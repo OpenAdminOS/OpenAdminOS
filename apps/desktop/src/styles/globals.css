@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+    monospace;
+
+  --color-bg: #1c1917;
+  --color-bg-elevated: #252220;
+  --color-bg-raised: #2d2926;
+  --color-sidebar: #18161423;
+  --color-sidebar-solid: #18161e;
+
+  --color-surface: #232120;
+  --color-surface-hover: #2a2724;
+
+  --color-border: #322e2a;
+  --color-border-strong: #403a35;
+  --color-border-soft: #2a2622;
+
+  --color-text: #f5f1eb;
+  --color-text-soft: #b5ada3;
+  --color-text-muted: #7a7167;
+  --color-text-faint: #524a44;
+
+  --color-accent: #e8a87c;
+  --color-accent-hover: #efb88f;
+  --color-accent-soft: #e8a87c1f;
+  --color-accent-strong: #d99868;
+
+  --color-success: #9cc88f;
+  --color-success-soft: #9cc88f1f;
+  --color-warning: #e5c678;
+  --color-warning-soft: #e5c6781f;
+  --color-danger: #dd9090;
+  --color-danger-soft: #dd90901f;
+  --color-info: #a3bfd9;
+  --color-info-soft: #a3bfd91f;
+  --color-think: #c4a5d9;
+  --color-think-soft: #c4a5d91f;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(0, 0, 0, 0.22);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  overflow: hidden;
+}
+
+/* Subtle, unobtrusive scrollbars (Claude-style) */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+  border: 2px solid var(--color-bg);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Focus ring tuned for the warm palette */
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Subtle pulse for "thinking" states */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out;
+}
+
+@keyframes fade-in-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.animate-fade-in-scale {
+  animation: fade-in-scale 0.18s ease-out;
+}
