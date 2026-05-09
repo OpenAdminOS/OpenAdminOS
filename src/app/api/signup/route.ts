@@ -30,10 +30,7 @@ export async function POST(req: Request) {
     .from("waitlist")
     .insert({ email, user_agent: userAgent, referrer });
 
-  if (error) {
-    if (error.code === "23505") {
-      return NextResponse.json({ ok: true, alreadyOnList: true });
-    }
+  if (error && error.code !== "23505") {
     console.error("waitlist insert failed", error);
     return NextResponse.json(
       { error: "Something went wrong. Please try again." },

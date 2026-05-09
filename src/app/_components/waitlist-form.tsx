@@ -5,7 +5,7 @@ import { useState } from "react";
 type Status =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "success"; alreadyOnList: boolean }
+  | { kind: "success" }
   | { kind: "error"; message: string };
 
 export function WaitlistForm() {
@@ -25,7 +25,6 @@ export function WaitlistForm() {
       });
       const data = (await res.json()) as {
         ok?: boolean;
-        alreadyOnList?: boolean;
         error?: string;
       };
       if (!res.ok || !data.ok) {
@@ -35,10 +34,7 @@ export function WaitlistForm() {
         });
         return;
       }
-      setStatus({
-        kind: "success",
-        alreadyOnList: Boolean(data.alreadyOnList),
-      });
+      setStatus({ kind: "success" });
     } catch {
       setStatus({
         kind: "error",
@@ -50,11 +46,7 @@ export function WaitlistForm() {
   if (status.kind === "success") {
     return (
       <div className="w-full max-w-md rounded-xl border border-white/10 bg-white/5 p-6 text-center backdrop-blur">
-        <p className="text-base font-medium text-white">
-          {status.alreadyOnList
-            ? "You're already on the list."
-            : "You're on the list."}
-        </p>
+        <p className="text-base font-medium text-white">You're on the list.</p>
         <p className="mt-2 text-sm text-white/60">
           We'll email you the moment your spot in the private preview opens up.
         </p>
