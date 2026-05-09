@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>05 · Diff confirmation — Ugurlabs Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.app-bg { position: fixed; inset: 0; background: var(--bg-0); }
+.app-bg-tt { position: absolute; left: 0; right: 0; top: 0; height: 36px; background: var(--bg-1); border-bottom: 1px solid var(--border); }
+.app-bg-side { position: absolute; left: 0; top: 36px; bottom: 0; width: 240px; background: var(--bg-1); border-right: 1px solid var(--border); }
+.app-bg-grid { position: absolute; inset: 36px 0 0 240px; padding: 60px 40px; opacity: 0.4; }
+.bg-line { height: 12px; background: var(--bg-2); border-radius: 6px; margin-bottom: 16px; }
+.bg-line.short { width: 30%; }
+.bg-line.tall { height: 80px; }
+
+.modal-wrap {
+  position: fixed; inset: 0;
+  background: rgba(5, 7, 10, 0.78);
+  backdrop-filter: blur(6px);
+  display: grid; place-items: center;
+  z-index: 100;
+  padding: 32px;
+}
+.diff-modal {
+  width: 100%;
+  max-width: 1180px;
+  height: calc(100vh - 64px);
+  max-height: 860px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.1), 0 30px 80px rgba(0, 0, 0, 0.6);
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  overflow: hidden;
+}
+
+.dh {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.06) 0%, var(--bg-1) 100%);
+  display: flex; align-items: center; gap: 16px;
+}
+.dh-icon {
+  width: 44px; height: 44px;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  display: grid; place-items: center;
+}
+.dh-icon svg { width: 22px; height: 22px; stroke: var(--warning); stroke-width: 2; fill: none; }
+.dh-info { flex: 1; }
+.dh-title {
+  font-size: 16px; font-weight: 600; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 10px;
+}
+.dh-meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-2); }
+.paused-badge {
+  padding: 3px 8px; border-radius: 4px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: var(--warning);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+
+.scope-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.scope-cell { padding: 12px 20px; border-right: 1px solid var(--border); }
+.scope-cell:last-child { border-right: none; }
+.scope-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.scope-value {
+  font-size: 14px; font-weight: 600; margin-top: 3px;
+  display: flex; align-items: baseline; gap: 6px;
+}
+.scope-value .num { font-family: 'JetBrains Mono', monospace; }
+.scope-value .danger { color: var(--danger); }
+.scope-value .warn { color: var(--warning); }
+.scope-value .secondary { font-size: 11px; color: var(--text-2); font-weight: 400; }
+
+.dbody {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  overflow: hidden;
+}
+
+.changes-list {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.cl-head {
+  padding: 14px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.change-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.change-item:hover { background: var(--bg-2); }
+.change-item.selected { background: var(--bg-2); border-left: 2px solid var(--accent); padding-left: 14px; }
+.change-marker {
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  display: grid; place-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; font-weight: 700;
+  flex-shrink: 0; margin-top: 1px;
+}
+.change-marker.delete { background: rgba(248, 113, 113, 0.12); color: var(--danger); }
+.change-marker.modify { background: rgba(251, 191, 36, 0.12); color: var(--warning); }
+.change-marker.create { background: rgba(74, 222, 128, 0.12); color: var(--success); }
+.change-info { flex: 1; min-width: 0; }
+.change-title {
+  font-size: 12px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.change-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; color: var(--text-3);
+}
+
+.diff-view {
+  display: flex; flex-direction: column;
+  background: var(--bg-0);
+  overflow-y: auto;
+}
+
+.dv-head {
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+  display: flex; align-items: center; gap: 16px;
+}
+.dv-target { flex: 1; }
+.dv-target-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.dv-target-id { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-2); }
+.dv-action {
+  padding: 4px 9px; border-radius: 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.dv-action.delete { background: rgba(248, 113, 113, 0.12); color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.25); }
+
+.diff-body { padding: 20px 24px; }
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.diff-side {
+  background: var(--bg-1);
+  padding: 14px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.diff-side-label {
+  font-size: 9px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-3);
+  margin-bottom: 10px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.diff-side.before .diff-side-label { color: var(--danger); }
+.diff-side.after .diff-side-label { color: var(--success); }
+
+.diff-line { color: var(--text-1); padding: 2px 0; }
+.diff-line.removed { background: rgba(248, 113, 113, 0.06); color: var(--text-0); margin: 0 -16px; padding: 2px 16px; border-left: 2px solid var(--danger); padding-left: 14px; }
+.diff-line.added { background: rgba(74, 222, 128, 0.06); color: var(--text-0); margin: 0 -16px; padding: 2px 16px; border-left: 2px solid var(--success); padding-left: 14px; }
+.diff-line.empty { color: var(--text-3); font-style: italic; }
+.diff-key { color: var(--accent); }
+.diff-string { color: var(--purple); }
+.diff-number { color: var(--warning); }
+
+.impact-card {
+  margin-top: 20px;
+  padding: 16px 20px;
+  background: rgba(248, 113, 113, 0.04);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: 8px;
+}
+.impact-head {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  font-size: 13px; font-weight: 600; color: var(--danger);
+}
+.impact-head svg { width: 16px; height: 16px; stroke: var(--danger); stroke-width: 2; fill: none; }
+.impact-list { font-size: 12px; color: var(--text-1); line-height: 1.7; }
+.impact-list li { margin-left: 18px; }
+
+.confirm-bar {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 16px;
+  align-items: center;
+}
+.confirm-input {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.confirm-label {
+  font-size: 11px; color: var(--text-2);
+  font-family: 'JetBrains Mono', monospace;
+  display: flex; align-items: center; gap: 6px;
+}
+.confirm-label code {
+  background: var(--bg-2); padding: 1px 6px;
+  border-radius: 3px; color: var(--danger); font-weight: 600;
+}
+.confirm-input input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  outline: none;
+  width: 100%;
+}
+.confirm-input input:focus { border-color: var(--danger); }
+</style>
+</head>
+<body>
+
+<div class="app-bg">
+  <div class="app-bg-tt"></div>
+  <div class="app-bg-side"></div>
+  <div class="app-bg-grid">
+    <div class="bg-line short"></div>
+    <div class="bg-line tall"></div>
+    <div class="bg-line"></div>
+    <div class="bg-line"></div>
+  </div>
+</div>
+
+<div class="modal-wrap">
+  <div class="diff-modal">
+
+    <div class="dh">
+      <div class="dh-icon">
+        <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+      </div>
+      <div class="dh-info">
+        <div class="dh-title">
+          Review changes before applying
+          <span class="paused-badge">⏸ Paused</span>
+        </div>
+        <div class="dh-meta">
+          Stale Device Cleaner · @andrewstaylor v2.0.1 · Contoso Tenant · run #24
+        </div>
+      </div>
+      <a href="03-agents-grid.html" class="btn">
+        <svg class="btn-icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        Cancel
+      </a>
+    </div>
+
+    <div class="scope-bar">
+      <div class="scope-cell">
+        <div class="scope-label">Total changes</div>
+        <div class="scope-value"><span class="num warn">47</span><span class="secondary">staged</span></div>
+      </div>
+      <div class="scope-cell">
+        <div class="scope-label">Devices affected</div>
+        <div class="scope-value"><span class="num">47</span><span class="secondary">of 1,284 enrolled</span></div>
+      </div>
+      <div class="scope-cell">
+        <div class="scope-label">Action</div>
+        <div class="scope-value"><span class="danger">Retire</span><span class="secondary">irreversible</span></div>
+      </div>
+      <div class="scope-cell">
+        <div class="scope-label">Estimated time</div>
+        <div class="scope-value"><span class="num" style="font-size:13px">~2m 30s</span><span class="secondary">at current rate</span></div>
+      </div>
+    </div>
+
+    <div class="dbody">
+
+      <aside class="changes-list scroll">
+        <div class="cl-head">// Pending changes · 47</div>
+
+        <div class="change-item selected">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">DESKTOP-7F2A1C9</div>
+            <div class="change-sub">last seen 187d ago</div>
+          </div>
+        </div>
+        <div class="change-item">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">LAPTOP-MARIA-K</div>
+            <div class="change-sub">last seen 142d ago</div>
+          </div>
+        </div>
+        <div class="change-item">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">DESKTOP-9B3D8E1</div>
+            <div class="change-sub">last seen 203d ago</div>
+          </div>
+        </div>
+        <div class="change-item">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">SURFACE-PRO-7-DEV</div>
+            <div class="change-sub">last seen 156d ago</div>
+          </div>
+        </div>
+        <div class="change-item">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">LAPTOP-JAKE-T</div>
+            <div class="change-sub">last seen 98d ago</div>
+          </div>
+        </div>
+        <div class="change-item">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">DESKTOP-4E1F7A2</div>
+            <div class="change-sub">last seen 211d ago</div>
+          </div>
+        </div>
+        <div class="change-item">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">DELL-OPTIPLEX-IT-04</div>
+            <div class="change-sub">last seen 167d ago</div>
+          </div>
+        </div>
+        <div class="change-item">
+          <div class="change-marker delete">−</div>
+          <div class="change-info">
+            <div class="change-title">LAPTOP-SARAH-W</div>
+            <div class="change-sub">last seen 124d ago</div>
+          </div>
+        </div>
+        <div style="padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-3);text-align:center;">
+          + 39 more
+        </div>
+      </aside>
+
+      <section class="diff-view">
+
+        <div class="dv-head">
+          <div class="dv-target">
+            <div class="dv-target-name">DESKTOP-7F2A1C9</div>
+            <div class="dv-target-id">deviceId: 8b3a1f9c-4d2e-4a7b-9e1c-f3a2d4b5e6c8 · last seen 187 days ago</div>
+          </div>
+          <div class="dv-action delete">DELETE / Retire</div>
+        </div>
+
+        <div class="diff-body">
+
+          <div class="diff-grid">
+            <div class="diff-side before">
+              <div class="diff-side-label">− Before · current state</div>
+              <div class="diff-line">{</div>
+              <div class="diff-line">  <span class="diff-key">"deviceName"</span>: <span class="diff-string">"DESKTOP-7F2A1C9"</span>,</div>
+              <div class="diff-line">  <span class="diff-key">"managementState"</span>: <span class="diff-string">"managed"</span>,</div>
+              <div class="diff-line removed">  <span class="diff-key">"complianceState"</span>: <span class="diff-string">"compliant"</span>,</div>
+              <div class="diff-line removed">  <span class="diff-key">"lastSyncDateTime"</span>: <span class="diff-string">"2025-11-03"</span>,</div>
+              <div class="diff-line removed">  <span class="diff-key">"enrolledDateTime"</span>: <span class="diff-string">"2024-02-14"</span>,</div>
+              <div class="diff-line">  <span class="diff-key">"userPrincipalName"</span>: <span class="diff-string">"former.user@…"</span>,</div>
+              <div class="diff-line">  <span class="diff-key">"isEncrypted"</span>: <span class="diff-number">true</span></div>
+              <div class="diff-line">}</div>
+            </div>
+            <div class="diff-side after">
+              <div class="diff-side-label">+ After · post-retire</div>
+              <div class="diff-line empty">// Device record removed from Intune</div>
+              <div class="diff-line empty">// Hardware identifiers retained for re-enrollment</div>
+              <div class="diff-line empty">// Audit entry: Retired by Ugurlabs Agents</div>
+              <div class="diff-line added">  <span class="diff-key">"managementState"</span>: <span class="diff-string">"retirePending"</span>,</div>
+              <div class="diff-line added">  <span class="diff-key">"retiredAt"</span>: <span class="diff-string">"2026-05-09T14:22:00Z"</span>,</div>
+              <div class="diff-line added">  <span class="diff-key">"retiredBy"</span>: <span class="diff-string">"agent:stale-device-cleaner"</span></div>
+            </div>
+          </div>
+
+          <div class="impact-card">
+            <div class="impact-head">
+              <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+              What this will do
+            </div>
+            <ul class="impact-list">
+              <li>Issue a Retire command to 47 devices via <span class="pill">/deviceManagement/managedDevices/{id}/retire</span></li>
+              <li>Devices will be removed from Intune management at next check-in (or immediately if online)</li>
+              <li>Company data will be wiped from devices that check in; personal data is preserved</li>
+              <li>Devices that never check in will remain in "Retire pending" indefinitely until manually removed</li>
+              <li>This action is <strong style="color:var(--danger)">irreversible</strong>. Re-enrollment requires the device to be reset.</li>
+            </ul>
+          </div>
+
+        </div>
+      </section>
+    </div>
+
+    <div class="confirm-bar">
+      <div class="confirm-input">
+        <label class="confirm-label">Type <code>RETIRE 47 DEVICES</code> to confirm</label>
+        <input type="text" placeholder="">
+      </div>
+      <a href="03-agents-grid.html" class="btn btn-large">Cancel</a>
+      <button class="btn btn-warning btn-large" disabled style="opacity: 0.5; cursor: not-allowed;">
+        <svg class="btn-icon" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+        Apply 47 changes
+      </button>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

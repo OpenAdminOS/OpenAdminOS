@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>06 · Error states — Ugurlabs Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.content { padding: 24px 32px; flex: 1; }
+
+.error-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.error-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ec-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ec-icon {
+  width: 32px; height: 32px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.ec-icon svg { width: 16px; height: 16px; stroke-width: 2; fill: none; }
+.ec-icon.warn { background: rgba(251, 191, 36, 0.1); color: var(--warning); }
+.ec-icon.danger { background: rgba(248, 113, 113, 0.1); color: var(--danger); }
+.ec-icon.info { background: rgba(0, 212, 255, 0.1); color: var(--accent); }
+
+.ec-title { font-size: 13px; font-weight: 600; }
+.ec-meta { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-3); margin-top: 2px; }
+
+.ec-body { padding: 16px 18px; }
+.ec-text { font-size: 12.5px; color: var(--text-1); line-height: 1.6; margin-bottom: 12px; }
+.ec-text strong { color: var(--text-0); }
+
+.ec-detail {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 10px 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+.ec-detail .danger { color: var(--danger); }
+.ec-detail .warn { color: var(--warning); }
+.ec-detail .accent { color: var(--accent); }
+
+.ec-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.section-intro {
+  margin-bottom: 24px;
+  font-size: 13px;
+  color: var(--text-1);
+  line-height: 1.7;
+  max-width: 720px;
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">Ugurlabs Agents · Error states reference</div>
+    <div class="titlebar-status"><div class="pulse"></div><span>local · v0.4.2</span></div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">U</div>
+      <div><div class="brand-name">Agents</div><div class="brand-sub">UGURLABS</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <a href="03-agents-grid.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Agents
+      </a>
+      <a href="04-live-run.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83"/></svg>
+        Runs
+      </a>
+      <a href="09-registry.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Registry
+      </a>
+      <a href="06-error-states.html" class="nav-item active">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+        Logs
+      </a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Configure</div>
+      <a href="07-llm-provider.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+        LLM Provider
+      </a>
+      <a href="08-tenant-switcher.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Tenants
+      </a>
+    </div>
+    <a href="08-tenant-switcher.html" class="tenant-switcher">
+      <div class="tenant-avatar">CT</div>
+      <div class="tenant-info">
+        <div class="tenant-name">Contoso Tenant</div>
+        <div class="tenant-id">a3f2e1...c4d9</div>
+      </div>
+    </a>
+  </aside>
+
+  <main class="main">
+    <header class="main-header">
+      <div>
+        <h1 class="page-title">Error & failure states</h1>
+        <div class="page-subtitle mono">Reference set · all failure modes get a clear recovery path</div>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <p class="section-intro">
+        These are the error states agents and the platform expose. Each one names the specific failure, surfaces the underlying cause without hiding it, and offers a single most-helpful recovery action plus a "show details" affordance for power users.
+      </p>
+
+      <div class="error-grid">
+
+        <!-- Auth expired -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon danger">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="16" r="1"/><path d="M12 8v4"/><circle cx="12" cy="12" r="10"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">Tenant auth expired</div>
+              <div class="ec-meta">MSAL refresh failed · 401 Unauthorized</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              Your sign-in to <strong>Contoso Tenant</strong> has expired. The agent stopped before sending any data. <strong>No changes were made.</strong>
+            </div>
+            <div class="ec-detail">
+              <span class="danger">Error</span>: AADSTS50173 — refresh token expired<br>
+              <span class="accent">at</span>: 14:22:08 UTC<br>
+              <span class="accent">remediation</span>: re-authenticate via MSAL
+            </div>
+            <div class="ec-actions">
+              <button class="btn btn-primary">Sign in again</button>
+              <button class="btn">Show details</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Graph throttling -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon warn">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">Graph API throttled</div>
+              <div class="ec-meta">429 Too Many Requests · auto-retrying</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              Microsoft Graph is rate-limiting requests. The agent is backing off and will resume in <strong>22 seconds</strong>. No action needed.
+            </div>
+            <div class="ec-detail">
+              <span class="warn">Retry-After</span>: 22s<br>
+              <span class="accent">attempt</span>: 2 / 5<br>
+              <span class="accent">strategy</span>: exponential backoff with jitter
+            </div>
+            <div class="ec-actions">
+              <button class="btn">Pause auto-retry</button>
+              <button class="btn">Cancel run</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ollama not reachable -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon danger">
+              <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">LLM provider unreachable</div>
+              <div class="ec-meta">Ollama at localhost:11434 · connection refused</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              The agent can't reach your local Ollama instance. Most likely Ollama isn't running, or its port has changed.
+            </div>
+            <div class="ec-detail">
+              <span class="danger">Error</span>: ECONNREFUSED 127.0.0.1:11434<br>
+              <span class="accent">tip</span>: run <span class="warn">`ollama serve`</span> in a terminal<br>
+              <span class="accent">last reachable</span>: 4h ago
+            </div>
+            <div class="ec-actions">
+              <button class="btn btn-primary">Test connection</button>
+              <a href="07-llm-provider.html" class="btn">Change provider</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Model returned bad JSON -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon warn">
+              <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">Model output didn't validate</div>
+              <div class="ec-meta">Schema mismatch · llama3.1:8b · attempt 3/3</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              The LLM produced output that doesn't match the agent's expected schema after 3 attempts. This usually means the model is too small for this agent's reasoning needs.
+            </div>
+            <div class="ec-detail">
+              <span class="warn">Required</span>: { findings: Array&lt;Finding&gt; }<br>
+              <span class="warn">Got</span>: malformed JSON · missing 'severity'<br>
+              <span class="accent">suggested model</span>: ≥30B params
+            </div>
+            <div class="ec-actions">
+              <a href="07-llm-provider.html" class="btn btn-primary">Switch model</a>
+              <button class="btn">Retry with same model</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Permission missing -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon warn">
+              <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">Missing Graph permission</div>
+              <div class="ec-meta">DeviceManagementApps.Read.All not consented</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              This agent needs a permission your tenant hasn't granted yet. You can re-consent to add it without affecting other agents.
+            </div>
+            <div class="ec-detail">
+              <span class="accent">scope</span>: DeviceManagementApps.Read.All<br>
+              <span class="accent">why</span>: enumerate app assignments per group<br>
+              <span class="accent">grant</span>: requires tenant admin consent
+            </div>
+            <div class="ec-actions">
+              <a href="02-msal-consent.html" class="btn btn-primary">Re-consent</a>
+              <button class="btn">Skip this agent</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hosted provider out of credits -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon danger">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">Hosted LLM rejected request</div>
+              <div class="ec-meta">Anthropic API · 429 quota exceeded</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              Your Anthropic API key has hit its monthly spending cap. Top up your Anthropic account, or temporarily switch to your local Ollama instance.
+            </div>
+            <div class="ec-detail">
+              <span class="danger">Spent this month</span>: $50.00 / $50.00<br>
+              <span class="accent">last successful call</span>: 3m ago<br>
+              <span class="accent">local fallback available</span>: Ollama llama3.1:70b
+            </div>
+            <div class="ec-actions">
+              <button class="btn btn-primary">Switch to local model</button>
+              <a href="https://console.anthropic.com" class="btn">Top up Anthropic →</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tenant data drift mid-run -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon warn">
+              <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0118 0M21 12a9 9 0 01-18 0M12 3v18"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">Tenant state changed mid-run</div>
+              <div class="ec-meta">5 devices modified by another admin during execution</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              While this agent was running, another admin (or automation) made changes to the tenant. The diff was computed against stale data and is no longer accurate.
+            </div>
+            <div class="ec-detail">
+              <span class="warn">Conflicts</span>: 5 of 47 staged changes<br>
+              <span class="accent">recommendation</span>: re-run to recompute diff<br>
+              <span class="accent">safe changes</span>: 42 unaffected
+            </div>
+            <div class="ec-actions">
+              <button class="btn btn-primary">Re-run agent</button>
+              <button class="btn">Apply 42 safe changes</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Network offline -->
+        <div class="error-card">
+          <div class="ec-head">
+            <div class="ec-icon danger">
+              <svg viewBox="0 0 24 24"><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.58 9M1.42 9a15.91 15.91 0 014.7-2.88"/></svg>
+            </div>
+            <div>
+              <div class="ec-title">No network connectivity</div>
+              <div class="ec-meta">DNS resolution failed · graph.microsoft.com</div>
+            </div>
+          </div>
+          <div class="ec-body">
+            <div class="ec-text">
+              The agent can't reach Microsoft Graph. Local agents that work entirely on cached data will continue; tenant-bound agents are paused until connectivity returns.
+            </div>
+            <div class="ec-detail">
+              <span class="danger">Last seen online</span>: 8m ago<br>
+              <span class="accent">queued runs</span>: 2 (will auto-resume)<br>
+              <span class="accent">offline-safe agents</span>: 3 available
+            </div>
+            <div class="ec-actions">
+              <button class="btn btn-primary">Retry now</button>
+              <button class="btn">Show offline agents</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div style="margin-top: 32px; padding: 16px 20px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px;">
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); margin-bottom: 10px;">// Design principles for errors</div>
+        <ul style="font-size: 12px; color: var(--text-1); line-height: 1.8; margin-left: 18px;">
+          <li><strong style="color:var(--text-0)">Name the failure honestly</strong> — never "something went wrong"</li>
+          <li><strong style="color:var(--text-0)">State what was preserved</strong> — "no changes were made" is the most reassuring sentence in IT</li>
+          <li><strong style="color:var(--text-0)">One primary recovery action</strong>, plus secondary options for power users</li>
+          <li><strong style="color:var(--text-0)">Show the technical detail</strong> — admins are technical and want it visible, not hidden</li>
+          <li><strong style="color:var(--text-0)">Suggest, don't decide</strong> — recommend the next step but let the admin choose</li>
+        </ul>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>01 · First-run setup — Ugurlabs Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.onboarding {
+  display: grid;
+  grid-template-rows: 36px 1fr;
+  height: 100vh;
+}
+.ob-body {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  overflow: hidden;
+}
+.ob-rail {
+  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+  border-right: 1px solid var(--border);
+  padding: 48px 32px;
+  display: flex;
+  flex-direction: column;
+}
+.ob-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 48px;
+}
+.ob-brand .brand-mark { width: 36px; height: 36px; font-size: 16px; }
+.ob-brand-name { font-size: 18px; font-weight: 600; }
+
+.ob-steps { display: flex; flex-direction: column; gap: 4px; }
+.ob-step {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  padding: 12px 0;
+  position: relative;
+}
+.ob-step::after {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 38px;
+  bottom: -16px;
+  width: 1px;
+  background: var(--border);
+}
+.ob-step:last-child::after { display: none; }
+
+.ob-step-num {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--bg-2);
+  border: 1.5px solid var(--border-strong);
+  display: grid; place-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.ob-step.done .ob-step-num {
+  background: rgba(74, 222, 128, 0.12);
+  border-color: var(--success);
+  color: var(--success);
+}
+.ob-step.active .ob-step-num {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ob-step-info { padding-top: 4px; }
+.ob-step-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  margin-bottom: 2px;
+}
+.ob-step.active .ob-step-name { color: var(--text-0); font-weight: 600; }
+.ob-step.done .ob-step-name { color: var(--text-0); }
+.ob-step-desc {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.ob-footer {
+  margin-top: auto;
+  padding-top: 24px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.6;
+}
+
+.ob-content {
+  padding: 64px 64px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.ob-h-step {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.ob-h-title {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-bottom: 10px;
+}
+.ob-h-sub {
+  font-size: 14px;
+  color: var(--text-1);
+  line-height: 1.6;
+  margin-bottom: 36px;
+  max-width: 540px;
+}
+
+.ob-form { max-width: 540px; }
+
+.ob-actions {
+  margin-top: auto;
+  padding-top: 32px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 540px;
+}
+.ob-skip {
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.ob-skip:hover { color: var(--text-0); }
+.ob-actions .spacer { flex: 1; }
+
+.security-note {
+  margin-top: 20px;
+  padding: 12px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--text-1);
+  line-height: 1.6;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 540px;
+}
+.security-note svg { width: 14px; height: 14px; stroke: var(--accent); stroke-width: 2; fill: none; flex-shrink: 0; margin-top: 1px; }
+</style>
+</head>
+<body>
+
+<div class="onboarding">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">Welcome to Ugurlabs Agents</div>
+    <div class="titlebar-status"><div class="pulse"></div><span>local · v0.4.2</span></div>
+  </div>
+
+  <div class="ob-body">
+    <aside class="ob-rail">
+      <div class="ob-brand">
+        <div class="brand-mark">U</div>
+        <div class="ob-brand-name">Setup</div>
+      </div>
+
+      <div class="ob-steps">
+        <div class="ob-step done">
+          <div class="ob-step-num">✓</div>
+          <div class="ob-step-info">
+            <div class="ob-step-name">Welcome</div>
+            <div class="ob-step-desc">Quick intro</div>
+          </div>
+        </div>
+        <div class="ob-step active">
+          <div class="ob-step-num">1</div>
+          <div class="ob-step-info">
+            <div class="ob-step-name">Connect tenant</div>
+            <div class="ob-step-desc">Sign in to Microsoft 365</div>
+          </div>
+        </div>
+        <div class="ob-step">
+          <div class="ob-step-num">2</div>
+          <div class="ob-step-info">
+            <div class="ob-step-name">Choose LLM provider</div>
+            <div class="ob-step-desc">Local or hosted</div>
+          </div>
+        </div>
+        <div class="ob-step">
+          <div class="ob-step-num">3</div>
+          <div class="ob-step-info">
+            <div class="ob-step-name">Install your first agent</div>
+            <div class="ob-step-desc">Pick a starter</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ob-footer">
+        Setup takes about 90 seconds.<br>
+        You can change everything later.
+      </div>
+    </aside>
+
+    <main class="ob-content">
+      <div class="ob-h-step">// Step 1 of 3</div>
+      <h1 class="ob-h-title">Connect your Microsoft tenant</h1>
+      <p class="ob-h-sub">Ugurlabs Agents needs read-only access to Entra and Intune to discover what your agents can act on. You'll review and approve every permission on the next screen — and you can revoke at any time from the Entra admin center.</p>
+
+      <div class="ob-form">
+        <div class="form-group">
+          <label class="form-label">Microsoft 365 admin account</label>
+          <div class="form-hint">Use an account with at least Intune Administrator or Global Reader role</div>
+        </div>
+
+        <button class="btn btn-primary btn-large" style="width: 100%; justify-content: center; padding: 14px;">
+          <svg class="btn-icon" viewBox="0 0 24 24" style="width: 18px; height: 18px;">
+            <rect x="2" y="2" width="9" height="9" fill="currentColor" stroke="none"/>
+            <rect x="13" y="2" width="9" height="9" fill="currentColor" stroke="none"/>
+            <rect x="2" y="13" width="9" height="9" fill="currentColor" stroke="none"/>
+            <rect x="13" y="13" width="9" height="9" fill="currentColor" stroke="none"/>
+          </svg>
+          Sign in with Microsoft
+        </button>
+
+        <div class="security-note">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <div>
+            <strong style="color: var(--text-0)">Local-first by design.</strong> Your tenant credentials live in your OS keychain — never on a server we control. Tokens are scoped to this device and refresh locally.
+          </div>
+        </div>
+
+        <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border);">
+          <div style="font-size: 11px; color: var(--text-3); font-family: 'JetBrains Mono', monospace; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 12px;">// Or</div>
+          <a href="#" style="font-size: 13px; color: var(--text-1); text-decoration: none;">Use a service principal / certificate →</a>
+          <div style="font-size: 11px; color: var(--text-3); margin-top: 4px;">Recommended for MSPs managing multiple tenants</div>
+        </div>
+      </div>
+
+      <div class="ob-actions">
+        <a href="index.html" class="ob-skip">← Back</a>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost">Skip for now</button>
+        <button class="btn">Continue without tenant →</button>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>

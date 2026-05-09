@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>02 · MSAL consent — Ugurlabs Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+body { display: grid; place-items: center; padding: 32px; overflow-y: auto; }
+
+.consent-card {
+  width: 100%;
+  max-width: 720px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.cc-head {
+  padding: 28px 32px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+}
+.cc-app-icon {
+  width: 48px; height: 48px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+  border-radius: 11px;
+  display: grid; place-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--bg-0);
+}
+.cc-arrow {
+  color: var(--text-3);
+  font-size: 18px;
+}
+.cc-ms-icon {
+  width: 48px; height: 48px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  display: grid; place-items: center;
+}
+.cc-ms-icon svg {
+  width: 22px; height: 22px;
+}
+.cc-head-text {
+  flex: 1;
+}
+.cc-head-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.cc-head-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.cc-tenant {
+  padding: 14px 32px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cc-tenant-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.cc-tenant-value {
+  font-size: 13px;
+  color: var(--text-0);
+  font-weight: 500;
+}
+.cc-tenant-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  margin-left: auto;
+}
+
+.cc-body { padding: 24px 32px; }
+
+.cc-section { margin-bottom: 24px; }
+.cc-section-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+
+.perm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.perm-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-1);
+  align-items: center;
+}
+.perm-icon {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  display: grid; place-items: center;
+}
+.perm-icon svg { width: 14px; height: 14px; stroke-width: 1.75; fill: none; }
+.perm-icon.read { background: rgba(74, 222, 128, 0.1); color: var(--success); }
+.perm-icon.write { background: rgba(251, 191, 36, 0.1); color: var(--warning); }
+
+.perm-info { min-width: 0; }
+.perm-name {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.perm-scope {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.perm-desc {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.disclosure {
+  padding: 14px 18px;
+  background: rgba(0, 212, 255, 0.04);
+  border: 1px solid rgba(0, 212, 255, 0.15);
+  border-radius: 7px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.disclosure svg {
+  width: 18px; height: 18px;
+  stroke: var(--accent);
+  stroke-width: 1.75;
+  fill: none;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.disclosure-text {
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.6;
+}
+.disclosure-text strong { color: var(--text-0); }
+
+.cc-foot {
+  padding: 18px 32px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cc-foot-info {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+</style>
+</head>
+<body>
+
+<div class="consent-card">
+
+  <div class="cc-head">
+    <div class="cc-app-icon">U</div>
+    <div class="cc-arrow">→</div>
+    <div class="cc-ms-icon">
+      <svg viewBox="0 0 24 24">
+        <rect x="2" y="2" width="9" height="9" fill="#f25022"/>
+        <rect x="13" y="2" width="9" height="9" fill="#7fba00"/>
+        <rect x="2" y="13" width="9" height="9" fill="#00a4ef"/>
+        <rect x="13" y="13" width="9" height="9" fill="#ffb900"/>
+      </svg>
+    </div>
+    <div class="cc-head-text">
+      <div class="cc-head-title">Permissions requested</div>
+      <div class="cc-head-sub">Ugurlabs Agents · github.com/ugurlabs/agents</div>
+    </div>
+  </div>
+
+  <div class="cc-tenant">
+    <span class="cc-tenant-label">Tenant</span>
+    <span class="cc-tenant-value">Contoso Ltd</span>
+    <span class="cc-tenant-id">a3f2e1b7-c4d9-4f1a-9e87-b2c4d8f1e3a5</span>
+  </div>
+
+  <div class="cc-body">
+
+    <div class="disclosure">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      <div class="disclosure-text">
+        <strong>This is a one-time consent.</strong> Ugurlabs Agents will use these permissions only on this device. We do not have a server that stores your tokens. You can revoke access at any time via <span class="pill">Entra → Enterprise applications</span>.
+      </div>
+    </div>
+
+    <div class="cc-section">
+      <div class="cc-section-label">// Read permissions · 5 scopes</div>
+      <div class="perm-list">
+
+        <div class="perm-row">
+          <div class="perm-icon read">
+            <svg viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2zM22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+          </div>
+          <div class="perm-info">
+            <div class="perm-name">Read all device configurations <span class="perm-scope">DeviceManagementConfiguration.Read.All</span></div>
+            <div class="perm-desc">Required so agents can analyze policies, profiles, and compliance baselines without modifying them.</div>
+          </div>
+        </div>
+
+        <div class="perm-row">
+          <div class="perm-icon read">
+            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          </div>
+          <div class="perm-info">
+            <div class="perm-name">Read all managed devices <span class="perm-scope">DeviceManagementManagedDevices.Read.All</span></div>
+            <div class="perm-desc">Lets compliance and inventory agents enumerate enrolled devices and their state.</div>
+          </div>
+        </div>
+
+        <div class="perm-row">
+          <div class="perm-icon read">
+            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+          </div>
+          <div class="perm-info">
+            <div class="perm-name">Read directory data <span class="perm-scope">Directory.Read.All</span></div>
+            <div class="perm-desc">Used to resolve user/group references in policies and present them in plain language.</div>
+          </div>
+        </div>
+
+        <div class="perm-row">
+          <div class="perm-icon read">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div class="perm-info">
+            <div class="perm-name">Read conditional access policies <span class="perm-scope">Policy.Read.All</span></div>
+            <div class="perm-desc">Required by the Conditional Access Auditor and related security agents.</div>
+          </div>
+        </div>
+
+        <div class="perm-row">
+          <div class="perm-icon read">
+            <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          </div>
+          <div class="perm-info">
+            <div class="perm-name">Read sign-in logs <span class="perm-scope">AuditLog.Read.All</span></div>
+            <div class="perm-desc">Used by risky sign-in triage and policy-effectiveness agents to evaluate real activity.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="cc-section">
+      <div class="cc-section-label">// Write permissions · 0 scopes by default</div>
+      <div style="padding: 16px 18px; background: var(--bg-2); border: 1px dashed var(--border); border-radius: 7px; font-size: 12px; color: var(--text-2); text-align: center;">
+        No write permissions requested. Each write-mode agent will ask for its specific scope at install time, with a separate consent screen.
+      </div>
+    </div>
+
+  </div>
+
+  <div class="cc-foot">
+    <div class="cc-foot-info">
+      <span style="color: var(--accent)">●</span>
+      <span>You'll be redirected to login.microsoftonline.com</span>
+    </div>
+    <button class="btn">Cancel</button>
+    <button class="btn btn-primary">
+      <svg class="btn-icon" viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+      Approve & continue
+    </button>
+  </div>
+
+</div>
+
+</body>
+</html>

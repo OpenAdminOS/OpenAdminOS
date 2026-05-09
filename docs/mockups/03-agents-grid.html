@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>03 · Agents — Ugurlabs Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.status-cell {
+  padding: 14px 24px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-cell:last-child { border-right: none; }
+.status-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.status-value {
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-meta { font-size: 11px; color: var(--text-2); }
+
+.content { padding: 24px 32px; flex: 1; }
+
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-bottom: 32px;
+}
+.agent-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.agent-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.agent-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.agent-icon {
+  width: 36px; height: 36px;
+  border-radius: 7px;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+  font-size: 16px;
+}
+.agent-icon.compliance { background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.2); }
+.agent-icon.policy { background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.2); }
+.agent-icon.cleanup { background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.2); }
+.agent-icon.reporting { background: rgba(167, 139, 250, 0.08); border: 1px solid rgba(167, 139, 250, 0.2); }
+.agent-icon.security { background: rgba(248, 113, 113, 0.08); border: 1px solid rgba(248, 113, 113, 0.2); }
+.agent-icon.app { background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.2); }
+
+.agent-meta { flex: 1; min-width: 0; }
+.agent-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.agent-author {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.agent-author .accent { color: var(--accent-dim); }
+.agent-desc {
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.55;
+  margin-bottom: 14px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.agent-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.agent-stats {
+  display: flex;
+  gap: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-2);
+}
+.run-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.12s;
+}
+.run-btn:hover { background: var(--accent); border-color: var(--accent); color: var(--bg-0); }
+.run-btn svg { width: 10px; height: 10px; fill: currentColor; stroke: none; }
+
+.runs-panel {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.runs-row {
+  display: grid;
+  grid-template-columns: 16px 1fr 120px 120px 80px 100px;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+.runs-row:last-child { border-bottom: none; }
+.runs-row:hover { background: var(--bg-2); }
+.runs-row.head {
+  background: var(--bg-2);
+  cursor: default;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 8px 16px;
+}
+.run-meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-2); }
+.run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.run-status.ok { color: var(--success); }
+.run-status.warn { color: var(--warning); }
+.run-status.running { color: var(--accent); }
+.run-status.failed { color: var(--danger); }
+
+.footnote {
+  margin-top: 24px;
+  padding: 12px 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.footnote .accent { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">Ugurlabs Agents</div>
+    <div class="titlebar-status"><div class="pulse"></div><span>local · v0.4.2</span></div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">U</div>
+      <div>
+        <div class="brand-name">Agents</div>
+        <div class="brand-sub">UGURLABS</div>
+      </div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <a href="03-agents-grid.html" class="nav-item active">
+        <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Agents <span class="nav-badge">12</span>
+      </a>
+      <a href="04-live-run.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+        Runs <span class="nav-badge">3</span>
+      </a>
+      <a href="09-registry.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Registry
+      </a>
+      <a href="06-error-states.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+        Logs
+      </a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Configure</div>
+      <a href="07-llm-provider.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 2"/></svg>
+        LLM Provider
+      </a>
+      <a href="08-tenant-switcher.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Tenants
+      </a>
+      <div class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83"/></svg>
+        Settings
+      </div>
+    </div>
+    <a href="08-tenant-switcher.html" class="tenant-switcher">
+      <div class="tenant-avatar">CT</div>
+      <div class="tenant-info">
+        <div class="tenant-name">Contoso Tenant</div>
+        <div class="tenant-id">a3f2e1...c4d9</div>
+      </div>
+      <svg style="width:14px;height:14px;stroke:var(--text-3);stroke-width:1.75;fill:none" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg>
+    </a>
+  </aside>
+
+  <main class="main">
+    <header class="main-header">
+      <div>
+        <h1 class="page-title">Agents</h1>
+        <div class="page-subtitle mono">12 installed · 8 read-only · 4 write-enabled</div>
+      </div>
+      <div class="header-actions">
+        <div class="search-bar">
+          <svg style="width:13px;height:13px;stroke:var(--text-2);stroke-width:2;fill:none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input placeholder="Search agents, runs, devices…">
+          <span class="kbd">⌘K</span>
+        </div>
+        <a href="09-registry.html" class="btn">
+          <svg class="btn-icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+          Browse registry
+        </a>
+        <button class="btn btn-primary">
+          <svg class="btn-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Install agent
+        </button>
+      </div>
+    </header>
+
+    <div class="status-strip">
+      <div class="status-cell">
+        <div class="status-label">Tenant</div>
+        <div class="status-value"><span class="dot-status ok"></span>Contoso Tenant</div>
+        <div class="status-meta mono">Graph · 0 throttled</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">LLM Provider</div>
+        <div class="status-value"><span class="dot-status ok"></span>Ollama · llama3.1:70b</div>
+        <div class="status-meta mono">localhost:11434 · 12.4 GB</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">Active runs</div>
+        <div class="status-value"><span class="dot-status warn"></span>2 running · 1 queued</div>
+        <div class="status-meta mono">avg 14s · last 2m ago</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">Data residency</div>
+        <div class="status-value"><span class="dot-status ok"></span>Local-only</div>
+        <div class="status-meta mono">No data leaves this device</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="section-head">
+        <div class="section-title">// Installed agents</div>
+        <div class="section-link">View all →</div>
+      </div>
+
+      <div class="agent-grid">
+        <a href="04-live-run.html" class="agent-card fade-in" style="text-decoration:none;color:inherit">
+          <div class="agent-head">
+            <div class="agent-icon compliance">✓</div>
+            <div class="agent-meta">
+              <div class="agent-name">Compliance Drift Reporter</div>
+              <div class="agent-author"><span class="accent">@ugurlabs</span> · v1.2.0</div>
+            </div>
+            <div class="tag tag-read">Read</div>
+          </div>
+          <div class="agent-desc">Scans device compliance state, flags drift from policy baseline, and produces a digest with root-cause hints.</div>
+          <div class="agent-foot">
+            <div class="agent-stats">
+              <span>last 12m</span>
+              <span>147 runs</span>
+            </div>
+            <button class="run-btn">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run
+            </button>
+          </div>
+        </a>
+
+        <a href="04-live-run.html" class="agent-card fade-in" style="text-decoration:none;color:inherit">
+          <div class="agent-head">
+            <div class="agent-icon policy">⌘</div>
+            <div class="agent-meta">
+              <div class="agent-name">Conditional Access Auditor</div>
+              <div class="agent-author"><span class="accent">@rudyooms</span> · v0.8.3</div>
+            </div>
+            <div class="tag tag-read">Read</div>
+          </div>
+          <div class="agent-desc">Reviews CA policies for conflicts, gaps, and drift from MS Zero Trust baseline. Outputs a markdown report with line-level findings.</div>
+          <div class="agent-foot">
+            <div class="agent-stats">
+              <span>2h ago</span>
+              <span>62 runs</span>
+            </div>
+            <button class="run-btn">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run
+            </button>
+          </div>
+        </a>
+
+        <a href="05-diff-confirm.html" class="agent-card fade-in" style="text-decoration:none;color:inherit">
+          <div class="agent-head">
+            <div class="agent-icon cleanup">⚡</div>
+            <div class="agent-meta">
+              <div class="agent-name">Stale Device Cleaner</div>
+              <div class="agent-author"><span class="accent">@andrewstaylor</span> · v2.0.1</div>
+            </div>
+            <div class="tag tag-write">Write</div>
+          </div>
+          <div class="agent-desc">Identifies devices with no check-in beyond threshold and offers retire/delete actions. Always runs dry-run first.</div>
+          <div class="agent-foot">
+            <div class="agent-stats">
+              <span>1d ago</span>
+              <span>23 runs</span>
+            </div>
+            <button class="run-btn">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run
+            </button>
+          </div>
+        </a>
+
+        <a href="04-live-run.html" class="agent-card fade-in" style="text-decoration:none;color:inherit">
+          <div class="agent-head">
+            <div class="agent-icon reporting">▤</div>
+            <div class="agent-meta">
+              <div class="agent-name">Tenant Snapshot Reporter</div>
+              <div class="agent-author"><span class="accent">@ugurlabs</span> · v1.0.4</div>
+            </div>
+            <div class="tag tag-read">Read</div>
+          </div>
+          <div class="agent-desc">Generates a branded PDF of tenant configuration. Pairs with TenantPDF for client deliverables and audit trails.</div>
+          <div class="agent-foot">
+            <div class="agent-stats">
+              <span>3h ago</span>
+              <span>89 runs</span>
+            </div>
+            <button class="run-btn">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run
+            </button>
+          </div>
+        </a>
+
+        <a href="04-live-run.html" class="agent-card fade-in" style="text-decoration:none;color:inherit">
+          <div class="agent-head">
+            <div class="agent-icon security">▲</div>
+            <div class="agent-meta">
+              <div class="agent-name">Risky Sign-in Triage</div>
+              <div class="agent-author"><span class="accent">@community</span> · v0.4.0</div>
+            </div>
+            <div class="tag tag-read">Read</div>
+          </div>
+          <div class="agent-desc">Pulls Entra risky sign-ins, clusters by user/IP/pattern, and proposes remediation steps with linked Graph queries.</div>
+          <div class="agent-foot">
+            <div class="agent-stats">
+              <span>34m ago</span>
+              <span>41 runs</span>
+            </div>
+            <button class="run-btn">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run
+            </button>
+          </div>
+        </a>
+
+        <a href="05-diff-confirm.html" class="agent-card fade-in" style="text-decoration:none;color:inherit">
+          <div class="agent-head">
+            <div class="agent-icon app">◐</div>
+            <div class="agent-meta">
+              <div class="agent-name">App Assignment Diff</div>
+              <div class="agent-author"><span class="accent">@ugurlabs</span> · v1.1.0</div>
+            </div>
+            <div class="tag tag-write">Write</div>
+          </div>
+          <div class="agent-desc">Compares app assignments between tenants or groups, surfaces drift, and stages a write plan with approval gates.</div>
+          <div class="agent-foot">
+            <div class="agent-stats">
+              <span>5h ago</span>
+              <span>17 runs</span>
+            </div>
+            <button class="run-btn">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run
+            </button>
+          </div>
+        </a>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">// Recent runs</div>
+        <div class="section-link">All runs →</div>
+      </div>
+
+      <div class="runs-panel">
+        <div class="runs-row head">
+          <div></div><div>Agent</div><div>Started</div><div>Duration</div><div>Tokens</div><div>Status</div>
+        </div>
+        <div class="runs-row">
+          <div><span class="dot-status ok"></span></div>
+          <div style="font-weight:500">Compliance Drift Reporter</div>
+          <div class="run-meta">12m ago</div>
+          <div class="run-meta">14.2s</div>
+          <div class="run-meta">8,412</div>
+          <div><span class="run-status ok">✓ Done</span></div>
+        </div>
+        <div class="runs-row">
+          <div><span class="dot-status warn"></span></div>
+          <div style="font-weight:500">Conditional Access Auditor</div>
+          <div class="run-meta">2h ago</div>
+          <div class="run-meta">38.1s</div>
+          <div class="run-meta">14,201</div>
+          <div><span class="run-status warn">⚠ 3 findings</span></div>
+        </div>
+        <div class="runs-row">
+          <div><span class="dot-status accent"></span></div>
+          <div style="font-weight:500">Tenant Snapshot Reporter</div>
+          <div class="run-meta">just now</div>
+          <div class="run-meta">—</div>
+          <div class="run-meta">2,103…</div>
+          <div><span class="run-status running"><div class="spinner"></div>Running</span></div>
+        </div>
+        <div class="runs-row">
+          <div><span class="dot-status danger"></span></div>
+          <div style="font-weight:500">Stale Device Cleaner <span style="color:var(--text-3);font-family:'JetBrains Mono',monospace;font-size:10px">· dry-run</span></div>
+          <div class="run-meta">1d ago</div>
+          <div class="run-meta">22.4s</div>
+          <div class="run-meta">11,408</div>
+          <div><span class="run-status failed">× Auth expired</span></div>
+        </div>
+      </div>
+
+      <div class="footnote">
+        <span class="accent">●</span>
+        <span>All agents run locally. Tenant data and LLM prompts never leave this device.</span>
+        <span style="margin-left:auto">ugurlabs/agents · MIT</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

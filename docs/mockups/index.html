@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ugurlabs Agents — Mockup Index</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+body { overflow-y: auto; padding: 60px 40px; }
+.wrap { max-width: 900px; margin: 0 auto; }
+.header { margin-bottom: 48px; }
+.brand-row { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.brand-mark-lg {
+  width: 44px; height: 44px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+  border-radius: 10px;
+  display: grid; place-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600; font-size: 18px;
+  color: var(--bg-0);
+}
+h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 6px; }
+.tagline { color: var(--text-2); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.intro { color: var(--text-1); font-size: 14px; line-height: 1.7; margin-top: 24px; max-width: 640px; }
+.intro code { background: var(--bg-2); padding: 1px 6px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); }
+
+.group { margin-bottom: 40px; }
+.group-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+.screen-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.screen-link {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--text-0);
+  transition: all 0.15s;
+}
+.screen-link:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-2);
+  transform: translateY(-1px);
+}
+.screen-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.screen-info { flex: 1; }
+.screen-name { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.screen-desc { font-size: 11px; color: var(--text-2); line-height: 1.5; }
+.screen-tag {
+  margin-top: 6px;
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.note {
+  margin-top: 48px;
+  padding: 16px 20px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.7;
+}
+.note strong { color: var(--text-0); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="header">
+    <div class="brand-row">
+      <div class="brand-mark-lg">U</div>
+      <div>
+        <h1>Ugurlabs Agents</h1>
+        <div class="tagline">// design mockups · v0.1 · for Electron build reference</div>
+      </div>
+    </div>
+    <p class="intro">
+      Click-through HTML mockups for the Ugurlabs Agents desktop app. Each screen below is a standalone HTML file using shared design tokens in <code>_design.css</code>. Use as the visual spec when building the Electron app — the CSS variables, typography scale, spacing, and component patterns translate directly to React/Tailwind/etc.
+    </p>
+  </header>
+
+  <div class="group">
+    <div class="group-label">// Onboarding</div>
+    <div class="screen-grid">
+      <a href="01-onboarding.html" class="screen-link">
+        <div class="screen-num">01</div>
+        <div class="screen-info">
+          <div class="screen-name">First-run setup</div>
+          <div class="screen-desc">3-step guided flow: tenant connection, LLM provider, first agent install.</div>
+          <div class="screen-tag">↳ critical path</div>
+        </div>
+      </a>
+      <a href="02-msal-consent.html" class="screen-link">
+        <div class="screen-num">02</div>
+        <div class="screen-info">
+          <div class="screen-name">MSAL consent</div>
+          <div class="screen-desc">Transparent permissions screen explaining exactly what Graph scopes are requested and why.</div>
+          <div class="screen-tag">↳ trust-critical</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <div class="group-label">// Daily use</div>
+    <div class="screen-grid">
+      <a href="03-agents-grid.html" class="screen-link">
+        <div class="screen-num">03</div>
+        <div class="screen-info">
+          <div class="screen-name">Agents grid (home)</div>
+          <div class="screen-desc">Hero screen — installed agents with status strip, recent runs, run actions.</div>
+          <div class="screen-tag">↳ landing screen</div>
+        </div>
+      </a>
+      <a href="04-live-run.html" class="screen-link">
+        <div class="screen-num">04</div>
+        <div class="screen-info">
+          <div class="screen-name">Live run modal</div>
+          <div class="screen-desc">Stepped pipeline, plain-language activity, streaming LLM reasoning, telemetry.</div>
+          <div class="screen-tag">↳ trust earner</div>
+        </div>
+      </a>
+      <a href="05-diff-confirm.html" class="screen-link">
+        <div class="screen-num">05</div>
+        <div class="screen-info">
+          <div class="screen-name">Diff confirmation</div>
+          <div class="screen-desc">Write-agent pause-and-review. Side-by-side before/after, scope summary, frictioned confirm.</div>
+          <div class="screen-tag">↳ highest stakes</div>
+        </div>
+      </a>
+      <a href="06-error-states.html" class="screen-link">
+        <div class="screen-num">06</div>
+        <div class="screen-info">
+          <div class="screen-name">Error & failure states</div>
+          <div class="screen-desc">Throttling, auth expiry, model failures — each with a clear recovery path.</div>
+          <div class="screen-tag">↳ resilience</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="group">
+    <div class="group-label">// Configure</div>
+    <div class="screen-grid">
+      <a href="07-llm-provider.html" class="screen-link">
+        <div class="screen-num">07</div>
+        <div class="screen-info">
+          <div class="screen-name">LLM provider config</div>
+          <div class="screen-desc">Ollama / LM Studio / Anthropic / OpenAI / Azure OpenAI picker with test connection.</div>
+          <div class="screen-tag">↳ trust pivot point</div>
+        </div>
+      </a>
+      <a href="08-tenant-switcher.html" class="screen-link">
+        <div class="screen-num">08</div>
+        <div class="screen-info">
+          <div class="screen-name">Tenant switcher</div>
+          <div class="screen-desc">Multi-tenant management for MSPs — search, favorites, color coding, scope guard.</div>
+          <div class="screen-tag">↳ MSP-grade</div>
+        </div>
+      </a>
+      <a href="09-registry.html" class="screen-link">
+        <div class="screen-num">09</div>
+        <div class="screen-info">
+          <div class="screen-name">Agent registry</div>
+          <div class="screen-desc">Browse community agents — search, filter, verified badges, install.</div>
+          <div class="screen-tag">↳ platform layer</div>
+        </div>
+      </a>
+      <a href="10-empty-states.html" class="screen-link">
+        <div class="screen-num">10</div>
+        <div class="screen-info">
+          <div class="screen-name">Empty states</div>
+          <div class="screen-desc">First-time experience for zero agents, zero runs, zero tenants.</div>
+          <div class="screen-tag">↳ first impression</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>How to use these:</strong> open them in a browser at desktop window size (~1280×800 minimum). All screens share <code>_design.css</code> — change a token there and every screen updates. When porting to Electron + React, treat the CSS variables as your theme tokens, the component patterns (cards, buttons, status dots, pills, tags) as your component library spec, and the layouts as the source of truth for spacing and density.
+  </div>
+
+</div>
+</body>
+</html>

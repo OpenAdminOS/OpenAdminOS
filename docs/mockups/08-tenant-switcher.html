@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>08 · Tenant switcher — Ugurlabs Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.content { padding: 24px 32px; flex: 1; }
+
+.scope-banner {
+  margin-bottom: 24px;
+  padding: 14px 20px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+  display: flex; align-items: center; gap: 14px;
+}
+.sb-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  background: var(--accent-bg);
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.sb-icon svg { width: 18px; height: 18px; stroke: var(--accent); stroke-width: 2; fill: none; }
+.sb-text { flex: 1; font-size: 13px; color: var(--text-1); line-height: 1.55; }
+.sb-text strong { color: var(--text-0); }
+.sb-current {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 9px; border-radius: 4px;
+  background: var(--bg-2); border: 1px solid var(--border-strong);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--text-0);
+}
+
+.tenant-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+.toolbar-search {
+  flex: 1;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 9px 12px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px;
+}
+.toolbar-search input {
+  background: none; border: none; outline: none;
+  color: var(--text-0); font-family: inherit; font-size: 13px; flex: 1;
+}
+.toolbar-search svg { width: 14px; height: 14px; stroke: var(--text-2); stroke-width: 2; fill: none; }
+
+.filter-pills { display: flex; gap: 6px; }
+.fp {
+  padding: 7px 11px;
+  border-radius: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-1);
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+}
+.fp.active { background: var(--accent-bg); border-color: rgba(0,212,255,0.3); color: var(--accent); }
+
+.tenant-section { margin-bottom: 28px; }
+.ts-head {
+  display: flex; align-items: baseline; gap: 12px;
+  margin-bottom: 12px;
+}
+.ts-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.ts-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.tenant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+
+.tenant-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.12s;
+  display: flex; align-items: center; gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+.tenant-card:hover { border-color: var(--border-strong); transform: translateX(2px); }
+.tenant-card.active {
+  border-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-bg) 0%, var(--bg-1) 60%);
+}
+.tenant-stripe {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+}
+
+.tc-avatar {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  display: grid; place-items: center;
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+  color: var(--bg-0);
+}
+
+.tc-info { flex: 1; min-width: 0; }
+.tc-name {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 6px;
+}
+.tc-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tc-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-2);
+  margin-top: 4px;
+  display: flex; gap: 10px;
+}
+.tc-meta .ok { color: var(--success); }
+.tc-meta .warn { color: var(--warning); }
+
+.fav-star {
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.active-badge {
+  padding: 1px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--accent);
+  color: var(--bg-0);
+  border-radius: 3px;
+}
+
+.scope-guard-modal {
+  background: var(--bg-1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 8px;
+  padding: 18px 20px;
+  margin-top: 24px;
+  display: flex; align-items: flex-start; gap: 14px;
+}
+.sgm-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.sgm-icon svg { width: 18px; height: 18px; stroke: var(--danger); stroke-width: 2; fill: none; }
+.sgm-info { flex: 1; }
+.sgm-title { font-size: 13px; font-weight: 600; color: var(--danger); margin-bottom: 6px; }
+.sgm-text { font-size: 12px; color: var(--text-1); line-height: 1.6; margin-bottom: 12px; }
+.sgm-text code {
+  background: var(--bg-2);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.add-tenant {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-2);
+}
+.add-tenant:hover { border-color: var(--accent-dim); background: var(--accent-bg); color: var(--accent); }
+.add-tenant .tc-avatar {
+  background: var(--bg-2);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-3);
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">Ugurlabs Agents</div>
+    <div class="titlebar-status"><div class="pulse"></div><span>local · v0.4.2</span></div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">U</div>
+      <div><div class="brand-name">Agents</div><div class="brand-sub">UGURLABS</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <a href="03-agents-grid.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Agents
+      </a>
+      <a href="04-live-run.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83"/></svg>
+        Runs
+      </a>
+      <a href="09-registry.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Registry
+      </a>
+      <a href="06-error-states.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+        Logs
+      </a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Configure</div>
+      <a href="07-llm-provider.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+        LLM Provider
+      </a>
+      <a href="08-tenant-switcher.html" class="nav-item active">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Tenants <span class="nav-badge">14</span>
+      </a>
+    </div>
+    <div class="tenant-switcher">
+      <div class="tenant-avatar" style="background: linear-gradient(135deg, #00d4ff, #0891a8)">CT</div>
+      <div class="tenant-info">
+        <div class="tenant-name">Contoso Tenant</div>
+        <div class="tenant-id">a3f2e1...c4d9</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="main-header">
+      <div>
+        <h1 class="page-title">Tenants</h1>
+        <div class="page-subtitle mono">14 connected · 3 favorites · scope guard active</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn">
+          <svg class="btn-icon" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          Bulk re-consent
+        </button>
+        <button class="btn btn-primary">
+          <svg class="btn-icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          Connect tenant
+        </button>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <div class="scope-banner">
+        <div class="sb-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="sb-text">
+          <strong>Currently scoped to:</strong> all agent runs from this device will execute against
+          <span class="sb-current"><span style="width:7px;height:7px;border-radius:2px;background:#00d4ff;display:inline-block"></span>Contoso Tenant · a3f2e1b7-c4d9</span>
+          <br>
+          <span style="font-size:12px;color:var(--text-2)">Switch tenants by clicking a card below. The scope guard prevents accidental cross-tenant runs.</span>
+        </div>
+      </div>
+
+      <div class="tenant-toolbar">
+        <div class="toolbar-search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input placeholder="Search tenants by name, domain, or ID…">
+          <span class="kbd">⌘T</span>
+        </div>
+        <div class="filter-pills">
+          <div class="fp active">All · 14</div>
+          <div class="fp">★ Favorites · 3</div>
+          <div class="fp">Recent · 5</div>
+          <div class="fp">⚠ Issues · 2</div>
+        </div>
+      </div>
+
+      <div class="tenant-section">
+        <div class="ts-head">
+          <div class="ts-title">// Active &amp; favorites</div>
+        </div>
+        <div class="tenant-grid">
+
+          <div class="tenant-card active">
+            <div class="tenant-stripe" style="background:#00d4ff"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #00d4ff, #0891a8)">CT</div>
+            <div class="tc-info">
+              <div class="tc-name">
+                <span class="fav-star">★</span>
+                Contoso Tenant
+                <span class="active-badge">Active</span>
+              </div>
+              <div class="tc-id">a3f2e1b7-c4d9-4f1a-9e87</div>
+              <div class="tc-meta">
+                <span class="ok">● Healthy</span>
+                <span>1,284 devices</span>
+                <span>5 scopes</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#a78bfa"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #a78bfa, #7c3aed)">FB</div>
+            <div class="tc-info">
+              <div class="tc-name">
+                <span class="fav-star">★</span>
+                Fabrikam Berlin GmbH
+              </div>
+              <div class="tc-id">b8c3a2f1-9d4e-4a6b-c2d8</div>
+              <div class="tc-meta">
+                <span class="ok">● Healthy</span>
+                <span>892 devices</span>
+                <span>5 scopes</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#4ade80"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #4ade80, #16a34a)">NP</div>
+            <div class="tc-info">
+              <div class="tc-name">
+                <span class="fav-star">★</span>
+                Northwind Pharma
+              </div>
+              <div class="tc-id">c2d4e7a9-3b8f-4d1c-9a6e</div>
+              <div class="tc-meta">
+                <span class="ok">● Healthy</span>
+                <span>3,241 devices</span>
+                <span>5 scopes</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tenant-section">
+        <div class="ts-head">
+          <div class="ts-title">// Recent</div>
+          <div class="ts-count">5 connected in last 30 days</div>
+        </div>
+        <div class="tenant-grid">
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#fbbf24"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #fbbf24, #d97706)">AL</div>
+            <div class="tc-info">
+              <div class="tc-name">Alpine Logistics AG</div>
+              <div class="tc-id">d3a8c7e2-1f9b-4d6a-8e2c</div>
+              <div class="tc-meta">
+                <span class="warn">⚠ Token expires in 4d</span>
+                <span>567 devices</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#f87171"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #f87171, #dc2626)">TS</div>
+            <div class="tc-info">
+              <div class="tc-name">Tailspin Toys</div>
+              <div class="tc-id">e4f9a3b7-c2d8-4e1a-9f3b</div>
+              <div class="tc-meta">
+                <span class="warn">⚠ Permission gap</span>
+                <span>112 devices</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#06b6d4"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #06b6d4, #0e7490)">WW</div>
+            <div class="tc-info">
+              <div class="tc-name">Wide World Importers</div>
+              <div class="tc-id">f5b3c8d2-7a4e-4b9f-1c3a</div>
+              <div class="tc-meta">
+                <span class="ok">● Healthy</span>
+                <span>1,805 devices</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#ec4899"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #ec4899, #be185d)">PG</div>
+            <div class="tc-info">
+              <div class="tc-name">Proseware GmbH</div>
+              <div class="tc-id">a6c4d9e3-8b5f-4a2c-9d1e</div>
+              <div class="tc-meta">
+                <span class="ok">● Healthy</span>
+                <span>432 devices</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#84cc16"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #84cc16, #4d7c0f)">VV</div>
+            <div class="tc-info">
+              <div class="tc-name">VanArsdel Ltd</div>
+              <div class="tc-id">b7d5e0f4-9c6a-4b3d-8e2f</div>
+              <div class="tc-meta">
+                <span class="ok">● Healthy</span>
+                <span>289 devices</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tenant-section">
+        <div class="ts-head">
+          <div class="ts-title">// All other tenants</div>
+          <div class="ts-count">6 more</div>
+        </div>
+        <div class="tenant-grid">
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#6366f1"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #6366f1, #4338ca)">CW</div>
+            <div class="tc-info">
+              <div class="tc-name">Coho Winery</div>
+              <div class="tc-id">c8e6f1a5-0d7b-4c4e-9f3a</div>
+              <div class="tc-meta">
+                <span style="color:var(--text-3)">○ Last run 12d ago</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card">
+            <div class="tenant-stripe" style="background:#f59e0b"></div>
+            <div class="tc-avatar" style="background: linear-gradient(135deg, #f59e0b, #b45309)">LS</div>
+            <div class="tc-info">
+              <div class="tc-name">Lucerne Publishing</div>
+              <div class="tc-id">d9f7a2b6-1e8c-4d5f-a4b1</div>
+              <div class="tc-meta">
+                <span style="color:var(--text-3)">○ Last run 23d ago</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-card add-tenant">
+            <div class="tc-avatar">+</div>
+            <div class="tc-info">
+              <div class="tc-name">Connect another tenant</div>
+              <div class="tc-id" style="color:var(--text-3)">via Microsoft sign-in or service principal</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="scope-guard-modal">
+        <div class="sgm-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="sgm-info">
+          <div class="sgm-title">Scope guard is enabled</div>
+          <div class="sgm-text">
+            When you switch tenants, any agent runs in flight will pause and require explicit re-confirmation before continuing on the new tenant. Write-mode agents will refuse to run if the tenant scope changes mid-execution.
+            <br>
+            Disable in <code>Settings → Safety</code> if you really need to (not recommended for MSPs).
+          </div>
+          <button class="btn">Open safety settings</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

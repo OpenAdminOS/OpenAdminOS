@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>07 · LLM provider — Ugurlabs Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.content { padding: 24px 32px; flex: 1; max-width: 1100px; }
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 32px;
+}
+.provider-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+.provider-card:hover { border-color: var(--border-strong); }
+.provider-card.selected {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, var(--accent-bg) 0%, var(--bg-1) 60%);
+}
+.provider-card.selected::after {
+  content: '';
+  position: absolute; top: 10px; right: 10px;
+  width: 16px; height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0c10' stroke-width='3'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E");
+  background-size: 11px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.pc-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.pc-logo {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  display: grid; place-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.pc-logo.local { background: rgba(74, 222, 128, 0.1); border-color: rgba(74, 222, 128, 0.25); color: var(--success); }
+.pc-logo.hosted { background: rgba(167, 139, 250, 0.1); border-color: rgba(167, 139, 250, 0.25); color: var(--purple); }
+
+.pc-name { font-size: 13px; font-weight: 600; }
+.pc-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+.pc-meta.local { color: var(--success); }
+.pc-meta.hosted { color: var(--purple); }
+
+.pc-desc {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.55;
+  margin-bottom: 10px;
+}
+.pc-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-3);
+  display: flex; align-items: center; gap: 5px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.pc-status .ok { color: var(--success); }
+.pc-status .warn { color: var(--warning); }
+.pc-status .danger { color: var(--danger); }
+
+.config-panel {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+.cp-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.cp-title { font-size: 13px; font-weight: 600; flex: 1; }
+.cp-body { padding: 18px; }
+.cp-row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: center; padding: 8px 0; }
+.cp-label { font-size: 12px; color: var(--text-1); }
+.cp-input {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  outline: none;
+}
+.cp-input:focus { border-color: var(--accent-dim); }
+
+.test-result {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(74, 222, 128, 0.06);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-1);
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.test-result svg { width: 14px; height: 14px; stroke: var(--success); stroke-width: 2; fill: none; flex-shrink: 0; margin-top: 2px; }
+.test-result strong { color: var(--success); }
+
+.models-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.model-row {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.model-row.recommended { border-color: var(--accent-dim); background: var(--accent-bg); }
+.model-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  flex: 1;
+}
+.model-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.model-rec {
+  padding: 1px 6px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 3px;
+}
+
+.override-list {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.override-row {
+  display: grid;
+  grid-template-columns: 1fr 220px 90px;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 12px;
+}
+.override-row:last-child { border-bottom: none; }
+.override-row.head {
+  background: var(--bg-2);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 8px 18px;
+}
+.or-agent { display: flex; align-items: center; gap: 8px; }
+.or-icon {
+  width: 22px; height: 22px;
+  border-radius: 5px;
+  display: grid; place-items: center;
+  background: var(--bg-3);
+  font-size: 11px;
+}
+.or-default {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.trust-banner {
+  margin-bottom: 24px;
+  padding: 14px 18px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.trust-banner.local {
+  background: rgba(74, 222, 128, 0.06);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  color: var(--text-1);
+}
+.trust-banner.local strong { color: var(--success); }
+.trust-banner.hosted {
+  background: rgba(251, 191, 36, 0.06);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  color: var(--text-1);
+}
+.trust-banner.hosted strong { color: var(--warning); }
+.trust-banner svg { width: 18px; height: 18px; stroke-width: 2; fill: none; flex-shrink: 0; }
+.trust-banner.local svg { stroke: var(--success); }
+.trust-banner.hosted svg { stroke: var(--warning); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">Ugurlabs Agents</div>
+    <div class="titlebar-status"><div class="pulse"></div><span>local · v0.4.2</span></div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">U</div>
+      <div><div class="brand-name">Agents</div><div class="brand-sub">UGURLABS</div></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <a href="03-agents-grid.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Agents
+      </a>
+      <a href="04-live-run.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83"/></svg>
+        Runs
+      </a>
+      <a href="09-registry.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Registry
+      </a>
+      <a href="06-error-states.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+        Logs
+      </a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Configure</div>
+      <a href="07-llm-provider.html" class="nav-item active">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 2"/></svg>
+        LLM Provider
+      </a>
+      <a href="08-tenant-switcher.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Tenants
+      </a>
+    </div>
+    <a href="08-tenant-switcher.html" class="tenant-switcher">
+      <div class="tenant-avatar">CT</div>
+      <div class="tenant-info">
+        <div class="tenant-name">Contoso Tenant</div>
+        <div class="tenant-id">a3f2e1...c4d9</div>
+      </div>
+    </a>
+  </aside>
+
+  <main class="main">
+    <header class="main-header">
+      <div>
+        <h1 class="page-title">LLM provider</h1>
+        <div class="page-subtitle mono">Choose where agent reasoning happens · local or hosted</div>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <div class="trust-banner local">
+        <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <div>
+          <strong>Local-only mode active.</strong> Tenant data and prompts stay on this device. Switching to a hosted provider below will change this — the data residency status will update everywhere in the app.
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">// Provider</div>
+      </div>
+
+      <div class="provider-grid">
+
+        <div class="provider-card selected">
+          <div class="pc-head">
+            <div class="pc-logo local">◉</div>
+            <div>
+              <div class="pc-name">Ollama</div>
+              <div class="pc-meta local">Local</div>
+            </div>
+          </div>
+          <div class="pc-desc">Runs open-weight models on your machine. Zero cost, zero data egress.</div>
+          <div class="pc-status">
+            <span class="ok">●</span>
+            <span class="ok">Connected</span>
+            <span style="margin-left:auto">localhost:11434</span>
+          </div>
+        </div>
+
+        <div class="provider-card">
+          <div class="pc-head">
+            <div class="pc-logo local">▲</div>
+            <div>
+              <div class="pc-name">LM Studio</div>
+              <div class="pc-meta local">Local</div>
+            </div>
+          </div>
+          <div class="pc-desc">GUI-driven local model runtime. Works with the same model files as Ollama.</div>
+          <div class="pc-status">
+            <span style="color:var(--text-3)">○</span>
+            <span>Not configured</span>
+          </div>
+        </div>
+
+        <div class="provider-card">
+          <div class="pc-head">
+            <div class="pc-logo hosted">A</div>
+            <div>
+              <div class="pc-name">Anthropic</div>
+              <div class="pc-meta hosted">Hosted</div>
+            </div>
+          </div>
+          <div class="pc-desc">Claude models. Best for complex reasoning agents. Data leaves device.</div>
+          <div class="pc-status">
+            <span class="ok">●</span>
+            <span class="ok">API key set</span>
+            <span style="margin-left:auto">$3.42 / mo</span>
+          </div>
+        </div>
+
+        <div class="provider-card">
+          <div class="pc-head">
+            <div class="pc-logo hosted">O</div>
+            <div>
+              <div class="pc-name">OpenAI</div>
+              <div class="pc-meta hosted">Hosted</div>
+            </div>
+          </div>
+          <div class="pc-desc">GPT models via the OpenAI API. Data leaves device.</div>
+          <div class="pc-status">
+            <span style="color:var(--text-3)">○</span>
+            <span>Not configured</span>
+          </div>
+        </div>
+
+        <div class="provider-card">
+          <div class="pc-head">
+            <div class="pc-logo hosted">⊞</div>
+            <div>
+              <div class="pc-name">Azure OpenAI</div>
+              <div class="pc-meta hosted">Hosted</div>
+            </div>
+          </div>
+          <div class="pc-desc">GPT models via your Azure tenant. Data residency follows your Azure region.</div>
+          <div class="pc-status">
+            <span style="color:var(--text-3)">○</span>
+            <span>Not configured</span>
+          </div>
+        </div>
+
+        <div class="provider-card">
+          <div class="pc-head">
+            <div class="pc-logo local">⊕</div>
+            <div>
+              <div class="pc-name">Custom (OpenAI-compatible)</div>
+              <div class="pc-meta">Self-hosted</div>
+            </div>
+          </div>
+          <div class="pc-desc">Any OpenAI-compatible endpoint (vLLM, llama.cpp server, hosted gateway).</div>
+          <div class="pc-status">
+            <span style="color:var(--text-3)">○</span>
+            <span>Not configured</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-panel">
+        <div class="cp-head">
+          <div class="cp-title">Configure Ollama</div>
+          <button class="btn">Test connection</button>
+        </div>
+        <div class="cp-body">
+          <div class="cp-row">
+            <div class="cp-label">Endpoint URL</div>
+            <input class="cp-input" value="http://localhost:11434" />
+          </div>
+          <div class="cp-row">
+            <div class="cp-label">Default model</div>
+            <select class="cp-input">
+              <option>llama3.1:70b · 39.6 GB</option>
+              <option>llama3.1:8b · 4.7 GB</option>
+              <option>qwen2.5:32b · 19.8 GB</option>
+              <option>mistral-nemo:12b · 7.1 GB</option>
+            </select>
+          </div>
+          <div class="cp-row">
+            <div class="cp-label">Request timeout</div>
+            <input class="cp-input" value="180s" style="max-width: 120px" />
+          </div>
+
+          <div class="test-result">
+            <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+            <div>
+              <strong>Connected.</strong> Ollama responded in 42ms. 4 models available locally. Default model is loaded into VRAM (12.4 GB used).
+            </div>
+          </div>
+
+          <div style="margin-top: 18px;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px;">// Locally available models</div>
+            <div class="models-grid">
+              <div class="model-row recommended">
+                <div class="model-name">llama3.1:70b</div>
+                <div class="model-rec">Recommended</div>
+                <div class="model-meta">39.6 GB</div>
+              </div>
+              <div class="model-row">
+                <div class="model-name">llama3.1:8b</div>
+                <div class="model-meta">4.7 GB</div>
+              </div>
+              <div class="model-row">
+                <div class="model-name">qwen2.5:32b</div>
+                <div class="model-meta">19.8 GB</div>
+              </div>
+              <div class="model-row">
+                <div class="model-name">mistral-nemo:12b</div>
+                <div class="model-meta">7.1 GB</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head">
+        <div class="section-title">// Per-agent overrides · 3 set</div>
+        <div class="section-link">Add override →</div>
+      </div>
+
+      <div class="override-list">
+        <div class="override-row head">
+          <div>Agent</div>
+          <div>Model override</div>
+          <div>Action</div>
+        </div>
+        <div class="override-row">
+          <div class="or-agent">
+            <div class="or-icon" style="background:rgba(0,212,255,0.08);color:var(--accent)">⌘</div>
+            <div>
+              <div style="font-weight:500">Conditional Access Auditor</div>
+              <div class="or-default">default: llama3.1:70b</div>
+            </div>
+          </div>
+          <div>
+            <select class="cp-input mono" style="width:100%">
+              <option>claude-sonnet-4-7 · Anthropic</option>
+            </select>
+          </div>
+          <div><button class="btn btn-ghost">Reset</button></div>
+        </div>
+        <div class="override-row">
+          <div class="or-agent">
+            <div class="or-icon" style="background:rgba(74,222,128,0.08);color:var(--success)">✓</div>
+            <div>
+              <div style="font-weight:500">Compliance Drift Reporter</div>
+              <div class="or-default">default: llama3.1:70b</div>
+            </div>
+          </div>
+          <div>
+            <select class="cp-input mono" style="width:100%">
+              <option>llama3.1:8b · Ollama (faster)</option>
+            </select>
+          </div>
+          <div><button class="btn btn-ghost">Reset</button></div>
+        </div>
+        <div class="override-row">
+          <div class="or-agent">
+            <div class="or-icon" style="background:rgba(167,139,250,0.08);color:var(--purple)">▤</div>
+            <div>
+              <div style="font-weight:500">Tenant Snapshot Reporter</div>
+              <div class="or-default">default: llama3.1:70b</div>
+            </div>
+          </div>
+          <div>
+            <select class="cp-input mono" style="width:100%">
+              <option>claude-sonnet-4-7 · Anthropic</option>
+            </select>
+          </div>
+          <div><button class="btn btn-ghost">Reset</button></div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

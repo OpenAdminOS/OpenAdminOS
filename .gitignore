@@ -1,0 +1,35 @@
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Tauri (legacy - safe to ignore)
+src-tauri/target/
+
+# Working artifacts (screenshots taken during dev, browser automation traces)
+/*.png
+.playwright-mcp/
