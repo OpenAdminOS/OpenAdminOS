@@ -7,7 +7,10 @@ export const metadata: Metadata = {
   title: "OpenAgents — Private preview",
   description:
     "The privacy-first, local, open source agent platform for admins. Runs entirely on your Mac — no cloud, no telemetry.",
-  icons: [{ rel: "icon", url: "/favicon.ico" }],
+};
+
+export const viewport = {
+  themeColor: "#0a0a0c",
 };
 
 const geist = Geist({
