@@ -73,14 +73,15 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="mt-12 w-full max-w-5xl pb-16 sm:mt-16">
-          <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] shadow-[0_30px_120px_-20px_rgba(140,140,255,0.25)]">
+        <div className="mt-12 w-full max-w-[88rem] pb-16 sm:mt-16">
+          <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] shadow-[0_40px_160px_-20px_rgba(140,140,255,0.3)] sm:rounded-2xl">
             <Image
               src="/openagents-app.png"
               alt="OpenAgents app showing agent runs across Intune-managed devices"
               width={2400}
               height={1500}
               priority
+              sizes="(min-width: 1408px) 1408px, 100vw"
               className="h-auto w-full"
             />
           </div>
