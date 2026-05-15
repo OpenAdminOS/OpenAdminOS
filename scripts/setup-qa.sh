@@ -32,12 +32,14 @@ elif is_valid "$cache_dir"; then
 else
   echo "msgraph skill not found locally; cloning $skill_repo@$skill_ref into $clone_dir" >&2
   mkdir -p "$(dirname "$clone_dir")"
-  git clone --depth 1 --branch "$skill_ref" --filter=blob:none --no-checkout "$skill_repo" "$clone_dir"
+  # All clone/checkout output is routed to stderr so callers can capture only
+  # the final MSGRAPH_SKILL_DIR=... line via `eval $(scripts/setup-qa.sh)`.
+  git clone --quiet --depth 1 --branch "$skill_ref" --filter=blob:none --no-checkout "$skill_repo" "$clone_dir" >&2
   (
     cd "$clone_dir"
-    git sparse-checkout init --cone
-    git sparse-checkout set skills/msgraph
-    git checkout "$skill_ref"
+    git sparse-checkout init --cone >&2
+    git sparse-checkout set skills/msgraph >&2
+    git checkout --quiet "$skill_ref" >&2
   )
   resolved="$cache_dir"
 fi
