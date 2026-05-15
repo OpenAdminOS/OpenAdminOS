@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    Open Agents app icon.
+
+    macOS app-icon template: 1024x1024 canvas with ~100px transparent
+    margin on all sides; the visible icon body lives inside an 824x824
+    area so the artwork matches the size of other Dock icons. The
+    rounded-square mask uses ~22.5% corner radius (Apple's "squircle"
+    proportions).
+  -->
+  <rect
+    x="100" y="100" width="824" height="824"
+    rx="185" ry="185"
+    fill="#1c1917"
+  />
+  <circle cx="512" cy="512" r="232" fill="none" stroke="#e8a87c" stroke-width="45"/>
+  <circle cx="512" cy="512" r="77"  fill="#e8a87c"/>
+</svg>
