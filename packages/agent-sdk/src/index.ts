@@ -79,6 +79,17 @@ export type RunStatus =
   | "failed"
   | "rejected";
 
+export type RunDataSource = "graph" | "synthetic";
+
+export interface TenantRecord {
+  id: string;
+  displayName: string;
+  username: string;
+  homeAccountId: string;
+  addedAt: string;
+  lastUsedAt?: string;
+}
+
 export type RunStepStatus = "pending" | "running" | "completed" | "failed";
 
 export interface RunStepThinking {
@@ -127,12 +138,16 @@ export interface RunRecord {
   steps: RunStepRecord[];
   logs: RunLogRecord[];
   plan?: WritePlan;
+  dataSource?: RunDataSource;
+  tenantId?: string;
 }
 
 export interface TrustState {
   label: string;
   detail: string;
   isLocal: boolean;
+  dataSource: RunDataSource;
+  tenantDisplayName?: string;
 }
 
 export interface AppState {
@@ -142,6 +157,8 @@ export interface AppState {
   installedAgents: AgentSummary[];
   runs: RunRecord[];
   trust: TrustState;
+  tenants: TenantRecord[];
+  activeTenantId?: string;
 }
 
 export interface OpenAgentsApi {
@@ -156,6 +173,10 @@ export interface OpenAgentsApi {
   getRun(id: string): Promise<RunRecord | undefined>;
   confirmRun(runId: string, phrase: string): Promise<RunRecord>;
   rejectRun(runId: string): Promise<RunRecord>;
+  listTenants(): Promise<TenantRecord[]>;
+  connectTenant(): Promise<AppState>;
+  setActiveTenant(id: string): Promise<AppState>;
+  disconnectTenant(id: string): Promise<AppState>;
 }
 
 export type AgentDefinition = AgentContract &
@@ -315,28 +336,67 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
 ];
 
-export function deriveTrustState(provider: ProviderSummary | undefined): TrustState {
+export interface DeriveTrustStateInput {
+  provider: ProviderSummary | undefined;
+  activeTenant?: TenantRecord | undefined;
+}
+
+export function deriveTrustState(
+  providerOrInput: ProviderSummary | undefined | DeriveTrustStateInput,
+  legacyTenant?: TenantRecord | undefined,
+): TrustState {
+  const isInputObject =
+    providerOrInput !== undefined &&
+    typeof providerOrInput === "object" &&
+    "provider" in (providerOrInput as object);
+  const provider = isInputObject
+    ? (providerOrInput as DeriveTrustStateInput).provider
+    : (providerOrInput as ProviderSummary | undefined);
+  const activeTenant = isInputObject
+    ? (providerOrInput as DeriveTrustStateInput).activeTenant
+    : legacyTenant;
+
+  const dataSource: RunDataSource = activeTenant ? "graph" : "synthetic";
+  const tenantSegment = activeTenant
+    ? `real tenant ${activeTenant.displayName}`
+    : "synthetic data";
+
   if (!provider) {
-    return {
+    const base: TrustState = {
       label: "Provider not configured",
       detail: "Select a provider before running agents.",
       isLocal: true,
+      dataSource,
     };
+    if (activeTenant) base.tenantDisplayName = activeTenant.displayName;
+    return base;
   }
 
   if (provider.isLocal) {
-    return {
-      label: "Local-only",
-      detail: "Tenant data and prompts stay on this device.",
+    const detail = activeTenant
+      ? `Tenant data stays on this device. Prompts use ${provider.name} locally.`
+      : "Tenant data and prompts stay on this device.";
+    const base: TrustState = {
+      label: `Local ${provider.name} · ${tenantSegment}`,
+      detail,
       isLocal: true,
+      dataSource,
     };
+    if (activeTenant) base.tenantDisplayName = activeTenant.displayName;
+    return base;
   }
 
-  return {
-    label: "Hosted provider",
-    detail: `Tenant data and prompts are sent to ${provider.name}.`,
+  const detail = activeTenant
+    ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}.`
+    : `Tenant data and prompts are sent to ${provider.name}.`;
+  const base: TrustState = {
+    label: `Hosted ${provider.name} · ${tenantSegment}`,
+    detail,
     isLocal: false,
+    dataSource,
   };
+  if (activeTenant) base.tenantDisplayName = activeTenant.displayName;
+  return base;
 }
 
 export function defineAgent<const TAgent extends AgentModule>(

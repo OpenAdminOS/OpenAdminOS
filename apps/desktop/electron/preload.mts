@@ -1,8 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type {
-  OpenAgentsApi,
-  ProviderId,
-} from "@openagents/agent-sdk";
+import type { OpenAgentsApi, ProviderId } from "@openagents/agent-sdk";
 
 const api: OpenAgentsApi = {
   getAppState: () => ipcRenderer.invoke("openagents:get-app-state"),
@@ -21,6 +18,12 @@ const api: OpenAgentsApi = {
   confirmRun: (runId: string, phrase: string) =>
     ipcRenderer.invoke("openagents:confirm-run", runId, phrase),
   rejectRun: (runId: string) => ipcRenderer.invoke("openagents:reject-run", runId),
+  listTenants: () => ipcRenderer.invoke("openagents:list-tenants"),
+  connectTenant: () => ipcRenderer.invoke("openagents:connect-tenant"),
+  setActiveTenant: (id: string) =>
+    ipcRenderer.invoke("openagents:set-active-tenant", id),
+  disconnectTenant: (id: string) =>
+    ipcRenderer.invoke("openagents:disconnect-tenant", id),
 };
 
 contextBridge.exposeInMainWorld("openAgents", api);

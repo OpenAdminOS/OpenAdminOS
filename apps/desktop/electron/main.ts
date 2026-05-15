@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { AppStateStore } from "./state.js";
+import { EncryptedSecretStore } from "./secret-store.js";
 import type { ProviderId } from "@openagents/agent-sdk";
 
 const currentFile = fileURLToPath(import.meta.url);
@@ -56,7 +57,7 @@ function createWindow() {
     show: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
-      preload: join(currentDir, "preload.js"),
+      preload: join(currentDir, "preload.mjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -112,6 +113,14 @@ function registerIpcHandlers() {
   ipcMain.handle("openagents:reject-run", (_event, runId: string) =>
     store.rejectRun(runId),
   );
+  ipcMain.handle("openagents:list-tenants", () => store.listTenants());
+  ipcMain.handle("openagents:connect-tenant", () => store.connectTenant());
+  ipcMain.handle("openagents:set-active-tenant", (_event, id: string) =>
+    store.setActiveTenant(id),
+  );
+  ipcMain.handle("openagents:disconnect-tenant", (_event, id: string) =>
+    store.disconnectTenant(id),
+  );
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -131,7 +140,15 @@ if (!gotLock) {
   });
 
   void app.whenReady().then(() => {
-    store = new AppStateStore(join(app.getPath("userData"), "state.json"));
+    const userDataDir = app.getPath("userData");
+    const tokenStore = new EncryptedSecretStore(join(userDataDir, "tokens.bin"));
+    store = new AppStateStore({
+      filePath: join(userDataDir, "state.json"),
+      tokenStore,
+      openBrowser: async (url: string) => {
+        await shell.openExternal(url);
+      },
+    });
     registerIpcHandlers();
     createWindow();
 

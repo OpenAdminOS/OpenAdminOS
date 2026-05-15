@@ -16,6 +16,7 @@ import type {
   ReadAgentModule,
   RegistryAgentSummary,
   RunContext,
+  RunGraphApi,
   RunLlmApi,
   RunLogLevel,
   RunLogRecord,
@@ -29,6 +30,18 @@ import { createSyntheticGraph } from "./graph-fixtures.js";
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 
 export { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+export {
+  acquireTokenSilent,
+  createMsalClient,
+  DEFAULT_AUTHORITY,
+  DEFAULT_SCOPES,
+  GRAPH_CLI_CLIENT_ID,
+  removeAccount,
+  runInteractiveFlow,
+  type TokenCacheStorage,
+} from "./msal.js";
+export { createGraphAdapter, type GraphAdapterOptions } from "./graph-adapter.js";
+export { createSyntheticGraph } from "./graph-fixtures.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -103,6 +116,7 @@ export interface ExecuteRunInput {
   providerId: ProviderId;
   model?: string;
   llm?: RunLlmApi;
+  graph?: RunGraphApi;
   onProgress(run: RunRecord): void | Promise<void>;
 }
 
@@ -155,7 +169,7 @@ async function createPhaseHandle(
     agent: toAgentDefinition(input.agent),
     providerId: input.providerId,
     model: input.model,
-    graph: createSyntheticGraph(),
+    graph: input.graph ?? createSyntheticGraph(),
     llm,
     log: (level, message, metadata) => {
       working = appendLog(working, level, message, currentStepId, metadata);

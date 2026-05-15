@@ -102,6 +102,17 @@ export default function RunResult() {
                 Streaming updates
               </span>
             )}
+            {run.dataSource && (
+              <Pill tone={run.dataSource === "graph" ? "success" : "default"}>
+                {run.dataSource === "graph"
+                  ? `Tenant: ${
+                      state.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ??
+                      run.tenantId ??
+                      "real"
+                    }`
+                  : "Synthetic data"}
+              </Pill>
+            )}
             <span>{formatDate(run.queuedAt)}</span>
             <span className="opacity-50">·</span>
             <span>{run.providerId ?? "provider pending"}</span>
