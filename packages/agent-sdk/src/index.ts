@@ -81,6 +81,15 @@ export type RunStatus =
 
 export type RunDataSource = "graph" | "synthetic";
 
+export interface StartRunOptions {
+  /**
+   * Pin the run to a specific tenant id at queue time. Pass `null` to force
+   * synthetic mode regardless of the currently-active tenant. Omit to default
+   * to whichever tenant is active when the run is queued.
+   */
+  tenantId?: string | null;
+}
+
 export interface TenantRecord {
   id: string;
   displayName: string;
@@ -169,7 +178,7 @@ export interface OpenAgentsApi {
   listProviders(): Promise<ProviderSummary[]>;
   installAgent(agentId: string): Promise<AppState>;
   setActiveProvider(id: ProviderId): Promise<AppState>;
-  startRun(agentSlug: string): Promise<RunRecord>;
+  startRun(agentSlug: string, options?: StartRunOptions): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | undefined>;
   confirmRun(runId: string, phrase: string): Promise<RunRecord>;
   rejectRun(runId: string): Promise<RunRecord>;

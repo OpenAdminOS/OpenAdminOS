@@ -102,8 +102,10 @@ function registerIpcHandlers() {
   ipcMain.handle("openagents:set-active-provider", (_event, id: ProviderId) =>
     store.setActiveProvider(id),
   );
-  ipcMain.handle("openagents:start-run", (_event, agentSlug: string) =>
-    store.startRun(agentSlug),
+  ipcMain.handle(
+    "openagents:start-run",
+    (_event, agentSlug: string, options?: { tenantId?: string | null }) =>
+      store.startRun(agentSlug, options),
   );
   ipcMain.handle("openagents:get-run", (_event, id: string) => store.getRun(id));
   ipcMain.handle(
