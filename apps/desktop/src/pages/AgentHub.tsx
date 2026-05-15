@@ -15,8 +15,8 @@ import {
   IconStar,
   IconTrend,
 } from "../components/icons";
-import { hubAgents } from "../data/agents";
-import type { Agent } from "../types";
+import type { RegistryAgentSummary } from "../shared/openAgents";
+import { useAppState } from "../state";
 
 const filters = [
   "All",
@@ -29,14 +29,21 @@ const filters = [
 type Filter = (typeof filters)[number];
 
 export default function AgentHub() {
+  const { state, registryAgents, installAgent } = useAppState();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
-  const [installed, setInstalled] = useState<Set<string>>(new Set());
 
-  const visible = hubAgents.filter((a) => {
+  const installedIds = new Set(
+    state.installedAgents.flatMap((agent) => [
+      agent.id,
+      agent.slug,
+      agent.registryId ?? "",
+    ]),
+  );
+  const visible = registryAgents.filter((a) => {
     const matchesFilter =
       filter === "All" ||
-      a.category === (filter.toLowerCase() as Agent["category"]);
+      a.category === (filter.toLowerCase() as RegistryAgentSummary["category"]);
     const matchesQuery =
       query.trim() === "" ||
       a.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -45,10 +52,15 @@ export default function AgentHub() {
     return matchesFilter && matchesQuery;
   });
 
-  // Featured: Configuration drift detector (high-rated, broad appeal)
-  const featured = hubAgents[1];
-  // Trending rail: Win32 app failures, Update ring health, App deployment health
-  const trending = [hubAgents[4], hubAgents[2], hubAgents[0]];
+  const featured = registryAgents[0];
+  const trending = registryAgents.slice(0, 3);
+  const isInstalled = (agent: RegistryAgentSummary) =>
+    installedIds.has(agent.id) ||
+    installedIds.has(agent.slug) ||
+    installedIds.has(agent.registryId);
+  const onInstall = (agent: RegistryAgentSummary) => {
+    void installAgent(agent.registryId);
+  };
 
   return (
     <>
@@ -57,9 +69,9 @@ export default function AgentHub() {
         title="Agent Hub"
         subtitle={
           <span className="inline-flex items-center gap-2">
-            <span>{hubAgents.length}+ agents from the community</span>
+            <span>{registryAgents.length} built-in agents in this monorepo</span>
             <span className="opacity-50">·</span>
-            <span>pinned by version, never auto-updated</span>
+            <span>visible under the root agents directory</span>
           </span>
         }
         actions={
@@ -79,30 +91,38 @@ export default function AgentHub() {
       />
       <PageBody>
         {/* Featured */}
-        <FeaturedCard
-          agent={featured}
-          installed={installed.has(featured.id)}
-          onInstall={() => setInstalled(new Set([...installed, featured.id]))}
-        />
+        {featured ? (
+          <FeaturedCard
+            agent={featured}
+            installed={isInstalled(featured)}
+            onInstall={() => onInstall(featured)}
+          />
+        ) : (
+          <EmptyRegistry />
+        )}
 
         {/* Trending rail */}
-        <div className="mt-8 mb-3 flex items-center gap-2">
-          <IconFire size={14} className="text-[var(--color-warning)]" />
-          <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
-            Trending this week
-          </h3>
-          <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
-        </div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {trending.map((a) => (
-            <TrendingCard
-              key={a.id}
-              agent={a}
-              installed={installed.has(a.id)}
-              onInstall={() => setInstalled(new Set([...installed, a.id]))}
-            />
-          ))}
-        </div>
+        {trending.length > 0 && (
+          <>
+            <div className="mt-8 mb-3 flex items-center gap-2">
+              <IconFire size={14} className="text-[var(--color-warning)]" />
+              <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
+                Built-in agents
+              </h3>
+              <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {trending.map((a) => (
+                <TrendingCard
+                  key={a.id}
+                  agent={a}
+                  installed={isInstalled(a)}
+                  onInstall={() => onInstall(a)}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
         {/* Filters */}
         <div className="mt-10 mb-4 flex items-center justify-between">
@@ -131,10 +151,8 @@ export default function AgentHub() {
             <HubAgentCard
               key={agent.id}
               agent={agent}
-              installed={installed.has(agent.id)}
-              onInstall={() =>
-                setInstalled(new Set([...installed, agent.id]))
-              }
+              installed={isInstalled(agent)}
+              onInstall={() => onInstall(agent)}
             />
           ))}
         </div>
@@ -145,14 +163,13 @@ export default function AgentHub() {
             <span>
               {visible.length} agents from{" "}
               <span className="font-medium text-[var(--color-text-soft)]">
-                Ugur Koc
+                this MIT monorepo
               </span>{" "}
-              · more authors coming soon
+              · contributions live under agents/
             </span>
           </div>
           <span>
-            Pulled from{" "}
-            <span className="font-mono">github.com/ugurlabs/openagents-registry</span>
+            Pulled from <span className="font-mono">./agents</span>
           </span>
         </div>
       </PageBody>
@@ -165,7 +182,7 @@ function FeaturedCard({
   installed,
   onInstall,
 }: {
-  agent: Agent;
+  agent: RegistryAgentSummary;
   installed: boolean;
   onInstall: () => void;
 }) {
@@ -212,7 +229,7 @@ function FeaturedCard({
               {installed ? "Installed" : "Install"}
             </Button>
             <Button size="md" variant="secondary">
-              View on GitHub
+              View manifest
             </Button>
           </div>
         </div>
@@ -279,7 +296,7 @@ function TrendingCard({
   installed,
   onInstall,
 }: {
-  agent: Agent;
+  agent: RegistryAgentSummary;
   installed: boolean;
   onInstall: () => void;
 }) {
@@ -296,7 +313,7 @@ function TrendingCard({
           </div>
           <div className="flex items-center gap-1 rounded-md bg-[var(--color-warning-soft)] px-2 py-1 text-[10.5px] font-medium text-[var(--color-warning)]">
             <IconTrend size={10} />
-            {Math.floor(Math.random() * 30) + 12}%
+            Built-in
           </div>
         </div>
         <div>
@@ -341,7 +358,7 @@ function HubAgentCard({
   installed,
   onInstall,
 }: {
-  agent: Agent;
+  agent: RegistryAgentSummary;
   installed: boolean;
   onInstall: () => void;
 }) {
@@ -415,6 +432,22 @@ function HubAgentCard({
               Install
             </Button>
           )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function EmptyRegistry() {
+  return (
+    <Card>
+      <div className="flex flex-col items-center justify-center p-10 text-center">
+        <div className="text-[15px] font-medium text-[var(--color-text)]">
+          No built-in agents found
+        </div>
+        <div className="mt-1 max-w-[440px] text-[13px] text-[var(--color-text-muted)]">
+          Add an agent manifest under the root agents directory to make it appear
+          here.
         </div>
       </div>
     </Card>

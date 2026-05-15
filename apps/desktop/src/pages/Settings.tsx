@@ -10,8 +10,8 @@ import {
   IconLock,
   IconShield,
 } from "../components/icons";
-import { providers, activeProviderId } from "../data/providers";
-import type { Provider } from "../types";
+import type { ProviderId, ProviderSummary, TrustState } from "../shared/openAgents";
+import { useAppState } from "../state";
 
 const sections = [
   { id: "providers", label: "LLM Providers" },
@@ -24,6 +24,7 @@ type SectionId = (typeof sections)[number]["id"];
 
 export default function Settings() {
   const [section, setSection] = useState<SectionId>("providers");
+  const { state, setActiveProvider } = useAppState();
 
   return (
     <>
@@ -45,9 +46,15 @@ export default function Settings() {
           ))}
         </nav>
         <PageBody>
-          {section === "providers" && <ProvidersSection />}
+          {section === "providers" && (
+            <ProvidersSection
+              providers={state.providers}
+              activeProviderId={state.activeProviderId}
+              onSetActiveProvider={setActiveProvider}
+            />
+          )}
           {section === "general" && <GeneralSection />}
-          {section === "privacy" && <PrivacySection />}
+          {section === "privacy" && <PrivacySection trust={state.trust} />}
           {section === "about" && <AboutSection />}
         </PageBody>
       </div>
@@ -55,7 +62,15 @@ export default function Settings() {
   );
 }
 
-function ProvidersSection() {
+function ProvidersSection({
+  providers,
+  activeProviderId,
+  onSetActiveProvider,
+}: {
+  providers: ProviderSummary[];
+  activeProviderId: ProviderId;
+  onSetActiveProvider: (id: ProviderId) => Promise<void>;
+}) {
   return (
     <div className="max-w-[820px]">
       <SectionTitle
@@ -67,7 +82,12 @@ function ProvidersSection() {
         {providers
           .filter((p) => p.isLocal)
           .map((p) => (
-            <ProviderRow key={p.id} provider={p} />
+            <ProviderRow
+              key={p.id}
+              provider={p}
+              activeProviderId={activeProviderId}
+              onSetActiveProvider={onSetActiveProvider}
+            />
           ))}
       </div>
 
@@ -86,14 +106,27 @@ function ProvidersSection() {
         {providers
           .filter((p) => !p.isLocal)
           .map((p) => (
-            <ProviderRow key={p.id} provider={p} />
+            <ProviderRow
+              key={p.id}
+              provider={p}
+              activeProviderId={activeProviderId}
+              onSetActiveProvider={onSetActiveProvider}
+            />
           ))}
       </div>
     </div>
   );
 }
 
-function ProviderRow({ provider }: { provider: Provider }) {
+function ProviderRow({
+  provider,
+  activeProviderId,
+  onSetActiveProvider,
+}: {
+  provider: ProviderSummary;
+  activeProviderId: ProviderId;
+  onSetActiveProvider: (id: ProviderId) => Promise<void>;
+}) {
   const isActive = provider.id === activeProviderId;
   return (
     <Card>
@@ -127,6 +160,11 @@ function ProviderRow({ provider }: { provider: Provider }) {
                 <StatusDot tone="muted" /> Not installed
               </Pill>
             )}
+            {provider.status === "error" && (
+              <Pill tone="danger">
+                <StatusDot tone="danger" /> Error
+              </Pill>
+            )}
             {isActive && (
               <Pill tone="accent">
                 <IconCheck size={10} /> Active
@@ -152,14 +190,16 @@ function ProviderRow({ provider }: { provider: Provider }) {
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          {provider.status === "connected" && !isActive && (
-            <Button variant="secondary" size="sm">
+          {(provider.status === "connected" || provider.status === "available") &&
+            !isActive && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                void onSetActiveProvider(provider.id);
+              }}
+            >
               Set active
-            </Button>
-          )}
-          {provider.status === "available" && (
-            <Button variant="primary" size="sm">
-              Connect
             </Button>
           )}
           {provider.status === "not-installed" && (
@@ -194,7 +234,7 @@ function GeneralSection() {
         <SettingRow
           label="Default tenant scope"
           description="The tenant agents use unless overridden at run time."
-          control={<Pill>UgurLabs</Pill>}
+          control={<Pill>Not connected</Pill>}
         />
         <SettingRow
           label="Confirm typed phrase for destructive writes"
@@ -215,7 +255,7 @@ function GeneralSection() {
   );
 }
 
-function PrivacySection() {
+function PrivacySection({ trust }: { trust: TrustState }) {
   return (
     <div className="max-w-[720px]">
       <SectionTitle
@@ -237,8 +277,8 @@ function PrivacySection() {
           label="Tenant data residency"
           description="Where the active provider sends prompts and tenant data."
           control={
-            <Pill tone="success">
-              <IconHardDrive size={10} /> Local · This device
+            <Pill tone={trust.isLocal ? "success" : "warning"}>
+              <IconHardDrive size={10} /> {trust.label}
             </Pill>
           }
         />
@@ -253,14 +293,11 @@ function PrivacySection() {
         <div className="flex items-center gap-2">
           <IconShield size={14} className="text-[var(--color-success)]" />
           <span className="text-[12px] font-medium text-[var(--color-success)]">
-            Local-first guarantee
+            {trust.label}
           </span>
         </div>
         <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-text-soft)]">
-          When a local LLM provider is active, your tenant data and prompts
-          never leave this machine. The trust strip in the sidebar reflects
-          this in real time. Switch to a hosted provider and the UI will
-          honestly tell you where data is going.
+          {trust.detail}
         </p>
       </div>
     </div>

@@ -16,26 +16,48 @@ import {
   IconTrend,
   IconClock,
 } from "../components/icons";
-import { installedAgents } from "../data/agents";
-import { homeStats, recentActivity } from "../data/stats";
-import { LiveRunModal } from "./LiveRun";
 import type { Agent } from "../types";
+import type { AgentSummary } from "../shared/openAgents";
+import { useAppState } from "../state";
 
 export default function AgentsHome() {
   const navigate = useNavigate();
+  const { state, registryAgents, startRun, installAgent } = useAppState();
   const [query, setQuery] = useState("");
-  const [runningAgent, setRunningAgent] = useState<Agent | null>(null);
+  const retireAgentId = "retire-inactive-devices";
+  const retireInstalled = state.installedAgents.some(
+    (agent) => agent.slug === retireAgentId,
+  );
+  const retireAvailable = registryAgents.some(
+    (agent) => agent.slug === retireAgentId,
+  );
 
-  const filtered = installedAgents.filter(
+  const handleTryWriteAgent = async () => {
+    if (!retireInstalled) {
+      if (!retireAvailable) return;
+      await installAgent(retireAgentId);
+    }
+    const run = await startRun(retireAgentId);
+    navigate(`/runs/${run.id}`);
+  };
+  const activeProvider = state.providers.find(
+    (provider) => provider.id === state.activeProviderId,
+  );
+  const displayAgents = state.installedAgents.map((agent) =>
+    toDisplayAgent(agent, state.runs, activeProvider?.defaultModel),
+  );
+
+  const filtered = displayAgents.filter(
     (a) =>
       a.name.toLowerCase().includes(query.toLowerCase()) ||
       a.description.toLowerCase().includes(query.toLowerCase()),
   );
 
-  const trendVsLast =
-    homeStats.runsThisWeek - homeStats.runsLastWeek > 0
-      ? `+${homeStats.runsThisWeek - homeStats.runsLastWeek}`
-      : `${homeStats.runsThisWeek - homeStats.runsLastWeek}`;
+  const runsThisWeek = countRecentRuns(state.runs.map((run) => run.queuedAt), 7);
+  const completedRuns = state.runs.filter((run) => run.status === "completed").length;
+  const providerLabel = activeProvider
+    ? `${state.trust.label} · ${activeProvider.name}`
+    : state.trust.label;
 
   return (
     <>
@@ -43,13 +65,13 @@ export default function AgentsHome() {
         title="Agents"
         subtitle={
           <span className="inline-flex items-center gap-2">
-            <span>{installedAgents.length} installed</span>
+            <span>{state.installedAgents.length} installed</span>
             <span className="opacity-50">·</span>
-            <Pill tone="success">
-              <IconHardDrive size={10} /> Local · Ollama
+            <Pill tone={state.trust.isLocal ? "success" : "warning"}>
+              <IconHardDrive size={10} /> {providerLabel}
             </Pill>
             <span className="opacity-50">·</span>
-            <span>Tenant: UgurLabs</span>
+            <span>No tenant connected</span>
           </span>
         }
         actions={
@@ -87,28 +109,28 @@ export default function AgentsHome() {
         <div className="mb-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatTile
             label="Runs this week"
-            value={String(homeStats.runsThisWeek)}
-            change={`${trendVsLast} vs last week`}
+            value={String(runsThisWeek)}
+            change="from local run history"
             icon={<IconActivity size={14} className="text-[var(--color-accent)]" />}
             mono
           />
           <StatTile
             label="Time saved"
-            value={`${homeStats.timeSavedHours}h`}
-            change="estimated · this month"
+            value="0h"
+            change="estimated after real runs"
             icon={<IconClock size={14} className="text-[var(--color-success)]" />}
           />
           <StatTile
             label="Items resolved"
-            value={String(homeStats.itemsResolved)}
-            change="across all agents"
+            value={String(completedRuns)}
+            change="completed runs"
             icon={<IconTrend size={14} className="text-[var(--color-info)]" />}
             mono
           />
           <StatTile
             label="Cost"
-            value={homeStats.costSpent}
-            change={homeStats.costLabel}
+            value={state.trust.isLocal ? "$0.00" : "External"}
+            change={state.trust.isLocal ? "local provider" : "hosted provider"}
             icon={<IconHardDrive size={14} className="text-[var(--color-success)]" />}
             valueClass="text-[var(--color-success)]"
           />
@@ -122,23 +144,26 @@ export default function AgentsHome() {
                 Installed
               </h2>
               <span className="text-[11px] text-[var(--color-text-muted)]">
-                {filtered.length} of {installedAgents.length}
+                {filtered.length} of {state.installedAgents.length}
               </span>
             </div>
 
             {filtered.length === 0 ? (
-              <EmptyState />
+              <EmptyState hasAgents={state.installedAgents.length > 0} />
             ) : (
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                 {filtered.map((agent) => (
                   <AgentCard
                     key={agent.id}
                     agent={agent}
-                    onRun={(a) =>
-                      a.mode === "write"
-                        ? navigate(`/agents/${a.slug}/confirm`)
-                        : navigate("/runs/last")
-                    }
+                    onRun={(a) => {
+                      if (a.mode === "write") {
+                        navigate(`/agents/${a.slug}/confirm`);
+                        return;
+                      }
+
+                      void startRun(a.slug).then((run) => navigate(`/runs/${run.id}`));
+                    }}
                   />
                 ))}
               </div>
@@ -160,32 +185,33 @@ export default function AgentsHome() {
                   </button>
                 </div>
                 <div className="mt-3 flex flex-col gap-2.5">
-                  {recentActivity.map((r, i) => (
+                  {state.runs.length === 0 && (
+                    <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+                      No runs recorded yet.
+                    </div>
+                  )}
+                  {state.runs.slice(0, 4).map((r) => (
                     <button
-                      key={i}
-                      onClick={() => navigate("/runs/last")}
+                      key={r.id}
+                      onClick={() => navigate(`/runs/${r.id}`)}
                       className="flex items-start gap-3 rounded-lg bg-[var(--color-bg-raised)] p-3 text-left ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)]"
                     >
                       <StatusDot
-                        tone={r.status === "alert" ? "warning" : "success"}
+                        tone={runStatusTone(r.status)}
                         className="mt-1.5"
                       />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
-                          {r.agent}
+                          {r.agentSlug}
                         </div>
                         <div
-                          className={`mt-0.5 text-[11px] ${
-                            r.status === "alert"
-                              ? "text-[var(--color-warning)]"
-                              : "text-[var(--color-text-muted)]"
-                          }`}
+                          className="mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                         >
-                          {r.result}
+                          {r.summary ?? r.status}
                         </div>
                       </div>
                       <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
-                        {r.when}
+                        {formatShortDate(r.queuedAt)}
                       </span>
                     </button>
                   ))}
@@ -201,12 +227,11 @@ export default function AgentsHome() {
                     className="text-[var(--color-success)]"
                   />
                   <span className="text-[12.5px] font-medium text-[var(--color-text)]">
-                    Local-first guarantee
+                    {state.trust.label}
                   </span>
                 </div>
                 <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
-                  Your tenant data and prompts never leave this device while
-                  Ollama is the active provider.
+                  {state.trust.detail}
                 </p>
                 <button
                   onClick={() => navigate("/settings")}
@@ -230,22 +255,17 @@ export default function AgentsHome() {
                   see the diff confirmation flow.
                 </p>
                 <button
-                  onClick={() =>
-                    navigate("/agents/retire-inactive-devices/confirm")
-                  }
-                  className="mt-3 text-[11.5px] font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)]"
+                  onClick={() => void handleTryWriteAgent()}
+                  disabled={!retireAvailable}
+                  className="mt-3 text-[11.5px] font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Preview the diff →
+                  {retireInstalled ? "Run retire" : "Install + run retire"} →
                 </button>
               </div>
             </Card>
           </aside>
         </div>
       </PageBody>
-      <LiveRunModal
-        agent={runningAgent}
-        onClose={() => setRunningAgent(null)}
-      />
     </>
   );
 }
@@ -289,18 +309,61 @@ function StatTile({
   );
 }
 
-function EmptyState() {
+function EmptyState({ hasAgents }: { hasAgents: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--color-surface)] py-16 ring-1 ring-[var(--color-border-soft)]">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
         <IconSearch size={20} />
       </div>
       <div className="text-[15px] font-medium text-[var(--color-text)]">
-        No agents match that search
+        {hasAgents ? "No agents match that search" : "No agents installed"}
       </div>
       <div className="mt-1 text-[13px] text-[var(--color-text-muted)]">
-        Try a different query, or browse the hub for community agents.
+        {hasAgents
+          ? "Try a different query, or browse the hub for community agents."
+          : "Install an agent from the hub once registry support is wired."}
       </div>
     </div>
   );
+}
+
+function toDisplayAgent(
+  agent: AgentSummary,
+  runs: { agentSlug: string; queuedAt: string }[],
+  defaultModel?: string,
+): Agent {
+  const lastRunAt = runs.find((run) => run.agentSlug === agent.slug)?.queuedAt;
+
+  return {
+    ...agent,
+    category: agent.category,
+    author: {
+      name: agent.author.name,
+      handle: agent.author.handle ?? "local",
+      verified: agent.author.verified ?? false,
+    },
+    installed: true,
+    lastRunAt,
+    preferredModel: defaultModel,
+  };
+}
+
+function countRecentRuns(startedAtValues: string[], days: number) {
+  const cutoff = Date.now() - days * 86_400_000;
+  return startedAtValues.filter((value) => {
+    const timestamp = new Date(value).getTime();
+    return !Number.isNaN(timestamp) && timestamp >= cutoff;
+  }).length;
+}
+
+function formatShortDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function runStatusTone(status: string) {
+  if (status === "failed") return "danger";
+  if (status === "queued" || status === "running") return "warning";
+  return "success";
 }

@@ -1,0 +1,346 @@
+export type ProviderId =
+  | "ollama"
+  | "lm-studio"
+  | "anthropic"
+  | "openai"
+  | "azure-openai";
+
+export type ProviderStatus = "connected" | "available" | "not-installed" | "error";
+
+export interface ProviderSummary {
+  id: ProviderId;
+  name: string;
+  description: string;
+  isLocal: boolean;
+  status: ProviderStatus;
+  detail?: string;
+  models: string[];
+  defaultModel?: string;
+}
+
+export type AgentMode = "read" | "write";
+
+export type AgentCategory =
+  | "devices"
+  | "apps"
+  | "policies"
+  | "compliance"
+  | "updates";
+
+export interface AgentAuthor {
+  name: string;
+  handle?: string;
+  url?: string;
+  verified?: boolean;
+}
+
+export type GraphHttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+
+export interface GraphOperation {
+  method: GraphHttpMethod;
+  path: string;
+  select?: string[];
+  notes?: string;
+}
+
+export interface AgentContract {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  mode: AgentMode;
+  category: AgentCategory;
+  scopes: string[];
+  author: AgentAuthor;
+  version: string;
+  preferredModel?: string;
+  graphOperations?: GraphOperation[];
+}
+
+export interface AgentSummary extends AgentContract {
+  installedAt: string;
+  registryId?: string;
+  registryPath?: string;
+  lastRunAt?: string;
+}
+
+export interface RegistryAgentSummary extends AgentContract {
+  registryId: string;
+  registryPath?: string;
+  installs?: number;
+  rating?: number;
+}
+
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "awaiting-confirmation"
+  | "completed"
+  | "failed"
+  | "rejected";
+
+export type RunStepStatus = "pending" | "running" | "completed" | "failed";
+
+export interface RunStepThinking {
+  text: string;
+  model: string;
+  streaming: boolean;
+}
+
+export interface RunStepRecord {
+  id: string;
+  runId: string;
+  label: string;
+  status: RunStepStatus;
+  detail?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  thinking?: RunStepThinking;
+}
+
+export type RunLogLevel = "debug" | "info" | "warn" | "error";
+
+export interface RunLogRecord {
+  id: string;
+  runId: string;
+  timestamp: string;
+  level: RunLogLevel;
+  message: string;
+  stepId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RunRecord {
+  id: string;
+  agentSlug: string;
+  status: RunStatus;
+  queuedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  confirmedAt?: string;
+  rejectedAt?: string;
+  providerId?: ProviderId;
+  model?: string;
+  summary?: string;
+  result?: unknown;
+  error?: string;
+  steps: RunStepRecord[];
+  logs: RunLogRecord[];
+  plan?: WritePlan;
+}
+
+export interface TrustState {
+  label: string;
+  detail: string;
+  isLocal: boolean;
+}
+
+export interface AppState {
+  activeProviderId: ProviderId;
+  providers: ProviderSummary[];
+  registryAgents: RegistryAgentSummary[];
+  installedAgents: AgentSummary[];
+  runs: RunRecord[];
+  trust: TrustState;
+}
+
+export interface OpenAgentsApi {
+  getAppState(): Promise<AppState>;
+  listRegistryAgents(): Promise<RegistryAgentSummary[]>;
+  listInstalledAgents(): Promise<AgentSummary[]>;
+  listAgents(): Promise<AgentSummary[]>;
+  listProviders(): Promise<ProviderSummary[]>;
+  installAgent(agentId: string): Promise<AppState>;
+  setActiveProvider(id: ProviderId): Promise<AppState>;
+  startRun(agentSlug: string): Promise<RunRecord>;
+  getRun(id: string): Promise<RunRecord | undefined>;
+  confirmRun(runId: string, phrase: string): Promise<RunRecord>;
+  rejectRun(runId: string): Promise<RunRecord>;
+}
+
+export type AgentDefinition = AgentContract &
+  Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs" | "rating">>;
+
+export interface ManagedDeviceRecord {
+  id: string;
+  deviceName: string;
+  userPrincipalName: string;
+  operatingSystem: string;
+  osVersion?: string;
+  lastSyncDateTime: string;
+  enrolledDateTime: string;
+  complianceState: "compliant" | "noncompliant" | "unknown";
+}
+
+export interface RunGraphApi {
+  listManagedDevices(): Promise<ManagedDeviceRecord[]>;
+}
+
+export interface LlmOptions {
+  prompt: string;
+  system?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface LlmCompletion {
+  text: string;
+  model: string;
+}
+
+export interface LlmStreamChunk {
+  delta: string;
+  accumulated: string;
+  done: boolean;
+  model: string;
+}
+
+export interface RunLlmApi {
+  readonly available: boolean;
+  readonly defaultModel?: string;
+  /**
+   * Caller MUST check `available` first. When `available` is `false` both
+   * `complete()` and `stream()` will throw before any I/O is performed.
+   */
+  complete(options: LlmOptions): Promise<LlmCompletion>;
+  stream(options: LlmOptions): AsyncIterable<LlmStreamChunk>;
+}
+
+export interface RunContextOptions {
+  agent: AgentDefinition;
+  providerId: ProviderId;
+  model?: string;
+}
+
+export interface RunContext {
+  agent: AgentDefinition;
+  providerId: ProviderId;
+  model?: string;
+  graph: RunGraphApi;
+  llm: RunLlmApi;
+  log(level: RunLogLevel, message: string, metadata?: Record<string, unknown>): void;
+  step<T>(
+    label: string,
+    detail: string | undefined,
+    fn: () => Promise<T> | T,
+  ): Promise<T>;
+}
+
+export interface AgentRunResult {
+  summary: string;
+  result?: unknown;
+}
+
+export type WriteActionSeverity = "default" | "destructive";
+
+export interface WriteAction {
+  id: string;
+  kind: string;
+  label: string;
+  description?: string;
+  severity?: WriteActionSeverity;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WritePlan {
+  summary: string;
+  confirmationPhrase: string;
+  actions: WriteAction[];
+}
+
+export interface ReadAgentModule extends AgentDefinition {
+  mode: "read";
+  run(ctx: RunContext): Promise<AgentRunResult>;
+}
+
+export interface WriteAgentModule extends AgentDefinition {
+  mode: "write";
+  plan(ctx: RunContext): Promise<WritePlan>;
+  apply(ctx: RunContext, plan: WritePlan): Promise<AgentRunResult>;
+}
+
+export type AgentModule = ReadAgentModule | WriteAgentModule;
+
+export const providerCatalog: readonly ProviderSummary[] = [
+  {
+    id: "ollama",
+    name: "Ollama",
+    description:
+      "Run open-source models locally. Tenant data and prompts stay on this machine.",
+    isLocal: true,
+    status: "available",
+    detail: "Waiting for connection check",
+    models: [],
+  },
+  {
+    id: "lm-studio",
+    name: "LM Studio",
+    description:
+      "Use LM Studio's local OpenAI-compatible server for private model runs.",
+    isLocal: true,
+    status: "not-installed",
+    detail: "Connection check not implemented yet",
+    models: [],
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    description:
+      "Hosted Claude models. Tenant prompts leave this device when active.",
+    isLocal: false,
+    status: "not-installed",
+    detail: "Hosted provider setup is not implemented yet",
+    models: [],
+  },
+  {
+    id: "openai",
+    name: "OpenAI",
+    description:
+      "Hosted OpenAI models. Tenant prompts leave this device when active.",
+    isLocal: false,
+    status: "not-installed",
+    detail: "Hosted provider setup is not implemented yet",
+    models: [],
+  },
+  {
+    id: "azure-openai",
+    name: "Azure OpenAI",
+    description:
+      "Hosted Azure OpenAI deployments using the organization's Azure boundary.",
+    isLocal: false,
+    status: "not-installed",
+    detail: "Hosted provider setup is not implemented yet",
+    models: [],
+  },
+];
+
+export function deriveTrustState(provider: ProviderSummary | undefined): TrustState {
+  if (!provider) {
+    return {
+      label: "Provider not configured",
+      detail: "Select a provider before running agents.",
+      isLocal: true,
+    };
+  }
+
+  if (provider.isLocal) {
+    return {
+      label: "Local-only",
+      detail: "Tenant data and prompts stay on this device.",
+      isLocal: true,
+    };
+  }
+
+  return {
+    label: "Hosted provider",
+    detail: `Tenant data and prompts are sent to ${provider.name}.`,
+    isLocal: false,
+  };
+}
+
+export function defineAgent<const TAgent extends AgentModule>(
+  agent: TAgent,
+): TAgent {
+  return agent;
+}

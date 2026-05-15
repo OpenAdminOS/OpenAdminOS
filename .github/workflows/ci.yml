@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck, qa, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENAGENTS_QA_SKILL_REPO: https://github.com/merill/msgraph.git
+      OPENAGENTS_QA_SKILL_REF: main
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Cache msgraph skill
+        uses: actions/cache@v4
+        with:
+          path: .qa-cache/msgraph
+          key: msgraph-skill-${{ env.OPENAGENTS_QA_SKILL_REF }}
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Resolve msgraph skill
+        run: |
+          eval "$(bash scripts/setup-qa.sh)"
+          echo "MSGRAPH_SKILL_DIR=$MSGRAPH_SKILL_DIR" >> "$GITHUB_ENV"
+
+      - name: Graph QA gate
+        run: npm run qa
+
+      - name: Build
+        run: npm run build

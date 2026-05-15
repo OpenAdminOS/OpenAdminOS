@@ -10,7 +10,7 @@ import {
   IconSettings,
   IconShield,
 } from "./icons";
-import { installedAgents, hubAgents } from "../data/agents";
+import { useAppState } from "../state";
 
 interface PaletteItem {
   id: string;
@@ -30,6 +30,7 @@ export function CommandPalette({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const { state, registryAgents, startRun } = useAppState();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -40,10 +41,10 @@ export function CommandPalette({
       onClose();
     };
     return [
-      ...installedAgents.map((a) => ({
+      ...state.installedAgents.map((a) => ({
         id: `agent-${a.id}`,
         label: a.name,
-        hint: `${a.mode === "write" ? "Write" : "Read-only"} · ${a.author.name}`,
+        hint: `${a.mode === "write" ? "Write" : "Read-only"} · ${a.version}`,
         group: "Agents" as const,
         icon:
           a.mode === "write" ? (
@@ -54,7 +55,7 @@ export function CommandPalette({
         shortcut: "↵ Open",
         action: go(`/agents/${a.slug}`),
       })),
-      ...hubAgents.map((a) => ({
+      ...registryAgents.map((a) => ({
         id: `hub-${a.id}`,
         label: a.name,
         hint: `Hub · ${a.author.name}`,
@@ -92,22 +93,23 @@ export function CommandPalette({
       },
       {
         id: "act-run-fid",
-        label: "Run · Find inactive devices",
-        hint: "Read-only · Ollama",
+        label: "Start first run",
+        hint:
+          state.installedAgents.length > 0
+            ? "Queue the first installed agent"
+            : "Install an agent before running",
         group: "Actions",
         icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
-        action: go("/runs/last"),
-      },
-      {
-        id: "act-run-retire",
-        label: "Run · Retire inactive devices",
-        hint: "Write · pauses for diff confirmation",
-        group: "Actions",
-        icon: <IconPlay size={13} className="text-[var(--color-warning)]" />,
-        action: go("/agents/retire-inactive-devices/confirm"),
+        action: async () => {
+          const agent = state.installedAgents[0];
+          if (!agent) return;
+          const run = await startRun(agent.slug);
+          navigate(`/runs/${run.id}`);
+          onClose();
+        },
       },
     ];
-  }, [navigate, onClose]);
+  }, [navigate, onClose, registryAgents, startRun, state.installedAgents]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;

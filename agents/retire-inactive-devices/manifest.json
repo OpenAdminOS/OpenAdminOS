@@ -1,0 +1,41 @@
+{
+  "id": "retire-inactive-devices",
+  "slug": "retire-inactive-devices",
+  "name": "Retire inactive devices",
+  "description": "Companion to Find inactive devices. Retires devices that have not synced in 180+ days after typed diff confirmation.",
+  "mode": "write",
+  "category": "devices",
+  "version": "1.0.0",
+  "author": {
+    "name": "OpenAgents",
+    "handle": "openagents",
+    "verified": true
+  },
+  "scopes": [
+    "DeviceManagementManagedDevices.PrivilegedOperations.All",
+    "DeviceManagementManagedDevices.Read.All"
+  ],
+  "preferredModel": "llama3.1:8b",
+  "graphOperations": [
+    {
+      "method": "GET",
+      "path": "/deviceManagement/managedDevices",
+      "select": [
+        "id",
+        "deviceName",
+        "userPrincipalName",
+        "operatingSystem",
+        "osVersion",
+        "lastSyncDateTime",
+        "enrolledDateTime",
+        "complianceState"
+      ],
+      "notes": "Reads managedDevices during the plan phase to pick retire candidates."
+    },
+    {
+      "method": "POST",
+      "path": "/deviceManagement/managedDevices/{managedDevice-id}/retire",
+      "notes": "Called per device during the apply phase after typed confirmation."
+    }
+  ]
+}

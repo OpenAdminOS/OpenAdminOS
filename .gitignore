@@ -3,8 +3,13 @@ node_modules/
 
 # Build outputs
 dist/
+dist-electron/
 build/
+release/
 *.tsbuildinfo
+
+# QA gate cache (msgraph skill clone)
+.qa-cache/
 
 # Environment
 .env

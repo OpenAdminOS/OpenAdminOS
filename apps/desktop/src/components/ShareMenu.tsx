@@ -38,7 +38,7 @@ export function ShareMenu({ contextLabel = "agent" }: { contextLabel?: string })
     {
       icon: <IconExternal size={13} className="text-[var(--color-text-soft)]" />,
       label: "Open in browser",
-      hint: "github.com/ugurlabs/openagents-registry",
+      hint: "github.com/ugurlabs/openagents/tree/main/agents",
       onClick: () => setOpen(false),
     },
     {

@@ -23,6 +23,31 @@ Thanks for your interest. This project is community-built and contributions are 
 - **Wrappers around other AI products** — we provide an abstraction so users can swap providers. Don't lock in to one vendor.
 - **"Smart" defaults that bypass the diff-confirmation flow** — every write operation gets human review. No exceptions.
 
+## Quality gate for agents
+
+Every built-in agent declares its Graph contract in `manifest.json` under `graphOperations` (method, path, optional `select` fields). Before opening a PR for an agent change, run:
+
+```
+eval $(scripts/setup-qa.sh)
+npm run qa
+```
+
+`scripts/setup-qa.sh` resolves the local Microsoft Graph knowledge index in this order:
+
+1. `$MSGRAPH_SKILL_DIR` if it already points at a valid skill directory.
+2. `~/.claude/skills/msgraph` if the skill is installed locally.
+3. Otherwise, clones the skill into `.qa-cache/msgraph` (override via `$OPENAGENTS_QA_SKILL_REPO` and `$OPENAGENTS_QA_SKILL_REF`).
+
+`npm run qa` then validates every agent manifest against the local Graph OpenAPI + docs indexes — no auth, no network. Failures block the gate; warnings are advisory. The gate covers:
+
+- Every declared scope is a known Graph permission (catches typos).
+- Every `graphOperations` entry resolves in the Graph OpenAPI index.
+- Every declared scope is required by at least one declared operation (catches orphans), and every operation has a declared scope that satisfies its required permissions.
+- Every `select` field exists on the operation's resource type.
+- A best-effort lookup of curated samples backing each GET operation (warning when none found).
+
+The synthetic Graph fixture in `@openagents/runtime` is also cross-checked against the real `managedDevice` schema. Adding a field to the fixture that doesn't exist on Graph fails the gate.
+
 ## Code of conduct
 
 See [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Short version: be the kind of person you'd want to work with.
