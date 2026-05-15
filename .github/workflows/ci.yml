@@ -35,13 +35,7 @@ jobs:
           key: msgraph-skill-${{ env.OPENAGENTS_QA_SKILL_REF }}
 
       - name: Install dependencies
-        # `npm install` rather than `npm ci`: npm/cli#4828 skips platform-
-        # specific optional deps under `npm ci` when the lockfile was generated
-        # on a different platform (here: rollup linux-x64, lightningcss linux-
-        # x64, and any other native binaries pulled in by Vite/Tailwind/etc.).
-        # `npm install` still honors the lockfile for resolution but re-installs
-        # platform-matching optional deps.
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck
         run: npm run typecheck
