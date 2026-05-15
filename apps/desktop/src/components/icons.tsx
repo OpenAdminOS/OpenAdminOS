@@ -140,8 +140,8 @@ export const IconSparkle = ({ size = 14, ...p }: IconProps) => (
 
 export const IconLogo = ({ size = 22, ...p }: IconProps) => (
   <svg {...base(size, p)}>
-    <path d="M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z" stroke="currentColor" />
-    <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth={1.6} />
+    <circle cx="12" cy="12" r="2.25" fill="currentColor" stroke="none" />
   </svg>
 );
 
