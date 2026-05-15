@@ -1,13 +1,16 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router";
+import { HashRouter } from "react-router";
 import App from "./App";
+import { AppStateProvider } from "./state";
 import "./styles/globals.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <AppStateProvider>
+      <HashRouter>
+        <App />
+      </HashRouter>
+    </AppStateProvider>
   </StrictMode>,
 );

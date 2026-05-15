@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
@@ -13,17 +13,88 @@ import {
   IconPlay,
   IconShield,
 } from "../components/icons";
-import { providers } from "../data/providers";
-import { hubAgents } from "../data/agents";
+import { useAppState } from "../state";
+import type {
+  ProviderId,
+  ProviderSummary,
+  RegistryAgentSummary,
+} from "../shared/openAgents";
 
 const steps = ["Welcome", "Pick LLM", "First agent"] as const;
 type Step = (typeof steps)[number];
 
 export default function Onboarding() {
   const navigate = useNavigate();
+  const { state, registryAgents, installAgent, setActiveProvider, startRun } =
+    useAppState();
   const [step, setStep] = useState<Step>("Welcome");
-  const [selectedProvider, setSelectedProvider] = useState("ollama");
-  const [selectedAgent, setSelectedAgent] = useState("hub-002");
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId>(
+    state.activeProviderId,
+  );
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedProvider(state.activeProviderId);
+  }, [state.activeProviderId]);
+
+  useEffect(() => {
+    if (selectedAgentId) return;
+    const first = registryAgents[0];
+    if (first) {
+      setSelectedAgentId(first.registryId);
+    }
+  }, [registryAgents, selectedAgentId]);
+
+  const handlePickLlmContinue = async () => {
+    setError(null);
+    if (selectedProvider !== state.activeProviderId) {
+      try {
+        setWorking(true);
+        await setActiveProvider(selectedProvider);
+      } catch (caughtError) {
+        setError(toMessage(caughtError));
+        return;
+      } finally {
+        setWorking(false);
+      }
+    }
+    setStep("First agent");
+  };
+
+  const handleInstallAndFinish = async () => {
+    setError(null);
+    const registryAgent = registryAgents.find(
+      (agent) => agent.registryId === selectedAgentId,
+    );
+
+    if (!registryAgent) {
+      setError("Pick an agent to install before continuing.");
+      return;
+    }
+
+    setWorking(true);
+    try {
+      const alreadyInstalled = state.installedAgents.some(
+        (installed) =>
+          installed.registryId === registryAgent.registryId ||
+          installed.id === registryAgent.id ||
+          installed.slug === registryAgent.slug,
+      );
+
+      if (!alreadyInstalled) {
+        await installAgent(registryAgent.registryId);
+      }
+
+      const run = await startRun(registryAgent.slug);
+      navigate(`/runs/${run.id}`);
+    } catch (caughtError) {
+      setError(toMessage(caughtError));
+    } finally {
+      setWorking(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
@@ -84,23 +155,33 @@ export default function Onboarding() {
 
       <main className="flex-1 overflow-y-auto px-6 py-10 animate-fade-in">
         <div className="mx-auto max-w-[820px]">
+          {error && (
+            <div className="mb-4 rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+              {error}
+            </div>
+          )}
+
           {step === "Welcome" && (
             <Welcome onContinue={() => setStep("Pick LLM")} />
           )}
           {step === "Pick LLM" && (
             <PickLLM
+              providers={state.providers}
               selected={selectedProvider}
               onSelect={setSelectedProvider}
               onBack={() => setStep("Welcome")}
-              onContinue={() => setStep("First agent")}
+              onContinue={() => void handlePickLlmContinue()}
+              working={working}
             />
           )}
           {step === "First agent" && (
             <PickAgent
-              selected={selectedAgent}
-              onSelect={setSelectedAgent}
+              agents={registryAgents}
+              selectedId={selectedAgentId}
+              onSelect={setSelectedAgentId}
               onBack={() => setStep("Pick LLM")}
-              onContinue={() => navigate("/")}
+              onContinue={() => void handleInstallAndFinish()}
+              working={working}
             />
           )}
         </div>
@@ -159,15 +240,19 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
 }
 
 function PickLLM({
+  providers,
   selected,
   onSelect,
   onBack,
   onContinue,
+  working,
 }: {
-  selected: string;
-  onSelect: (id: string) => void;
+  providers: ProviderSummary[];
+  selected: ProviderId;
+  onSelect: (id: ProviderId) => void;
   onBack: () => void;
   onContinue: () => void;
+  working: boolean;
 }) {
   return (
     <div>
@@ -227,6 +312,7 @@ function PickLLM({
                     )}
                     {p.status === "available" && <Pill tone="warning">Available</Pill>}
                     {p.status === "not-installed" && <Pill>Not installed</Pill>}
+                    {p.status === "error" && <Pill tone="danger">Error</Pill>}
                   </div>
                   <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
                     {p.description}
@@ -255,8 +341,9 @@ function PickLLM({
           variant="primary"
           trailingIcon={<IconArrowRight size={14} />}
           onClick={onContinue}
+          disabled={working}
         >
-          Continue
+          {working ? "Saving…" : "Continue"}
         </Button>
       </div>
     </div>
@@ -264,17 +351,21 @@ function PickLLM({
 }
 
 function PickAgent({
-  selected,
+  agents,
+  selectedId,
   onSelect,
   onBack,
   onContinue,
+  working,
 }: {
-  selected: string;
+  agents: RegistryAgentSummary[];
+  selectedId: string;
   onSelect: (id: string) => void;
   onBack: () => void;
   onContinue: () => void;
+  working: boolean;
 }) {
-  const featured = hubAgents.slice(0, 3);
+  const featured = useMemo(() => agents.slice(0, 3), [agents]);
 
   return (
     <div>
@@ -288,58 +379,69 @@ function PickAgent({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3">
-        {featured.map((a) => {
-          const active = a.id === selected;
-          return (
-            <Card
-              key={a.id}
-              interactive
-              onClick={() => onSelect(a.id)}
-              className={
-                active
-                  ? "ring-2 ring-[var(--color-accent)]/55 bg-[var(--color-surface-hover)]"
-                  : ""
-              }
-            >
-              <div className="flex items-start gap-4 p-5">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
-                  <IconShield size={18} className="text-[var(--color-text-soft)]" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[14px] font-medium text-[var(--color-text)]">
-                      {a.name}
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
-                      {a.author.name}
-                      {a.author.verified && (
-                        <IconBadgeCheck
-                          size={11}
-                          className="text-[var(--color-accent)]"
-                        />
-                      )}
-                    </span>
-                    <Pill>Read-only</Pill>
+      {featured.length === 0 ? (
+        <Card>
+          <div className="p-6 text-[13px] text-[var(--color-text-muted)]">
+            No built-in agents are available yet. Add an agent under the root
+            agents directory.
+          </div>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-3">
+          {featured.map((a) => {
+            const active = a.registryId === selectedId;
+            return (
+              <Card
+                key={a.registryId}
+                interactive
+                onClick={() => onSelect(a.registryId)}
+                className={
+                  active
+                    ? "ring-2 ring-[var(--color-accent)]/55 bg-[var(--color-surface-hover)]"
+                    : ""
+                }
+              >
+                <div className="flex items-start gap-4 p-5">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
+                    <IconShield size={18} className="text-[var(--color-text-soft)]" />
                   </div>
-                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-                    {a.description}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px] font-medium text-[var(--color-text)]">
+                        {a.name}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+                        {a.author.name}
+                        {a.author.verified && (
+                          <IconBadgeCheck
+                            size={11}
+                            className="text-[var(--color-accent)]"
+                          />
+                        )}
+                      </span>
+                      <Pill tone={a.mode === "write" ? "warning" : "default"}>
+                        {a.mode === "write" ? "Write" : "Read-only"}
+                      </Pill>
+                    </div>
+                    <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                      {a.description}
+                    </p>
+                  </div>
+                  <div
+                    className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ${
+                      active
+                        ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
+                        : "ring-[var(--color-border-strong)]"
+                    }`}
+                  >
+                    {active && <IconCheck size={12} className="text-[#1a120c]" />}
+                  </div>
                 </div>
-                <div
-                  className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ${
-                    active
-                      ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
-                      : "ring-[var(--color-border-strong)]"
-                  }`}
-                >
-                  {active && <IconCheck size={12} className="text-[#1a120c]" />}
-                </div>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
 
       <div className="mt-8 flex items-center justify-between">
         <Button variant="ghost" onClick={onBack}>
@@ -350,8 +452,9 @@ function PickAgent({
           size="lg"
           leadingIcon={<IconPlay size={12} />}
           onClick={onContinue}
+          disabled={working || featured.length === 0}
         >
-          Install and finish
+          {working ? "Installing…" : "Install and run"}
         </Button>
       </div>
     </div>
@@ -380,4 +483,10 @@ function FeatureCard({
       </div>
     </div>
   );
+}
+
+function toMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "Onboarding failed.";
 }

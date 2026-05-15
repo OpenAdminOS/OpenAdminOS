@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
@@ -14,14 +13,15 @@ import {
   IconPlay,
   IconShield,
 } from "../components/icons";
-import { installedAgents } from "../data/agents";
-import { LiveRunModal } from "./LiveRun";
+import { useAppState } from "../state";
+import type { RunRecord } from "../shared/openAgents";
 
 export default function AgentDetail() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const agent = installedAgents.find((a) => a.slug === slug);
-  const [running, setRunning] = useState(false);
+  const { state, startRun } = useAppState();
+  const agent = state.installedAgents.find((a) => a.slug === slug);
+  const recentRuns = state.runs.filter((run) => run.agentSlug === slug).slice(0, 3);
 
   if (!agent) {
     return (
@@ -71,7 +71,9 @@ export default function AgentDetail() {
             <Button
               variant="primary"
               leadingIcon={<IconPlay size={12} />}
-              onClick={() => setRunning(true)}
+              onClick={() => {
+                void startRun(agent.slug).then((run) => navigate(`/runs/${run.id}`));
+              }}
             >
               Run agent
             </Button>
@@ -126,43 +128,34 @@ export default function AgentDetail() {
               <div className="p-6">
                 <SectionLabel>Recent runs</SectionLabel>
                 <div className="mt-3 divide-y divide-[var(--color-border-soft)]">
-                  {[
-                    {
-                      when: "2 hours ago",
-                      result: "47 inactive devices found",
-                      tenant: "UgurLabs",
-                      duration: "8.2s",
-                    },
-                    {
-                      when: "Yesterday",
-                      result: "44 inactive devices found",
-                      tenant: "UgurLabs",
-                      duration: "7.8s",
-                    },
-                    {
-                      when: "3 days ago",
-                      result: "41 inactive devices found",
-                      tenant: "UgurLabs",
-                      duration: "8.0s",
-                    },
-                  ].map((run, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
-                    >
-                      <div>
-                        <div className="text-[13px] text-[var(--color-text)]">
-                          {run.result}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                          {run.when} · {run.tenant} · {run.duration}
-                        </div>
-                      </div>
-                      <Button variant="ghost" size="sm">
-                        View
-                      </Button>
+                  {recentRuns.length === 0 ? (
+                    <div className="py-3 text-[12px] text-[var(--color-text-muted)]">
+                      No runs recorded for this agent yet.
                     </div>
-                  ))}
+                  ) : (
+                    recentRuns.map((run) => (
+                      <div
+                        key={run.id}
+                        className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
+                      >
+                        <div>
+                          <div className="text-[13px] text-[var(--color-text)]">
+                            {run.summary ?? run.status}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                            {formatDate(run.queuedAt)} · {formatDuration(run)}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => navigate(`/runs/${run.id}`)}
+                        >
+                          View
+                        </Button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </Card>
@@ -207,7 +200,7 @@ export default function AgentDetail() {
                     {agent.preferredModel ?? "Default"}
                   </div>
                   <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                    Inherited from active provider · Ollama
+                    Inherited from active provider
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -219,10 +212,6 @@ export default function AgentDetail() {
           </div>
         </div>
       </PageBody>
-      <LiveRunModal
-        agent={running ? agent : null}
-        onClose={() => setRunning(false)}
-      />
     </>
   );
 }
@@ -233,4 +222,23 @@ function SectionLabel({ children }: { children: string }) {
       {children}
     </div>
   );
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(run: RunRecord) {
+  if (!run.startedAt || !run.finishedAt) return "-";
+  const durationMs =
+    new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime();
+  if (Number.isNaN(durationMs) || durationMs < 0) return "-";
+  return `${(durationMs / 1000).toFixed(1)}s`;
 }

@@ -11,12 +11,10 @@ import {
   IconChevronUpDown,
   IconChevronDown,
 } from "./icons";
-import { providers, activeProviderId } from "../data/providers";
 import { StatusDot } from "./Pill";
-import { installedAgents } from "../data/agents";
 import { Avatar } from "./Avatar";
 import { Sparkline } from "./Sparkline";
-import { runsByDay, runsByDayLabels } from "../data/stats";
+import { useAppState } from "../state";
 
 interface NavItem {
   to: string;
@@ -25,22 +23,6 @@ interface NavItem {
   end?: boolean;
   badge?: string | number;
 }
-
-const mainNav: NavItem[] = [
-  {
-    to: "/",
-    label: "Agents",
-    icon: <IconAgents size={16} />,
-    end: true,
-    badge: installedAgents.length,
-  },
-  { to: "/hub", label: "Agent Hub", icon: <IconHub size={16} /> },
-  {
-    to: "/activity",
-    label: "Activity",
-    icon: <IconActivity size={16} />,
-  },
-];
 
 function NavRow({ item }: { item: NavItem }) {
   return (
@@ -88,10 +70,29 @@ function NavRow({ item }: { item: NavItem }) {
 }
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
-  const active = providers.find((p) => p.id === activeProviderId)!;
+  const { state } = useAppState();
+  const active = state.providers.find((p) => p.id === state.activeProviderId);
+  const mainNav: NavItem[] = [
+    {
+      to: "/",
+      label: "Agents",
+      icon: <IconAgents size={16} />,
+      end: true,
+      badge: state.installedAgents.length,
+    },
+    { to: "/hub", label: "Agent Hub", icon: <IconHub size={16} /> },
+    {
+      to: "/activity",
+      label: "Activity",
+      icon: <IconActivity size={16} />,
+    },
+  ];
 
+  const runsByDay = runsForLastSevenDays(state.runs.map((run) => run.queuedAt));
+  const runsByDayLabels = ["M", "T", "W", "T", "F", "S", "S"];
   const runsThisWeek = runsByDay.reduce((a, b) => a + b, 0);
-  const peakIdx = runsByDay.indexOf(Math.max(...runsByDay));
+  const peak = Math.max(0, ...runsByDay);
+  const peakIdx = peak > 0 ? runsByDay.indexOf(peak) : -1;
 
   return (
     <aside className="flex h-full w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]">
@@ -113,14 +114,14 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
 
       {/* Tenant switcher card */}
       <button className="mx-2.5 mt-1 flex items-center gap-2.5 rounded-xl bg-[var(--color-surface)] px-2.5 py-2 text-left ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)]">
-        <Avatar name="UgurLabs" size={28} />
+            <Avatar name="No tenant" size={28} />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="truncate text-[12.5px] font-semibold text-[var(--color-text)]">
-            UgurLabs
+            No tenant connected
           </div>
           <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-            <StatusDot tone="success" />
-            <span>Default tenant · 1,284 devices</span>
+            <StatusDot tone="muted" />
+            <span>Connect Microsoft 365 to run agents</span>
           </div>
         </div>
         <IconChevronUpDown size={12} className="text-[var(--color-text-muted)]" />
@@ -179,7 +180,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </div>
         <div className="mt-2 flex items-center gap-1.5 text-[10.5px] text-[var(--color-text-muted)]">
           <StatusDot tone="warning" />
-          <span className="truncate">Spike Fri · compliance dip resolved</span>
+          <span className="truncate">
+            {runsThisWeek === 0 ? "No runs recorded yet" : "Recent run activity"}
+          </span>
         </div>
       </div>
 
@@ -208,21 +211,19 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             <span className="text-[9.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               Provider
             </span>
-            <StatusDot
-              tone={active.status === "connected" ? "success" : "warning"}
-            />
+            <StatusDot tone={active?.status === "connected" ? "success" : "warning"} />
           </div>
           <div className="mt-1 flex items-center gap-1.5">
             <IconHardDrive size={11} className="text-[var(--color-success)]" />
             <span className="text-[12px] font-medium text-[var(--color-text)]">
-              {active.name}
+              {active?.name ?? "No provider"}
             </span>
             <span className="ml-auto font-mono text-[9.5px] text-[var(--color-text-muted)]">
-              {active.defaultModel ?? "—"}
+              {active?.defaultModel ?? "-"}
             </span>
           </div>
           <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
-            Local · No data leaves this device
+            {state.trust.detail}
           </div>
         </div>
 
@@ -243,4 +244,32 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       </div>
     </aside>
   );
+}
+
+function runsForLastSevenDays(startedAtValues: string[]) {
+  const days = Array.from({ length: 7 }, () => 0);
+  const now = new Date();
+
+  for (const startedAt of startedAtValues) {
+    const started = new Date(startedAt);
+    if (Number.isNaN(started.getTime())) {
+      continue;
+    }
+
+    const ageDays = Math.floor(
+      (startOfDay(now).getTime() - startOfDay(started).getTime()) / 86_400_000,
+    );
+
+    if (ageDays >= 0 && ageDays < 7) {
+      days[6 - ageDays] += 1;
+    }
+  }
+
+  return days;
+}
+
+function startOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
 }

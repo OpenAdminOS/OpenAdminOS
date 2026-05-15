@@ -7,7 +7,6 @@ import Activity from "./pages/Activity";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import RunResult from "./pages/RunResult";
-import DiffConfirm from "./pages/DiffConfirm";
 
 export default function App() {
   const location = useLocation();
@@ -26,7 +25,6 @@ export default function App() {
       <Routes>
         <Route path="/" element={<AgentsHome />} />
         <Route path="/agents/:slug" element={<AgentDetail />} />
-        <Route path="/agents/:slug/confirm" element={<DiffConfirm />} />
         <Route path="/hub" element={<AgentHub />} />
         <Route path="/activity" element={<Activity />} />
         <Route path="/runs/:id" element={<RunResult />} />
