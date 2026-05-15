@@ -16,6 +16,7 @@ import {
   type ProviderId,
   type RegistryAgentSummary,
   type RunRecord,
+  type TenantRecord,
 } from "../shared/openAgents";
 
 interface AppStateContextValue {
@@ -30,6 +31,9 @@ interface AppStateContextValue {
   startRun: (agentSlug: string) => Promise<RunRecord>;
   confirmRun: (runId: string, phrase: string) => Promise<RunRecord>;
   rejectRun: (runId: string) => Promise<RunRecord>;
+  connectTenant: () => Promise<TenantRecord | undefined>;
+  setActiveTenant: (id: string) => Promise<void>;
+  disconnectTenant: (id: string) => Promise<void>;
 }
 
 interface AppStateProviderProps {
@@ -49,6 +53,7 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
     installedAgents: [],
     runs: [],
     trust: deriveTrustState(activeProvider),
+    tenants: [],
   };
 }
 
@@ -207,6 +212,59 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const connectTenant = useCallback(async () => {
+    const api = getOpenAgentsApi();
+    if (!api) {
+      const fallbackError = new Error(
+        "Tenant connect is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+    setError(null);
+    try {
+      const nextState = await api.connectTenant();
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+      const id = nextState.activeTenantId;
+      return id ? nextState.tenants.find((tenant) => tenant.id === id) : undefined;
+    } catch (caughtError) {
+      const tenantError = toError(caughtError);
+      setError(tenantError);
+      throw tenantError;
+    }
+  }, []);
+
+  const setActiveTenant = useCallback(async (id: string) => {
+    const api = getOpenAgentsApi();
+    if (!api) return;
+    setError(null);
+    try {
+      const nextState = await api.setActiveTenant(id);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const tenantError = toError(caughtError);
+      setError(tenantError);
+      throw tenantError;
+    }
+  }, []);
+
+  const disconnectTenant = useCallback(async (id: string) => {
+    const api = getOpenAgentsApi();
+    if (!api) return;
+    setError(null);
+    try {
+      const nextState = await api.disconnectTenant(id);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const tenantError = toError(caughtError);
+      setError(tenantError);
+      throw tenantError;
+    }
+  }, []);
+
   const rejectRun = useCallback(async (runId: string) => {
     const api = getOpenAgentsApi();
     if (!api) {
@@ -259,9 +317,14 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       startRun,
       confirmRun,
       rejectRun,
+      connectTenant,
+      setActiveTenant,
+      disconnectTenant,
     }),
     [
       confirmRun,
+      connectTenant,
+      disconnectTenant,
       error,
       installAgent,
       loading,
@@ -270,6 +333,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       registryAgents,
       rejectRun,
       setActiveProvider,
+      setActiveTenant,
       startRun,
       state,
     ],

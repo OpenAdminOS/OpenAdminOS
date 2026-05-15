@@ -1,4 +1,4 @@
-import { NavLink } from "react-router";
+import { NavLink, useNavigate } from "react-router";
 import type { ReactNode } from "react";
 import {
   IconAgents,
@@ -71,7 +71,11 @@ function NavRow({ item }: { item: NavItem }) {
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
+  const navigate = useNavigate();
   const active = state.providers.find((p) => p.id === state.activeProviderId);
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    : undefined;
   const mainNav: NavItem[] = [
     {
       to: "/",
@@ -113,15 +117,22 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       </div>
 
       {/* Tenant switcher card */}
-      <button className="mx-2.5 mt-1 flex items-center gap-2.5 rounded-xl bg-[var(--color-surface)] px-2.5 py-2 text-left ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)]">
-            <Avatar name="No tenant" size={28} />
+      <button
+        onClick={() => navigate("/settings")}
+        className="mx-2.5 mt-1 flex items-center gap-2.5 rounded-xl bg-[var(--color-surface)] px-2.5 py-2 text-left ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)]"
+      >
+        <Avatar name={activeTenant?.displayName ?? "Synthetic"} size={28} />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="truncate text-[12.5px] font-semibold text-[var(--color-text)]">
-            No tenant connected
+            {activeTenant?.displayName ?? "Synthetic data"}
           </div>
           <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-            <StatusDot tone="muted" />
-            <span>Connect Microsoft 365 to run agents</span>
+            <StatusDot tone={activeTenant ? "success" : "muted"} />
+            <span>
+              {activeTenant
+                ? activeTenant.username
+                : "Manage tenants in Settings"}
+            </span>
           </div>
         </div>
         <IconChevronUpDown size={12} className="text-[var(--color-text-muted)]" />

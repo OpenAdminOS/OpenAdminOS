@@ -11,6 +11,10 @@ release/
 # QA gate cache (msgraph skill clone)
 .qa-cache/
 
+# Local secret stores (encrypted MSAL token cache)
+*.tokens.bin
+tokens.bin
+
 # Environment
 .env
 .env.local

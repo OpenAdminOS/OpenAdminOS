@@ -14,5 +14,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["electron/**/*.ts", "src/shared/**/*.ts"]
+  "include": ["electron/**/*.ts", "electron/**/*.mts", "src/shared/**/*.ts"]
 }

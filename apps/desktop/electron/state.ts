@@ -1,17 +1,29 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
+  acquireTokenSilent,
+  createGraphAdapter,
+  createMsalClient,
   createOllamaLlm,
   createQueuedRun,
+  createSyntheticGraph,
   executeApply,
   executePlan,
   executeRun,
   findRegistryAgentById,
   listBuiltInRegistryAgents,
   noopLlm,
+  removeAccount,
+  runInteractiveFlow,
   toInstalledAgent,
+  type TokenCacheStorage,
 } from "@openagents/runtime";
-import type { RunLlmApi } from "@openagents/agent-sdk";
+import type {
+  RunDataSource,
+  RunGraphApi,
+  RunLlmApi,
+  TenantRecord,
+} from "@openagents/agent-sdk";
 import {
   deriveTrustState,
   providerCatalog,
@@ -22,11 +34,16 @@ import {
   type RegistryAgentSummary,
   type RunRecord,
 } from "@openagents/agent-sdk";
+import type { PublicClientApplication } from "@azure/msal-node";
+
+import { EncryptedSecretStore } from "./secret-store.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
   installedAgents: AgentSummary[];
   runs: RunRecord[];
+  tenants: TenantRecord[];
+  activeTenantId?: string;
 }
 
 interface OllamaTagsResponse {
@@ -39,16 +56,48 @@ const defaultState: PersistedState = {
   activeProviderId: "ollama",
   installedAgents: [],
   runs: [],
+  tenants: [],
 };
 
 const providerIds = new Set<ProviderId>(
   providerCatalog.map((provider) => provider.id),
 );
 
+export interface AppStateStoreOptions {
+  filePath: string;
+  tokenStore: EncryptedSecretStore;
+  openBrowser?(url: string): Promise<void>;
+}
+
 export class AppStateStore {
   private writeChain: Promise<unknown> = Promise.resolve();
+  private readonly filePath: string;
+  private readonly tokenStore: EncryptedSecretStore;
+  private readonly openBrowser: (url: string) => Promise<void>;
+  private msalClient: PublicClientApplication | undefined;
 
-  constructor(private readonly filePath: string) {}
+  constructor(options: AppStateStoreOptions | string, legacyTokenStore?: EncryptedSecretStore) {
+    if (typeof options === "string") {
+      this.filePath = options;
+      this.tokenStore =
+        legacyTokenStore ?? new EncryptedSecretStore(`${options}.tokens.bin`);
+      this.openBrowser = async () => undefined;
+    } else {
+      this.filePath = options.filePath;
+      this.tokenStore = options.tokenStore;
+      this.openBrowser = options.openBrowser ?? (async () => undefined);
+    }
+  }
+
+  private getMsalClient(): PublicClientApplication {
+    if (this.msalClient) return this.msalClient;
+    const cacheStorage: TokenCacheStorage = {
+      read: () => this.tokenStore.read(),
+      write: (serialized) => this.tokenStore.write(serialized),
+    };
+    this.msalClient = createMsalClient({ storage: cacheStorage });
+    return this.msalClient;
+  }
 
   private serialize<T>(task: () => Promise<T>): Promise<T> {
     const next = this.writeChain.then(task, task);
@@ -62,15 +111,23 @@ export class AppStateStore {
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
       providers[0];
+    const activeTenant = persisted.activeTenantId
+      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+      : undefined;
 
-    return {
+    const state: AppState = {
       activeProviderId: activeProvider?.id ?? "ollama",
       providers,
       registryAgents: this.listRegistryAgents(),
       installedAgents: persisted.installedAgents,
       runs: persisted.runs,
-      trust: deriveTrustState(activeProvider),
+      trust: deriveTrustState({ provider: activeProvider, activeTenant }),
+      tenants: persisted.tenants,
     };
+    if (persisted.activeTenantId) {
+      state.activeTenantId = persisted.activeTenantId;
+    }
+    return state;
   }
 
   listRegistryAgents(): RegistryAgentSummary[] {
@@ -136,6 +193,101 @@ export class AppStateStore {
         ...persisted,
         activeProviderId: id,
       });
+    });
+
+    return this.getAppState();
+  }
+
+  async listTenants(): Promise<TenantRecord[]> {
+    const persisted = await this.read();
+    return persisted.tenants;
+  }
+
+  async connectTenant(): Promise<AppState> {
+    const client = this.getMsalClient();
+    const result = await runInteractiveFlow({
+      client,
+      openBrowser: this.openBrowser,
+    });
+
+    if (!result.account) {
+      throw new Error("Microsoft sign-in did not return an account.");
+    }
+    const account = result.account;
+    const homeAccountId = account.homeAccountId;
+    const displayName =
+      account.tenantId && account.username
+        ? account.username.split("@")[1] ?? account.tenantId
+        : account.tenantId ?? "tenant";
+
+    const tenantId = account.tenantId ?? homeAccountId;
+    const addedAt = new Date().toISOString();
+    const tenant: TenantRecord = {
+      id: tenantId,
+      homeAccountId,
+      displayName,
+      username: account.username,
+      addedAt,
+      lastUsedAt: addedAt,
+    };
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const existingIdx = persisted.tenants.findIndex((t) => t.id === tenant.id);
+      const nextTenants = [...persisted.tenants];
+      if (existingIdx >= 0) {
+        nextTenants[existingIdx] = { ...nextTenants[existingIdx], ...tenant };
+      } else {
+        nextTenants.push(tenant);
+      }
+      await this.write({
+        ...persisted,
+        tenants: nextTenants,
+        activeTenantId: tenant.id,
+      });
+    });
+
+    return this.getAppState();
+  }
+
+  async setActiveTenant(id: string): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const exists = persisted.tenants.some((tenant) => tenant.id === id);
+      if (!exists) {
+        throw new Error(`Tenant not found: ${id}`);
+      }
+      await this.write({
+        ...persisted,
+        activeTenantId: id,
+      });
+    });
+    return this.getAppState();
+  }
+
+  async disconnectTenant(id: string): Promise<AppState> {
+    const client = this.getMsalClient();
+    const persistedBefore = await this.read();
+    const target = persistedBefore.tenants.find((tenant) => tenant.id === id);
+    if (target) {
+      try {
+        await removeAccount({ client, homeAccountId: target.homeAccountId });
+      } catch {
+        // best-effort; we still clear the tenant entry below.
+      }
+    }
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const nextTenants = persisted.tenants.filter((tenant) => tenant.id !== id);
+      const next: PersistedState = {
+        ...persisted,
+        tenants: nextTenants,
+      };
+      if (persisted.activeTenantId === id) {
+        delete next.activeTenantId;
+      }
+      await this.write(next);
     });
 
     return this.getAppState();
@@ -297,6 +449,48 @@ export class AppStateStore {
     return createOllamaLlm(options);
   }
 
+  private async buildGraph(): Promise<{
+    graph: RunGraphApi;
+    dataSource: RunDataSource;
+    tenantId?: string;
+  }> {
+    const persisted = await this.read();
+    const tenantId = persisted.activeTenantId;
+    const tenant = tenantId
+      ? persisted.tenants.find((t) => t.id === tenantId)
+      : undefined;
+    if (!tenant) {
+      return { graph: createSyntheticGraph(), dataSource: "synthetic" };
+    }
+    const client = this.getMsalClient();
+    return {
+      graph: createGraphAdapter({
+        tokenProvider: async () => {
+          const result = await acquireTokenSilent({
+            client,
+            homeAccountId: tenant.homeAccountId,
+          });
+          return result.accessToken;
+        },
+      }),
+      dataSource: "graph",
+      tenantId: tenant.id,
+    };
+  }
+
+  private stampDataSource(
+    run: RunRecord,
+    selection: { dataSource: RunDataSource; tenantId?: string },
+  ): RunRecord {
+    const next: RunRecord = { ...run, dataSource: selection.dataSource };
+    if (selection.tenantId) {
+      next.tenantId = selection.tenantId;
+    } else if ("tenantId" in next) {
+      delete next.tenantId;
+    }
+    return next;
+  }
+
   private async driveRun(input: {
     run: RunRecord;
     agent: AgentSummary;
@@ -306,13 +500,18 @@ export class AppStateStore {
     try {
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const llm = await this.buildLlm(input.providerId, input.model);
+      const selection = await this.buildGraph();
+      const stampedRun = this.stampDataSource(input.run, selection);
+      await this.persistRunSnapshot(stampedRun);
       await driver({
-        run: input.run,
+        run: stampedRun,
         agent: input.agent,
         providerId: input.providerId,
         model: input.model,
         llm,
-        onProgress: (next) => this.persistRunSnapshot(next),
+        graph: selection.graph,
+        onProgress: (next) =>
+          this.persistRunSnapshot(this.stampDataSource(next, selection)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
@@ -328,6 +527,7 @@ export class AppStateStore {
   }): Promise<void> {
     try {
       const llm = await this.buildLlm(input.providerId, input.model);
+      const selection = await this.buildGraph();
       await executeApply({
         run: input.run,
         agent: input.agent,
@@ -335,7 +535,9 @@ export class AppStateStore {
         model: input.model,
         plan: input.plan,
         llm,
-        onProgress: (next) => this.persistRunSnapshot(next),
+        graph: selection.graph,
+        onProgress: (next) =>
+          this.persistRunSnapshot(this.stampDataSource(next, selection)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
@@ -374,7 +576,14 @@ export class AppStateStore {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<PersistedState>;
 
-      return {
+      const tenants = Array.isArray(parsed.tenants) ? parsed.tenants : [];
+      const activeTenantId =
+        typeof parsed.activeTenantId === "string" &&
+        tenants.some((tenant) => tenant.id === parsed.activeTenantId)
+          ? parsed.activeTenantId
+          : undefined;
+
+      const state: PersistedState = {
         activeProviderId: isProviderId(parsed.activeProviderId)
           ? parsed.activeProviderId
           : defaultState.activeProviderId,
@@ -382,7 +591,12 @@ export class AppStateStore {
           ? parsed.installedAgents
           : defaultState.installedAgents,
         runs: Array.isArray(parsed.runs) ? parsed.runs : defaultState.runs,
+        tenants,
       };
+      if (activeTenantId) {
+        state.activeTenantId = activeTenantId;
+      }
+      return state;
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
         await this.write(defaultState);

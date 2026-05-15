@@ -5,16 +5,24 @@ import { Pill, StatusDot } from "../components/Pill";
 import { Button } from "../components/Button";
 import {
   IconCheck,
+  IconClose,
   IconCloud,
   IconHardDrive,
   IconLock,
+  IconPlus,
   IconShield,
 } from "../components/icons";
-import type { ProviderId, ProviderSummary, TrustState } from "../shared/openAgents";
+import type {
+  ProviderId,
+  ProviderSummary,
+  TenantRecord,
+  TrustState,
+} from "../shared/openAgents";
 import { useAppState } from "../state";
 
 const sections = [
   { id: "providers", label: "LLM Providers" },
+  { id: "tenants", label: "Tenants" },
   { id: "general", label: "General" },
   { id: "privacy", label: "Privacy" },
   { id: "about", label: "About" },
@@ -24,7 +32,27 @@ type SectionId = (typeof sections)[number]["id"];
 
 export default function Settings() {
   const [section, setSection] = useState<SectionId>("providers");
-  const { state, setActiveProvider } = useAppState();
+  const {
+    state,
+    setActiveProvider,
+    connectTenant,
+    setActiveTenant,
+    disconnectTenant,
+  } = useAppState();
+  const [tenantBusy, setTenantBusy] = useState(false);
+  const [tenantError, setTenantError] = useState<string | null>(null);
+
+  const handleConnectTenant = async () => {
+    setTenantBusy(true);
+    setTenantError(null);
+    try {
+      await connectTenant();
+    } catch (error) {
+      setTenantError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTenantBusy(false);
+    }
+  };
 
   return (
     <>
@@ -51,6 +79,17 @@ export default function Settings() {
               providers={state.providers}
               activeProviderId={state.activeProviderId}
               onSetActiveProvider={setActiveProvider}
+            />
+          )}
+          {section === "tenants" && (
+            <TenantsSection
+              tenants={state.tenants}
+              activeTenantId={state.activeTenantId}
+              busy={tenantBusy}
+              error={tenantError}
+              onConnect={handleConnectTenant}
+              onSetActive={setActiveTenant}
+              onDisconnect={disconnectTenant}
             />
           )}
           {section === "general" && <GeneralSection />}
@@ -212,6 +251,133 @@ function ProviderRow({
               Configure
             </Button>
           )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function TenantsSection({
+  tenants,
+  activeTenantId,
+  busy,
+  error,
+  onConnect,
+  onSetActive,
+  onDisconnect,
+}: {
+  tenants: TenantRecord[];
+  activeTenantId?: string;
+  busy: boolean;
+  error: string | null;
+  onConnect: () => Promise<void>;
+  onSetActive: (id: string) => Promise<void>;
+  onDisconnect: (id: string) => Promise<void>;
+}) {
+  return (
+    <div className="max-w-[820px]">
+      <SectionTitle
+        title="Tenants"
+        subtitle="Connect Microsoft 365 tenants. Sign-in opens your system browser to Microsoft's login page. Agents read Graph data from the active tenant when one is connected; otherwise they fall back to a built-in synthetic fixture so the demo keeps working."
+      />
+
+      <div className="mt-6 flex items-center gap-3">
+        <Button
+          variant="primary"
+          leadingIcon={<IconPlus size={12} />}
+          onClick={() => void onConnect()}
+          disabled={busy}
+        >
+          {busy ? "Waiting for sign-in…" : "Connect tenant"}
+        </Button>
+        <span className="text-[11.5px] text-[var(--color-text-muted)]">
+          Consent is requested under "Microsoft Graph Command Line Tools".
+        </span>
+      </div>
+
+      {error && (
+        <div className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-6 flex flex-col gap-3">
+        {tenants.length === 0 ? (
+          <Card>
+            <div className="p-5 text-[13px] text-[var(--color-text-muted)]">
+              No tenants connected. Runs use the built-in synthetic Graph
+              fixture until you sign in.
+            </div>
+          </Card>
+        ) : (
+          tenants.map((tenant) => (
+            <TenantRow
+              key={tenant.id}
+              tenant={tenant}
+              isActive={tenant.id === activeTenantId}
+              onSetActive={onSetActive}
+              onDisconnect={onDisconnect}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TenantRow({
+  tenant,
+  isActive,
+  onSetActive,
+  onDisconnect,
+}: {
+  tenant: TenantRecord;
+  isActive: boolean;
+  onSetActive: (id: string) => Promise<void>;
+  onDisconnect: (id: string) => Promise<void>;
+}) {
+  return (
+    <Card>
+      <div className="flex items-start gap-4 p-5">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
+          <IconCloud size={20} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[14px] font-medium text-[var(--color-text)]">
+              {tenant.displayName}
+            </span>
+            {isActive && (
+              <Pill tone="accent">
+                <IconCheck size={10} /> Active
+              </Pill>
+            )}
+          </div>
+          <div className="mt-1 text-[12.5px] text-[var(--color-text-soft)]">
+            {tenant.username}
+          </div>
+          <div className="mt-1 font-mono text-[10.5px] text-[var(--color-text-muted)]">
+            tenant-id: {tenant.id}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {!isActive && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void onSetActive(tenant.id)}
+            >
+              Set active
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            leadingIcon={<IconClose size={11} />}
+            onClick={() => void onDisconnect(tenant.id)}
+          >
+            Disconnect
+          </Button>
         </div>
       </div>
     </Card>
