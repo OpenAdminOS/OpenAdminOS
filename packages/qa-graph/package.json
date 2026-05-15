@@ -16,7 +16,7 @@
     "@openagents/agent-sdk": "0.1.0-dev"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5",
-    "typescript": "~5.7.2"
+    "@types/node": "^25.8.0",
+    "typescript": "~6.0.3"
   }
 }
