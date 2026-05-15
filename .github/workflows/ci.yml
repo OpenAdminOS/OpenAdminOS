@@ -35,7 +35,12 @@ jobs:
           key: msgraph-skill-${{ env.OPENAGENTS_QA_SKILL_REF }}
 
       - name: Install dependencies
-        run: npm ci
+        # `npm ci` strictly follows package-lock.json; workaround for
+        # npm/cli#4828 by re-running `npm install` so platform-specific
+        # optional binaries (rollup linux-x64) are guaranteed on the runner.
+        run: |
+          npm ci
+          npm install --no-save --no-audit --no-fund @rollup/rollup-linux-x64-gnu
 
       - name: Typecheck
         run: npm run typecheck
