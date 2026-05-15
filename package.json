@@ -1,0 +1,20 @@
+{
+  "name": "openagents",
+  "private": true,
+  "version": "0.1.0-dev",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "agents/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @openagents/desktop",
+    "build": "npm run build -w @openagents/desktop",
+    "typecheck": "npm run typecheck -w @openagents/agent-sdk && npm run typecheck -w @openagents/runtime && npm run typecheck -w @openagents/agent-find-inactive-devices && npm run typecheck -w @openagents/agent-retire-inactive-devices && npm run typecheck -w @openagents/qa-graph && npm run typecheck -w @openagents/desktop",
+    "qa": "npm run qa -w @openagents/qa-graph",
+    "dist:desktop": "npm run dist -w @openagents/desktop"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

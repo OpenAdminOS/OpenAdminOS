@@ -1,0 +1,22 @@
+{
+  "name": "@openagents/qa-graph",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "openagents-qa-graph": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json --noEmit",
+    "qa": "npm run build && node ./dist/cli.js"
+  },
+  "dependencies": {
+    "@openagents/agent-sdk": "0.1.0-dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "~5.7.2"
+  }
+}
