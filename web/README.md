@@ -1,29 +1,48 @@
-# Create T3 App
+# Open Agents - marketing site
 
-This is a [T3 Stack](https://create.t3.gg/) project bootstrapped with `create-t3-app`.
+Public landing page for [openagents.sh](https://openagents.sh). Captures waitlist signups in Supabase.
 
-## What's next? How do I make an app with this?
+This directory lives inside the [OpenAgents monorepo](https://github.com/ugurkocde/OpenAgents) but is intentionally **not** an npm workspace — it has its own `package.json` and `package-lock.json` and is deployed independently. Vercel's project Root Directory is set to `web`.
 
-We try to keep this project as simple as possible, so you can start with just the scaffolding we set up for you, and add additional things later when they become necessary.
+## Stack
 
-If you are not familiar with the different technologies used in this project, please refer to the respective docs. If you still are in the wind, please join our [Discord](https://t3.gg/discord) and ask for help.
+- Next.js 15 (App Router)
+- React 19
+- Tailwind CSS 4
+- Supabase JS (waitlist storage)
+- `@t3-oss/env-nextjs` + Zod (env validation)
 
-- [Next.js](https://nextjs.org)
-- [NextAuth.js](https://next-auth.js.org)
-- [Prisma](https://prisma.io)
-- [Drizzle](https://orm.drizzle.team)
-- [Tailwind CSS](https://tailwindcss.com)
-- [tRPC](https://trpc.io)
+## Local development
 
-## Learn More
+```sh
+cd web
+npm install
+cp .env.example .env
+# fill in NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
+npm run dev
+```
 
-To learn more about the [T3 Stack](https://create.t3.gg/), take a look at the following resources:
+The dev server runs on http://localhost:3000.
 
-- [Documentation](https://create.t3.gg/)
-- [Learn the T3 Stack](https://create.t3.gg/en/faq#what-learning-resources-are-currently-available) — Check out these awesome tutorials
+## Environment variables
 
-You can check out the [create-t3-app GitHub repository](https://github.com/t3-oss/create-t3-app) — your feedback and contributions are welcome!
+| Name                            | Required | Description                                  |
+| ------------------------------- | -------- | -------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | Yes      | Supabase project URL.                        |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes      | Supabase anon key (safe to ship to clients). |
 
-## How do I deploy this?
+Both must be set in Vercel's project Environment Variables for production.
 
-Follow our deployment guides for [Vercel](https://create.t3.gg/en/deployment/vercel), [Netlify](https://create.t3.gg/en/deployment/netlify) and [Docker](https://create.t3.gg/en/deployment/docker) for more information.
+## Deployment
+
+Vercel automatically deploys on every push to `main` that changes files under `web/`. Commits that only touch the desktop app or agents do not trigger a marketing rebuild.
+
+## Scripts
+
+| Script             | What it does                              |
+| ------------------ | ----------------------------------------- |
+| `npm run dev`      | Next.js dev server with Turbopack.        |
+| `npm run build`    | Production build.                         |
+| `npm run start`    | Run the production build.                 |
+| `npm run preview`  | `build` then `start` in one go.           |
+| `npm run typecheck`| TypeScript-only check, no emit.           |
