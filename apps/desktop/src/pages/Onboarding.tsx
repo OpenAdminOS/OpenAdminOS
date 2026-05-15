@@ -13,21 +13,29 @@ import {
   IconPlay,
   IconShield,
 } from "../components/icons";
+import { Avatar } from "../components/Avatar";
 import { TitleBarInset } from "../components/AppShell";
 import { useAppState } from "../state";
 import type {
   ProviderId,
   ProviderSummary,
   RegistryAgentSummary,
+  TenantRecord,
 } from "../shared/openAgents";
 
-const steps = ["Welcome", "Pick LLM", "First agent"] as const;
+const steps = ["Welcome", "Pick LLM", "Connect tenant", "First agent"] as const;
 type Step = (typeof steps)[number];
 
 export default function Onboarding() {
   const navigate = useNavigate();
-  const { state, registryAgents, installAgent, setActiveProvider, startRun } =
-    useAppState();
+  const {
+    state,
+    registryAgents,
+    installAgent,
+    setActiveProvider,
+    startRun,
+    connectTenant,
+  } = useAppState();
   const [step, setStep] = useState<Step>("Welcome");
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>(
     state.activeProviderId,
@@ -61,6 +69,24 @@ export default function Onboarding() {
         setWorking(false);
       }
     }
+    setStep("Connect tenant");
+  };
+
+  const handleConnectTenant = async () => {
+    setError(null);
+    setWorking(true);
+    try {
+      await connectTenant();
+      setStep("First agent");
+    } catch (caughtError) {
+      setError(toMessage(caughtError));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleSkipTenant = () => {
+    setError(null);
     setStep("First agent");
   };
 
@@ -176,12 +202,26 @@ export default function Onboarding() {
               working={working}
             />
           )}
+          {step === "Connect tenant" && (
+            <ConnectTenant
+              activeTenant={
+                state.activeTenantId
+                  ? state.tenants.find((t) => t.id === state.activeTenantId)
+                  : undefined
+              }
+              onConnect={() => void handleConnectTenant()}
+              onSkip={handleSkipTenant}
+              onContinueWithActive={() => setStep("First agent")}
+              onBack={() => setStep("Pick LLM")}
+              working={working}
+            />
+          )}
           {step === "First agent" && (
             <PickAgent
               agents={registryAgents}
               selectedId={selectedAgentId}
               onSelect={setSelectedAgentId}
-              onBack={() => setStep("Pick LLM")}
+              onBack={() => setStep("Connect tenant")}
               onContinue={() => void handleInstallAndFinish()}
               working={working}
             />
@@ -347,6 +387,146 @@ function PickLLM({
         >
           {working ? "Saving…" : "Continue"}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function ConnectTenant({
+  activeTenant,
+  onConnect,
+  onSkip,
+  onContinueWithActive,
+  onBack,
+  working,
+}: {
+  activeTenant: TenantRecord | undefined;
+  onConnect: () => void;
+  onSkip: () => void;
+  onContinueWithActive: () => void;
+  onBack: () => void;
+  working: boolean;
+}) {
+  return (
+    <div>
+      <div className="mb-7">
+        <h2 className="text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
+          Connect a Microsoft 365 tenant
+        </h2>
+        <p className="mt-1.5 max-w-[640px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
+          Sign in once with your admin account. Open Agents will open
+          Microsoft's login page in your system browser and read managed
+          devices, policies, and compliance state from Graph against the
+          tenants you allow.
+        </p>
+      </div>
+
+      {activeTenant ? (
+        <Card className="ring-2 ring-[var(--color-accent)]/30">
+          <div className="flex items-start gap-4 p-5">
+            <Avatar name={activeTenant.displayName} size={40} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[14.5px] font-medium text-[var(--color-text)]">
+                  {activeTenant.displayName}
+                </span>
+                <Pill tone="success">
+                  <StatusDot tone="success" /> Active
+                </Pill>
+              </div>
+              <div className="mt-1 text-[12.5px] text-[var(--color-text-soft)]">
+                {activeTenant.username}
+              </div>
+              <div className="mt-1 font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                tenant-id: {activeTenant.id}
+              </div>
+            </div>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <Card>
+            <div className="flex h-full flex-col p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
+                <IconCloud size={20} />
+              </div>
+              <div className="mt-3 text-[14.5px] font-medium text-[var(--color-text)]">
+                Connect a tenant
+              </div>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                Read real device + compliance data from Microsoft Graph. The
+                consent screen says "Microsoft Graph Command Line Tools".
+              </p>
+              <div className="mt-auto pt-4">
+                <Button
+                  variant="primary"
+                  leadingIcon={<IconShield size={12} />}
+                  onClick={onConnect}
+                  disabled={working}
+                >
+                  {working ? "Waiting for sign-in…" : "Sign in"}
+                </Button>
+              </div>
+            </div>
+          </Card>
+          <Card>
+            <div className="flex h-full flex-col p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+                <IconHardDrive size={20} />
+              </div>
+              <div className="mt-3 text-[14.5px] font-medium text-[var(--color-text)]">
+                Use synthetic data
+              </div>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                Skip Microsoft sign-in for now. Agents run against a
+                built-in synthetic device inventory so you can see the flow
+                end-to-end. Connect a tenant later from Settings.
+              </p>
+              <div className="mt-auto pt-4">
+                <Button
+                  variant="secondary"
+                  onClick={onSkip}
+                  disabled={working}
+                >
+                  Skip for now
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <div className="mt-8 flex items-center justify-between">
+        <Button variant="ghost" onClick={onBack} disabled={working}>
+          Back
+        </Button>
+        {activeTenant ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              onClick={onConnect}
+              disabled={working}
+            >
+              {working ? "Waiting…" : "Connect another"}
+            </Button>
+            <Button
+              variant="primary"
+              trailingIcon={<IconArrowRight size={14} />}
+              onClick={onContinueWithActive}
+              disabled={working}
+            >
+              Continue with this tenant
+            </Button>
+          </div>
+        ) : (
+          <button
+            onClick={onSkip}
+            disabled={working}
+            className="text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-50"
+          >
+            Skip and use synthetic data →
+          </button>
+        )}
       </div>
     </div>
   );
