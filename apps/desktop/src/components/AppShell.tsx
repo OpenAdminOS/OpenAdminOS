@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 
@@ -7,16 +7,13 @@ import { CommandPalette } from "./CommandPalette";
 // make that strip draggable so users can move the window from the top edge.
 // Harmless on Windows/Linux: just a thin extra header band.
 const TITLE_BAR_HEIGHT = 32;
-const dragStyle: CSSProperties = {
-  WebkitAppRegion: "drag",
-} as CSSProperties;
 
 export function TitleBarInset() {
   return (
     <div
       aria-hidden
-      className="shrink-0 bg-[var(--color-bg)]"
-      style={{ ...dragStyle, height: TITLE_BAR_HEIGHT }}
+      className="app-region-drag shrink-0 bg-[var(--color-bg)]"
+      style={{ height: TITLE_BAR_HEIGHT }}
     />
   );
 }
