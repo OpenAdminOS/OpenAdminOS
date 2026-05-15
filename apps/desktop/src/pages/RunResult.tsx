@@ -21,6 +21,7 @@ import type {
   RunRecord,
   RunStatus,
   RunStepRecord,
+  TenantRecord,
   WriteAction,
   WritePlan,
 } from "../shared/openAgents";
@@ -206,6 +207,12 @@ export default function RunResult() {
           />
         )}
 
+        <TenantDriftNote
+          runTenantId={run.tenantId}
+          activeTenantId={state.activeTenantId}
+          tenants={state.tenants}
+        />
+
         <Card className="mb-6">
           <div className="p-6">
             <SectionLabel>Steps</SectionLabel>
@@ -258,6 +265,39 @@ export default function RunResult() {
         </div>
       </PageBody>
     </>
+  );
+}
+
+function TenantDriftNote({
+  runTenantId,
+  activeTenantId,
+  tenants,
+}: {
+  runTenantId: string | undefined;
+  activeTenantId: string | undefined;
+  tenants: TenantRecord[];
+}) {
+  if (!runTenantId) return null;
+  if (runTenantId === activeTenantId) return null;
+  const runTenant = tenants.find((tenant) => tenant.id === runTenantId);
+  const activeTenant = activeTenantId
+    ? tenants.find((tenant) => tenant.id === activeTenantId)
+    : undefined;
+  return (
+    <div className="mb-6 flex items-start gap-3 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 ring-1 ring-[var(--color-info)]/25">
+      <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-info)]" />
+      <div className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+        This run executed against{" "}
+        <span className="font-medium text-[var(--color-text)]">
+          {runTenant?.displayName ?? `tenant ${runTenantId}`}
+        </span>
+        . The active tenant is now{" "}
+        <span className="font-medium text-[var(--color-text)]">
+          {activeTenant?.displayName ?? "Synthetic data"}
+        </span>
+        , so results below reflect the original tenant, not the current one.
+      </div>
+    </div>
   );
 }
 

@@ -22,6 +22,7 @@ import type {
   RunDataSource,
   RunGraphApi,
   RunLlmApi,
+  StartRunOptions,
   TenantRecord,
 } from "@openagents/agent-sdk";
 import {
@@ -293,7 +294,10 @@ export class AppStateStore {
     return this.getAppState();
   }
 
-  async startRun(agentSlug: string): Promise<RunRecord> {
+  async startRun(
+    agentSlug: string,
+    options: StartRunOptions = {},
+  ): Promise<RunRecord> {
     const queued = await this.serialize(async () => {
       const persisted = await this.read();
       const agent = persisted.installedAgents.find(
@@ -310,7 +314,31 @@ export class AppStateStore {
         providers[0];
       const providerId = activeProvider?.id ?? persisted.activeProviderId;
       const model = activeProvider?.defaultModel;
+
+      // Resolve the effective tenant at queue time:
+      //   - explicit null  -> synthetic for this run regardless of active tenant
+      //   - explicit id    -> validate it exists and pin it
+      //   - omitted        -> default to currently-active tenant (if any)
+      let pinnedTenantId: string | null;
+      if (options.tenantId === null) {
+        pinnedTenantId = null;
+      } else if (typeof options.tenantId === "string") {
+        const exists = persisted.tenants.some((tenant) => tenant.id === options.tenantId);
+        if (!exists) {
+          throw new Error(`Tenant not connected: ${options.tenantId}`);
+        }
+        pinnedTenantId = options.tenantId;
+      } else {
+        pinnedTenantId = persisted.activeTenantId ?? null;
+      }
+
       const queuedRun = createQueuedRun({ agent, providerId, model });
+      if (pinnedTenantId) {
+        queuedRun.tenantId = pinnedTenantId;
+        queuedRun.dataSource = "graph";
+      } else {
+        queuedRun.dataSource = "synthetic";
+      }
 
       await this.write({
         ...persisted,
@@ -449,13 +477,13 @@ export class AppStateStore {
     return createOllamaLlm(options);
   }
 
-  private async buildGraph(): Promise<{
+  private async buildGraph(pinnedTenantId?: string): Promise<{
     graph: RunGraphApi;
     dataSource: RunDataSource;
     tenantId?: string;
   }> {
     const persisted = await this.read();
-    const tenantId = persisted.activeTenantId;
+    const tenantId = pinnedTenantId ?? persisted.activeTenantId;
     const tenant = tenantId
       ? persisted.tenants.find((t) => t.id === tenantId)
       : undefined;
@@ -500,7 +528,7 @@ export class AppStateStore {
     try {
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const llm = await this.buildLlm(input.providerId, input.model);
-      const selection = await this.buildGraph();
+      const selection = await this.buildGraph(input.run.tenantId);
       const stampedRun = this.stampDataSource(input.run, selection);
       await this.persistRunSnapshot(stampedRun);
       await driver({
@@ -527,7 +555,7 @@ export class AppStateStore {
   }): Promise<void> {
     try {
       const llm = await this.buildLlm(input.providerId, input.model);
-      const selection = await this.buildGraph();
+      const selection = await this.buildGraph(input.run.tenantId);
       await executeApply({
         run: input.run,
         agent: input.agent,

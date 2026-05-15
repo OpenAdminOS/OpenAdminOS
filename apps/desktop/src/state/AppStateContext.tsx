@@ -16,6 +16,7 @@ import {
   type ProviderId,
   type RegistryAgentSummary,
   type RunRecord,
+  type StartRunOptions,
   type TenantRecord,
 } from "../shared/openAgents";
 
@@ -28,7 +29,7 @@ interface AppStateContextValue {
   refreshRegistry: () => Promise<void>;
   installAgent: (agentId: string) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
-  startRun: (agentSlug: string) => Promise<RunRecord>;
+  startRun: (agentSlug: string, options?: StartRunOptions) => Promise<RunRecord>;
   confirmRun: (runId: string, phrase: string) => Promise<RunRecord>;
   rejectRun: (runId: string) => Promise<RunRecord>;
   connectTenant: () => Promise<TenantRecord | undefined>;
@@ -162,32 +163,35 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
-  const startRun = useCallback(async (agentSlug: string) => {
-    const api = getOpenAgentsApi();
+  const startRun = useCallback(
+    async (agentSlug: string, options?: StartRunOptions) => {
+      const api = getOpenAgentsApi();
 
-    if (!api) {
-      const fallbackError = new Error("Agent runs are unavailable in browser development.");
-      setError(fallbackError);
-      throw fallbackError;
-    }
+      if (!api) {
+        const fallbackError = new Error("Agent runs are unavailable in browser development.");
+        setError(fallbackError);
+        throw fallbackError;
+      }
 
-    setLoading(true);
-    setError(null);
+      setLoading(true);
+      setError(null);
 
-    try {
-      const run = await api.startRun(agentSlug);
-      const nextState = await api.getAppState();
-      setState(nextState);
-      setRegistryAgents(nextState.registryAgents);
-      return run;
-    } catch (caughtError) {
-      const runError = toError(caughtError);
-      setError(runError);
-      throw runError;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      try {
+        const run = await api.startRun(agentSlug, options);
+        const nextState = await api.getAppState();
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+        return run;
+      } catch (caughtError) {
+        const runError = toError(caughtError);
+        setError(runError);
+        throw runError;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   const confirmRun = useCallback(async (runId: string, phrase: string) => {
     const api = getOpenAgentsApi();

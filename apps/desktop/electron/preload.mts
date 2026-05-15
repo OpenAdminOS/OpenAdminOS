@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { OpenAgentsApi, ProviderId } from "@openagents/agent-sdk";
+import type {
+  OpenAgentsApi,
+  ProviderId,
+  StartRunOptions,
+} from "@openagents/agent-sdk";
 
 const api: OpenAgentsApi = {
   getAppState: () => ipcRenderer.invoke("openagents:get-app-state"),
@@ -12,8 +16,8 @@ const api: OpenAgentsApi = {
     ipcRenderer.invoke("openagents:install-agent", agentId),
   setActiveProvider: (id: ProviderId) =>
     ipcRenderer.invoke("openagents:set-active-provider", id),
-  startRun: (agentSlug: string) =>
-    ipcRenderer.invoke("openagents:start-run", agentSlug),
+  startRun: (agentSlug: string, options?: StartRunOptions) =>
+    ipcRenderer.invoke("openagents:start-run", agentSlug, options),
   getRun: (id: string) => ipcRenderer.invoke("openagents:get-run", id),
   confirmRun: (runId: string, phrase: string) =>
     ipcRenderer.invoke("openagents:confirm-run", runId, phrase),
