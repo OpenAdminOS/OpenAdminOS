@@ -153,3 +153,21 @@ button:disabled {
 .animate-fade-in-scale {
   animation: fade-in-scale 0.18s ease-out;
 }
+
+/* Electron window drag regions. Tailwind has no utility for the
+ * non-standard -webkit-app-region property, and React's CSS-in-JS
+ * doesn't reliably emit it from the camelCase `WebkitAppRegion` prop.
+ * Plain class rules guarantee the property reaches the DOM.
+ *
+ * Use .app-region-drag on areas that should drag the OS window
+ * (e.g. the title-bar strip above the sidebar). Use .app-region-no-drag
+ * on interactive children (buttons, links, inputs) so clicks still
+ * register inside a drag region.
+ */
+.app-region-drag {
+  -webkit-app-region: drag;
+}
+
+.app-region-no-drag {
+  -webkit-app-region: no-drag;
+}

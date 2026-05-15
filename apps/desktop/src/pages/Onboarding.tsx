@@ -13,6 +13,7 @@ import {
   IconPlay,
   IconShield,
 } from "../components/icons";
+import { TitleBarInset } from "../components/AppShell";
 import { useAppState } from "../state";
 import type {
   ProviderId,
@@ -98,6 +99,7 @@ export default function Onboarding() {
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
+      <TitleBarInset />
       {/* Top bar */}
       <header className="flex shrink-0 items-center justify-between border-b border-[var(--color-border-soft)] px-10 py-4">
         <div className="flex items-center gap-2.5">

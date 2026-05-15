@@ -2,6 +2,22 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 
+// Reserve space at the top of the window for the macOS traffic-light buttons
+// (titleBarStyle: "hiddenInset" leaves them floating over the renderer) and
+// make that strip draggable so users can move the window from the top edge.
+// Harmless on Windows/Linux: just a thin extra header band.
+const TITLE_BAR_HEIGHT = 32;
+
+export function TitleBarInset() {
+  return (
+    <div
+      aria-hidden
+      className="app-region-drag shrink-0 bg-[var(--color-bg)]"
+      style={{ height: TITLE_BAR_HEIGHT }}
+    />
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -17,11 +33,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
-      <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
-      <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-        {children}
-      </main>
+    <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+      <TitleBarInset />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
+        <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+          {children}
+        </main>
+      </div>
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
