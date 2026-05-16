@@ -11,6 +11,18 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ### Removed
 
 ### Fixed
+
+### Security
+
+## [0.1.3] - 2026-05-16
+
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
 - macOS DMG launched to a blank window because Vite's default `base: "/"` emitted absolute asset URLs (`<script src="/assets/…">`) that Electron's `file://` loader resolved to the filesystem root instead of the html file's directory. Neither JS nor CSS loaded, React never mounted, and the user saw only the BrowserWindow's configured background color. Fixed by setting `base: "./"` in `apps/desktop/vite.config.ts`, which emits `./assets/…` paths that resolve correctly under `file://`. Dev mode (`npm run dev`) was unaffected because Vite serves over `http` where absolute paths resolve to the dev server root. Bug was latent in v0.1.0 / v0.1.1 / v0.1.2; only surfaced now that someone actually launched the signed DMG.
 
 ### Security
