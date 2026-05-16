@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openagents.sh/schemas/agent-template.schema.json",
+  "title": "Open Agents — Agent Template",
+  "description": "Declarative YAML pipeline manifest interpreted by the @openagents/runtime agent-template runner. The schema mirrors the TypeScript types in @openagents/agent-sdk and is the authoritative shape for any agents/<slug>/manifest.yaml file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["descriptor", "skills", "definition"],
+  "properties": {
+    "descriptor": { "$ref": "#/$defs/descriptor" },
+    "skills": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered pipeline of skills (steps). Each step's output is stored under its id and is available to later steps via templating.",
+      "items": { "$ref": "#/$defs/skill" }
+    },
+    "definition": { "$ref": "#/$defs/definition" }
+  },
+
+  "$defs": {
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "version", "author", "category", "mode"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+          "description": "Stable slug for the agent. Lower-case, hyphen-separated, must match the directory name under agents/."
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[\\w.-]+)?$",
+          "description": "Semantic version, e.g. 1.0.0 or 1.2.3-rc.1."
+        },
+        "author": { "$ref": "#/$defs/author" },
+        "category": {
+          "type": "string",
+          "enum": ["devices", "apps", "policies", "compliance", "updates"]
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["read", "write"],
+          "description": "read = autonomous run. write = plan + apply with typed confirmation."
+        },
+        "preferredModel": {
+          "type": "string",
+          "description": "Optional. Suggests an LLM model the agent works well against; the host may ignore it."
+        }
+      }
+    },
+
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "handle": { "type": "string" },
+        "verified": { "type": "boolean" }
+      }
+    },
+
+    "skill": {
+      "oneOf": [
+        { "$ref": "#/$defs/graphSkill" },
+        { "$ref": "#/$defs/transformSkill" },
+        { "$ref": "#/$defs/llmSkill" },
+        { "$ref": "#/$defs/writeSkill" }
+      ]
+    },
+
+    "skillBase": {
+      "type": "object",
+      "required": ["id", "format", "label", "settings"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_]*$",
+          "description": "Skill id. Lower-case, snake_case. Used as the key under which the skill's output is stored in the pipeline state."
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string" }
+      }
+    },
+
+    "graphSkill": {
+      "allOf": [
+        { "$ref": "#/$defs/skillBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "label": true,
+            "detail": true,
+            "format": { "const": "graph" },
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["method", "path", "scopes"],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": ["GET", "POST", "PATCH", "PUT", "DELETE"],
+                  "description": "v0.1 supports GET only; declaring others is allowed but the interpreter will refuse to execute them."
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Microsoft Graph endpoint path, e.g. /deviceManagement/managedDevices."
+                },
+                "select": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "scopes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string" },
+                  "description": "Graph permissions required by this call. Surfaced to the user at sign-in and audited by the qa-graph harness."
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "transformSkill": {
+      "allOf": [
+        { "$ref": "#/$defs/skillBase" },
+        {
+          "type": "object",
+          "properties": {
+            "format": { "const": "transform" },
+            "settings": {
+              "type": "object",
+              "required": ["kind", "source"],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["group-by-age", "filter-by-age"],
+                  "description": "v0.1 transforms. Adding more is a one-function change in @openagents/runtime."
+                },
+                "source": {
+                  "description": "Liquid expression resolving to an array, e.g. \"{{ load_devices.output }}\"."
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "llmSkill": {
+      "allOf": [
+        { "$ref": "#/$defs/skillBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "label": true,
+            "detail": true,
+            "format": { "const": "llm" },
+            "when": {
+              "type": "string",
+              "enum": ["ctx.llm.available"],
+              "description": "Optional gate. When set, the skill is skipped if no LLM provider is configured."
+            },
+            "inputs": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["prompt"],
+              "properties": {
+                "system": { "type": "string" },
+                "prompt": { "type": "string" },
+                "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+                "maxTokens": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "writeSkill": {
+      "allOf": [
+        { "$ref": "#/$defs/skillBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "label": true,
+            "detail": true,
+            "format": { "const": "write" },
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "source", "actionTemplate", "confirmationPhrase"],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["retire-managed-device"],
+                  "description": "Registered action kind handled by the runtime. v0.1 supports retire-managed-device."
+                },
+                "source": {
+                  "type": "string",
+                  "description": "Liquid expression resolving to an array. One action will be rendered per item."
+                },
+                "confirmationPhrase": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The exact phrase the user must type to approve the plan. Usually templated on actions count, e.g. \"RETIRE {{ actions | size }} DEVICES\"."
+                },
+                "summary": { "type": "string" },
+                "scopes": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Graph scopes required to apply actions of this kind. Concatenated with graph-step scopes."
+                },
+                "actionTemplate": { "$ref": "#/$defs/actionTemplate" }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "actionTemplate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "severity": { "type": "string", "enum": ["default", "destructive"] },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Per-action metadata. Templated; values are strings at the schema layer but the runtime may parse them per action kind."
+        }
+      }
+    },
+
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "settings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/templateSetting" }
+        },
+        "triggers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/templateTrigger" }
+        },
+        "result": { "$ref": "#/$defs/templateResult" }
+      }
+    },
+
+    "templateSetting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+          "description": "Setting id. Referenced in templating as {{ settings.<id> }}."
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "enum": ["string", "integer", "boolean"] },
+        "default": {},
+        "description": { "type": "string" },
+        "hint": { "type": "string" },
+        "required": { "type": "boolean" }
+      }
+    },
+
+    "templateTrigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["manual", "scheduled"] },
+        "intervalSeconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "templateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "data": { "type": "object" }
+      }
+    }
+  }
+}

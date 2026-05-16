@@ -9,3 +9,7 @@ export {
 } from "./checks.js";
 export { formatReport, reportExitCode, type ProjectReport, type AgentReport } from "./report.js";
 export { managedDeviceFixture } from "./fixtures.js";
+export {
+  runManifestSchemaChecks,
+  type ManifestSchemaReport,
+} from "./schema-check.js";

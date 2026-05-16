@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
 # Agent Template manifest for find-inactive-devices.
 #
 # The runtime interprets this YAML top-to-bottom. Each `skill` is one step in
