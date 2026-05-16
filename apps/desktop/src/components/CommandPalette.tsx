@@ -96,8 +96,8 @@ export function CommandPalette({
         label: "Start first run",
         hint:
           state.installedAgents.length > 0
-            ? "Queue the first installed agent"
-            : "Install an agent before running",
+            ? "Queue the first added agent"
+            : "Add an agent before running",
         group: "Actions",
         icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
         action: async () => {

@@ -12,6 +12,7 @@ import {
   executeRun,
   findRegistryAgentById,
   listBuiltInRegistryAgents,
+  loadAgentManifestPreview,
   noopLlm,
   removeAccount,
   runInteractiveFlow,
@@ -19,6 +20,7 @@ import {
   type TokenCacheStorage,
 } from "@openagents/runtime";
 import type {
+  AgentManifestPreview,
   RunDataSource,
   RunGraphApi,
   RunLlmApi,
@@ -150,6 +152,24 @@ export class AppStateStore {
 
   listRegistryAgents(): RegistryAgentSummary[] {
     return listBuiltInRegistryAgents();
+  }
+
+  async getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined> {
+    // Prefer the on-disk metadata from the registry (it has the correct
+    // registryPath) so the preview can label the source location.
+    const registryAgent = this.listRegistryAgents().find(
+      (agent) => agent.slug === slug || agent.id === slug,
+    );
+    if (registryAgent) {
+      return loadAgentManifestPreview(registryAgent);
+    }
+    // Fall back to an installed agent for the rare case where it's no
+    // longer in the registry but still in user state.
+    const persisted = await this.read();
+    const installed = persisted.installedAgents.find(
+      (agent) => agent.slug === slug || agent.id === slug,
+    );
+    return installed ? loadAgentManifestPreview(installed) : undefined;
   }
 
   async listAgents(): Promise<AgentSummary[]> {

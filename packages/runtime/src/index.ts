@@ -5,6 +5,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import type {
   AgentAuthor,
   AgentCategory,
+  AgentManifestPreview,
   AgentMode,
   AgentModule,
   AgentRunResult,
@@ -495,6 +496,59 @@ function validatePlan(plan: WritePlan, agentSlug: string): void {
       );
     }
   }
+}
+
+/**
+ * Read-only inspection of an agent's on-disk manifest, exposed to the
+ * renderer for the Agent detail "preview" surface. Returns `undefined`
+ * when neither a manifest.yaml nor a compiled code module can be found.
+ */
+export function loadAgentManifestPreview(
+  agent: AgentSummary | RegistryAgentSummary,
+): AgentManifestPreview | undefined {
+  let agentDir: string;
+  try {
+    agentDir = resolveAgentDirectory(agent);
+  } catch {
+    return undefined;
+  }
+
+  const yamlPath = join(agentDir, "manifest.yaml");
+  if (existsSync(yamlPath)) {
+    const sourceText = readFileSync(yamlPath, "utf8");
+    let manifest;
+    try {
+      manifest = parseAgentTemplate(sourceText);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Agent template at ${yamlPath} is invalid: ${message}`,
+      );
+    }
+    return {
+      kind: "agent-template",
+      ...(agent.registryPath ? { registryPath: agent.registryPath } : {}),
+      manifest,
+      sourceText,
+    };
+  }
+
+  // Code-based fallback: show metadata from manifest.json + a pointer to the
+  // source location so curious users can inspect the code in GitHub.
+  const jsonPath = join(agentDir, "manifest.json");
+  if (existsSync(jsonPath)) {
+    const sourceText = readFileSync(jsonPath, "utf8");
+    const metadata = loadManifest(jsonPath, agentDir);
+    return {
+      kind: "code-based",
+      ...(agent.registryPath ? { registryPath: agent.registryPath } : {}),
+      metadata,
+      sourceText,
+      sourceLocation: agent.registryPath ?? agentDir,
+    };
+  }
+
+  return undefined;
 }
 
 export async function loadAgentModule(
