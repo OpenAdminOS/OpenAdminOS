@@ -15,6 +15,11 @@ on:
 
 permissions:
   contents: write
+  # The "Dispatch release workflow" step calls
+  # `gh workflow run release.yml --ref vX.Y.Z`, which goes through the
+  # repos/.../actions/workflows/release.yml/dispatches endpoint —
+  # that needs actions:write, separate from contents:write.
+  actions: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
