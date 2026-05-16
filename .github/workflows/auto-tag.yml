@@ -18,13 +18,10 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Sidesteps YAML's colon-in-string parsing — see the if: on the
-  # tag job, which compares the commit subject against this prefix.
-  RELEASE_PREFIX: "release: v"
 
 jobs:
   tag:
-    if: startsWith(github.event.head_commit.message, env.RELEASE_PREFIX)
+    if: 'startsWith(github.event.head_commit.message, ''release: v'')'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
