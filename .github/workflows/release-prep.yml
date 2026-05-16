@@ -52,7 +52,7 @@ jobs:
 
       - name: Read current version
         id: current
-        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Bump versions + roll CHANGELOG
         env:
@@ -62,7 +62,7 @@ jobs:
 
       - name: Read new version
         id: next
-        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Install (regenerate lockfile)
         run: npm install --no-audit --no-fund
