@@ -5,6 +5,20 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.1] - 2026-05-16
+
+Signed-binaries follow-up to v0.1.0. The platform is unchanged; this release adds the distribution pipeline so we can ship trustable installers from CI on every tag push. End-to-end verified by a `workflow_dispatch` dry run on `main` — Windows MSIX built clean in 1m45s, macOS DMG signed + notarized in 3m23s (Apple's notarytool round-trip under 2 min on the day).
+
+### Added
 - Release pipeline. Tag-push of `v*.*.*` (or workflow_dispatch) cuts a two-channel build via `.github/workflows/release.yml`: an unsigned Windows MSIX for Microsoft Store submission (Store re-signs after upload, giving the binary Microsoft's SmartScreen reputation from day one) and a notarized + signed macOS DMG/ZIP for direct download via GitHub Releases (auto-updated by electron-updater). Build artifacts land on a draft release for review before publishing. macOS notarization uses the modern App Store Connect API key flow (`APPLE_API_KEY` / `_KEY_ID` / `_ISSUER`) rather than the legacy Apple-ID + app-specific-password path. Per-platform secrets list and the full runbook live in `docs/RELEASING.md`.
 - `electron-updater` wired in `apps/desktop/electron/updates.ts`: 15-second startup delay, 4-hour poll, native dialog when an update is downloaded ("Restart now" / "Later"). Auto-skipped in dev and on Windows when the running build is a Microsoft Store-installed AppX (so the Store and electron-updater never race over the same install).
 
