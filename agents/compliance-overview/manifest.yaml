@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# Agent Template manifest for compliance-overview.
+#
+# A YAML-only Agent Template (no companion TypeScript). The pipeline
+# loads the tenant's managed-device inventory once, counts the devices
+# by complianceState, optionally asks the LLM to summarise the result,
+# and renders a final JSON shape the renderer can show to admins.
+#
+# This is the second canonical Agent Template in the repo. It exercises
+# the `compliance` category and the `count-by-field` transform kind;
+# nothing else about the DSL had to change.
+
+descriptor:
+  id: compliance-overview
+  name: Compliance overview
+  description: Counts Intune-managed devices by complianceState so admins can spot drift across the tenant at a glance.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: compliance
+  mode: read
+  preferredModel: llama3.1:8b
+
+# ─── pipeline ──────────────────────────────────────────────────────────────
+skills:
+
+  # 1) Load the managed-device inventory. Reused endpoint; cheap on the
+  #    tenant since each device is only fetched once per run.
+  - id: load_devices
+    format: graph
+    label: Load managed device inventory
+    detail: Reads managedDevices from the active tenant.
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+        - userPrincipalName
+        - operatingSystem
+        - complianceState
+        - lastSyncDateTime
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+
+  # 2) Tally devices by complianceState. The bucket list is pinned so the
+  #    output always has all three keys, even on a tenant that happens to
+  #    have zero noncompliant or zero unknown devices — the result data
+  #    shape stays stable across runs.
+  - id: by_state
+    format: transform
+    label: Count devices by compliance state
+    detail: Tabulates compliant / noncompliant / unknown counts.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: complianceState
+      buckets:
+        - compliant
+        - noncompliant
+        - unknown
+
+  # 3) Optional LLM summary. Gated on availability so the agent still
+  #    completes against synthetic mode without Ollama running.
+  - id: summarize
+    format: llm
+    label: Summarize compliance posture
+    detail: Two-sentence executive summary plus one prioritised action.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are a Microsoft 365 administrator's assistant. Be concise and
+        factual. Two sentences maximum, then one short prioritised action.
+        Skip filler. Never invent numbers — use only the figures you are
+        given.
+      prompt: |-
+        Tenant managed devices: {{ load_devices.output | size }}.
+        Compliant: {{ by_state.output.compliant }}.
+        Noncompliant: {{ by_state.output.noncompliant }}.
+        Unknown: {{ by_state.output.unknown }}.
+
+        Write an executive summary an Intune admin can paste into a
+        ticket. Lead with the biggest risk, then one short prioritised
+        action.
+      temperature: 0.2
+      maxTokens: 180
+
+# ─── what makes it an agent ────────────────────────────────────────────────
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+
+  # Shape of the run record's `result` field. Renders against the
+  # accumulated pipeline state.
+  result:
+    summary: >-
+      {{ by_state.output.noncompliant }} of {{ load_devices.output | size }}
+      managed devices are noncompliant ({{ by_state.output.unknown }} unknown).
+    data:
+      totalDevices: "{{ load_devices.output | size }}"
+      counts:
+        compliant: "{{ by_state.output.compliant }}"
+        noncompliant: "{{ by_state.output.noncompliant }}"
+        unknown: "{{ by_state.output.unknown }}"
+      llmSummary: "{{ summarize.output.text }}"
+      llmModel: "{{ summarize.output.model }}"

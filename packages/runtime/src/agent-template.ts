@@ -574,9 +574,11 @@ async function runTransformSkill(
       return transformGroupByAge(skill.id, settings, ctx);
     case "filter-by-age":
       return transformFilterByAge(skill.id, settings, ctx);
+    case "count-by-field":
+      return transformCountByField(skill.id, settings, ctx);
     default:
       throw new Error(
-        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age.`,
+        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field.`,
       );
   }
 }
@@ -676,6 +678,58 @@ function transformFilterByAge(
 
   ctx.log("info", `Filter-by-age >= ${threshold}d kept ${matched.length} of ${(spec.source as unknown[]).length}.`);
   return matched;
+}
+
+interface CountByFieldSpec {
+  source: unknown;
+  field: string;
+  /**
+   * Optional explicit list of bucket names. When provided, the output
+   * keys are exactly these (zero-filled for missing values) so the
+   * resulting object has a stable shape across runs — useful when the
+   * downstream template renders specific keys (`{{ x.output.compliant }}`).
+   * When omitted, the keys are whatever values actually appear in the
+   * source array.
+   */
+  buckets?: string[];
+}
+
+function transformCountByField(
+  skillId: string,
+  settings: Record<string, unknown>,
+  ctx: RunContext,
+): Record<string, number> {
+  const spec = settings as unknown as CountByFieldSpec;
+  if (!Array.isArray(spec.source)) {
+    throw new Error(`transform "${skillId}": count-by-field expects "source" to resolve to an array.`);
+  }
+  if (typeof spec.field !== "string" || spec.field.length === 0) {
+    throw new Error(`transform "${skillId}": count-by-field requires "field".`);
+  }
+
+  const result: Record<string, number> = {};
+  if (Array.isArray(spec.buckets)) {
+    for (const bucket of spec.buckets) {
+      if (typeof bucket === "string") result[bucket] = 0;
+    }
+  }
+
+  for (const item of spec.source as Array<Record<string, unknown>>) {
+    const raw = item?.[spec.field];
+    if (raw === undefined || raw === null) continue;
+    const key = typeof raw === "string" ? raw : String(raw);
+    result[key] = (result[key] ?? 0) + 1;
+  }
+
+  const total = (spec.source as unknown[]).length;
+  const breakdown = Object.entries(result)
+    .map(([key, count]) => `${key}=${count}`)
+    .join(", ");
+  ctx.log(
+    "info",
+    `Counted ${total} items by "${spec.field}": ${breakdown || "(no matches)"}.`,
+  );
+  return result;
 }
 
 async function runLlmSkill(
