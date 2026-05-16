@@ -62,19 +62,66 @@ type JsonObject = Record<string, unknown>;
 const builtInRegistryRoot = "agents";
 
 export function listBuiltInRegistryAgents(): RegistryAgentSummary[] {
-  const agentsRoot = findAgentsRoot();
+  return listAgentsInRoot(findAgentsRoot(), { absolutePaths: false });
+}
 
+/**
+ * List every agent visible to the runtime — both the bundled set under
+ * `agents/` (read-only, ships with the app) and any user-authored
+ * agents written to `userAgentsRoot` (writable, populated by NL2Agent
+ * etc.). When `userAgentsRoot` doesn't exist or has no agent
+ * directories, the result is identical to `listBuiltInRegistryAgents()`.
+ *
+ * Bundled and user agents are merged and de-duplicated by slug — a
+ * user-authored agent with the same slug as a bundled one shadows the
+ * bundled one. This matches the precedent set by the loader, which
+ * prefers the user dir when both define the same slug.
+ */
+export function listAllRegistryAgents(
+  userAgentsRoot?: string,
+): RegistryAgentSummary[] {
+  const builtin = listBuiltInRegistryAgents();
+  if (!userAgentsRoot || !existsSync(userAgentsRoot)) {
+    return builtin;
+  }
+
+  const user = listAgentsInRoot(userAgentsRoot, { absolutePaths: true });
+  const bySlug = new Map<string, RegistryAgentSummary>();
+  for (const agent of builtin) bySlug.set(agent.slug, agent);
+  for (const agent of user) bySlug.set(agent.slug, agent); // user shadows builtin
+  return [...bySlug.values()].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+}
+
+function listAgentsInRoot(
+  agentsRoot: string,
+  options: { absolutePaths: boolean },
+): RegistryAgentSummary[] {
+  if (!existsSync(agentsRoot)) return [];
   return readdirSync(agentsRoot)
     .map((entryName) => join(agentsRoot, entryName))
-    .filter((entryPath) => statSync(entryPath).isDirectory())
-    .map((agentPath) => loadManifest(join(agentPath, "manifest.json"), agentPath))
+    .filter((entryPath) => {
+      try {
+        return statSync(entryPath).isDirectory();
+      } catch {
+        return false;
+      }
+    })
+    .filter((agentPath) => existsSync(join(agentPath, "manifest.json")))
+    .map((agentPath) =>
+      loadManifest(join(agentPath, "manifest.json"), agentPath, {
+        absoluteRegistryPath: options.absolutePaths,
+      }),
+    )
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function findRegistryAgentById(
   id: string,
+  userAgentsRoot?: string,
 ): RegistryAgentSummary | undefined {
-  return listBuiltInRegistryAgents().find(
+  return listAllRegistryAgents(userAgentsRoot).find(
     (agent) => agent.id === id || agent.registryId === id || agent.slug === id,
   );
 }
@@ -611,13 +658,23 @@ export async function loadAgentModule(
 }
 
 function resolveAgentDirectory(agent: AgentSummary | RegistryAgentSummary): string {
+  // 1. Absolute registryPath wins (user-authored agents stamp their
+  //    absolute path on save). This lets the same slug coexist between
+  //    the bundled tree and the user dir without collision.
+  if (agent.registryPath && isAbsolutePath(agent.registryPath)) {
+    if (existsSync(agent.registryPath) && statSync(agent.registryPath).isDirectory()) {
+      return agent.registryPath;
+    }
+  }
+
+  // 2. Built-in tree: <repoRoot>/agents/<slug>.
   const agentsRoot = findAgentsRoot();
   const slugDir = join(agentsRoot, agent.slug);
   if (existsSync(slugDir) && statSync(slugDir).isDirectory()) {
     return slugDir;
   }
 
-  // Fall back to a registry path that may be relative ("agents/<slug>") or already absolute.
+  // 3. Legacy relative registryPath ("agents/<slug>").
   if (agent.registryPath) {
     const fragments = agent.registryPath.split(/[\\/]/);
     const tailSegments = fragments[0] === builtInRegistryRoot ? fragments.slice(1) : fragments;
@@ -628,6 +685,12 @@ function resolveAgentDirectory(agent: AgentSummary | RegistryAgentSummary): stri
   }
 
   throw new Error(`Unable to locate agent directory for "${agent.slug}".`);
+}
+
+function isAbsolutePath(value: string): boolean {
+  // Cross-platform absolute-path heuristic. Avoids importing path.isAbsolute
+  // to keep the module loadable in the renderer test harness.
+  return /^[/\\]/.test(value) || /^[A-Za-z]:[/\\]/.test(value);
 }
 
 function findAgentsRoot(): string {
@@ -670,6 +733,7 @@ function getSearchStartPaths(): string[] {
 function loadManifest(
   manifestPath: string,
   agentPath: string,
+  options: { absoluteRegistryPath?: boolean } = {},
 ): RegistryAgentSummary {
   if (!existsSync(manifestPath)) {
     throw new Error(`Missing built-in agent manifest: ${manifestPath}`);
@@ -682,10 +746,18 @@ function loadManifest(
 
   validateManifest(parsed, manifestPath);
 
+  // User-authored agents (NL2Agent) sit outside the bundled `agents/`
+  // tree, so a "agents/<slug>" relative path would be ambiguous or
+  // outright wrong. For those we stamp the absolute path; the dir
+  // resolver checks for it before falling back to the bundled root.
+  const registryPath = options.absoluteRegistryPath
+    ? agentPath
+    : relativeRegistryPath(agentPath);
+
   return {
     id: parsed.id,
     registryId: parsed.id,
-    registryPath: relativeRegistryPath(agentPath),
+    registryPath,
     slug: parsed.slug,
     name: parsed.name,
     description: parsed.description,
