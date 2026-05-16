@@ -130,6 +130,11 @@ function registerIpcHandlers() {
   ipcMain.handle("openagents:get-agent-manifest", (_event, slug: string) =>
     store.getAgentManifest(slug),
   );
+  ipcMain.handle(
+    "openagents:update-agent-settings",
+    (_event, slug: string, values: Record<string, unknown>) =>
+      store.updateAgentSettings(slug, values),
+  );
 }
 
 const gotLock = app.requestSingleInstanceLock();

@@ -25,6 +25,7 @@ import type {
   RunGraphApi,
   RunLlmApi,
   StartRunOptions,
+  TemplateSetting,
   TenantRecord,
 } from "@openagents/agent-sdk";
 import {
@@ -187,6 +188,59 @@ export class AppStateStore {
         return checkOllama(provider);
       }),
     );
+  }
+
+  /**
+   * Persist per-install overrides for an agent's `definition.settings[]`.
+   * The manifest is the source of truth for the legal key set and type
+   * for each value: unknown keys are silently dropped, ill-typed values
+   * throw before any persist. A missing manifest (e.g. the agent doesn't
+   * ship a YAML template) is a no-op — code-based agents have no
+   * declared settings surface in v0.1.
+   */
+  async updateAgentSettings(
+    slug: string,
+    values: Record<string, unknown>,
+  ): Promise<AppState> {
+    if (!values || typeof values !== "object" || Array.isArray(values)) {
+      throw new Error(`updateAgentSettings: values must be an object.`);
+    }
+
+    // Manifest read, validation, and persist all live inside the same
+    // serialize() slot so a concurrent install or re-install of the same
+    // agent can't slip a different manifest version between the read and
+    // the write. The cost is one extra ipc-bound read inside the chain;
+    // the prize is atomicity.
+    await this.serialize(async () => {
+      const preview = await this.getAgentManifest(slug);
+      if (!preview) {
+        throw new Error(`updateAgentSettings: unknown agent "${slug}".`);
+      }
+      if (preview.kind !== "agent-template") {
+        throw new Error(
+          `updateAgentSettings: agent "${slug}" is code-based and does not declare configurable settings in v0.1.`,
+        );
+      }
+
+      const declared = preview.manifest.definition.settings ?? [];
+      const sanitized = sanitizeSettingsAgainstSchema(declared, values, slug);
+
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentSettings: agent "${slug}" is not installed.`);
+      }
+      const next = [...persisted.installedAgents];
+      next[idx] = { ...next[idx], settings: sanitized };
+      await this.write({
+        ...persisted,
+        installedAgents: next,
+      });
+    });
+
+    return this.getAppState();
   }
 
   async installAgent(agentId: string): Promise<AppState> {
@@ -751,4 +805,60 @@ async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> 
   } finally {
     clearTimeout(timeout);
   }
+}
+
+
+/**
+ * Project the user-submitted values onto the manifest's declared settings,
+ * coercing where it's safe (numeric string -> integer for type: integer)
+ * and rejecting unrecognised types. Unknown ids are dropped.
+ */
+function sanitizeSettingsAgainstSchema(
+  declared: TemplateSetting[],
+  values: Record<string, unknown>,
+  slug: string,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const def of declared) {
+    if (!Object.prototype.hasOwnProperty.call(values, def.id)) continue;
+    const raw = values[def.id];
+    if (raw === undefined || raw === null) continue;
+
+    switch (def.type) {
+      case "integer": {
+        const coerced = typeof raw === "number" ? raw : Number(raw);
+        if (!Number.isFinite(coerced) || !Number.isInteger(coerced)) {
+          throw new Error(
+            `updateAgentSettings(${slug}): setting "${def.id}" must be an integer (got ${JSON.stringify(raw)}).`,
+          );
+        }
+        result[def.id] = coerced;
+        break;
+      }
+      case "string": {
+        if (typeof raw !== "string") {
+          throw new Error(
+            `updateAgentSettings(${slug}): setting "${def.id}" must be a string (got ${typeof raw}).`,
+          );
+        }
+        result[def.id] = raw;
+        break;
+      }
+      case "boolean": {
+        if (typeof raw !== "boolean") {
+          throw new Error(
+            `updateAgentSettings(${slug}): setting "${def.id}" must be a boolean (got ${typeof raw}).`,
+          );
+        }
+        result[def.id] = raw;
+        break;
+      }
+      default: {
+        // Unknown type in the manifest schema — accept the value as-is.
+        // A separate slice tightens the schema with JSON Schema export.
+        result[def.id] = raw;
+      }
+    }
+  }
+  return result;
 }

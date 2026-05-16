@@ -30,17 +30,30 @@ import type {
  * Both flavours include a "View raw" affordance at the bottom for users who
  * want to read the exact source the runtime sees.
  */
-export function ManifestPreview({ preview }: { preview: AgentManifestPreview }) {
+export function ManifestPreview({
+  preview,
+  settingsOverrides,
+}: {
+  preview: AgentManifestPreview;
+  /**
+   * Persisted install-time overrides for this agent. When provided and
+   * non-empty, the Settings card surfaces the user's current value
+   * alongside the manifest default for full transparency.
+   */
+  settingsOverrides?: Record<string, unknown>;
+}) {
   if (preview.kind === "agent-template") {
-    return <TemplateBody preview={preview} />;
+    return <TemplateBody preview={preview} settingsOverrides={settingsOverrides} />;
   }
   return <CodeBasedBody preview={preview} />;
 }
 
 function TemplateBody({
   preview,
+  settingsOverrides,
 }: {
   preview: Extract<AgentManifestPreview, { kind: "agent-template" }>;
+  settingsOverrides?: Record<string, unknown>;
 }) {
   const { manifest, sourceText, registryPath } = preview;
   const scopes = collectScopesFromManifest(manifest);
@@ -48,7 +61,7 @@ function TemplateBody({
     <div className="flex flex-col gap-6">
       <ScopesCard scopes={scopes} />
       <PipelineCard steps={manifest.skills} />
-      <SettingsCard manifest={manifest} />
+      <SettingsCard manifest={manifest} overrides={settingsOverrides} />
       <ResultCard manifest={manifest} />
       <RawSourceCard
         sourceText={sourceText}
@@ -398,7 +411,13 @@ function LlmDetail({ step }: { step: LlmStep }) {
   );
 }
 
-function SettingsCard({ manifest }: { manifest: AgentTemplate }) {
+function SettingsCard({
+  manifest,
+  overrides,
+}: {
+  manifest: AgentTemplate;
+  overrides?: Record<string, unknown>;
+}) {
   const settings = manifest.definition.settings ?? [];
   if (settings.length === 0) return null;
   return (
@@ -406,35 +425,46 @@ function SettingsCard({ manifest }: { manifest: AgentTemplate }) {
       <div className="p-6">
         <SectionLabel>Configurable settings</SectionLabel>
         <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-          These can be overridden at install time. Defaults shown here are
-          what the agent will use unless you change them.
+          Use the "Configure" button at the top to override these per
+          install. Manifest defaults are shown alongside any current value
+          you've saved.
         </div>
         <div className="mt-4 flex flex-col gap-2.5">
-          {settings.map((setting) => (
-            <div
-              key={setting.id}
-              className="flex items-center justify-between gap-4 rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
-            >
-              <div className="min-w-0">
-                <div className="text-[13px] font-medium text-[var(--color-text)]">
-                  {setting.label}
-                </div>
-                {setting.description && (
-                  <div className="mt-0.5 text-[11.5px] text-[var(--color-text-muted)]">
-                    {setting.description}
+          {settings.map((setting) => {
+            const overridden =
+              overrides && Object.prototype.hasOwnProperty.call(overrides, setting.id);
+            const currentValue = overridden ? overrides![setting.id] : undefined;
+            return (
+              <div
+                key={setting.id}
+                className="flex items-center justify-between gap-4 rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
+              >
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium text-[var(--color-text)]">
+                    {setting.label}
                   </div>
-                )}
+                  {setting.description && (
+                    <div className="mt-0.5 text-[11.5px] text-[var(--color-text-muted)]">
+                      {setting.description}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Pill>{setting.type}</Pill>
+                  {setting.default !== undefined && (
+                    <span className="rounded-md bg-[var(--color-surface)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+                      default: {stringify(setting.default)}
+                    </span>
+                  )}
+                  {overridden && (
+                    <span className="rounded-md bg-[var(--color-accent-soft)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25">
+                      current: {stringify(currentValue)}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Pill>{setting.type}</Pill>
-                {setting.default !== undefined && (
-                  <span className="rounded-md bg-[var(--color-surface)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-                    default: {stringify(setting.default)}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </Card>

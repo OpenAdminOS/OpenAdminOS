@@ -32,6 +32,8 @@ const api: OpenAgentsApi = {
     ipcRenderer.invoke("openagents:set-real-writes-enabled", enabled),
   getAgentManifest: (slug: string) =>
     ipcRenderer.invoke("openagents:get-agent-manifest", slug),
+  updateAgentSettings: (slug: string, values: Record<string, unknown>) =>
+    ipcRenderer.invoke("openagents:update-agent-settings", slug, values),
 };
 
 contextBridge.exposeInMainWorld("openAgents", api);

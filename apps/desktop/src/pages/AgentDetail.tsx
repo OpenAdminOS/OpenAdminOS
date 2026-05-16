@@ -6,6 +6,7 @@ import { Pill } from "../components/Pill";
 import { Button } from "../components/Button";
 import { Avatar } from "../components/Avatar";
 import { ManifestPreview } from "../components/ManifestPreview";
+import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
 import { ShareMenu } from "../components/ShareMenu";
 import {
   IconArrowLeft,
@@ -20,12 +21,13 @@ import type { AgentManifestPreview, RunRecord } from "../shared/openAgents";
 export default function AgentDetail() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { state, startRun } = useAppState();
+  const { state, startRun, updateAgentSettings } = useAppState();
   const agent = state.installedAgents.find((a) => a.slug === slug);
   const recentRuns = state.runs.filter((run) => run.agentSlug === slug).slice(0, 3);
   const [preview, setPreview] = useState<AgentManifestPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(true);
+  const [configureOpen, setConfigureOpen] = useState(false);
 
   useEffect(() => {
     if (!slug) return;
@@ -108,7 +110,17 @@ export default function AgentDetail() {
         actions={
           <>
             <ShareMenu contextLabel="agent" />
-            <Button variant="secondary">Configure</Button>
+            <Button
+              variant="secondary"
+              disabled={
+                !preview ||
+                preview.kind !== "agent-template" ||
+                (preview.manifest.definition.settings ?? []).length === 0
+              }
+              onClick={() => setConfigureOpen(true)}
+            >
+              Configure
+            </Button>
             <Button
               variant="primary"
               leadingIcon={<IconPlay size={12} />}
@@ -156,7 +168,10 @@ export default function AgentDetail() {
             )}
 
             {!previewLoading && !previewError && preview && (
-              <ManifestPreview preview={preview} />
+              <ManifestPreview
+                preview={preview}
+                settingsOverrides={agent.settings}
+              />
             )}
 
             {!previewLoading && !preview && (
@@ -251,6 +266,15 @@ export default function AgentDetail() {
           </div>
         </div>
       </PageBody>
+      {preview && preview.kind === "agent-template" && (
+        <ConfigureAgentModal
+          open={configureOpen}
+          onClose={() => setConfigureOpen(false)}
+          agent={agent}
+          manifest={preview.manifest}
+          onSave={(values) => updateAgentSettings(agent.slug, values)}
+        />
+      )}
     </>
   );
 }

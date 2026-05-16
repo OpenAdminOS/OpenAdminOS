@@ -36,6 +36,10 @@ interface AppStateContextValue {
   setActiveTenant: (id: string) => Promise<void>;
   disconnectTenant: (id: string) => Promise<void>;
   setRealWritesEnabled: (enabled: boolean) => Promise<void>;
+  updateAgentSettings: (
+    slug: string,
+    values: Record<string, unknown>,
+  ) => Promise<void>;
 }
 
 interface AppStateProviderProps {
@@ -286,6 +290,30 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const updateAgentSettings = useCallback(
+    async (slug: string, values: Record<string, unknown>) => {
+      const api = getOpenAgentsApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating agent settings is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentSettings(slug, values);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const settingsError = toError(caughtError);
+        setError(settingsError);
+        throw settingsError;
+      }
+    },
+    [],
+  );
+
   const rejectRun = useCallback(async (runId: string) => {
     const api = getOpenAgentsApi();
     if (!api) {
@@ -342,6 +370,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveTenant,
       disconnectTenant,
       setRealWritesEnabled,
+      updateAgentSettings,
     }),
     [
       confirmRun,
@@ -359,6 +388,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveTenant,
       startRun,
       state,
+      updateAgentSettings,
     ],
   );
 
