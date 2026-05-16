@@ -150,12 +150,12 @@ function PipelineCard({ steps }: { steps: TemplateStep[] }) {
 function StepRow({ step, index }: { step: TemplateStep; index: number }) {
   const tone = formatTone(step.format);
   return (
-    <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
-      <div className="flex items-start gap-3">
+    <div className="min-w-0 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
+      <div className="flex min-w-0 items-start gap-3">
         <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface)] font-mono text-[11px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           {index + 1}
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 overflow-hidden">
           <div className="flex items-center gap-2">
             <span className="text-[13.5px] font-medium text-[var(--color-text)]">
               {step.label}
@@ -196,12 +196,12 @@ function StepDetail({ step }: { step: TemplateStep }) {
 
 function GraphDetail({ step }: { step: GraphStep }) {
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 font-mono text-[11.5px]">
-        <span className="rounded bg-[var(--color-success-soft)] px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-success)]">
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 items-center gap-2 font-mono text-[11.5px]">
+        <span className="shrink-0 rounded bg-[var(--color-success-soft)] px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-success)]">
           {step.settings.method}
         </span>
-        <span className="truncate text-[var(--color-text)]">{step.settings.path}</span>
+        <span className="min-w-0 truncate text-[var(--color-text)]">{step.settings.path}</span>
       </div>
       {step.settings.select && step.settings.select.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
