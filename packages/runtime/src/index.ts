@@ -28,8 +28,19 @@ import type {
 
 import { createSyntheticGraph } from "./graph-fixtures.js";
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+import {
+  parseAgentTemplate,
+  agentTemplateToModule,
+} from "./agent-template.js";
 
 export { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+export {
+  ManifestValidationError,
+  parseAgentTemplate,
+  runAgentTemplate,
+  agentTemplateToModule,
+} from "./agent-template.js";
+export { renderTemplate, renderDeep } from "./template-engine.js";
 export {
   acquireTokenSilent,
   createMsalClient,
@@ -490,6 +501,20 @@ export async function loadAgentModule(
   agent: AgentSummary | RegistryAgentSummary,
 ): Promise<AgentModule> {
   const agentDir = resolveAgentDirectory(agent);
+
+  // Agent Template path: declarative YAML manifest. Preferred over a legacy code-based
+  // module when present, so an agent can ship just a manifest.yaml and a
+  // manifest.json (metadata) without any TypeScript source.
+  const yamlPath = join(agentDir, "manifest.yaml");
+  if (existsSync(yamlPath)) {
+    const yamlSource = readFileSync(yamlPath, "utf8");
+    const manifest = parseAgentTemplate(yamlSource);
+    return agentTemplateToModule(manifest);
+  }
+
+  // Code-based agent: a compiled TypeScript / JavaScript module that
+  // default-exports an AgentModule. Used when an agent needs logic the
+  // template DSL can't express; the escape hatch.
   const candidates = [
     join(agentDir, "dist", "agent.js"),
     join(agentDir, "dist", "agent.mjs"),
@@ -498,7 +523,7 @@ export async function loadAgentModule(
   const entryPath = candidates.find((candidate) => existsSync(candidate));
   if (!entryPath) {
     throw new Error(
-      `Agent "${agent.slug}" has no compiled entry. Expected one of: ${candidates.join(", ")}.`,
+      `Agent "${agent.slug}" has no manifest.yaml and no compiled entry. Expected one of: manifest.yaml, ${candidates.join(", ")}.`,
     );
   }
 

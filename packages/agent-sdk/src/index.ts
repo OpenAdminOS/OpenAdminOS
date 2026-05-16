@@ -200,6 +200,102 @@ export interface OpenAgentsApi {
 export type AgentDefinition = AgentContract &
   Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs" | "rating">>;
 
+// ─── Agent Template types ─────────────────────────────────────────────────
+//
+// An Agent Template is a declarative YAML pipeline of steps (skills). The
+// runtime interprets the manifest top-to-bottom; each step's output is
+// stored under its `id` and available to later steps via templating
+// (`{{ step_id.output }}`). No code execution — the only side effects an
+// agent can have are the Graph calls and LLM calls it declares.
+
+export type TemplateStepFormat = "graph" | "transform" | "llm";
+
+export interface GraphStep {
+  id: string;
+  format: "graph";
+  label: string;
+  detail?: string;
+  settings: {
+    method: GraphHttpMethod;
+    path: string;
+    select?: string[];
+    scopes: string[];
+  };
+}
+
+export interface TransformStep {
+  id: string;
+  format: "transform";
+  label: string;
+  detail?: string;
+  settings: Record<string, unknown> & { kind: string; source: string };
+}
+
+export interface LlmStep {
+  id: string;
+  format: "llm";
+  label: string;
+  detail?: string;
+  /**
+   * Optional gating expression. The interpreter supports the literal string
+   * `ctx.llm.available` for v0.1 — when set, the skill is skipped (logged)
+   * if no LLM provider is configured for the run.
+   */
+  when?: "ctx.llm.available";
+  inputs?: Record<string, string>;
+  settings: {
+    system?: string;
+    prompt: string;
+    temperature?: number;
+    maxTokens?: number;
+  };
+}
+
+export type TemplateStep = GraphStep | TransformStep | LlmStep;
+
+export type TemplateTriggerKind = "manual" | "scheduled";
+
+export interface TemplateTrigger {
+  id: string;
+  kind: TemplateTriggerKind;
+  /** Only consulted when `kind: scheduled`; ignored in v0.1. */
+  intervalSeconds?: number;
+}
+
+export interface TemplateSetting {
+  id: string;
+  label: string;
+  type: "string" | "integer" | "boolean";
+  default?: unknown;
+  description?: string;
+  hint?: string;
+  required?: boolean;
+}
+
+export interface TemplateResult {
+  summary: string;
+  data?: Record<string, unknown>;
+}
+
+export interface AgentTemplate {
+  descriptor: {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    author: AgentAuthor;
+    category: AgentCategory;
+    mode: AgentMode;
+    preferredModel?: string;
+  };
+  skills: TemplateStep[];
+  definition: {
+    settings?: TemplateSetting[];
+    triggers?: TemplateTrigger[];
+    result: TemplateResult;
+  };
+}
+
 export interface ManagedDeviceRecord {
   id: string;
   deviceName: string;
