@@ -1,7 +1,7 @@
 {
   "name": "@openagents/desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -15,8 +15,8 @@
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
-    "@openagents/agent-sdk": "0.1.0",
-    "@openagents/runtime": "0.1.0",
+    "@openagents/agent-sdk": "0.1.1",
+    "@openagents/runtime": "0.1.1",
     "electron-updater": "^6.6.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
