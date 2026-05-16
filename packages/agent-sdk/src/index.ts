@@ -62,6 +62,13 @@ export interface AgentSummary extends AgentContract {
   registryId?: string;
   registryPath?: string;
   lastRunAt?: string;
+  /**
+   * Per-install overrides for the agent's `definition.settings[]` block.
+   * Values are validated against the manifest's declared types at write
+   * time and merged on top of YAML defaults at run time. Undefined or
+   * missing keys fall back to the manifest default.
+   */
+  settings?: Record<string, unknown>;
 }
 
 export interface RegistryAgentSummary extends AgentContract {
@@ -196,6 +203,16 @@ export interface OpenAgentsApi {
   disconnectTenant(id: string): Promise<AppState>;
   setRealWritesEnabled(enabled: boolean): Promise<AppState>;
   getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined>;
+  /**
+   * Persist per-install overrides for the named agent's
+   * `definition.settings[]` block. Values are validated against the
+   * manifest schema (type-coerced where it's a safe widening; rejected
+   * with a thrown error otherwise). Unknown setting ids are dropped.
+   */
+  updateAgentSettings(
+    slug: string,
+    values: Record<string, unknown>,
+  ): Promise<AppState>;
 }
 
 /**
@@ -445,6 +462,16 @@ export interface RunContext {
   model?: string;
   graph: RunGraphApi;
   llm: RunLlmApi;
+  /**
+   * Resolved install-time settings. The host merges the user's persisted
+   * overrides (from `AgentSummary.settings`) on top of the manifest's
+   * declared defaults before building the context, so the interpreter
+   * always sees a complete, type-coerced settings map.
+   *
+   * Code-based agents are free to read this map but may also ignore it.
+   * The agent template interpreter consults it via `resolveSettings`.
+   */
+  settings?: Record<string, unknown>;
   /**
    * Whether write actions invoked via `ctx.graph.*` will hit real Graph.
    *

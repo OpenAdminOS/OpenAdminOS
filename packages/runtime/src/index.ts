@@ -194,6 +194,7 @@ async function createPhaseHandle(
     graph: input.graph ?? createSyntheticGraph(),
     llm,
     realWrites: input.realWrites ?? false,
+    settings: input.agent.settings,
     log: (level, message, metadata) => {
       working = appendLog(working, level, message, currentStepId, metadata);
       void input.onProgress(working);

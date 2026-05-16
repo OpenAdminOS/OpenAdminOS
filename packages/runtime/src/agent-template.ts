@@ -186,11 +186,28 @@ function validateWriteStepSettings(
 
 type PipelineState = Record<string, { output: unknown }>;
 
-function resolveSettings(manifest: AgentTemplate): Record<string, unknown> {
+/**
+ * Build the settings map the templating engine sees during a run. Starts
+ * from each declared setting's `default` and layers `overrides` on top
+ * — typically `ctx.settings`, the host's persisted install-time map.
+ * Unknown keys in `overrides` are ignored so a stale persisted value
+ * (e.g. a setting renamed in a newer manifest version) never leaks
+ * through.
+ */
+function resolveSettings(
+  manifest: AgentTemplate,
+  overrides?: Record<string, unknown>,
+): Record<string, unknown> {
   const settings: Record<string, unknown> = {};
   for (const def of manifest.definition.settings ?? []) {
     if (def.default !== undefined) {
       settings[def.id] = def.default;
+    }
+    if (overrides && Object.prototype.hasOwnProperty.call(overrides, def.id)) {
+      const value = overrides[def.id];
+      if (value !== undefined) {
+        settings[def.id] = value;
+      }
     }
   }
   return settings;
@@ -224,7 +241,7 @@ async function runPipelineUpTo(
   ctx: RunContext,
   stopBefore: (step: TemplateStep) => boolean = () => false,
 ): Promise<{ pipeline: PipelineState; settings: Record<string, unknown> }> {
-  const settings = resolveSettings(manifest);
+  const settings = resolveSettings(manifest, ctx.settings);
   const pipeline: PipelineState = {};
 
   for (const skill of manifest.skills) {
