@@ -75,10 +75,13 @@ jobs:
       # electron-builder reads these to authenticate notarization +
       # certificate import. CSC_LINK can be a https URL or a base64
       # blob; we use the base64 path so no external storage is needed.
+      # APPLE_TEAM_ID is not secret (it's printed on the cert) so it
+      # lives inline rather than in repo secrets.
       CSC_LINK: ${{ secrets.CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_TEAM_ID: "D259ULY2B4"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -115,7 +118,10 @@ jobs:
           echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
 
       - name: Build .dmg + .zip (signed + notarized when secrets present)
-        run: npm run dist -w @openagents/desktop -- --mac --arm64 --publish never
+        # Arch is declared in package.json build.mac.target, so we only
+        # pass --mac on the CLI; passing --arm64 here would be redundant
+        # and (with some electron-builder versions) override the config.
+        run: npm run dist -w @openagents/desktop -- --mac --publish never
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
