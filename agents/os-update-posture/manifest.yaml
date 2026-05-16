@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# Agent Template manifest for os-update-posture.
+#
+# A YAML-only Agent Template in the `updates` category. Reads the
+# managed-device inventory once, counts the fleet by operating system
+# and by full OS version, then optionally asks the LLM for a posture
+# summary calling out Windows-10-era builds and other end-of-life
+# concerns. Demonstrates that the v0.1 DSL can express realistic
+# Intune admin posture reports without any new transforms.
+
+descriptor:
+  id: os-update-posture
+  name: OS update posture
+  description: Breaks down the Intune-managed fleet by operating system and OS version so admins can spot stale build distributions at a glance.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: updates
+  mode: read
+  preferredModel: llama3.1:8b
+
+# ─── pipeline ──────────────────────────────────────────────────────────────
+skills:
+
+  - id: load_devices
+    format: graph
+    label: Load managed device inventory
+    detail: Reads managedDevices from the active tenant.
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+        - userPrincipalName
+        - operatingSystem
+        - osVersion
+        - lastSyncDateTime
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+
+  - id: by_os
+    format: transform
+    label: Tally by operating system
+    detail: Counts devices by the broad operatingSystem field (Windows / macOS / iOS / Android).
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: operatingSystem
+
+  - id: by_os_version
+    format: transform
+    label: Tally by full OS version
+    detail: Counts devices by the specific osVersion string so end-of-life builds (e.g. Windows 10.21H2) surface clearly.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: osVersion
+
+  - id: summarize
+    format: llm
+    label: Summarize update posture
+    detail: Highlights end-of-life or near-EOL builds and recommends the highest-priority remediation.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are a Microsoft 365 administrator's assistant. Be concise and
+        factual. Two short sentences plus one prioritized recommendation,
+        no filler. Call out Windows 10 builds explicitly because Windows
+        10 reaches end-of-life soon. Never invent numbers; use only the
+        figures you are given.
+      prompt: |-
+        Tenant managed devices: {{ load_devices.output | size }}.
+        By operating system: {{ by_os.output }}
+        By OS version: {{ by_os_version.output }}
+
+        Write an executive summary an Intune admin can paste into a ticket.
+        Lead with the biggest update risk, then one short prioritised
+        recommendation.
+      temperature: 0.2
+      maxTokens: 200
+
+# ─── what makes it an agent ────────────────────────────────────────────────
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+
+  result:
+    summary: >-
+      Fleet of {{ load_devices.output | size }} devices spans
+      {{ by_os.output | size }} operating systems and
+      {{ by_os_version.output | size }} distinct OS builds.
+    data:
+      totalDevices: "{{ load_devices.output | size }}"
+      byOs: "{{ by_os.output }}"
+      byOsVersion: "{{ by_os_version.output }}"
+      llmSummary: "{{ summarize.output.text }}"
+      llmModel: "{{ summarize.output.model }}"

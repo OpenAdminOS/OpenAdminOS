@@ -1,0 +1,11 @@
+{
+  "name": "@openagents/agent-os-update-posture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "manifest.json",
+    "manifest.yaml",
+    "README.md"
+  ]
+}
