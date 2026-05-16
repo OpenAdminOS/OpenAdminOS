@@ -13,9 +13,12 @@
     "qa": "npm run build && node ./dist/cli.js"
   },
   "dependencies": {
-    "@openagents/agent-sdk": "0.1.0-dev"
+    "@openagents/agent-sdk": "0.1.0-dev",
+    "ajv": "^8.17.1",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.8.0",
     "typescript": "~6.0.3"
   }

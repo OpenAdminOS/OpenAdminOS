@@ -7,6 +7,7 @@ import {
   MsgraphClient,
   reportExitCode,
   runAgentChecks,
+  runManifestSchemaChecks,
   type AgentReport,
   type ProjectReport,
 } from "./index.js";
@@ -23,9 +24,12 @@ async function main(): Promise<void> {
   }
 
   const fixtureResults = await checkFixtureAgainstResource(managedDeviceFixture, client);
+  const schemas = runManifestSchemaChecks();
+
   const report: ProjectReport = {
     agents,
     fixtures: [{ name: managedDeviceFixture.fixtureName, results: fixtureResults }],
+    schemas,
   };
 
   process.stdout.write(`${formatReport(report)}\n`);

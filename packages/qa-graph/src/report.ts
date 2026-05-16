@@ -15,6 +15,12 @@ export interface AgentReport {
 export interface ProjectReport {
   agents: AgentReport[];
   fixtures: { name: string; results: CheckResult[] }[];
+  /**
+   * One entry per `agents/<slug>/manifest.yaml` validated against
+   * `schemas/agent-template.schema.json`. Code-based agents (no YAML)
+   * don't appear here.
+   */
+  schemas: { slug: string; manifestPath: string; results: CheckResult[] }[];
 }
 
 export function formatReport(report: ProjectReport): string {
@@ -41,6 +47,20 @@ export function formatReport(report: ProjectReport): string {
     const severity = summarize(fixture.results);
     lines.push(`${SYMBOL[severity]} fixture: ${fixture.name}`);
     for (const result of fixture.results) {
+      lines.push(`  ${SYMBOL[result.severity]} ${result.name}: ${result.message}`);
+      if (result.details) {
+        for (const detail of result.details) {
+          lines.push(`      - ${detail}`);
+        }
+      }
+    }
+  }
+
+  for (const schema of report.schemas) {
+    lines.push("");
+    const severity = summarize(schema.results);
+    lines.push(`${SYMBOL[severity]} schema: ${schema.slug}`);
+    for (const result of schema.results) {
       lines.push(`  ${SYMBOL[result.severity]} ${result.name}: ${result.message}`);
       if (result.details) {
         for (const detail of result.details) {
@@ -82,6 +102,13 @@ function countTotals(report: ProjectReport): { pass: number; warn: number; fail:
   }
   for (const fixture of report.fixtures) {
     for (const result of fixture.results) {
+      if (result.severity === "pass") pass++;
+      else if (result.severity === "warn") warn++;
+      else fail++;
+    }
+  }
+  for (const schema of report.schemas) {
+    for (const result of schema.results) {
       if (result.severity === "pass") pass++;
       else if (result.severity === "warn") warn++;
       else fail++;
