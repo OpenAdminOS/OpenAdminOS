@@ -168,6 +168,14 @@ export interface AppState {
   trust: TrustState;
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /**
+   * Global toggle that gates whether write-mode agents may call real
+   * Microsoft Graph mutating endpoints. Default `false`. Even when `true`,
+   * every write run still pauses for typed diff confirmation; this toggle
+   * only controls whether the approved `apply` phase actually hits Graph
+   * or emits a simulated trace.
+   */
+  realWritesEnabled: boolean;
 }
 
 export interface OpenAgentsApi {
@@ -186,6 +194,7 @@ export interface OpenAgentsApi {
   connectTenant(): Promise<AppState>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
+  setRealWritesEnabled(enabled: boolean): Promise<AppState>;
 }
 
 export type AgentDefinition = AgentContract &
@@ -204,6 +213,14 @@ export interface ManagedDeviceRecord {
 
 export interface RunGraphApi {
   listManagedDevices(): Promise<ManagedDeviceRecord[]>;
+  /**
+   * Calls `POST /deviceManagement/managedDevices/{managedDevice-id}/retire`.
+   * Destructive — only invoke after the user has approved a `WritePlan`
+   * via typed diff confirmation. The runtime's policy gating (tenant
+   * connected + real-writes toggle ON) is surfaced via `RunContext.realWrites`;
+   * agents should branch on that flag before calling this method.
+   */
+  retireManagedDevice(deviceId: string): Promise<void>;
 }
 
 export interface LlmOptions {
@@ -249,6 +266,21 @@ export interface RunContext {
   model?: string;
   graph: RunGraphApi;
   llm: RunLlmApi;
+  /**
+   * Whether write actions invoked via `ctx.graph.*` will hit real Graph.
+   *
+   * `true`  — a tenant is connected AND the user has flipped the global
+   *           "Enable real Graph writes" toggle ON. Destructive operations
+   *           in `apply` should call the real Graph methods.
+   * `false` — no tenant connected, OR the toggle is OFF. `apply` should
+   *           emit a log line describing what *would* have happened and
+   *           skip the destructive call so the synthetic / blocked mode
+   *           remains honest about not touching the tenant.
+   *
+   * Read-only operations (`listManagedDevices`) ignore this flag and
+   * always reflect the active data source.
+   */
+  realWrites: boolean;
   log(level: RunLogLevel, message: string, metadata?: Record<string, unknown>): void;
   step<T>(
     label: string,

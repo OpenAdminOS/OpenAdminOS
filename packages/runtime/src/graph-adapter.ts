@@ -53,6 +53,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         const payload: GraphListResponse<ManagedDeviceResponseItem> = await graphRequest<
           GraphListResponse<ManagedDeviceResponseItem>
         >({
+          method: "GET",
           url: nextLink,
           tokenProvider: options.tokenProvider,
           fetchImpl,
@@ -67,18 +68,40 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
 
       return records;
     },
+
+    async retireManagedDevice(deviceId: string): Promise<void> {
+      if (!deviceId || typeof deviceId !== "string") {
+        throw new Error("retireManagedDevice requires a non-empty deviceId.");
+      }
+      // Action endpoint. Body is empty per Microsoft Graph docs.
+      const url = `${baseUrl}/deviceManagement/managedDevices/${encodeURIComponent(
+        deviceId,
+      )}/retire`;
+      await graphRequest<void>({
+        method: "POST",
+        url,
+        tokenProvider: options.tokenProvider,
+        fetchImpl,
+        maxRetries,
+        timeoutMs,
+        expectJson: false,
+      });
+    },
   };
 }
 
 interface GraphRequestInput {
+  method: "GET" | "POST";
   url: string;
   tokenProvider: () => Promise<string>;
   fetchImpl: typeof fetch;
   maxRetries: number;
   timeoutMs: number;
+  expectJson?: boolean;
 }
 
 async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
+  const expectJson = input.expectJson ?? true;
   let attempt = 0;
   while (true) {
     attempt += 1;
@@ -86,14 +109,18 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs);
 
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${token}`,
+    };
+    if (expectJson) {
+      headers.accept = "application/json";
+    }
+
     let response: Response;
     try {
       response = await input.fetchImpl(input.url, {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/json",
-        },
+        method: input.method,
+        headers,
         signal: controller.signal,
       });
     } catch (error) {
@@ -106,6 +133,11 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     clearTimeout(timer);
 
     if (response.ok) {
+      if (!expectJson) {
+        // Consume the body so the underlying connection can be reused.
+        await response.text().catch(() => "");
+        return undefined as T;
+      }
       return (await response.json()) as T;
     }
 

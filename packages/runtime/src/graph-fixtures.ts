@@ -63,6 +63,15 @@ export function createSyntheticGraph(): RunGraphApi {
     async listManagedDevices(): Promise<ManagedDeviceRecord[]> {
       return buildInventory(Date.now());
     },
+    async retireManagedDevice(_deviceId: string): Promise<void> {
+      // Synthetic graph is read-only by design — the device list is
+      // regenerated each call from a fixed spec. The runtime gates real
+      // writes via RunContext.realWrites, and agents branch on that
+      // flag before calling this method, so a synthetic call here is
+      // unexpected. Return successfully but make this a no-op rather
+      // than throwing — it makes accidental calls during tests harmless.
+      return;
+    },
   };
 }
 

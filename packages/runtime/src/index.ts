@@ -117,6 +117,14 @@ export interface ExecuteRunInput {
   model?: string;
   llm?: RunLlmApi;
   graph?: RunGraphApi;
+  /**
+   * Whether the agent is allowed to call destructive Graph methods
+   * during this run. The host computes this from
+   * `tenant !== null && realWritesEnabled === true`. Defaults to
+   * `false` so unconfigured callers cannot accidentally perform real
+   * writes.
+   */
+  realWrites?: boolean;
   onProgress(run: RunRecord): void | Promise<void>;
 }
 
@@ -171,6 +179,7 @@ async function createPhaseHandle(
     model: input.model,
     graph: input.graph ?? createSyntheticGraph(),
     llm,
+    realWrites: input.realWrites ?? false,
     log: (level, message, metadata) => {
       working = appendLog(working, level, message, currentStepId, metadata);
       void input.onProgress(working);
