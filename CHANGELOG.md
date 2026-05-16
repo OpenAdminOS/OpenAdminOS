@@ -5,6 +5,7 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+- `write` step format in Agent Templates. Write-mode agents now declare a `write` skill with `kind`, `source`, `confirmationPhrase`, and `actionTemplate` (rendered once per source item). The interpreter pauses on plan, builds a `WritePlan`, and dispatches each approved action to a registered handler (`retire-managed-device` for v0.1). `retire-inactive-devices` migrated from TypeScript to `manifest.yaml`; behaviour against synthetic Graph fixtures is identical (4 candidates, phrase `RETIRE 4 DEVICES`, per-device retire calls on apply). Manifest preview UI renders the write step with its kind, source, confirmation phrase, action template, and required scopes — every promise of transparency now applies uniformly across read and write agents.
 - Initial project handoff: SPEC.md, CLAUDE.md, design mockups, contributor docs.
 - v0.1 (private preview showcase) scope locked in SPEC.md §5a with phased plan in `tasks/todo.md`.
 - Onboarding now installs a built-in registry agent through Electron IPC and routes into a live `/runs/:id`.

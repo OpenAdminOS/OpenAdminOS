@@ -8,6 +8,7 @@ import {
   IconLock,
   IconShield,
   IconSparkle,
+  IconWarning,
 } from "./icons";
 import type {
   AgentManifestPreview,
@@ -16,6 +17,7 @@ import type {
   LlmStep,
   TemplateStep,
   TransformStep,
+  WriteStep,
 } from "../shared/openAgents";
 
 /**
@@ -189,9 +191,83 @@ function StepDetail({ step }: { step: TemplateStep }) {
       return <TransformDetail step={step} />;
     case "llm":
       return <LlmDetail step={step} />;
+    case "write":
+      return <WriteDetail step={step} />;
     default:
       return null;
   }
+}
+
+function WriteDetail({ step }: { step: WriteStep }) {
+  const { kind, source, confirmationPhrase, actionTemplate, scopes } = step.settings;
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]">
+        <span className="rounded bg-[var(--color-danger-soft)] px-1.5 py-0.5 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-danger)]">
+          {kind}
+        </span>
+        <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+          source: {source}
+        </span>
+      </div>
+      <div className="rounded-md bg-[var(--color-danger-soft)] px-3 py-2 ring-1 ring-[var(--color-danger)]/30">
+        <div className="flex items-start gap-2">
+          <IconWarning size={12} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
+          <div className="min-w-0">
+            <div className="text-[11.5px] font-medium text-[var(--color-text)]">
+              Typed confirmation required
+            </div>
+            <div className="mt-0.5 text-[11px] text-[var(--color-text-soft)]">
+              The runtime pauses here and will not call Microsoft Graph until
+              the user types the rendered phrase verbatim.
+            </div>
+            <pre className="mt-2 overflow-x-auto rounded bg-[var(--color-surface)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
+              {confirmationPhrase}
+            </pre>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-md bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
+        <div className="text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          Action template (rendered once per source item)
+        </div>
+        <div className="mt-2 flex flex-col gap-1.5 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)]">
+          <div>
+            <span className="text-[var(--color-text-muted)]">label:</span>{" "}
+            {actionTemplate.label}
+          </div>
+          {actionTemplate.description && (
+            <div>
+              <span className="text-[var(--color-text-muted)]">description:</span>{" "}
+              {actionTemplate.description}
+            </div>
+          )}
+          <div>
+            <span className="text-[var(--color-text-muted)]">severity:</span>{" "}
+            {actionTemplate.severity ?? "destructive"}
+          </div>
+          {actionTemplate.metadata && (
+            <pre className="mt-1 overflow-x-auto rounded bg-[var(--color-bg-raised)] p-2 text-[10.5px] ring-1 ring-[var(--color-border-soft)]">
+              {`metadata:\n${Object.entries(actionTemplate.metadata)
+                .map(([key, value]) => `  ${key}: ${String(value)}`)
+                .join("\n")}`}
+            </pre>
+          )}
+        </div>
+      </div>
+      {scopes && scopes.length > 0 && (
+        <div className="text-[11px] text-[var(--color-text-muted)]">
+          Uses scope{scopes.length === 1 ? "" : "s"}:{" "}
+          {scopes.map((scope, idx) => (
+            <span key={scope}>
+              {idx > 0 ? ", " : ""}
+              <span className="font-mono text-[var(--color-text-soft)]">{scope}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function GraphDetail({ step }: { step: GraphStep }) {
@@ -366,6 +442,8 @@ function SettingsCard({ manifest }: { manifest: AgentTemplate }) {
 }
 
 function ResultCard({ manifest }: { manifest: AgentTemplate }) {
+  const result = manifest.definition.result;
+  if (!result) return null;
   return (
     <Card>
       <div className="p-6">
@@ -375,16 +453,16 @@ function ResultCard({ manifest }: { manifest: AgentTemplate }) {
             Summary template
           </div>
           <pre className="mt-1.5 whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            {manifest.definition.result.summary}
+            {result.summary}
           </pre>
         </div>
-        {manifest.definition.result.data && (
+        {result.data && (
           <div className="mt-4">
             <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
               Result data shape
             </div>
             <pre className="mt-1.5 overflow-x-auto rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-              {stringify(manifest.definition.result.data, 2)}
+              {stringify(result.data, 2)}
             </pre>
           </div>
         )}
@@ -463,6 +541,8 @@ function FormatIcon({ format }: { format: TemplateStep["format"] }) {
       return <IconBolt size={9} />;
     case "llm":
       return <IconSparkle size={9} />;
+    case "write":
+      return <IconWarning size={9} />;
     default:
       return null;
   }
@@ -476,6 +556,8 @@ function formatLabel(format: TemplateStep["format"]): string {
       return "Transform";
     case "llm":
       return "LLM";
+    case "write":
+      return "Write";
     default:
       return format;
   }
@@ -483,7 +565,7 @@ function formatLabel(format: TemplateStep["format"]): string {
 
 function formatTone(
   format: TemplateStep["format"],
-): "success" | "warning" | "accent" | "default" {
+): "success" | "warning" | "accent" | "default" | "danger" {
   switch (format) {
     case "graph":
       return "success";
@@ -491,6 +573,8 @@ function formatTone(
       return "default";
     case "llm":
       return "accent";
+    case "write":
+      return "danger";
     default:
       return "default";
   }
@@ -500,6 +584,10 @@ function collectScopesFromManifest(manifest: AgentTemplate): string[] {
   const scopes = new Set<string>();
   for (const step of manifest.skills) {
     if (step.format === "graph") {
+      for (const scope of step.settings.scopes ?? []) {
+        scopes.add(scope);
+      }
+    } else if (step.format === "write") {
       for (const scope of step.settings.scopes ?? []) {
         scopes.add(scope);
       }

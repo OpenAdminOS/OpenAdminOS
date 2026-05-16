@@ -39,6 +39,8 @@ export {
   ManifestValidationError,
   parseAgentTemplate,
   runAgentTemplate,
+  runAgentTemplatePlan,
+  runAgentTemplateApply,
   agentTemplateToModule,
 } from "./agent-template.js";
 export { renderTemplate, renderDeep } from "./template-engine.js";
