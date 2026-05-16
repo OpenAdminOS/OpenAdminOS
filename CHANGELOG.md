@@ -5,6 +5,22 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.0] - 2026-05-16
+
+First public release. Private preview showcase. Tenant-data-local-by-default desktop platform for Microsoft 365 admins. Four bundled reference agents, two authoring paths (YAML by hand or NL2Agent draft), full transparency UI over both, gated real Graph writes, static schema + Graph QA gate.
+
+Versioned packages: root `0.1.0`, `@openagents/agent-sdk@0.1.0`, `@openagents/runtime@0.1.0`, `@openagents/qa-graph@0.1.0`, `@openagents/desktop@0.1.0`.
+
+### Added
 - `agents/os-update-posture/` — third canonical Agent Template in the `updates` category. Reads `managedDevices` once and tallies the fleet twice with `count-by-field` (once on `operatingSystem`, once on `osVersion`) so end-of-life builds (Windows 10.21H2, 10.22H2) surface distinctly from current builds (11.23H2). Optional LLM step calls out the biggest update risk. YAML-only, no companion TypeScript. Smoke-verified against the synthetic fixture: 13 Windows / 5 macOS / 3 iOS / 1 Android, 12 distinct OS builds; 6 of 13 Windows devices on Windows 10 lines. Doubles as the reference shape NL2Agent should be able to draft from a plain-English prompt.
 - NL2Agent renderer: the New agent button on the hub used to be dead chrome — it now opens a two-pane flow. Pane one is a prompt textarea with a quick capability cheat-sheet and a clear callout when the LLM provider isn't reachable. Pane two is a full Manifest Preview of the generated YAML (the same component used on AgentDetail) plus inline validation errors when the LLM produced a schema-incompliant draft. Save & install wires through to `saveAgentDraft` + `installAgent` and routes the user straight to the new agent's detail page so they can run it.
 - NL2Agent backend: `draftAgentManifest(prompt)` + `saveAgentDraft(yaml)` IPC + runtime support for a second, user-writable agents root under `userData/agents/`. `draftAgentManifest` sends a structured prompt (system message + JSON Schema reference + worked example) to the active LLM provider, strips any markdown fences, parses + schema-validates the YAML, and returns either the parsed manifest or a list of validation errors. `saveAgentDraft` writes `manifest.yaml` + a projected `manifest.json` under `userData/agents/<slug>/` and refuses to shadow a bundled slug. The runtime's `listAllRegistryAgents(userRoot?)` merges both roots into a single de-duplicated registry; user-authored agents stamp their absolute path on `registryPath` so the dir resolver picks them up without colliding with the bundled tree.
