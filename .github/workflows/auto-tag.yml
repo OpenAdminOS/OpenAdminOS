@@ -68,4 +68,18 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Open Agents $TAG"
           git push origin "$TAG"
-          echo "Pushed $TAG → release.yml will fire next."
+          echo "Pushed $TAG."
+
+      - name: Dispatch release workflow
+        # The tag push above does NOT trigger release.yml on its own —
+        # GitHub deliberately suppresses workflow chaining when one
+        # workflow's GITHUB_TOKEN is the actor that pushed (anti-loop
+        # safeguard). So we dispatch release.yml explicitly here,
+        # against the freshly-pushed tag.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref "$TAG"
+          echo "Dispatched release.yml for $TAG."
