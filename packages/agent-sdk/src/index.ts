@@ -237,7 +237,7 @@ export type AgentDefinition = AgentContract &
 // (`{{ step_id.output }}`). No code execution — the only side effects an
 // agent can have are the Graph calls and LLM calls it declares.
 
-export type TemplateStepFormat = "graph" | "transform" | "llm";
+export type TemplateStepFormat = "graph" | "transform" | "llm" | "write";
 
 export interface GraphStep {
   id: string;
@@ -280,7 +280,61 @@ export interface LlmStep {
   };
 }
 
-export type TemplateStep = GraphStep | TransformStep | LlmStep;
+/**
+ * Templated `WriteAction` definition. The runtime renders this template
+ * once per `source` item to produce the `actions[]` of a `WritePlan`.
+ * `metadata` carries handler-specific fields (e.g. `deviceId` for
+ * `retire-managed-device`); the runtime's action-kind handler reads
+ * those fields when executing the approved action.
+ */
+export interface WriteActionTemplate {
+  label: string;
+  description?: string;
+  severity?: WriteActionSeverity;
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Produces a `WritePlan` from a pipeline state. The runtime pauses the
+ * run at `awaiting-confirmation` after rendering the plan; on confirm,
+ * the runtime iterates `plan.actions` and dispatches each one to the
+ * handler registered for `settings.kind`. There is no separate "apply
+ * step" in the YAML — the apply phase is implicit and lives in the
+ * runtime's action-kind handler registry.
+ */
+export interface WriteStep {
+  id: string;
+  format: "write";
+  label: string;
+  detail?: string;
+  settings: {
+    /**
+     * The action kind the runtime should dispatch each action to.
+     * v0.1 supports: "retire-managed-device".
+     */
+    kind: string;
+    /** Liquid expression that resolves to an array of items. */
+    source: string;
+    /** Per-item template applied to each `source` item. */
+    actionTemplate: WriteActionTemplate;
+    /**
+     * The phrase the user must type verbatim to confirm. Templated
+     * — usually parameterised on the action count, e.g.
+     * `"RETIRE {{ items | size }} DEVICES"`.
+     */
+    confirmationPhrase: string;
+    /** Optional plan-level summary. Templated. */
+    summary?: string;
+    /**
+     * Graph scopes required to apply actions of this kind. Concatenated
+     * with the scopes declared on graph steps when the runtime reports
+     * the agent's effective scope set.
+     */
+    scopes?: string[];
+  };
+}
+
+export type TemplateStep = GraphStep | TransformStep | LlmStep | WriteStep;
 
 export type TemplateTriggerKind = "manual" | "scheduled";
 
