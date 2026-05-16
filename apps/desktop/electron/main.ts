@@ -135,6 +135,14 @@ function registerIpcHandlers() {
     (_event, slug: string, values: Record<string, unknown>) =>
       store.updateAgentSettings(slug, values),
   );
+  ipcMain.handle(
+    "openagents:draft-agent-manifest",
+    (_event, prompt: string) => store.draftAgentManifest(prompt),
+  );
+  ipcMain.handle(
+    "openagents:save-agent-draft",
+    (_event, yamlSource: string) => store.saveAgentDraft(yamlSource),
+  );
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -159,6 +167,7 @@ if (!gotLock) {
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
       tokenStore,
+      userAgentsDir: join(userDataDir, "agents"),
       openBrowser: async (url: string) => {
         await shell.openExternal(url);
       },

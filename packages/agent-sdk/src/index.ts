@@ -213,6 +213,38 @@ export interface OpenAgentsApi {
     slug: string,
     values: Record<string, unknown>,
   ): Promise<AppState>;
+  /**
+   * Generate a draft `manifest.yaml` from a natural-language description
+   * using the active LLM provider. Returns the YAML source as a string
+   * — validation against the schema lives in the host but the renderer
+   * may surface any validation errors raised. Throws if no LLM provider
+   * is configured.
+   */
+  draftAgentManifest(prompt: string): Promise<AgentDraft>;
+  /**
+   * Persist a user-authored agent (typically the output of
+   * `draftAgentManifest` after the user has reviewed it) to the
+   * writable user-agents directory. The agent appears in the registry
+   * immediately, ready to install.
+   */
+  saveAgentDraft(yamlSource: string): Promise<AppState>;
+}
+
+/**
+ * Output of a draft-agent generation pass. The renderer feeds this
+ * straight into a Manifest Preview (`kind: "agent-template"`) so the
+ * user reviews the same surface they'd see post-install.
+ */
+export interface AgentDraft {
+  /** Raw YAML emitted by the LLM. Always present. */
+  yamlSource: string;
+  /**
+   * Parsed + schema-validated manifest. Only present when the YAML is
+   * structurally valid; `validationErrors` populated otherwise.
+   */
+  manifest?: AgentTemplate;
+  /** Empty when valid; one entry per schema violation otherwise. */
+  validationErrors: string[];
 }
 
 /**

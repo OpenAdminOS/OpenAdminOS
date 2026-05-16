@@ -34,6 +34,10 @@ const api: OpenAgentsApi = {
     ipcRenderer.invoke("openagents:get-agent-manifest", slug),
   updateAgentSettings: (slug: string, values: Record<string, unknown>) =>
     ipcRenderer.invoke("openagents:update-agent-settings", slug, values),
+  draftAgentManifest: (prompt: string) =>
+    ipcRenderer.invoke("openagents:draft-agent-manifest", prompt),
+  saveAgentDraft: (yamlSource: string) =>
+    ipcRenderer.invoke("openagents:save-agent-draft", yamlSource),
 };
 
 contextBridge.exposeInMainWorld("openAgents", api);
