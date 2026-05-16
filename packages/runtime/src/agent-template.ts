@@ -6,14 +6,14 @@ import type {
   ManagedDeviceRecord,
   ReadAgentModule,
   RunContext,
-  Tier1GraphSkill,
-  Tier1LlmSkill,
-  Tier1Manifest,
-  Tier1Skill,
-  Tier1TransformSkill,
+  GraphStep,
+  LlmStep,
+  AgentTemplate,
+  TemplateStep,
+  TransformStep,
 } from "@openagents/agent-sdk";
 
-import { renderDeep, renderTemplate, type TemplateContext } from "./tier1-template.js";
+import { renderDeep, renderTemplate, type TemplateContext } from "./template-engine.js";
 
 export class ManifestValidationError extends Error {
   readonly path: string;
@@ -25,10 +25,10 @@ export class ManifestValidationError extends Error {
 }
 
 /**
- * Parse a Tier 1 manifest from YAML (or JSON) text. Throws
+ * Parse a agent template from YAML (or JSON) text. Throws
  * ManifestValidationError on schema violations.
  */
-export function parseTier1Manifest(source: string): Tier1Manifest {
+export function parseAgentTemplate(source: string): AgentTemplate {
   const raw = parseYaml(source);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new ManifestValidationError("root", "manifest must be a YAML object");
@@ -58,7 +58,7 @@ export function parseTier1Manifest(source: string): Tier1Manifest {
     throw new ManifestValidationError("skills", "must contain at least one skill");
   }
 
-  const validated: Tier1Skill[] = skills.map((skill, idx) => {
+  const validated: TemplateStep[] = skills.map((skill, idx) => {
     if (!skill || typeof skill !== "object" || Array.isArray(skill)) {
       throw new ManifestValidationError(`skills[${idx}]`, "must be an object");
     }
@@ -74,9 +74,9 @@ export function parseTier1Manifest(source: string): Tier1Manifest {
   }
 
   return {
-    descriptor: descriptor as Tier1Manifest["descriptor"],
+    descriptor: descriptor as AgentTemplate["descriptor"],
     skills: validated,
-    definition: definition as Tier1Manifest["definition"],
+    definition: definition as AgentTemplate["definition"],
   };
 }
 
@@ -96,7 +96,7 @@ function requireArray(obj: Record<string, unknown>, key: string): unknown[] {
   return value;
 }
 
-function validateSkill(skill: Record<string, unknown>, path: string): Tier1Skill {
+function validateSkill(skill: Record<string, unknown>, path: string): TemplateStep {
   for (const field of ["id", "format", "label"] as const) {
     if (typeof skill[field] !== "string" || (skill[field] as string).length === 0) {
       throw new ManifestValidationError(`${path}.${field}`, "must be a non-empty string");
@@ -109,11 +109,11 @@ function validateSkill(skill: Record<string, unknown>, path: string): Tier1Skill
 
   switch (skill.format) {
     case "graph":
-      return skill as unknown as Tier1GraphSkill;
+      return skill as unknown as GraphStep;
     case "transform":
-      return skill as unknown as Tier1TransformSkill;
+      return skill as unknown as TransformStep;
     case "llm":
-      return skill as unknown as Tier1LlmSkill;
+      return skill as unknown as LlmStep;
     default:
       throw new ManifestValidationError(
         `${path}.format`,
@@ -125,12 +125,12 @@ function validateSkill(skill: Record<string, unknown>, path: string): Tier1Skill
 // ─── Interpreter ───────────────────────────────────────────────────────────
 
 /**
- * Execute a Tier 1 manifest against a live RunContext. Each skill's output
+ * Execute a agent template against a live RunContext. Each skill's output
  * lands at `pipeline[skill.id].output` and is visible to later skills + the
  * final result template.
  */
-export async function runTier1Manifest(
-  manifest: Tier1Manifest,
+export async function runAgentTemplate(
+  manifest: AgentTemplate,
   ctx: RunContext,
 ): Promise<AgentRunResult> {
   const settings = resolveSettings(manifest);
@@ -164,7 +164,7 @@ export async function runTier1Manifest(
   };
 }
 
-function resolveSettings(manifest: Tier1Manifest): Record<string, unknown> {
+function resolveSettings(manifest: AgentTemplate): Record<string, unknown> {
   const settings: Record<string, unknown> = {};
   for (const def of manifest.definition.settings ?? []) {
     if (def.default !== undefined) {
@@ -175,7 +175,7 @@ function resolveSettings(manifest: Tier1Manifest): Record<string, unknown> {
 }
 
 async function runSkill(
-  skill: Tier1Skill,
+  skill: TemplateStep,
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown> {
@@ -194,7 +194,7 @@ async function runSkill(
 }
 
 async function runGraphSkill(
-  skill: Tier1GraphSkill,
+  skill: GraphStep,
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown> {
@@ -202,11 +202,11 @@ async function runGraphSkill(
 
   if (settings.method !== "GET") {
     throw new Error(
-      `graph skill "${skill.id}": only GET is supported in v0.1 Tier 1 (got ${settings.method}).`,
+      `graph skill "${skill.id}": only GET is supported in v0.1 expected (got ${settings.method}).`,
     );
   }
 
-  // v0.1 limitation: the Tier 1 graph format currently knows one canonical
+  // v0.1 limitation: the agent-template graph step currently knows one canonical
   // path. Expanding this requires extending RunGraphApi or a generic
   // method on the adapter — neither is in this slice.
   if (settings.path === "/deviceManagement/managedDevices") {
@@ -216,12 +216,12 @@ async function runGraphSkill(
   }
 
   throw new Error(
-    `graph skill "${skill.id}": path "${settings.path}" is not yet supported by the Tier 1 interpreter. Use a Tier 2 (code) agent or extend RunGraphApi.`,
+    `graph skill "${skill.id}": path "${settings.path}" is not yet supported by the agent template interpreter. Use a code-based agent (manifest.json + dist/agent.js) or extend RunGraphApi.`,
   );
 }
 
 async function runTransformSkill(
-  skill: Tier1TransformSkill,
+  skill: TransformStep,
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown> {
@@ -300,7 +300,7 @@ function transformGroupByAge(
 }
 
 async function runLlmSkill(
-  skill: Tier1LlmSkill,
+  skill: LlmStep,
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown> {
@@ -325,10 +325,10 @@ async function runLlmSkill(
   };
 }
 
-// ─── Adapter so the runtime can treat a Tier 1 manifest as an AgentModule ───
+// ─── Adapter so the runtime can treat a agent template as an AgentModule ───
 
-export function tier1ManifestToAgentModule(
-  manifest: Tier1Manifest,
+export function agentTemplateToModule(
+  manifest: AgentTemplate,
 ): ReadAgentModule {
   const descriptor = manifest.descriptor;
   return {
@@ -342,11 +342,11 @@ export function tier1ManifestToAgentModule(
     author: descriptor.author,
     version: descriptor.version,
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
-    run: (ctx) => runTier1Manifest(manifest, ctx),
+    run: (ctx) => runAgentTemplate(manifest, ctx),
   } as ReadAgentModule;
 }
 
-function collectScopes(manifest: Tier1Manifest): string[] {
+function collectScopes(manifest: AgentTemplate): string[] {
   const scopes = new Set<string>();
   for (const skill of manifest.skills) {
     if (skill.format === "graph") {

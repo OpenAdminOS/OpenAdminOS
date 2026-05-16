@@ -1,4 +1,4 @@
-# Tier 1 manifest for find-inactive-devices.
+# Agent Template manifest for find-inactive-devices.
 #
 # The runtime interprets this YAML top-to-bottom. Each `skill` is one step in
 # the pipeline; outputs are addressed by skill id elsewhere in the manifest

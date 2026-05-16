@@ -200,17 +200,17 @@ export interface OpenAgentsApi {
 export type AgentDefinition = AgentContract &
   Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs" | "rating">>;
 
-// ─── Tier 1 manifest types ─────────────────────────────────────────────────
+// ─── Agent Template types ─────────────────────────────────────────────────
 //
-// Tier 1 agents are declared as a YAML pipeline of `skills`. The runtime
-// interprets the manifest top-to-bottom; each skill's output is stored under
-// its `id` and available to later skills via templating (`{{ skill_id.output }}`).
-// No code execution — the only side effects an agent can have are the Graph
-// calls and LLM calls it declares.
+// An Agent Template is a declarative YAML pipeline of steps (skills). The
+// runtime interprets the manifest top-to-bottom; each step's output is
+// stored under its `id` and available to later steps via templating
+// (`{{ step_id.output }}`). No code execution — the only side effects an
+// agent can have are the Graph calls and LLM calls it declares.
 
-export type Tier1SkillFormat = "graph" | "transform" | "llm";
+export type TemplateStepFormat = "graph" | "transform" | "llm";
 
-export interface Tier1GraphSkill {
+export interface GraphStep {
   id: string;
   format: "graph";
   label: string;
@@ -223,7 +223,7 @@ export interface Tier1GraphSkill {
   };
 }
 
-export interface Tier1TransformSkill {
+export interface TransformStep {
   id: string;
   format: "transform";
   label: string;
@@ -231,7 +231,7 @@ export interface Tier1TransformSkill {
   settings: Record<string, unknown> & { kind: string; source: string };
 }
 
-export interface Tier1LlmSkill {
+export interface LlmStep {
   id: string;
   format: "llm";
   label: string;
@@ -251,18 +251,18 @@ export interface Tier1LlmSkill {
   };
 }
 
-export type Tier1Skill = Tier1GraphSkill | Tier1TransformSkill | Tier1LlmSkill;
+export type TemplateStep = GraphStep | TransformStep | LlmStep;
 
-export type Tier1TriggerKind = "manual" | "scheduled";
+export type TemplateTriggerKind = "manual" | "scheduled";
 
-export interface Tier1Trigger {
+export interface TemplateTrigger {
   id: string;
-  kind: Tier1TriggerKind;
+  kind: TemplateTriggerKind;
   /** Only consulted when `kind: scheduled`; ignored in v0.1. */
   intervalSeconds?: number;
 }
 
-export interface Tier1SettingDef {
+export interface TemplateSetting {
   id: string;
   label: string;
   type: "string" | "integer" | "boolean";
@@ -272,12 +272,12 @@ export interface Tier1SettingDef {
   required?: boolean;
 }
 
-export interface Tier1ResultShape {
+export interface TemplateResult {
   summary: string;
   data?: Record<string, unknown>;
 }
 
-export interface Tier1Manifest {
+export interface AgentTemplate {
   descriptor: {
     id: string;
     name: string;
@@ -288,11 +288,11 @@ export interface Tier1Manifest {
     mode: AgentMode;
     preferredModel?: string;
   };
-  skills: Tier1Skill[];
+  skills: TemplateStep[];
   definition: {
-    settings?: Tier1SettingDef[];
-    triggers?: Tier1Trigger[];
-    result: Tier1ResultShape;
+    settings?: TemplateSetting[];
+    triggers?: TemplateTrigger[];
+    result: TemplateResult;
   };
 }
 

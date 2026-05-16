@@ -1,4 +1,4 @@
-// Minimal Liquid-subset template engine for Tier 1 manifests.
+// Minimal Liquid-subset template engine for agent templates.
 //
 // Supports:
 //   {{ path.to.value }}

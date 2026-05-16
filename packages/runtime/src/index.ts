@@ -29,18 +29,18 @@ import type {
 import { createSyntheticGraph } from "./graph-fixtures.js";
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import {
-  parseTier1Manifest,
-  tier1ManifestToAgentModule,
-} from "./tier1-interpreter.js";
+  parseAgentTemplate,
+  agentTemplateToModule,
+} from "./agent-template.js";
 
 export { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 export {
   ManifestValidationError,
-  parseTier1Manifest,
-  runTier1Manifest,
-  tier1ManifestToAgentModule,
-} from "./tier1-interpreter.js";
-export { renderTemplate, renderDeep } from "./tier1-template.js";
+  parseAgentTemplate,
+  runAgentTemplate,
+  agentTemplateToModule,
+} from "./agent-template.js";
+export { renderTemplate, renderDeep } from "./template-engine.js";
 export {
   acquireTokenSilent,
   createMsalClient,
@@ -502,17 +502,19 @@ export async function loadAgentModule(
 ): Promise<AgentModule> {
   const agentDir = resolveAgentDirectory(agent);
 
-  // Tier 1: declarative YAML manifest. Preferred over a Tier 2 compiled
+  // Agent Template path: declarative YAML manifest. Preferred over a legacy code-based
   // module when present, so an agent can ship just a manifest.yaml and a
   // manifest.json (metadata) without any TypeScript source.
   const yamlPath = join(agentDir, "manifest.yaml");
   if (existsSync(yamlPath)) {
     const yamlSource = readFileSync(yamlPath, "utf8");
-    const manifest = parseTier1Manifest(yamlSource);
-    return tier1ManifestToAgentModule(manifest);
+    const manifest = parseAgentTemplate(yamlSource);
+    return agentTemplateToModule(manifest);
   }
 
-  // Tier 2: compiled TypeScript / JavaScript module.
+  // Code-based agent: a compiled TypeScript / JavaScript module that
+  // default-exports an AgentModule. Used when an agent needs logic the
+  // template DSL can't express; the escape hatch.
   const candidates = [
     join(agentDir, "dist", "agent.js"),
     join(agentDir, "dist", "agent.mjs"),
