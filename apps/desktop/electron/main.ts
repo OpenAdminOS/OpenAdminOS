@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { AppStateStore } from "./state.js";
 import { EncryptedSecretStore } from "./secret-store.js";
+import { startAutoUpdater } from "./updates.js";
 import type { ProviderId } from "@openagents/agent-sdk";
 
 const currentFile = fileURLToPath(import.meta.url);
@@ -174,6 +175,7 @@ if (!gotLock) {
     });
     registerIpcHandlers();
     createWindow();
+    startAutoUpdater(() => mainWindow ?? undefined);
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {

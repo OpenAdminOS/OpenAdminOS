@@ -5,8 +5,11 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+- Release pipeline. Tag-push of `v*.*.*` (or workflow_dispatch) cuts a two-channel build via `.github/workflows/release.yml`: an unsigned Windows MSIX for Microsoft Store submission (Store re-signs after upload, giving the binary Microsoft's SmartScreen reputation from day one) and a notarized + signed macOS DMG/ZIP for direct download via GitHub Releases (auto-updated by electron-updater). Build artifacts land on a draft release for review before publishing. macOS notarization uses the modern App Store Connect API key flow (`APPLE_API_KEY` / `_KEY_ID` / `_ISSUER`) rather than the legacy Apple-ID + app-specific-password path. Per-platform secrets list and the full runbook live in `docs/RELEASING.md`.
+- `electron-updater` wired in `apps/desktop/electron/updates.ts`: 15-second startup delay, 4-hour poll, native dialog when an update is downloaded ("Restart now" / "Later"). Auto-skipped in dev and on Windows when the running build is a Microsoft Store-installed AppX (so the Store and electron-updater never race over the same install).
 
 ### Changed
+- `apps/desktop/package.json` `build` block: Windows target switched from NSIS to AppX/MSIX with the Partner Center identity (`UgurLabs.UgurLabs.OpenAgents`, `CN=E5B1EEE1-…`, publisher `UgurLabs`); macOS target tightened to Apple Silicon DMG + ZIP with `hardenedRuntime: true`; GitHub publish provider added so electron-updater knows which release feed to read.
 
 ### Removed
 
