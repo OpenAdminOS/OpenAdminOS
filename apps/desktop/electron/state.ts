@@ -45,6 +45,7 @@ interface PersistedState {
   runs: RunRecord[];
   tenants: TenantRecord[];
   activeTenantId?: string;
+  realWritesEnabled: boolean;
 }
 
 interface OllamaTagsResponse {
@@ -58,6 +59,7 @@ const defaultState: PersistedState = {
   installedAgents: [],
   runs: [],
   tenants: [],
+  realWritesEnabled: false,
 };
 
 const providerIds = new Set<ProviderId>(
@@ -124,11 +126,26 @@ export class AppStateStore {
       runs: persisted.runs,
       trust: deriveTrustState({ provider: activeProvider, activeTenant }),
       tenants: persisted.tenants,
+      realWritesEnabled: persisted.realWritesEnabled,
     };
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
     }
     return state;
+  }
+
+  async setRealWritesEnabled(enabled: boolean): Promise<AppState> {
+    if (typeof enabled !== "boolean") {
+      throw new Error(`setRealWritesEnabled requires a boolean, got ${typeof enabled}.`);
+    }
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      await this.write({
+        ...persisted,
+        realWritesEnabled: enabled,
+      });
+    });
+    return this.getAppState();
   }
 
   listRegistryAgents(): RegistryAgentSummary[] {
@@ -519,6 +536,17 @@ export class AppStateStore {
     return next;
   }
 
+  // Real writes are only permitted when: (a) the run resolved to a real
+  // tenant Graph adapter (dataSource === "graph") AND (b) the user has
+  // explicitly toggled the global "Enable real Graph writes" setting.
+  // Synthetic runs never pass real writes through, regardless of the
+  // toggle, because there's no tenant to write against.
+  private async resolveRealWrites(selection: { dataSource: RunDataSource }): Promise<boolean> {
+    if (selection.dataSource !== "graph") return false;
+    const persisted = await this.read();
+    return persisted.realWritesEnabled === true;
+  }
+
   private async driveRun(input: {
     run: RunRecord;
     agent: AgentSummary;
@@ -529,6 +557,7 @@ export class AppStateStore {
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const llm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId);
+      const realWrites = await this.resolveRealWrites(selection);
       const stampedRun = this.stampDataSource(input.run, selection);
       await this.persistRunSnapshot(stampedRun);
       await driver({
@@ -538,6 +567,7 @@ export class AppStateStore {
         model: input.model,
         llm,
         graph: selection.graph,
+        realWrites,
         onProgress: (next) =>
           this.persistRunSnapshot(this.stampDataSource(next, selection)),
       });
@@ -556,6 +586,7 @@ export class AppStateStore {
     try {
       const llm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId);
+      const realWrites = await this.resolveRealWrites(selection);
       await executeApply({
         run: input.run,
         agent: input.agent,
@@ -564,6 +595,7 @@ export class AppStateStore {
         plan: input.plan,
         llm,
         graph: selection.graph,
+        realWrites,
         onProgress: (next) =>
           this.persistRunSnapshot(this.stampDataSource(next, selection)),
       });
@@ -620,6 +652,12 @@ export class AppStateStore {
           : defaultState.installedAgents,
         runs: Array.isArray(parsed.runs) ? parsed.runs : defaultState.runs,
         tenants,
+        // Default to false for older state files written before real-writes
+        // existed; the user must explicitly opt in via Settings.
+        realWritesEnabled:
+          typeof parsed.realWritesEnabled === "boolean"
+            ? parsed.realWritesEnabled
+            : defaultState.realWritesEnabled,
       };
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;

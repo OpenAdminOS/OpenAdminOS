@@ -14,6 +14,7 @@ import {
   IconLock,
   IconPlay,
   IconShare,
+  IconShield,
   IconWarning,
 } from "../components/icons";
 import { useAppState } from "../state";
@@ -204,6 +205,14 @@ export default function RunResult() {
             plan={run.plan}
             onConfirm={confirmRun}
             onReject={rejectRun}
+            writesAreReal={
+              run.dataSource === "graph" && state.realWritesEnabled === true
+            }
+            tenantDisplayName={
+              run.tenantId
+                ? state.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName
+                : undefined
+            }
           />
         )}
 
@@ -306,11 +315,15 @@ function DiffConfirmPanel({
   plan,
   onConfirm,
   onReject,
+  writesAreReal,
+  tenantDisplayName,
 }: {
   runId: string;
   plan: WritePlan;
   onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
   onReject: (runId: string) => Promise<RunRecord>;
+  writesAreReal: boolean;
+  tenantDisplayName: string | undefined;
 }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -353,6 +366,32 @@ function DiffConfirmPanel({
           Write operation paused for confirmation. Open Agents will not proceed until the exact phrase is typed.
         </div>
       </div>
+
+      {writesAreReal ? (
+        <div className="border-b border-[var(--color-danger)]/35 bg-[var(--color-danger-soft)] px-6 py-3">
+          <div className="flex items-start gap-3 text-[12.5px] text-[var(--color-danger)]">
+            <IconWarning size={14} className="mt-0.5 shrink-0" />
+            <span>
+              <span className="font-semibold">Approving will call Microsoft Graph.</span>{" "}
+              {plan.actions.length} {plan.actions.length === 1 ? "device" : "devices"} in{" "}
+              <span className="font-mono">{tenantDisplayName ?? "the active tenant"}</span>{" "}
+              will be retired. There is no undo at the Graph level.
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="border-b border-[var(--color-info)]/25 bg-[var(--color-info-soft)] px-6 py-3">
+          <div className="flex items-start gap-3 text-[12.5px] text-[var(--color-info)]">
+            <IconShield size={14} className="mt-0.5 shrink-0" />
+            <span>
+              <span className="font-semibold">Apply will be simulated.</span>{" "}
+              No Graph writes. The agent will emit a trace of what it would have
+              retired. Flip "Enable real Graph writes" in Settings → Privacy to
+              perform real changes against a connected tenant.
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="p-6">
         <div className="mb-5 flex items-start justify-between gap-6">

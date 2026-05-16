@@ -123,6 +123,10 @@ function registerIpcHandlers() {
   ipcMain.handle("openagents:disconnect-tenant", (_event, id: string) =>
     store.disconnectTenant(id),
   );
+  ipcMain.handle(
+    "openagents:set-real-writes-enabled",
+    (_event, enabled: boolean) => store.setRealWritesEnabled(enabled),
+  );
 }
 
 const gotLock = app.requestSingleInstanceLock();

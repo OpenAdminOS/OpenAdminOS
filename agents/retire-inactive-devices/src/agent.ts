@@ -90,30 +90,75 @@ const agent: WriteAgentModule = {
   },
 
   async apply(ctx: RunContext, plan: WritePlan): Promise<AgentRunResult> {
+    const realWrites = ctx.realWrites;
     const retiredDeviceIds: string[] = [];
+    const simulatedDeviceIds: string[] = [];
+    const failed: Array<{ id: string; name: string; error: string }> = [];
+
+    if (!realWrites) {
+      ctx.log(
+        "warn",
+        "Real Graph writes are disabled (no tenant connected or the toggle in Settings is OFF). The apply phase will emit a simulated trace instead of calling Microsoft Graph.",
+      );
+    }
 
     for (const action of plan.actions) {
       const deviceId = readString(action.metadata, "deviceId");
       const deviceName = readString(action.metadata, "deviceName") ?? deviceId ?? action.id;
 
-      await ctx.step(
-        action.label,
-        action.description,
-        async () => {
-          if (!deviceId) {
-            throw new Error(`Action ${action.id} is missing deviceId metadata.`);
+      if (!deviceId) {
+        failed.push({
+          id: action.id,
+          name: deviceName,
+          error: "Action is missing deviceId metadata.",
+        });
+        ctx.log("error", `Skipping ${action.label}: missing deviceId.`);
+        continue;
+      }
+
+      // Per-device errors must not abort the run -- catch around the
+      // step so one Graph 404 / 403 / throttle doesn't strand the other
+      // approved devices. Aggregate into `failed` and report in summary.
+      try {
+        await ctx.step(action.label, action.description, async () => {
+          if (realWrites) {
+            await ctx.graph.retireManagedDevice(deviceId);
+            ctx.log("info", `Retired ${deviceName} (${deviceId}) via Graph.`);
+            retiredDeviceIds.push(deviceId);
+          } else {
+            ctx.log(
+              "info",
+              `[simulated] would retire ${deviceName} (${deviceId}); real writes disabled.`,
+            );
+            simulatedDeviceIds.push(deviceId);
           }
-          ctx.log("info", `Retired ${deviceName} (${deviceId}).`);
-          retiredDeviceIds.push(deviceId);
-        },
-      );
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failed.push({ id: deviceId, name: deviceName, error: message });
+        ctx.log(
+          "error",
+          `Failed to retire ${deviceName} (${deviceId}): ${message}`,
+        );
+      }
     }
 
+    const successCount = realWrites ? retiredDeviceIds.length : simulatedDeviceIds.length;
+    const total = plan.actions.length;
+    const verb = realWrites ? "Retired" : "Simulated retire of";
+    const failureSuffix = failed.length > 0 ? ` ${failed.length} failed.` : "";
+    const summary = `${verb} ${successCount} of ${total} devices.${failureSuffix}`;
+
     return {
-      summary: `Retired ${retiredDeviceIds.length} devices.`,
+      summary,
       result: {
+        mode: realWrites ? "real" : "simulated",
         retiredDeviceIds,
-        count: retiredDeviceIds.length,
+        simulatedDeviceIds,
+        failed,
+        successCount,
+        failureCount: failed.length,
+        total,
       },
     };
   },
