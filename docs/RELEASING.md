@@ -46,28 +46,40 @@ These match the Partner Center reservation for the `OpenAgents` Store name. Don'
 
 ## Cutting a release
 
+The full flow is **two clicks in GitHub**. No local terminal needed.
+
+1. **Run the Release prep workflow.**
+   - Actions tab → **Release prep** → **Run workflow** → branch `main`.
+   - Inputs: `bump` defaults to `patch` (the right answer for the v0.1.x line). Use `minor`/`major` or set `explicit_version` only when intentionally changing line.
+   - On run: the workflow bumps every workspace `package.json`, rolls `CHANGELOG.md` so the `[Unreleased]` section becomes a dated `[X.Y.Z]` section, regenerates `package-lock.json`, and opens a `release: vX.Y.Z` PR.
+2. **Review and merge the release PR.**
+   - Skim the CHANGELOG roll (the most important review surface — make sure no entries are stuck under Unreleased that should have been edited).
+   - Merge (squash). The squash-merge commit subject is `release: vX.Y.Z (#NN)`.
+3. **The rest is automatic.**
+   - `auto-tag.yml` fires on the `release: v*` commit landing on `main` → pushes the matching `vX.Y.Z` tag.
+   - `release.yml` fires on the tag → builds the signed installers → uploads them to a **draft** GitHub release.
+   - You publish the macOS side from the GitHub UI; you upload the `.appx` to Partner Center for Windows.
+
+### Manual fallback (if the workflow ever breaks)
+
 ```bash
-# 1. Make sure main is green.
+# 1. Confirm main is green.
 git checkout main && git pull
 npm run typecheck && npm run qa && npm run build
 
-# 2. Bump versions if you haven't already. (The release-v0.1.0 PR
-#    pattern is the template — edit every workspace package.json, roll
-#    the [Unreleased] section in CHANGELOG.md under the new version
-#    header, merge through CI.)
+# 2. Bump locally with the same script the workflow uses.
+BUMP_TYPE=patch node scripts/prepare-release.mjs
 
-# 3. Tag and push. Workflow fires automatically.
-git tag -a v0.1.1 -m "Open Agents v0.1.1"
-git push origin v0.1.1
+# 3. Open the PR by hand.
+git checkout -b release/v0.1.X
+git add -A
+git commit -m "release: v0.1.X"
+git push -u origin release/v0.1.X
+gh pr create --title "release: v0.1.X" --body "Manual release prep."
+
+# 4. After PR merges, auto-tag.yml still picks it up. (If that also
+#    breaks, tag manually: git tag -a v0.1.X && git push origin v0.1.X.)
 ```
-
-CI then:
-
-1. Builds the Windows MSIX on `windows-latest`.
-2. Builds the signed + notarized macOS DMG/ZIP + `latest-mac.yml` on `macos-14`.
-3. Downloads both into the `publish-release` job and pushes them to a **draft** GitHub release for `v0.1.1`.
-
-Visit https://github.com/ugurkocde/OpenAgents/releases. The draft has all four artifacts attached.
 
 ## Manual steps after CI
 

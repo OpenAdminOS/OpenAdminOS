@@ -35,6 +35,11 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Opt into Node 24 for JavaScript actions ahead of GitHub's June 2026
+  # forced cutover. Silences the EOL warnings the runner emits otherwise.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   windows-msix:
     name: Windows MSIX (Microsoft Store)
