@@ -11,6 +11,7 @@ import {
 import {
   deriveTrustState,
   providerCatalog,
+  type AgentDraft,
   type AppState,
   type OpenAgentsApi,
   type ProviderId,
@@ -40,6 +41,8 @@ interface AppStateContextValue {
     slug: string,
     values: Record<string, unknown>,
   ) => Promise<void>;
+  draftAgentManifest: (prompt: string) => Promise<AgentDraft>;
+  saveAgentDraft: (yamlSource: string) => Promise<void>;
 }
 
 interface AppStateProviderProps {
@@ -314,6 +317,46 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     [],
   );
 
+  const draftAgentManifest = useCallback(async (prompt: string) => {
+    const api = getOpenAgentsApi();
+    if (!api) {
+      const fallbackError = new Error(
+        "Drafting an agent is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+    setError(null);
+    try {
+      return await api.draftAgentManifest(prompt);
+    } catch (caughtError) {
+      const draftError = toError(caughtError);
+      setError(draftError);
+      throw draftError;
+    }
+  }, []);
+
+  const saveAgentDraft = useCallback(async (yamlSource: string) => {
+    const api = getOpenAgentsApi();
+    if (!api) {
+      const fallbackError = new Error(
+        "Saving an agent draft is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+    setError(null);
+    try {
+      const nextState = await api.saveAgentDraft(yamlSource);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const saveError = toError(caughtError);
+      setError(saveError);
+      throw saveError;
+    }
+  }, []);
+
   const rejectRun = useCallback(async (runId: string) => {
     const api = getOpenAgentsApi();
     if (!api) {
@@ -371,11 +414,14 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       disconnectTenant,
       setRealWritesEnabled,
       updateAgentSettings,
+      draftAgentManifest,
+      saveAgentDraft,
     }),
     [
       confirmRun,
       connectTenant,
       disconnectTenant,
+      draftAgentManifest,
       error,
       setRealWritesEnabled,
       installAgent,
@@ -384,6 +430,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       refreshRegistry,
       registryAgents,
       rejectRun,
+      saveAgentDraft,
       setActiveProvider,
       setActiveTenant,
       startRun,

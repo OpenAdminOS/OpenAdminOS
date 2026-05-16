@@ -4,6 +4,7 @@ import { PageBody, PageHeader } from "../components/AppShell";
 import { AgentCard } from "../components/AgentCard";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { NewAgentModal } from "../components/NewAgentModal";
 import { Pill, StatusDot } from "../components/Pill";
 import {
   IconActivity,
@@ -24,6 +25,7 @@ export default function AgentsHome() {
   const navigate = useNavigate();
   const { state, registryAgents, startRun, installAgent } = useAppState();
   const [query, setQuery] = useState("");
+  const [newAgentOpen, setNewAgentOpen] = useState(false);
   const retireAgentId = "retire-inactive-devices";
   const retireInstalled = state.installedAgents.some(
     (agent) => agent.slug === retireAgentId,
@@ -98,7 +100,11 @@ export default function AgentsHome() {
             >
               Browse hub
             </Button>
-            <Button variant="primary" leadingIcon={<IconPlus size={14} />}>
+            <Button
+              variant="primary"
+              leadingIcon={<IconPlus size={14} />}
+              onClick={() => setNewAgentOpen(true)}
+            >
               New agent
             </Button>
           </>
@@ -266,6 +272,10 @@ export default function AgentsHome() {
           </aside>
         </div>
       </PageBody>
+      <NewAgentModal
+        open={newAgentOpen}
+        onClose={() => setNewAgentOpen(false)}
+      />
     </>
   );
 }
