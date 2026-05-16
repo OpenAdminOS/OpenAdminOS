@@ -141,7 +141,7 @@ export default function AgentsHome() {
           <section>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-[13px] font-medium text-[var(--color-text)]">
-                Installed
+                Added
               </h2>
               <span className="text-[11px] text-[var(--color-text-muted)]">
                 {filtered.length} of {state.installedAgents.length}
@@ -259,7 +259,7 @@ export default function AgentsHome() {
                   disabled={!retireAvailable}
                   className="mt-3 text-[11.5px] font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {retireInstalled ? "Run retire" : "Install + run retire"} →
+                  {retireInstalled ? "Run retire" : "Add + run retire"} →
                 </button>
               </div>
             </Card>
@@ -321,7 +321,7 @@ function EmptyState({ hasAgents }: { hasAgents: boolean }) {
       <div className="mt-1 text-[13px] text-[var(--color-text-muted)]">
         {hasAgents
           ? "Try a different query, or browse the hub for community agents."
-          : "Install an agent from the hub once registry support is wired."}
+          : "Add an agent from the hub once registry support is wired."}
       </div>
     </div>
   );

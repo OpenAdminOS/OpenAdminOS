@@ -127,6 +127,9 @@ function registerIpcHandlers() {
     "openagents:set-real-writes-enabled",
     (_event, enabled: boolean) => store.setRealWritesEnabled(enabled),
   );
+  ipcMain.handle("openagents:get-agent-manifest", (_event, slug: string) =>
+    store.getAgentManifest(slug),
+  );
 }
 
 const gotLock = app.requestSingleInstanceLock();

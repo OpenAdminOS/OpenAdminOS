@@ -195,7 +195,36 @@ export interface OpenAgentsApi {
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
   setRealWritesEnabled(enabled: boolean): Promise<AppState>;
+  getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined>;
 }
+
+/**
+ * Renderer-friendly snapshot of an agent's manifest, used by the Agent
+ * detail screen to render a transparency-first preview of what the agent
+ * actually does. Two flavours mirror the two authoring modes:
+ *
+ * - `agent-template`  — the agent ships a YAML pipeline. `manifest` is the
+ *                       parsed structure; `source` is the raw YAML text for
+ *                       the "View raw" affordance.
+ * - `code-based`      — the agent ships a TypeScript / JavaScript module.
+ *                       We can only show metadata from `manifest.json`; the
+ *                       actual logic lives in code. `sourceLocation` points
+ *                       at the file path relative to the monorepo root.
+ */
+export type AgentManifestPreview =
+  | {
+      kind: "agent-template";
+      registryPath?: string;
+      manifest: AgentTemplate;
+      sourceText: string;
+    }
+  | {
+      kind: "code-based";
+      registryPath?: string;
+      metadata: RegistryAgentSummary;
+      sourceText?: string;
+      sourceLocation: string;
+    };
 
 export type AgentDefinition = AgentContract &
   Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs" | "rating">>;

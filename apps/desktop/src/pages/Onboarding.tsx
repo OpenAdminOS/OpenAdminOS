@@ -636,7 +636,7 @@ function PickAgent({
           onClick={onContinue}
           disabled={working || featured.length === 0}
         >
-          {working ? "Installing…" : "Install and run"}
+          {working ? "Adding…" : "Add and run"}
         </Button>
       </div>
     </div>

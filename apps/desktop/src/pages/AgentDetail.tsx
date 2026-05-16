@@ -1,20 +1,21 @@
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { Button } from "../components/Button";
 import { Avatar } from "../components/Avatar";
+import { ManifestPreview } from "../components/ManifestPreview";
 import { ShareMenu } from "../components/ShareMenu";
 import {
   IconArrowLeft,
   IconBadgeCheck,
   IconBolt,
-  IconLock,
   IconPlay,
   IconShield,
 } from "../components/icons";
 import { useAppState } from "../state";
-import type { RunRecord } from "../shared/openAgents";
+import type { AgentManifestPreview, RunRecord } from "../shared/openAgents";
 
 export default function AgentDetail() {
   const { slug } = useParams();
@@ -22,6 +23,38 @@ export default function AgentDetail() {
   const { state, startRun } = useAppState();
   const agent = state.installedAgents.find((a) => a.slug === slug);
   const recentRuns = state.runs.filter((run) => run.agentSlug === slug).slice(0, 3);
+  const [preview, setPreview] = useState<AgentManifestPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
+
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    const api = window.openAgents;
+    if (!api) {
+      setPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
+    api
+      .getAgentManifest(slug)
+      .then((result) => {
+        if (cancelled) return;
+        setPreview(result ?? null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setPreviewError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
 
   if (!agent) {
     return (
@@ -59,9 +92,17 @@ export default function AgentDetail() {
               <IconBadgeCheck size={12} className="text-[var(--color-accent)]" />
             )}
             <span className="opacity-50">·</span>
-            <span className="font-mono">{agent.version}</span>
+            <span className="font-mono">v{agent.version}</span>
             <span className="opacity-50">·</span>
             <span className="capitalize">{agent.category}</span>
+            {preview && (
+              <>
+                <span className="opacity-50">·</span>
+                <Pill tone={preview.kind === "agent-template" ? "accent" : "default"}>
+                  {preview.kind === "agent-template" ? "YAML template" : "Code-based"}
+                </Pill>
+              </>
+            )}
           </span>
         }
         actions={
@@ -81,8 +122,8 @@ export default function AgentDetail() {
         }
       />
       <PageBody>
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-          <div className="flex flex-col gap-6">
+        <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="flex min-w-0 flex-col gap-6">
             <Card>
               <div className="p-6">
                 <SectionLabel>About</SectionLabel>
@@ -98,31 +139,29 @@ export default function AgentDetail() {
               </div>
             </Card>
 
-            <Card>
-              <div className="p-6">
-                <SectionLabel>Required Graph scopes</SectionLabel>
-                <div className="mt-3 flex flex-col gap-2">
-                  {agent.scopes.map((scope) => (
-                    <div
-                      key={scope}
-                      className="flex items-center gap-2.5 rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
-                    >
-                      <IconLock
-                        size={13}
-                        className="text-[var(--color-text-muted)]"
-                      />
-                      <span className="font-mono text-[12px] text-[var(--color-text)]">
-                        {scope}
-                      </span>
-                    </div>
-                  ))}
+            {previewLoading && (
+              <Card>
+                <div className="p-6 text-[13px] text-[var(--color-text-muted)]">
+                  Loading manifest…
                 </div>
-                <div className="mt-4 text-[12px] text-[var(--color-text-muted)]">
-                  Granted at install time. You can revoke them from your
-                  tenant's enterprise apps view at any time.
+              </Card>
+            )}
+
+            {previewError && (
+              <Card>
+                <div className="p-6 text-[13px] text-[var(--color-danger)]">
+                  Couldn't load manifest: {previewError}
                 </div>
-              </div>
-            </Card>
+              </Card>
+            )}
+
+            {!previewLoading && !previewError && preview && (
+              <ManifestPreview preview={preview} />
+            )}
+
+            {!previewLoading && !preview && (
+              <FallbackScopesCard scopes={agent.scopes} />
+            )}
 
             <Card>
               <div className="p-6">
@@ -213,6 +252,24 @@ export default function AgentDetail() {
         </div>
       </PageBody>
     </>
+  );
+}
+
+function FallbackScopesCard({ scopes }: { scopes: string[] }) {
+  if (scopes.length === 0) return null;
+  return (
+    <Card>
+      <div className="p-6">
+        <SectionLabel>Required Graph scopes</SectionLabel>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {scopes.map((scope) => (
+            <Pill key={scope}>
+              <span className="font-mono text-[11px]">{scope}</span>
+            </Pill>
+          ))}
+        </div>
+      </div>
+    </Card>
   );
 }
 

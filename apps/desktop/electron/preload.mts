@@ -30,6 +30,8 @@ const api: OpenAgentsApi = {
     ipcRenderer.invoke("openagents:disconnect-tenant", id),
   setRealWritesEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openagents:set-real-writes-enabled", enabled),
+  getAgentManifest: (slug: string) =>
+    ipcRenderer.invoke("openagents:get-agent-manifest", slug),
 };
 
 contextBridge.exposeInMainWorld("openAgents", api);

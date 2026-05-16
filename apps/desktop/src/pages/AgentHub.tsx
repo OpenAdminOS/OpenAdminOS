@@ -226,7 +226,7 @@ function FeaturedCard({
               leadingIcon={installed ? <IconCheck size={12} /> : undefined}
               onClick={onInstall}
             >
-              {installed ? "Installed" : "Install"}
+              {installed ? "Added" : "Add"}
             </Button>
             <Button size="md" variant="secondary">
               View manifest
@@ -345,7 +345,7 @@ function TrendingCard({
               onInstall();
             }}
           >
-            {installed ? "Installed" : "Install"}
+            {installed ? "Added" : "Add"}
           </Button>
         </div>
       </div>
@@ -425,11 +425,11 @@ function HubAgentCard({
               leadingIcon={<IconCheck size={12} />}
               disabled
             >
-              Installed
+              Added
             </Button>
           ) : (
             <Button variant="primary" size="sm" onClick={onInstall}>
-              Install
+              Add
             </Button>
           )}
         </div>
