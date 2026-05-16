@@ -42,3 +42,4 @@ src-tauri/target/
 # Working artifacts (screenshots taken during dev, browser automation traces)
 /*.png
 .playwright-mcp/
+apps/desktop/release/
