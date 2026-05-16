@@ -6,6 +6,18 @@ import { EncryptedSecretStore } from "./secret-store.js";
 import { startAutoUpdater } from "./updates.js";
 import type { ProviderId } from "@openagents/agent-sdk";
 
+// Set the app name BEFORE anything else that could touch the macOS
+// Keychain. Electron's safeStorage uses `app.getName()` to construct
+// the Keychain service name ("<name> Safe Storage"). In a signed
+// production build that name comes from CFBundleName ("Open Agents")
+// via Info.plist, but in dev (`npm run dev`, unpackaged Electron) it
+// falls back to package.json's `name` field — which is the npm
+// package id "@openagents/desktop" and ends up as the user-visible
+// string in Keychain prompts. Pinning it explicitly here keeps the
+// two paths consistent and gives users a single "Open Agents Safe
+// Storage" entry regardless of how they're running the app.
+app.setName("Open Agents");
+
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = dirname(currentFile);
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
