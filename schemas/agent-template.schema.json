@@ -144,7 +144,7 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": ["group-by-age", "filter-by-age"],
+                  "enum": ["group-by-age", "filter-by-age", "count-by-field"],
                   "description": "v0.1 transforms. Adding more is a one-function change in @openagents/runtime."
                 },
                 "source": {

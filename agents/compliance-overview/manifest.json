@@ -1,0 +1,33 @@
+{
+  "id": "compliance-overview",
+  "slug": "compliance-overview",
+  "name": "Compliance overview",
+  "description": "Counts Intune-managed devices by complianceState so admins can spot drift across the tenant at a glance.",
+  "mode": "read",
+  "category": "compliance",
+  "version": "1.0.0",
+  "author": {
+    "name": "OpenAgents",
+    "handle": "openagents",
+    "verified": true
+  },
+  "scopes": [
+    "DeviceManagementManagedDevices.Read.All"
+  ],
+  "preferredModel": "llama3.1:8b",
+  "graphOperations": [
+    {
+      "method": "GET",
+      "path": "/deviceManagement/managedDevices",
+      "select": [
+        "id",
+        "deviceName",
+        "userPrincipalName",
+        "operatingSystem",
+        "complianceState",
+        "lastSyncDateTime"
+      ],
+      "notes": "Reads managedDevices once per run to tabulate complianceState across the tenant."
+    }
+  ]
+}
