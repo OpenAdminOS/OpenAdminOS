@@ -1,0 +1,71 @@
+name: Auto-tag release commits
+
+# When a "release: vX.Y.Z" commit lands on main (typically via the
+# release-prep PR), this workflow extracts the version from the commit
+# subject and pushes the matching tag. The push triggers release.yml,
+# which builds and uploads the signed artifacts to a draft GitHub
+# release.
+#
+# Gated on the commit-subject regex so day-to-day merges don't tag.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  tag:
+    if: startsWith(github.event.head_commit.message, 'release: v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          # The squash-merge commit subject is "release: vX.Y.Z (#NN)".
+          # Strip everything after the version, then strip the prefix.
+          version="$(printf '%s\n' "$COMMIT_MESSAGE" | head -n1 \
+            | sed -E 's/^release: v([0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?).*$/\1/')"
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Could not parse version from commit message: $COMMIT_MESSAGE" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag doesn't already exist
+        env:
+          TAG: v${{ steps.tag.outputs.version }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::warning::Tag $TAG already exists locally — skipping."
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+            echo "::warning::Tag $TAG already exists on origin — skipping."
+            exit 0
+          fi
+
+      - name: Push tag
+        env:
+          TAG: v${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Open Agents $TAG"
+          git push origin "$TAG"
+          echo "Pushed $TAG → release.yml will fire next."
