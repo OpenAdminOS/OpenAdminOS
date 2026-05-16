@@ -39,6 +39,7 @@
   "build": {
     "appId": "com.ugurlabs.openagents",
     "productName": "Open Agents",
+    "electronVersion": "42.1.0",
     "directories": {
       "output": "release"
     },
