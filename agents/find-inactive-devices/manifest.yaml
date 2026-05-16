@@ -1,0 +1,128 @@
+# Tier 1 manifest for find-inactive-devices.
+#
+# The runtime interprets this YAML top-to-bottom. Each `skill` is one step in
+# the pipeline; outputs are addressed by skill id elsewhere in the manifest
+# (e.g. `{{ load_devices.output }}`). The manifest is the only source of truth
+# for what this agent does — there is no companion TypeScript code.
+
+descriptor:
+  id: find-inactive-devices
+  name: Find inactive devices
+  description: Surfaces Intune-managed devices that have not synced recently, grouped by inactivity window.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: devices
+  mode: read
+  preferredModel: llama3.1:8b
+
+# ─── pipeline ──────────────────────────────────────────────────────────────
+skills:
+
+  # 1) Read managedDevices from the active tenant.
+  - id: load_devices
+    format: graph
+    label: Load managed device inventory
+    detail: Reads managedDevices from the active tenant.
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+        - userPrincipalName
+        - operatingSystem
+        - osVersion
+        - lastSyncDateTime
+        - enrolledDateTime
+        - complianceState
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+
+  # 2) Group devices into inactivity bands. Pure data shaping; no LLM.
+  - id: categorize_by_age
+    format: transform
+    label: Group devices by how long they have been inactive
+    detail: "Thresholds (days): {{ settings.warnDays }} / {{ settings.staleDays }} / {{ settings.retireDays }}."
+    settings:
+      kind: group-by-age
+      source: "{{ load_devices.output }}"
+      timestampField: lastSyncDateTime
+      groups:
+        - name: warn
+          inactiveDaysAtLeast: "{{ settings.warnDays }}"
+        - name: stale
+          inactiveDaysAtLeast: "{{ settings.staleDays }}"
+        - name: retire
+          inactiveDaysAtLeast: "{{ settings.retireDays }}"
+
+  # 3) Optional LLM polish. Gated on availability so the agent still
+  #    completes against synthetic mode without Ollama.
+  - id: summarize
+    format: llm
+    label: Summarize findings with local LLM
+    detail: Generates a 2-sentence executive summary plus two recommendations.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are a Microsoft 365 administrator's assistant. Be concise and
+        factual. Skip filler. Return at most three sentences followed by two
+        short prioritized recommendations.
+      prompt: |-
+        Total managed devices: {{ load_devices.output | size }}.
+        Warn band (>= {{ settings.warnDays }} days): {{ categorize_by_age.output.warn | size }} devices.
+        Stale band (>= {{ settings.staleDays }} days): {{ categorize_by_age.output.stale | size }} devices.
+        Retire band (>= {{ settings.retireDays }} days): {{ categorize_by_age.output.retire | size }} devices.
+
+        Write an executive summary an Intune admin can paste into a ticket.
+        Lead with the most important band, then two short prioritized
+        recommendations.
+      temperature: 0.2
+      maxTokens: 220
+
+# ─── what makes it an agent ────────────────────────────────────────────────
+definition:
+  # Install-time, user-configurable parameters. v0.1 uses the declared
+  # defaults; an install-time form lands in a later slice.
+  settings:
+    - id: warnDays
+      label: Warn band (days)
+      type: integer
+      default: 30
+      description: Devices inactive at least this many days enter the warn band.
+    - id: staleDays
+      label: Stale band (days)
+      type: integer
+      default: 90
+      description: Devices inactive at least this many days enter the stale band.
+    - id: retireDays
+      label: Retire band (days)
+      type: integer
+      default: 180
+      description: Devices inactive at least this many days are flagged for retirement.
+
+  triggers:
+    - id: manual
+      kind: manual
+
+  # Shape of the run record's `result` field. Renders against the
+  # accumulated pipeline state.
+  result:
+    summary: >-
+      Found {{ categorize_by_age.output.retire | size }} devices ready to
+      retire, {{ categorize_by_age.output.stale | size }} stale, and
+      {{ categorize_by_age.output.warn | size }} in the warning band.
+    data:
+      totalDevices: "{{ load_devices.output | size }}"
+      buckets:
+        warn: "{{ categorize_by_age.output.warn }}"
+        stale: "{{ categorize_by_age.output.stale }}"
+        retire: "{{ categorize_by_age.output.retire }}"
+      llmSummary: "{{ summarize.output.text }}"
+      llmModel: "{{ summarize.output.model }}"
+      thresholds:
+        warnDays: "{{ settings.warnDays }}"
+        staleDays: "{{ settings.staleDays }}"
+        retireDays: "{{ settings.retireDays }}"

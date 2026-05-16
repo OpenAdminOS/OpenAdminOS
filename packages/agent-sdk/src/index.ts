@@ -200,6 +200,102 @@ export interface OpenAgentsApi {
 export type AgentDefinition = AgentContract &
   Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs" | "rating">>;
 
+// ─── Tier 1 manifest types ─────────────────────────────────────────────────
+//
+// Tier 1 agents are declared as a YAML pipeline of `skills`. The runtime
+// interprets the manifest top-to-bottom; each skill's output is stored under
+// its `id` and available to later skills via templating (`{{ skill_id.output }}`).
+// No code execution — the only side effects an agent can have are the Graph
+// calls and LLM calls it declares.
+
+export type Tier1SkillFormat = "graph" | "transform" | "llm";
+
+export interface Tier1GraphSkill {
+  id: string;
+  format: "graph";
+  label: string;
+  detail?: string;
+  settings: {
+    method: GraphHttpMethod;
+    path: string;
+    select?: string[];
+    scopes: string[];
+  };
+}
+
+export interface Tier1TransformSkill {
+  id: string;
+  format: "transform";
+  label: string;
+  detail?: string;
+  settings: Record<string, unknown> & { kind: string; source: string };
+}
+
+export interface Tier1LlmSkill {
+  id: string;
+  format: "llm";
+  label: string;
+  detail?: string;
+  /**
+   * Optional gating expression. The interpreter supports the literal string
+   * `ctx.llm.available` for v0.1 — when set, the skill is skipped (logged)
+   * if no LLM provider is configured for the run.
+   */
+  when?: "ctx.llm.available";
+  inputs?: Record<string, string>;
+  settings: {
+    system?: string;
+    prompt: string;
+    temperature?: number;
+    maxTokens?: number;
+  };
+}
+
+export type Tier1Skill = Tier1GraphSkill | Tier1TransformSkill | Tier1LlmSkill;
+
+export type Tier1TriggerKind = "manual" | "scheduled";
+
+export interface Tier1Trigger {
+  id: string;
+  kind: Tier1TriggerKind;
+  /** Only consulted when `kind: scheduled`; ignored in v0.1. */
+  intervalSeconds?: number;
+}
+
+export interface Tier1SettingDef {
+  id: string;
+  label: string;
+  type: "string" | "integer" | "boolean";
+  default?: unknown;
+  description?: string;
+  hint?: string;
+  required?: boolean;
+}
+
+export interface Tier1ResultShape {
+  summary: string;
+  data?: Record<string, unknown>;
+}
+
+export interface Tier1Manifest {
+  descriptor: {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    author: AgentAuthor;
+    category: AgentCategory;
+    mode: AgentMode;
+    preferredModel?: string;
+  };
+  skills: Tier1Skill[];
+  definition: {
+    settings?: Tier1SettingDef[];
+    triggers?: Tier1Trigger[];
+    result: Tier1ResultShape;
+  };
+}
+
 export interface ManagedDeviceRecord {
   id: string;
   deviceName: string;
