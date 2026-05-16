@@ -5,12 +5,15 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+- Release-prep automation: a `workflow_dispatch` workflow that bumps every workspace `package.json`, rolls `CHANGELOG.md` so `[Unreleased]` becomes a dated `[X.Y.Z]` section, regenerates `package-lock.json`, and opens a release PR via `gh`. Pairs with a new `auto-tag` workflow that pushes the matching `vX.Y.Z` tag when a `release: v*` commit lands on `main`, which then triggers `release.yml` for the signed build. Net result: cutting a release is two clicks (Run workflow → review PR → merge). Defaults to `patch` bump so the v0.1.x line discipline is preserved by default.
+- All four GitHub Actions workflows now opt into Node 24 via `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`, ahead of GitHub's June 2026 forced cutover. Silences the runner's Node-20-EOL warnings.
 
 ### Changed
 
 ### Removed
 
 ### Fixed
+- macOS Keychain prompt on first run no longer references the raw npm package id (`@openagents/desktop`). `app.setName("Open Agents")` is now pinned at the top of `main.ts`, before any `safeStorage` access, so dev and signed builds both produce a single user-facing `Open Agents Safe Storage` Keychain entry. Existing dev-install users may need to delete a stale `@openagents/desktop Safe Storage` entry once (`security delete-generic-password -l "@openagents/desktop Safe Storage"`); fresh installs see no prompt at all.
 
 ### Security
 
