@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-05-17T21:10:31.454Z",
+  "updatedAt": "2026-05-17T21:11:26.809Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 2,
-      "installs7d": 2
+      "installs": 3,
+      "installs7d": 3
     },
     "retire-inactive-devices": {
       "installs": 1,
