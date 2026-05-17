@@ -49,3 +49,5 @@ yarn-error.log*
 /.playwright-mcp/
 /landing-*.png
 /t3-codes-reference.png
+# Synced from stats/agents.json by scripts/sync-stats.mjs at build time
+/public/stats/

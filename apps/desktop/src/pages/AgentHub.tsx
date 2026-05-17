@@ -45,6 +45,10 @@ export default function AgentHub() {
   );
   const [manifestError, setManifestError] = useState<string | null>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
+  // Live install counts fetched from the public stats endpoint on Hub
+  // mount. Falls back silently to the bundled values on `agent.installs`
+  // when the fetch fails (offline, network error, etc.).
+  const liveInstalls = useLiveInstalls();
 
   useEffect(() => {
     if (!manifestAgent) {
@@ -136,6 +140,7 @@ export default function AgentHub() {
         {featured ? (
           <FeaturedCard
             agent={featured}
+            installs={resolveInstallCount(featured, liveInstalls)}
             installed={isInstalled(featured)}
             onInstall={() => onInstall(featured)}
             onViewManifest={() => setManifestAgent(featured)}
@@ -159,6 +164,7 @@ export default function AgentHub() {
                 <TrendingCard
                   key={a.id}
                   agent={a}
+                  installs={resolveInstallCount(a, liveInstalls)}
                   installed={isInstalled(a)}
                   onInstall={() => onInstall(a)}
                   onViewManifest={() => setManifestAgent(a)}
@@ -205,6 +211,7 @@ export default function AgentHub() {
               <HubAgentCard
                 key={agent.id}
                 agent={agent}
+                installs={resolveInstallCount(agent, liveInstalls)}
                 installed={isInstalled(agent)}
                 onInstall={() => onInstall(agent)}
                 onViewManifest={() => setManifestAgent(agent)}
@@ -264,11 +271,13 @@ export default function AgentHub() {
 
 function FeaturedCard({
   agent,
+  installs,
   installed,
   onInstall,
   onViewManifest,
 }: {
   agent: RegistryAgentSummary;
+  installs: number | undefined;
   installed: boolean;
   onInstall: () => void;
   onViewManifest: () => void;
@@ -328,7 +337,7 @@ function FeaturedCard({
             </div>
             <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px] capitalize text-[var(--color-text)]">
               <span>{agent.category}</span>
-              <InstallCount count={agent.installs} size="md" />
+              <InstallCount count={installs} size="md" />
             </div>
           </div>
           <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
@@ -362,11 +371,13 @@ function FeaturedCard({
 
 function TrendingCard({
   agent,
+  installs,
   installed,
   onInstall,
   onViewManifest,
 }: {
   agent: RegistryAgentSummary;
+  installs: number | undefined;
   installed: boolean;
   onInstall: () => void;
   onViewManifest: () => void;
@@ -407,10 +418,10 @@ function TrendingCard({
             <span className="font-mono text-[10.5px] text-[var(--color-text-muted)] capitalize">
               {agent.category}
             </span>
-            {typeof agent.installs === "number" && (
+            {typeof installs === "number" && (
               <>
                 <span className="text-[10.5px] text-[var(--color-text-muted)] opacity-50">·</span>
-                <InstallCount count={agent.installs} />
+                <InstallCount count={installs} />
               </>
             )}
           </div>
@@ -434,11 +445,13 @@ function TrendingCard({
 
 function HubAgentCard({
   agent,
+  installs,
   installed,
   onInstall,
   onViewManifest,
 }: {
   agent: RegistryAgentSummary;
+  installs: number | undefined;
   installed: boolean;
   onInstall: () => void;
   onViewManifest: () => void;
@@ -494,10 +507,10 @@ function HubAgentCard({
             <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
               v{agent.version}
             </span>
-            {typeof agent.installs === "number" && (
+            {typeof installs === "number" && (
               <>
                 <span className="text-[11px] text-[var(--color-text-muted)] opacity-50">·</span>
-                <InstallCount count={agent.installs} />
+                <InstallCount count={installs} />
               </>
             )}
           </div>
@@ -540,6 +553,71 @@ function EmptyRegistry() {
       </div>
     </Card>
   );
+}
+
+const LIVE_STATS_URL = "https://www.openagents.sh/stats/agents.json";
+const LIVE_STATS_TIMEOUT_MS = 5_000;
+
+interface LiveStatsFile {
+  updatedAt?: string;
+  agents?: Record<string, { installs?: number; installs7d?: number }>;
+}
+
+/**
+ * Pulls the public stats file on Hub mount. Lives at a static URL on
+ * the marketing site (synced from the canonical `stats/agents.json` at
+ * deploy time). When the fetch fails — offline, DNS error, marketing
+ * site down — we silently fall back to the bundled `agent.installs`
+ * value baked into the desktop release. The Hub never shows a loading
+ * spinner for stats; the bundled values are used until/unless the
+ * fetch resolves, at which point counts swap in.
+ */
+function useLiveInstalls(): Map<string, number> | null {
+  const [live, setLive] = useState<Map<string, number> | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LIVE_STATS_TIMEOUT_MS);
+    fetch(LIVE_STATS_URL, {
+      method: "GET",
+      cache: "no-cache",
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? (response.json() as Promise<LiveStatsFile>) : null))
+      .then((data) => {
+        if (!data || typeof data !== "object" || !data.agents) return;
+        const next = new Map<string, number>();
+        for (const [slug, entry] of Object.entries(data.agents)) {
+          if (entry && typeof entry.installs === "number") {
+            next.set(slug, entry.installs);
+          }
+        }
+        setLive(next);
+      })
+      .catch((error: unknown) => {
+        console.debug("[hub] live stats fetch failed; using bundled values", error);
+      })
+      .finally(() => clearTimeout(timer));
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, []);
+
+  return live;
+}
+
+/**
+ * Returns the live install count for an agent when the fetch has
+ * resolved, otherwise the bundled value, otherwise `undefined` (which
+ * tells `<InstallCount>` to render nothing).
+ */
+function resolveInstallCount(
+  agent: RegistryAgentSummary,
+  live: Map<string, number> | null,
+): number | undefined {
+  if (live && live.has(agent.slug)) return live.get(agent.slug);
+  return agent.installs;
 }
 
 /**
