@@ -13,3 +13,4 @@ export {
   runManifestSchemaChecks,
   type ManifestSchemaReport,
 } from "./schema-check.js";
+export { runStatsChecks, type StatsReport } from "./stats-check.js";

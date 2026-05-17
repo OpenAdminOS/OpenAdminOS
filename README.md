@@ -67,15 +67,15 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 ### Trust model (non-negotiable)
 
 - **Tenant data never leaves the device** when a local LLM is selected. No telemetry, no analytics, no error reporting that could include tenant content.
-- **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed phrase confirmation.
-- **Real Graph writes are gated twice**: an active tenant connection AND a global toggle the user has to flip. Until both, write agents emit a simulated trace instead of calling Graph.
+- **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed-phrase confirmation against the live diff, every time.
+- **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. Run against synthetic mode (no tenant) and the apply phase emits a simulated trace. There is no separate global "enable writes" toggle — the typed-phrase confirmation per run is the only gate.
 
 ### What's shipped vs what's coming
 
 | | v0.1.4 | v0.2 |
 |---|---|---|
 | Tenant connect (read) | yes (MSAL interactive) | — |
-| Real Graph writes (gated) | UI complete, POST handler stubbed | real POSTs |
+| Real Graph writes | live POSTs after typed-phrase diff confirm | additional write surface (assignment changes, policy edits) |
 | Local LLM (Ollama) | yes, with `think: false` for reasoning models | — |
 | LM Studio / Anthropic / OpenAI / Azure OpenAI | toggles disabled, "Coming in 0.2" | yes |
 | Per-run schedules | yes (in-process tick while app is open) | OS-level via launchd / Task Scheduler |

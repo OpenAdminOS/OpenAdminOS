@@ -1,0 +1,9 @@
+{
+  "updatedAt": "2026-05-17T00:00:00Z",
+  "agents": {
+    "find-inactive-devices": { "installs": 0, "installs7d": 0 },
+    "retire-inactive-devices": { "installs": 0, "installs7d": 0 },
+    "compliance-overview": { "installs": 0, "installs7d": 0 },
+    "os-update-posture": { "installs": 0, "installs7d": 0 }
+  }
+}

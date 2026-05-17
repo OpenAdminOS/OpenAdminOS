@@ -21,14 +21,10 @@ import type {
 } from "../shared/openAgents";
 
 /**
- * Renders an agent's manifest as readable cards so users can audit what an
- * agent does before installing or running it. Two render paths:
- *   - `agent-template` — declarative YAML pipeline (`<TemplateBody>`)
- *   - `code-based`     — TypeScript module with metadata only
- *                        (`<CodeBasedBody>`)
- *
- * Both flavours include a "View raw" affordance at the bottom for users who
- * want to read the exact source the runtime sees.
+ * Renders an agent's manifest as readable cards so users can audit what
+ * an agent does before installing or running it. Every agent ships a
+ * declarative YAML pipeline; the "View raw" card at the bottom shows
+ * the exact source the runtime loaded.
  */
 export function ManifestPreview({
   preview,
@@ -40,19 +36,6 @@ export function ManifestPreview({
    * non-empty, the Settings card surfaces the user's current value
    * alongside the manifest default for full transparency.
    */
-  settingsOverrides?: Record<string, unknown>;
-}) {
-  if (preview.kind === "agent-template") {
-    return <TemplateBody preview={preview} settingsOverrides={settingsOverrides} />;
-  }
-  return <CodeBasedBody preview={preview} />;
-}
-
-function TemplateBody({
-  preview,
-  settingsOverrides,
-}: {
-  preview: Extract<AgentManifestPreview, { kind: "agent-template" }>;
   settingsOverrides?: Record<string, unknown>;
 }) {
   const { manifest, sourceText, registryPath } = preview;
@@ -70,42 +53,6 @@ function TemplateBody({
         title="Raw manifest"
         helperText="This is the exact YAML the runtime loaded. The pipeline above is derived from it — there is no hidden code path."
       />
-    </div>
-  );
-}
-
-function CodeBasedBody({
-  preview,
-}: {
-  preview: Extract<AgentManifestPreview, { kind: "code-based" }>;
-}) {
-  return (
-    <div className="flex flex-col gap-6">
-      <Card>
-        <div className="p-6">
-          <SectionLabel>This is a code-based agent</SectionLabel>
-          <p className="mt-3 text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
-            Capabilities are declared in <code className="font-mono text-[12px]">manifest.json</code>{" "}
-            (shown below). The actual logic lives in a TypeScript module that
-            we can't pretty-print here. The runtime still enforces the
-            declared scopes and graph operations at runtime — the agent
-            cannot call anything outside what it declares.
-          </p>
-          <p className="mt-3 text-[12.5px] text-[var(--color-text-muted)]">
-            Source location: <code className="font-mono">{preview.sourceLocation}</code>
-          </p>
-        </div>
-      </Card>
-      <ScopesCard scopes={preview.metadata.scopes} />
-      {preview.sourceText && (
-        <RawSourceCard
-          sourceText={preview.sourceText}
-          registryPath={preview.registryPath}
-          languageHint="json"
-          title="manifest.json"
-          helperText="Registry metadata only. The implementation lives in TypeScript source under the same directory."
-        />
-      )}
     </div>
   );
 }

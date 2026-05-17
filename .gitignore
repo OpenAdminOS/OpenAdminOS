@@ -43,3 +43,5 @@ src-tauri/target/
 /*.png
 .playwright-mcp/
 apps/desktop/release/
+.vercel
+.env*.local

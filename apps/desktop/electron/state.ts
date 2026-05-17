@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -25,7 +26,6 @@ import {
 import type {
   AgentDraft,
   AgentManifestPreview,
-  AgentTemplate,
   RunDataSource,
   RunGraphApi,
   RunLlmApi,
@@ -61,7 +61,14 @@ interface PersistedState {
   runs: RunRecord[];
   tenants: TenantRecord[];
   activeTenantId?: string;
-  realWritesEnabled: boolean;
+  /**
+   * Stable per-installation UUID, generated on first agent install and
+   * persisted thereafter. Sent to the stats aggregator alongside each
+   * install event so the same machine never counts twice for the same
+   * agent. Carries no PII — it's a random v4 UUID, not derived from
+   * any hardware identifier.
+   */
+  installId?: string;
 }
 
 interface OllamaTagsResponse {
@@ -75,12 +82,21 @@ const defaultState: PersistedState = {
   installedAgents: [],
   runs: [],
   tenants: [],
-  realWritesEnabled: false,
 };
 
 const providerIds = new Set<ProviderId>(
   providerCatalog.map((provider) => provider.id),
 );
+
+/**
+ * Default stats aggregator URL. Constructor option `statsApiUrl` wins;
+ * env var `OPENAGENTS_STATS_API` is the next fallback; otherwise the
+ * official deployment URL. An empty string disables the POST entirely
+ * — installs still complete locally, the count just doesn't flow to
+ * the public stats file. main.ts passes `""` in dev so we don't
+ * report dev installs to production.
+ */
+const DEFAULT_STATS_API_URL = "https://www.openagents.sh";
 
 export interface AppStateStoreOptions {
   filePath: string;
@@ -88,7 +104,7 @@ export interface AppStateStoreOptions {
   openBrowser?(url: string): Promise<void>;
   /**
    * Writable directory where user-authored agents (NL2Agent output)
-   * live. Each child is `<slug>/manifest.yaml` + `<slug>/manifest.json`.
+   * live. Each child is `<slug>/manifest.yaml`.
    * When omitted, only bundled agents are visible to the registry.
    */
   userAgentsDir?: string;
@@ -98,6 +114,15 @@ export interface AppStateStoreOptions {
    * The host hooks this to surface an OS notification.
    */
   onRunFinished?(run: RunRecord): void;
+  /**
+   * Base URL for the install-stats aggregator. Pass `""` to disable
+   * the POST entirely (the recommended setting for dev builds so we
+   * don't pollute production counters). Defaults to the official
+   * deployment URL.
+   */
+  statsApiUrl?: string;
+  /** Version string POSTed alongside install events, e.g. `0.1.4`. */
+  appVersion?: string;
 }
 
 export class AppStateStore {
@@ -107,6 +132,8 @@ export class AppStateStore {
   private readonly openBrowser: (url: string) => Promise<void>;
   private readonly userAgentsDir: string | undefined;
   private readonly onRunFinished: ((run: RunRecord) => void) | undefined;
+  private readonly statsApiUrl: string;
+  private readonly appVersion: string;
   private msalClient: PublicClientApplication | undefined;
   // Soft-cancel set. While a run id is here, progress snapshots from
   // the runtime are dropped so the run stays in "cancelled" state. The
@@ -122,12 +149,19 @@ export class AppStateStore {
       this.openBrowser = async () => undefined;
       this.userAgentsDir = undefined;
       this.onRunFinished = undefined;
+      this.statsApiUrl = "";
+      this.appVersion = "0.0.0";
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
       this.openBrowser = options.openBrowser ?? (async () => undefined);
       this.userAgentsDir = options.userAgentsDir;
       this.onRunFinished = options.onRunFinished;
+      this.statsApiUrl =
+        typeof options.statsApiUrl === "string"
+          ? options.statsApiUrl
+          : DEFAULT_STATS_API_URL;
+      this.appVersion = options.appVersion ?? "0.0.0";
     }
   }
 
@@ -165,7 +199,6 @@ export class AppStateStore {
       runs: persisted.runs,
       trust: deriveTrustState({ provider: activeProvider, activeTenant }),
       tenants: persisted.tenants,
-      realWritesEnabled: persisted.realWritesEnabled,
     };
     if (persisted.activeModelByProviderId) {
       state.activeModelByProviderId = persisted.activeModelByProviderId;
@@ -174,20 +207,6 @@ export class AppStateStore {
       state.activeTenantId = persisted.activeTenantId;
     }
     return state;
-  }
-
-  async setRealWritesEnabled(enabled: boolean): Promise<AppState> {
-    if (typeof enabled !== "boolean") {
-      throw new Error(`setRealWritesEnabled requires a boolean, got ${typeof enabled}.`);
-    }
-    await this.serialize(async () => {
-      const persisted = await this.read();
-      await this.write({
-        ...persisted,
-        realWritesEnabled: enabled,
-      });
-    });
-    return this.getAppState();
   }
 
   listRegistryAgents(): RegistryAgentSummary[] {
@@ -233,9 +252,7 @@ export class AppStateStore {
    * Persist per-install overrides for an agent's `definition.settings[]`.
    * The manifest is the source of truth for the legal key set and type
    * for each value: unknown keys are silently dropped, ill-typed values
-   * throw before any persist. A missing manifest (e.g. the agent doesn't
-   * ship a YAML template) is a no-op — code-based agents have no
-   * declared settings surface in v0.1.
+   * throw before any persist.
    */
   async updateAgentSettings(
     slug: string,
@@ -254,11 +271,6 @@ export class AppStateStore {
       const preview = await this.getAgentManifest(slug);
       if (!preview) {
         throw new Error(`updateAgentSettings: unknown agent "${slug}".`);
-      }
-      if (preview.kind !== "agent-template") {
-        throw new Error(
-          `updateAgentSettings: agent "${slug}" is code-based and does not declare configurable settings in v0.1.`,
-        );
       }
 
       const declared = preview.manifest.definition.settings ?? [];
@@ -459,11 +471,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /**
    * Persist a user-authored agent under `userAgentsDir/<slug>/`. The
-   * slug comes from the manifest's `descriptor.id`. Writes:
-   *   - `manifest.yaml` (the source of truth for runtime behaviour)
-   *   - `manifest.json` (registry metadata projected from the manifest
-   *     so qa-graph and the registry walker can find the agent without
-   *     re-parsing the YAML)
+   * slug comes from the manifest's `descriptor.id`. Writes the
+   * `manifest.yaml` — the only file an agent needs to exist.
    *
    * Refuses to overwrite an existing user agent or to shadow a bundled
    * agent (the user gets a clear error and can rename their draft).
@@ -508,11 +517,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     await mkdir(agentDir, { recursive: true });
     await writeFile(join(agentDir, "manifest.yaml"), `${yamlSource.trimEnd()}\n`, "utf8");
-    await writeFile(
-      join(agentDir, "manifest.json"),
-      `${JSON.stringify(projectManifestJson(manifest), null, 2)}\n`,
-      "utf8",
-    );
 
     return this.getAppState();
   }
@@ -597,6 +601,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async installAgent(agentId: string): Promise<AppState> {
+    let installedSlug: string | undefined;
+    let installIdForReport: string | undefined;
+
     await this.serialize(async () => {
       const persisted = await this.read();
       const existing = persisted.installedAgents.find(
@@ -615,16 +622,67 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         throw new Error(`Unknown registry agent: ${agentId}`);
       }
 
+      const installId = persisted.installId ?? randomUUID();
+
       await this.write({
         ...persisted,
+        installId,
         installedAgents: [
           ...persisted.installedAgents,
           toInstalledAgent(registryAgent, new Date()),
         ],
       });
+
+      installedSlug = registryAgent.slug;
+      installIdForReport = installId;
     });
 
+    if (installedSlug && installIdForReport) {
+      this.reportInstall(installedSlug, installIdForReport);
+    }
+
     return this.getAppState();
+  }
+
+  /**
+   * Fire-and-forget POST to the stats aggregator. Never blocks the
+   * install, never throws, never surfaces UI errors. We don't even
+   * log non-2xx responses at info level — the desktop user has zero
+   * leverage to act on them, and a 404 / 429 from this endpoint must
+   * never feel like the install itself failed.
+   *
+   * User-authored agents (registry path outside the bundled tree)
+   * never report — they don't exist in the public registry, so the
+   * aggregator would reject the slug anyway.
+   */
+  private reportInstall(slug: string, installId: string): void {
+    if (this.statsApiUrl.length === 0) return;
+    if (this.userAgentsDir && this.isUserAuthoredSlug(slug)) return;
+
+    const url = `${this.statsApiUrl.replace(/\/$/, "")}/api/install`;
+    const body = JSON.stringify({
+      slug,
+      installId,
+      version: this.appVersion,
+      platform: process.platform,
+    });
+    void fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      // Keep the request bounded so a hung server doesn't keep the
+      // socket alive forever.
+      signal: AbortSignal.timeout(5_000),
+    }).catch((error) => {
+      // Intentionally swallow. Console-debug for the curious dev only.
+      console.debug("[stats] report install failed:", error);
+    });
+  }
+
+  private isUserAuthoredSlug(slug: string): boolean {
+    if (!this.userAgentsDir) return false;
+    const candidate = join(this.userAgentsDir, slug);
+    return existsSync(candidate);
   }
 
   async setActiveProvider(id: ProviderId): Promise<AppState> {
@@ -1070,15 +1128,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return next;
   }
 
-  // Real writes are only permitted when: (a) the run resolved to a real
-  // tenant Graph adapter (dataSource === "graph") AND (b) the user has
-  // explicitly toggled the global "Enable real Graph writes" setting.
-  // Synthetic runs never pass real writes through, regardless of the
-  // toggle, because there's no tenant to write against.
-  private async resolveRealWrites(selection: { dataSource: RunDataSource }): Promise<boolean> {
-    if (selection.dataSource !== "graph") return false;
-    const persisted = await this.read();
-    return persisted.realWritesEnabled === true;
+  // Real writes flow whenever the run resolved to a real tenant Graph
+  // adapter. Per-write authorization is handled by the typed-phrase diff
+  // confirmation prompt that every write agent pauses for; we don't keep
+  // a separate global toggle. Synthetic runs always pass `realWrites:
+  // false` because there's no tenant to write against.
+  private resolveRealWrites(selection: { dataSource: RunDataSource }): boolean {
+    return selection.dataSource === "graph";
   }
 
   private async driveRun(input: {
@@ -1091,7 +1147,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const llm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId);
-      const realWrites = await this.resolveRealWrites(selection);
+      const realWrites = this.resolveRealWrites(selection);
       const stampedRun = this.stampDataSource(input.run, selection);
       await this.persistRunSnapshot(stampedRun);
       await driver({
@@ -1120,7 +1176,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     try {
       const llm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId);
-      const realWrites = await this.resolveRealWrites(selection);
+      const realWrites = this.resolveRealWrites(selection);
       await executeApply({
         run: input.run,
         agent: input.agent,
@@ -1202,15 +1258,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           : defaultState.installedAgents,
         runs: Array.isArray(parsed.runs) ? parsed.runs : defaultState.runs,
         tenants,
-        // Default to false for older state files written before real-writes
-        // existed; the user must explicitly opt in via Settings.
-        realWritesEnabled:
-          typeof parsed.realWritesEnabled === "boolean"
-            ? parsed.realWritesEnabled
-            : defaultState.realWritesEnabled,
       };
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
+      }
+      if (typeof parsed.installId === "string" && parsed.installId.length > 0) {
+        state.installId = parsed.installId;
       }
       const rawActiveModels = (parsed as { activeModelByProviderId?: unknown })
         .activeModelByProviderId;
@@ -1518,44 +1571,3 @@ function stripCodeFences(source: string): string {
   return s.trim();
 }
 
-/**
- * Project the parsed Agent Template manifest into a minimal
- * manifest.json that the registry walker (and qa-graph) can consume
- * without re-parsing the YAML. The registry uses manifest.json for
- * fast metadata reads; the YAML drives runtime behaviour.
- */
-function projectManifestJson(manifest: AgentTemplate): Record<string, unknown> {
-  const scopes = new Set<string>();
-  const graphOps: Array<Record<string, unknown>> = [];
-  for (const skill of manifest.skills) {
-    if (skill.format === "graph") {
-      for (const scope of skill.settings.scopes ?? []) scopes.add(scope);
-      const op: Record<string, unknown> = {
-        method: skill.settings.method,
-        path: skill.settings.path,
-      };
-      if (skill.settings.select && skill.settings.select.length > 0) {
-        op.select = skill.settings.select;
-      }
-      graphOps.push(op);
-    } else if (skill.format === "write") {
-      for (const scope of skill.settings.scopes ?? []) scopes.add(scope);
-    }
-  }
-
-  return {
-    id: manifest.descriptor.id,
-    slug: manifest.descriptor.id,
-    name: manifest.descriptor.name,
-    description: manifest.descriptor.description,
-    mode: manifest.descriptor.mode,
-    category: manifest.descriptor.category,
-    version: manifest.descriptor.version,
-    author: manifest.descriptor.author,
-    scopes: [...scopes],
-    ...(manifest.descriptor.preferredModel
-      ? { preferredModel: manifest.descriptor.preferredModel }
-      : {}),
-    ...(graphOps.length > 0 ? { graphOperations: graphOps } : {}),
-  };
-}

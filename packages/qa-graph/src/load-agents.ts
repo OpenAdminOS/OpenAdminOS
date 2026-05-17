@@ -2,7 +2,9 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { GraphOperation } from "@openagents/agent-sdk";
+import { load as parseYaml } from "js-yaml";
+
+import type { GraphHttpMethod, GraphOperation } from "@openagents/agent-sdk";
 
 export interface AgentManifest {
   id: string;
@@ -19,25 +21,88 @@ export function loadAgentManifests(): AgentManifest[] {
   return readdirSync(agentsRoot)
     .map((entry) => join(agentsRoot, entry))
     .filter((entryPath) => statSync(entryPath).isDirectory())
-    .map((agentDir) => parseManifest(join(agentDir, "manifest.json")))
+    .filter((agentDir) => {
+      try {
+        return statSync(join(agentDir, "manifest.yaml")).isFile();
+      } catch {
+        return false;
+      }
+    })
+    .map((agentDir) => parseManifest(join(agentDir, "manifest.yaml")))
     .sort((left, right) => left.slug.localeCompare(right.slug));
 }
 
-function parseManifest(manifestPath: string): AgentManifest {
-  const raw = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
-  const operations = Array.isArray(raw.graphOperations)
-    ? (raw.graphOperations as GraphOperation[])
-    : [];
+interface ParsedSkill {
+  format?: string;
+  settings?: {
+    method?: string;
+    path?: string;
+    select?: unknown;
+    scopes?: unknown;
+  };
+  detail?: string;
+}
 
+interface ParsedManifest {
+  descriptor?: {
+    id?: string;
+    name?: string;
+    mode?: string;
+  };
+  skills?: ParsedSkill[];
+}
+
+function parseManifest(manifestPath: string): AgentManifest {
+  const raw = parseYaml(readFileSync(manifestPath, "utf8")) as ParsedManifest;
+  const descriptor = raw?.descriptor ?? {};
+  const skills = Array.isArray(raw?.skills) ? raw.skills : [];
+
+  const scopes = new Set<string>();
+  const graphOperations: GraphOperation[] = [];
+  for (const skill of skills) {
+    const skillScopes = skill?.settings?.scopes;
+    if (Array.isArray(skillScopes)) {
+      for (const scope of skillScopes) {
+        if (typeof scope === "string") scopes.add(scope);
+      }
+    }
+    if (skill?.format === "graph" && skill.settings) {
+      const method = skill.settings.method;
+      const path = skill.settings.path;
+      if (!isGraphMethod(method) || typeof path !== "string") continue;
+      const op: GraphOperation = { method, path };
+      const select = skill.settings.select;
+      if (Array.isArray(select)) {
+        const stringSelect = select.filter((item): item is string => typeof item === "string");
+        if (stringSelect.length > 0) op.select = stringSelect;
+      }
+      if (typeof skill.detail === "string" && skill.detail.length > 0) {
+        op.notes = skill.detail;
+      }
+      graphOperations.push(op);
+    }
+  }
+
+  const id = typeof descriptor.id === "string" ? descriptor.id : "";
   return {
-    id: String(raw.id),
-    slug: String(raw.slug),
-    name: String(raw.name),
-    scopes: Array.isArray(raw.scopes) ? (raw.scopes as string[]) : [],
-    mode: raw.mode === "write" ? "write" : "read",
-    graphOperations: operations,
+    id,
+    slug: id,
+    name: typeof descriptor.name === "string" ? descriptor.name : id,
+    scopes: [...scopes],
+    mode: descriptor.mode === "write" ? "write" : "read",
+    graphOperations,
     manifestPath,
   };
+}
+
+function isGraphMethod(value: unknown): value is GraphHttpMethod {
+  return (
+    value === "GET" ||
+    value === "POST" ||
+    value === "PATCH" ||
+    value === "PUT" ||
+    value === "DELETE"
+  );
 }
 
 function findAgentsRoot(): string {

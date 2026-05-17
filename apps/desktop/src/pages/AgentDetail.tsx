@@ -132,9 +132,7 @@ export default function AgentDetail() {
             {preview && (
               <>
                 <span className="opacity-50">·</span>
-                <Pill tone={preview.kind === "agent-template" ? "accent" : "default"}>
-                  {preview.kind === "agent-template" ? "YAML template" : "Code-based"}
-                </Pill>
+                <Pill tone="accent">YAML template</Pill>
               </>
             )}
           </span>
@@ -159,7 +157,6 @@ export default function AgentDetail() {
               disabled={
                 previewLoading ||
                 !preview ||
-                preview.kind !== "agent-template" ||
                 (preview.manifest.definition.settings ?? []).length === 0
               }
               onClick={() => setConfigureOpen(true)}
@@ -168,11 +165,9 @@ export default function AgentDetail() {
                   ? "Loading manifest…"
                   : !preview
                     ? "Manifest unavailable"
-                    : preview.kind !== "agent-template"
-                      ? "This agent is code-based; no install-time settings"
-                      : (preview.manifest.definition.settings ?? []).length === 0
-                        ? "This agent declares no configurable settings"
-                        : "Edit per-install settings"
+                    : (preview.manifest.definition.settings ?? []).length === 0
+                      ? "This agent declares no configurable settings"
+                      : "Edit per-install settings"
               }
             >
               {previewLoading ? "Loading…" : "Configure"}
@@ -362,7 +357,7 @@ export default function AgentDetail() {
           </div>
         </div>
       </PageBody>
-      {preview && preview.kind === "agent-template" && (
+      {preview && (
         <ConfigureAgentModal
           open={configureOpen}
           onClose={() => setConfigureOpen(false)}

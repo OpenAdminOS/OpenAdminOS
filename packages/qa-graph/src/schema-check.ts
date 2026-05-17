@@ -23,10 +23,7 @@ export interface ManifestSchemaReport {
 
 /**
  * Validate every `agents/<slug>/manifest.yaml` against the canonical
- * JSON Schema. Agents without a YAML manifest (code-based) are skipped.
- * Returns one report per agent; an empty array means there's nothing to
- * validate (rare — at least one of our two showcase agents always ships
- * YAML).
+ * JSON Schema. Returns one report per agent.
  */
 export function runManifestSchemaChecks(): ManifestSchemaReport[] {
   const schema = loadSchema();
@@ -137,7 +134,7 @@ function findManifestYamlFiles(): string[] {
     .sort();
 }
 
-function repoRoot(): string {
+export function repoRoot(): string {
   for (const start of [process.cwd(), dirname(fileURLToPath(import.meta.url))]) {
     let current = resolve(start);
     while (true) {

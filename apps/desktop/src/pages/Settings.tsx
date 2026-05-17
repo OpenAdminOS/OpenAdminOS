@@ -41,7 +41,6 @@ export default function Settings() {
     connectTenant,
     setActiveTenant,
     disconnectTenant,
-    setRealWritesEnabled,
   } = useAppState();
   const [tenantBusy, setTenantBusy] = useState(false);
   const [tenantError, setTenantError] = useState<string | null>(null);
@@ -99,13 +98,7 @@ export default function Settings() {
             />
           )}
           {section === "general" && <GeneralSection />}
-          {section === "privacy" && (
-            <PrivacySection
-              trust={state.trust}
-              realWritesEnabled={state.realWritesEnabled}
-              onRealWritesChange={setRealWritesEnabled}
-            />
-          )}
+          {section === "privacy" && <PrivacySection trust={state.trust} />}
           {section === "about" && <AboutSection />}
         </PageBody>
       </div>
@@ -530,26 +523,7 @@ function GeneralSection() {
   );
 }
 
-function PrivacySection({
-  trust,
-  realWritesEnabled,
-  onRealWritesChange,
-}: {
-  trust: TrustState;
-  realWritesEnabled: boolean;
-  onRealWritesChange: (enabled: boolean) => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  const handleToggle = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await onRealWritesChange(!realWritesEnabled);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+function PrivacySection({ trust }: { trust: TrustState }) {
   return (
     <div className="max-w-[720px]">
       <SectionTitle
@@ -585,27 +559,12 @@ function PrivacySection({
           }
         />
         <SettingRow
-          label="Enable real Graph writes"
-          description="Off by default. When ON, approved write agents call Microsoft Graph and make real changes after typed diff confirmation. When OFF, the apply phase emits a simulated trace -- no Graph mutating calls. The diff prompt itself is mandatory in either mode and cannot be disabled."
+          label="Graph writes"
+          description="Write-mode agents always call Microsoft Graph for real when a tenant is connected. There is no global toggle — every write run pauses for a typed-phrase confirmation against the live diff, which is the only place to authorize a change."
           control={
-            <button
-              onClick={() => void handleToggle()}
-              disabled={busy}
-              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11.5px] font-medium ring-1 transition-colors ${
-                realWritesEnabled
-                  ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/35"
-                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-[var(--color-border)]"
-              } ${busy ? "opacity-50" : ""}`}
-            >
-              <span
-                className={`inline-block h-1.5 w-1.5 rounded-full ${
-                  realWritesEnabled
-                    ? "bg-[var(--color-warning)]"
-                    : "bg-[var(--color-text-muted)]"
-                }`}
-              />
-              {realWritesEnabled ? "On — writes will hit Graph" : "Off — simulated"}
-            </button>
+            <Pill tone="warning">
+              <StatusDot tone="warning" /> Confirmed per run
+            </Pill>
           }
         />
         <SettingRow

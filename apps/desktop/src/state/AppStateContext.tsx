@@ -40,7 +40,6 @@ interface AppStateContextValue {
   connectTenant: () => Promise<TenantRecord | undefined>;
   setActiveTenant: (id: string) => Promise<void>;
   disconnectTenant: (id: string) => Promise<void>;
-  setRealWritesEnabled: (enabled: boolean) => Promise<void>;
   updateAgentSettings: (
     slug: string,
     values: Record<string, unknown>,
@@ -71,7 +70,6 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
     runs: [],
     trust: deriveTrustState(activeProvider),
     tenants: [],
-    realWritesEnabled: false,
   };
 }
 
@@ -337,21 +335,6 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
-  const setRealWritesEnabled = useCallback(async (enabled: boolean) => {
-    const api = getOpenAgentsApi();
-    if (!api) return;
-    setError(null);
-    try {
-      const nextState = await api.setRealWritesEnabled(enabled);
-      setState(nextState);
-      setRegistryAgents(nextState.registryAgents);
-    } catch (caughtError) {
-      const settingError = toError(caughtError);
-      setError(settingError);
-      throw settingError;
-    }
-  }, []);
-
   const updateAgentSettings = useCallback(
     async (slug: string, values: Record<string, unknown>) => {
       const api = getOpenAgentsApi();
@@ -521,7 +504,6 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       connectTenant,
       setActiveTenant,
       disconnectTenant,
-      setRealWritesEnabled,
       updateAgentSettings,
       updateAgentSchedule,
       draftAgentManifest,
@@ -534,7 +516,6 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       disconnectTenant,
       draftAgentManifest,
       error,
-      setRealWritesEnabled,
       installAgent,
       loading,
       refresh,

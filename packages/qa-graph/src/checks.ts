@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 
 import { load as parseYaml } from "js-yaml";
 
@@ -36,16 +35,15 @@ export async function runAgentChecks(
 }
 
 function checkAgentUsesLlm(agent: AgentManifest): CheckResult {
-  const yamlPath = join(dirname(agent.manifestPath), "manifest.yaml");
   let parsed: { skills?: Array<{ format?: string; id?: string }> };
   try {
-    const raw = readFileSync(yamlPath, "utf8");
+    const raw = readFileSync(agent.manifestPath, "utf8");
     parsed = parseYaml(raw) as { skills?: Array<{ format?: string; id?: string }> };
   } catch (error) {
     return {
       name: "uses-llm",
       severity: "warn",
-      message: `Could not read sibling manifest.yaml to verify LLM use: ${
+      message: `Could not read manifest.yaml to verify LLM use: ${
         error instanceof Error ? error.message : String(error)
       }`,
     };

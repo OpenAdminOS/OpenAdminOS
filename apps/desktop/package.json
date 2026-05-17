@@ -8,7 +8,7 @@
     "dev": "npm run build:packages && npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dev:renderer": "vite",
     "build": "npm run build:packages && tsc -b && npm run build:electron && vite build",
-    "build:packages": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/runtime && npm run build -w @openagents/agent-find-inactive-devices && npm run build -w @openagents/agent-retire-inactive-devices",
+    "build:packages": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/runtime",
     "build:electron": "tsc -p tsconfig.electron.json",
     "dist": "npm run build && electron-builder",
     "preview": "vite preview",
@@ -52,6 +52,10 @@
       {
         "from": "../../agents",
         "to": "agents"
+      },
+      {
+        "from": "../../stats",
+        "to": "stats"
       }
     ],
     "publish": [

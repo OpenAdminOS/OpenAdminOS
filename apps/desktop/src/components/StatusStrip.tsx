@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import { useAppState } from "../state";
-import { IconCloud, IconHardDrive, IconShield } from "./icons";
+import { IconCloud, IconHardDrive } from "./icons";
 
 export function StatusStrip() {
   const { state } = useAppState();
@@ -47,22 +47,6 @@ export function StatusStrip() {
           <span className="text-[var(--color-text-soft)]">
             {activeProvider?.name ?? "no provider"}
             {activeProvider?.defaultModel ? ` · ${activeProvider.defaultModel}` : ""}
-          </span>
-        </span>
-
-        <span className="opacity-40">·</span>
-
-        <span className="inline-flex items-center gap-1.5">
-          <IconShield
-            size={10}
-            className={
-              state.realWritesEnabled
-                ? "text-[var(--color-warning)]"
-                : "text-[var(--color-text-muted)]"
-            }
-          />
-          <span className="text-[var(--color-text-soft)]">
-            real writes {state.realWritesEnabled ? "on" : "off"}
           </span>
         </span>
       </div>

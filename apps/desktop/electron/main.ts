@@ -306,10 +306,6 @@ function registerIpcHandlers() {
   ipcMain.handle("openagents:disconnect-tenant", (_event, id: string) =>
     store.disconnectTenant(id),
   );
-  ipcMain.handle(
-    "openagents:set-real-writes-enabled",
-    (_event, enabled: boolean) => store.setRealWritesEnabled(enabled),
-  );
   ipcMain.handle("openagents:get-agent-manifest", (_event, slug: string) =>
     store.getAgentManifest(slug),
   );
@@ -385,6 +381,13 @@ if (!gotLock) {
       filePath: join(userDataDir, "state.json"),
       tokenStore,
       userAgentsDir: join(userDataDir, "agents"),
+      // Only packaged production builds report installs to the public
+      // stats aggregator. Dev/CLI builds default to the empty string,
+      // which disables the POST entirely.
+      statsApiUrl: app.isPackaged
+        ? process.env.OPENAGENTS_STATS_API ?? undefined
+        : process.env.OPENAGENTS_STATS_API ?? "",
+      appVersion: app.getVersion(),
       openBrowser: async (url: string) => {
         await shell.openExternal(url);
       },

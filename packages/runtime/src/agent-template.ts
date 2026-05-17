@@ -1,8 +1,12 @@
 import { load as parseYaml } from "js-yaml";
 
 import type {
+  AgentAuthor,
+  AgentCategory,
+  AgentMode,
   AgentModule,
   AgentRunResult,
+  GraphOperation,
   GraphStep,
   LlmStep,
   ManagedDeviceRecord,
@@ -557,7 +561,7 @@ async function runGraphSkill(
   }
 
   throw new Error(
-    `graph step "${skill.id}": path "${settings.path}" is not yet supported by the agent template interpreter. Use a code-based agent or extend RunGraphApi.`,
+    `graph step "${skill.id}": path "${settings.path}" is not yet supported by the agent template interpreter. Extend RunGraphApi to add support.`,
   );
 }
 
@@ -855,4 +859,62 @@ function collectScopes(manifest: AgentTemplate): string[] {
     }
   }
   return [...scopes];
+}
+
+function collectGraphOperations(manifest: AgentTemplate): GraphOperation[] {
+  const operations: GraphOperation[] = [];
+  for (const skill of manifest.skills) {
+    if (skill.format !== "graph") continue;
+    const op: GraphOperation = {
+      method: skill.settings.method,
+      path: skill.settings.path,
+    };
+    if (skill.settings.select && skill.settings.select.length > 0) {
+      op.select = [...skill.settings.select];
+    }
+    if (skill.detail) {
+      op.notes = skill.detail;
+    }
+    operations.push(op);
+  }
+  return operations;
+}
+
+/**
+ * Project a parsed manifest into the listing shape consumed by the
+ * Hub / Agent Detail surfaces. This is the YAML-native replacement for
+ * the old `manifest.json` projection — every field here is derivable
+ * from the `descriptor` block plus the declared `skills`.
+ */
+export function agentTemplateToRegistrySummary(
+  manifest: AgentTemplate,
+): {
+  id: string;
+  registryId: string;
+  slug: string;
+  name: string;
+  description: string;
+  mode: AgentMode;
+  category: AgentCategory;
+  scopes: string[];
+  author: AgentAuthor;
+  version: string;
+  preferredModel?: string;
+  graphOperations: GraphOperation[];
+} {
+  const descriptor = manifest.descriptor;
+  return {
+    id: descriptor.id,
+    registryId: descriptor.id,
+    slug: descriptor.id,
+    name: descriptor.name,
+    description: descriptor.description,
+    mode: descriptor.mode,
+    category: descriptor.category,
+    scopes: collectScopes(manifest),
+    author: descriptor.author,
+    version: descriptor.version,
+    ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
+    graphOperations: collectGraphOperations(manifest),
+  };
 }

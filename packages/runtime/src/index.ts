@@ -1,17 +1,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import type {
-  AgentAuthor,
-  AgentCategory,
   AgentManifestPreview,
-  AgentMode,
   AgentModule,
   AgentRunResult,
   AgentSummary,
-  GraphHttpMethod,
-  GraphOperation,
   LlmStreamChunk,
   LlmTokenUsage,
   ProviderId,
@@ -33,6 +28,7 @@ import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import {
   parseAgentTemplate,
   agentTemplateToModule,
+  agentTemplateToRegistrySummary,
 } from "./agent-template.js";
 
 export { createOllamaLlm, noopLlm } from "./llm-ollama.js";
@@ -58,12 +54,45 @@ export {
 export { createGraphAdapter, type GraphAdapterOptions } from "./graph-adapter.js";
 export { createSyntheticGraph } from "./graph-fixtures.js";
 
-type JsonObject = Record<string, unknown>;
-
 const builtInRegistryRoot = "agents";
 
 export function listBuiltInRegistryAgents(): RegistryAgentSummary[] {
-  return listAgentsInRoot(findAgentsRoot(), { absolutePaths: false });
+  const agentsRoot = findAgentsRoot();
+  const agents = listAgentsInRoot(agentsRoot, { absolutePaths: false });
+  const stats = loadAgentStats(dirname(agentsRoot));
+  if (!stats) return agents;
+  return agents.map((agent) => {
+    const entry = stats[agent.slug];
+    return entry && typeof entry.installs === "number"
+      ? { ...agent, installs: entry.installs }
+      : agent;
+  });
+}
+
+interface AgentStatsEntry {
+  installs?: number;
+  installs7d?: number;
+}
+
+/**
+ * Read `<root>/stats/agents.json` next to the bundled `agents/`
+ * directory. Returns `null` when the file is absent or malformed —
+ * stats are non-critical, so we never throw from this path.
+ */
+function loadAgentStats(root: string): Record<string, AgentStatsEntry> | null {
+  const statsPath = join(root, "stats", "agents.json");
+  if (!existsSync(statsPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(statsPath, "utf8")) as {
+      agents?: Record<string, AgentStatsEntry>;
+    };
+    if (parsed && typeof parsed === "object" && parsed.agents && typeof parsed.agents === "object") {
+      return parsed.agents;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -109,9 +138,9 @@ function listAgentsInRoot(
         return false;
       }
     })
-    .filter((agentPath) => existsSync(join(agentPath, "manifest.json")))
+    .filter((agentPath) => existsSync(join(agentPath, "manifest.yaml")))
     .map((agentPath) =>
-      loadManifest(join(agentPath, "manifest.json"), agentPath, {
+      loadRegistrySummaryFromYaml(agentPath, {
         absoluteRegistryPath: options.absolutePaths,
       }),
     )
@@ -181,10 +210,10 @@ export interface ExecuteRunInput {
   graph?: RunGraphApi;
   /**
    * Whether the agent is allowed to call destructive Graph methods
-   * during this run. The host computes this from
-   * `tenant !== null && realWritesEnabled === true`. Defaults to
-   * `false` so unconfigured callers cannot accidentally perform real
-   * writes.
+   * during this run. The host sets `true` whenever the run is bound to
+   * a real tenant (i.e. `dataSource === "graph"`); the per-write typed
+   * diff confirmation is the user-facing gate. Defaults to `false` so
+   * unconfigured callers cannot accidentally perform real writes.
    */
   realWrites?: boolean;
   onProgress(run: RunRecord): void | Promise<void>;
@@ -586,7 +615,7 @@ function validatePlan(plan: WritePlan, agentSlug: string): void {
 /**
  * Read-only inspection of an agent's on-disk manifest, exposed to the
  * renderer for the Agent detail "preview" surface. Returns `undefined`
- * when neither a manifest.yaml nor a compiled code module can be found.
+ * when no manifest.yaml can be found.
  */
 export function loadAgentManifestPreview(
   agent: AgentSummary | RegistryAgentSummary,
@@ -599,97 +628,37 @@ export function loadAgentManifestPreview(
   }
 
   const yamlPath = join(agentDir, "manifest.yaml");
-  if (existsSync(yamlPath)) {
-    const sourceText = readFileSync(yamlPath, "utf8");
-    let manifest;
-    try {
-      manifest = parseAgentTemplate(sourceText);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Agent template at ${yamlPath} is invalid: ${message}`,
-      );
-    }
-    return {
-      kind: "agent-template",
-      ...(agent.registryPath ? { registryPath: agent.registryPath } : {}),
-      manifest,
-      sourceText,
-    };
+  if (!existsSync(yamlPath)) {
+    return undefined;
   }
-
-  // Code-based fallback: show metadata from manifest.json + a pointer to the
-  // source location so curious users can inspect the code in GitHub.
-  const jsonPath = join(agentDir, "manifest.json");
-  if (existsSync(jsonPath)) {
-    const sourceText = readFileSync(jsonPath, "utf8");
-    const metadata = loadManifest(jsonPath, agentDir);
-    return {
-      kind: "code-based",
-      ...(agent.registryPath ? { registryPath: agent.registryPath } : {}),
-      metadata,
-      sourceText,
-      sourceLocation: agent.registryPath ?? agentDir,
-    };
+  const sourceText = readFileSync(yamlPath, "utf8");
+  let manifest;
+  try {
+    manifest = parseAgentTemplate(sourceText);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Agent template at ${yamlPath} is invalid: ${message}`);
   }
-
-  return undefined;
+  return {
+    kind: "agent-template",
+    ...(agent.registryPath ? { registryPath: agent.registryPath } : {}),
+    manifest,
+    sourceText,
+  };
 }
 
 export async function loadAgentModule(
   agent: AgentSummary | RegistryAgentSummary,
 ): Promise<AgentModule> {
   const agentDir = resolveAgentDirectory(agent);
-
-  // Agent Template path: declarative YAML manifest. Preferred over a legacy code-based
-  // module when present, so an agent can ship just a manifest.yaml and a
-  // manifest.json (metadata) without any TypeScript source.
   const yamlPath = join(agentDir, "manifest.yaml");
-  if (existsSync(yamlPath)) {
-    const yamlSource = readFileSync(yamlPath, "utf8");
-    const manifest = parseAgentTemplate(yamlSource);
-    return agentTemplateToModule(manifest);
-  }
-
-  // Code-based agent: a compiled TypeScript / JavaScript module that
-  // default-exports an AgentModule. Used when an agent needs logic the
-  // template DSL can't express; the escape hatch.
-  const candidates = [
-    join(agentDir, "dist", "agent.js"),
-    join(agentDir, "dist", "agent.mjs"),
-  ];
-
-  const entryPath = candidates.find((candidate) => existsSync(candidate));
-  if (!entryPath) {
+  if (!existsSync(yamlPath)) {
     throw new Error(
-      `Agent "${agent.slug}" has no manifest.yaml and no compiled entry. Expected one of: manifest.yaml, ${candidates.join(", ")}.`,
+      `Agent "${agent.slug}" has no manifest.yaml at ${agentDir}.`,
     );
   }
-
-  const moduleUrl = pathToFileURL(entryPath).href;
-  const loaded = (await import(moduleUrl)) as { default?: AgentModule };
-  const candidate = loaded.default;
-  if (!candidate || typeof candidate !== "object" || candidate === null) {
-    throw new Error(
-      `Agent "${agent.slug}" module at ${entryPath} did not default-export an agent.`,
-    );
-  }
-
-  const mode = (candidate as { mode?: string }).mode;
-  if (mode === "read" && typeof (candidate as ReadAgentModule).run === "function") {
-    return candidate;
-  }
-  if (
-    mode === "write" &&
-    typeof (candidate as WriteAgentModule).plan === "function" &&
-    typeof (candidate as WriteAgentModule).apply === "function"
-  ) {
-    return candidate;
-  }
-
-  throw new Error(
-    `Agent "${agent.slug}" module at ${entryPath} did not export a valid read or write agent.`,
-  );
+  const manifest = parseAgentTemplate(readFileSync(yamlPath, "utf8"));
+  return agentTemplateToModule(manifest);
 }
 
 function resolveAgentDirectory(agent: AgentSummary | RegistryAgentSummary): string {
@@ -765,21 +734,18 @@ function getSearchStartPaths(): string[] {
   ];
 }
 
-function loadManifest(
-  manifestPath: string,
+function loadRegistrySummaryFromYaml(
   agentPath: string,
   options: { absoluteRegistryPath?: boolean } = {},
 ): RegistryAgentSummary {
-  if (!existsSync(manifestPath)) {
-    throw new Error(`Missing built-in agent manifest: ${manifestPath}`);
+  const yamlPath = join(agentPath, "manifest.yaml");
+  let manifest;
+  try {
+    manifest = parseAgentTemplate(readFileSync(yamlPath, "utf8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Agent manifest at ${yamlPath} is invalid: ${message}`);
   }
-
-  const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as unknown;
-  if (!isJsonObject(parsed)) {
-    throw new Error(`Built-in agent manifest must be an object: ${manifestPath}`);
-  }
-
-  validateManifest(parsed, manifestPath);
 
   // User-authored agents (NL2Agent) sit outside the bundled `agents/`
   // tree, so a "agents/<slug>" relative path would be ambiguous or
@@ -790,144 +756,9 @@ function loadManifest(
     : relativeRegistryPath(agentPath);
 
   return {
-    id: parsed.id,
-    registryId: parsed.id,
+    ...agentTemplateToRegistrySummary(manifest),
     registryPath,
-    slug: parsed.slug,
-    name: parsed.name,
-    description: parsed.description,
-    mode: parsed.mode,
-    category: parsed.category,
-    scopes: parsed.scopes,
-    author: parsed.author,
-    version: parsed.version,
-    preferredModel:
-      typeof parsed.preferredModel === "string" ? parsed.preferredModel : undefined,
-    installs: typeof parsed.installs === "number" ? parsed.installs : undefined,
-    graphOperations: parsed.graphOperations,
   };
-}
-
-function validateManifest(
-  manifest: JsonObject,
-  manifestPath: string,
-): asserts manifest is {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  mode: AgentMode;
-  category: AgentCategory;
-  scopes: string[];
-  author: AgentAuthor;
-  version: string;
-  preferredModel?: string;
-  installs?: number;
-  graphOperations?: GraphOperation[];
-} {
-  requireString(manifest, "id", manifestPath);
-  requireString(manifest, "slug", manifestPath);
-  requireString(manifest, "name", manifestPath);
-  requireString(manifest, "description", manifestPath);
-  requireString(manifest, "version", manifestPath);
-  requireStringArray(manifest, "scopes", manifestPath);
-
-  if (manifest.mode !== "read" && manifest.mode !== "write") {
-    throw new Error(`Invalid mode in ${manifestPath}: ${String(manifest.mode)}`);
-  }
-
-  if (!isAgentCategory(manifest.category)) {
-    throw new Error(
-      `Invalid category in ${manifestPath}: ${String(manifest.category)}`,
-    );
-  }
-
-  if (!isJsonObject(manifest.author)) {
-    throw new Error(`Missing author object in ${manifestPath}`);
-  }
-
-  requireString(manifest.author, "name", manifestPath);
-
-  if (manifest.graphOperations !== undefined) {
-    validateGraphOperations(manifest.graphOperations, manifestPath);
-  }
-}
-
-function validateGraphOperations(
-  value: unknown,
-  manifestPath: string,
-): asserts value is GraphOperation[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`graphOperations in ${manifestPath} must be an array.`);
-  }
-  for (const entry of value) {
-    if (!isJsonObject(entry)) {
-      throw new Error(`graphOperations in ${manifestPath} must contain objects.`);
-    }
-    if (!isGraphMethod(entry.method)) {
-      throw new Error(
-        `graphOperations in ${manifestPath} has invalid method: ${String(entry.method)}`,
-      );
-    }
-    if (typeof entry.path !== "string" || entry.path.length === 0) {
-      throw new Error(`graphOperations in ${manifestPath} has missing path.`);
-    }
-    if (entry.select !== undefined) {
-      if (!Array.isArray(entry.select) || entry.select.some((item) => typeof item !== "string")) {
-        throw new Error(
-          `graphOperations in ${manifestPath} has invalid select array.`,
-        );
-      }
-    }
-    if (entry.notes !== undefined && typeof entry.notes !== "string") {
-      throw new Error(`graphOperations in ${manifestPath} has invalid notes.`);
-    }
-  }
-}
-
-function isGraphMethod(value: unknown): value is GraphHttpMethod {
-  return (
-    value === "GET" ||
-    value === "POST" ||
-    value === "PATCH" ||
-    value === "PUT" ||
-    value === "DELETE"
-  );
-}
-
-function isAgentCategory(value: unknown): value is AgentCategory {
-  return (
-    value === "devices" ||
-    value === "apps" ||
-    value === "policies" ||
-    value === "compliance" ||
-    value === "updates"
-  );
-}
-
-function requireString(
-  object: JsonObject,
-  key: string,
-  manifestPath: string,
-): void {
-  if (typeof object[key] !== "string" || object[key].length === 0) {
-    throw new Error(`Missing ${key} string in ${manifestPath}`);
-  }
-}
-
-function requireStringArray(
-  object: JsonObject,
-  key: string,
-  manifestPath: string,
-): void {
-  const value = object[key];
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error(`Missing ${key} string array in ${manifestPath}`);
-  }
-}
-
-function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeIsoDate(value: Date | string, fieldName: string): string {

@@ -8,6 +8,7 @@ import {
   reportExitCode,
   runAgentChecks,
   runManifestSchemaChecks,
+  runStatsChecks,
   type AgentReport,
   type ProjectReport,
 } from "./index.js";
@@ -25,11 +26,13 @@ async function main(): Promise<void> {
 
   const fixtureResults = await checkFixtureAgainstResource(managedDeviceFixture, client);
   const schemas = runManifestSchemaChecks();
+  const stats = runStatsChecks();
 
   const report: ProjectReport = {
     agents,
     fixtures: [{ name: managedDeviceFixture.fixtureName, results: fixtureResults }],
     schemas,
+    stats,
   };
 
   process.stdout.write(`${formatReport(report)}\n`);

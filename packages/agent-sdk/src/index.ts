@@ -216,14 +216,6 @@ export interface AppState {
   trust: TrustState;
   tenants: TenantRecord[];
   activeTenantId?: string;
-  /**
-   * Global toggle that gates whether write-mode agents may call real
-   * Microsoft Graph mutating endpoints. Default `false`. Even when `true`,
-   * every write run still pauses for typed diff confirmation; this toggle
-   * only controls whether the approved `apply` phase actually hits Graph
-   * or emits a simulated trace.
-   */
-  realWritesEnabled: boolean;
 }
 
 export interface OpenAgentsApi {
@@ -262,7 +254,6 @@ export interface OpenAgentsApi {
   connectTenant(): Promise<AppState>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
-  setRealWritesEnabled(enabled: boolean): Promise<AppState>;
   getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined>;
   /**
    * Persist per-install overrides for the named agent's
@@ -373,31 +364,17 @@ export interface AgentDraft {
 
 /**
  * Renderer-friendly snapshot of an agent's manifest, used by the Agent
- * detail screen to render a transparency-first preview of what the agent
- * actually does. Two flavours mirror the two authoring modes:
- *
- * - `agent-template`  — the agent ships a YAML pipeline. `manifest` is the
- *                       parsed structure; `source` is the raw YAML text for
- *                       the "View raw" affordance.
- * - `code-based`      — the agent ships a TypeScript / JavaScript module.
- *                       We can only show metadata from `manifest.json`; the
- *                       actual logic lives in code. `sourceLocation` points
- *                       at the file path relative to the monorepo root.
+ * detail screen to render a transparency-first preview of what the
+ * agent actually does. Every agent ships a declarative YAML pipeline;
+ * `manifest` is the parsed structure and `sourceText` is the raw YAML
+ * for the "View raw" affordance.
  */
-export type AgentManifestPreview =
-  | {
-      kind: "agent-template";
-      registryPath?: string;
-      manifest: AgentTemplate;
-      sourceText: string;
-    }
-  | {
-      kind: "code-based";
-      registryPath?: string;
-      metadata: RegistryAgentSummary;
-      sourceText?: string;
-      sourceLocation: string;
-    };
+export interface AgentManifestPreview {
+  kind: "agent-template";
+  registryPath?: string;
+  manifest: AgentTemplate;
+  sourceText: string;
+}
 
 export type AgentDefinition = AgentContract &
   Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs">>;
@@ -569,8 +546,8 @@ export interface RunGraphApi {
    * Calls `POST /deviceManagement/managedDevices/{managedDevice-id}/retire`.
    * Destructive — only invoke after the user has approved a `WritePlan`
    * via typed diff confirmation. The runtime's policy gating (tenant
-   * connected + real-writes toggle ON) is surfaced via `RunContext.realWrites`;
-   * agents should branch on that flag before calling this method.
+   * connected) is surfaced via `RunContext.realWrites`; agents should
+   * branch on that flag before calling this method.
    */
   retireManagedDevice(deviceId: string): Promise<void>;
 }
@@ -648,13 +625,13 @@ export interface RunContext {
   /**
    * Whether write actions invoked via `ctx.graph.*` will hit real Graph.
    *
-   * `true`  — a tenant is connected AND the user has flipped the global
-   *           "Enable real Graph writes" toggle ON. Destructive operations
-   *           in `apply` should call the real Graph methods.
-   * `false` — no tenant connected, OR the toggle is OFF. `apply` should
-   *           emit a log line describing what *would* have happened and
-   *           skip the destructive call so the synthetic / blocked mode
-   *           remains honest about not touching the tenant.
+   * `true`  — a tenant is connected. Destructive operations in `apply`
+   *           should call the real Graph methods after the user has
+   *           approved the run via typed diff confirmation.
+   * `false` — synthetic mode (no tenant connected). `apply` should emit
+   *           a log line describing what *would* have happened and skip
+   *           the destructive call so synthetic mode stays honest about
+   *           not touching a tenant.
    *
    * Read-only operations (`listManagedDevices`) ignore this flag and
    * always reflect the active data source.

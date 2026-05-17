@@ -10,6 +10,7 @@ import {
   IconBadgeCheck,
   IconBolt,
   IconCheck,
+  IconDownload,
   IconFire,
   IconSearch,
   IconShield,
@@ -325,8 +326,9 @@ function FeaturedCard({
             <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               Category
             </div>
-            <div className="mt-1.5 text-[13px] capitalize text-[var(--color-text)]">
-              {agent.category}
+            <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px] capitalize text-[var(--color-text)]">
+              <span>{agent.category}</span>
+              <InstallCount count={agent.installs} size="md" />
             </div>
           </div>
           <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
@@ -401,9 +403,17 @@ function TrendingCard({
           {agent.description}
         </p>
         <div className="mt-1 flex items-center justify-between">
-          <span className="font-mono text-[10.5px] text-[var(--color-text-muted)] capitalize">
-            {agent.category}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10.5px] text-[var(--color-text-muted)] capitalize">
+              {agent.category}
+            </span>
+            {typeof agent.installs === "number" && (
+              <>
+                <span className="text-[10.5px] text-[var(--color-text-muted)] opacity-50">·</span>
+                <InstallCount count={agent.installs} />
+              </>
+            )}
+          </div>
           <Button
             size="sm"
             variant={installed ? "ghost" : "primary"}
@@ -480,9 +490,17 @@ function HubAgentCard({
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--color-border-soft)] pt-3">
-          <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
-            v{agent.version}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+              v{agent.version}
+            </span>
+            {typeof agent.installs === "number" && (
+              <>
+                <span className="text-[11px] text-[var(--color-text-muted)] opacity-50">·</span>
+                <InstallCount count={agent.installs} />
+              </>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={onViewManifest}>
               View manifest
@@ -522,6 +540,40 @@ function EmptyRegistry() {
       </div>
     </Card>
   );
+}
+
+/**
+ * Compact install counter — `12 installs`, `1.2k installs`, etc.
+ * Renders nothing when the stats file has no entry for this agent so
+ * we don't surface a misleading "0 installs" before the counter is
+ * actually wired up to the live aggregator.
+ */
+function InstallCount({
+  count,
+  size = "sm",
+}: {
+  count: number | undefined;
+  size?: "sm" | "md";
+}) {
+  if (typeof count !== "number") return null;
+  const iconSize = size === "md" ? 11 : 10;
+  const textClass =
+    size === "md"
+      ? "text-[11.5px] text-[var(--color-text-muted)]"
+      : "text-[10.5px] text-[var(--color-text-muted)]";
+  return (
+    <span className={`inline-flex items-center gap-1 ${textClass}`}>
+      <IconDownload size={iconSize} />
+      {formatInstallCount(count)} install{count === 1 ? "" : "s"}
+    </span>
+  );
+}
+
+function formatInstallCount(count: number): string {
+  if (count < 1000) return String(count);
+  if (count < 10_000) return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
+  return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
 function HubFilterEmpty({

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openagents.sh/schemas/stats.schema.json",
+  "title": "Aggregated agent stats",
+  "description": "Single source of truth for per-agent install counts and (later) ratings. Owned by the openagents-stats[bot] account; humans never edit it directly. The renderer fetches this file once on Hub open and caches.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["updatedAt", "agents"],
+  "properties": {
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp set by the bot on every flush. Lets the renderer show staleness when needed."
+    },
+    "agents": {
+      "type": "object",
+      "description": "Keyed by agent slug (matches `agents/<slug>/manifest.yaml` descriptor.id).",
+      "patternProperties": {
+        "^[a-z0-9]+(?:-[a-z0-9]+)*$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["installs", "installs7d"],
+          "properties": {
+            "installs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total lifetime installs across all clients."
+            },
+            "installs7d": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Installs in the trailing 7 days. Reset by the cron handler."
+            },
+            "discussionUrl": {
+              "type": "string",
+              "format": "uri",
+              "description": "Permalink to the GitHub Discussion thread for this agent. Optional until Discussions ship."
+            },
+            "comments": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Comment count on the Discussion. Optional until Discussions ship."
+            },
+            "reactions": {
+              "type": "object",
+              "description": "Reaction counts on the Discussion, keyed by reaction name (`+1`, `heart`, etc.). Optional until Discussions ship.",
+              "additionalProperties": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

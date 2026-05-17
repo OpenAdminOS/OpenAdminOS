@@ -17,10 +17,15 @@ export interface ProjectReport {
   fixtures: { name: string; results: CheckResult[] }[];
   /**
    * One entry per `agents/<slug>/manifest.yaml` validated against
-   * `schemas/agent-template.schema.json`. Code-based agents (no YAML)
-   * don't appear here.
+   * `schemas/agent-template.schema.json`.
    */
   schemas: { slug: string; manifestPath: string; results: CheckResult[] }[];
+  /**
+   * Validation results for `stats/agents.json`. Empty `results` array
+   * means the file is absent (acceptable until phase 3 lands). One entry
+   * with `severity: "fail"` means the file is present but malformed.
+   */
+  stats: { results: CheckResult[] };
 }
 
 export function formatReport(report: ProjectReport): string {
@@ -61,6 +66,20 @@ export function formatReport(report: ProjectReport): string {
     const severity = summarize(schema.results);
     lines.push(`${SYMBOL[severity]} schema: ${schema.slug}`);
     for (const result of schema.results) {
+      lines.push(`  ${SYMBOL[result.severity]} ${result.name}: ${result.message}`);
+      if (result.details) {
+        for (const detail of result.details) {
+          lines.push(`      - ${detail}`);
+        }
+      }
+    }
+  }
+
+  if (report.stats.results.length > 0) {
+    lines.push("");
+    const severity = summarize(report.stats.results);
+    lines.push(`${SYMBOL[severity]} stats: stats/agents.json`);
+    for (const result of report.stats.results) {
       lines.push(`  ${SYMBOL[result.severity]} ${result.name}: ${result.message}`);
       if (result.details) {
         for (const detail of result.details) {
@@ -113,6 +132,11 @@ function countTotals(report: ProjectReport): { pass: number; warn: number; fail:
       else if (result.severity === "warn") warn++;
       else fail++;
     }
+  }
+  for (const result of report.stats.results) {
+    if (result.severity === "pass") pass++;
+    else if (result.severity === "warn") warn++;
+    else fail++;
   }
   return { pass, warn, fail };
 }

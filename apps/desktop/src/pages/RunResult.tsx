@@ -281,9 +281,7 @@ export default function RunResult() {
             plan={run.plan}
             onConfirm={confirmRun}
             onReject={rejectRun}
-            writesAreReal={
-              run.dataSource === "graph" && state.realWritesEnabled === true
-            }
+            writesAreReal={run.dataSource === "graph"}
             tenantDisplayName={tenantDisplayName}
           />
         )}
@@ -503,8 +501,8 @@ function DiffConfirmPanel({
             <span>
               <span className="font-semibold">Apply will be simulated.</span>{" "}
               No Graph writes. The agent will emit a trace of what it would have
-              retired. Flip "Enable real Graph writes" in Settings → Privacy to
-              perform real changes against a connected tenant.
+              retired. Connect a real tenant in Settings → Tenants to perform
+              real changes.
             </span>
           </div>
         </div>
