@@ -87,6 +87,11 @@ export async function commitStats(input: {
   const content = Buffer.from(`${JSON.stringify(input.file, null, 2)}\n`, "utf8").toString(
     "base64",
   );
+  // No author / committer override — let GitHub attribute the commit to
+  // the PAT owner. Vercel's deployment-authorization check rejects any
+  // commit whose author email doesn't map to a GitHub account, so the
+  // previous `stats-bot@openagents.sh` placeholder caused production
+  // redeploys to bounce.
   await octokit.repos.createOrUpdateFileContents({
     owner,
     repo,
@@ -95,13 +100,5 @@ export async function commitStats(input: {
     message: input.commitMessage,
     content,
     sha: input.sha,
-    committer: {
-      name: "openagents-stats-bot",
-      email: "stats-bot@openagents.sh",
-    },
-    author: {
-      name: "openagents-stats-bot",
-      email: "stats-bot@openagents.sh",
-    },
   });
 }
