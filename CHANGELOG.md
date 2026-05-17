@@ -14,6 +14,82 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+## [0.1.4] - 2026-05-17
+
+A cleanup pass on the v0.1 surface plus a structural redesign of the run-detail page. Stays on 0.1.x; no schema or storage migrations.
+
+### Added
+
+**Agent contract — LLM is load-bearing.** Every agent template must include at least one `format: llm` step. The runtime hard-fails any LLM step reached without a connected provider (replacing the previous silent skip on `when: ctx.llm.available`). `npm run qa` enforces it via a new `uses-llm` check. NL2Agent's prompt and validators reject drafts that omit the step. Bundled agents (`find-inactive-devices`, `compliance-overview`, `os-update-posture`) now use the LLM step's output as the `result.summary` headline rather than burying it in `data.llmSummary`. The write agent `retire-inactive-devices` gained an `explain_plan` LLM step whose output becomes the diff-confirmation headline.
+
+**Run detail page redesign.**
+- **Live telemetry strip** under the header: Elapsed (live-ticking) · Steps N/M · Tokens (prompt · out) · Model · Cost.
+- **Token telemetry**: Ollama provider parses `prompt_eval_count` + `eval_count`; runtime accumulates into `RunRecord.tokens`.
+- **Pipeline timeline** replaces the flat step list — connected status indicators (done ✓ / running spinner / pending hollow / failed ✕) with per-step durations.
+- **Tabbed activity feed**: Pipeline · Logs · Reasoning. Logs tab has per-level filter chips (debug/info/warn/error) and per-line hover-to-copy. Reasoning tab isolates LLM thinking blocks.
+- **Structured Result panel**: arrays-of-records render as tables; bucketed maps render as grouped sections; JSON-stringified values inside the data block are re-hydrated; `Show raw` toggle exposes the original JSON.
+- **Failure remediation card** on failed runs with pattern-matched suggestions for common errors.
+- **Outcome card** replaces the duplicated summary card; data-residency moved into a side panel.
+
+**Per-run controls.**
+- **Run cancellation** via `cancelRun(runId)` IPC + danger-styled Cancel button + `Esc` shortcut. Marks the run terminal and drops subsequent progress; background work finishes silently.
+- **Per-run provider + model override** via a new `RunWithMenu` split button on Agent Detail. `StartRunOptions` gained `providerId` and `model` fields. Run-again preserves the original run's tenant, provider, and model.
+- **"Run in background"** button during live runs navigates back to Agents; runs continue in flight.
+- **Run-start preflight** throws synchronously ("Ollama isn't reachable. Start it with `ollama serve`, then try again.") instead of queueing a run that fails seconds later.
+
+**Per-install agent management.**
+- **Uninstall** via `uninstallAgent(slug)` IPC + UI on Agent Detail. User-authored agents are deleted from disk; bundled agents stay on disk and remain installable from the Hub.
+- **Schedules**: `AgentSchedule { enabled, intervalSeconds }` per installed agent. A 60-second main-process tick fires any due schedule (skipping in-flight runs). New `AgentScheduleCard` with preset intervals (15m / 1h / 4h / 12h / 24h) and a live countdown. Schedules only fire while the app is open — surfaced honestly in the card copy.
+- **Per-provider active model**: Settings → LLM Providers now renders each installed model as a clickable chip. Persists as `activeModelByProviderId` in state.
+- **Resolution priority** for the model stamped on each run: explicit `options.model` → agent manifest `preferredModel` (if pulled) → user's `activeModelByProviderId` → provider's first reported model. Each layer validates the model is actually installed.
+
+**App shell + system integration.**
+- **Bottom status strip** across every page: active tenant · provider · model · real-writes · in-flight count.
+- **Sidebar in-flight badge** on the Activity nav item with pulsing warning tone.
+- **Auto-update in-app banner**: main-process updater broadcasts state to the renderer; `UpdateBanner` shows "downloading" / "ready" with a `Restart now` button alongside the existing native dialog.
+- **OS-level run-completion notifications** when the app isn't focused; clicking focuses the app and navigates to the run.
+- **Native application menu** with View accelerators (`Cmd+1`/`2`/`3`/`,`) and Help shortcuts (Open app data folder, Open logs folder, Open Agents on GitHub).
+- **Inline tenant disconnect** on each row of the sidebar TenantSwitcher (hover-revealed ×).
+- **Synthetic-mode banner** on Agents home when no tenant is connected.
+
+**Run reporting.**
+- **Copy report** (plaintext clipboard), **Export** (save-dialog JSON), **Share** menu (deep link + Export as Markdown). New IPC bridge for `openExternal` and `saveTextFile`.
+- **Copy run ID** affordance in the run detail subtitle.
+- **Activity text search** alongside the filter chips.
+- **Manifest preview Pipeline card** is collapsible by default to shorten the Agent Detail body.
+- **Hub filter empty state** with a `Clear filters` action when search/category returns no agents.
+
+### Changed
+- ShareMenu accepts per-action callbacks; renders only items with handlers supplied. Slack item removed.
+- TenantDriftNote elevated from info to warning tone with a `Re-run against current tenant` CTA.
+- Settings → General + Privacy rewritten with honest copy: real toggleable rows where wired, "Not collected" / "Coming in 0.2" labels everywhere else (no more fake "Off" badges).
+- Settings → LLM Providers `Install guide` button opens vendor docs via `openExternal`.
+- NL2Agent provider-unavailable warning includes provider-specific guidance (`ollama serve` for Ollama, "open Settings → LLM Providers" for hosted).
+- Status pills render the new `cancelled` RunStatus with neutral tone.
+- Cancelled runs stamp `summary: "Cancelled by user."` (was: stale "is running" text).
+- Activity provider column shows the display name (e.g. `Ollama`), not the canonical id.
+- All UI references to the GitHub repo corrected from `ugurlabs/openagents` to `ugurkocde/OpenAgents`.
+- Agent Hub eyebrow "Community" → "Built-in"; fake `INSTALLS` / `Top installed in May` / hardcoded "From the author" quote removed in favour of real Category + Graph scopes panels.
+- Onboarding "Use synthetic data" card retitled "Continue without a tenant" with honest empty-inventory copy.
+- README + CONTRIBUTING updated to reflect the LLM-required contract and the actual shipped surface.
+
+### Removed
+- The 22-record `contoso.com` synthetic device fixture. Synthetic mode now returns zero devices; agents run end-to-end but produce empty results.
+- Placeholder `$0.00 / External` cost cells from the agents-home stats strip, Activity table, Run Result summary, and Agent Detail right rail.
+- "Time saved" tile from the agents-home stats strip.
+- Stubbed Slack share entry, stubbed `Configure` button on provider rows, stubbed `INSTALLS` stat, the hardcoded "Top installed in May" pill, and the fake author quote on the featured Hub card.
+- Agent rating field across the SDK, runtime, and UI (`rating?` removed from `RegistryAgentSummary`).
+- Dead export `getSyntheticInventorySize()` from `@openagents/runtime/graph-fixtures.ts`.
+
+### Fixed
+- Ollama reasoning models (qwen3, deepseek-r1, gpt-oss) were producing empty `message.content` because they burned the full token budget inside `<think>` blocks. The Ollama provider now sends `think: false` to disable reasoning mode, captures `message.thinking` separately, and falls back to reasoning content if `message.content` is empty. `cleanLlmText` strips `<think>…</think>` from the visible answer.
+- Default tenant scope in Settings → General now reflects the actual connected tenant instead of always showing "Not connected".
+- Agent Detail Model card now resolves the *actual* model that will be used at run time (mirroring the runtime's resolution chain) instead of statically showing the manifest's `preferredModel` regardless of whether it's installed.
+- Steps telemetry caption no longer reads `4/4 · of 4`; reports state ("all complete" / "in progress" / "N failed" / "incomplete" / "no steps yet").
+- Agents home subtitle no longer duplicates the tenant name across the trust pill and a trailing span.
+
+### Security
+
 ## [0.1.3] - 2026-05-16
 
 ### Added

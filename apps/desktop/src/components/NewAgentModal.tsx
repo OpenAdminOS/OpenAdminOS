@@ -58,6 +58,10 @@ export function NewAgentModal({
     (provider) => provider.id === state.activeProviderId,
   );
   const llmReady = activeProvider?.status === "connected";
+  const llmGuidance =
+    activeProvider?.id === "ollama"
+      ? "Start Ollama with `ollama serve` from a terminal, then reopen this dialog."
+      : `Open Settings → LLM Providers to verify ${activeProvider?.name ?? "your provider"}'s connection.`;
 
   const previewForRenderer: AgentManifestPreview | null = useMemo(() => {
     if (!draft?.manifest) return null;
@@ -126,6 +130,7 @@ export function NewAgentModal({
             drafting={drafting}
             llmReady={llmReady}
             providerName={activeProvider?.name ?? "your LLM provider"}
+            guidance={llmGuidance}
             onDraft={handleDraft}
             error={error}
           />
@@ -156,13 +161,14 @@ interface PromptPaneProps {
   drafting: boolean;
   llmReady: boolean;
   providerName: string;
+  guidance: string;
   onDraft: () => void;
   error: string | null;
 }
 
 const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
   (
-    { prompt, onPromptChange, drafting, llmReady, providerName, onDraft, error },
+    { prompt, onPromptChange, drafting, llmReady, providerName, guidance, onDraft, error },
     ref,
   ) => (
     <>
@@ -172,8 +178,8 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
             <IconSparkle size={12} className="text-[var(--color-accent)]" /> What you can ask for in v0.1
           </div>
           <ul className="mt-2 space-y-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-            <li>· Read-only agents that pull `managedDevices` and bucket / count / summarise them.</li>
-            <li>· Optional LLM summary step (gated on Ollama availability).</li>
+            <li>· Read-only agents that pull `managedDevices` and bucket / count / filter them.</li>
+            <li>· An LLM step that writes the headline summary (required — every agent must invoke the model at least once).</li>
             <li>· Settings the user can override at install time (integer / string / boolean).</li>
           </ul>
           <p className="mt-2 text-[11.5px] text-[var(--color-text-muted)]">
@@ -191,7 +197,7 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
           id="new-agent-prompt"
           ref={ref}
           rows={6}
-          placeholder="e.g. Tell me which Windows devices have OS version 10.x — bucket them by major version, then summarise."
+          placeholder="e.g. Find devices that haven't synced in 60+ days, bucket them by operating system, and write a short summary."
           value={prompt}
           onChange={(event) => onPromptChange(event.currentTarget.value)}
           disabled={drafting}
@@ -202,7 +208,10 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
           <div className="mt-3 flex items-start gap-2 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 ring-1 ring-[var(--color-warning)]/30">
             <IconWarning size={12} className="mt-0.5 text-[var(--color-warning)]" />
             <div className="text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
-              {providerName} isn't reachable. Start it (or pick a different provider in Settings) before drafting.
+              <span className="font-medium text-[var(--color-text)]">
+                {providerName} isn't reachable.
+              </span>{" "}
+              {guidance}
             </div>
           </div>
         )}

@@ -1,4 +1,5 @@
-import { Route, Routes, useLocation } from "react-router";
+import { useEffect } from "react";
+import { Route, Routes, useLocation, useNavigate } from "react-router";
 import { AppShell } from "./components/AppShell";
 import AgentsHome from "./pages/AgentsHome";
 import AgentDetail from "./pages/AgentDetail";
@@ -10,7 +11,23 @@ import RunResult from "./pages/RunResult";
 
 export default function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const noShell = location.pathname.startsWith("/onboarding");
+
+  useEffect(() => {
+    const api = window.openAgents;
+    if (!api) return;
+    const unsubscribeFocusRun = api.onFocusRun((runId) => {
+      navigate(`/runs/${runId}`);
+    });
+    const unsubscribeNavigate = api.onNavigate((path) => {
+      navigate(path);
+    });
+    return () => {
+      unsubscribeFocusRun();
+      unsubscribeNavigate();
+    };
+  }, [navigate]);
 
   if (noShell) {
     return (

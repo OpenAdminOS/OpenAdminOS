@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
@@ -36,6 +36,7 @@ import type {
 import {
   deriveTrustState,
   providerCatalog,
+  type AgentSchedule,
   type AgentSummary,
   type AppState,
   type ProviderId,
@@ -49,6 +50,13 @@ import { EncryptedSecretStore } from "./secret-store.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
+  /**
+   * User-picked model override per provider. When the provider exposes
+   * multiple installed models, the user can pick which one is "active"
+   * for that provider. Absent → fall back to the provider's first
+   * reported model. Stamped onto each new run at queue time.
+   */
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>;
   installedAgents: AgentSummary[];
   runs: RunRecord[];
   tenants: TenantRecord[];
@@ -84,6 +92,12 @@ export interface AppStateStoreOptions {
    * When omitted, only bundled agents are visible to the registry.
    */
   userAgentsDir?: string;
+  /**
+   * Fired when a run transitions from a non-terminal status to a
+   * terminal one (`completed`, `failed`, `cancelled`, `rejected`).
+   * The host hooks this to surface an OS notification.
+   */
+  onRunFinished?(run: RunRecord): void;
 }
 
 export class AppStateStore {
@@ -92,7 +106,13 @@ export class AppStateStore {
   private readonly tokenStore: EncryptedSecretStore;
   private readonly openBrowser: (url: string) => Promise<void>;
   private readonly userAgentsDir: string | undefined;
+  private readonly onRunFinished: ((run: RunRecord) => void) | undefined;
   private msalClient: PublicClientApplication | undefined;
+  // Soft-cancel set. While a run id is here, progress snapshots from
+  // the runtime are dropped so the run stays in "cancelled" state. The
+  // background driver eventually returns; we don't (yet) plumb an
+  // AbortSignal through the runtime to interrupt it mid-flight.
+  private readonly cancelledRunIds = new Set<string>();
 
   constructor(options: AppStateStoreOptions | string, legacyTokenStore?: EncryptedSecretStore) {
     if (typeof options === "string") {
@@ -101,11 +121,13 @@ export class AppStateStore {
         legacyTokenStore ?? new EncryptedSecretStore(`${options}.tokens.bin`);
       this.openBrowser = async () => undefined;
       this.userAgentsDir = undefined;
+      this.onRunFinished = undefined;
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
       this.openBrowser = options.openBrowser ?? (async () => undefined);
       this.userAgentsDir = options.userAgentsDir;
+      this.onRunFinished = options.onRunFinished;
     }
   }
 
@@ -145,6 +167,9 @@ export class AppStateStore {
       tenants: persisted.tenants,
       realWritesEnabled: persisted.realWritesEnabled,
     };
+    if (persisted.activeModelByProviderId) {
+      state.activeModelByProviderId = persisted.activeModelByProviderId;
+    }
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
     }
@@ -257,6 +282,108 @@ export class AppStateStore {
     return this.getAppState();
   }
 
+  async updateAgentSchedule(
+    slug: string,
+    schedule: AgentSchedule | null,
+  ): Promise<AppState> {
+    if (schedule !== null) {
+      if (typeof schedule !== "object") {
+        throw new Error("updateAgentSchedule: schedule must be an object or null.");
+      }
+      if (
+        typeof schedule.intervalSeconds !== "number" ||
+        !Number.isFinite(schedule.intervalSeconds) ||
+        schedule.intervalSeconds < 60
+      ) {
+        throw new Error(
+          "updateAgentSchedule: intervalSeconds must be a number >= 60.",
+        );
+      }
+      if (typeof schedule.enabled !== "boolean") {
+        throw new Error("updateAgentSchedule: enabled must be a boolean.");
+      }
+    }
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentSchedule: agent "${slug}" is not installed.`);
+      }
+      const next = [...persisted.installedAgents];
+      const existing = next[idx];
+      if (schedule === null) {
+        const { schedule: _, ...rest } = existing;
+        next[idx] = rest;
+      } else {
+        next[idx] = {
+          ...existing,
+          schedule: {
+            enabled: schedule.enabled,
+            intervalSeconds: Math.floor(schedule.intervalSeconds),
+            ...(schedule.lastScheduledRunAt
+              ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
+              : existing.schedule?.lastScheduledRunAt
+                ? { lastScheduledRunAt: existing.schedule.lastScheduledRunAt }
+                : {}),
+          },
+        };
+      }
+      await this.write({ ...persisted, installedAgents: next });
+    });
+
+    return this.getAppState();
+  }
+
+  /**
+   * Walk all installed agents and fire any whose schedule is enabled +
+   * due. Runs against the agent's active-tenant default; in-flight runs
+   * for the same agent are skipped to avoid stampedes. Schedules only
+   * fire while the host is running; this is the honest contract for a
+   * desktop tool.
+   */
+  async fireDueSchedules(): Promise<void> {
+    const persisted = await this.read();
+    const nowMs = Date.now();
+
+    for (const agent of persisted.installedAgents) {
+      const schedule = agent.schedule;
+      if (!schedule?.enabled) continue;
+      const lastFired = schedule.lastScheduledRunAt
+        ? new Date(schedule.lastScheduledRunAt).getTime()
+        : 0;
+      const dueAtMs = lastFired + schedule.intervalSeconds * 1000;
+      if (nowMs < dueAtMs) continue;
+
+      // Skip if there's already an in-flight run for this agent — we
+      // don't want a long-running agent to queue more copies of itself.
+      const inFlight = persisted.runs.some(
+        (run) =>
+          run.agentSlug === agent.slug &&
+          (run.status === "queued" ||
+            run.status === "running" ||
+            run.status === "awaiting-confirmation"),
+      );
+      if (inFlight) continue;
+
+      try {
+        await this.startRun(agent.slug);
+        await this.updateAgentSchedule(agent.slug, {
+          enabled: true,
+          intervalSeconds: schedule.intervalSeconds,
+          lastScheduledRunAt: new Date(nowMs).toISOString(),
+        });
+      } catch (error) {
+        console.error(
+          `[scheduler] agent "${agent.slug}" failed to start:`,
+          error,
+        );
+      }
+    }
+  }
+
   /**
    * NL2Agent — draft a `manifest.yaml` from a plain-English description.
    *
@@ -317,6 +444,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
     }
 
+    // Contract: every agent must include at least one `llm` step.
+    if (manifest && !manifest.skills.some((skill) => skill.format === "llm")) {
+      validationErrors.push(
+        "Manifest has no `format: llm` step. Open Agents requires every agent to invoke the LLM at least once — add a summary or rationale step.",
+      );
+      manifest = undefined;
+    }
+
     return validationErrors.length > 0
       ? { yamlSource, validationErrors }
       : { yamlSource, manifest, validationErrors: [] };
@@ -348,6 +483,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`saveAgentDraft: manifest failed schema validation: ${message}`);
     }
+    if (!manifest.skills.some((skill) => skill.format === "llm")) {
+      throw new Error(
+        "saveAgentDraft: manifest has no `format: llm` step. Open Agents requires every agent to invoke the LLM at least once.",
+      );
+    }
 
     const slug = manifest.descriptor.id;
     const bundledSlugs = new Set(
@@ -375,6 +515,85 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     );
 
     return this.getAppState();
+  }
+
+  async uninstallAgent(slug: string): Promise<AppState> {
+    let userAuthoredDir: string | undefined;
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const target = persisted.installedAgents.find(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (!target) {
+        throw new Error(`Agent is not installed: ${slug}`);
+      }
+
+      // If the installed agent is sourced from the writable user-agents
+      // directory, delete those files too. Bundled / monorepo agents
+      // stay on disk and remain available in the registry.
+      if (this.userAgentsDir && target.registryPath) {
+        const normalized = target.registryPath.replace(/\\/g, "/");
+        const root = this.userAgentsDir.replace(/\\/g, "/");
+        if (normalized.startsWith(`${root}/`) || normalized === root) {
+          userAuthoredDir = target.registryPath;
+        }
+      }
+
+      await this.write({
+        ...persisted,
+        installedAgents: persisted.installedAgents.filter(
+          (agent) => agent.slug !== target.slug && agent.id !== target.id,
+        ),
+      });
+    });
+
+    if (userAuthoredDir) {
+      try {
+        await rm(userAuthoredDir, { recursive: true, force: true });
+      } catch (error) {
+        console.error("[uninstall] failed to remove user-authored dir", error);
+      }
+    }
+
+    return this.getAppState();
+  }
+
+  async cancelRun(runId: string): Promise<RunRecord> {
+    const result = await this.serialize(async () => {
+      const persisted = await this.read();
+      const run = persisted.runs.find((existing) => existing.id === runId);
+      if (!run) {
+        throw new Error(`Run not found: ${runId}`);
+      }
+      if (
+        run.status === "completed" ||
+        run.status === "failed" ||
+        run.status === "rejected" ||
+        run.status === "cancelled"
+      ) {
+        // Already terminal — nothing to cancel.
+        return run;
+      }
+
+      const finishedAt = new Date().toISOString();
+      const cancelled: RunRecord = {
+        ...run,
+        status: "cancelled",
+        finishedAt,
+        // Overwrite any stale in-progress summary (e.g. "X is running.")
+        // with an explicit cancellation message. The original summary
+        // would otherwise leak into Activity rows long after the cancel.
+        summary: "Cancelled by user.",
+      };
+      const nextRuns = persisted.runs.map((existing) =>
+        existing.id === runId ? cancelled : existing,
+      );
+      await this.write({ ...persisted, runs: nextRuns });
+      return cancelled;
+    });
+    this.cancelledRunIds.add(runId);
+    return result;
   }
 
   async installAgent(agentId: string): Promise<AppState> {
@@ -424,6 +643,53 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return this.getAppState();
   }
 
+  async setActiveModel(
+    providerId: ProviderId,
+    model: string | null,
+  ): Promise<AppState> {
+    if (!isProviderId(providerId)) {
+      throw new Error(`Unknown provider: ${String(providerId)}`);
+    }
+    if (model !== null) {
+      if (typeof model !== "string" || model.trim().length === 0) {
+        throw new Error("setActiveModel: model must be a non-empty string or null.");
+      }
+      // Validate that the model is one the provider actually has.
+      const providers = await this.listProviders();
+      const provider = providers.find((p) => p.id === providerId);
+      if (!provider) {
+        throw new Error(`Provider not found: ${providerId}`);
+      }
+      const known = provider.models ?? [];
+      if (known.length > 0 && !known.includes(model)) {
+        throw new Error(
+          `Model "${model}" is not installed for ${provider.name}. Available: ${known.join(", ")}.`,
+        );
+      }
+    }
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const next = { ...(persisted.activeModelByProviderId ?? {}) };
+      if (model === null) {
+        delete next[providerId];
+      } else {
+        next[providerId] = model;
+      }
+      const cleaned = Object.keys(next).length > 0 ? next : undefined;
+      const updated: PersistedState = {
+        ...persisted,
+        ...(cleaned ? { activeModelByProviderId: cleaned } : {}),
+      };
+      if (!cleaned) {
+        delete updated.activeModelByProviderId;
+      }
+      await this.write(updated);
+    });
+
+    return this.getAppState();
+  }
+
   async listTenants(): Promise<TenantRecord[]> {
     const persisted = await this.read();
     return persisted.tenants;
@@ -431,13 +697,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   async connectTenant(): Promise<AppState> {
     const client = this.getMsalClient();
-    const result = await runInteractiveFlow({
-      client,
-      openBrowser: this.openBrowser,
-    });
+    let result;
+    try {
+      result = await runInteractiveFlow({
+        client,
+        openBrowser: this.openBrowser,
+      });
+    } catch (error) {
+      throw new Error(humanizeMsalError(error));
+    }
 
     if (!result.account) {
-      throw new Error("Microsoft sign-in did not return an account.");
+      throw new Error(
+        "Microsoft sign-in did not return an account. Try connecting again from Settings → Tenants.",
+      );
     }
     const account = result.account;
     const homeAccountId = account.homeAccountId;
@@ -534,11 +807,64 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
 
       const providers = await this.listProviders();
-      const activeProvider =
-        providers.find((provider) => provider.id === persisted.activeProviderId) ??
-        providers[0];
-      const providerId = activeProvider?.id ?? persisted.activeProviderId;
-      const model = activeProvider?.defaultModel;
+      // Honor a per-run provider override if supplied; otherwise fall
+      // back to the globally-active provider. Unknown ids are an error
+      // — silently dropping the override would be misleading.
+      let selectedProvider: ProviderSummary | undefined;
+      if (options.providerId !== undefined) {
+        selectedProvider = providers.find((p) => p.id === options.providerId);
+        if (!selectedProvider) {
+          throw new Error(`Unknown provider: ${String(options.providerId)}`);
+        }
+      } else {
+        selectedProvider =
+          providers.find((provider) => provider.id === persisted.activeProviderId) ??
+          providers[0];
+      }
+      const activeProvider = selectedProvider;
+      const providerId =
+        activeProvider?.id ?? options.providerId ?? persisted.activeProviderId;
+
+      // Resolve which model to stamp on the run, in priority order:
+      //   1. Explicit per-run override (options.model) when supplied
+      //   2. Agent manifest's preferredModel IF the provider has it pulled
+      //   3. User's pinned activeModelByProviderId[providerId] if set
+      //   4. Provider's first reported model (defaultModel)
+      const knownModels = activeProvider?.models ?? [];
+      const userPinnedModel =
+        persisted.activeModelByProviderId?.[providerId] ?? undefined;
+      let model: string | undefined;
+      if (typeof options.model === "string" && options.model.length > 0) {
+        if (knownModels.length > 0 && !knownModels.includes(options.model)) {
+          throw new Error(
+            `Model "${options.model}" is not installed for ${activeProvider?.name ?? providerId}. Pull it with \`ollama pull ${options.model}\` and try again.`,
+          );
+        }
+        model = options.model;
+      } else if (
+        agent.preferredModel &&
+        knownModels.includes(agent.preferredModel)
+      ) {
+        model = agent.preferredModel;
+      } else if (userPinnedModel && knownModels.includes(userPinnedModel)) {
+        model = userPinnedModel;
+      } else {
+        model = activeProvider?.defaultModel;
+      }
+
+      // Preflight the LLM provider so a clearly-actionable error is
+      // returned to the renderer synchronously instead of a queued
+      // run that fails moments later when the runtime can't reach it.
+      if (activeProvider && activeProvider.status !== "connected") {
+        if (activeProvider.id === "ollama") {
+          throw new Error(
+            "Ollama isn't reachable. Start it with `ollama serve`, then try again.",
+          );
+        }
+        throw new Error(
+          `${activeProvider.name} isn't ready. Open Settings → LLM Providers to check the connection.`,
+        );
+      }
 
       // Resolve the effective tenant at queue time:
       //   - explicit null  -> synthetic for this run regardless of active tenant
@@ -829,13 +1155,29 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private persistRunSnapshot(run: RunRecord): Promise<void> {
+    if (this.cancelledRunIds.has(run.id)) {
+      // Run was soft-cancelled: discard further progress snapshots so
+      // the stored state stays in the "cancelled" terminal state even
+      // while background work finishes returning.
+      return Promise.resolve();
+    }
     return this.serialize(async () => {
       const persisted = await this.read();
-      const exists = persisted.runs.some((existing) => existing.id === run.id);
+      const previous = persisted.runs.find((existing) => existing.id === run.id);
+      const wasTerminal = previous ? isTerminalRunStatus(previous.status) : false;
+      const isNowTerminal = isTerminalRunStatus(run.status);
+      const exists = previous !== undefined;
       const nextRuns = exists
         ? persisted.runs.map((existing) => (existing.id === run.id ? run : existing))
         : [run, ...persisted.runs];
       await this.write({ ...persisted, runs: nextRuns });
+      if (!wasTerminal && isNowTerminal && this.onRunFinished) {
+        try {
+          this.onRunFinished(run);
+        } catch (error) {
+          console.error("[state] onRunFinished listener failed", error);
+        }
+      }
     });
   }
 
@@ -870,6 +1212,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
       }
+      const rawActiveModels = (parsed as { activeModelByProviderId?: unknown })
+        .activeModelByProviderId;
+      if (rawActiveModels && typeof rawActiveModels === "object" && !Array.isArray(rawActiveModels)) {
+        const sanitized: Partial<Record<ProviderId, string>> = {};
+        for (const [key, value] of Object.entries(rawActiveModels)) {
+          if (isProviderId(key) && typeof value === "string" && value.length > 0) {
+            sanitized[key] = value;
+          }
+        }
+        if (Object.keys(sanitized).length > 0) {
+          state.activeModelByProviderId = sanitized;
+        }
+      }
       return state;
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
@@ -892,6 +1247,62 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && providerIds.has(value as ProviderId);
+}
+
+/**
+ * MSAL's interactive flow throws raw library errors whose messages are
+ * accurate but unfriendly ("AADSTS500113: No reply address was found"…).
+ * Map the common ones to plain English; fall back to the original message
+ * so we never hide signal.
+ */
+function humanizeMsalError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const lower = raw.toLowerCase();
+  if (lower.includes("user_cancelled") || lower.includes("cancelled by user")) {
+    return "Sign-in was cancelled in the browser. Try again from Settings → Tenants.";
+  }
+  if (lower.includes("aadsts50105") || lower.includes("assigned to a role")) {
+    return "The account isn't assigned to access Microsoft Graph CLI for this tenant. Ask a tenant admin to grant access, or sign in with a different account.";
+  }
+  if (
+    lower.includes("aadsts65001") ||
+    lower.includes("consent") ||
+    lower.includes("requires admin")
+  ) {
+    return "Admin consent is required for the Microsoft Graph CLI in this tenant. Have a Global Administrator approve the app, then try again.";
+  }
+  if (lower.includes("aadsts50020") || lower.includes("user account") || lower.includes("not exist")) {
+    return "That account doesn't exist in this tenant. Pick a directory account during sign-in instead of a personal Microsoft account.";
+  }
+  if (
+    lower.includes("aadsts700016") ||
+    lower.includes("aadsts900023") ||
+    lower.includes("not found in the directory")
+  ) {
+    return "Microsoft rejected the sign-in because the tenant doesn't recognise our app id. This can happen if Conditional Access blocks the Microsoft Graph CLI; check with your security team.";
+  }
+  if (
+    lower.includes("network") ||
+    lower.includes("enotfound") ||
+    lower.includes("etimedout") ||
+    lower.includes("fetch failed")
+  ) {
+    return "Couldn't reach Microsoft's sign-in endpoint. Check your internet connection (proxy / VPN / DNS) and try again.";
+  }
+  if (lower.includes("interaction_required") || lower.includes("invalid_grant")) {
+    return "The previous sign-in session expired. Reconnect from Settings → Tenants and complete the consent prompt.";
+  }
+  // Fall back to the raw message so debugging is still possible.
+  return `Sign-in failed: ${raw}`;
+}
+
+function isTerminalRunStatus(status: RunRecord["status"]): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "rejected"
+  );
 }
 
 async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> {
@@ -1017,24 +1428,25 @@ Hard rules:
 - Skill ids are lower-case snake_case, e.g. "load_devices".
 - For v0.1, the only Graph endpoint available is GET /deviceManagement/managedDevices. Do not invent other endpoints.
 - Transform kinds available: group-by-age, filter-by-age, count-by-field.
-- LLM steps are optional; when included, gate them with: when: ctx.llm.available
-- Write-action kinds available: retire-managed-device.
+- EVERY agent MUST include at least one step with format: llm. This is what makes it an agent rather than a deterministic query — the LLM writes the headline summary an admin reads. Do not gate it with "when:". The runtime preflights the provider and fails the run if one isn't connected, so the gate is unnecessary and misleading.
+- definition.result.summary MUST reference the LLM step's output, e.g.: {{ summarize.output.text | default("Summary unavailable.") }}. Do not put raw counts in the summary line — those belong in result.data.
+- Write-action kinds available: retire-managed-device. For write agents, the LLM step should explain the planned actions in plain language; the write step's settings.summary should reference {{ explain_plan.output.text }} (or whatever the LLM step is named).
 - Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", ").
 - Always include a top-level "# yaml-language-server: $schema=../../schemas/agent-template.schema.json" comment.
 
-Reference example — find-inactive-devices (read mode, bucketed by age):
+Reference example — read agent, bucketed by compliance state, LLM summary as headline:
 
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
 descriptor:
-  id: find-inactive-devices
-  name: Find inactive devices
-  description: Surfaces Intune-managed devices that have not synced recently, grouped by inactivity window.
+  id: compliance-overview
+  name: Compliance overview
+  description: Counts Intune-managed devices by compliance state and writes a plain-language posture summary.
   version: 1.0.0
   author:
     name: OpenAgents
     handle: openagents
     verified: false
-  category: devices
+  category: compliance
   mode: read
   preferredModel: llama3.1:8b
 skills:
@@ -1045,7 +1457,7 @@ skills:
     settings:
       method: GET
       path: /deviceManagement/managedDevices
-      select: [id, deviceName, userPrincipalName, operatingSystem, lastSyncDateTime, complianceState]
+      select: [id, deviceName, userPrincipalName, operatingSystem, complianceState, lastSyncDateTime]
       scopes:
         - DeviceManagementManagedDevices.Read.All
   - id: by_state
@@ -1056,15 +1468,35 @@ skills:
       source: "{{ load_devices.output }}"
       field: complianceState
       buckets: [compliant, noncompliant, unknown]
+  - id: summarize
+    format: llm
+    label: Summarize compliance posture
+    detail: Two-sentence executive summary plus one prioritised action.
+    settings:
+      system: >-
+        You are a Microsoft 365 administrator's assistant. Be concise and
+        factual. Two sentences plus one prioritised action. Never invent
+        numbers — use only the figures you are given.
+      prompt: |-
+        Total devices: {{ load_devices.output | size }}.
+        Compliant: {{ by_state.output.compliant }}.
+        Noncompliant: {{ by_state.output.noncompliant }}.
+        Unknown: {{ by_state.output.unknown }}.
+
+        Write an executive summary. Lead with the biggest risk, then one
+        short prioritised action.
+      temperature: 0.2
+      maxTokens: 200
 definition:
   triggers:
     - id: manual
       kind: manual
   result:
-    summary: "{{ by_state.output.noncompliant }} noncompliant of {{ load_devices.output | size }} devices."
+    summary: '{{ summarize.output.text | default("Summary unavailable.") }}'
     data:
       total: "{{ load_devices.output | size }}"
       counts: "{{ by_state.output }}"
+      llmModel: "{{ summarize.output.model }}"
 
 When the user's description is vague, pick sensible defaults and continue — don't ask clarifying questions. When you cannot fulfil a request inside the available endpoints / transforms, choose the closest supported shape rather than inventing new mechanisms.
 

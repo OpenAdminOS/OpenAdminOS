@@ -5,29 +5,61 @@ import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { Button } from "../components/Button";
 import { Avatar } from "../components/Avatar";
+import { AgentScheduleCard } from "../components/AgentScheduleCard";
 import { ManifestPreview } from "../components/ManifestPreview";
 import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
+import { RunWithMenu } from "../components/RunWithMenu";
 import { ShareMenu } from "../components/ShareMenu";
+import { useToast } from "../components/Toast";
 import {
   IconArrowLeft,
   IconBadgeCheck,
   IconBolt,
-  IconPlay,
   IconShield,
 } from "../components/icons";
 import { useAppState } from "../state";
-import type { AgentManifestPreview, RunRecord } from "../shared/openAgents";
+import type {
+  AgentManifestPreview,
+  ProviderId,
+  RunRecord,
+} from "../shared/openAgents";
 
 export default function AgentDetail() {
   const { slug } = useParams();
   const navigate = useNavigate();
-  const { state, startRun, updateAgentSettings } = useAppState();
+  const {
+    state,
+    startRun,
+    updateAgentSettings,
+    uninstallAgent,
+    updateAgentSchedule,
+  } = useAppState();
+  const toast = useToast();
   const agent = state.installedAgents.find((a) => a.slug === slug);
   const recentRuns = state.runs.filter((run) => run.agentSlug === slug).slice(0, 3);
   const [preview, setPreview] = useState<AgentManifestPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(true);
   const [configureOpen, setConfigureOpen] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const handleStartRun = async (choice?: { providerId?: ProviderId; model?: string }) => {
+    if (!agent) return;
+    setRunError(null);
+    try {
+      const options =
+        choice && (choice.providerId || choice.model)
+          ? {
+              ...(choice.providerId ? { providerId: choice.providerId } : {}),
+              ...(choice.model ? { model: choice.model } : {}),
+            }
+          : undefined;
+      const run = await startRun(agent.slug, options);
+      navigate(`/runs/${run.id}`);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   useEffect(() => {
     if (!slug) return;
@@ -109,31 +141,89 @@ export default function AgentDetail() {
         }
         actions={
           <>
-            <ShareMenu contextLabel="agent" />
+            <ShareMenu
+              contextLabel="agent"
+              onCopyLink={() => {
+                void navigator.clipboard.writeText(`openagents://agent/${agent.slug}`);
+              }}
+              copyLinkHint={`openagents://agent/${agent.slug}`}
+              onOpenInBrowser={() => {
+                void window.openAgents?.openExternal(
+                  `https://github.com/ugurkocde/OpenAgents/tree/main/agents/${agent.slug}`,
+                );
+              }}
+              openInBrowserHint={`github.com/ugurkocde/OpenAgents · agents/${agent.slug}`}
+            />
             <Button
               variant="secondary"
               disabled={
+                previewLoading ||
                 !preview ||
                 preview.kind !== "agent-template" ||
                 (preview.manifest.definition.settings ?? []).length === 0
               }
               onClick={() => setConfigureOpen(true)}
+              title={
+                previewLoading
+                  ? "Loading manifest…"
+                  : !preview
+                    ? "Manifest unavailable"
+                    : preview.kind !== "agent-template"
+                      ? "This agent is code-based; no install-time settings"
+                      : (preview.manifest.definition.settings ?? []).length === 0
+                        ? "This agent declares no configurable settings"
+                        : "Edit per-install settings"
+              }
             >
-              Configure
+              {previewLoading ? "Loading…" : "Configure"}
             </Button>
             <Button
-              variant="primary"
-              leadingIcon={<IconPlay size={12} />}
+              variant="ghost"
               onClick={() => {
-                void startRun(agent.slug).then((run) => navigate(`/runs/${run.id}`));
+                const confirmed = window.confirm(
+                  `Remove ${agent.name}? Run history is kept. User-authored agents are deleted from disk.`,
+                );
+                if (!confirmed) return;
+                void uninstallAgent(agent.slug)
+                  .then(() => {
+                    toast.success(`${agent.name} uninstalled.`);
+                    navigate("/");
+                  })
+                  .catch((error) => {
+                    toast.error(
+                      error instanceof Error ? error.message : String(error),
+                    );
+                  });
               }}
             >
-              Run agent
+              Uninstall
             </Button>
+            <RunWithMenu
+              providers={state.providers}
+              activeProviderId={state.activeProviderId}
+              activeModelByProviderId={state.activeModelByProviderId}
+              onRun={(choice) => {
+                void handleStartRun(choice);
+              }}
+            />
           </>
         }
       />
       <PageBody>
+        {runError && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 ring-1 ring-[var(--color-danger)]/30">
+            <div className="text-[12.5px] leading-relaxed text-[var(--color-danger)]">
+              {runError}
+            </div>
+            <button
+              onClick={() => setRunError(null)}
+              aria-label="Dismiss"
+              className="text-[var(--color-danger)]/70 hover:text-[var(--color-danger)]"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="flex min-w-0 flex-col gap-6">
             <Card>
@@ -177,6 +267,18 @@ export default function AgentDetail() {
             {!previewLoading && !preview && (
               <FallbackScopesCard scopes={agent.scopes} />
             )}
+
+            <AgentScheduleCard
+              schedule={agent.schedule}
+              onChange={async (next) => {
+                await updateAgentSchedule(agent.slug, next);
+                toast.success(
+                  next === null
+                    ? "Schedule disabled."
+                    : `Schedule saved · every ${Math.round(next.intervalSeconds / 60)}m.`,
+                );
+              }}
+            />
 
             <Card>
               <div className="p-6">
@@ -249,18 +351,12 @@ export default function AgentDetail() {
             <Card>
               <div className="p-5">
                 <SectionLabel>Model</SectionLabel>
-                <div className="mt-3">
-                  <div className="text-[13px] font-medium text-[var(--color-text)]">
-                    {agent.preferredModel ?? "Default"}
-                  </div>
-                  <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                    Inherited from active provider
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  <Pill tone="success">Local</Pill>
-                  <Pill>$0.00 / run</Pill>
-                </div>
+                <ModelCardBody
+                  agent={agent}
+                  providers={state.providers}
+                  activeProviderId={state.activeProviderId}
+                  activeModelByProviderId={state.activeModelByProviderId}
+                />
               </div>
             </Card>
           </div>
@@ -275,6 +371,73 @@ export default function AgentDetail() {
           onSave={(values) => updateAgentSettings(agent.slug, values)}
         />
       )}
+    </>
+  );
+}
+
+function ModelCardBody({
+  agent,
+  providers,
+  activeProviderId,
+  activeModelByProviderId,
+}: {
+  agent: { preferredModel?: string };
+  providers: { id: ProviderId; name: string; isLocal: boolean; models?: string[]; defaultModel?: string }[];
+  activeProviderId: ProviderId;
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>;
+}) {
+  const provider = providers.find((p) => p.id === activeProviderId);
+  const installed = provider?.models ?? [];
+  const userPinned = activeModelByProviderId?.[activeProviderId];
+  const preferred = agent.preferredModel;
+
+  let resolved: string | undefined;
+  let source: string;
+  if (preferred && installed.includes(preferred)) {
+    resolved = preferred;
+    source = `Agent prefers this model (manifest)`;
+  } else if (userPinned && installed.includes(userPinned)) {
+    resolved = userPinned;
+    source = `Your default for ${provider?.name ?? activeProviderId}`;
+  } else if (provider?.defaultModel) {
+    resolved = provider.defaultModel;
+    source = `Provider default · ${provider.name}`;
+  } else {
+    resolved = undefined;
+    source = "No model installed for the active provider";
+  }
+
+  const preferredButMissing =
+    preferred && !installed.includes(preferred) && installed.length > 0;
+
+  return (
+    <>
+      <div className="mt-3">
+        <div className="font-mono text-[13px] font-medium text-[var(--color-text)]">
+          {resolved ?? "—"}
+        </div>
+        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+          {source}
+        </div>
+      </div>
+      {preferredButMissing && (
+        <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 ring-1 ring-[var(--color-warning)]/30">
+          <div className="text-[11px] leading-relaxed text-[var(--color-text-soft)]">
+            <span className="font-medium text-[var(--color-text)]">
+              {preferred}
+            </span>{" "}
+            is the agent's preferred model but isn't installed for{" "}
+            {provider?.name ?? activeProviderId}. Pull it with{" "}
+            <span className="font-mono">{`ollama pull ${preferred}`}</span> to
+            match the author's intent.
+          </div>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <Pill tone={provider?.isLocal ? "success" : "warning"}>
+          {provider?.isLocal ? "Local" : "Hosted"}
+        </Pill>
+      </div>
     </>
   );
 }

@@ -4,7 +4,6 @@ import {
   IconDownload,
   IconExternal,
   IconShare,
-  IconSlack,
 } from "./icons";
 import { Button } from "./Button";
 
@@ -12,10 +11,31 @@ interface MenuItem {
   icon: React.ReactNode;
   label: string;
   hint?: string;
-  onClick: () => void;
+  onClick: () => void | Promise<void>;
 }
 
-export function ShareMenu({ contextLabel = "agent" }: { contextLabel?: string }) {
+export interface ShareMenuProps {
+  contextLabel?: string;
+  /** Copy a deep link / identifier for this object to the clipboard. */
+  onCopyLink?: () => void | Promise<void>;
+  copyLinkHint?: string;
+  /** Open a public URL representation of this object (e.g. GitHub source). */
+  onOpenInBrowser?: () => void | Promise<void>;
+  openInBrowserHint?: string;
+  /** Write a Markdown representation of this object to a file. */
+  onExportMarkdown?: () => void | Promise<void>;
+  exportMarkdownHint?: string;
+}
+
+export function ShareMenu({
+  contextLabel = "agent",
+  onCopyLink,
+  copyLinkHint,
+  onOpenInBrowser,
+  openInBrowserHint,
+  onExportMarkdown,
+  exportMarkdownHint,
+}: ShareMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -28,32 +48,44 @@ export function ShareMenu({ contextLabel = "agent" }: { contextLabel?: string })
     return () => window.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const items: MenuItem[] = [
-    {
+  const items: MenuItem[] = [];
+  if (onCopyLink) {
+    items.push({
       icon: <IconCopy size={13} className="text-[var(--color-text-soft)]" />,
       label: "Copy link",
-      hint: `openagents://${contextLabel}/...`,
-      onClick: () => setOpen(false),
-    },
-    {
+      hint: copyLinkHint,
+      onClick: async () => {
+        await onCopyLink();
+        setOpen(false);
+      },
+    });
+  }
+  if (onOpenInBrowser) {
+    items.push({
       icon: <IconExternal size={13} className="text-[var(--color-text-soft)]" />,
       label: "Open in browser",
-      hint: "github.com/ugurlabs/openagents/tree/main/agents",
-      onClick: () => setOpen(false),
-    },
-    {
+      hint: openInBrowserHint,
+      onClick: async () => {
+        await onOpenInBrowser();
+        setOpen(false);
+      },
+    });
+  }
+  if (onExportMarkdown) {
+    items.push({
       icon: <IconDownload size={13} className="text-[var(--color-text-soft)]" />,
       label: "Export as Markdown",
-      hint: "Save report locally",
-      onClick: () => setOpen(false),
-    },
-    {
-      icon: <IconSlack size={13} className="text-[var(--color-text-soft)]" />,
-      label: "Send to Slack…",
-      hint: "Post to a channel",
-      onClick: () => setOpen(false),
-    },
-  ];
+      hint: exportMarkdownHint,
+      onClick: async () => {
+        await onExportMarkdown();
+        setOpen(false);
+      },
+    });
+  }
+
+  if (items.length === 0) {
+    return null;
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -74,7 +106,7 @@ export function ShareMenu({ contextLabel = "agent" }: { contextLabel?: string })
             {items.map((it, i) => (
               <button
                 key={i}
-                onClick={it.onClick}
+                onClick={() => void it.onClick()}
                 className="flex w-full items-start gap-3 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
               >
                 <span className="mt-0.5">{it.icon}</span>

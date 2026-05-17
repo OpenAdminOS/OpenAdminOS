@@ -2,6 +2,7 @@ import type {
   LlmCompletion,
   LlmOptions,
   LlmStreamChunk,
+  LlmTokenUsage,
   RunLlmApi,
 } from "@openagents/agent-sdk";
 
@@ -13,9 +14,23 @@ export interface OllamaProviderOptions {
 
 interface OllamaChatChunk {
   model?: string;
-  message?: { content?: string };
+  message?: {
+    content?: string;
+    /**
+     * Ollama 0.10+ emits reasoning-model chain-of-thought in this
+     * separate field. We capture it so the Reasoning tab can show it
+     * and so we can fall back to using it as the answer if the model
+     * exhausts its token budget inside the reasoning phase.
+     */
+    thinking?: string;
+  };
   done?: boolean;
+  done_reason?: string;
   error?: string;
+  /** Tokens consumed parsing the prompt + system message. */
+  prompt_eval_count?: number;
+  /** Tokens generated in the response. */
+  eval_count?: number;
 }
 
 export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi {
@@ -37,7 +52,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       if (!last) {
         throw new Error("Ollama returned no content.");
       }
-      return { text: last.accumulated, model: last.model };
+      return {
+        text: last.accumulated,
+        model: last.model,
+        ...(last.tokenUsage ? { tokenUsage: last.tokenUsage } : {}),
+      };
     },
     async *stream(opts: LlmOptions): AsyncIterable<LlmStreamChunk> {
       const model = opts.model ?? defaultModel;
@@ -59,6 +78,13 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         model,
         messages,
         stream: true,
+        // Ask Ollama to skip reasoning-model "thinking" mode and have
+        // the model produce its answer directly. For reasoning models
+        // (deepseek-r1, qwen-qwq, gpt-oss, etc.) this prevents the
+        // model from spending its entire token budget inside a hidden
+        // chain-of-thought and emitting empty `message.content`. For
+        // non-reasoning models the flag is silently ignored.
+        think: false,
       };
       const optionsPayload: Record<string, number> = {};
       if (typeof opts.temperature === "number") {
@@ -107,6 +133,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
       let accumulated = "";
+      let reasoningOnly = "";
       let actualModel = model;
 
       try {
@@ -133,7 +160,17 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
             if (typeof chunk.model === "string" && chunk.model.length > 0) {
               actualModel = chunk.model;
             }
+            const tokenUsage = extractTokenUsage(chunk);
             const delta = chunk.message?.content ?? "";
+            // Capture reasoning-model chain-of-thought separately. We
+            // don't yield this as content (the renderer surfaces it via
+            // the runtime's thinking hook on the accumulated stream),
+            // but we keep it around so we can fall back to it if the
+            // model never produced visible content.
+            const reasoningDelta = chunk.message?.thinking ?? "";
+            if (reasoningDelta.length > 0) {
+              reasoningOnly += reasoningDelta;
+            }
             if (delta.length > 0) {
               accumulated += delta;
               yield {
@@ -141,15 +178,31 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
                 accumulated,
                 done: Boolean(chunk.done),
                 model: actualModel,
+                ...(tokenUsage ? { tokenUsage } : {}),
               };
             }
             if (chunk.done) {
-              if (delta.length === 0) {
+              // If the model never emitted visible content but did
+              // produce reasoning (e.g. it hit num_predict mid-thought),
+              // surface the reasoning so the agent has *something* to
+              // work with. The cleanLlmText filter in the runtime will
+              // re-strip <think> tags if the model also wrapped output.
+              if (delta.length === 0 && accumulated.length === 0 && reasoningOnly.length > 0) {
+                accumulated = reasoningOnly;
+                yield {
+                  delta: reasoningOnly,
+                  accumulated,
+                  done: true,
+                  model: actualModel,
+                  ...(tokenUsage ? { tokenUsage } : {}),
+                };
+              } else if (delta.length === 0) {
                 yield {
                   delta: "",
                   accumulated,
                   done: true,
                   model: actualModel,
+                  ...(tokenUsage ? { tokenUsage } : {}),
                 };
               }
               return;
@@ -173,6 +226,19 @@ export const noopLlm: RunLlmApi = {
     throw new Error("No LLM provider is configured for this run.");
   },
 };
+
+function extractTokenUsage(chunk: OllamaChatChunk): LlmTokenUsage | undefined {
+  const prompt = typeof chunk.prompt_eval_count === "number" ? chunk.prompt_eval_count : undefined;
+  const completion = typeof chunk.eval_count === "number" ? chunk.eval_count : undefined;
+  if (prompt === undefined && completion === undefined) return undefined;
+  const usage: LlmTokenUsage = {};
+  if (prompt !== undefined) usage.promptTokens = prompt;
+  if (completion !== undefined) usage.completionTokens = completion;
+  if (prompt !== undefined && completion !== undefined) {
+    usage.totalTokens = prompt + completion;
+  }
+  return usage;
+}
 
 function describe(error: unknown): string {
   if (error instanceof Error) return error.message;

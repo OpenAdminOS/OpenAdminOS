@@ -66,7 +66,6 @@ skills:
     format: llm
     label: Summarize findings with local LLM
     detail: Generates a 2-sentence executive summary plus two recommendations.
-    when: ctx.llm.available
     settings:
       system: >-
         You are a Microsoft 365 administrator's assistant. Be concise and
@@ -86,7 +85,7 @@ skills:
 
 # ─── what makes it an agent ────────────────────────────────────────────────
 definition:
-  # Install-time, user-configurable parameters. v0.1 uses the declared
+  # Install-time, user-configurable parameters. The runtime reads the declared
   # defaults; an install-time form lands in a later slice.
   settings:
     - id: warnDays
@@ -112,10 +111,10 @@ definition:
   # Shape of the run record's `result` field. Renders against the
   # accumulated pipeline state.
   result:
+    # LLM-generated headline — every run preflights an LLM provider, so the
+    # `default` filter is purely defensive.
     summary: >-
-      Found {{ categorize_by_age.output.retire | size }} devices ready to
-      retire, {{ categorize_by_age.output.stale | size }} stale, and
-      {{ categorize_by_age.output.warn | size }} in the warning band.
+      {{ summarize.output.text | default("Summary unavailable.") }}
     data:
       totalDevices: "{{ load_devices.output | size }}"
       buckets:

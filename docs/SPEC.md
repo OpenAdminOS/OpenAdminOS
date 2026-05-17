@@ -102,6 +102,13 @@ Per-agent model overrides are required: an agent's manifest can specify a prefer
 
 ### Agent contract
 
+**Every agent invokes the LLM at least once.** The model is load-bearing, not optional polish. Agent Template manifests MUST declare at least one step with `format: llm`; the runtime hard-fails any LLM step that is reached without a connected provider (no silent skipping), and `startRun` preflights the active provider before queueing. This is what makes an agent an *agent* and not just a Graph query — the deterministic transforms shape the data, but the model is the part that reasons and produces the headline the admin reads.
+
+Concretely:
+- The agent's `result.summary` should reference the LLM step's output (e.g. `{{ summarize.output.text | default("...") }}`), not a deterministic count template. The deterministic counts belong in `result.data` for structured rendering.
+- Write agents use the LLM to *explain* the plan in plain language before the typed-confirmation prompt — they don't get a pass.
+- If you genuinely don't need an LLM (e.g. a pure data export), this product is the wrong tool; reach for `Get-MgDeviceManagementManagedDevice | Export-Csv` or a similar deterministic script instead.
+
 An agent is a TypeScript module with a default-exported manifest and a `run` function:
 
 ```ts

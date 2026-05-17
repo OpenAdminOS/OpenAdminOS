@@ -13,30 +13,42 @@ import {
   IconHardDrive,
   IconLock,
   IconPlay,
-  IconShare,
   IconShield,
   IconWarning,
 } from "../components/icons";
+
+import { ShareMenu } from "../components/ShareMenu";
+import { ActivityFeed } from "../components/ActivityFeed";
+import { ResultPanel } from "../components/ResultPanel";
+import { RunFailureRemediation } from "../components/RunFailureRemediation";
+import { RunTelemetry } from "../components/RunTelemetry";
 import { useAppState } from "../state";
 import type {
   RunRecord,
   RunStatus,
-  RunStepRecord,
   TenantRecord,
   WriteAction,
   WritePlan,
 } from "../shared/openAgents";
+import {
+  runReportJson,
+  runReportMarkdown,
+  runReportPlaintext,
+} from "../shared/runReport";
 
 export default function RunResult() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { state, startRun, confirmRun, rejectRun } = useAppState();
+  const { state, startRun, confirmRun, rejectRun, cancelRun } = useAppState();
   const run = state.runs.find((candidate) => candidate.id === id);
   const agent = run
     ? state.installedAgents.find((candidate) => candidate.slug === run.agentSlug)
     : undefined;
   const isLive = run?.status === "queued" || run?.status === "running";
   const isAwaiting = run?.status === "awaiting-confirmation";
+  const tenantDisplayName = run?.tenantId
+    ? state.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName
+    : undefined;
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -44,6 +56,19 @@ export default function RunResult() {
     const intervalId = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(intervalId);
   }, [isLive]);
+
+  // Keyboard: Esc cancels a live run.
+  useEffect(() => {
+    if (!isLive || !run) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        void cancelRun(run.id);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isLive, run, cancelRun]);
 
   if (!run) {
     return (
@@ -72,6 +97,22 @@ export default function RunResult() {
     );
   }
 
+  const reRun = () => {
+    // Preserve the run's tenant pinning, provider override, AND model
+    // override so re-runs don't silently drift to whatever's currently
+    // active globally.
+    const options: {
+      tenantId: string | null;
+      providerId?: typeof run.providerId;
+      model?: string;
+    } = { tenantId: run.tenantId ?? null };
+    if (run.providerId) options.providerId = run.providerId;
+    if (run.model) options.model = run.model;
+    void startRun(run.agentSlug, options).then((nextRun) =>
+      navigate(`/runs/${nextRun.id}`),
+    );
+  };
+
   return (
     <>
       <PageHeader
@@ -85,68 +126,133 @@ export default function RunResult() {
         }
         title={agent?.name ?? run.agentSlug}
         subtitle={
-          <span className="inline-flex items-center gap-2">
-            <Pill tone={statusTone(run.status)}>
-              {run.status === "completed" ? (
-                <IconCheck size={10} />
-              ) : run.status === "failed" || run.status === "rejected" ? (
-                <IconWarning size={10} />
-              ) : run.status === "awaiting-confirmation" ? (
-                <IconBolt size={10} />
-              ) : (
-                <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current" />
-              )}
-              {statusLabel(run.status)}
-            </Pill>
-            {isLive && (
-              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]">
-                <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-warning)]" />
-                Streaming updates
-              </span>
-            )}
-            {run.dataSource && (
-              <Pill tone={run.dataSource === "graph" ? "success" : "default"}>
-                {run.dataSource === "graph"
-                  ? `Tenant: ${
-                      state.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ??
-                      run.tenantId ??
-                      "real"
-                    }`
-                  : "Synthetic data"}
+          <div className="flex flex-col gap-1">
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <Pill tone={statusTone(run.status)}>
+                {statusIcon(run.status)}
+                {statusLabel(run.status)}
               </Pill>
-            )}
-            <span>{formatDate(run.queuedAt)}</span>
-            <span className="opacity-50">·</span>
-            <span>{run.providerId ?? "provider pending"}</span>
-            {run.model && (
-              <>
-                <span className="opacity-50">·</span>
-                <span className="font-mono">{run.model}</span>
-              </>
-            )}
-          </span>
+              {isLive && (
+                <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]">
+                  <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-warning)]" />
+                  Streaming updates
+                </span>
+              )}
+              {run.dataSource && (
+                <Pill tone={run.dataSource === "graph" ? "success" : "default"}>
+                  {run.dataSource === "graph"
+                    ? `Tenant: ${tenantDisplayName ?? run.tenantId ?? "connected"}`
+                    : "Synthetic data"}
+                </Pill>
+              )}
+              {agent && (
+                <Pill tone={agent.mode === "write" ? "warning" : "default"}>
+                  {agent.mode === "write" ? "Write" : "Read"} · {agent.category}
+                </Pill>
+              )}
+            </span>
+            <span className="inline-flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
+              <span>{formatDate(run.queuedAt)}</span>
+              <span className="opacity-50">·</span>
+              <span>{run.providerId ?? "provider pending"}</span>
+              {run.model && (
+                <>
+                  <span className="opacity-50">·</span>
+                  <span className="font-mono">{run.model}</span>
+                </>
+              )}
+              <span className="opacity-50">·</span>
+              <button
+                onClick={() => {
+                  void navigator.clipboard.writeText(run.id);
+                }}
+                title="Copy run id"
+                className="inline-flex items-center gap-1 font-mono transition-colors hover:text-[var(--color-text)]"
+              >
+                <IconCopy size={10} />
+                <span>{run.id.slice(0, 8)}</span>
+              </button>
+            </span>
+          </div>
         }
         actions={
           <>
-            <Button variant="secondary" size="md" leadingIcon={<IconCopy size={12} />}>
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={<IconCopy size={12} />}
+              onClick={() => {
+                void navigator.clipboard.writeText(
+                  runReportPlaintext(run, {
+                    agentName: agent?.name,
+                    tenantName: tenantDisplayName,
+                  }),
+                );
+              }}
+            >
               Copy report
             </Button>
-            <Button variant="secondary" size="md" leadingIcon={<IconDownload size={12} />}>
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={<IconDownload size={12} />}
+              onClick={() => {
+                void window.openAgents?.saveTextFile({
+                  suggestedName: `${run.agentSlug}-${run.id}.json`,
+                  content: runReportJson(run),
+                  filters: [{ name: "JSON", extensions: ["json"] }],
+                });
+              }}
+            >
               Export
             </Button>
-            <Button variant="secondary" size="md" leadingIcon={<IconShare size={12} />}>
-              Share
-            </Button>
+            <ShareMenu
+              contextLabel="run"
+              onCopyLink={() => {
+                void navigator.clipboard.writeText(`openagents://run/${run.id}`);
+              }}
+              copyLinkHint={`openagents://run/${run.id}`}
+              onExportMarkdown={() => {
+                void window.openAgents?.saveTextFile({
+                  suggestedName: `${run.agentSlug}-${run.id}.md`,
+                  content: runReportMarkdown(run, {
+                    agentName: agent?.name,
+                    tenantName: tenantDisplayName,
+                  }),
+                  filters: [{ name: "Markdown", extensions: ["md"] }],
+                });
+              }}
+              exportMarkdownHint="Save report as .md"
+            />
+            {isLive && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => navigate("/")}
+                  title="Run continues in the background"
+                >
+                  Run in background
+                </Button>
+                <Button
+                  size="md"
+                  onClick={() => {
+                    void cancelRun(run.id);
+                  }}
+                  className="!bg-[var(--color-danger-soft)] !text-[var(--color-danger)] !ring-1 !ring-[var(--color-danger)]/30 hover:!bg-[var(--color-danger)]/15"
+                  title="Cancel run (Esc)"
+                >
+                  Cancel run
+                </Button>
+              </>
+            )}
             {!isLive && !isAwaiting && (
               <Button
                 variant="primary"
                 size="md"
                 leadingIcon={<IconPlay size={12} />}
-                onClick={() => {
-                  void startRun(run.agentSlug).then((nextRun) =>
-                    navigate(`/runs/${nextRun.id}`),
-                  );
-                }}
+                onClick={reRun}
+                title="Re-run with the same tenant pinning"
               >
                 Run again
               </Button>
@@ -154,50 +260,20 @@ export default function RunResult() {
           </>
         }
       />
+      <RunTelemetry run={run} nowMs={now} isLive={isLive} />
       <PageBody>
-        <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <Card>
-            <div className="flex items-stretch gap-6 p-6">
-              <div className="flex flex-col justify-center">
-                <SectionLabel>Run summary</SectionLabel>
-                <div className="mt-3 max-w-[680px] text-[18px] font-medium leading-relaxed text-[var(--color-text)]">
-                  {run.summary ?? "Run is waiting for its first update."}
-                </div>
-                <div className="mt-4 flex items-center gap-2">
-                  <Pill tone={statusTone(run.status)}>{statusLabel(run.status)}</Pill>
-                  <Pill>{run.steps.length} steps</Pill>
-                  <Pill>{run.logs.length} logs</Pill>
-                  {run.plan && <Pill tone="warning">{run.plan.actions.length} planned actions</Pill>}
-                </div>
-              </div>
-              <div className="ml-auto flex flex-col items-end justify-center gap-2 border-l border-[var(--color-border-soft)] pl-6">
-                <SmallStat label="Duration" value={formatDuration(run, now)} mono />
-                <SmallStat label="Provider" value={run.providerId ?? "-"} mono />
-                <SmallStat
-                  label="Cost"
-                  value={state.trust.isLocal ? "$0.00" : "External"}
-                  valueClass="text-[var(--color-success)]"
-                  caption={state.trust.label}
-                />
-              </div>
-            </div>
-          </Card>
+        <TenantDriftNote
+          runTenantId={run.tenantId}
+          activeTenantId={state.activeTenantId}
+          tenants={state.tenants}
+          onRetargetCurrent={() => {
+            void startRun(run.agentSlug, {
+              tenantId: state.activeTenantId ?? null,
+            }).then((nextRun) => navigate(`/runs/${nextRun.id}`));
+          }}
+        />
 
-          <Card>
-            <div className="p-6">
-              <SectionLabel>Data residency</SectionLabel>
-              <div className="mt-3 flex items-center gap-2">
-                <IconHardDrive size={16} className="text-[var(--color-success)]" />
-                <span className="text-[14px] font-medium text-[var(--color-text)]">
-                  {state.trust.label}
-                </span>
-              </div>
-              <div className="mt-2 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-                {state.trust.detail}
-              </div>
-            </div>
-          </Card>
-        </div>
+        <OutcomeCard run={run} agent={agent} trustLabel={state.trust.label} />
 
         {isAwaiting && run.plan && (
           <DiffConfirmPanel
@@ -208,83 +284,119 @@ export default function RunResult() {
             writesAreReal={
               run.dataSource === "graph" && state.realWritesEnabled === true
             }
-            tenantDisplayName={
-              run.tenantId
-                ? state.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName
-                : undefined
-            }
+            tenantDisplayName={tenantDisplayName}
           />
         )}
 
-        <TenantDriftNote
-          runTenantId={run.tenantId}
-          activeTenantId={state.activeTenantId}
-          tenants={state.tenants}
-        />
+        <RunFailureRemediation run={run} />
 
-        <Card className="mb-6">
-          <div className="p-6">
-            <SectionLabel>Steps</SectionLabel>
-            <div className="mt-4 flex flex-col gap-2">
-              {run.steps.length === 0 ? (
-                <div className="text-[12px] text-[var(--color-text-muted)]">
-                  No steps recorded yet.
-                </div>
-              ) : (
-                run.steps.map((step) => <StepRow key={step.id} step={step} />)
-              )}
-            </div>
-          </div>
-        </Card>
+        <ActivityFeed run={run} />
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Card>
-            <div className="p-6">
-              <SectionLabel>Result</SectionLabel>
-              <pre className="mt-4 max-h-[360px] overflow-auto rounded-lg bg-[var(--color-bg-raised)] p-4 font-mono text-[11.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-                {JSON.stringify(run.result ?? { status: run.status }, null, 2)}
-              </pre>
-            </div>
-          </Card>
+        <ResultPanel run={run} />
 
-          <Card>
-            <div className="p-6">
-              <SectionLabel>Logs</SectionLabel>
-              <div className="mt-4 flex max-h-[360px] flex-col gap-2 overflow-auto">
-                {run.logs.length === 0 ? (
-                  <div className="text-[12px] text-[var(--color-text-muted)]">
-                    No logs recorded yet.
-                  </div>
-                ) : (
-                  run.logs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="rounded-lg bg-[var(--color-bg-raised)] p-3 font-mono text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-                    >
-                      <span className="text-[var(--color-text-muted)]">
-                        {formatTime(log.timestamp)} {log.level}
-                      </span>{" "}
-                      {log.message}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </Card>
+        <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
+          <span
+            className={
+              state.trust.isLocal
+                ? "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
+                : "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-info)]"
+            }
+          />
+          <span>{state.trust.detail}</span>
         </div>
       </PageBody>
     </>
   );
 }
 
+function statusIcon(status: RunStatus) {
+  if (status === "completed") return <IconCheck size={10} />;
+  if (status === "failed" || status === "rejected" || status === "cancelled") {
+    return <IconWarning size={10} />;
+  }
+  if (status === "awaiting-confirmation") return <IconBolt size={10} />;
+  return <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current" />;
+}
+
+function OutcomeCard({
+  run,
+  agent,
+  trustLabel,
+}: {
+  run: RunRecord;
+  agent: ReturnType<typeof useAppState>["state"]["installedAgents"][number] | undefined;
+  trustLabel: string;
+}) {
+  return (
+    <Card className="mb-6">
+      <div className="grid grid-cols-1 gap-0 lg:grid-cols-[1fr_320px]">
+        <div className="p-6">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            {statusToOutcomeLabel(run.status)}
+          </div>
+          <div className="mt-3 text-[18px] font-medium leading-relaxed text-[var(--color-text)]">
+            {run.summary ?? "Run is waiting for its first update."}
+          </div>
+          {agent?.description && (
+            <p className="mt-3 max-w-[640px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              {agent.description}
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Pill>
+              {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
+            </Pill>
+            <Pill>
+              {run.logs.length} log{run.logs.length === 1 ? "" : "s"}
+            </Pill>
+            {run.plan && (
+              <Pill tone="warning">
+                <IconLock size={9} /> {run.plan.actions.length} planned action
+                {run.plan.actions.length === 1 ? "" : "s"}
+              </Pill>
+            )}
+          </div>
+        </div>
+        <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] p-6 lg:border-l lg:border-t-0">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            Data residency
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <IconHardDrive size={14} className="text-[var(--color-success)]" />
+            <span className="text-[13px] font-medium text-[var(--color-text)]">
+              {trustLabel}
+            </span>
+          </div>
+          <div className="mt-4 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+            Run records are written to this profile's local store. They never
+            leave the device when a local LLM provider is selected.
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function statusToOutcomeLabel(status: RunStatus): string {
+  if (status === "completed") return "Completed";
+  if (status === "running" || status === "queued") return "In progress";
+  if (status === "awaiting-confirmation") return "Waiting for confirmation";
+  if (status === "failed") return "Failed";
+  if (status === "rejected") return "Rejected";
+  if (status === "cancelled") return "Cancelled";
+  return "Outcome";
+}
+
 function TenantDriftNote({
   runTenantId,
   activeTenantId,
   tenants,
+  onRetargetCurrent,
 }: {
   runTenantId: string | undefined;
   activeTenantId: string | undefined;
   tenants: TenantRecord[];
+  onRetargetCurrent: () => void;
 }) {
   if (!runTenantId) return null;
   if (runTenantId === activeTenantId) return null;
@@ -293,19 +405,24 @@ function TenantDriftNote({
     ? tenants.find((tenant) => tenant.id === activeTenantId)
     : undefined;
   return (
-    <div className="mb-6 flex items-start gap-3 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 ring-1 ring-[var(--color-info)]/25">
-      <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-info)]" />
-      <div className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-        This run executed against{" "}
-        <span className="font-medium text-[var(--color-text)]">
-          {runTenant?.displayName ?? `tenant ${runTenantId}`}
-        </span>
-        . The active tenant is now{" "}
-        <span className="font-medium text-[var(--color-text)]">
-          {activeTenant?.displayName ?? "Synthetic data"}
-        </span>
-        , so results below reflect the original tenant, not the current one.
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/30">
+      <div className="flex items-start gap-3">
+        <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+        <div className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+          This run executed against{" "}
+          <span className="font-medium text-[var(--color-text)]">
+            {runTenant?.displayName ?? `tenant ${runTenantId}`}
+          </span>
+          . The active tenant is now{" "}
+          <span className="font-medium text-[var(--color-text)]">
+            {activeTenant?.displayName ?? "Synthetic data"}
+          </span>
+          , so the results below reflect the original tenant.
+        </div>
       </div>
+      <Button variant="secondary" size="sm" onClick={onRetargetCurrent}>
+        Re-run against current tenant
+      </Button>
     </div>
   );
 }
@@ -510,105 +627,6 @@ function ActionRow({ action, index }: { action: WriteAction; index: number }) {
   );
 }
 
-function StepRow({ step }: { step: RunStepRecord }) {
-  const isRunning = step.status === "running";
-
-  return (
-    <div
-      className={`rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ${
-        isRunning
-          ? "ring-[var(--color-warning)]/40"
-          : "ring-[var(--color-border-soft)]"
-      }`}
-    >
-      <div className="flex items-center gap-3">
-        <Pill tone={stepTone(step.status)}>
-          {isRunning && (
-            <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current" />
-          )}
-          {step.status}
-        </Pill>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
-            {step.label}
-          </div>
-          {step.detail && (
-            <div className="mt-0.5 text-[11.5px] text-[var(--color-text-muted)]">
-              {step.detail}
-            </div>
-          )}
-        </div>
-      </div>
-      {step.thinking && step.thinking.text.length > 0 && (
-        <div className="mt-3 rounded-md bg-[var(--color-think-soft)] p-3 ring-1 ring-[var(--color-think)]/25">
-          <div className="mb-1.5 flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-think)]">
-              Reasoning
-            </span>
-            <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
-              {step.thinking.model}
-            </span>
-            {step.thinking.streaming && (
-              <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
-                <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-think)]" />
-                streaming
-              </span>
-            )}
-          </div>
-          <div className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-            {step.thinking.text}
-            {step.thinking.streaming && (
-              <span className="ml-1 inline-block h-3.5 w-1.5 -translate-y-px animate-pulse-soft bg-[var(--color-think)]" />
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: string }) {
-  return (
-    <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-      {children}
-    </div>
-  );
-}
-
-function SmallStat({
-  label,
-  value,
-  caption,
-  mono = false,
-  valueClass = "text-[var(--color-text)]",
-}: {
-  label: string;
-  value: string;
-  caption?: string;
-  mono?: boolean;
-  valueClass?: string;
-}) {
-  return (
-    <div className="flex flex-col items-end leading-tight">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </span>
-      <span
-        className={`mt-0.5 text-[16px] font-semibold tabular-nums ${valueClass} ${
-          mono ? "font-mono" : ""
-        }`}
-      >
-        {value}
-      </span>
-      {caption && (
-        <span className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
-          {caption}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
@@ -620,48 +638,19 @@ function formatDate(value: string) {
   });
 }
 
-function formatTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--:--";
-  return date.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function formatDuration(run: RunRecord, nowMs: number) {
-  if (run.status === "queued") return "queued";
-  if (run.status === "awaiting-confirmation") return "paused";
-  if (!run.startedAt) return "-";
-
-  const endMs = run.finishedAt ? new Date(run.finishedAt).getTime() : nowMs;
-  const durationMs = endMs - new Date(run.startedAt).getTime();
-  if (Number.isNaN(durationMs) || durationMs < 0) return "-";
-
-  const suffix = run.status === "running" ? "… " : "";
-  return `${suffix}${(durationMs / 1000).toFixed(1)}s`;
-}
-
 function statusLabel(status: RunStatus) {
   if (status === "queued") return "Queued";
   if (status === "running") return "Running";
   if (status === "awaiting-confirmation") return "Awaiting confirmation";
   if (status === "completed") return "Completed";
   if (status === "rejected") return "Rejected";
+  if (status === "cancelled") return "Cancelled";
   return "Failed";
 }
 
 function statusTone(status: RunStatus) {
   if (status === "failed") return "danger";
-  if (status === "rejected") return "default";
+  if (status === "rejected" || status === "cancelled") return "default";
   if (status === "completed") return "success";
   return "warning";
-}
-
-function stepTone(status: RunStepRecord["status"]) {
-  if (status === "failed") return "danger";
-  if (status === "running") return "warning";
-  if (status === "completed") return "success";
-  return "default";
 }

@@ -12,6 +12,7 @@ import {
   deriveTrustState,
   providerCatalog,
   type AgentDraft,
+  type AgentSchedule,
   type AppState,
   type OpenAgentsApi,
   type ProviderId,
@@ -29,10 +30,13 @@ interface AppStateContextValue {
   refresh: () => Promise<void>;
   refreshRegistry: () => Promise<void>;
   installAgent: (agentId: string) => Promise<void>;
+  uninstallAgent: (slug: string) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
+  setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
   startRun: (agentSlug: string, options?: StartRunOptions) => Promise<RunRecord>;
   confirmRun: (runId: string, phrase: string) => Promise<RunRecord>;
   rejectRun: (runId: string) => Promise<RunRecord>;
+  cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: () => Promise<TenantRecord | undefined>;
   setActiveTenant: (id: string) => Promise<void>;
   disconnectTenant: (id: string) => Promise<void>;
@@ -40,6 +44,10 @@ interface AppStateContextValue {
   updateAgentSettings: (
     slug: string,
     values: Record<string, unknown>,
+  ) => Promise<void>;
+  updateAgentSchedule: (
+    slug: string,
+    schedule: AgentSchedule | null,
   ) => Promise<void>;
   draftAgentManifest: (prompt: string) => Promise<AgentDraft>;
   saveAgentDraft: (yamlSource: string) => Promise<void>;
@@ -149,6 +157,57 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setLoading(false);
     }
   }, []);
+
+  const uninstallAgent = useCallback(async (slug: string) => {
+    const api = getOpenAgentsApi();
+
+    if (!api) {
+      const fallbackError = new Error(
+        "Agent uninstall is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const nextState = await api.uninstallAgent(slug);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const uninstallError = toError(caughtError);
+      setError(uninstallError);
+      throw uninstallError;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const setActiveModel = useCallback(
+    async (providerId: ProviderId, model: string | null) => {
+      const api = getOpenAgentsApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Setting the active model is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.setActiveModel(providerId, model);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const modelError = toError(caughtError);
+        setError(modelError);
+        throw modelError;
+      }
+    },
+    [],
+  );
 
   const setActiveProvider = useCallback(async (id: ProviderId) => {
     const api = getOpenAgentsApi();
@@ -317,6 +376,30 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     [],
   );
 
+  const updateAgentSchedule = useCallback(
+    async (slug: string, schedule: AgentSchedule | null) => {
+      const api = getOpenAgentsApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating an agent schedule is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentSchedule(slug, schedule);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const scheduleError = toError(caughtError);
+        setError(scheduleError);
+        throw scheduleError;
+      }
+    },
+    [],
+  );
+
   const draftAgentManifest = useCallback(async (prompt: string) => {
     const api = getOpenAgentsApi();
     if (!api) {
@@ -354,6 +437,29 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       const saveError = toError(caughtError);
       setError(saveError);
       throw saveError;
+    }
+  }, []);
+
+  const cancelRun = useCallback(async (runId: string) => {
+    const api = getOpenAgentsApi();
+    if (!api) {
+      const fallbackError = new Error("Run cancellation is unavailable in browser development.");
+      setError(fallbackError);
+      throw fallbackError;
+    }
+
+    setError(null);
+
+    try {
+      const run = await api.cancelRun(runId);
+      const nextState = await api.getAppState();
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+      return run;
+    } catch (caughtError) {
+      const cancelError = toError(caughtError);
+      setError(cancelError);
+      throw cancelError;
     }
   }, []);
 
@@ -405,19 +511,24 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       refresh,
       refreshRegistry,
       installAgent,
+      uninstallAgent,
+      setActiveModel,
       setActiveProvider,
       startRun,
       confirmRun,
       rejectRun,
+      cancelRun,
       connectTenant,
       setActiveTenant,
       disconnectTenant,
       setRealWritesEnabled,
       updateAgentSettings,
+      updateAgentSchedule,
       draftAgentManifest,
       saveAgentDraft,
     }),
     [
+      cancelRun,
       confirmRun,
       connectTenant,
       disconnectTenant,
@@ -431,10 +542,13 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       registryAgents,
       rejectRun,
       saveAgentDraft,
+      setActiveModel,
       setActiveProvider,
       setActiveTenant,
       startRun,
       state,
+      uninstallAgent,
+      updateAgentSchedule,
       updateAgentSettings,
     ],
   );

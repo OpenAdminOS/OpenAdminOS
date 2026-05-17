@@ -1,3 +1,8 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import { load as parseYaml } from "js-yaml";
+
 import type { GraphOperation } from "@openagents/agent-sdk";
 
 import type { AgentManifest } from "./load-agents.js";
@@ -25,8 +30,43 @@ export async function runAgentChecks(
   results.push(...(await checkScopeCoverage(agent, opResults.endpointDocs)));
   results.push(...(await checkSelectProperties(agent, opResults.endpointDocs, client)));
   results.push(...(await checkSampleBacking(agent, client)));
+  results.push(checkAgentUsesLlm(agent));
 
   return results;
+}
+
+function checkAgentUsesLlm(agent: AgentManifest): CheckResult {
+  const yamlPath = join(dirname(agent.manifestPath), "manifest.yaml");
+  let parsed: { skills?: Array<{ format?: string; id?: string }> };
+  try {
+    const raw = readFileSync(yamlPath, "utf8");
+    parsed = parseYaml(raw) as { skills?: Array<{ format?: string; id?: string }> };
+  } catch (error) {
+    return {
+      name: "uses-llm",
+      severity: "warn",
+      message: `Could not read sibling manifest.yaml to verify LLM use: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+  const skills = Array.isArray(parsed?.skills) ? parsed.skills : [];
+  const llmSteps = skills.filter((skill) => skill?.format === "llm");
+  if (llmSteps.length === 0) {
+    return {
+      name: "uses-llm",
+      severity: "fail",
+      message:
+        "Agent has no `llm` step. Every Open Agents agent is LLM-augmented by contract — add at least one `format: llm` step.",
+    };
+  }
+  return {
+    name: "uses-llm",
+    severity: "pass",
+    message: `Agent invokes the LLM in ${llmSteps.length} step${
+      llmSteps.length === 1 ? "" : "s"
+    }.`,
+  };
 }
 
 async function checkScopesAreKnown(

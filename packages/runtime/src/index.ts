@@ -13,6 +13,7 @@ import type {
   GraphHttpMethod,
   GraphOperation,
   LlmStreamChunk,
+  LlmTokenUsage,
   ProviderId,
   ReadAgentModule,
   RegistryAgentSummary,
@@ -232,6 +233,10 @@ async function createPhaseHandle(
       };
       void input.onProgress(working);
     },
+    accumulateTokens: (usage) => {
+      working = { ...working, tokens: mergeTokenUsage(working.tokens, usage) };
+      void input.onProgress(working);
+    },
   });
 
   const ctx: RunContext = {
@@ -323,6 +328,29 @@ interface ThinkingHooks {
     stepId: string,
     update: (current: RunStepThinking | undefined) => RunStepThinking | undefined,
   ): void;
+  accumulateTokens(usage: LlmTokenUsage): void;
+}
+
+export function mergeTokenUsage(
+  current: LlmTokenUsage | undefined,
+  next: LlmTokenUsage,
+): LlmTokenUsage {
+  const merged: LlmTokenUsage = { ...(current ?? {}) };
+  if (typeof next.promptTokens === "number") {
+    merged.promptTokens = (merged.promptTokens ?? 0) + next.promptTokens;
+  }
+  if (typeof next.completionTokens === "number") {
+    merged.completionTokens = (merged.completionTokens ?? 0) + next.completionTokens;
+  }
+  if (typeof next.totalTokens === "number") {
+    merged.totalTokens = (merged.totalTokens ?? 0) + next.totalTokens;
+  } else if (
+    typeof merged.promptTokens === "number" &&
+    typeof merged.completionTokens === "number"
+  ) {
+    merged.totalTokens = merged.promptTokens + merged.completionTokens;
+  }
+  return merged;
 }
 
 function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
@@ -346,7 +374,11 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
       if (!last) {
         throw new Error("LLM provider returned no content.");
       }
-      return { text: last.accumulated, model: last.model };
+      return {
+        text: last.accumulated,
+        model: last.model,
+        ...(last.tokenUsage ? { tokenUsage: last.tokenUsage } : {}),
+      };
     },
     async *stream(options) {
       guardAvailable();
@@ -365,6 +397,9 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
               model: chunk.model,
               streaming: !chunk.done,
             }));
+          }
+          if (chunk.done && chunk.tokenUsage) {
+            hooks.accumulateTokens(chunk.tokenUsage);
           }
           yield chunk;
         }
@@ -769,7 +804,6 @@ function loadManifest(
     preferredModel:
       typeof parsed.preferredModel === "string" ? parsed.preferredModel : undefined,
     installs: typeof parsed.installs === "number" ? parsed.installs : undefined,
-    rating: typeof parsed.rating === "number" ? parsed.rating : undefined,
     graphOperations: parsed.graphOperations,
   };
 }
@@ -789,7 +823,6 @@ function validateManifest(
   version: string;
   preferredModel?: string;
   installs?: number;
-  rating?: number;
   graphOperations?: GraphOperation[];
 } {
   requireString(manifest, "id", manifestPath);

@@ -23,6 +23,12 @@ Thanks for your interest. This project is community-built and contributions are 
 - **Wrappers around other AI products** — we provide an abstraction so users can swap providers. Don't lock in to one vendor.
 - **"Smart" defaults that bypass the diff-confirmation flow** — every write operation gets human review. No exceptions.
 
+## Agent contract
+
+Every Open Agents agent is **LLM-augmented by contract**. The manifest must include at least one `format: llm` step, and the run's `result.summary` must reference that step's output (e.g. `{{ summarize.output.text | default("Summary unavailable.") }}`). Deterministic templates that simply count records are not agents — they're queries. Reach for `Get-MgDeviceManagementManagedDevice | Group-Object` or similar PowerShell instead.
+
+The runtime hard-fails any LLM step reached without a connected provider (no silent skips), and `npm run qa` includes a `uses-llm` check that fails any manifest without a `format: llm` step.
+
 ## Quality gate for agents
 
 Every built-in agent declares its Graph contract in `manifest.json` under `graphOperations` (method, path, optional `select` fields). Before opening a PR for an agent change, run:
@@ -45,6 +51,7 @@ npm run qa
 - Every declared scope is required by at least one declared operation (catches orphans), and every operation has a declared scope that satisfies its required permissions.
 - Every `select` field exists on the operation's resource type.
 - A best-effort lookup of curated samples backing each GET operation (warning when none found).
+- Every agent includes at least one `format: llm` step (`uses-llm` check, hard fail).
 
 The synthetic Graph fixture in `@openagents/runtime` is also cross-checked against the real `managedDevice` schema. Adding a field to the fixture that doesn't exist on Graph fails the gate.
 

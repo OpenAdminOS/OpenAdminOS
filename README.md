@@ -4,7 +4,7 @@
 
 Run AI agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected. Every agent ships its full pipeline as YAML — no opaque code paths, no hidden Graph calls.
 
-> Pre-1.0. v0.1 (private preview showcase) is feature-complete; signed installers ship with v0.2. Star the repo to follow along.
+> Pre-1.0. v0.1.4 ships the desktop surface end-to-end against local Ollama. Hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), LM Studio, signed installers, and the GitHub-hosted agent registry land in v0.2. Star the repo to follow along.
 
 ---
 
@@ -41,17 +41,16 @@ skills:
 
   - id: summarize
     format: llm
-    when: ctx.llm.available
     settings: { prompt: "...", maxTokens: 220 }
 
 definition:
   settings:
     - { id: retireDays, type: integer, default: 180 }
   result:
-    summary: "{{ buckets.retire | size }} devices ready to retire."
+    summary: '{{ summarize.output.text | default("Summary unavailable.") }}'
 ```
 
-**Four step formats**: `graph` (read Microsoft Graph), `transform` (pure data shaping — `group-by-age`, `filter-by-age`, `count-by-field`), `llm` (optional, gated on provider availability), and `write` (emits one action per source item and pauses for typed phrase confirmation).
+**Four step formats**: `graph` (read Microsoft Graph), `transform` (pure data shaping — `group-by-age`, `filter-by-age`, `count-by-field`), `llm` (required — every agent invokes the model at least once to produce the headline summary), and `write` (emits one action per source item and pauses for typed phrase confirmation).
 
 ### Static QA gate
 
@@ -73,17 +72,18 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 
 ### What's shipped vs what's coming
 
-| | v0.1 | v0.2 |
+| | v0.1.4 | v0.2 |
 |---|---|---|
 | Tenant connect (read) | yes (MSAL interactive) | — |
-| Real Graph writes (gated) | yes | — |
-| Local LLM (Ollama) | yes | — |
-| Hosted LLM (Anthropic / OpenAI) | no | yes |
-| LM Studio | no | yes |
-| Signed installers | no | yes |
-| Code-signing + notarization | no | yes |
-| Auto-update via electron-updater | no | yes |
-| Cross-platform builds | dev-only | Win + macOS signed |
+| Real Graph writes (gated) | UI complete, POST handler stubbed | real POSTs |
+| Local LLM (Ollama) | yes, with `think: false` for reasoning models | — |
+| LM Studio / Anthropic / OpenAI / Azure OpenAI | toggles disabled, "Coming in 0.2" | yes |
+| Per-run schedules | yes (in-process tick while app is open) | OS-level via launchd / Task Scheduler |
+| Auto-update via electron-updater | yes (banner + native dialog) | — |
+| Signed installers + notarization | workflows ready, certs not yet purchased | yes |
+| GitHub-hosted agent registry | local `./agents` only | yes |
+| SQLite run history | JSON-file backed | yes |
+| Secrets in OS keychain (keytar) | Electron `safeStorage` only | yes |
 
 ## Reference agents
 
@@ -92,7 +92,7 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 | `find-inactive-devices` | devices | read | Buckets managed devices by last-sync age. |
 | `retire-inactive-devices` | devices | write | Plans retires for devices ≥180 days inactive, pauses for typed confirmation. |
 | `compliance-overview` | compliance | read | Counts devices by `complianceState`. |
-| `os-update-posture` | updates | read | Tallies fleet by OS + OS version; surfaces Windows 10 lines. |
+| `os-update-posture` | updates | read | Tallies fleet by OS + OS version; surfaces end-of-life build risk via LLM summary. |
 
 Each lives at `agents/<slug>/manifest.yaml`. Read them — they are the documentation of what the runtime can do.
 
@@ -104,9 +104,9 @@ git clone https://github.com/ugurkocde/OpenAgents.git
 cd OpenAgents
 npm install
 
-# 2. (Optional) Pull a local LLM model so NL2Agent works
+# 2. Install Ollama and pull a model (required — every agent uses the LLM at least once)
 brew install ollama && ollama serve &
-ollama pull llama3.1:8b
+ollama pull llama3.2:3b   # lightweight default; or pull whichever model you prefer
 
 # 3. Run the desktop app
 npm run dev
@@ -117,7 +117,7 @@ npm run qa          # JSON Schema + Graph QA
 npm run build       # production bundle
 ```
 
-The app comes up with four agents (three read-only, one write) pre-available against a synthetic Graph fixture. You can run every agent end-to-end without connecting a real tenant.
+The app comes up with four agents (three read-only, one write) discoverable in the Agent Hub. Without a connected tenant, agents run in synthetic mode against an empty Graph fixture — the pipeline executes end-to-end but produces zero records. Connect a real tenant in Settings → Tenants to see actual device data.
 
 ## Architecture
 
@@ -162,10 +162,22 @@ skills:
       path: /deviceManagement/managedDevices
       scopes: [DeviceManagementManagedDevices.Read.All]
 
+  - id: summarize
+    format: llm
+    label: Summarize what we found
+    settings:
+      system: Be concise. Two sentences max.
+      prompt: |-
+        Total devices: {{ load_devices.output | size }}.
+        Write an executive summary an admin can paste into a ticket.
+      maxTokens: 180
+
 definition:
   result:
-    summary: "Loaded {{ load_devices.output | size }} devices."
+    summary: '{{ summarize.output.text | default("Summary unavailable.") }}'
 ```
+
+Every agent must include at least one `format: llm` step — the runtime enforces this and `npm run qa` flags violations. Use the LLM step's output as the run's headline summary.
 
 Drop that at `agents/my-agent/manifest.yaml`, run `npm run qa`, and the agent shows up in the hub.
 

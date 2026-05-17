@@ -69,13 +69,26 @@ export interface AgentSummary extends AgentContract {
    * missing keys fall back to the manifest default.
    */
   settings?: Record<string, unknown>;
+  /**
+   * Per-install run schedule. When `enabled`, the host fires the agent
+   * automatically every `intervalSeconds` while the app is running.
+   * Schedules do not persist across app shutdown — runs only fire while
+   * the user has Open Agents open. Absent / disabled = manual-only.
+   */
+  schedule?: AgentSchedule;
+}
+
+export interface AgentSchedule {
+  enabled: boolean;
+  intervalSeconds: number;
+  /** When the scheduler last fired this agent. Updated by the host. */
+  lastScheduledRunAt?: string;
 }
 
 export interface RegistryAgentSummary extends AgentContract {
   registryId: string;
   registryPath?: string;
   installs?: number;
-  rating?: number;
 }
 
 export type RunStatus =
@@ -84,7 +97,8 @@ export type RunStatus =
   | "awaiting-confirmation"
   | "completed"
   | "failed"
-  | "rejected";
+  | "rejected"
+  | "cancelled";
 
 export type RunDataSource = "graph" | "synthetic";
 
@@ -95,6 +109,21 @@ export interface StartRunOptions {
    * to whichever tenant is active when the run is queued.
    */
   tenantId?: string | null;
+  /**
+   * Pin the run to a specific LLM provider id, overriding the globally
+   * active provider for this run only. The provider must be known and
+   * implemented; unknown / unimplemented ids throw at queue time. Omit
+   * to default to the active provider.
+   */
+  providerId?: ProviderId;
+  /**
+   * Pin the run to a specific model name within the chosen provider,
+   * overriding the agent's preferredModel and the user's globally-
+   * pinned active model. The model must be installed for the provider;
+   * unknown names throw at queue time. Omit to use the resolved
+   * default per the agent's manifest and provider settings.
+   */
+  model?: string;
 }
 
 export interface TenantRecord {
@@ -156,6 +185,12 @@ export interface RunRecord {
   plan?: WritePlan;
   dataSource?: RunDataSource;
   tenantId?: string;
+  /**
+   * Accumulated LLM token usage for this run (summed across all LLM
+   * calls). Absent when no LLM step has run yet, or when the provider
+   * doesn't report token telemetry.
+   */
+  tokens?: LlmTokenUsage;
 }
 
 export interface TrustState {
@@ -168,6 +203,12 @@ export interface TrustState {
 
 export interface AppState {
   activeProviderId: ProviderId;
+  /**
+   * User-picked model override per provider. Renderer-visible mirror of
+   * the host's persisted preference; populated for every provider the
+   * user has explicitly chosen a model for.
+   */
+  activeModelByProviderId?: Partial<Record<ProviderId, string>>;
   providers: ProviderSummary[];
   registryAgents: RegistryAgentSummary[];
   installedAgents: AgentSummary[];
@@ -192,11 +233,31 @@ export interface OpenAgentsApi {
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
   installAgent(agentId: string): Promise<AppState>;
+  /**
+   * Remove an installed agent. Bundled / registry-sourced agents are
+   * removed from the user's installed list (the registry copy is
+   * untouched). User-authored agents persisted under the user-agents
+   * directory are deleted entirely.
+   */
+  uninstallAgent(slug: string): Promise<AppState>;
   setActiveProvider(id: ProviderId): Promise<AppState>;
+  /**
+   * Pin the active model for the given provider. Pass `null` to revert
+   * to "whichever model the provider reports first". The host validates
+   * the model belongs to the provider's installed list.
+   */
+  setActiveModel(providerId: ProviderId, model: string | null): Promise<AppState>;
   startRun(agentSlug: string, options?: StartRunOptions): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | undefined>;
   confirmRun(runId: string, phrase: string): Promise<RunRecord>;
   rejectRun(runId: string): Promise<RunRecord>;
+  /**
+   * Soft-cancel a running or queued run. The run is immediately marked
+   * as `cancelled` in state and the UI stops receiving progress
+   * updates. In-flight LLM and Graph calls finish in the background
+   * (no abort plumbing yet), but their output is discarded.
+   */
+  cancelRun(runId: string): Promise<RunRecord>;
   listTenants(): Promise<TenantRecord[]>;
   connectTenant(): Promise<AppState>;
   setActiveTenant(id: string): Promise<AppState>;
@@ -214,6 +275,13 @@ export interface OpenAgentsApi {
     values: Record<string, unknown>,
   ): Promise<AppState>;
   /**
+   * Persist a per-install run schedule for the named agent. Pass `null`
+   * to remove the schedule (i.e. revert to manual-only). The host's
+   * in-process scheduler fires the agent every `intervalSeconds` while
+   * the app is open.
+   */
+  updateAgentSchedule(slug: string, schedule: AgentSchedule | null): Promise<AppState>;
+  /**
    * Generate a draft `manifest.yaml` from a natural-language description
    * using the active LLM provider. Returns the YAML source as a string
    * — validation against the schema lives in the host but the renderer
@@ -228,6 +296,62 @@ export interface OpenAgentsApi {
    * immediately, ready to install.
    */
   saveAgentDraft(yamlSource: string): Promise<AppState>;
+  /**
+   * Open an http/https URL in the user's default browser. Other
+   * schemes are rejected by the host. Used for "open docs" / "view
+   * source" affordances.
+   */
+  openExternal(url: string): Promise<void>;
+  /**
+   * Prompt the user for a save location and write the supplied text
+   * content to it. Returns the chosen path or a cancelled flag.
+   */
+  saveTextFile(args: SaveTextFileArgs): Promise<SaveTextFileResult>;
+  /**
+   * Current auto-updater state. Used by the renderer to surface an
+   * "update ready" banner without waiting for the native dialog.
+   */
+  getUpdateState(): Promise<UpdateState>;
+  /**
+   * Subscribe to auto-updater state changes. The supplied callback
+   * fires whenever the main-process updater transitions states. The
+   * returned function unsubscribes the listener.
+   */
+  onUpdateStateChanged(listener: (state: UpdateState) => void): () => void;
+  /**
+   * Subscribe to "focus this run" requests from the main process —
+   * fired e.g. when the user clicks an OS-level run-completion
+   * notification. The renderer should navigate to the named run.
+   */
+  onFocusRun(listener: (runId: string) => void): () => void;
+  /**
+   * Subscribe to navigation requests from the main process — e.g.
+   * when the user picks an item from the native application menu.
+   */
+  onNavigate(listener: (path: string) => void): () => void;
+  /**
+   * Trigger an immediate quit + install when the updater has a
+   * downloaded update on disk. No-op otherwise.
+   */
+  applyUpdateNow(): Promise<void>;
+}
+
+export interface UpdateState {
+  status: "idle" | "checking" | "available" | "downloading" | "ready" | "error";
+  version?: string;
+  message?: string;
+}
+
+export interface SaveTextFileArgs {
+  suggestedName: string;
+  content: string;
+  /** OS-level file type filter, e.g. `[{ name: "JSON", extensions: ["json"] }]`. */
+  filters?: { name: string; extensions: string[] }[];
+}
+
+export interface SaveTextFileResult {
+  canceled: boolean;
+  filePath?: string;
 }
 
 /**
@@ -276,7 +400,7 @@ export type AgentManifestPreview =
     };
 
 export type AgentDefinition = AgentContract &
-  Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs" | "rating">>;
+  Partial<Pick<RegistryAgentSummary, "registryId" | "registryPath" | "installs">>;
 
 // ─── Agent Template types ─────────────────────────────────────────────────
 //
@@ -459,9 +583,19 @@ export interface LlmOptions {
   maxTokens?: number;
 }
 
+export interface LlmTokenUsage {
+  /** Tokens consumed parsing the prompt + system message. */
+  promptTokens?: number;
+  /** Tokens generated in the response. */
+  completionTokens?: number;
+  /** Sum of prompt + completion when known; some providers report only this. */
+  totalTokens?: number;
+}
+
 export interface LlmCompletion {
   text: string;
   model: string;
+  tokenUsage?: LlmTokenUsage;
 }
 
 export interface LlmStreamChunk {
@@ -469,6 +603,13 @@ export interface LlmStreamChunk {
   accumulated: string;
   done: boolean;
   model: string;
+  /**
+   * Populated by providers that emit token-count telemetry in their
+   * final stream chunk (Ollama: `prompt_eval_count` + `eval_count`).
+   * Earlier chunks omit this; consumers should only trust the last
+   * chunk's value.
+   */
+  tokenUsage?: LlmTokenUsage;
 }
 
 export interface RunLlmApi {
@@ -562,6 +703,11 @@ export interface WriteAgentModule extends AgentDefinition {
 
 export type AgentModule = ReadAgentModule | WriteAgentModule;
 
+// TODO(uli): only the `ollama` provider has a working runtime adapter as
+// of v0.1.x. LM Studio + the three hosted providers below are kept in the
+// catalog as forward-compat placeholders but flagged "Coming in 0.2" by
+// the renderer (see apps/desktop/src/shared/providers.ts) until adapters
+// + keytar-backed credential storage land.
 export const providerCatalog: readonly ProviderSummary[] = [
   {
     id: "ollama",
@@ -637,7 +783,7 @@ export function deriveTrustState(
 
   const dataSource: RunDataSource = activeTenant ? "graph" : "synthetic";
   const tenantSegment = activeTenant
-    ? `real tenant ${activeTenant.displayName}`
+    ? `tenant ${activeTenant.displayName}`
     : "synthetic data";
 
   if (!provider) {

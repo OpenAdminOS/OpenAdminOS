@@ -6,7 +6,7 @@
 # managed-device inventory once, counts the fleet by operating system
 # and by full OS version, then optionally asks the LLM for a posture
 # summary calling out Windows-10-era builds and other end-of-life
-# concerns. Demonstrates that the v0.1 DSL can express realistic
+# concerns. Demonstrates that the Agent Template DSL can express realistic
 # Intune admin posture reports without any new transforms.
 
 descriptor:
@@ -64,7 +64,6 @@ skills:
     format: llm
     label: Summarize update posture
     detail: Highlights end-of-life or near-EOL builds and recommends the highest-priority remediation.
-    when: ctx.llm.available
     settings:
       system: >-
         You are a Microsoft 365 administrator's assistant. Be concise and
@@ -90,10 +89,11 @@ definition:
       kind: manual
 
   result:
+    # The LLM-generated summary is the headline. Every run is preflighted
+    # against a connected LLM provider, so this should always be populated;
+    # the `default` filter is purely defensive.
     summary: >-
-      Fleet of {{ load_devices.output | size }} devices spans
-      {{ by_os.output | size }} operating systems and
-      {{ by_os_version.output | size }} distinct OS builds.
+      {{ summarize.output.text | default("Summary unavailable.") }}
     data:
       totalDevices: "{{ load_devices.output | size }}"
       byOs: "{{ by_os.output }}"

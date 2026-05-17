@@ -1,10 +1,29 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  Notification,
+  shell,
+  type MenuItemConstructorOptions,
+} from "electron";
+import { writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { AppStateStore } from "./state.js";
 import { EncryptedSecretStore } from "./secret-store.js";
-import { startAutoUpdater } from "./updates.js";
-import type { ProviderId } from "@openagents/agent-sdk";
+import {
+  applyUpdateNow,
+  getUpdateState,
+  startAutoUpdater,
+  subscribeToUpdateState,
+} from "./updates.js";
+import {
+  attachWindowStatePersistence,
+  loadWindowState,
+} from "./window-state.js";
+import type { ProviderId, SaveTextFileArgs } from "@openagents/agent-sdk";
 
 // Set the app name BEFORE anything else that could touch the macOS
 // Keychain. Electron's safeStorage uses `app.getName()` to construct
@@ -59,10 +78,141 @@ function isAllowedAppNavigation(url: string): boolean {
   }
 }
 
-function createWindow() {
+function navigate(path: string): void {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+  mainWindow.webContents.send("openagents:navigate", path);
+}
+
+function buildAppMenu(): Menu {
+  const isMac = process.platform === "darwin";
+
+  const appMenu: MenuItemConstructorOptions = isMac
+    ? {
+        label: "Open Agents",
+        submenu: [
+          { role: "about" },
+          { type: "separator" },
+          {
+            label: "Settings…",
+            accelerator: "Cmd+,",
+            click: () => navigate("/settings"),
+          },
+          { type: "separator" },
+          { role: "services" },
+          { type: "separator" },
+          { role: "hide" },
+          { role: "hideOthers" },
+          { role: "unhide" },
+          { type: "separator" },
+          { role: "quit" },
+        ],
+      }
+    : { label: "File", submenu: [{ role: "quit" }] };
+
+  const editMenu: MenuItemConstructorOptions = {
+    label: "Edit",
+    submenu: [
+      { role: "undo" },
+      { role: "redo" },
+      { type: "separator" },
+      { role: "cut" },
+      { role: "copy" },
+      { role: "paste" },
+      { role: "selectAll" },
+    ],
+  };
+
+  const viewMenu: MenuItemConstructorOptions = {
+    label: "View",
+    submenu: [
+      {
+        label: "Agents",
+        accelerator: "CmdOrCtrl+1",
+        click: () => navigate("/"),
+      },
+      {
+        label: "Agent Hub",
+        accelerator: "CmdOrCtrl+2",
+        click: () => navigate("/hub"),
+      },
+      {
+        label: "Activity",
+        accelerator: "CmdOrCtrl+3",
+        click: () => navigate("/activity"),
+      },
+      {
+        label: "Settings",
+        accelerator: "CmdOrCtrl+,",
+        click: () => navigate("/settings"),
+      },
+      { type: "separator" },
+      { role: "reload" },
+      { role: "togglefullscreen" },
+      ...(app.isPackaged
+        ? []
+        : ([{ role: "toggleDevTools" }] as MenuItemConstructorOptions[])),
+    ],
+  };
+
+  const windowMenu: MenuItemConstructorOptions = {
+    label: "Window",
+    submenu: [
+      { role: "minimize" },
+      { role: "zoom" },
+      ...(isMac
+        ? ([
+            { type: "separator" },
+            { role: "front" },
+          ] as MenuItemConstructorOptions[])
+        : ([{ role: "close" }] as MenuItemConstructorOptions[])),
+    ],
+  };
+
+  const helpMenu: MenuItemConstructorOptions = {
+    role: "help",
+    submenu: [
+      {
+        label: "Open Agents on GitHub",
+        click: () => {
+          void shell.openExternal("https://github.com/ugurkocde/OpenAgents");
+        },
+      },
+      {
+        label: "Report an issue",
+        click: () => {
+          void shell.openExternal(
+            "https://github.com/ugurkocde/OpenAgents/issues/new",
+          );
+        },
+      },
+      { type: "separator" },
+      {
+        label: "Open app data folder",
+        click: () => {
+          void shell.openPath(app.getPath("userData"));
+        },
+      },
+      {
+        label: "Open logs folder",
+        click: () => {
+          void shell.openPath(app.getPath("logs"));
+        },
+      },
+    ],
+  };
+
+  return Menu.buildFromTemplate([appMenu, editMenu, viewMenu, windowMenu, helpMenu]);
+}
+
+async function createWindow() {
+  const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...(typeof persisted.x === "number" ? { x: persisted.x } : {}),
+    ...(typeof persisted.y === "number" ? { y: persisted.y } : {}),
+    width: persisted.width,
+    height: persisted.height,
     minWidth: 960,
     minHeight: 680,
     title: "Open Agents",
@@ -76,6 +226,15 @@ function createWindow() {
       sandbox: false,
     },
   });
+
+  attachWindowStatePersistence(mainWindow);
+
+  if (persisted.maximized) {
+    mainWindow.maximize();
+  }
+  if (persisted.fullscreen) {
+    mainWindow.setFullScreen(true);
+  }
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
@@ -112,8 +271,16 @@ function registerIpcHandlers() {
   ipcMain.handle("openagents:install-agent", (_event, agentId: string) =>
     store.installAgent(agentId),
   );
+  ipcMain.handle("openagents:uninstall-agent", (_event, slug: string) =>
+    store.uninstallAgent(slug),
+  );
   ipcMain.handle("openagents:set-active-provider", (_event, id: ProviderId) =>
     store.setActiveProvider(id),
+  );
+  ipcMain.handle(
+    "openagents:set-active-model",
+    (_event, providerId: ProviderId, model: string | null) =>
+      store.setActiveModel(providerId, model),
   );
   ipcMain.handle(
     "openagents:start-run",
@@ -127,6 +294,9 @@ function registerIpcHandlers() {
   );
   ipcMain.handle("openagents:reject-run", (_event, runId: string) =>
     store.rejectRun(runId),
+  );
+  ipcMain.handle("openagents:cancel-run", (_event, runId: string) =>
+    store.cancelRun(runId),
   );
   ipcMain.handle("openagents:list-tenants", () => store.listTenants());
   ipcMain.handle("openagents:connect-tenant", () => store.connectTenant());
@@ -149,12 +319,46 @@ function registerIpcHandlers() {
       store.updateAgentSettings(slug, values),
   );
   ipcMain.handle(
+    "openagents:update-agent-schedule",
+    (_event, slug: string, schedule) => store.updateAgentSchedule(slug, schedule),
+  );
+  ipcMain.handle(
     "openagents:draft-agent-manifest",
     (_event, prompt: string) => store.draftAgentManifest(prompt),
   );
   ipcMain.handle(
     "openagents:save-agent-draft",
     (_event, yamlSource: string) => store.saveAgentDraft(yamlSource),
+  );
+  ipcMain.handle("openagents:open-external", (_event, url: string) => {
+    openExternalUrl(url);
+  });
+  ipcMain.handle("openagents:get-update-state", () => getUpdateState());
+  ipcMain.handle("openagents:apply-update-now", () => applyUpdateNow());
+  subscribeToUpdateState((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("openagents:update-state", state);
+    }
+  });
+  ipcMain.handle(
+    "openagents:save-text-file",
+    async (_event, args: SaveTextFileArgs) => {
+      const parent = mainWindow ?? undefined;
+      const result = parent
+        ? await dialog.showSaveDialog(parent, {
+            defaultPath: args.suggestedName,
+            filters: args.filters,
+          })
+        : await dialog.showSaveDialog({
+            defaultPath: args.suggestedName,
+            filters: args.filters,
+          });
+      if (result.canceled || !result.filePath) {
+        return { canceled: true };
+      }
+      await writeFile(result.filePath, args.content, "utf8");
+      return { canceled: false, filePath: result.filePath };
+    },
   );
 }
 
@@ -184,14 +388,49 @@ if (!gotLock) {
       openBrowser: async (url: string) => {
         await shell.openExternal(url);
       },
+      onRunFinished: (run) => {
+        if (!Notification.isSupported()) return;
+        // Skip notifications if the user is already focused on the
+        // app — they will see the result without being interrupted.
+        if (mainWindow && mainWindow.isFocused()) return;
+        const title =
+          run.status === "completed"
+            ? "Agent run completed"
+            : run.status === "failed"
+              ? "Agent run failed"
+              : run.status === "cancelled"
+                ? "Agent run cancelled"
+                : "Agent run rejected";
+        const notification = new Notification({
+          title,
+          body: run.summary ?? `${run.agentSlug} · ${run.status}`,
+          silent: false,
+        });
+        notification.on("click", () => {
+          if (!mainWindow) return;
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+          mainWindow.webContents.send("openagents:focus-run", run.id);
+        });
+        notification.show();
+      },
     });
     registerIpcHandlers();
-    createWindow();
+    Menu.setApplicationMenu(buildAppMenu());
+    void createWindow();
     startAutoUpdater(() => mainWindow ?? undefined);
+
+    // In-process agent scheduler: ticks every 60s, fires any installed
+    // agent whose schedule is enabled + due. Honest by design — runs
+    // only fire while the user has the app open.
+    const SCHEDULER_TICK_MS = 60_000;
+    setInterval(() => {
+      void store.fireDueSchedules();
+    }, SCHEDULER_TICK_MS);
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
+        void createWindow();
       }
     });
   });

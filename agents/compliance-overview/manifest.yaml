@@ -7,9 +7,9 @@
 # by complianceState, optionally asks the LLM to summarise the result,
 # and renders a final JSON shape the renderer can show to admins.
 #
-# This is the second canonical Agent Template in the repo. It exercises
-# the `compliance` category and the `count-by-field` transform kind;
-# nothing else about the DSL had to change.
+# Exercises the `compliance` category and the `count-by-field` transform
+# kind. The LLM step turns the bucket counts into a one-paragraph posture
+# summary that becomes the run's headline result.
 
 descriptor:
   id: compliance-overview
@@ -69,7 +69,6 @@ skills:
     format: llm
     label: Summarize compliance posture
     detail: Two-sentence executive summary plus one prioritised action.
-    when: ctx.llm.available
     settings:
       system: >-
         You are a Microsoft 365 administrator's assistant. Be concise and
@@ -97,9 +96,10 @@ definition:
   # Shape of the run record's `result` field. Renders against the
   # accumulated pipeline state.
   result:
+    # LLM-generated headline — every run preflights an LLM provider, so the
+    # `default` filter is purely defensive.
     summary: >-
-      {{ by_state.output.noncompliant }} of {{ load_devices.output | size }}
-      managed devices are noncompliant ({{ by_state.output.unknown }} unknown).
+      {{ summarize.output.text | default("Summary unavailable.") }}
     data:
       totalDevices: "{{ load_devices.output | size }}"
       counts:

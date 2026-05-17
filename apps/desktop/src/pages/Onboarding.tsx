@@ -22,6 +22,7 @@ import type {
   RegistryAgentSummary,
   TenantRecord,
 } from "../shared/openAgents";
+import { isProviderImplemented } from "../shared/providers";
 
 const steps = ["Welcome", "Pick LLM", "Connect tenant", "First agent"] as const;
 type Step = (typeof steps)[number];
@@ -136,7 +137,7 @@ export default function Onboarding() {
             Open Agents
           </span>
           <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
-            v0.1.0
+            v0.1.4
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -263,7 +264,7 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
         <FeatureCard
           icon={<IconCloud size={16} className="text-[var(--color-info)]" />}
           title="No API keys"
-          body="Use your installed Claude Code or Codex CLI. We never store keys."
+          body="Local Ollama today. Hosted providers (Claude, OpenAI, Azure) piggyback on your installed CLI in v0.2 — we never store keys."
         />
       </div>
 
@@ -303,24 +304,29 @@ function PickLLM({
           Pick an LLM provider
         </h2>
         <p className="mt-1.5 max-w-[600px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
-          Local providers (Ollama, LM Studio) keep tenant data on this device.
-          Hosted providers run on your existing Claude Code or Codex
-          subscription — no API keys stored.
+          Local Ollama is the only provider available today. LM Studio and
+          hosted providers (Anthropic, OpenAI, Azure OpenAI) land in v0.2.
+          Local providers keep tenant data on this device; hosted providers
+          will piggyback on your installed CLI's authentication so we never
+          store API keys.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-3">
         {providers.map((p) => {
           const active = p.id === selected;
+          const implemented = isProviderImplemented(p.id);
           return (
             <Card
               key={p.id}
-              interactive
-              onClick={() => onSelect(p.id)}
+              interactive={implemented}
+              onClick={implemented ? () => onSelect(p.id) : undefined}
               className={
-                active
-                  ? "ring-2 ring-[var(--color-accent)]/55 bg-[var(--color-surface-hover)]"
-                  : ""
+                !implemented
+                  ? "opacity-60 cursor-not-allowed"
+                  : active
+                    ? "ring-2 ring-[var(--color-accent)]/55 bg-[var(--color-surface-hover)]"
+                    : ""
               }
             >
               <div className="flex items-center gap-4 p-5">
@@ -347,14 +353,22 @@ function PickLLM({
                         <StatusDot tone="info" /> CLI piggyback
                       </Pill>
                     )}
-                    {p.status === "connected" && (
-                      <Pill tone="success">
-                        <IconCheck size={9} /> Detected
+                    {!implemented ? (
+                      <Pill>
+                        <StatusDot tone="muted" /> Coming in 0.2
                       </Pill>
+                    ) : (
+                      <>
+                        {p.status === "connected" && (
+                          <Pill tone="success">
+                            <IconCheck size={9} /> Detected
+                          </Pill>
+                        )}
+                        {p.status === "available" && <Pill tone="warning">Available</Pill>}
+                        {p.status === "not-installed" && <Pill>Not installed</Pill>}
+                        {p.status === "error" && <Pill tone="danger">Error</Pill>}
+                      </>
                     )}
-                    {p.status === "available" && <Pill tone="warning">Available</Pill>}
-                    {p.status === "not-installed" && <Pill>Not installed</Pill>}
-                    {p.status === "error" && <Pill tone="danger">Error</Pill>}
                   </div>
                   <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
                     {p.description}
@@ -362,12 +376,14 @@ function PickLLM({
                 </div>
                 <div
                   className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ${
-                    active
+                    active && implemented
                       ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
                       : "ring-[var(--color-border-strong)]"
                   }`}
                 >
-                  {active && <IconCheck size={12} className="text-[#1a120c]" />}
+                  {active && implemented && (
+                    <IconCheck size={12} className="text-[#1a120c]" />
+                  )}
                 </div>
               </div>
             </Card>
@@ -475,12 +491,13 @@ function ConnectTenant({
                 <IconHardDrive size={20} />
               </div>
               <div className="mt-3 text-[14.5px] font-medium text-[var(--color-text)]">
-                Use synthetic data
+                Continue without a tenant
               </div>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-                Skip Microsoft sign-in for now. Agents run against a
-                built-in synthetic device inventory so you can see the flow
-                end-to-end. Connect a tenant later from Settings.
+                Skip Microsoft sign-in for now. Agents run end-to-end
+                against an empty synthetic inventory — the pipeline
+                works but results will be empty. Connect a tenant from
+                Settings to see actual device data.
               </p>
               <div className="mt-auto pt-4">
                 <Button
@@ -524,7 +541,7 @@ function ConnectTenant({
             disabled={working}
             className="text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-50"
           >
-            Skip and use synthetic data →
+            Continue without a tenant →
           </button>
         )}
       </div>
@@ -636,7 +653,7 @@ function PickAgent({
           onClick={onContinue}
           disabled={working || featured.length === 0}
         >
-          {working ? "Adding…" : "Add and run"}
+          {working ? "Installing…" : "Install and run"}
         </Button>
       </div>
     </div>

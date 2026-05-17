@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { Button } from "../components/Button";
 import { Avatar } from "../components/Avatar";
+import { ManifestPreview } from "../components/ManifestPreview";
+import { Modal, ModalHeader } from "../components/Modal";
 import {
   IconBadgeCheck,
   IconBolt,
@@ -12,10 +14,12 @@ import {
   IconSearch,
   IconShield,
   IconSparkle,
-  IconStar,
   IconTrend,
 } from "../components/icons";
-import type { RegistryAgentSummary } from "../shared/openAgents";
+import type {
+  AgentManifestPreview,
+  RegistryAgentSummary,
+} from "../shared/openAgents";
 import { useAppState } from "../state";
 
 const filters = [
@@ -32,6 +36,43 @@ export default function AgentHub() {
   const { state, registryAgents, installAgent } = useAppState();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
+  const [manifestAgent, setManifestAgent] = useState<RegistryAgentSummary | null>(
+    null,
+  );
+  const [manifestPreview, setManifestPreview] = useState<AgentManifestPreview | null>(
+    null,
+  );
+  const [manifestError, setManifestError] = useState<string | null>(null);
+  const [manifestLoading, setManifestLoading] = useState(false);
+
+  useEffect(() => {
+    if (!manifestAgent) {
+      setManifestPreview(null);
+      setManifestError(null);
+      setManifestLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setManifestLoading(true);
+    setManifestError(null);
+    setManifestPreview(null);
+    window.openAgents
+      ?.getAgentManifest(manifestAgent.slug)
+      .then((result) => {
+        if (cancelled) return;
+        setManifestPreview(result ?? null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setManifestError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setManifestLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [manifestAgent]);
 
   const installedIds = new Set(
     state.installedAgents.flatMap((agent) => [
@@ -65,13 +106,13 @@ export default function AgentHub() {
   return (
     <>
       <PageHeader
-        eyebrow="Community"
+        eyebrow="Built-in"
         title="Agent Hub"
         subtitle={
           <span className="inline-flex items-center gap-2">
-            <span>{registryAgents.length} built-in agents in this monorepo</span>
+            <span>{registryAgents.length} agents bundled in this repo</span>
             <span className="opacity-50">·</span>
-            <span>visible under the root agents directory</span>
+            <span>community registry lands in v0.2</span>
           </span>
         }
         actions={
@@ -96,6 +137,7 @@ export default function AgentHub() {
             agent={featured}
             installed={isInstalled(featured)}
             onInstall={() => onInstall(featured)}
+            onViewManifest={() => setManifestAgent(featured)}
           />
         ) : (
           <EmptyRegistry />
@@ -118,6 +160,7 @@ export default function AgentHub() {
                   agent={a}
                   installed={isInstalled(a)}
                   onInstall={() => onInstall(a)}
+                  onViewManifest={() => setManifestAgent(a)}
                 />
               ))}
             </div>
@@ -146,16 +189,28 @@ export default function AgentHub() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {visible.map((agent) => (
-            <HubAgentCard
-              key={agent.id}
-              agent={agent}
-              installed={isInstalled(agent)}
-              onInstall={() => onInstall(agent)}
-            />
-          ))}
-        </div>
+        {visible.length === 0 ? (
+          <HubFilterEmpty
+            query={query}
+            filter={filter}
+            onReset={() => {
+              setQuery("");
+              setFilter("All");
+            }}
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {visible.map((agent) => (
+              <HubAgentCard
+                key={agent.id}
+                agent={agent}
+                installed={isInstalled(agent)}
+                onInstall={() => onInstall(agent)}
+                onViewManifest={() => setManifestAgent(agent)}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="mt-10 flex flex-col items-center gap-2 text-[12px] text-[var(--color-text-muted)]">
           <div className="inline-flex items-center gap-2">
@@ -173,6 +228,35 @@ export default function AgentHub() {
           </span>
         </div>
       </PageBody>
+      <Modal
+        open={manifestAgent !== null}
+        onClose={() => setManifestAgent(null)}
+        size="lg"
+      >
+        <ModalHeader
+          title={manifestAgent?.name ?? "Manifest"}
+          subtitle={manifestAgent ? `v${manifestAgent.version} · ${manifestAgent.author.name}` : undefined}
+          onClose={() => setManifestAgent(null)}
+        />
+        <div className="overflow-y-auto p-6">
+          {manifestLoading && (
+            <div className="text-[13px] text-[var(--color-text-muted)]">Loading manifest…</div>
+          )}
+          {manifestError && (
+            <div className="text-[13px] text-[var(--color-danger)]">
+              Couldn't load manifest: {manifestError}
+            </div>
+          )}
+          {!manifestLoading && !manifestError && manifestPreview && (
+            <ManifestPreview preview={manifestPreview} />
+          )}
+          {!manifestLoading && !manifestError && !manifestPreview && manifestAgent && (
+            <div className="text-[13px] text-[var(--color-text-muted)]">
+              No manifest is available for this agent yet.
+            </div>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
@@ -181,10 +265,12 @@ function FeaturedCard({
   agent,
   installed,
   onInstall,
+  onViewManifest,
 }: {
   agent: RegistryAgentSummary;
   installed: boolean;
   onInstall: () => void;
+  onViewManifest: () => void;
 }) {
   return (
     <Card>
@@ -192,10 +278,10 @@ function FeaturedCard({
         <div>
           <div className="mb-3 inline-flex items-center gap-2">
             <Pill tone="accent">
-              <IconSparkle size={10} /> Featured this week
+              <IconSparkle size={10} /> Featured
             </Pill>
-            <Pill tone="warning">
-              <IconTrend size={10} /> Top installed in May
+            <Pill>
+              <IconShield size={10} /> {agent.mode === "write" ? "Write" : "Read-only"}
             </Pill>
           </div>
           <h2 className="text-[24px] font-semibold tracking-tight text-[var(--color-text)]">
@@ -226,34 +312,45 @@ function FeaturedCard({
               leadingIcon={installed ? <IconCheck size={12} /> : undefined}
               onClick={onInstall}
             >
-              {installed ? "Added" : "Add"}
+              {installed ? "Installed" : "Install"}
             </Button>
-            <Button size="md" variant="secondary">
+            <Button size="md" variant="secondary" onClick={onViewManifest}>
               View manifest
             </Button>
           </div>
         </div>
 
         <div className="flex flex-col gap-3">
-          <FeaturedStat
-            label="Installs"
-            value={(agent.installs ?? 0).toLocaleString()}
-            tone="default"
-          />
-          <FeaturedStat
-            label="Rating"
-            value={`${agent.rating ?? "—"} / 5`}
-            iconLeft={<IconStar size={11} className="text-[var(--color-warning)]" />}
-          />
           <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
             <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              From the author
+              Category
             </div>
-            <p className="mt-2 text-[12px] italic leading-relaxed text-[var(--color-text-soft)]">
-              "Wrote this after spending a Friday tracing why 200+ devices
-              never landed on the new baseline. The Intune blade hides the
-              root cause — this surfaces it in seconds."
-            </p>
+            <div className="mt-1.5 text-[13px] capitalize text-[var(--color-text)]">
+              {agent.category}
+            </div>
+          </div>
+          <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Graph scopes
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {agent.scopes.length === 0 ? (
+                <span className="text-[12px] text-[var(--color-text-muted)]">
+                  None declared
+                </span>
+              ) : (
+                agent.scopes.slice(0, 3).map((scope) => (
+                  <Pill key={scope}>
+                    <span className="font-mono text-[10px]">{scope}</span>
+                  </Pill>
+                ))
+              )}
+              {agent.scopes.length > 3 && (
+                <span className="text-[10.5px] text-[var(--color-text-muted)]">
+                  +{agent.scopes.length - 3}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -261,47 +358,19 @@ function FeaturedCard({
   );
 }
 
-function FeaturedStat({
-  label,
-  value,
-  tone = "default",
-  iconLeft,
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "success";
-  iconLeft?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div
-        className={`mt-1 inline-flex items-center gap-1.5 text-[20px] font-semibold tabular-nums ${
-          tone === "success"
-            ? "text-[var(--color-success)]"
-            : "text-[var(--color-text)]"
-        }`}
-      >
-        {iconLeft}
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function TrendingCard({
   agent,
   installed,
   onInstall,
+  onViewManifest,
 }: {
   agent: RegistryAgentSummary;
   installed: boolean;
   onInstall: () => void;
+  onViewManifest: () => void;
 }) {
   return (
-    <Card interactive>
+    <Card interactive onClick={onViewManifest}>
       <div className="flex flex-col gap-3 p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
@@ -332,8 +401,8 @@ function TrendingCard({
           {agent.description}
         </p>
         <div className="mt-1 flex items-center justify-between">
-          <span className="text-[10.5px] text-[var(--color-text-muted)]">
-            {agent.installs?.toLocaleString()} installs
+          <span className="font-mono text-[10.5px] text-[var(--color-text-muted)] capitalize">
+            {agent.category}
           </span>
           <Button
             size="sm"
@@ -345,7 +414,7 @@ function TrendingCard({
               onInstall();
             }}
           >
-            {installed ? "Added" : "Add"}
+            {installed ? "Installed" : "Install"}
           </Button>
         </div>
       </div>
@@ -357,10 +426,12 @@ function HubAgentCard({
   agent,
   installed,
   onInstall,
+  onViewManifest,
 }: {
   agent: RegistryAgentSummary;
   installed: boolean;
   onInstall: () => void;
+  onViewManifest: () => void;
 }) {
   return (
     <Card>
@@ -392,12 +463,6 @@ function HubAgentCard({
               </div>
             </div>
           </div>
-          {agent.rating !== undefined && (
-            <div className="flex shrink-0 items-center gap-1 text-[11px] text-[var(--color-text-soft)]">
-              <IconStar size={11} className="text-[var(--color-warning)]" />
-              <span className="font-medium tabular-nums">{agent.rating}</span>
-            </div>
-          )}
         </div>
 
         <p className="text-[13px] leading-relaxed text-[var(--color-text-soft)]">
@@ -415,23 +480,28 @@ function HubAgentCard({
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--color-border-soft)] pt-3">
-          <span className="text-[11px] text-[var(--color-text-muted)] tabular-nums">
-            {agent.installs?.toLocaleString()} installs
+          <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+            v{agent.version}
           </span>
-          {installed ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              leadingIcon={<IconCheck size={12} />}
-              disabled
-            >
-              Added
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onViewManifest}>
+              View manifest
             </Button>
-          ) : (
-            <Button variant="primary" size="sm" onClick={onInstall}>
-              Add
-            </Button>
-          )}
+            {installed ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                leadingIcon={<IconCheck size={12} />}
+                disabled
+              >
+                Installed
+              </Button>
+            ) : (
+              <Button variant="primary" size="sm" onClick={onInstall}>
+                Install
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </Card>
@@ -449,6 +519,41 @@ function EmptyRegistry() {
           Add an agent manifest under the root agents directory to make it appear
           here.
         </div>
+      </div>
+    </Card>
+  );
+}
+
+function HubFilterEmpty({
+  query,
+  filter,
+  onReset,
+}: {
+  query: string;
+  filter: Filter;
+  onReset: () => void;
+}) {
+  const hasQuery = query.trim().length > 0;
+  const hasFilter = filter !== "All";
+  return (
+    <Card>
+      <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
+        <IconSearch size={24} className="text-[var(--color-text-muted)]" />
+        <div className="text-[15px] font-medium text-[var(--color-text)]">
+          No agents match
+        </div>
+        <div className="max-w-[440px] text-[13px] text-[var(--color-text-muted)]">
+          {hasQuery && hasFilter
+            ? `Nothing matches "${query}" in the ${filter} category.`
+            : hasQuery
+              ? `Nothing matches "${query}" across all categories.`
+              : `No agents in the ${filter} category yet.`}
+        </div>
+        {(hasQuery || hasFilter) && (
+          <Button variant="secondary" size="sm" onClick={onReset}>
+            Clear filters
+          </Button>
+        )}
       </div>
     </Card>
   );

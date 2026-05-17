@@ -15,7 +15,6 @@ import {
   IconSearch,
   IconShield,
   IconTrend,
-  IconClock,
 } from "../components/icons";
 import type { Agent } from "../types";
 import type { AgentSummary } from "../shared/openAgents";
@@ -26,6 +25,17 @@ export default function AgentsHome() {
   const { state, registryAgents, startRun, installAgent } = useAppState();
   const [query, setQuery] = useState("");
   const [newAgentOpen, setNewAgentOpen] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const handleStartRun = async (slug: string) => {
+    setRunError(null);
+    try {
+      const run = await startRun(slug);
+      navigate(`/runs/${run.id}`);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error));
+    }
+  };
   const retireAgentId = "retire-inactive-devices";
   const retireInstalled = state.installedAgents.some(
     (agent) => agent.slug === retireAgentId,
@@ -35,12 +45,17 @@ export default function AgentsHome() {
   );
 
   const handleTryWriteAgent = async () => {
-    if (!retireInstalled) {
-      if (!retireAvailable) return;
-      await installAgent(retireAgentId);
+    setRunError(null);
+    try {
+      if (!retireInstalled) {
+        if (!retireAvailable) return;
+        await installAgent(retireAgentId);
+      }
+      const run = await startRun(retireAgentId);
+      navigate(`/runs/${run.id}`);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error));
     }
-    const run = await startRun(retireAgentId);
-    navigate(`/runs/${run.id}`);
   };
   const activeProvider = state.providers.find(
     (provider) => provider.id === state.activeProviderId,
@@ -57,9 +72,13 @@ export default function AgentsHome() {
 
   const runsThisWeek = countRecentRuns(state.runs.map((run) => run.queuedAt), 7);
   const completedRuns = state.runs.filter((run) => run.status === "completed").length;
-  const providerLabel = activeProvider
-    ? `${state.trust.label} · ${activeProvider.name}`
-    : state.trust.label;
+  // The trust label already encodes "{provider} · tenant {name}" — don't
+  // append the provider name again or duplicate the tenant in a sibling
+  // span. One pill, no echo.
+  const providerLabel = state.trust.label;
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    : undefined;
 
   return (
     <>
@@ -72,8 +91,14 @@ export default function AgentsHome() {
             <Pill tone={state.trust.isLocal ? "success" : "warning"}>
               <IconHardDrive size={10} /> {providerLabel}
             </Pill>
-            <span className="opacity-50">·</span>
-            <span>No tenant connected</span>
+            {!activeTenant && (
+              <>
+                <span className="opacity-50">·</span>
+                <span>
+                  No tenant — synthetic mode
+                </span>
+              </>
+            )}
           </span>
         }
         actions={
@@ -86,12 +111,9 @@ export default function AgentsHome() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search agents"
-                className="h-9 w-[260px] rounded-lg bg-[var(--color-surface)] pl-9 pr-12 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+                placeholder="Search installed agents"
+                className="h-9 w-[260px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
               />
-              <kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-                ⌘K
-              </kbd>
             </div>
             <Button
               variant="secondary"
@@ -111,8 +133,49 @@ export default function AgentsHome() {
         }
       />
       <PageBody>
+        {runError && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 ring-1 ring-[var(--color-danger)]/30">
+            <div className="text-[12.5px] leading-relaxed text-[var(--color-danger)]">
+              {runError}
+            </div>
+            <button
+              onClick={() => setRunError(null)}
+              aria-label="Dismiss"
+              className="text-[var(--color-danger)]/70 hover:text-[var(--color-danger)]"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {!activeTenant && (
+          <div className="mb-6 flex items-center justify-between gap-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 ring-1 ring-[var(--color-info)]/25">
+            <div className="flex items-start gap-3">
+              <IconShield
+                size={16}
+                className="mt-0.5 shrink-0 text-[var(--color-info)]"
+              />
+              <div className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                <span className="font-medium text-[var(--color-text)]">
+                  Synthetic mode.
+                </span>{" "}
+                Connect a Microsoft 365 tenant to run agents against real
+                device data — without one, agents complete successfully but
+                operate on an empty inventory.
+              </div>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => navigate("/settings")}
+            >
+              Connect tenant
+            </Button>
+          </div>
+        )}
+
         {/* Stats strip */}
-        <div className="mb-7 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <StatTile
             label="Runs this week"
             value={String(runsThisWeek)}
@@ -121,24 +184,11 @@ export default function AgentsHome() {
             mono
           />
           <StatTile
-            label="Time saved"
-            value="0h"
-            change="estimated after real runs"
-            icon={<IconClock size={14} className="text-[var(--color-success)]" />}
-          />
-          <StatTile
             label="Items resolved"
             value={String(completedRuns)}
             change="completed runs"
             icon={<IconTrend size={14} className="text-[var(--color-info)]" />}
             mono
-          />
-          <StatTile
-            label="Cost"
-            value={state.trust.isLocal ? "$0.00" : "External"}
-            change={state.trust.isLocal ? "local provider" : "hosted provider"}
-            icon={<IconHardDrive size={14} className="text-[var(--color-success)]" />}
-            valueClass="text-[var(--color-success)]"
           />
         </div>
 
@@ -147,7 +197,7 @@ export default function AgentsHome() {
           <section>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-[13px] font-medium text-[var(--color-text)]">
-                Added
+                Installed
               </h2>
               <span className="text-[11px] text-[var(--color-text-muted)]">
                 {filtered.length} of {state.installedAgents.length}
@@ -168,7 +218,7 @@ export default function AgentsHome() {
                         return;
                       }
 
-                      void startRun(a.slug).then((run) => navigate(`/runs/${run.id}`));
+                      void handleStartRun(a.slug);
                     }}
                   />
                 ))}

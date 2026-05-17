@@ -737,9 +737,16 @@ async function runLlmSkill(
   ctx: RunContext,
   templateCtx: () => TemplateContext,
 ): Promise<unknown> {
-  if (skill.when === "ctx.llm.available" && !ctx.llm.available) {
-    ctx.log("info", `Skipped "${skill.label}": ctx.llm is unavailable.`);
-    return undefined;
+  if (!ctx.llm.available) {
+    // Agents are LLM-augmented automations by contract. If we reach an
+    // `llm` step without a usable provider, fail loudly rather than
+    // silently skipping — the headline summary depends on this step's
+    // output. The host preflights `startRun` to ensure a connected
+    // provider before queueing, so this should only trip in tests or
+    // when the provider drops mid-run.
+    throw new Error(
+      `LLM step "${skill.label}" requires a connected LLM provider. Start Ollama (or pick another provider in Settings) and re-run.`,
+    );
   }
 
   const settings = renderDeep(skill.settings, templateCtx());
@@ -751,11 +758,46 @@ async function runLlmSkill(
     ...(typeof settings.maxTokens === "number" ? { maxTokens: settings.maxTokens } : {}),
   });
 
-  ctx.log("info", `LLM step "${skill.label}" used model ${completion.model}.`);
+  const cleaned = cleanLlmText(completion.text);
+  ctx.log(
+    "info",
+    `LLM step "${skill.label}" used model ${completion.model} · ${cleaned.length} chars returned.`,
+  );
+  if (cleaned.length === 0) {
+    const promptSnippet = typeof settings.prompt === "string"
+      ? settings.prompt.slice(0, 160)
+      : "";
+    ctx.log(
+      "warn",
+      `LLM step "${skill.label}" returned no usable text. Raw length: ${completion.text.length}. ` +
+        `Common causes: model not pulled, model exhausted maxTokens on reasoning tags, or model returned only <think>…</think>. ` +
+        `Prompt began with: ${promptSnippet}${promptSnippet.length === 160 ? "…" : ""}`,
+    );
+  }
   return {
-    text: completion.text.trim(),
+    text: cleaned,
     model: completion.model,
   };
+}
+
+/**
+ * Strip `<think>…</think>` reasoning blocks emitted by reasoning models
+ * (deepseek-r1, qwen-qwq, etc.) from the visible answer. The full
+ * unfiltered stream is still surfaced in the Reasoning tab via the
+ * runtime's per-step thinking hook — this only affects what the agent's
+ * downstream templates see as `summarize.output.text`.
+ */
+function cleanLlmText(raw: string): string {
+  if (typeof raw !== "string") return "";
+  // Remove fully-closed thinking blocks.
+  let stripped = raw.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  // Some models emit `<think>…` and never close it within maxTokens.
+  // Treat anything after a dangling `<think>` as throwaway reasoning.
+  const danglingThink = stripped.search(/<think>/i);
+  if (danglingThink >= 0) {
+    stripped = stripped.slice(0, danglingThink);
+  }
+  return stripped.trim();
 }
 
 // ─── Adapter so the runtime can treat a manifest as an AgentModule ───────

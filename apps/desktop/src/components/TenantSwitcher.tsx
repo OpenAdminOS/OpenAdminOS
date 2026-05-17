@@ -5,15 +5,18 @@ import { StatusDot } from "./Pill";
 import {
   IconCheck,
   IconChevronUpDown,
+  IconClose,
   IconCloud,
   IconHardDrive,
   IconPlus,
 } from "./icons";
 import { useAppState } from "../state";
+import { useToast } from "./Toast";
 
 export function TenantSwitcher() {
   const navigate = useNavigate();
-  const { state, setActiveTenant, connectTenant } = useAppState();
+  const { state, setActiveTenant, connectTenant, disconnectTenant } = useAppState();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -76,6 +79,22 @@ export function TenantSwitcher() {
     }
   };
 
+  const handleDisconnect = async (tenantId: string, displayName: string) => {
+    const confirmed = window.confirm(
+      `Disconnect ${displayName}? Cached credentials will be removed from this machine. You can reconnect anytime.`,
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      await disconnectTenant(tenantId);
+      toast.success(`${displayName} disconnected.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div ref={wrapperRef} className="relative mx-2.5 mt-1">
       <button
@@ -116,28 +135,43 @@ export function TenantSwitcher() {
               {state.tenants.map((tenant) => {
                 const isActive = tenant.id === activeTenant?.id;
                 return (
-                  <button
+                  <div
                     key={tenant.id}
-                    onClick={() => void handlePickTenant(tenant.id)}
-                    disabled={busy}
-                    role="menuitem"
-                    className={`flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)] ${
+                    className={`group flex items-center transition-colors hover:bg-[var(--color-surface-hover)] ${
                       isActive ? "bg-[var(--color-surface)]" : ""
                     }`}
                   >
-                    <Avatar name={tenant.displayName} size={22} />
-                    <div className="min-w-0 flex-1 leading-tight">
-                      <div className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
-                        {tenant.displayName}
+                    <button
+                      onClick={() => void handlePickTenant(tenant.id)}
+                      disabled={busy}
+                      role="menuitem"
+                      className="flex flex-1 items-center gap-2.5 px-3 py-2 text-left"
+                    >
+                      <Avatar name={tenant.displayName} size={22} />
+                      <div className="min-w-0 flex-1 leading-tight">
+                        <div className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
+                          {tenant.displayName}
+                        </div>
+                        <div className="mt-0.5 truncate text-[10px] text-[var(--color-text-muted)]">
+                          {tenant.username}
+                        </div>
                       </div>
-                      <div className="mt-0.5 truncate text-[10px] text-[var(--color-text-muted)]">
-                        {tenant.username}
-                      </div>
-                    </div>
-                    {isActive && (
-                      <IconCheck size={12} className="text-[var(--color-accent)]" />
-                    )}
-                  </button>
+                      {isActive && (
+                        <IconCheck size={12} className="text-[var(--color-accent)]" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() =>
+                        void handleDisconnect(tenant.id, tenant.displayName)
+                      }
+                      disabled={busy}
+                      title={`Disconnect ${tenant.displayName}`}
+                      aria-label={`Disconnect ${tenant.displayName}`}
+                      className="mr-2 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-bg-raised)] hover:text-[var(--color-danger)] group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
+                    >
+                      <IconClose size={12} />
+                    </button>
+                  </div>
                 );
               })}
             </div>

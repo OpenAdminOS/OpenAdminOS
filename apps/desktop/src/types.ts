@@ -21,7 +21,6 @@ export interface Agent {
   version: string;
   installed: boolean;
   installs?: number;
-  rating?: number;
   lastRunAt?: string;
   preferredModel?: string;
 }

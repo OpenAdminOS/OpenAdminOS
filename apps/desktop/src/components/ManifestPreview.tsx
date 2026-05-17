@@ -142,21 +142,42 @@ function ScopesCard({ scopes }: { scopes: string[] }) {
 }
 
 function PipelineCard({ steps }: { steps: TemplateStep[] }) {
+  const [open, setOpen] = useState(false);
   return (
     <Card>
       <div className="p-6">
-        <SectionLabel>Pipeline</SectionLabel>
-        <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-          The agent runs these steps in order. Each step's output is named
-          after its id and is available to later steps.
-        </div>
-        <ol className="mt-5 flex flex-col gap-3">
-          {steps.map((step, index) => (
-            <li key={step.id}>
-              <StepRow step={step} index={index} />
-            </li>
-          ))}
-        </ol>
+        <button
+          onClick={() => setOpen((current) => !current)}
+          className="flex w-full items-center gap-2 text-left"
+        >
+          <IconChevronDown
+            size={12}
+            className="text-[var(--color-text-muted)]"
+            style={{
+              transform: open ? "rotate(0deg)" : "rotate(-90deg)",
+              transition: "transform 0.15s ease",
+            }}
+          />
+          <SectionLabel>Pipeline</SectionLabel>
+          <span className="ml-auto rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+            {steps.length} step{steps.length === 1 ? "" : "s"}
+          </span>
+        </button>
+        {open && (
+          <>
+            <div className="mt-3 text-[12px] text-[var(--color-text-muted)]">
+              The agent runs these steps in order. Each step's output is
+              named after its id and is available to later steps.
+            </div>
+            <ol className="mt-5 flex flex-col gap-3">
+              {steps.map((step, index) => (
+                <li key={step.id}>
+                  <StepRow step={step} index={index} />
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
       </div>
     </Card>
   );

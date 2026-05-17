@@ -22,6 +22,7 @@ interface NavItem {
   icon: ReactNode;
   end?: boolean;
   badge?: string | number;
+  badgeTone?: "default" | "warning";
 }
 
 function NavRow({ item }: { item: NavItem }) {
@@ -54,12 +55,17 @@ function NavRow({ item }: { item: NavItem }) {
           <span className="flex-1">{item.label}</span>
           {item.badge !== undefined && (
             <span
-              className={`rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums ${
-                isActive
-                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]"
+              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums ${
+                item.badgeTone === "warning"
+                  ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
+                  : isActive
+                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                    : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]"
               }`}
             >
+              {item.badgeTone === "warning" && (
+                <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current" />
+              )}
               {item.badge}
             </span>
           )}
@@ -72,6 +78,12 @@ function NavRow({ item }: { item: NavItem }) {
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
   const active = state.providers.find((p) => p.id === state.activeProviderId);
+  const activeRunCount = state.runs.filter(
+    (run) =>
+      run.status === "queued" ||
+      run.status === "running" ||
+      run.status === "awaiting-confirmation",
+  ).length;
   const mainNav: NavItem[] = [
     {
       to: "/",
@@ -85,6 +97,8 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       to: "/activity",
       label: "Activity",
       icon: <IconActivity size={16} />,
+      badge: activeRunCount > 0 ? activeRunCount : undefined,
+      badgeTone: activeRunCount > 0 ? "warning" : undefined,
     },
   ];
 
@@ -106,10 +120,21 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             Open Agents
           </span>
           <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[9.5px] text-[var(--color-text-muted)]">
-            v0.1.0
+            v0.1.4
           </span>
         </div>
-        <span className="ml-auto inline-flex h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-success)]" />
+        <span
+          title={
+            active?.status === "connected"
+              ? `${active.name} reachable`
+              : "LLM provider not reachable"
+          }
+          className={`ml-auto inline-flex h-1.5 w-1.5 animate-pulse-soft rounded-full ${
+            active?.status === "connected"
+              ? "bg-[var(--color-success)]"
+              : "bg-[var(--color-warning)]"
+          }`}
+        />
       </div>
 
       {/* Tenant switcher */}

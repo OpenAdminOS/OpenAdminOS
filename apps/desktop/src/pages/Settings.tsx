@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
@@ -18,6 +19,7 @@ import type {
   TenantRecord,
   TrustState,
 } from "../shared/openAgents";
+import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
 
 const sections = [
@@ -35,6 +37,7 @@ export default function Settings() {
   const {
     state,
     setActiveProvider,
+    setActiveModel,
     connectTenant,
     setActiveTenant,
     disconnectTenant,
@@ -79,7 +82,9 @@ export default function Settings() {
             <ProvidersSection
               providers={state.providers}
               activeProviderId={state.activeProviderId}
+              activeModelByProviderId={state.activeModelByProviderId}
               onSetActiveProvider={setActiveProvider}
+              onSetActiveModel={setActiveModel}
             />
           )}
           {section === "tenants" && (
@@ -111,11 +116,15 @@ export default function Settings() {
 function ProvidersSection({
   providers,
   activeProviderId,
+  activeModelByProviderId,
   onSetActiveProvider,
+  onSetActiveModel,
 }: {
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
+  activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined;
   onSetActiveProvider: (id: ProviderId) => Promise<void>;
+  onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
 }) {
   return (
     <div className="max-w-[820px]">
@@ -132,7 +141,9 @@ function ProvidersSection({
               key={p.id}
               provider={p}
               activeProviderId={activeProviderId}
+              activeModel={activeModelByProviderId?.[p.id]}
               onSetActiveProvider={onSetActiveProvider}
+              onSetActiveModel={onSetActiveModel}
             />
           ))}
       </div>
@@ -156,7 +167,9 @@ function ProvidersSection({
               key={p.id}
               provider={p}
               activeProviderId={activeProviderId}
+              activeModel={activeModelByProviderId?.[p.id]}
               onSetActiveProvider={onSetActiveProvider}
+              onSetActiveModel={onSetActiveModel}
             />
           ))}
       </div>
@@ -167,15 +180,25 @@ function ProvidersSection({
 function ProviderRow({
   provider,
   activeProviderId,
+  activeModel,
   onSetActiveProvider,
+  onSetActiveModel,
 }: {
   provider: ProviderSummary;
   activeProviderId: ProviderId;
+  activeModel: string | undefined;
   onSetActiveProvider: (id: ProviderId) => Promise<void>;
+  onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
 }) {
   const isActive = provider.id === activeProviderId;
+  const implemented = isProviderImplemented(provider.id);
+  const installedModels = provider.models ?? [];
+  const effectiveModel =
+    activeModel && installedModels.includes(activeModel)
+      ? activeModel
+      : provider.defaultModel ?? installedModels[0];
   return (
-    <Card>
+    <Card className={implemented ? undefined : "opacity-60"}>
       <div className="flex items-start gap-4 p-5">
         <div
           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ring-1 ${
@@ -191,27 +214,35 @@ function ProviderRow({
             <span className="text-[14px] font-medium text-[var(--color-text)]">
               {provider.name}
             </span>
-            {provider.status === "connected" && (
-              <Pill tone="success">
-                <StatusDot tone="success" /> Connected
-              </Pill>
-            )}
-            {provider.status === "available" && (
-              <Pill tone="warning">
-                <StatusDot tone="warning" /> Available
-              </Pill>
-            )}
-            {provider.status === "not-installed" && (
+            {!implemented ? (
               <Pill>
-                <StatusDot tone="muted" /> Not installed
+                <StatusDot tone="muted" /> Coming in 0.2
               </Pill>
+            ) : (
+              <>
+                {provider.status === "connected" && (
+                  <Pill tone="success">
+                    <StatusDot tone="success" /> Connected
+                  </Pill>
+                )}
+                {provider.status === "available" && (
+                  <Pill tone="warning">
+                    <StatusDot tone="warning" /> Available
+                  </Pill>
+                )}
+                {provider.status === "not-installed" && (
+                  <Pill>
+                    <StatusDot tone="muted" /> Not installed
+                  </Pill>
+                )}
+                {provider.status === "error" && (
+                  <Pill tone="danger">
+                    <StatusDot tone="danger" /> Error
+                  </Pill>
+                )}
+              </>
             )}
-            {provider.status === "error" && (
-              <Pill tone="danger">
-                <StatusDot tone="danger" /> Error
-              </Pill>
-            )}
-            {isActive && (
+            {isActive && implemented && (
               <Pill tone="accent">
                 <IconCheck size={10} /> Active
               </Pill>
@@ -225,18 +256,48 @@ function ProviderRow({
               {provider.detail}
             </div>
           )}
-          {provider.models && provider.models.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {provider.models.slice(0, 4).map((m) => (
-                <Pill key={m}>
-                  <span className="font-mono text-[10.5px]">{m}</span>
-                </Pill>
-              ))}
+          {implemented && installedModels.length > 0 && (
+            <div className="mt-3">
+              <div className="mb-1.5 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                <span>Models</span>
+                <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+                  {installedModels.length} installed
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {installedModels.map((m) => {
+                  const selected = m === effectiveModel;
+                  return (
+                    <button
+                      key={m}
+                      onClick={() => {
+                        void onSetActiveModel(provider.id, selected ? null : m);
+                      }}
+                      title={
+                        selected
+                          ? "Currently active model · click to revert to provider default"
+                          : `Use ${m} for runs against this provider`
+                      }
+                      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[10.5px] transition-colors ${
+                        selected
+                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
+                          : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+                      }`}
+                    >
+                      {selected && (
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+                      )}
+                      {m}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
-          {(provider.status === "connected" || provider.status === "available") &&
+          {implemented &&
+            (provider.status === "connected" || provider.status === "available") &&
             !isActive && (
             <Button
               variant="secondary"
@@ -248,20 +309,39 @@ function ProviderRow({
               Set active
             </Button>
           )}
-          {provider.status === "not-installed" && (
-            <Button variant="ghost" size="sm">
+          {implemented && provider.status === "not-installed" && providerInstallGuideUrl(provider.id) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const url = providerInstallGuideUrl(provider.id);
+                if (url) void window.openAgents?.openExternal(url);
+              }}
+            >
               Install guide
-            </Button>
-          )}
-          {provider.status === "connected" && (
-            <Button variant="ghost" size="sm">
-              Configure
             </Button>
           )}
         </div>
       </div>
     </Card>
   );
+}
+
+function providerInstallGuideUrl(providerId: ProviderId): string | undefined {
+  switch (providerId) {
+    case "ollama":
+      return "https://ollama.com/download";
+    case "lm-studio":
+      return "https://lmstudio.ai";
+    case "anthropic":
+      return "https://docs.anthropic.com/en/docs/claude-code/overview";
+    case "openai":
+      return "https://github.com/openai/codex";
+    case "azure-openai":
+      return "https://learn.microsoft.com/en-us/azure/ai-services/openai/";
+    default:
+      return undefined;
+  }
 }
 
 function TenantsSection({
@@ -392,6 +472,10 @@ function TenantRow({
 }
 
 function GeneralSection() {
+  const { state } = useAppState();
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    : undefined;
   return (
     <div className="max-w-[720px]">
       <SectionTitle
@@ -400,14 +484,19 @@ function GeneralSection() {
       />
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
-          label="Theme"
-          description="Light theme arrives in v1.1. Dark only for now."
-          control={<Pill>Dark</Pill>}
-        />
-        <SettingRow
           label="Default tenant scope"
-          description="The tenant agents use unless overridden at run time."
-          control={<Pill>Not connected</Pill>}
+          description={
+            activeTenant
+              ? "Agents use this tenant unless overridden at run time. Change in Settings → Tenants."
+              : "No tenant connected. Agents run in synthetic mode. Connect a tenant from Settings → Tenants."
+          }
+          control={
+            activeTenant ? (
+              <Pill tone="success">{activeTenant.displayName}</Pill>
+            ) : (
+              <Pill>Synthetic mode</Pill>
+            )
+          }
         />
         <SettingRow
           label="Confirm typed phrase for destructive writes"
@@ -419,9 +508,22 @@ function GeneralSection() {
           }
         />
         <SettingRow
+          label="Theme"
+          description="Open Agents is dark-only today. A light theme is on the v1.x list."
+          control={
+            <Pill>
+              <StatusDot tone="muted" /> Dark only
+            </Pill>
+          }
+        />
+        <SettingRow
           label="Run history retention"
-          description="Old runs are kept locally. Choose how long."
-          control={<Pill>90 days</Pill>}
+          description="Run records live in this profile's local store. Automatic pruning lands in v0.2."
+          control={
+            <Pill>
+              <StatusDot tone="muted" /> Coming in 0.2
+            </Pill>
+          }
         />
       </div>
     </div>
@@ -457,13 +559,21 @@ function PrivacySection({
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
           label="Telemetry"
-          description="Anonymous app usage data. Off by default. We have no plan to turn it on without explicit consent."
-          control={<Pill>Off</Pill>}
+          description="No telemetry is collected. No app usage data leaves this device. There is no opt-in switch — if we ever build one, it will require explicit consent."
+          control={
+            <Pill tone="success">
+              <StatusDot tone="success" /> Not collected
+            </Pill>
+          }
         />
         <SettingRow
           label="Crash reporting"
-          description="If enabled, sends only stack traces and OS info. No tenant content. Off by default."
-          control={<Pill>Off</Pill>}
+          description="No crash reports are sent. Errors stay local. An opt-in option for sending sanitized stack traces lands in v0.2."
+          control={
+            <Pill tone="success">
+              <StatusDot tone="success" /> Not collected
+            </Pill>
+          }
         />
         <SettingRow
           label="Tenant data residency"
@@ -500,8 +610,12 @@ function PrivacySection({
         />
         <SettingRow
           label="Update channel"
-          description="Stable releases pushed via signed installer. No silent updates."
-          control={<Pill>Stable</Pill>}
+          description="Stable-only for now. The auto-updater checks signed GitHub releases on launch and every four hours. No silent updates — you'll see a banner with a Restart button when an update is ready."
+          control={
+            <Pill tone="success">
+              <StatusDot tone="success" /> Stable
+            </Pill>
+          }
         />
       </div>
 
@@ -521,14 +635,46 @@ function PrivacySection({
 }
 
 function AboutSection() {
+  const navigate = useNavigate();
   return (
     <div className="max-w-[640px]">
       <SectionTitle title="About" subtitle="Open Agents is open-source and community-driven." />
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <Stat label="Version" value="0.1.0" mono />
+        <Stat label="Version" value="0.1.4" mono />
         <Stat label="License" value="MIT" />
-        <Stat label="Repo" value="ugurlabs/openagents" mono />
+        <Stat label="Repo" value="ugurkocde/OpenAgents" mono />
         <Stat label="Built by" value="Ugurlabs" />
+      </div>
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => navigate("/onboarding")}
+        >
+          Run setup again
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            void window.openAgents?.openExternal(
+              "https://github.com/ugurkocde/OpenAgents",
+            );
+          }}
+        >
+          View on GitHub
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            void window.openAgents?.openExternal(
+              "https://github.com/ugurkocde/OpenAgents/blob/main/CHANGELOG.md",
+            );
+          }}
+        >
+          What's new
+        </Button>
       </div>
     </div>
   );

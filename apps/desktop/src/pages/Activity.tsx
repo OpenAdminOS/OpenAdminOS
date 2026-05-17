@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
+import { IconSearch } from "../components/icons";
 import { useAppState } from "../state";
 import type { RunRecord, RunStatus } from "../shared/openAgents";
 
@@ -12,6 +13,7 @@ export default function Activity() {
   const navigate = useNavigate();
   const { state } = useAppState();
   const [filter, setFilter] = useState<Filter>({ kind: "all" });
+  const [query, setQuery] = useState("");
 
   const counts = useMemo(() => {
     const total = state.runs.length;
@@ -26,12 +28,25 @@ export default function Activity() {
   }, [state.runs]);
 
   const filteredRuns = useMemo(() => {
-    if (filter.kind === "all") return state.runs;
-    if (filter.kind === "synthetic") {
-      return state.runs.filter((run) => run.dataSource === "synthetic");
-    }
-    return state.runs.filter((run) => run.tenantId === filter.tenantId);
-  }, [filter, state.runs]);
+    const base = filter.kind === "all"
+      ? state.runs
+      : filter.kind === "synthetic"
+        ? state.runs.filter((run) => run.dataSource === "synthetic")
+        : state.runs.filter((run) => run.tenantId === filter.tenantId);
+    const q = query.trim().toLowerCase();
+    if (q.length === 0) return base;
+    return base.filter((run) => {
+      const agentName =
+        state.installedAgents.find((agent) => agent.slug === run.agentSlug)?.name ?? "";
+      return (
+        agentName.toLowerCase().includes(q) ||
+        run.agentSlug.toLowerCase().includes(q) ||
+        run.id.toLowerCase().includes(q) ||
+        (run.summary?.toLowerCase().includes(q) ?? false) ||
+        (run.providerId?.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [filter, state.runs, state.installedAgents, query]);
 
   const showFilters = state.tenants.length > 0 || counts.synthetic > 0;
 
@@ -40,6 +55,21 @@ export default function Activity() {
       <PageHeader
         title="Activity"
         subtitle="A local, append-only history of every agent run on this device."
+        actions={
+          <div className="relative">
+            <IconSearch
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search runs"
+              className="h-9 w-[260px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+            />
+          </div>
+        }
       />
       <PageBody>
         {showFilters && (
@@ -70,12 +100,11 @@ export default function Activity() {
 
         <Card>
           <div className="divide-y divide-[var(--color-border-soft)]">
-            <div className="grid grid-cols-[1.6fr_1fr_1fr_auto_auto_auto] items-center gap-4 px-5 py-3 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="grid grid-cols-[1.6fr_1fr_1fr_auto_auto] items-center gap-4 px-5 py-3 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               <span>Agent</span>
               <span>Provider</span>
               <span>When</span>
               <span>Duration</span>
-              <span>Cost</span>
               <span>Status</span>
             </div>
             {filteredRuns.length === 0 ? (
@@ -89,7 +118,7 @@ export default function Activity() {
                 <button
                   key={run.id}
                   onClick={() => navigate(`/runs/${run.id}`)}
-                  className="grid w-full grid-cols-[1.6fr_1fr_1fr_auto_auto_auto] items-center gap-4 px-5 py-3 text-left text-[13px] hover:bg-[var(--color-surface-hover)]"
+                  className="grid w-full grid-cols-[1.6fr_1fr_1fr_auto_auto] items-center gap-4 px-5 py-3 text-left text-[13px] hover:bg-[var(--color-surface-hover)]"
                 >
                   <div className="min-w-0">
                     <div className="truncate font-medium text-[var(--color-text)]">
@@ -104,16 +133,13 @@ export default function Activity() {
                     </div>
                   </div>
                   <span className="text-[var(--color-text-soft)]">
-                    {run.providerId ?? "-"}
+                    {providerDisplayName(run.providerId, state.providers)}
                   </span>
                   <span className="text-[var(--color-text-soft)]">
                     {formatDate(run.queuedAt)}
                   </span>
                   <span className="font-mono text-[12px] text-[var(--color-text-soft)] tabular-nums">
                     {formatDuration(run)}
-                  </span>
-                  <span className="font-mono text-[12px] text-[var(--color-success)] tabular-nums">
-                    {state.trust.isLocal ? "$0.00" : "External"}
                   </span>
                   <Pill tone={statusTone(run.status)}>{statusLabel(run.status)}</Pill>
                 </button>
@@ -170,9 +196,17 @@ function tenantLabel(
   tenants: { id: string; displayName: string }[],
 ): string {
   if (run.dataSource === "graph" && run.tenantId) {
-    return tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ?? "real tenant";
+    return tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ?? "connected tenant";
   }
   return "synthetic";
+}
+
+function providerDisplayName(
+  providerId: string | undefined,
+  providers: { id: string; name: string }[],
+): string {
+  if (!providerId) return "—";
+  return providers.find((p) => p.id === providerId)?.name ?? providerId;
 }
 
 function formatDate(value: string) {
@@ -197,12 +231,16 @@ function formatDuration(run: RunRecord) {
 function statusLabel(status: RunStatus) {
   if (status === "queued") return "Queued";
   if (status === "running") return "Running";
+  if (status === "awaiting-confirmation") return "Awaiting confirmation";
   if (status === "completed") return "Done";
+  if (status === "rejected") return "Rejected";
+  if (status === "cancelled") return "Cancelled";
   return "Failed";
 }
 
 function statusTone(status: RunStatus) {
   if (status === "failed") return "danger";
   if (status === "queued" || status === "running") return "warning";
+  if (status === "rejected" || status === "cancelled") return "default";
   return "success";
 }

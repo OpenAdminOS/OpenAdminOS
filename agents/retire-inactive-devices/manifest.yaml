@@ -56,7 +56,32 @@ skills:
       timestampField: lastSyncDateTime
       inactiveDaysAtLeast: "{{ settings.retireDays }}"
 
-  # 3) Emit one retire action per candidate. The runtime pauses here.
+  # 3) Ask the local LLM to write a plain-language rationale the admin
+  #    will see alongside the typed-confirmation prompt. Runs before the
+  #    write step so its output is available when the plan is rendered.
+  - id: explain_plan
+    format: llm
+    label: Explain the retirement plan
+    detail: One-paragraph rationale to surface alongside the confirmation prompt.
+    settings:
+      system: >-
+        You are a Microsoft 365 administrator's assistant. Be concise and
+        factual. Write a single short paragraph (3 sentences max) that an
+        admin can paste into a change ticket. Never invent numbers; use only
+        the figures you are given.
+      prompt: |-
+        About to retire {{ select_retire_candidates.output | size }} managed devices
+        that have not synced in at least {{ settings.retireDays }} days.
+
+        Write a short paragraph explaining what the admin is approving:
+        - The count and the threshold
+        - Why retiring stale devices reduces attack surface
+        - One sentence on what happens when a device is retired (Intune unenrolls it
+          but the device itself is not wiped unless the policy also wipes)
+      temperature: 0.2
+      maxTokens: 240
+
+  # 4) Emit one retire action per candidate. The runtime pauses here.
   - id: plan_retirements
     format: write
     label: Build retire plan
@@ -66,8 +91,7 @@ skills:
       source: "{{ select_retire_candidates.output }}"
       confirmationPhrase: "RETIRE {{ actions | size }} DEVICES"
       summary: >-
-        Retire {{ actions | size }} devices that have not synced in
-        {{ settings.retireDays }}+ days.
+        {{ explain_plan.output.text | default("Retire devices inactive past the configured threshold.") }}
       scopes:
         - DeviceManagementManagedDevices.PrivilegedOperations.All
       actionTemplate:

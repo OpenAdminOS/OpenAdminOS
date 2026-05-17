@@ -3,6 +3,42 @@ import electronUpdater from "electron-updater";
 
 const { autoUpdater } = electronUpdater;
 
+export interface UpdateState {
+  status: "idle" | "checking" | "available" | "downloading" | "ready" | "error";
+  version?: string;
+  message?: string;
+}
+
+let currentState: UpdateState = { status: "idle" };
+const listeners = new Set<(state: UpdateState) => void>();
+
+export function getUpdateState(): UpdateState {
+  return currentState;
+}
+
+export function subscribeToUpdateState(
+  listener: (state: UpdateState) => void,
+): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function setUpdateState(next: UpdateState): void {
+  currentState = next;
+  for (const listener of listeners) {
+    try {
+      listener(next);
+    } catch (error) {
+      console.error("[updater] listener failed", error);
+    }
+  }
+}
+
+export async function applyUpdateNow(): Promise<void> {
+  if (currentState.status !== "ready") return;
+  autoUpdater.quitAndInstall();
+}
+
 /**
  * Update polling cadence. Mirrors t3code: a 15-second startup delay
  * (so first-run UX isn't dominated by a network round-trip) plus a
@@ -35,9 +71,29 @@ export function startAutoUpdater(getMainWindow: () => BrowserWindow | undefined)
 
   autoUpdater.on("error", (error) => {
     console.error("[updater] error", error);
+    setUpdateState({
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  });
+
+  autoUpdater.on("checking-for-update", () => {
+    if (currentState.status === "idle") {
+      setUpdateState({ status: "checking" });
+    }
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    setUpdateState({ status: "downloading", version: info.version });
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    setUpdateState({ status: "idle" });
   });
 
   autoUpdater.on("update-downloaded", (info) => {
+    setUpdateState({ status: "ready", version: info.version });
+
     const parent = getMainWindow();
     const options: Electron.MessageBoxOptions = {
       type: "info",

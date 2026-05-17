@@ -91,23 +91,35 @@ export function CommandPalette({
         icon: <IconSettings size={13} className="text-[var(--color-accent)]" />,
         action: go("/settings"),
       },
-      {
-        id: "act-run-fid",
-        label: "Start first run",
-        hint:
-          state.installedAgents.length > 0
-            ? "Queue the first added agent"
-            : "Add an agent before running",
-        group: "Actions",
-        icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
-        action: async () => {
-          const agent = state.installedAgents[0];
-          if (!agent) return;
-          const run = await startRun(agent.slug);
-          navigate(`/runs/${run.id}`);
-          onClose();
-        },
-      },
+      ...(state.installedAgents.length > 0
+        ? ([
+            {
+              id: "act-run-first",
+              label: `Run ${state.installedAgents[0]!.name}`,
+              hint:
+                state.installedAgents.length === 1
+                  ? "Queue your installed agent"
+                  : `Run the first of ${state.installedAgents.length} installed agents`,
+              group: "Actions",
+              icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
+              action: async () => {
+                const agent = state.installedAgents[0]!;
+                const run = await startRun(agent.slug);
+                navigate(`/runs/${run.id}`);
+                onClose();
+              },
+            },
+          ] as PaletteItem[])
+        : ([
+            {
+              id: "act-browse-hub",
+              label: "Browse agents to install",
+              hint: "Install an agent before running",
+              group: "Actions",
+              icon: <IconHub size={13} className="text-[var(--color-accent)]" />,
+              action: go("/hub"),
+            },
+          ] as PaletteItem[])),
     ];
   }, [navigate, onClose, registryAgents, startRun, state.installedAgents]);
 
