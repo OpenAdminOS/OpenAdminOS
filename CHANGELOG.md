@@ -6,6 +6,8 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- **Branded macOS DMG install window.** The `.dmg` now opens to a dark, on-brand Open Agents install screen (660×440) with the app icon on the left, an arrow, and an `Applications` shortcut on the right. Background source is `apps/desktop/build/dmg-background.svg`, rendered to a Retina TIFF at `apps/desktop/build/background.tiff`. See `apps/desktop/build/README.md` for regeneration steps.
+
 ### Changed
 
 - **Graph writes are real by default once a tenant is connected.** Removed the `Enable real Graph writes` toggle from Settings → Privacy and dropped the corresponding global flag from state, IPC, and the status strip. The typed-phrase diff confirmation on every write run is the only authorization gate — there is no separate global switch to forget. Synthetic mode (no tenant connected) still emits a simulated trace.
