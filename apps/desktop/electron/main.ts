@@ -375,6 +375,19 @@ if (!gotLock) {
   });
 
   void app.whenReady().then(() => {
+    // In dev the app runs from the unsigned `electron` binary, so macOS
+    // shows the default Electron logo in the dock. Override it with the
+    // production icon so the dev window looks like the shipped app.
+    // Packaged builds get the icon from the bundle's Info.plist and
+    // don't need this.
+    if (process.platform === "darwin" && !app.isPackaged && app.dock) {
+      try {
+        app.dock.setIcon(join(currentDir, "../../build/icon.png"));
+      } catch {
+        // Non-fatal — dock icon is cosmetic in dev.
+      }
+    }
+
     const userDataDir = app.getPath("userData");
     const tokenStore = new EncryptedSecretStore(join(userDataDir, "tokens.bin"));
     store = new AppStateStore({
