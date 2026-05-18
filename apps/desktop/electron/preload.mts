@@ -1,19 +1,63 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  HostPlatform,
   OpenAgentsApi,
+  PendingConnectorConfirmation,
+  PendingConnectorDecision,
   ProviderId,
   SaveTextFileArgs,
   StartRunOptions,
   UpdateState,
 } from "@openagents/agent-sdk";
 
+const platform: HostPlatform =
+  process.platform === "darwin"
+    ? "macos"
+    : process.platform === "win32"
+      ? "windows"
+      : process.platform === "linux"
+        ? "linux"
+        : "unknown";
+
 const api: OpenAgentsApi = {
+  platform,
   getAppState: () => ipcRenderer.invoke("openagents:get-app-state"),
   listAgents: () => ipcRenderer.invoke("openagents:list-agents"),
   listInstalledAgents: () => ipcRenderer.invoke("openagents:list-agents"),
   listRegistryAgents: () =>
     ipcRenderer.invoke("openagents:list-registry-agents"),
   listProviders: () => ipcRenderer.invoke("openagents:list-providers"),
+  listConnectors: () => ipcRenderer.invoke("openagents:list-connectors"),
+  testConnector: (id: string) =>
+    ipcRenderer.invoke("openagents:test-connector", id),
+  setConnectorConfig: (id: string, config: Record<string, unknown>) =>
+    ipcRenderer.invoke("openagents:set-connector-config", id, config),
+  listConnectorTeams: (id: string) =>
+    ipcRenderer.invoke("openagents:list-connector-teams", id),
+  listConnectorChannels: (id: string, teamId: string) =>
+    ipcRenderer.invoke("openagents:list-connector-channels", id, teamId),
+  onConnectorConfirmRequest: (
+    listener: (request: PendingConnectorConfirmation) => void,
+  ): (() => void) => {
+    const handler = (_event: unknown, payload: PendingConnectorConfirmation) =>
+      listener(payload);
+    ipcRenderer.on("openagents:connector-confirm-request", handler);
+    return () => {
+      ipcRenderer.removeListener(
+        "openagents:connector-confirm-request",
+        handler,
+      );
+    };
+  },
+  respondToConnectorConfirm: (
+    requestId: string,
+    decision: PendingConnectorDecision,
+  ) =>
+    ipcRenderer.invoke(
+      "openagents:respond-to-connector-confirm",
+      requestId,
+      decision,
+    ),
   installAgent: (agentId: string) =>
     ipcRenderer.invoke("openagents:install-agent", agentId),
   uninstallAgent: (slug: string) =>

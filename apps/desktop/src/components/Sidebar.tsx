@@ -4,14 +4,12 @@ import {
   IconAgents,
   IconHub,
   IconActivity,
+  IconConnectors,
   IconSettings,
   IconLogo,
-  IconHardDrive,
   IconCommand,
-  IconChevronDown,
 } from "./icons";
 import { StatusDot } from "./Pill";
-import { Avatar } from "./Avatar";
 import { Sparkline } from "./Sparkline";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { useAppState } from "../state";
@@ -93,6 +91,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       badge: state.installedAgents.length,
     },
     { to: "/hub", label: "Agent Hub", icon: <IconHub size={16} /> },
+    { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },
     {
       to: "/activity",
       label: "Activity",
@@ -100,6 +99,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       badge: activeRunCount > 0 ? activeRunCount : undefined,
       badgeTone: activeRunCount > 0 ? "warning" : undefined,
     },
+    { to: "/settings", label: "Settings", icon: <IconSettings size={16} /> },
   ];
 
   const runsByDay = runsForLastSevenDays(state.runs.map((run) => run.queuedAt));
@@ -199,62 +199,6 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </div>
       </div>
 
-      {/* Spacer pushes footer down */}
-      <div className="flex-1" />
-
-      {/* User row + Settings + Provider strip */}
-      <div className="mx-2.5 mb-3 flex flex-col gap-2 rounded-xl bg-[var(--color-surface)] p-2 ring-1 ring-[var(--color-border-soft)]">
-        {/* User row */}
-        <button className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 transition-colors hover:bg-[var(--color-surface-hover)]">
-          <Avatar name="Ugur Koc" size={26} />
-          <div className="min-w-0 flex-1 text-left leading-tight">
-            <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
-              Ugur Koc
-            </div>
-            <div className="text-[10px] text-[var(--color-text-muted)]">
-              you · admin
-            </div>
-          </div>
-          <IconChevronDown size={11} className="text-[var(--color-text-muted)]" />
-        </button>
-
-        {/* Provider chip */}
-        <div className="rounded-lg bg-[var(--color-bg-raised)] px-2.5 py-2 ring-1 ring-[var(--color-border-soft)]">
-          <div className="flex items-center justify-between">
-            <span className="text-[9.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Provider
-            </span>
-            <StatusDot tone={active?.status === "connected" ? "success" : "warning"} />
-          </div>
-          <div className="mt-1 flex items-center gap-1.5">
-            <IconHardDrive size={11} className="text-[var(--color-success)]" />
-            <span className="text-[12px] font-medium text-[var(--color-text)]">
-              {active?.name ?? "No provider"}
-            </span>
-            <span className="ml-auto font-mono text-[9.5px] text-[var(--color-text-muted)]">
-              {active?.defaultModel ?? "-"}
-            </span>
-          </div>
-          <div className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
-            {state.trust.detail}
-          </div>
-        </div>
-
-        {/* Settings */}
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            `flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] transition-colors ${
-              isActive
-                ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-            }`
-          }
-        >
-          <IconSettings size={13} className="text-[var(--color-text-muted)]" />
-          <span>Settings</span>
-        </NavLink>
-      </div>
     </aside>
   );
 }

@@ -76,9 +76,6 @@ export default function AgentsHome() {
   // append the provider name again or duplicate the tenant in a sibling
   // span. One pill, no echo.
   const providerLabel = state.trust.label;
-  const activeTenant = state.activeTenantId
-    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
-    : undefined;
 
   return (
     <>
@@ -91,14 +88,6 @@ export default function AgentsHome() {
             <Pill tone={state.trust.isLocal ? "success" : "warning"}>
               <IconHardDrive size={10} /> {providerLabel}
             </Pill>
-            {!activeTenant && (
-              <>
-                <span className="opacity-50">·</span>
-                <span>
-                  No tenant — synthetic mode
-                </span>
-              </>
-            )}
           </span>
         }
         actions={
@@ -145,32 +134,6 @@ export default function AgentsHome() {
             >
               ×
             </button>
-          </div>
-        )}
-
-        {!activeTenant && (
-          <div className="mb-6 flex items-center justify-between gap-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 ring-1 ring-[var(--color-info)]/25">
-            <div className="flex items-start gap-3">
-              <IconShield
-                size={16}
-                className="mt-0.5 shrink-0 text-[var(--color-info)]"
-              />
-              <div className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-                <span className="font-medium text-[var(--color-text)]">
-                  Synthetic mode.
-                </span>{" "}
-                Connect a Microsoft 365 tenant to run agents against real
-                device data — without one, agents complete successfully but
-                operate on an empty inventory.
-              </div>
-            </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => navigate("/settings")}
-            >
-              Connect tenant
-            </Button>
           </div>
         )}
 

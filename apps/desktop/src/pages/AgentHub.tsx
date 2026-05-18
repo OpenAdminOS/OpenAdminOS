@@ -220,21 +220,6 @@ export default function AgentHub() {
           </div>
         )}
 
-        <div className="mt-10 flex flex-col items-center gap-2 text-[12px] text-[var(--color-text-muted)]">
-          <div className="inline-flex items-center gap-2">
-            <Avatar name="Ugur Koc" size={20} />
-            <span>
-              {visible.length} agents from{" "}
-              <span className="font-medium text-[var(--color-text-soft)]">
-                this MIT monorepo
-              </span>{" "}
-              · contributions live under agents/
-            </span>
-          </div>
-          <span>
-            Pulled from <span className="font-mono">./agents</span>
-          </span>
-        </div>
       </PageBody>
       <Modal
         open={manifestAgent !== null}

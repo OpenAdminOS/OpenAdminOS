@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "npm run dev -w @openagents/desktop",
     "build": "npm run build -w @openagents/desktop",
-    "typecheck": "npm run typecheck -w @openagents/agent-sdk && npm run typecheck -w @openagents/runtime && npm run typecheck -w @openagents/qa-graph && npm run typecheck -w @openagents/desktop",
+    "typecheck": "npm run typecheck -w @openagents/agent-sdk && npm run typecheck -w @openagents/connector-teams && npm run typecheck -w @openagents/runtime && npm run typecheck -w @openagents/qa-graph && npm run typecheck -w @openagents/desktop",
     "qa": "npm run qa -w @openagents/qa-graph",
     "dist:desktop": "npm run dist -w @openagents/desktop"
   },

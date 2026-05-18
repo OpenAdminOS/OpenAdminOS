@@ -66,9 +66,6 @@ export function ResultPanel({ run }: { run: RunRecord }) {
 
 function describeEmpty(run: RunRecord): string | undefined {
   if (!isEmptyResult(run)) return undefined;
-  if (run.dataSource === "synthetic") {
-    return "No records processed. Synthetic mode runs against an empty inventory — connect a Microsoft 365 tenant from Settings to see actual data.";
-  }
   if (run.status === "failed") {
     return "Run failed before producing a result. See the Logs tab for details.";
   }

@@ -122,6 +122,9 @@ export default {
   scopes: [                            // Graph permissions required
     'DeviceManagementManagedDevices.Read.All',
   ],
+  connectors: [                        // optional; declared egress dependencies
+    { id: 'teams', required: false, capabilities: ['post-channel-message'] },
+  ],
   modelRequirements: {
     minContextTokens: 8000,
     preferredModel: 'claude-sonnet-4-7',
@@ -129,11 +132,308 @@ export default {
   async run(ctx: AgentContext) {
     // ctx.graph — the Graph API client (auto-scoped to tenant)
     // ctx.llm — the LLM provider (auto-configured)
+    // ctx.connectors — egress adapters declared in the manifest (see Connector abstraction)
     // ctx.log — structured logging that streams to the UI
     // ctx.confirm(diff) — required for write agents; throws if user rejects
   },
 };
 ```
+
+Agents may declare optional or required `connectors:` — see Connector abstraction below.
+
+### Connector abstraction
+
+Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
+
+**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openagents/agent-sdk` in the [Unreleased] section. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. The runtime injection and the first connector — **Microsoft Teams** — land in the next release alongside the Connectors sidebar entry, the channel-picker setup UI, and the preview-and-send confirmation modal.
+
+The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships — retrofitting them after agents start consuming the API is what makes ecosystems brittle.
+
+#### Auth source classes
+
+Three classes, each with a distinct trust posture:
+
+- `graph-delegated` — piggybacks on the active tenant's MSAL token; adds Graph scopes (Teams, Outlook, SharePoint, Planner). No new credentials, no second consent dance. Data stays inside the customer's M365 tenant boundary.
+- `graph-application` — app-only consent via Resource-Specific Consent or per-resource installation. Deferred past v1.0; the interface accommodates it so we don't have to break agents to add it later.
+- `external` — owns credentials in the OS keychain (ServiceNow, Jira, Slack). Data leaves the tenant boundary; trust messaging must say so explicitly. External connectors implement a uniform OAuth/credential flow surface so the setup UI is connector-agnostic.
+
+#### Capability kinds → confirmation tiers
+
+Every capability declares a `kind` that maps to a confirmation tier. Mixing connectors with destructive Graph operations under one `mode: 'write'` flag would be sloppy — most connector use is *additive notification*, not destruction, and conflating the two erodes the typed-diff gate's signal value.
+
+| Kind          | Side effect                       | Confirmation                                     | Examples                                  |
+|---------------|-----------------------------------|--------------------------------------------------|-------------------------------------------|
+| `read`        | None                              | None                                             | `listTeams`, `listChannels`               |
+| `notify`      | Additive (creates a new artifact) | **Preview & send** modal — rendered output + target, one-click confirm | `post-channel-message`, `create-incident` |
+| `mutating`    | Modifies an existing artifact     | Diff modal — before/after, one-click confirm     | `edit-message`, `update-incident-status`  |
+| `destructive` | Removes an artifact               | Typed-phrase confirmation, same gate as destructive Graph ops | `delete-message`, `close-incident`        |
+
+The agent's `mode: 'read' | 'write'` continues to describe Graph behavior unchanged. The agent's **effective trust tier** at install and run time is `max(agent.mode, max(declared capability kinds))`. UI presents both axes — "Reads Intune devices · Posts to Microsoft Teams" — never collapses them into one tag.
+
+#### Versioning
+
+Capabilities are SemVer-major-versioned and addressed as `id@major`. Agents pin a major: `capabilities: ['post-channel-message@1']`. Connectors may ship `@2` (e.g. switches from markdown to Adaptive Cards) without breaking agents on `@1`. The connector itself is also SemVer'd; agents declare `minVersion`.
+
+Manifests declare a top-level `schemaVersion: 1`. The runtime rejects unsupported schema versions with a designed error and a "this agent was authored for a newer Open Agents" remediation. This is how we evolve the manifest shape without orphaning agents in the wild.
+
+#### The interface
+
+Lives in `packages/agent-sdk`. The runtime imports it; per-connector packages augment it; agent authors consume it via `defineAgent()` and `ctx.connectors`.
+
+```ts
+type ConnectorAuthSource = 'graph-delegated' | 'graph-application' | 'external';
+type CapabilityKind = 'read' | 'notify' | 'mutating' | 'destructive';
+
+interface ConnectorTrust {
+  label: string;          // 'Microsoft Teams · {tenant}'
+  detail: string;         // one sentence on where data actually goes
+  staysInTenant: boolean; // true for graph-*, false for external
+}
+
+interface CapabilityDescriptor {
+  id: string;             // 'post-channel-message'
+  version: number;        // SemVer major; minor/patch are non-breaking
+  kind: CapabilityKind;
+  /** Subset of the connector's scopes required to invoke this capability. */
+  scopes: string[];
+  /** Override the connector-level trust for capability-specific messaging. */
+  trust?: Partial<ConnectorTrust>;
+}
+
+interface ConnectorDescriptor {
+  id: string;             // 'teams', 'servicenow', 'slack'
+  name: string;
+  version: string;        // SemVer of the connector implementation
+  authSource: ConnectorAuthSource;
+  /** Union of every capability's scope set; used for MSAL consent. */
+  scopes: string[];
+  capabilities: CapabilityDescriptor[];
+  /** JSON Schema describing per-install configuration (channel picker, instance URL, etc.). */
+  configSchema?: object;
+  trust: ConnectorTrust;
+}
+
+interface ConnectorInstance<TCapabilities> {
+  descriptor: ConnectorDescriptor;
+  status: 'connected' | 'needs-setup' | 'needs-scope' | 'error';
+  capabilities: TCapabilities; // typed, per-connector
+  healthCheck(): Promise<{ healthy: boolean; message?: string }>;
+  dispose(): Promise<void>;
+}
+
+interface ConnectorFactory<TCapabilities> {
+  descriptor: ConnectorDescriptor;
+  /** Called once per run after preflight. Receives the resolved tenant session + per-install config. */
+  build(ctx: ConnectorBuildContext): Promise<ConnectorInstance<TCapabilities>>;
+}
+
+interface ConnectorBuildContext {
+  tenant: TenantSession;          // MSAL token accessor for graph-* connectors
+  config: Record<string, unknown>;// validated against descriptor.configSchema
+  secrets: SecretAccessor;        // keychain-backed; only used by external connectors
+  log: RunLogger;
+  /** Runtime-supplied idempotency key generator for capability invocations. */
+  idempotencyKeyFor(stepId: string, iteration: number): string;
+}
+
+/** Module-augmentable registry — see "Type-safe registry" below. */
+interface ConnectorRegistry {} // intentionally empty; populated by connector packages
+```
+
+Agent declarations reference connectors via a typed requirement block:
+
+```ts
+interface AgentConnectorRequirement {
+  id: keyof ConnectorRegistry;          // string-narrowed by augmentation
+  minVersion: string;                   // SemVer of the connector
+  capabilities: { id: string; version: number }[];
+  required: boolean;                    // false → graceful degradation
+}
+```
+
+#### Error contract
+
+Connectors throw typed errors; the runtime maps each to a designed UI state with the correct recovery action. No generic `Error` throws — every failure has a designed remediation.
+
+```ts
+type ConnectorRecovery = 'retry' | 'reauth' | 'reconfigure' | 'fatal';
+
+abstract class ConnectorError extends Error {
+  abstract readonly recovery: ConnectorRecovery;
+  abstract readonly connectorId: string;
+  readonly capabilityId?: string;
+  readonly cause?: unknown;
+}
+
+class ConnectorAuthError extends ConnectorError {           // recovery: 'reauth'
+}
+class ConnectorScopeError extends ConnectorError {          // recovery: 'reauth'
+  readonly missingScopes: string[] = [];
+}
+class ConnectorRateLimitError extends ConnectorError {      // recovery: 'retry'
+  readonly retryAfterMs: number = 0;
+}
+class ConnectorNotConfiguredError extends ConnectorError {  // recovery: 'reconfigure'
+}
+class ConnectorRemoteError extends ConnectorError {         // recovery: 'retry' | 'fatal'
+  readonly statusCode?: number;
+}
+class ConnectorValidationError extends ConnectorError {     // recovery: 'fatal'
+}
+```
+
+The runtime applies bounded exponential-backoff retries for `recovery: 'retry'` errors. `reauth` triggers the MSAL re-consent flow (or external OAuth refresh) inline in the run. `reconfigure` parks the run on the Connectors page deep-linked to setup. `fatal` fails the run with the error class name and message surfaced verbatim.
+
+#### Idempotency and audit
+
+Every `notify`/`mutating`/`destructive` capability call receives a runtime-supplied `idempotencyKey` derived from `${runId}:${stepId}:${iteration}`. Connectors that support remote idempotency (Graph `Idempotency-Key` header, ServiceNow correlation IDs) honor it; those that don't, ignore it. Re-running a failed step never duplicates posts when the connector is idempotent-aware.
+
+Every invocation emits a structured audit entry. The shape is connector-agnostic; the audit log export (§5 Important) consumes this directly:
+
+```ts
+interface ConnectorAuditEntry {
+  runId: string;
+  stepId: string;
+  connector: string;       // 'teams'
+  capability: string;      // 'post-channel-message@1'
+  kind: CapabilityKind;
+  idempotencyKey: string;
+  egressTarget: string;    // 'contoso.onmicrosoft.com · Team A · #it-ops'
+  argsDigest: string;      // sha256 of redacted args; for dedup detection
+  status: 'success' | 'failure';
+  durationMs: number;
+  externalId?: string;     // remote messageId / ticketId
+  externalUrl?: string;    // webUrl
+  errorClass?: string;
+  errorMessage?: string;
+}
+```
+
+#### Runtime contract
+
+Lifecycle, in order, per run:
+
+1. **Manifest load** — connector requirements validated against the host's known registry. Unknown ids or unsatisfiable `minVersion` constraints reject the run before queue.
+2. **Preflight** — for each required connector: factory `build()` is called, then `healthCheck()`. Failures surface as designed error states (see §5 Critical) before any LLM/Graph call runs.
+3. **Capability invocation** — `ctx.connectors[id].capabilities.foo(args)` calls go through a runtime wrapper that: emits audit entry start, applies confirmation tier (preview/diff/typed), supplies `idempotencyKey`, catches `ConnectorError`, applies retry/reauth policy, emits audit entry finish.
+4. **Disposal** — `dispose()` called for every built instance at run end, success or failure.
+
+Required vs optional: a `required: true` connector that's not connected fails preflight. A `required: false` connector that's not connected makes `ctx.connectors[id]` `undefined`; agents check before use. The typed signature reflects this — `ctx.connectors.teams?` not `ctx.connectors.teams!`.
+
+#### Type-safe registry via module augmentation
+
+The empty `ConnectorRegistry` interface in `@openagents/agent-sdk` is populated by each connector package via declaration merging. This is the standard TypeScript pattern for extensible registries (React Router, Vite, Wrangler all do this) and gives agent authors full IntelliSense without coupling the SDK to the known connector list.
+
+```ts
+// packages/connector-teams/src/index.d.ts
+declare module '@openagents/agent-sdk' {
+  interface ConnectorRegistry {
+    teams: TeamsConnectorCapabilities;
+  }
+}
+```
+
+Inside `defineAgent({ run(ctx) { ctx.connectors.teams.postChannelMessage(...) } })`, the `.teams` property exists if and only if `@openagents/connector-teams` is installed in the workspace. Misspelled connector ids are type errors at edit time.
+
+#### Plugin architecture
+
+Each connector ships as its own package under `packages/connector-<id>/` (in-tree initially) and later via the agent registry (community-contributed). Per-package boundaries make versioning, testing, and supply-chain review tractable.
+
+```ts
+// packages/connector-teams/src/index.ts
+import { defineConnector } from '@openagents/agent-sdk';
+import type { TeamsConnectorCapabilities } from './capabilities';
+
+export default defineConnector<TeamsConnectorCapabilities>({
+  descriptor: { /* ... */ },
+  build: async (ctx) => {
+    const client = createGraphClient(ctx.tenant);
+    return {
+      descriptor,
+      status: 'connected',
+      capabilities: makeTeamsCapabilities(client, ctx.idempotencyKeyFor),
+      healthCheck: async () => ({ healthy: true }),
+      dispose: async () => { /* no-op for stateless Graph client */ },
+    };
+  },
+});
+```
+
+The host (in `packages/runtime`) discovers connectors via a static import map for now; v1.0+ may move to dynamic registration as third-party connectors land. The contract above is stable regardless of discovery mechanism.
+
+#### UI surface
+
+- New sidebar entry **Connectors** between Agent Hub and Activity.
+- Connectors page: card per registered connector with status pill (`connected` / `needs setup` / `needs scope` / `error`), capability list (one row per `id@version` with kind tag), trust label. Per-connector detail page handles setup (Teams channel picker, ServiceNow instance URL + credentials) generated from `configSchema`.
+- Per-agent install: when the manifest declares connectors, install adds a connector-setup step before the agent appears installed. The step itemizes egress targets and capability kinds so the user knows what they're authorizing.
+- Run status: when a run uses connectors, the status-strip trust cell expands to list each egress target. Capability invocations stream into the run timeline with the kind-appropriate confirmation modal.
+- Error states: every `ConnectorError` subclass has a designed remediation tile in §06 — `auth expired → reauth`, `missing scope → re-consent`, `rate limited → retry in Xs`, `not configured → open Connectors page`.
+
+#### Teams connector (first to ship)
+
+The Teams connector lands first because it is the cheapest credible connector — `graph-delegated`, so it reuses the existing MSAL flow; data stays in the tenant; each capability is one Graph call. It validates the abstraction without paying for a new trust surface.
+
+```yaml
+descriptor:
+  id: teams
+  name: Microsoft Teams
+  version: 1.0.0
+  authSource: graph-delegated
+  scopes:
+    - ChannelMessage.Send
+    - Chat.ReadWrite
+    - Team.ReadBasic.All
+    - Channel.ReadBasic.All
+  capabilities:
+    - id: list-teams
+      version: 1
+      kind: read
+      scopes: [Team.ReadBasic.All]
+    - id: list-channels
+      version: 1
+      kind: read
+      scopes: [Channel.ReadBasic.All]
+    - id: post-channel-message
+      version: 1
+      kind: notify
+      scopes: [ChannelMessage.Send]
+    - id: post-chat-message
+      version: 1
+      kind: notify
+      scopes: [Chat.ReadWrite]
+  trust:
+    label: "Microsoft Teams · {tenant}"
+    detail: "Posts via Microsoft Graph as the signed-in admin. Data stays inside the tenant."
+    staysInTenant: true
+```
+
+Capability surface:
+
+```ts
+interface TeamsConnectorCapabilities {
+  listTeams(): Promise<{ id: string; displayName: string }[]>;
+  listChannels(teamId: string): Promise<{ id: string; displayName: string }[]>;
+  postChannelMessage(args: {
+    teamId: string;
+    channelId: string;
+    markdown: string;
+  }): Promise<{ messageId: string; webUrl: string }>;
+  postChatMessage(args: {
+    chatId: string;
+    markdown: string;
+  }): Promise<{ messageId: string; webUrl: string }>;
+}
+```
+
+Decisions locked for the first release:
+- **Delegated permissions only.** Posts attributed to the signed-in admin ("{admin} · via Open Agents"). No Resource-Specific Consent, no per-team app installation. Application permissions are a v1.1+ concern; the descriptor's `authSource` field is the seam where that decision can change without breaking agents.
+- **Teams scopes folded into the MSAL consent screen.** Granted once at tenant connect. Admins who declined initial consent see `status: 'needs-scope'` and a single re-consent button — no separate auth flow.
+- **`post-*-message` is `kind: notify`.** Users see a "Send to Teams?" preview modal with the rendered markdown and the target channel — one-click confirm, not typed phrase. Typed-phrase confirmation is reserved for destructive Graph operations; debasing it for routine notifications dulls its trust signal.
+- **`configSchema` covers default channel/chat selection.** Per-install setting; agents can override at invocation time.
+
+#### Why Teams first, ServiceNow second
+
+Teams proves the contract generalizes across capabilities while keeping the trust surface unchanged from today. ServiceNow is the canonical second connector — `external` auth, instance URL configuration, keychain-stored credentials, "data leaves your tenant" trust messaging. Designing both into the abstraction from the start, shipping Teams first, validates the contract before paying for a new trust surface.
 
 ### Registry model
 
@@ -265,7 +565,6 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 
 ### What v0.1 deliberately defers
 
-- Real MSAL tenant connection (use mock tenant; OAuth flow lands in v0.2)
 - Other LLM providers (LM Studio, Anthropic-via-Claude-Code, OpenAI-via-Codex, Azure OpenAI)
 - Write agents and diff confirmation behavior (UI built for screenshots, no real writes)
 - GitHub-backed registry (registry browse uses static JSON in v0.1)
@@ -303,11 +602,12 @@ These must exist and work well before any public release.
 6. **Empty states** — Zero agents installed, zero runs, zero tenants. These teach new users what the product is for.
 7. **Registry browse** — Search, filter (author, mode, model requirements), install, signing/verification status, screenshots, changelog.
 8. **Multi-tenant switcher done properly** — Search, color-coding, "currently scoped to" badges, scope guard against running an agent on the wrong tenant.
+9. **Teams connector (graph-delegated)** — first connector to validate the abstraction. Channel + chat picker, post-message capabilities, Teams scopes folded into the MSAL consent flow, trust messaging integrated with the status strip. See §2 Connector abstraction.
 
 ### Important (in v1.0, doesn't have to be perfect)
 
 - Scheduled runs (recurrence, pause/resume, notification routing)
-- Notification settings (per-agent, OS notification / email / Teams webhook / none)
+- Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; the Teams connector is the first egress target wired through this surface.
 - Run history with filters (agent, tenant, date, status)
 - Audit log export (JSON/CSV with cryptographic timestamps for compliance buyers)
 - Keyboard shortcuts (⌘K palette, ⌘R rerun, ⌘/ search, ⌘? help)
@@ -317,6 +617,7 @@ These must exist and work well before any public release.
 
 ### Designed before launch (not strict blockers)
 
+- **Second connector: ServiceNow (`external` auth)** — proves the Connector abstraction generalizes across trust boundaries. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed alongside Teams; ships post-v1.0.
 - Agent signing / verification (registry supply-chain integrity)
 - Sandbox / dry-run mode for read agents (preview Graph calls before executing)
 - Cost budgets & rate limits (per-agent or per-day spend caps for hosted LLMs)

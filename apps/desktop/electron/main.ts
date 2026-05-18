@@ -23,7 +23,16 @@ import {
   attachWindowStatePersistence,
   loadWindowState,
 } from "./window-state.js";
-import type { ProviderId, SaveTextFileArgs } from "@openagents/agent-sdk";
+import type {
+  PendingConnectorDecision,
+  ProviderId,
+  SaveTextFileArgs,
+} from "@openagents/agent-sdk";
+import {
+  installConnectorConfirmBridge,
+  respondConnectorConfirm,
+} from "./connector-confirm-bridge.js";
+import { listRegisteredConnectors } from "@openagents/runtime";
 
 // Set the app name BEFORE anything else that could touch the macOS
 // Keychain. Electron's safeStorage uses `app.getName()` to construct
@@ -268,6 +277,30 @@ function registerIpcHandlers() {
     store.listRegistryAgents(),
   );
   ipcMain.handle("openagents:list-providers", () => store.listProviders());
+  ipcMain.handle("openagents:list-connectors", () => store.listConnectors());
+  ipcMain.handle("openagents:test-connector", (_event, id: string) =>
+    store.testConnector(id),
+  );
+  ipcMain.handle(
+    "openagents:set-connector-config",
+    (_event, id: string, config: Record<string, unknown>) =>
+      store.setConnectorConfig(id, config),
+  );
+  ipcMain.handle(
+    "openagents:list-connector-teams",
+    (_event, id: string) => store.listConnectorTeams(id),
+  );
+  ipcMain.handle(
+    "openagents:list-connector-channels",
+    (_event, id: string, teamId: string) =>
+      store.listConnectorChannels(id, teamId),
+  );
+  ipcMain.handle(
+    "openagents:respond-to-connector-confirm",
+    (_event, requestId: string, decision: PendingConnectorDecision) => {
+      respondConnectorConfirm(requestId, decision);
+    },
+  );
   ipcMain.handle("openagents:install-agent", (_event, agentId: string) =>
     store.installAgent(agentId),
   );
@@ -284,7 +317,7 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openagents:start-run",
-    (_event, agentSlug: string, options?: { tenantId?: string | null }) =>
+    (_event, agentSlug: string, options?: { tenantId?: string }) =>
       store.startRun(agentSlug, options),
   );
   ipcMain.handle("openagents:get-run", (_event, id: string) => store.getRun(id));
@@ -390,6 +423,14 @@ if (!gotLock) {
 
     const userDataDir = app.getPath("userData");
     const tokenStore = new EncryptedSecretStore(join(userDataDir, "tokens.bin"));
+
+    installConnectorConfirmBridge({
+      getMainWindow: () => mainWindow,
+      connectorNameLookup: (id) =>
+        listRegisteredConnectors().find((d) => d.id === id)?.name ?? id,
+      connectorConfigLookup: (id) => store.getConnectorConfigCached(id),
+    });
+
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
       tokenStore,

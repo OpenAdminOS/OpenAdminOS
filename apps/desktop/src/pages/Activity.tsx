@@ -7,7 +7,7 @@ import { IconSearch } from "../components/icons";
 import { useAppState } from "../state";
 import type { RunRecord, RunStatus } from "../shared/openAgents";
 
-type Filter = { kind: "all" } | { kind: "synthetic" } | { kind: "tenant"; tenantId: string };
+type Filter = { kind: "all" } | { kind: "tenant"; tenantId: string };
 
 export default function Activity() {
   const navigate = useNavigate();
@@ -17,22 +17,19 @@ export default function Activity() {
 
   const counts = useMemo(() => {
     const total = state.runs.length;
-    const synthetic = state.runs.filter((run) => run.dataSource === "synthetic").length;
     const byTenant = new Map<string, number>();
     for (const run of state.runs) {
       if (run.tenantId) {
         byTenant.set(run.tenantId, (byTenant.get(run.tenantId) ?? 0) + 1);
       }
     }
-    return { total, synthetic, byTenant };
+    return { total, byTenant };
   }, [state.runs]);
 
   const filteredRuns = useMemo(() => {
     const base = filter.kind === "all"
       ? state.runs
-      : filter.kind === "synthetic"
-        ? state.runs.filter((run) => run.dataSource === "synthetic")
-        : state.runs.filter((run) => run.tenantId === filter.tenantId);
+      : state.runs.filter((run) => run.tenantId === filter.tenantId);
     const q = query.trim().toLowerCase();
     if (q.length === 0) return base;
     return base.filter((run) => {
@@ -48,7 +45,9 @@ export default function Activity() {
     });
   }, [filter, state.runs, state.installedAgents, query]);
 
-  const showFilters = state.tenants.length > 0 || counts.synthetic > 0;
+  // Show the filter row only when 2+ tenants exist — single-tenant case
+  // is already implied by the page title.
+  const showFilters = state.tenants.length > 1;
 
   return (
     <>
@@ -79,12 +78,6 @@ export default function Activity() {
               count={counts.total}
               active={filter.kind === "all"}
               onClick={() => setFilter({ kind: "all" })}
-            />
-            <FilterChip
-              label="Synthetic"
-              count={counts.synthetic}
-              active={filter.kind === "synthetic"}
-              onClick={() => setFilter({ kind: "synthetic" })}
             />
             {state.tenants.map((tenant) => (
               <FilterChip
@@ -195,10 +188,10 @@ function tenantLabel(
   run: RunRecord,
   tenants: { id: string; displayName: string }[],
 ): string {
-  if (run.dataSource === "graph" && run.tenantId) {
+  if (run.tenantId) {
     return tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ?? "connected tenant";
   }
-  return "synthetic";
+  return "—";
 }
 
 function providerDisplayName(

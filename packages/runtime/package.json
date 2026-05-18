@@ -15,12 +15,13 @@
     "dist"
   ],
   "scripts": {
-    "build": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json --noEmit"
+    "build": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/connector-teams && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/connector-teams && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
     "@openagents/agent-sdk": "0.1.4",
+    "@openagents/connector-teams": "0.1.4",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

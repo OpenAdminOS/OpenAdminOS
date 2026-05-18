@@ -3,10 +3,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
+  AgentConnectorRequirement,
   AgentManifestPreview,
   AgentModule,
   AgentRunResult,
   AgentSummary,
+  ConnectorAuditEntry,
+  ConnectorAccessor,
   LlmStreamChunk,
   LlmTokenUsage,
   ProviderId,
@@ -19,17 +22,27 @@ import type {
   RunLogRecord,
   RunRecord,
   RunStepThinking,
+  SecretAccessor,
+  TenantSession,
   WriteAgentModule,
   WritePlan,
 } from "@openagents/agent-sdk";
 
-import { createSyntheticGraph } from "./graph-fixtures.js";
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import {
   parseAgentTemplate,
   agentTemplateToModule,
   agentTemplateToRegistrySummary,
 } from "./agent-template.js";
+import {
+  disposeBuiltConnectors,
+  noSecrets,
+  preflightConnectors,
+  wrapConnector,
+  type BuiltConnector,
+  type ConfirmationDecision,
+  type ConnectorInvocationInfo,
+} from "./connectors.js";
 
 export { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 export {
@@ -52,7 +65,18 @@ export {
   type TokenCacheStorage,
 } from "./msal.js";
 export { createGraphAdapter, type GraphAdapterOptions } from "./graph-adapter.js";
-export { createSyntheticGraph } from "./graph-fixtures.js";
+export { createTenantSession } from "./msal.js";
+export {
+  disposeBuiltConnectors,
+  findConnectorFactory,
+  listRegisteredConnectors,
+  noSecrets,
+  preflightConnectors,
+  wrapConnector,
+  type BuiltConnector,
+  type ConfirmationDecision,
+  type ConnectorInvocationInfo,
+} from "./connectors.js";
 
 const builtInRegistryRoot = "agents";
 
@@ -174,6 +198,9 @@ export function toInstalledAgent(
     registryId: agent.registryId,
     registryPath: agent.registryPath,
     graphOperations: agent.graphOperations,
+    ...(agent.connectors && agent.connectors.length > 0
+      ? { connectors: agent.connectors }
+      : {}),
     installedAt: normalizeIsoDate(installedAt, "installedAt"),
   };
 }
@@ -207,15 +234,48 @@ export interface ExecuteRunInput {
   providerId: ProviderId;
   model?: string;
   llm?: RunLlmApi;
-  graph?: RunGraphApi;
+  graph: RunGraphApi;
   /**
    * Whether the agent is allowed to call destructive Graph methods
-   * during this run. The host sets `true` whenever the run is bound to
-   * a real tenant (i.e. `dataSource === "graph"`); the per-write typed
-   * diff confirmation is the user-facing gate. Defaults to `false` so
-   * unconfigured callers cannot accidentally perform real writes.
+   * during this run. The per-write typed diff confirmation is the
+   * user-facing gate. Defaults to `false` so unconfigured callers
+   * cannot accidentally perform real writes.
    */
   realWrites?: boolean;
+  /**
+   * Tenant session for connector use. Required when the agent
+   * declares any connectors with `authSource: 'graph-delegated'`.
+   * Built via `createTenantSession({ msalClient, ... })`.
+   */
+  tenant?: TenantSession;
+  /**
+   * Per-connector configuration overrides (keyed by connector id).
+   * Validated against each connector's `configSchema` before
+   * `factory.build()` is called.
+   */
+  connectorConfigs?: Record<string, Record<string, unknown>>;
+  /**
+   * Optional per-connector secret accessor (only used by connectors
+   * with `authSource: 'external'`). When omitted, a no-op accessor
+   * is supplied; `external` connectors will fail to initialize.
+   */
+  connectorSecretsFor?: (connectorId: string) => SecretAccessor;
+  /**
+   * Called before every `notify`/`mutating`/`destructive` capability
+   * invocation. The wrapper aborts the call when this returns
+   * `{ approved: false }`. Phase 6 wires this to the preview-and-send
+   * modal; in this phase, callers that omit it auto-approve with an
+   * info-level log entry.
+   */
+  confirmCapability?: (
+    info: ConnectorInvocationInfo,
+  ) => Promise<ConfirmationDecision>;
+  /**
+   * Receives a structured audit entry for every capability call
+   * (success or failure). The host appends these to the run record
+   * for surfacing in the timeline and audit log export.
+   */
+  onConnectorAudit?: (entry: ConnectorAuditEntry) => void;
   onProgress(run: RunRecord): void | Promise<void>;
 }
 
@@ -228,6 +288,8 @@ interface PhaseHandle {
   setWorking(update: (run: RunRecord) => RunRecord): RunRecord;
   emit(): Promise<void>;
   ctx: RunContext;
+  /** Built connectors awaiting disposal at end of phase. */
+  builtConnectors: BuiltConnector[];
 }
 
 async function createPhaseHandle(
@@ -268,14 +330,75 @@ async function createPhaseHandle(
     },
   });
 
+  const logFn = (
+    level: RunLogLevel,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ) => {
+    working = appendLog(working, level, message, currentStepId, metadata);
+    void input.onProgress(working);
+  };
+
+  const requirements = (input.agent.connectors ?? []) as readonly AgentConnectorRequirement[];
+  let connectorAccessor: ConnectorAccessor | undefined;
+  let builtConnectors: BuiltConnector[] = [];
+  if (requirements.length > 0) {
+    if (!input.tenant) {
+      throw new Error(
+        `Agent "${input.agent.slug}" declares ${requirements.length} connector(s) but no tenant session was supplied.`,
+      );
+    }
+    const iterationCounters = new Map<string, number>();
+    const nextIteration = (stepId: string, capabilityId: string): number => {
+      const key = `${stepId}:${capabilityId}`;
+      const next = (iterationCounters.get(key) ?? 0) + 1;
+      iterationCounters.set(key, next);
+      return next - 1;
+    };
+
+    const preflight = await preflightConnectors({
+      runId: input.run.id,
+      requirements,
+      tenant: input.tenant,
+      configFor: (connectorId) => input.connectorConfigs?.[connectorId] ?? {},
+      secretsFor: (connectorId) =>
+        input.connectorSecretsFor?.(connectorId) ?? noSecrets,
+      log: logFn,
+    });
+    builtConnectors = preflight.built;
+
+    const wrappedAccessor: Record<string, unknown> = {};
+    for (const entry of preflight.built) {
+      wrappedAccessor[entry.id] = wrapConnector(entry.id, entry.instance, {
+        runId: input.run.id,
+        currentStepId: () => currentStepId,
+        ...(input.confirmCapability
+          ? { confirmInvocation: input.confirmCapability }
+          : {}),
+        onAuditEntry: (entry: ConnectorAuditEntry) => {
+          if (input.onConnectorAudit) input.onConnectorAudit(entry);
+          logFn(
+            entry.status === "success" ? "info" : "warn",
+            `Connector ${entry.connector}.${entry.capability} ${entry.status}` +
+              (entry.externalUrl ? ` (${entry.externalUrl})` : ""),
+            { connectorAudit: entry as unknown as Record<string, unknown> },
+          );
+        },
+        nextIteration,
+      });
+    }
+    connectorAccessor = wrappedAccessor as ConnectorAccessor;
+  }
+
   const ctx: RunContext = {
     agent: toAgentDefinition(input.agent),
     providerId: input.providerId,
     model: input.model,
-    graph: input.graph ?? createSyntheticGraph(),
+    graph: input.graph,
     llm,
     realWrites: input.realWrites ?? false,
     settings: input.agent.settings,
+    ...(connectorAccessor !== undefined ? { connectors: connectorAccessor } : {}),
     log: (level, message, metadata) => {
       working = appendLog(working, level, message, currentStepId, metadata);
       void input.onProgress(working);
@@ -348,6 +471,7 @@ async function createPhaseHandle(
     },
     emit: () => Promise.resolve(input.onProgress(working)).then(() => undefined),
     ctx,
+    builtConnectors,
   };
 }
 
@@ -502,6 +626,13 @@ export async function executeRun(input: ExecuteRunInput): Promise<RunRecord> {
     return completed;
   } catch (error) {
     return failPhase(input, handle.getWorking(), error);
+  } finally {
+    if (handle.builtConnectors.length > 0) {
+      await disposeBuiltConnectors(handle.builtConnectors, (level, message, metadata) => {
+        handle.setWorking((working) => appendLog(working, level, message, null, metadata));
+        void handle.emit();
+      });
+    }
   }
 }
 
@@ -546,6 +677,13 @@ export async function executePlan(input: ExecuteRunInput): Promise<RunRecord> {
     return awaiting;
   } catch (error) {
     return failPhase(input, handle.getWorking(), error);
+  } finally {
+    if (handle.builtConnectors.length > 0) {
+      await disposeBuiltConnectors(handle.builtConnectors, (level, message, metadata) => {
+        handle.setWorking((working) => appendLog(working, level, message, null, metadata));
+        void handle.emit();
+      });
+    }
   }
 }
 
@@ -586,6 +724,13 @@ export async function executeApply(input: ExecuteApplyInput): Promise<RunRecord>
     return completed;
   } catch (error) {
     return failPhase(input, handle.getWorking(), error);
+  } finally {
+    if (handle.builtConnectors.length > 0) {
+      await disposeBuiltConnectors(handle.builtConnectors, (level, message, metadata) => {
+        handle.setWorking((working) => appendLog(working, level, message, null, metadata));
+        void handle.emit();
+      });
+    }
   }
 }
 

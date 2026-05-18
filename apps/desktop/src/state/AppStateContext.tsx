@@ -485,6 +485,18 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     return () => window.clearInterval(intervalId);
   }, [refresh, state.runs]);
 
+  // Refresh once whenever the window regains focus. Cheap, and catches
+  // out-of-band state changes (e.g. the user started or stopped Ollama
+  // in another window, plugged in a new tenant, etc.) without forcing a
+  // permanent polling loop.
+  useEffect(() => {
+    const onFocus = () => {
+      void refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
   const value = useMemo<AppStateContextValue>(
     () => ({
       state,

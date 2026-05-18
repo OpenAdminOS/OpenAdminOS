@@ -358,7 +358,7 @@ function TenantsSection({
     <div className="max-w-[820px]">
       <SectionTitle
         title="Tenants"
-        subtitle="Connect Microsoft 365 tenants. Sign-in opens your system browser to Microsoft's login page. Agents read Graph data from the active tenant when one is connected; otherwise they fall back to a built-in synthetic fixture so the demo keeps working."
+        subtitle="Connect Microsoft 365 tenants. Sign-in opens your system browser to Microsoft's login page. Agents read Graph data from the active tenant; disconnecting the last tenant returns you to onboarding."
       />
 
       <div className="mt-6 flex items-center gap-3">
@@ -385,8 +385,8 @@ function TenantsSection({
         {tenants.length === 0 ? (
           <Card>
             <div className="p-5 text-[13px] text-[var(--color-text-muted)]">
-              No tenants connected. Runs use the built-in synthetic Graph
-              fixture until you sign in.
+              No tenants connected. Use the button above to sign in with
+              your Microsoft 365 admin account.
             </div>
           </Card>
         ) : (
@@ -481,13 +481,13 @@ function GeneralSection() {
           description={
             activeTenant
               ? "Agents use this tenant unless overridden at run time. Change in Settings → Tenants."
-              : "No tenant connected. Agents run in synthetic mode. Connect a tenant from Settings → Tenants."
+              : "No tenant connected. Connect one from Settings → Tenants."
           }
           control={
             activeTenant ? (
               <Pill tone="success">{activeTenant.displayName}</Pill>
             ) : (
-              <Pill>Synthetic mode</Pill>
+              <Pill tone="warning">None</Pill>
             )
           }
         />

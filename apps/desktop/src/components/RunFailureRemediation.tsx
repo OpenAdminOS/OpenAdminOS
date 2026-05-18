@@ -36,8 +36,8 @@ const SUGGESTIONS: Suggestion[] = [
   },
   {
     match: (e) => /tenant.*not connected|no tenant/i.test(e),
-    title: "No tenant available",
-    body: "Open Settings → Tenants and connect a Microsoft 365 tenant, or accept synthetic mode for an empty-inventory dry run.",
+    title: "No tenant connected",
+    body: "Open Settings → Tenants and connect a Microsoft 365 tenant before running agents.",
   },
   {
     match: (e) => /yaml|manifest|schema|invalid/i.test(e),

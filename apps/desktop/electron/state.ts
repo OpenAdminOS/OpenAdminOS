@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
@@ -8,13 +8,16 @@ import {
   createMsalClient,
   createOllamaLlm,
   createQueuedRun,
-  createSyntheticGraph,
+  createTenantSession,
   executeApply,
   executePlan,
   executeRun,
+  findConnectorFactory,
   findRegistryAgentById,
   listAllRegistryAgents,
+  listRegisteredConnectors,
   loadAgentManifestPreview,
+  noSecrets,
   noopLlm,
   parseAgentTemplate,
   ManifestValidationError,
@@ -26,12 +29,13 @@ import {
 import type {
   AgentDraft,
   AgentManifestPreview,
-  RunDataSource,
+  ConnectorSummary,
   RunGraphApi,
   RunLlmApi,
   StartRunOptions,
   TemplateSetting,
   TenantRecord,
+  TenantSession,
 } from "@openagents/agent-sdk";
 import {
   deriveTrustState,
@@ -47,6 +51,7 @@ import {
 import type { PublicClientApplication } from "@azure/msal-node";
 
 import { EncryptedSecretStore } from "./secret-store.js";
+import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
@@ -69,6 +74,21 @@ interface PersistedState {
    * any hardware identifier.
    */
   installId?: string;
+  /**
+   * Per-connector persisted state. Keyed by connector id. Stores the
+   * user-supplied config (validated against the connector's
+   * `configSchema`) plus the last health-check outcome so the
+   * Connectors page can render status without re-testing on every load.
+   */
+  connectors?: Record<
+    string,
+    {
+      config: Record<string, unknown>;
+      status?: ConnectorSummary["status"];
+      lastTestedAt?: string;
+      lastTestMessage?: string;
+    }
+  >;
 }
 
 interface OllamaTagsResponse {
@@ -163,6 +183,10 @@ export class AppStateStore {
           : DEFAULT_STATS_API_URL;
       this.appVersion = options.appVersion ?? "0.0.0";
     }
+    // Warm the connector-config cache so the confirm-bridge can resolve
+    // human-readable target labels without an async disk read inside
+    // a capability invocation. Updated on every `setConnectorConfig`.
+    void this.primeConnectorConfigCache().catch(() => undefined);
   }
 
   private getMsalClient(): PublicClientApplication {
@@ -246,6 +270,274 @@ export class AppStateStore {
         return checkOllama(provider);
       }),
     );
+  }
+
+  async listConnectors(): Promise<ConnectorSummary[]> {
+    const persisted = await this.read();
+    const stored = persisted.connectors ?? {};
+    return listRegisteredConnectors().map((descriptor) => {
+      const entry = stored[descriptor.id];
+      const summary: ConnectorSummary = {
+        descriptor,
+        config: entry?.config ?? {},
+        status: entry?.status ?? "unknown",
+      };
+      if (entry?.lastTestedAt) summary.lastTestedAt = entry.lastTestedAt;
+      if (entry?.lastTestMessage) summary.lastTestMessage = entry.lastTestMessage;
+      return summary;
+    });
+  }
+
+  /**
+   * Builds the connector with the active tenant session and calls
+   * `healthCheck`. Persists the outcome so the Connectors page can
+   * surface the last status without re-running the test on every
+   * render.
+   */
+  async testConnector(connectorId: string): Promise<ConnectorSummary> {
+    const factory = findConnectorFactory(connectorId);
+    if (!factory) {
+      throw new Error(`Unknown connector '${connectorId}'.`);
+    }
+    const persisted = await this.read();
+    const activeTenantId = persisted.activeTenantId;
+    const tenant = activeTenantId
+      ? persisted.tenants.find((t) => t.id === activeTenantId)
+      : undefined;
+    if (!tenant) {
+      throw new Error(
+        "No tenant connected. Connect a Microsoft 365 tenant before testing connectors.",
+      );
+    }
+    const client = this.getMsalClient();
+    const openBrowser = this.openBrowser;
+    const tenantSession = createTenantSession({
+      client,
+      tenantId: tenant.id,
+      username: tenant.username,
+      homeAccountId: tenant.homeAccountId,
+      acquireInteractive: async (scopes) =>
+        runInteractiveFlow({ client, scopes, openBrowser }),
+    });
+
+    const storedConfig =
+      persisted.connectors?.[connectorId]?.config ?? {};
+
+    const buildContext = {
+      tenant: tenantSession,
+      config: storedConfig,
+      secrets: noSecrets,
+      log: () => undefined,
+      idempotencyKeyFor: (stepId: string, iteration: number) =>
+        `test:${connectorId}:${stepId}:${iteration}`,
+    };
+
+    let status: ConnectorSummary["status"] = "error";
+    let message: string | undefined;
+    try {
+      const instance = await factory.build(buildContext);
+      try {
+        const health = await instance.healthCheck();
+        status = health.healthy ? "connected" : "error";
+        message = health.message;
+      } finally {
+        await instance.dispose().catch(() => undefined);
+      }
+    } catch (error) {
+      status = "error";
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    const lastTestedAt = new Date().toISOString();
+    await this.serialize(async () => {
+      const current = await this.read();
+      const next: PersistedState = {
+        ...current,
+        connectors: {
+          ...(current.connectors ?? {}),
+          [connectorId]: {
+            config: storedConfig,
+            status,
+            lastTestedAt,
+            ...(message !== undefined ? { lastTestMessage: message } : {}),
+          },
+        },
+      };
+      await this.write(next);
+    });
+
+    const summary: ConnectorSummary = {
+      descriptor: factory.descriptor,
+      config: storedConfig,
+      status,
+      lastTestedAt,
+    };
+    if (message !== undefined) summary.lastTestMessage = message;
+    return summary;
+  }
+
+  /**
+   * Synchronous accessor for the most-recently-persisted connector
+   * config snapshot. Used by the confirm-bridge when it needs to
+   * decorate a confirmation request with human-readable names — the
+   * bridge fires in-process during a run and can't afford the
+   * file-read latency of `readConnectorConfigs`. Stays in sync via
+   * `setConnectorConfig` (which updates the cache after every save).
+   */
+  getConnectorConfigCached(connectorId: string): Record<string, unknown> {
+    return this.connectorConfigCache.get(connectorId) ?? {};
+  }
+
+  private connectorConfigCache = new Map<string, Record<string, unknown>>();
+
+  private async primeConnectorConfigCache(): Promise<void> {
+    const persisted = await this.read();
+    this.connectorConfigCache.clear();
+    for (const [id, entry] of Object.entries(persisted.connectors ?? {})) {
+      this.connectorConfigCache.set(id, entry.config ?? {});
+    }
+  }
+
+  /**
+   * Build the `connectorConfigs` map the runtime passes to
+   * `ExecuteRunInput`. Reads from `PersistedState.connectors[id].config`
+   * for every registered connector so a run picks up the latest
+   * defaults the user saved on the Connectors page — no agent
+   * reinstall required when a connector default changes.
+   */
+  private async readConnectorConfigs(): Promise<
+    Record<string, Record<string, unknown>>
+  > {
+    const persisted = await this.read();
+    const stored = persisted.connectors ?? {};
+    const map: Record<string, Record<string, unknown>> = {};
+    for (const [id, entry] of Object.entries(stored)) {
+      map[id] = entry.config ?? {};
+    }
+    return map;
+  }
+
+  async setConnectorConfig(
+    connectorId: string,
+    config: Record<string, unknown>,
+  ): Promise<ConnectorSummary> {
+    const factory = findConnectorFactory(connectorId);
+    if (!factory) {
+      throw new Error(`Unknown connector '${connectorId}'.`);
+    }
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      throw new Error("setConnectorConfig: config must be a plain object.");
+    }
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(config)) {
+      if (typeof value === "string" && value.length > 0) {
+        sanitized[key] = value;
+      }
+    }
+    await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.connectors?.[connectorId];
+      const merged: PersistedState["connectors"] = {
+        ...(current.connectors ?? {}),
+        [connectorId]: {
+          ...existing,
+          config: sanitized,
+        },
+      };
+      await this.write({ ...current, connectors: merged });
+    });
+    this.connectorConfigCache.set(connectorId, sanitized);
+    const persisted = await this.read();
+    const entry = persisted.connectors?.[connectorId];
+    const summary: ConnectorSummary = {
+      descriptor: factory.descriptor,
+      config: entry?.config ?? {},
+      status: entry?.status ?? "unknown",
+    };
+    if (entry?.lastTestedAt) summary.lastTestedAt = entry.lastTestedAt;
+    if (entry?.lastTestMessage) summary.lastTestMessage = entry.lastTestMessage;
+    return summary;
+  }
+
+  /**
+   * Build the named connector in a one-shot read mode, invoke the
+   * supplied read-kind capability, dispose, and return the result.
+   * Shared by `listConnectorTeams` and `listConnectorChannels` —
+   * neither needs the run-time confirmation wrapper because both
+   * are `kind: read`.
+   */
+  private async invokeConnectorRead<T>(
+    connectorId: string,
+    invoke: (capabilities: unknown) => Promise<T>,
+  ): Promise<T> {
+    const factory = findConnectorFactory(connectorId);
+    if (!factory) throw new Error(`Unknown connector '${connectorId}'.`);
+    const persisted = await this.read();
+    const activeTenantId = persisted.activeTenantId;
+    const tenant = activeTenantId
+      ? persisted.tenants.find((t) => t.id === activeTenantId)
+      : undefined;
+    if (!tenant) {
+      throw new Error(
+        "No tenant connected. Connect a Microsoft 365 tenant before invoking connectors.",
+      );
+    }
+    const client = this.getMsalClient();
+    const openBrowser = this.openBrowser;
+    const tenantSession = createTenantSession({
+      client,
+      tenantId: tenant.id,
+      username: tenant.username,
+      homeAccountId: tenant.homeAccountId,
+      acquireInteractive: async (scopes) =>
+        runInteractiveFlow({ client, scopes, openBrowser }),
+    });
+    const config = persisted.connectors?.[connectorId]?.config ?? {};
+    const instance = await factory.build({
+      tenant: tenantSession,
+      config,
+      secrets: noSecrets,
+      log: () => undefined,
+      idempotencyKeyFor: (stepId, iteration) =>
+        `picker:${connectorId}:${stepId}:${iteration}`,
+    });
+    try {
+      return await invoke(instance.capabilities);
+    } finally {
+      await instance.dispose().catch(() => undefined);
+    }
+  }
+
+  async listConnectorTeams(connectorId: string): Promise<unknown[]> {
+    return this.invokeConnectorRead(connectorId, async (capabilities) => {
+      const caps = capabilities as { listTeams?: () => Promise<unknown[]> };
+      if (typeof caps.listTeams !== "function") {
+        throw new Error(
+          `Connector '${connectorId}' does not expose a listTeams capability.`,
+        );
+      }
+      return caps.listTeams();
+    });
+  }
+
+  async listConnectorChannels(
+    connectorId: string,
+    teamId: string,
+  ): Promise<unknown[]> {
+    if (!teamId || typeof teamId !== "string") {
+      throw new Error("listConnectorChannels requires a non-empty teamId.");
+    }
+    return this.invokeConnectorRead(connectorId, async (capabilities) => {
+      const caps = capabilities as {
+        listChannels?: (teamId: string) => Promise<unknown[]>;
+      };
+      if (typeof caps.listChannels !== "function") {
+        throw new Error(
+          `Connector '${connectorId}' does not expose a listChannels capability.`,
+        );
+      }
+      return caps.listChannels(teamId);
+    });
   }
 
   /**
@@ -924,30 +1216,28 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         );
       }
 
-      // Resolve the effective tenant at queue time:
-      //   - explicit null  -> synthetic for this run regardless of active tenant
-      //   - explicit id    -> validate it exists and pin it
-      //   - omitted        -> default to currently-active tenant (if any)
-      let pinnedTenantId: string | null;
-      if (options.tenantId === null) {
-        pinnedTenantId = null;
-      } else if (typeof options.tenantId === "string") {
+      // Resolve the effective tenant at queue time. Runs cannot proceed
+      // without a connected tenant — onboarding is the gate that gets a
+      // user here in the first place, but defend in depth.
+      //   - explicit id  -> validate it exists and pin it
+      //   - omitted      -> default to currently-active tenant
+      let pinnedTenantId: string;
+      if (typeof options.tenantId === "string") {
         const exists = persisted.tenants.some((tenant) => tenant.id === options.tenantId);
         if (!exists) {
           throw new Error(`Tenant not connected: ${options.tenantId}`);
         }
         pinnedTenantId = options.tenantId;
+      } else if (persisted.activeTenantId) {
+        pinnedTenantId = persisted.activeTenantId;
       } else {
-        pinnedTenantId = persisted.activeTenantId ?? null;
+        throw new Error(
+          "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
+        );
       }
 
       const queuedRun = createQueuedRun({ agent, providerId, model });
-      if (pinnedTenantId) {
-        queuedRun.tenantId = pinnedTenantId;
-        queuedRun.dataSource = "graph";
-      } else {
-        queuedRun.dataSource = "synthetic";
-      }
+      queuedRun.tenantId = pinnedTenantId;
 
       await this.write({
         ...persisted,
@@ -1088,8 +1378,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   private async buildGraph(pinnedTenantId?: string): Promise<{
     graph: RunGraphApi;
-    dataSource: RunDataSource;
-    tenantId?: string;
+    tenantId: string;
+    tenantSession: TenantSession;
   }> {
     const persisted = await this.read();
     const tenantId = pinnedTenantId ?? persisted.activeTenantId;
@@ -1097,9 +1387,26 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       ? persisted.tenants.find((t) => t.id === tenantId)
       : undefined;
     if (!tenant) {
-      return { graph: createSyntheticGraph(), dataSource: "synthetic" };
+      throw new Error(
+        "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
+      );
     }
     const client = this.getMsalClient();
+    const openBrowser = this.openBrowser;
+    const tenantSession = createTenantSession({
+      client,
+      tenantId: tenant.id,
+      username: tenant.username,
+      homeAccountId: tenant.homeAccountId,
+      acquireInteractive: async (scopes) => {
+        // Per-capability incremental consent. Pops a browser sign-in when
+        // a connector requests scopes the cached refresh token cannot
+        // satisfy. The user re-consents to the additional scopes;
+        // subsequent silent acquisitions for the same scope set succeed
+        // from cache.
+        return await runInteractiveFlow({ client, scopes, openBrowser });
+      },
+    });
     return {
       graph: createGraphAdapter({
         tokenProvider: async () => {
@@ -1110,31 +1417,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           return result.accessToken;
         },
       }),
-      dataSource: "graph",
       tenantId: tenant.id,
+      tenantSession,
     };
   }
 
-  private stampDataSource(
-    run: RunRecord,
-    selection: { dataSource: RunDataSource; tenantId?: string },
-  ): RunRecord {
-    const next: RunRecord = { ...run, dataSource: selection.dataSource };
-    if (selection.tenantId) {
-      next.tenantId = selection.tenantId;
-    } else if ("tenantId" in next) {
-      delete next.tenantId;
-    }
-    return next;
-  }
-
-  // Real writes flow whenever the run resolved to a real tenant Graph
-  // adapter. Per-write authorization is handled by the typed-phrase diff
-  // confirmation prompt that every write agent pauses for; we don't keep
-  // a separate global toggle. Synthetic runs always pass `realWrites:
-  // false` because there's no tenant to write against.
-  private resolveRealWrites(selection: { dataSource: RunDataSource }): boolean {
-    return selection.dataSource === "graph";
+  private stampTenant(run: RunRecord, tenantId: string): RunRecord {
+    return { ...run, tenantId };
   }
 
   private async driveRun(input: {
@@ -1147,8 +1436,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const llm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId);
-      const realWrites = this.resolveRealWrites(selection);
-      const stampedRun = this.stampDataSource(input.run, selection);
+      const stampedRun = this.stampTenant(input.run, selection.tenantId);
       await this.persistRunSnapshot(stampedRun);
       await driver({
         run: stampedRun,
@@ -1157,9 +1445,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         model: input.model,
         llm,
         graph: selection.graph,
-        realWrites,
+        tenant: selection.tenantSession,
+        connectorConfigs: await this.readConnectorConfigs(),
+        confirmCapability: requestConnectorConfirmation,
+        realWrites: true,
         onProgress: (next) =>
-          this.persistRunSnapshot(this.stampDataSource(next, selection)),
+          this.persistRunSnapshot(this.stampTenant(next, selection.tenantId)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
@@ -1176,7 +1467,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     try {
       const llm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId);
-      const realWrites = this.resolveRealWrites(selection);
       await executeApply({
         run: input.run,
         agent: input.agent,
@@ -1185,9 +1475,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         plan: input.plan,
         llm,
         graph: selection.graph,
-        realWrites,
+        tenant: selection.tenantSession,
+        connectorConfigs: await this.readConnectorConfigs(),
+        confirmCapability: requestConnectorConfirmation,
+        realWrites: true,
         onProgress: (next) =>
-          this.persistRunSnapshot(this.stampDataSource(next, selection)),
+          this.persistRunSnapshot(this.stampTenant(next, selection.tenantId)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
@@ -1237,10 +1530,50 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
   }
 
+  /**
+   * Last successfully-parsed state, used as a safety net when a fresh
+   * read fails to parse (e.g. the OS happened to schedule the read in
+   * the middle of a partial `writeFile`). Without this cache, a parse
+   * error caused `read()` to silently return `defaultState` — whose
+   * empty `tenants` array tripped the routing gate in App.tsx and
+   * bounced the user to /onboarding. The atomic rename in `write()`
+   * makes the race impossible going forward, but the cache keeps us
+   * robust against any future read-side surprises.
+   */
+  private lastReadSnapshot: PersistedState | undefined;
+
   private async read(): Promise<PersistedState> {
+    let raw: string;
     try {
-      const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as Partial<PersistedState>;
+      raw = await readFile(this.filePath, "utf8");
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        await this.write(defaultState);
+        this.lastReadSnapshot = defaultState;
+        return defaultState;
+      }
+      // The file exists but couldn't be read (permission, IO error).
+      // Return the last-known-good snapshot rather than fabricating
+      // an empty state; if we have nothing cached, surface the error.
+      if (this.lastReadSnapshot) {
+        return this.lastReadSnapshot;
+      }
+      throw error;
+    }
+    let parsed: Partial<PersistedState>;
+    try {
+      parsed = JSON.parse(raw) as Partial<PersistedState>;
+    } catch (error) {
+      // Parse error on a non-empty file is almost always a transient
+      // race against a writer. Return the last-known-good snapshot
+      // (atomic rename in `write()` makes this branch rare but
+      // possible during e.g. backups or hand-edits).
+      if (this.lastReadSnapshot) {
+        return this.lastReadSnapshot;
+      }
+      throw error;
+    }
+    {
 
       const tenants = Array.isArray(parsed.tenants) ? parsed.tenants : [];
       const activeTenantId =
@@ -1278,19 +1611,62 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           state.activeModelByProviderId = sanitized;
         }
       }
-      return state;
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") {
-        await this.write(defaultState);
+      const rawConnectors = (parsed as { connectors?: unknown }).connectors;
+      if (
+        rawConnectors &&
+        typeof rawConnectors === "object" &&
+        !Array.isArray(rawConnectors)
+      ) {
+        const sanitized: NonNullable<PersistedState["connectors"]> = {};
+        for (const [id, entry] of Object.entries(rawConnectors)) {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+          const obj = entry as Record<string, unknown>;
+          const config =
+            obj.config && typeof obj.config === "object" && !Array.isArray(obj.config)
+              ? (obj.config as Record<string, unknown>)
+              : {};
+          const cleaned: NonNullable<PersistedState["connectors"]>[string] = { config };
+          if (
+            obj.status === "connected" ||
+            obj.status === "needs-setup" ||
+            obj.status === "needs-scope" ||
+            obj.status === "error" ||
+            obj.status === "unknown"
+          ) {
+            cleaned.status = obj.status;
+          }
+          if (typeof obj.lastTestedAt === "string") {
+            cleaned.lastTestedAt = obj.lastTestedAt;
+          }
+          if (typeof obj.lastTestMessage === "string") {
+            cleaned.lastTestMessage = obj.lastTestMessage;
+          }
+          sanitized[id] = cleaned;
+        }
+        if (Object.keys(sanitized).length > 0) {
+          state.connectors = sanitized;
+        }
       }
-
-      return defaultState;
+      this.lastReadSnapshot = state;
+      return state;
     }
   }
 
+  /**
+   * Atomic write: serialize the new state to `state.json.tmp`, then
+   * `rename` it over `state.json`. Rename is atomic on every
+   * filesystem we target (APFS, ext4, NTFS), so a concurrent reader
+   * either sees the previous file content or the new one — never a
+   * half-flushed JSON. Plain `writeFile` truncated first and was the
+   * root cause of the "redirected to onboarding mid-action" bug.
+   */
   private async write(state: PersistedState): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    const serialized = `${JSON.stringify(state, null, 2)}\n`;
+    const tmpPath = `${this.filePath}.tmp`;
+    await writeFile(tmpPath, serialized, "utf8");
+    await rename(tmpPath, this.filePath);
+    this.lastReadSnapshot = state;
   }
 }
 

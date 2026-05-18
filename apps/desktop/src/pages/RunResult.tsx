@@ -102,10 +102,11 @@ export default function RunResult() {
     // override so re-runs don't silently drift to whatever's currently
     // active globally.
     const options: {
-      tenantId: string | null;
+      tenantId?: string;
       providerId?: typeof run.providerId;
       model?: string;
-    } = { tenantId: run.tenantId ?? null };
+    } = {};
+    if (run.tenantId) options.tenantId = run.tenantId;
     if (run.providerId) options.providerId = run.providerId;
     if (run.model) options.model = run.model;
     void startRun(run.agentSlug, options).then((nextRun) =>
@@ -138,11 +139,9 @@ export default function RunResult() {
                   Streaming updates
                 </span>
               )}
-              {run.dataSource && (
-                <Pill tone={run.dataSource === "graph" ? "success" : "default"}>
-                  {run.dataSource === "graph"
-                    ? `Tenant: ${tenantDisplayName ?? run.tenantId ?? "connected"}`
-                    : "Synthetic data"}
+              {run.tenantId && (
+                <Pill tone="success">
+                  Tenant: {tenantDisplayName ?? run.tenantId}
                 </Pill>
               )}
               {agent && (
@@ -267,9 +266,11 @@ export default function RunResult() {
           activeTenantId={state.activeTenantId}
           tenants={state.tenants}
           onRetargetCurrent={() => {
-            void startRun(run.agentSlug, {
-              tenantId: state.activeTenantId ?? null,
-            }).then((nextRun) => navigate(`/runs/${nextRun.id}`));
+            const options: { tenantId?: string } = {};
+            if (state.activeTenantId) options.tenantId = state.activeTenantId;
+            void startRun(run.agentSlug, options).then((nextRun) =>
+              navigate(`/runs/${nextRun.id}`),
+            );
           }}
         />
 
@@ -281,7 +282,7 @@ export default function RunResult() {
             plan={run.plan}
             onConfirm={confirmRun}
             onReject={rejectRun}
-            writesAreReal={run.dataSource === "graph"}
+            writesAreReal={Boolean(run.tenantId)}
             tenantDisplayName={tenantDisplayName}
           />
         )}

@@ -55,6 +55,13 @@ export interface AgentContract {
   version: string;
   preferredModel?: string;
   graphOperations?: GraphOperation[];
+  /**
+   * Egress dependencies declared by this agent. Validated against the
+   * host's registered connectors at manifest load; required connectors
+   * that are unknown or unsatisfiable fail the run before queue. See
+   * `Connector abstraction` in docs/SPEC.md §2.
+   */
+  connectors?: AgentConnectorRequirement[];
 }
 
 export interface AgentSummary extends AgentContract {
@@ -100,15 +107,14 @@ export type RunStatus =
   | "rejected"
   | "cancelled";
 
-export type RunDataSource = "graph" | "synthetic";
-
 export interface StartRunOptions {
   /**
-   * Pin the run to a specific tenant id at queue time. Pass `null` to force
-   * synthetic mode regardless of the currently-active tenant. Omit to default
-   * to whichever tenant is active when the run is queued.
+   * Pin the run to a specific tenant id at queue time. Omit to default to
+   * whichever tenant is active when the run is queued. The run will fail
+   * preflight if no tenant resolves — runs cannot proceed without a
+   * connected tenant.
    */
-  tenantId?: string | null;
+  tenantId?: string;
   /**
    * Pin the run to a specific LLM provider id, overriding the globally
    * active provider for this run only. The provider must be known and
@@ -183,7 +189,6 @@ export interface RunRecord {
   steps: RunStepRecord[];
   logs: RunLogRecord[];
   plan?: WritePlan;
-  dataSource?: RunDataSource;
   tenantId?: string;
   /**
    * Accumulated LLM token usage for this run (summed across all LLM
@@ -197,7 +202,6 @@ export interface TrustState {
   label: string;
   detail: string;
   isLocal: boolean;
-  dataSource: RunDataSource;
   tenantDisplayName?: string;
 }
 
@@ -218,12 +222,74 @@ export interface AppState {
   activeTenantId?: string;
 }
 
+/** The host OS, normalized for renderer use. */
+export type HostPlatform = "macos" | "windows" | "linux" | "unknown";
+
 export interface OpenAgentsApi {
+  /**
+   * The host operating system, normalized to a small union for
+   * renderer-side conditional UI (install instructions, keyboard
+   * shortcut hints, etc.). Resolved at preload time; never changes.
+   */
+  platform: HostPlatform;
   getAppState(): Promise<AppState>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
+  /**
+   * Returns every connector registered in the host, with its
+   * persisted config and last health-check outcome.
+   */
+  listConnectors(): Promise<ConnectorSummary[]>;
+  /**
+   * Builds the named connector with the active tenant and runs its
+   * `healthCheck`. Triggers per-capability incremental consent via
+   * MSAL if the connector requests scopes the cache cannot satisfy.
+   * Persists the outcome before returning the updated summary.
+   */
+  testConnector(id: string): Promise<ConnectorSummary>;
+  /**
+   * Persist per-install configuration for the named connector. The
+   * host validates the payload shape (defensively coerced to a plain
+   * object) and stores it under `PersistedState.connectors[id].config`.
+   * Returns the updated summary so the renderer can refresh in place.
+   */
+  setConnectorConfig(
+    id: string,
+    config: Record<string, unknown>,
+  ): Promise<ConnectorSummary>;
+  /**
+   * Reads the list of teams the signed-in admin has joined, via the
+   * Teams connector's `list-teams` capability. Used by the Connectors
+   * page channel picker.
+   */
+  listConnectorTeams(connectorId: string): Promise<ConnectorTeamRef[]>;
+  /**
+   * Reads channels for a given team via the connector's
+   * `list-channels` capability. Used by the channel picker.
+   */
+  listConnectorChannels(
+    connectorId: string,
+    teamId: string,
+  ): Promise<ConnectorChannelRef[]>;
+  /**
+   * Subscribe to confirmation requests fired by the runtime when a
+   * `notify`/`mutating`/`destructive` connector capability is about
+   * to execute. The renderer is expected to show a confirmation
+   * modal and call `respondToConnectorConfirm(requestId, decision)`.
+   */
+  onConnectorConfirmRequest(
+    listener: (request: PendingConnectorConfirmation) => void,
+  ): () => void;
+  /**
+   * Resolves the pending confirmation identified by `requestId` with
+   * the supplied decision. Calling with an unknown id is a no-op.
+   */
+  respondToConnectorConfirm(
+    requestId: string,
+    decision: PendingConnectorDecision,
+  ): Promise<void>;
   installAgent(agentId: string): Promise<AppState>;
   /**
    * Remove an installed agent. Bundled / registry-sourced agents are
@@ -387,7 +453,7 @@ export type AgentDefinition = AgentContract &
 // (`{{ step_id.output }}`). No code execution — the only side effects an
 // agent can have are the Graph calls and LLM calls it declares.
 
-export type TemplateStepFormat = "graph" | "transform" | "llm" | "write";
+export type TemplateStepFormat = "graph" | "transform" | "llm" | "write" | "connector";
 
 export interface GraphStep {
   id: string;
@@ -484,7 +550,50 @@ export interface WriteStep {
   };
 }
 
-export type TemplateStep = GraphStep | TransformStep | LlmStep | WriteStep;
+/**
+ * Invokes a connector capability inside a YAML pipeline. The runtime
+ * resolves `connector` against the agent's declared connector
+ * requirements (typed `ctx.connectors[id]`) and calls the named
+ * `capability` method with the templated `args` payload.
+ *
+ * Capability `kind` is read from the connector descriptor and gates
+ * confirmation: `notify`+ capabilities trigger the preview-and-send
+ * modal, `read` capabilities run inline.
+ */
+export interface ConnectorStep {
+  id: string;
+  format: "connector";
+  label: string;
+  detail?: string;
+  /**
+   * Optional gating expression. The interpreter supports the literal
+   * string `ctx.connectors.<id>.available` for v0.1 — when set, the
+   * step is skipped (logged) if the named connector was not built at
+   * preflight (typically because it's declared as optional and the
+   * user has not configured it).
+   */
+  when?: string;
+  settings: {
+    /** Connector id, must match an `AgentConnectorRequirement.id`. */
+    connector: string;
+    /** Capability id within the connector (kebab-case, e.g. 'post-channel-message'). */
+    capability: string;
+    /** Capability version (defaults to 1 if omitted). */
+    version?: number;
+    /**
+     * Templated args passed to the capability method. Each leaf
+     * string is run through the template engine before invocation.
+     */
+    args: Record<string, unknown>;
+  };
+}
+
+export type TemplateStep =
+  | GraphStep
+  | TransformStep
+  | LlmStep
+  | WriteStep
+  | ConnectorStep;
 
 export type TemplateTriggerKind = "manual" | "scheduled";
 
@@ -520,6 +629,13 @@ export interface AgentTemplate {
     category: AgentCategory;
     mode: AgentMode;
     preferredModel?: string;
+    /**
+     * Connector dependencies declared by this agent. Loaded into
+     * `AgentContract.connectors` at manifest parse time; the runtime
+     * preflights each entry against the host's registered connectors
+     * before queuing the run.
+     */
+    connectors?: AgentConnectorRequirement[];
   };
   skills: TemplateStep[];
   definition: {
@@ -613,6 +729,23 @@ export interface RunContext {
   graph: RunGraphApi;
   llm: RunLlmApi;
   /**
+   * Egress connectors built for this run. Keyed by connector id; only the
+   * connectors the agent declared in its manifest are populated. Required
+   * connectors are guaranteed defined (preflight rejected the run
+   * otherwise); optional connectors may be `undefined` and must be
+   * checked before use.
+   *
+   * Connector packages augment `ConnectorRegistry` via TypeScript
+   * declaration merging — `ctx.connectors.teams` is fully typed when
+   * `@openagents/connector-teams` is installed in the workspace.
+   *
+   * Optional in the type so the v0.1.x runtime (which has no connector
+   * support yet) compiles unchanged. The v0.2 runtime always populates
+   * this — call sites in agents that declare connectors can rely on it
+   * because preflight rejects runs missing required connectors.
+   */
+  connectors?: ConnectorAccessor;
+  /**
    * Resolved install-time settings. The host merges the user's persisted
    * overrides (from `AgentSummary.settings`) on top of the manifest's
    * declared defaults before building the context, so the interpreter
@@ -624,17 +757,10 @@ export interface RunContext {
   settings?: Record<string, unknown>;
   /**
    * Whether write actions invoked via `ctx.graph.*` will hit real Graph.
-   *
-   * `true`  — a tenant is connected. Destructive operations in `apply`
-   *           should call the real Graph methods after the user has
-   *           approved the run via typed diff confirmation.
-   * `false` — synthetic mode (no tenant connected). `apply` should emit
-   *           a log line describing what *would* have happened and skip
-   *           the destructive call so synthetic mode stays honest about
-   *           not touching a tenant.
-   *
-   * Read-only operations (`listManagedDevices`) ignore this flag and
-   * always reflect the active data source.
+   * Always `true` in production because runs require a connected tenant
+   * — the typed diff confirmation is the user-facing gate, not this
+   * flag. Kept as a parameter so unit tests / fixtures can pass
+   * `false` and exercise apply logic without a tenant.
    */
   realWrites: boolean;
   log(level: RunLogLevel, message: string, metadata?: Record<string, unknown>): void;
@@ -758,17 +884,15 @@ export function deriveTrustState(
     ? (providerOrInput as DeriveTrustStateInput).activeTenant
     : legacyTenant;
 
-  const dataSource: RunDataSource = activeTenant ? "graph" : "synthetic";
   const tenantSegment = activeTenant
     ? `tenant ${activeTenant.displayName}`
-    : "synthetic data";
+    : "no tenant";
 
   if (!provider) {
     const base: TrustState = {
       label: "Provider not configured",
       detail: "Select a provider before running agents.",
       isLocal: true,
-      dataSource,
     };
     if (activeTenant) base.tenantDisplayName = activeTenant.displayName;
     return base;
@@ -777,12 +901,11 @@ export function deriveTrustState(
   if (provider.isLocal) {
     const detail = activeTenant
       ? `Tenant data stays on this device. Prompts use ${provider.name} locally.`
-      : "Tenant data and prompts stay on this device.";
+      : `Prompts use ${provider.name} locally.`;
     const base: TrustState = {
       label: `Local ${provider.name} · ${tenantSegment}`,
       detail,
       isLocal: true,
-      dataSource,
     };
     if (activeTenant) base.tenantDisplayName = activeTenant.displayName;
     return base;
@@ -790,12 +913,11 @@ export function deriveTrustState(
 
   const detail = activeTenant
     ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}.`
-    : `Tenant data and prompts are sent to ${provider.name}.`;
+    : `Prompts are sent to ${provider.name}.`;
   const base: TrustState = {
     label: `Hosted ${provider.name} · ${tenantSegment}`,
     detail,
     isLocal: false,
-    dataSource,
   };
   if (activeTenant) base.tenantDisplayName = activeTenant.displayName;
   return base;
@@ -805,4 +927,386 @@ export function defineAgent<const TAgent extends AgentModule>(
   agent: TAgent,
 ): TAgent {
   return agent;
+}
+
+// ─── Connector abstraction ────────────────────────────────────────────────
+//
+// See docs/SPEC.md §2 "Connector abstraction" for the full design rationale,
+// confirmation tiers, and trust model. The types below are the contract the
+// runtime and per-connector packages implement against. No runtime injection
+// yet — `RunContext.connectors` is optional and stays undefined in the
+// v0.1.x runtime; the v0.2 runtime populates it after preflight.
+
+export type ConnectorAuthSource =
+  | "graph-delegated"
+  | "graph-application"
+  | "external";
+
+export type CapabilityKind = "read" | "notify" | "mutating" | "destructive";
+
+export interface ConnectorTrust {
+  /**
+   * Short label, e.g. "Microsoft Teams · {tenant}". The literal
+   * `{tenant}` token is substituted by the runtime with the active
+   * tenant's display name when surfacing this in the status strip.
+   */
+  label: string;
+  /** One sentence on where data actually goes when capabilities are invoked. */
+  detail: string;
+  /** True for `graph-delegated` / `graph-application`; false for `external`. */
+  staysInTenant: boolean;
+}
+
+export interface CapabilityDescriptor {
+  /** Stable identifier, lowercase kebab-case. */
+  id: string;
+  /**
+   * SemVer major version. Minor and patch increments are non-breaking
+   * and do not require a new major. Agents pin a major via
+   * `AgentConnectorRequirement.capabilities[].version`; the runtime
+   * accepts any minor/patch of the same major.
+   */
+  version: number;
+  kind: CapabilityKind;
+  /**
+   * Subset of `ConnectorDescriptor.scopes` required to invoke this
+   * capability. Used to compute the MSAL consent set when the agent
+   * is installed and to fail preflight with a precise missing-scope
+   * error when consent is incomplete.
+   */
+  scopes: string[];
+  /**
+   * Optional per-capability overrides for the connector-level trust
+   * label. Used when one capability has materially different egress
+   * (e.g. a connector that both posts to Teams and opens a webhook).
+   */
+  trust?: Partial<ConnectorTrust>;
+}
+
+export interface ConnectorDescriptor {
+  id: string;
+  name: string;
+  /** SemVer of the connector implementation. */
+  version: string;
+  authSource: ConnectorAuthSource;
+  /** Union of every capability's scope set. Used for MSAL consent computation. */
+  scopes: string[];
+  capabilities: CapabilityDescriptor[];
+  /**
+   * JSON Schema (draft-07) describing per-install configuration. The
+   * Connectors page renders the setup form from this schema — no
+   * per-connector UI code is required for routine config like channel
+   * pickers or instance URLs.
+   */
+  configSchema?: object;
+  trust: ConnectorTrust;
+}
+
+export type ConnectorStatus =
+  | "connected"
+  | "needs-setup"
+  | "needs-scope"
+  | "error";
+
+export interface ConnectorInstance<TCapabilities> {
+  descriptor: ConnectorDescriptor;
+  status: ConnectorStatus;
+  capabilities: TCapabilities;
+  /**
+   * Cheap, side-effect-free reachability probe. Called at preflight; a
+   * `healthy: false` result fails the run with the supplied message
+   * surfaced as a designed remediation tile.
+   */
+  healthCheck(): Promise<{ healthy: boolean; message?: string }>;
+  /** Called once at run finish, success or failure. */
+  dispose(): Promise<void>;
+}
+
+/**
+ * Subset of the tenant session exposed to connectors. Connectors with
+ * `authSource: "graph-delegated"` use `acquireTokenForScopes` to mint a
+ * scoped Graph token. `external` connectors ignore the token surface
+ * and read credentials from `ConnectorBuildContext.secrets` instead.
+ */
+export interface TenantSession {
+  tenantId: string;
+  username: string;
+  /** Mints a Graph token covering the requested scope set. Implementations cache per scope set. */
+  acquireTokenForScopes(scopes: string[]): Promise<string>;
+}
+
+/**
+ * Keychain-backed secret accessor. Connectors with
+ * `authSource: "external"` read and write here under their own id
+ * namespace. The runtime rejects access outside the connector's own
+ * namespace; cross-connector secret leakage is structurally impossible.
+ */
+export interface SecretAccessor {
+  get(key: string): Promise<string | undefined>;
+  set(key: string, value: string): Promise<void>;
+  remove(key: string): Promise<void>;
+}
+
+export interface ConnectorBuildContext {
+  tenant: TenantSession;
+  /** Validated against `ConnectorDescriptor.configSchema` before `build` is called. */
+  config: Record<string, unknown>;
+  secrets: SecretAccessor;
+  log: (level: RunLogLevel, message: string, metadata?: Record<string, unknown>) => void;
+  /**
+   * Runtime-supplied idempotency key generator. Stable across retries
+   * for the same `(stepId, iteration)`, so connectors that honor remote
+   * idempotency (Graph `Idempotency-Key`, ServiceNow correlation IDs)
+   * do not duplicate side effects when a step is re-executed after a
+   * recoverable failure.
+   */
+  idempotencyKeyFor(stepId: string, iteration: number): string;
+}
+
+export interface ConnectorFactory<TCapabilities> {
+  descriptor: ConnectorDescriptor;
+  build(ctx: ConnectorBuildContext): Promise<ConnectorInstance<TCapabilities>>;
+}
+
+/**
+ * Empty registry interface, populated by each connector package via
+ * TypeScript declaration merging:
+ *
+ * ```ts
+ * declare module '@openagents/agent-sdk' {
+ *   interface ConnectorRegistry {
+ *     teams: TeamsConnectorCapabilities;
+ *   }
+ * }
+ * ```
+ *
+ * `ConnectorAccessor` narrows to the augmented keys, so `ctx.connectors.teams`
+ * is fully typed only when `@openagents/connector-teams` is installed in
+ * the workspace. The SDK has no awareness of the known connector list.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface ConnectorRegistry {}
+
+/**
+ * Typed accessor for `RunContext.connectors`. Required connectors are
+ * guaranteed populated by preflight; optional connectors may be
+ * `undefined` at access time and the agent must branch. Keys are
+ * narrowed to the augmented `ConnectorRegistry` interface.
+ */
+export type ConnectorAccessor = {
+  readonly [K in keyof ConnectorRegistry]?: ConnectorInstance<ConnectorRegistry[K]>;
+};
+
+export interface AgentConnectorRequirement {
+  /**
+   * Connector id as a plain string. Validated against the host's
+   * registered connectors at manifest load — typed narrowing happens
+   * at the `ctx.connectors[id]` access point, not here, so YAML
+   * manifests can declare ids the consuming workspace doesn't statically
+   * know about.
+   */
+  id: string;
+  /**
+   * Minimum acceptable connector implementation version (SemVer). The
+   * runtime accepts any installed connector version that is `>= minVersion`
+   * within the same major.
+   */
+  minVersion: string;
+  capabilities: { id: string; version: number }[];
+  /**
+   * When `true`, preflight fails the run if the connector is
+   * unconfigured or unhealthy. When `false`, `ctx.connectors[id]` may
+   * be `undefined` at run time and the agent must branch on its
+   * presence.
+   */
+  required: boolean;
+}
+
+// ─── Connector errors ─────────────────────────────────────────────────────
+//
+// Connector implementations throw these typed errors; the runtime maps
+// `recovery` values to designed UI remediations. Generic `Error` throws
+// are wrapped by the runtime in `ConnectorRemoteError` with
+// `recovery: 'fatal'` so every failure has a designed state.
+
+export type ConnectorRecovery = "retry" | "reauth" | "reconfigure" | "fatal";
+
+export interface ConnectorErrorArgs {
+  connectorId: string;
+  capabilityId?: string;
+  cause?: unknown;
+}
+
+export abstract class ConnectorError extends Error {
+  abstract readonly recovery: ConnectorRecovery;
+  readonly connectorId: string;
+  readonly capabilityId: string | undefined;
+
+  constructor(message: string, args: ConnectorErrorArgs) {
+    super(
+      message,
+      args.cause !== undefined ? { cause: args.cause } : undefined,
+    );
+    this.name = new.target.name;
+    this.connectorId = args.connectorId;
+    this.capabilityId = args.capabilityId;
+  }
+}
+
+export class ConnectorAuthError extends ConnectorError {
+  readonly recovery = "reauth" as const;
+}
+
+export interface ConnectorScopeErrorArgs extends ConnectorErrorArgs {
+  missingScopes: string[];
+}
+
+export class ConnectorScopeError extends ConnectorError {
+  readonly recovery = "reauth" as const;
+  readonly missingScopes: readonly string[];
+
+  constructor(message: string, args: ConnectorScopeErrorArgs) {
+    super(message, args);
+    this.missingScopes = [...args.missingScopes];
+  }
+}
+
+export interface ConnectorRateLimitErrorArgs extends ConnectorErrorArgs {
+  retryAfterMs: number;
+}
+
+export class ConnectorRateLimitError extends ConnectorError {
+  readonly recovery = "retry" as const;
+  readonly retryAfterMs: number;
+
+  constructor(message: string, args: ConnectorRateLimitErrorArgs) {
+    super(message, args);
+    this.retryAfterMs = args.retryAfterMs;
+  }
+}
+
+export class ConnectorNotConfiguredError extends ConnectorError {
+  readonly recovery = "reconfigure" as const;
+}
+
+export interface ConnectorRemoteErrorArgs extends ConnectorErrorArgs {
+  recovery: "retry" | "fatal";
+  statusCode?: number;
+}
+
+export class ConnectorRemoteError extends ConnectorError {
+  readonly recovery: "retry" | "fatal";
+  readonly statusCode: number | undefined;
+
+  constructor(message: string, args: ConnectorRemoteErrorArgs) {
+    super(message, args);
+    this.recovery = args.recovery;
+    this.statusCode = args.statusCode;
+  }
+}
+
+export class ConnectorValidationError extends ConnectorError {
+  readonly recovery = "fatal" as const;
+}
+
+// ─── Connector audit ──────────────────────────────────────────────────────
+
+export interface ConnectorAuditEntry {
+  runId: string;
+  stepId: string;
+  /** Connector id, e.g. 'teams'. */
+  connector: string;
+  /** `${capabilityId}@${version}`, e.g. 'post-channel-message@1'. */
+  capability: string;
+  kind: CapabilityKind;
+  idempotencyKey: string;
+  /** Human-readable egress location, surfaced in the audit log export. */
+  egressTarget: string;
+  /** SHA-256 of the redacted args payload; used to detect duplicate sends. */
+  argsDigest: string;
+  status: "success" | "failure";
+  durationMs: number;
+  externalId?: string;
+  externalUrl?: string;
+  /** Subclass name of the thrown `ConnectorError`, when status is 'failure'. */
+  errorClass?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Symmetric counterpart to `defineAgent`. Locks the capability type at
+ * the call site so connector packages can preserve full type
+ * information for the registry augmentation pattern.
+ */
+export function defineConnector<TCapabilities>(
+  factory: ConnectorFactory<TCapabilities>,
+): ConnectorFactory<TCapabilities> {
+  return factory;
+}
+
+/**
+ * Wire-serializable payload sent from the main process to the
+ * renderer when a `notify`/`mutating`/`destructive` capability is
+ * about to fire. Fields mirror `ConnectorInvocationInfo` from the
+ * runtime, plus a `requestId` the renderer echoes back in
+ * `respondToConnectorConfirm`.
+ */
+export interface PendingConnectorConfirmation {
+  requestId: string;
+  runId: string;
+  stepId: string;
+  connectorId: string;
+  connectorName: string;
+  capability: CapabilityDescriptor;
+  args: unknown;
+  egressTarget: string;
+  idempotencyKey: string;
+  /**
+   * Markdown source of the body. The modal renders this into a
+   * Teams-equivalent React tree client-side (no innerHTML mount) so
+   * the user sees a faithful approximation of how the message will
+   * land in the destination.
+   */
+  bodyPreview?: string;
+  /** Best-effort label for the egress target ("Team A · #it-ops"). */
+  targetLabel?: string;
+}
+
+export type PendingConnectorDecision =
+  | { approved: true }
+  | { approved: false; reason: string };
+
+/**
+ * Renderer-facing summary of a registered connector. Surfaces the
+ * descriptor plus any host-tracked state (persisted config, last
+ * health-check outcome). The Connectors page consumes this directly.
+ */
+/** Lightweight team reference returned by `listConnectorTeams`. */
+export interface ConnectorTeamRef {
+  id: string;
+  displayName: string;
+}
+
+/** Lightweight channel reference returned by `listConnectorChannels`. */
+export interface ConnectorChannelRef {
+  id: string;
+  displayName: string;
+  membershipType?: "standard" | "private" | "shared" | "unknown";
+}
+
+export interface ConnectorSummary {
+  descriptor: ConnectorDescriptor;
+  /**
+   * Persisted per-install configuration. Validated against
+   * `descriptor.configSchema` by the host before storage.
+   */
+  config: Record<string, unknown>;
+  /**
+   * Last known status. `unknown` means no health check has been
+   * performed yet — the renderer surfaces this as a neutral pill
+   * until the user clicks "Test connection".
+   */
+  status: ConnectorStatus | "unknown";
+  lastTestedAt?: string;
+  lastTestMessage?: string;
 }

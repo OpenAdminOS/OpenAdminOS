@@ -3,6 +3,7 @@ import { load as parseYaml } from "js-yaml";
 import type {
   AgentAuthor,
   AgentCategory,
+  AgentConnectorRequirement,
   AgentMode,
   AgentModule,
   AgentRunResult,
@@ -13,6 +14,7 @@ import type {
   ReadAgentModule,
   RunContext,
   AgentTemplate,
+  ConnectorStep,
   TemplateStep,
   TransformStep,
   WriteAction,
@@ -150,11 +152,29 @@ function validateSkill(skill: Record<string, unknown>, path: string): TemplateSt
     case "write":
       validateWriteStepSettings(settings as Record<string, unknown>, `${path}.settings`);
       return skill as unknown as WriteStep;
+    case "connector":
+      validateConnectorStepSettings(settings as Record<string, unknown>, `${path}.settings`);
+      return skill as unknown as ConnectorStep;
     default:
       throw new ManifestValidationError(
         `${path}.format`,
         `unknown format: ${JSON.stringify(skill.format)}`,
       );
+  }
+}
+
+function validateConnectorStepSettings(
+  settings: Record<string, unknown>,
+  path: string,
+): void {
+  if (typeof settings.connector !== "string" || settings.connector.length === 0) {
+    throw new ManifestValidationError(`${path}.connector`, "must be a non-empty string");
+  }
+  if (typeof settings.capability !== "string" || settings.capability.length === 0) {
+    throw new ManifestValidationError(`${path}.capability`, "must be a non-empty string");
+  }
+  if (!settings.args || typeof settings.args !== "object" || Array.isArray(settings.args)) {
+    throw new ManifestValidationError(`${path}.args`, "must be an object");
   }
 }
 
@@ -529,6 +549,8 @@ async function runSkill(
       return runTransformSkill(skill, ctx, templateCtx);
     case "llm":
       return runLlmSkill(skill, ctx, templateCtx);
+    case "connector":
+      return runConnectorSkill(skill, ctx, templateCtx);
     case "write":
       // Write steps are executed by runAgentTemplatePlan, not here.
       throw new Error(
@@ -539,6 +561,54 @@ async function runSkill(
       throw new Error(`Unsupported skill format: ${JSON.stringify(exhaustive)}`);
     }
   }
+}
+
+async function runConnectorSkill(
+  skill: ConnectorStep,
+  ctx: RunContext,
+  templateCtx: () => TemplateContext,
+): Promise<unknown> {
+  const settings = renderDeep(skill.settings, templateCtx()) as {
+    connector: string;
+    capability: string;
+    version?: number;
+    args: Record<string, unknown>;
+  };
+
+  const connector = ctx.connectors?.[settings.connector as keyof typeof ctx.connectors];
+  if (!connector) {
+    if (skill.when === `ctx.connectors.${settings.connector}.available`) {
+      ctx.log(
+        "info",
+        `Skipping connector step "${skill.id}" — connector "${settings.connector}" not available.`,
+      );
+      return undefined;
+    }
+    throw new Error(
+      `connector step "${skill.id}": required connector "${settings.connector}" was not built. Declare it under \`descriptor.connectors\` or mark this step optional via \`when: ctx.connectors.${settings.connector}.available\`.`,
+    );
+  }
+
+  const methodName = kebabToCamel(settings.capability);
+  const capabilities = connector.capabilities as unknown as Record<string, unknown>;
+  const method = capabilities[methodName];
+  if (typeof method !== "function") {
+    throw new Error(
+      `connector step "${skill.id}": connector "${settings.connector}" does not expose capability "${settings.capability}" (looked up as method "${methodName}").`,
+    );
+  }
+
+  ctx.log(
+    "info",
+    `Invoking ${settings.connector}.${settings.capability}@${settings.version ?? 1}`,
+    { connectorStepId: skill.id },
+  );
+  const fn = method as (args: Record<string, unknown>) => Promise<unknown>;
+  return await fn(settings.args);
+}
+
+function kebabToCamel(value: string): string {
+  return value.replace(/-([a-z])/g, (_match, ch: string) => ch.toUpperCase());
 }
 
 async function runGraphSkill(
@@ -901,6 +971,7 @@ export function agentTemplateToRegistrySummary(
   version: string;
   preferredModel?: string;
   graphOperations: GraphOperation[];
+  connectors?: AgentConnectorRequirement[];
 } {
   const descriptor = manifest.descriptor;
   return {
@@ -916,5 +987,8 @@ export function agentTemplateToRegistrySummary(
     version: descriptor.version,
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
     graphOperations: collectGraphOperations(manifest),
+    ...(descriptor.connectors && descriptor.connectors.length > 0
+      ? { connectors: descriptor.connectors }
+      : {}),
   };
 }

@@ -8,6 +8,7 @@ import {
   type SilentFlowRequest,
   type TokenCacheContext,
 } from "@azure/msal-node";
+import type { TenantSession } from "@openagents/agent-sdk";
 
 export const GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
 export const DEFAULT_AUTHORITY = "https://login.microsoftonline.com/common";
@@ -154,6 +155,66 @@ export async function acquireTokenSilent(input: {
     }
     throw error;
   }
+}
+
+export interface CreateTenantSessionInput {
+  client: PublicClientApplication;
+  tenantId: string;
+  username: string;
+  homeAccountId: string;
+  /**
+   * Optional fallback invoked when silent token acquisition fails for a
+   * scope set the cache cannot satisfy (typically because the user has
+   * not yet consented to those scopes). When supplied, the session
+   * delegates to it to trigger an interactive consent flow. When
+   * omitted, the session throws — Phase 3 connectors surface this as
+   * a `ConnectorAuthError` and the host catches it to drive the
+   * Connectors UI re-consent state.
+   */
+  acquireInteractive?: (
+    scopes: string[],
+  ) => Promise<AuthenticationResult>;
+}
+
+/**
+ * Builds a `TenantSession` for the agent-sdk connector contract.
+ *
+ * `acquireTokenForScopes` calls MSAL silent acquisition first. If the
+ * cache cannot mint a token for the requested scopes (typically
+ * because the user has not yet consented), it either delegates to the
+ * caller-supplied `acquireInteractive` fallback or rethrows the
+ * underlying MSAL error so the connector wrapper can surface a
+ * `ConnectorAuthError` with the recovery hint.
+ */
+export function createTenantSession(
+  input: CreateTenantSessionInput,
+): TenantSession {
+  return {
+    tenantId: input.tenantId,
+    username: input.username,
+    async acquireTokenForScopes(scopes: string[]): Promise<string> {
+      try {
+        const result = await acquireTokenSilent({
+          client: input.client,
+          homeAccountId: input.homeAccountId,
+          scopes,
+        });
+        return result.accessToken;
+      } catch (silentError) {
+        const needsInteractive =
+          silentError instanceof InteractionRequiredAuthError ||
+          (silentError instanceof Error &&
+            silentError.message.includes("is no longer valid")) ||
+          (silentError instanceof Error &&
+            silentError.message.includes("No cached account"));
+        if (!needsInteractive || !input.acquireInteractive) {
+          throw silentError;
+        }
+        const result = await input.acquireInteractive(scopes);
+        return result.accessToken;
+      }
+    },
+  };
 }
 
 export async function removeAccount(input: {

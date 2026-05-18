@@ -10,9 +10,7 @@ export function runReportPlaintext(
   ctx: RunReportContext = {},
 ): string {
   const title = ctx.agentName ?? run.agentSlug;
-  const tenant = run.dataSource === "graph"
-    ? ctx.tenantName ?? run.tenantId ?? "connected tenant"
-    : "Synthetic data";
+  const tenant = ctx.tenantName ?? run.tenantId ?? "—";
 
   const lines: string[] = [
     `${title} — ${run.status}`,
@@ -48,9 +46,7 @@ export function runReportMarkdown(
   ctx: RunReportContext = {},
 ): string {
   const title = ctx.agentName ?? run.agentSlug;
-  const tenant = run.dataSource === "graph"
-    ? ctx.tenantName ?? run.tenantId ?? "connected tenant"
-    : "Synthetic data";
+  const tenant = ctx.tenantName ?? run.tenantId ?? "—";
 
   const parts: string[] = [
     `# ${title}`,

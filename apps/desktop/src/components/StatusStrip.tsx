@@ -20,20 +20,16 @@ export function StatusStrip() {
   return (
     <footer className="flex shrink-0 items-center justify-between border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] px-4 py-1.5 font-mono text-[10.5px] text-[var(--color-text-muted)]">
       <div className="flex items-center gap-3">
-        <span className="inline-flex items-center gap-1.5">
-          {activeTenant ? (
+        {activeTenant && (
+          <span className="inline-flex items-center gap-1.5">
             <IconCloud size={10} className="text-[var(--color-info)]" />
-          ) : (
-            <IconHardDrive size={10} className="text-[var(--color-success)]" />
-          )}
-          <span className="text-[var(--color-text-soft)]">
-            {activeTenant
-              ? `tenant: ${activeTenant.displayName}`
-              : "synthetic mode"}
+            <span className="text-[var(--color-text-soft)]">
+              tenant: {activeTenant.displayName}
+            </span>
           </span>
-        </span>
+        )}
 
-        <span className="opacity-40">·</span>
+        {activeTenant && <span className="opacity-40">·</span>}
 
         <span className="inline-flex items-center gap-1.5">
           <IconHardDrive

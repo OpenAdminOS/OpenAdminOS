@@ -1,3 +1,73 @@
+# Drop synthetic mode entirely (in-progress, still 0.1.4)
+
+**Status: implemented; not yet shipped.** Going live. No demo tenants, no synthetic fixtures, no fallback fake data. Onboarding becomes a hard gate: connect a real Microsoft 365 tenant or stay on `/onboarding`. Adding further tenants later is direct MSAL sign-in from the existing TenantSwitcher / Settings entry points — no onboarding rerun. Aligns with CLAUDE.md constraint #3 ("No agent runs without an active tenant scope") and removes the trust ambiguity of pretending fake data is a usable state. Version stays on 0.1.4 — this lands as part of the cleanup pass already in flight.
+
+## Why
+
+- CLAUDE.md constraint #3: agents cannot start without an active tenant. Synthetic mode silently bypasses this.
+- "synthetic mode" / "synthetic fixture" is jargon a real admin shouldn't have to decode. Either you're connected to a tenant or you're not.
+- Going live = product is for real M365 admins running against real tenants. No "explore without connecting" use case past the marketing site.
+
+## Scope
+
+### 1. Routing gate
+
+- [x] `App.tsx`: if `state.tenants.length === 0` AND path is not `/onboarding`, redirect to `/onboarding`. Onboarding is the only path that doesn't require a tenant.
+- [x] Drop the `state.activeTenantId === null` ambient case from the app shell — after onboarding there is always at least one tenant.
+- [x] Remove the global "Skip" button in `Onboarding.tsx:178` (was wired to `navigate("/")`).
+- [x] Step 3 "Connect tenant" cannot be skipped; remove the `onSkip` / "Skip for now" / "Continue without a tenant" code path (`Onboarding.tsx:89,214,494–509`).
+
+### 2. Add-tenant flow (later tenants)
+
+- [x] Adding tenant #2+ is **not** onboarding. Existing `Connect tenant` buttons in `TenantSwitcher` and `Settings → Tenants` already call `connectTenant()` directly — keep that.
+- [x] If user disconnects their **last** tenant via TenantSwitcher, the routing gate kicks them back to `/onboarding`.
+
+### 3. Delete synthetic data layer
+
+- [x] Delete `packages/runtime/src/graph-fixtures.ts`.
+- [x] Remove the synthetic branch from `packages/runtime/src/graph-adapter.ts` — Graph adapter only talks to real Microsoft Graph; if there's no tenant token, runs fail preflight with a clear error.
+- [x] Remove `dataSource: "synthetic"` from the `Run` type and every read site. Every run is live.
+- [x] Delete synthetic-related exports from `packages/runtime/src/index.ts`.
+
+### 4. Remove all synthetic-mode UI
+
+- [x] `StatusStrip.tsx:24–34` — collapse the tenant block to always render `tenant: <activeTenant.displayName>`. Drop the no-tenant branch.
+- [x] `AgentsHome.tsx:98` — delete the "No tenant — synthetic mode" banner.
+- [x] `RunFailureRemediation.tsx:40` — drop the "accept synthetic mode" remediation entry.
+- [x] `Settings.tsx:361, 388, 484` — rewrite the three synthetic-fixture copy strings to plain "Connect a Microsoft 365 tenant" language. Delete the "No tenants connected" subtitle branch (unreachable now).
+- [x] `Onboarding.tsx:498` — delete the "skip and run against synthetic inventory" copy block along with the skip path.
+
+### 5. Activity filter
+
+- [x] `Activity.tsx`: delete the `"synthetic"` filter variant, the `counts.synthetic` accumulator, and the `Synthetic` chip. `showFilters` reduces to `state.tenants.length > 1` (filter row only relevant for multi-tenant).
+- [x] Drop the `dataSource === "synthetic"` filter logic.
+
+### 6. Result panel
+
+- [x] `ResultPanel.tsx:69` — delete the synthetic-data callout entirely.
+
+### 7. Onboarding step 4 ("First agent")
+
+- [x] Audit the post-tenant "run your first agent" step — make sure it executes against the real tenant (no synthetic fallback). If it can't, fail loudly.
+
+## Acceptance criteria
+
+- Fresh launch (zero tenants on disk) routes to `/onboarding` from any URL.
+- Onboarding has no "Skip" / "Continue without a tenant" path — step 3 must be completed.
+- Disconnecting the last tenant routes user back to `/onboarding`.
+- Adding a 2nd+ tenant from TenantSwitcher or Settings opens MSAL sign-in directly; user is not sent back through onboarding.
+- `StatusStrip` always shows a real tenant name. The string "synthetic" appears nowhere in renderer source (`rg synthetic apps/desktop/src` returns zero matches).
+- `packages/runtime/src/graph-fixtures.ts` is deleted; nothing imports it.
+- `Run` type no longer has a `dataSource` field.
+- `npm run typecheck` passes; UI smoke-tested in Electron dev.
+
+## Out of scope
+
+- Cached real-tenant data for offline review — separate v0.2 concern.
+- Telemetry / analytics — still off, still local-first.
+
+---
+
 # v0.1.4 — Cleanup pass (current)
 
 **Status: planned.** Patch release on the 0.1.x line. No new features, no spec deltas. Tightens UX honesty: wire or remove the stub buttons, drop the synthetic device seed data, and flag the unimplemented provider toggles so the next contributor can't miss them.

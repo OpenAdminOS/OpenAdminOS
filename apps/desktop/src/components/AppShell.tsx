@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
+import { ConnectorConfirmModal } from "./ConnectorConfirmModal";
 import { StatusStrip } from "./StatusStrip";
 import { UpdateBanner } from "./UpdateBanner";
 
@@ -49,6 +50,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
       />
+      <ConnectorConfirmModal />
     </div>
   );
 }
