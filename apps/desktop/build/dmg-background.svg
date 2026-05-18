@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DMG install background for Open Agents.
+  Window is 660x440. Icons are 128px, positioned by electron-builder:
+    Open Agents.app  at (170, 230)  -> center (234, 294)
+    Applications     at (490, 230)  -> center (554, 294)
+  Everything else (headline, arrow, footer) lives in this SVG.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="440" viewBox="0 0 660 440">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0e1117"/>
+      <stop offset="1" stop-color="#0a0c10"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#1c222c" stroke-width="0.5" opacity="0.4"/>
+    </pattern>
+  </defs>
+
+  <rect width="660" height="440" fill="url(#bg)"/>
+  <rect width="660" height="440" fill="url(#grid)"/>
+
+  <!-- Top brand strip -->
+  <g font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10" fill="#4a5160" letter-spacing="0.08em">
+    <text x="32" y="40">OPEN AGENTS</text>
+    <text x="628" y="40" text-anchor="end">INSTALLER</text>
+  </g>
+  <line x1="32" y1="52" x2="628" y2="52" stroke="#1c222c" stroke-width="1"/>
+
+  <!-- Headline -->
+  <g font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#e6e9ef">
+    <text x="330" y="120" text-anchor="middle" font-size="22" font-weight="600" letter-spacing="-0.01em">
+      Drag Open Agents to Applications
+    </text>
+    <text x="330" y="150" text-anchor="middle" font-size="13" fill="#a8b0bd" font-weight="400">
+      Then eject this disk and launch from your Applications folder.
+    </text>
+  </g>
+
+  <!-- Arrow between icon slots (icons span x=170-298 and x=490-618, y=230-358) -->
+  <g stroke="#00d4ff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">
+    <line x1="318" y1="294" x2="470" y2="294"/>
+    <polyline points="456,282 472,294 456,306"/>
+  </g>
+
+  <!-- Footer tagline -->
+  <g font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#6c7484" font-size="11">
+    <text x="330" y="410" text-anchor="middle">Local-first agents for Microsoft 365 admins</text>
+  </g>
+</svg>

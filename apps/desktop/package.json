@@ -75,6 +75,29 @@
         { "target": "zip", "arch": ["arm64"] }
       ]
     },
+    "dmg": {
+      "title": "Open Agents ${version}",
+      "background": "build/background.tiff",
+      "icon": "build/icon.png",
+      "iconSize": 128,
+      "window": {
+        "width": 660,
+        "height": 440
+      },
+      "contents": [
+        {
+          "x": 170,
+          "y": 230,
+          "type": "file"
+        },
+        {
+          "x": 490,
+          "y": 230,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
     "win": {
       "target": [
         { "target": "appx", "arch": ["x64"] }
