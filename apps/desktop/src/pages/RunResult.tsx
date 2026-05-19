@@ -414,7 +414,7 @@ function TenantDriftNote({
           </span>
           . The active tenant is now{" "}
           <span className="font-medium text-[var(--color-text)]">
-            {activeTenant?.displayName ?? "Synthetic data"}
+            {activeTenant?.displayName ?? "no tenant"}
           </span>
           , so the results below reflect the original tenant.
         </div>

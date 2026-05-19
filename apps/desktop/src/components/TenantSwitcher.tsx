@@ -7,7 +7,6 @@ import {
   IconChevronUpDown,
   IconClose,
   IconCloud,
-  IconHardDrive,
   IconPlus,
 } from "./icons";
 import { useAppState } from "../state";
@@ -43,17 +42,6 @@ export function TenantSwitcher() {
       window.removeEventListener("keydown", handleKey);
     };
   }, [open]);
-
-  const handlePickSynthetic = async () => {
-    if (!activeTenant) {
-      setOpen(false);
-      return;
-    }
-    // Setting active is per-tenant; "Synthetic data" can't be set as a tenant.
-    // Route to Settings → Tenants where the user can disconnect or manage.
-    navigate("/settings");
-    setOpen(false);
-  };
 
   const handlePickTenant = async (tenantId: string) => {
     if (tenantId === activeTenant?.id) {
@@ -103,10 +91,10 @@ export function TenantSwitcher() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <Avatar name={activeTenant?.displayName ?? "Synthetic"} size={28} />
+        <Avatar name={activeTenant?.displayName ?? "—"} size={28} />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="truncate text-[12.5px] font-semibold text-[var(--color-text)]">
-            {activeTenant?.displayName ?? "Synthetic data"}
+            {activeTenant?.displayName ?? "No tenant"}
           </div>
           <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
             <StatusDot tone={activeTenant ? "success" : "muted"} />
@@ -176,30 +164,6 @@ export function TenantSwitcher() {
               })}
             </div>
           )}
-
-          <button
-            onClick={() => void handlePickSynthetic()}
-            disabled={busy}
-            role="menuitem"
-            className={`flex w-full items-center gap-2.5 border-t border-[var(--color-border-soft)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-hover)] ${
-              !activeTenant ? "bg-[var(--color-surface)]" : ""
-            }`}
-          >
-            <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-              <IconHardDrive size={11} />
-            </span>
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
-                Synthetic data
-              </div>
-              <div className="mt-0.5 truncate text-[10px] text-[var(--color-text-muted)]">
-                Built-in fixture; no Microsoft Graph call
-              </div>
-            </div>
-            {!activeTenant && (
-              <IconCheck size={12} className="text-[var(--color-accent)]" />
-            )}
-          </button>
 
           <div className="flex items-center gap-1 border-t border-[var(--color-border-soft)] bg-[var(--color-surface)] p-1.5">
             <button
