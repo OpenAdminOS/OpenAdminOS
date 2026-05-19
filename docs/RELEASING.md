@@ -29,7 +29,7 @@ The CI workflow detects when these are missing and falls back to an unsigned `.d
 
 ### Windows — Microsoft Store
 
-No secrets needed in GitHub. CI builds an unsigned MSIX; Microsoft signs it after Partner Center submission.
+The first submission is manual via Partner Center. Every release after that is auto-submitted by `.github/workflows/store-publish.yml` when you click **Publish release** on the GitHub draft.
 
 The values in `apps/desktop/package.json` `build.appx` are the Partner Center-assigned identity for this app:
 
@@ -38,9 +38,37 @@ The values in `apps/desktop/package.json` `build.appx` are the Partner Center-as
 | `identityName` | `UgurLabs.UgurLabs.OpenAgents` |
 | `publisher` | `CN=E5B1EEE1-CB55-4BCF-9214-2A6446BB2580` |
 | `publisherDisplayName` | `UgurLabs` |
-| Seller ID (for future Submission API automation) | `82025760` |
+| Seller ID | `82025760` |
 
 These match the Partner Center reservation for the `OpenAgents` Store name. Don't change them — Microsoft validates the MSIX against the registered identity at upload time.
+
+#### One-time setup to enable Store auto-publish
+
+Do this once, after the first manual submission has been accepted by Partner Center.
+
+1. **Associate an Azure AD tenant with Partner Center.**
+   Partner Center → **Account settings** → **Tenants** → **Associate Azure AD**. Use the same tenant you use for everything else (or create a dedicated one if you prefer isolation).
+2. **Create an Azure AD app registration.**
+   In the Azure portal → Microsoft Entra ID → **App registrations** → **New registration**. Single tenant is fine. No redirect URI needed.
+3. **Create a client secret.**
+   App registration → **Certificates & secrets** → **New client secret**. Copy the value once — Azure won't show it again.
+4. **Grant the app Manager access in Partner Center.**
+   Partner Center → **Account settings** → **User management** → **Azure AD applications** → **Add Azure AD applications** → pick the registration → role **Manager**. Manager is required for the Submission API; lower roles can't push packages.
+5. **Capture the Store App ID.**
+   Partner Center → **Apps** → **OpenAgents** → **Product identity**. The 12-character Store ID (looks like `9NABCDEFGHIJ`) is what `MS_STORE_APP_ID` needs.
+6. **Add the four secrets to GitHub.**
+   Repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
+
+   | Secret | Value |
+   |---|---|
+   | `PARTNER_CENTER_TENANT_ID` | The Azure AD tenant directory (tenant) ID from step 1. |
+   | `PARTNER_CENTER_CLIENT_ID` | The app registration's Application (client) ID from step 2. |
+   | `PARTNER_CENTER_CLIENT_SECRET` | The client secret value from step 3. |
+   | `MS_STORE_APP_ID` | The Store App ID from step 5. |
+
+   (`Seller ID` is hardcoded as `82025760` in the workflow — it isn't secret.)
+
+Until all four secrets exist, the workflow runs but logs a warning and exits. Once they're set, the next time you publish a GitHub release the `.appx` is submitted automatically. You can also re-run it by hand from the Actions tab against any tag.
 
 ---
 
@@ -93,12 +121,19 @@ That's it. electron-updater on existing macOS installs picks up the new `latest-
 
 ### Windows — Microsoft Store submission
 
+**First submission (manual, once):**
+
 1. Download the `.appx` (named like `Open Agents-x.y.z.appx`) from the draft release.
 2. Go to https://partner.microsoft.com/dashboard.
-3. Apps → **OpenAgents** → Submissions → **New submission** (or **Update**).
+3. Apps → **OpenAgents** → Submissions → **New submission**.
 4. **Packages** section → upload the `.appx`.
-5. Fill in the per-submission fields (release notes, age rating, etc.). For the first submission Partner Center walks you through everything; later submissions only need the new package + release notes.
+5. Fill in the per-submission fields (description, screenshots, age rating, privacy policy URL, etc.). Partner Center walks you through everything.
 6. **Submit to the Store**.
+7. After it's accepted, complete the **one-time setup to enable Store auto-publish** in the Windows section above so the next release goes out automatically.
+
+**Subsequent submissions (automatic):**
+
+Once the Store secrets are configured, clicking **Publish release** on the GitHub draft fires `store-publish.yml`, which downloads the `.appx` from the release assets and submits it via the `msstore` CLI. No Partner Center clicks needed. Release-notes copy still has to come from the GitHub release body — Partner Center reuses the previous submission's description fields automatically.
 
 Certification typically takes 1–3 business days for the first submission and minutes-to-hours for updates. The Store handles distribution + auto-update on Windows; we don't need to ship anything else for Windows users.
 

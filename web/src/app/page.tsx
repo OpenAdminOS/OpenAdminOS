@@ -88,7 +88,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
+      <footer className="relative z-10 flex flex-col items-center gap-2 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-white/40">
           © {new Date().getFullYear()}{" "}
           <Link
@@ -98,6 +98,20 @@ export default function HomePage() {
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
             UgurLabs
+          </Link>
+          {" · "}
+          <Link
+            href="/privacy"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Privacy
+          </Link>
+          {" · "}
+          <Link
+            href="/terms"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Terms
           </Link>
         </span>
       </footer>
