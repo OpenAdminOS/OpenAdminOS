@@ -76,7 +76,7 @@
       ]
     },
     "dmg": {
-      "title": "Open Agents ${version}",
+      "title": "Open Agents",
       "background": "build/background.tiff",
       "icon": "build/icon.png",
       "iconSize": 128,
