@@ -108,11 +108,7 @@ export default function Connectors() {
               Have a connector idea?
             </h3>
             <p className="mt-0.5 text-[12px] text-[var(--color-text-soft)]">
-              Open a GitHub discussion. The contract is documented in
-              <code className="ml-1 rounded bg-[var(--color-bg-raised)] px-1 py-0.5 font-mono text-[11px]">
-                docs/SPEC.md §2
-              </code>{" "}
-              — anyone can author one.
+              Open a GitHub discussion.
             </p>
           </div>
           <button
