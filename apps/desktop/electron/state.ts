@@ -52,6 +52,11 @@ import type { PublicClientApplication } from "@azure/msal-node";
 
 import { EncryptedSecretStore } from "./secret-store.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
+import {
+  searchEndpoints,
+  validatePath,
+  type EndpointSummary,
+} from "./graph-catalog.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
@@ -715,7 +720,12 @@ export class AppStateStore {
       );
     }
 
-    const system = NL2AGENT_SYSTEM_PROMPT;
+    // Pull a shortlist of real Graph endpoints relevant to the user's
+    // prompt and inject them into the system prompt. Keeps the model
+    // grounded in real paths instead of inventing them, and gives it
+    // the matching delegated scope to declare.
+    const candidates = searchEndpoints(trimmed, { limit: 12, method: "GET" });
+    const system = buildNl2AgentSystemPrompt(candidates);
     const userTurn = `Draft a manifest.yaml for the following Open Agents agent description.
 
 Description from the user:
@@ -756,6 +766,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       manifest = undefined;
     }
 
+    // Catalogue check: every graph step must target a real Graph
+    // endpoint and declare a matching delegated scope.
+    if (manifest) {
+      const graphErrors = collectGraphStepErrors(manifest);
+      if (graphErrors.length > 0) {
+        validationErrors.push(...graphErrors);
+        manifest = undefined;
+      }
+    }
+
     return validationErrors.length > 0
       ? { yamlSource, validationErrors }
       : { yamlSource, manifest, validationErrors: [] };
@@ -787,6 +807,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (!manifest.skills.some((skill) => skill.format === "llm")) {
       throw new Error(
         "saveAgentDraft: manifest has no `format: llm` step. Open Agents requires every agent to invoke the LLM at least once.",
+      );
+    }
+
+    const graphErrors = collectGraphStepErrors(manifest);
+    if (graphErrors.length > 0) {
+      throw new Error(
+        `saveAgentDraft: manifest references unknown Graph endpoints — ${graphErrors.join("; ")}`,
       );
     }
 
@@ -1376,7 +1403,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return createOllamaLlm(options);
   }
 
-  private async buildGraph(pinnedTenantId?: string): Promise<{
+  private async buildGraph(
+    pinnedTenantId?: string,
+    agentScopes?: string[],
+  ): Promise<{
     graph: RunGraphApi;
     tenantId: string;
     tenantSession: TenantSession;
@@ -1400,23 +1430,32 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       homeAccountId: tenant.homeAccountId,
       acquireInteractive: async (scopes) => {
         // Per-capability incremental consent. Pops a browser sign-in when
-        // a connector requests scopes the cached refresh token cannot
-        // satisfy. The user re-consents to the additional scopes;
-        // subsequent silent acquisitions for the same scope set succeed
-        // from cache.
+        // a connector or agent requests scopes the cached refresh token
+        // cannot satisfy. The user re-consents to the additional
+        // scopes; subsequent silent acquisitions for the same scope set
+        // succeed from cache.
         return await runInteractiveFlow({ client, scopes, openBrowser });
       },
     });
+    // When the agent declares Graph scopes, route the tokenProvider
+    // through `tenantSession.acquireTokenForScopes` so the silent
+    // acquisition asks MSAL for those exact scopes and falls through to
+    // interactive consent on the first run that requires a new one.
+    // Connectors already do this for their declared scopes; agents now
+    // get the same treatment.
+    const scopes = (agentScopes ?? []).filter((s) => s.length > 0);
+    const tokenProvider =
+      scopes.length > 0
+        ? async () => await tenantSession.acquireTokenForScopes(scopes)
+        : async () => {
+            const result = await acquireTokenSilent({
+              client,
+              homeAccountId: tenant.homeAccountId,
+            });
+            return result.accessToken;
+          };
     return {
-      graph: createGraphAdapter({
-        tokenProvider: async () => {
-          const result = await acquireTokenSilent({
-            client,
-            homeAccountId: tenant.homeAccountId,
-          });
-          return result.accessToken;
-        },
-      }),
+      graph: createGraphAdapter({ tokenProvider }),
       tenantId: tenant.id,
       tenantSession,
     };
@@ -1435,7 +1474,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     try {
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const llm = await this.buildLlm(input.providerId, input.model);
-      const selection = await this.buildGraph(input.run.tenantId);
+      const selection = await this.buildGraph(input.run.tenantId, input.agent.scopes);
       const stampedRun = this.stampTenant(input.run, selection.tenantId);
       await this.persistRunSnapshot(stampedRun);
       await driver({
@@ -1466,7 +1505,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }): Promise<void> {
     try {
       const llm = await this.buildLlm(input.providerId, input.model);
-      const selection = await this.buildGraph(input.run.tenantId);
+      const selection = await this.buildGraph(input.run.tenantId, input.agent.scopes);
       await executeApply({
         run: input.run,
         agent: input.agent,
@@ -1846,7 +1885,50 @@ function sanitizeSettingsAgainstSchema(
  * we use in the bundled agents. The temperature is kept low so output
  * stays close to the examples.
  */
-const NL2AGENT_SYSTEM_PROMPT = `You generate Agent Template manifests for Open Agents — a desktop tool that runs AI agents against a Microsoft 365 tenant.
+function collectGraphStepErrors(
+  manifest: { skills: Array<{ id: string; format: string; settings: unknown }> },
+): string[] {
+  const errors: string[] = [];
+  for (const skill of manifest.skills) {
+    if (skill.format !== "graph") continue;
+    const settings = skill.settings as {
+      method?: string;
+      path?: string;
+      scopes?: string[];
+    } | null;
+    if (!settings || typeof settings.method !== "string" || typeof settings.path !== "string") {
+      continue;
+    }
+    const result = validatePath(
+      settings.method,
+      settings.path,
+      Array.isArray(settings.scopes) ? settings.scopes : [],
+    );
+    if (!result.ok) {
+      errors.push(
+        `graph step "${skill.id}": ${result.reason}${result.suggestion ? ` (${result.suggestion})` : ""}`,
+      );
+    }
+  }
+  return errors;
+}
+
+function buildNl2AgentSystemPrompt(candidates: EndpointSummary[]): string {
+  const candidateBlock =
+    candidates.length === 0
+      ? "(No catalogue match for this prompt. Pick `GET /deviceManagement/managedDevices` if no better fit exists — it is always available.)"
+      : candidates
+          .map((ep) => {
+            const scope =
+              ep.scopesDelegated.length > 0
+                ? ep.scopesDelegated[0]
+                : "(no delegated scope documented)";
+            const summary = ep.summary ? ` — ${ep.summary}` : "";
+            return `- ${ep.method} ${ep.path} | scope: ${scope}${summary}`;
+          })
+          .join("\n");
+
+  return `You generate Agent Template manifests for Open Agents — a desktop tool that runs AI agents against a Microsoft 365 tenant.
 
 The manifest is a YAML document with three top-level keys: descriptor, skills, definition.
 
@@ -1855,13 +1937,16 @@ Hard rules:
 - category must be one of: devices, apps, policies, compliance, updates.
 - Slug ids are lower-case hyphen-separated, e.g. "find-inactive-devices".
 - Skill ids are lower-case snake_case, e.g. "load_devices".
-- For v0.1, the only Graph endpoint available is GET /deviceManagement/managedDevices. Do not invent other endpoints.
-- Transform kinds available: group-by-age, filter-by-age, count-by-field.
+- Graph steps: pick the closest match from the candidate endpoints listed below. Do not invent endpoints — if none of the candidates fit, fall back to GET /deviceManagement/managedDevices. Always declare the scope shown alongside the endpoint.
+- Transform kinds available: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by.
 - EVERY agent MUST include at least one step with format: llm. This is what makes it an agent rather than a deterministic query — the LLM writes the headline summary an admin reads. Do not gate it with "when:". The runtime preflights the provider and fails the run if one isn't connected, so the gate is unnecessary and misleading.
 - definition.result.summary MUST reference the LLM step's output, e.g.: {{ summarize.output.text | default("Summary unavailable.") }}. Do not put raw counts in the summary line — those belong in result.data.
 - Write-action kinds available: retire-managed-device. For write agents, the LLM step should explain the planned actions in plain language; the write step's settings.summary should reference {{ explain_plan.output.text }} (or whatever the LLM step is named).
 - Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", ").
 - Always include a top-level "# yaml-language-server: $schema=../../schemas/agent-template.schema.json" comment.
+
+Candidate Microsoft Graph endpoints for this prompt (pick from these — declare the listed scope):
+${candidateBlock}
 
 Reference example — read agent, bucketed by compliance state, LLM summary as headline:
 
@@ -1930,6 +2015,7 @@ definition:
 When the user's description is vague, pick sensible defaults and continue — don't ask clarifying questions. When you cannot fulfil a request inside the available endpoints / transforms, choose the closest supported shape rather than inventing new mechanisms.
 
 Output: a single YAML manifest. Nothing else.`;
+}
 
 function stripCodeFences(source: string): string {
   // The LLM sometimes wraps output in \`\`\`yaml fences despite the system

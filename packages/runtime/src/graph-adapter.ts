@@ -1,4 +1,8 @@
-import type { ManagedDeviceRecord, RunGraphApi } from "@openagents/agent-sdk";
+import type {
+  GraphRequestInput as SdkGraphRequestInput,
+  ManagedDeviceRecord,
+  RunGraphApi,
+} from "@openagents/agent-sdk";
 
 export interface GraphAdapterOptions {
   tokenProvider: () => Promise<string>;
@@ -87,7 +91,47 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         expectJson: false,
       });
     },
+
+    async request(input: SdkGraphRequestInput): Promise<unknown> {
+      if (input.method !== "GET") {
+        throw new Error(
+          `RunGraphApi.request: only GET is supported (got ${input.method}).`,
+        );
+      }
+      if (!input.path || !input.path.startsWith("/")) {
+        throw new Error(
+          `RunGraphApi.request: path must start with "/" (got ${JSON.stringify(input.path)}).`,
+        );
+      }
+      const url = buildGraphUrl(baseUrl, input.path, input.query);
+      return await graphRequest<unknown>({
+        method: "GET",
+        url,
+        tokenProvider: options.tokenProvider,
+        fetchImpl,
+        maxRetries,
+        timeoutMs,
+        extraHeaders: input.headers,
+      });
+    },
   };
+}
+
+function buildGraphUrl(
+  baseUrl: string,
+  path: string,
+  query: Record<string, string> | undefined,
+): string {
+  const base = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  let url = `${base}${path}`;
+  if (query && Object.keys(query).length > 0) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      params.set(key, value);
+    }
+    url += (url.includes("?") ? "&" : "?") + params.toString();
+  }
+  return url;
 }
 
 interface GraphRequestInput {
@@ -98,6 +142,7 @@ interface GraphRequestInput {
   maxRetries: number;
   timeoutMs: number;
   expectJson?: boolean;
+  extraHeaders?: Record<string, string>;
 }
 
 async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
@@ -114,6 +159,11 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     };
     if (expectJson) {
       headers.accept = "application/json";
+    }
+    if (input.extraHeaders) {
+      for (const [key, value] of Object.entries(input.extraHeaders)) {
+        headers[key.toLowerCase()] = value;
+      }
     }
 
     let response: Response;

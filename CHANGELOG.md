@@ -6,9 +6,16 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- runtime: agent-template graph steps can now call any Microsoft Graph GET endpoint via the new `RunGraphApi.request()` adapter — paths beyond `/deviceManagement/managedDevices` are dispatched generically with `$select`, `$filter`, etc.
+- runtime: two new transforms — `group-by-field` and `sort-by` — so agents working over arbitrary Graph collections have somewhere to go besides device-age math.
+- electron: vendored merill/msgraph endpoint catalogue (~28k endpoints, ~6.4k with permission scopes). The drafter pre-searches it for candidate endpoints, and the install path validates that every declared graph step targets a real endpoint with a matching delegated scope.
+- agents: sample `user-license-overview` agent demonstrating a `/users`-backed read agent.
+
 ### Changed
 
 - new-agent: review step now shows the drafted agent's name, description, mode, category, and version; modal subtitle switches to a review-mode caption; pipeline card opens by default so the proposed steps are visible without an extra click.
+- new-agent: drafter prompt no longer hardcodes a single endpoint; candidate endpoints relevant to the user's prompt are injected into the system message at draft time, and the manifest validator blocks invented paths and wrong scopes.
+- runtime: `tokenProvider` for agent runs now goes through `tenantSession.acquireTokenForScopes(agent.scopes)`, so MSAL prompts for incremental consent the first time an installed agent needs new scopes.
 
 ### Removed
 

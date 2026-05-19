@@ -179,15 +179,16 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mb-4 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
           <div className="flex items-center gap-2 text-[11.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
-            <IconSparkle size={12} className="text-[var(--color-accent)]" /> What you can ask for in v0.1
+            <IconSparkle size={12} className="text-[var(--color-accent)]" /> What you can ask for
           </div>
           <ul className="mt-2 space-y-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-            <li>· Read-only agents that pull `managedDevices` and bucket / count / filter them.</li>
+            <li>· Read-only agents that call any Microsoft Graph GET endpoint — users, devices, groups, sign-in logs, compliance policies, audit logs, reports, and more.</li>
+            <li>· Transforms over the results: group / count / sort / bucket-by-age.</li>
             <li>· An LLM step that writes the headline summary (required — every agent must invoke the model at least once).</li>
             <li>· Settings the user can override at install time (integer / string / boolean).</li>
           </ul>
           <p className="mt-2 text-[11.5px] text-[var(--color-text-muted)]">
-            v0.1 supports a small DSL — the LLM will pick the closest supported shape rather than invent new endpoints or transforms.
+            The drafter looks up real Graph endpoints for your prompt and refuses to invent paths. Write operations are still limited to device retire — broader write support is coming.
           </p>
         </div>
 

@@ -624,15 +624,63 @@ async function runGraphSkill(
     );
   }
 
-  if (settings.path === "/deviceManagement/managedDevices") {
+  // Legacy fast path — keep returning strongly-typed ManagedDeviceRecord
+  // values for existing v0.1 agents whose downstream transforms rely on
+  // those fields. Detect by the path; any divergence (extra query
+  // params, $select customisations) falls through to the generic path.
+  if (
+    settings.path === "/deviceManagement/managedDevices" &&
+    !settings.query &&
+    (!settings.select || settings.select.length === 0)
+  ) {
     const devices = await ctx.graph.listManagedDevices();
     ctx.log("info", `Loaded ${devices.length} managed devices.`);
     return devices as ManagedDeviceRecord[];
   }
 
-  throw new Error(
-    `graph step "${skill.id}": path "${settings.path}" is not yet supported by the agent template interpreter. Extend RunGraphApi to add support.`,
-  );
+  const query: Record<string, string> = {};
+  if (settings.select && settings.select.length > 0) {
+    query.$select = settings.select.join(",");
+  }
+  if (settings.query) {
+    for (const [key, value] of Object.entries(settings.query)) {
+      query[key] = String(value);
+    }
+  }
+
+  const response = (await ctx.graph.request({
+    method: "GET",
+    path: settings.path,
+    query: Object.keys(query).length > 0 ? query : undefined,
+    headers: settings.headers,
+  })) as unknown;
+
+  // Graph collection endpoints wrap items in `{ value: [...] }`. Unwrap
+  // so downstream transforms operate on the array directly. Single-
+  // entity responses (e.g. `GET /me`) return the entity object as-is.
+  const unwrapped = unwrapGraphResponse(response);
+  if (Array.isArray(unwrapped)) {
+    ctx.log(
+      "info",
+      `Loaded ${unwrapped.length} items from ${settings.method} ${settings.path}.`,
+    );
+  } else {
+    ctx.log("info", `Loaded ${settings.method} ${settings.path}.`);
+  }
+  return unwrapped;
+}
+
+function unwrapGraphResponse(payload: unknown): unknown {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    "value" in (payload as Record<string, unknown>)
+  ) {
+    const value = (payload as Record<string, unknown>).value;
+    if (Array.isArray(value)) return value;
+  }
+  return payload;
 }
 
 async function runTransformSkill(
@@ -650,11 +698,91 @@ async function runTransformSkill(
       return transformFilterByAge(skill.id, settings, ctx);
     case "count-by-field":
       return transformCountByField(skill.id, settings, ctx);
+    case "group-by-field":
+      return transformGroupByField(skill.id, settings, ctx);
+    case "sort-by":
+      return transformSortBy(skill.id, settings, ctx);
     default:
       throw new Error(
-        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field.`,
+        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by.`,
       );
   }
+}
+
+function transformGroupByField(
+  skillId: string,
+  settings: Record<string, unknown>,
+  ctx: RunContext,
+): Record<string, unknown[]> {
+  const source = settings.source;
+  const field = settings.field;
+  if (!Array.isArray(source)) {
+    throw new Error(`transform "${skillId}": group-by-field expects "source" to resolve to an array.`);
+  }
+  if (typeof field !== "string" || field.length === 0) {
+    throw new Error(`transform "${skillId}": group-by-field requires "field".`);
+  }
+  const missingBucket =
+    typeof settings.missing === "string" && settings.missing.length > 0
+      ? settings.missing
+      : "(unknown)";
+
+  const result: Record<string, unknown[]> = {};
+  for (const item of source as Array<Record<string, unknown>>) {
+    const raw = item?.[field];
+    const bucket =
+      raw === undefined || raw === null || raw === ""
+        ? missingBucket
+        : String(raw);
+    if (!result[bucket]) result[bucket] = [];
+    result[bucket].push(item);
+  }
+  ctx.log(
+    "info",
+    `Grouped ${source.length} items into ${Object.keys(result).length} buckets by "${field}".`,
+  );
+  return result;
+}
+
+function transformSortBy(
+  skillId: string,
+  settings: Record<string, unknown>,
+  ctx: RunContext,
+): unknown[] {
+  const source = settings.source;
+  const field = settings.field;
+  if (!Array.isArray(source)) {
+    throw new Error(`transform "${skillId}": sort-by expects "source" to resolve to an array.`);
+  }
+  if (typeof field !== "string" || field.length === 0) {
+    throw new Error(`transform "${skillId}": sort-by requires "field".`);
+  }
+  const direction = settings.direction === "asc" ? "asc" : "desc";
+  const take =
+    typeof settings.take === "number" && Number.isFinite(settings.take) && settings.take > 0
+      ? Math.floor(settings.take)
+      : undefined;
+
+  const sorted = [...(source as Array<Record<string, unknown>>)].sort((a, b) => {
+    const av = a?.[field];
+    const bv = b?.[field];
+    if (av === bv) return 0;
+    if (av === undefined || av === null) return 1;
+    if (bv === undefined || bv === null) return -1;
+    if (typeof av === "number" && typeof bv === "number") {
+      return direction === "asc" ? av - bv : bv - av;
+    }
+    const as = String(av);
+    const bs = String(bv);
+    return direction === "asc" ? as.localeCompare(bs) : bs.localeCompare(as);
+  });
+
+  const out = take ? sorted.slice(0, take) : sorted;
+  ctx.log(
+    "info",
+    `Sorted ${source.length} items by "${field}" ${direction}${take ? `, took top ${take}` : ""}.`,
+  );
+  return out;
 }
 
 interface GroupByAgeSpec {

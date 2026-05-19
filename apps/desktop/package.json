@@ -56,6 +56,10 @@
       {
         "from": "../../stats",
         "to": "stats"
+      },
+      {
+        "from": "electron/assets/graph-index",
+        "to": "graph-index"
       }
     ],
     "publish": [

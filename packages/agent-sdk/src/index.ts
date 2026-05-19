@@ -464,6 +464,10 @@ export interface GraphStep {
     method: GraphHttpMethod;
     path: string;
     select?: string[];
+    /** Additional `$`-prefixed OData query params (filter, top, orderby, ...). */
+    query?: Record<string, string>;
+    /** Optional extra HTTP headers (e.g. `ConsistencyLevel: eventual`). */
+    headers?: Record<string, string>;
     scopes: string[];
   };
 }
@@ -666,6 +670,22 @@ export interface RunGraphApi {
    * branch on that flag before calling this method.
    */
   retireManagedDevice(deviceId: string): Promise<void>;
+  /**
+   * Generic Graph GET. Used by the agent-template interpreter for any
+   * path beyond the legacy hardcoded `/deviceManagement/managedDevices`
+   * fast path. Returns the parsed JSON response body; callers are
+   * expected to unwrap `value` for collection endpoints themselves.
+   */
+  request(input: GraphRequestInput): Promise<unknown>;
+}
+
+export interface GraphRequestInput {
+  method: "GET";
+  path: string;
+  /** Map of `$select`, `$filter`, `$top`, etc. Encoded into the URL. */
+  query?: Record<string, string>;
+  /** Optional `ConsistencyLevel: eventual` etc. */
+  headers?: Record<string, string>;
 }
 
 export interface LlmOptions {

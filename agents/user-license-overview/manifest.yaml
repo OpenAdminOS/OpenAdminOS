@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+descriptor:
+  id: user-license-overview
+  name: User license overview
+  description: Counts tenant users by usage location and writes a one-paragraph licensing posture summary.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: false
+  category: apps
+  mode: read
+  preferredModel: llama3.1:8b
+skills:
+  - id: load_users
+    format: graph
+    label: Load tenant users
+    detail: Reads the tenant's users via Microsoft Graph.
+    settings:
+      method: GET
+      path: /users
+      select: [id, displayName, userPrincipalName, usageLocation, accountEnabled]
+      scopes:
+        - User.Read.All
+  - id: by_location
+    format: transform
+    label: Count users by usage location
+    settings:
+      kind: group-by-field
+      source: "{{ load_users.output }}"
+      field: usageLocation
+      missing: "(unset)"
+  - id: summarize
+    format: llm
+    label: Summarize licensing posture
+    detail: One paragraph summary highlighting countries with the most users.
+    settings:
+      system: >-
+        You are a Microsoft 365 administrator's assistant. Be concise and
+        factual. One short paragraph. Never invent numbers — use only the
+        figures you are given.
+      prompt: |-
+        Total users: {{ load_users.output | size }}.
+        Distribution: {{ by_location.output }}.
+
+        Write a one-paragraph licensing posture summary that highlights
+        the two largest country buckets and flags any users with no
+        usage location set.
+      temperature: 0.2
+      maxTokens: 220
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ summarize.output.text | default("Summary unavailable.") }}'
+    data:
+      total: "{{ load_users.output | size }}"
+      byLocation: "{{ by_location.output }}"
+      llmModel: "{{ summarize.output.model }}"
