@@ -29,6 +29,8 @@ import type {
 export function ManifestPreview({
   preview,
   settingsOverrides,
+  showDescriptor = false,
+  defaultPipelineOpen = false,
 }: {
   preview: AgentManifestPreview;
   /**
@@ -37,13 +39,28 @@ export function ManifestPreview({
    * alongside the manifest default for full transparency.
    */
   settingsOverrides?: Record<string, unknown>;
+  /**
+   * When true, render a descriptor card (name, description, mode,
+   * category, version) above the manifest sections. Off by default
+   * because most callers already show this in their page chrome —
+   * NewAgentModal sets it on so users can see what the LLM proposed.
+   */
+  showDescriptor?: boolean;
+  /**
+   * Whether the pipeline card starts expanded. Defaults to collapsed.
+   * Surfaces that exist primarily to review a newly drafted manifest
+   * (NewAgentModal) should open it so the steps are visible without
+   * an extra click.
+   */
+  defaultPipelineOpen?: boolean;
 }) {
   const { manifest, sourceText, registryPath } = preview;
   const scopes = collectScopesFromManifest(manifest);
   return (
     <div className="flex flex-col gap-6">
+      {showDescriptor && <DescriptorCard manifest={manifest} />}
       <ScopesCard scopes={scopes} />
-      <PipelineCard steps={manifest.skills} />
+      <PipelineCard steps={manifest.skills} defaultOpen={defaultPipelineOpen} />
       <SettingsCard manifest={manifest} overrides={settingsOverrides} />
       <ResultCard manifest={manifest} />
       <RawSourceCard
@@ -54,6 +71,36 @@ export function ManifestPreview({
         helperText="This is the exact YAML the runtime loaded. The pipeline above is derived from it — there is no hidden code path."
       />
     </div>
+  );
+}
+
+function DescriptorCard({ manifest }: { manifest: AgentTemplate }) {
+  const { descriptor } = manifest;
+  const modeTone = descriptor.mode === "write" ? "danger" : "success";
+  const modeLabel = descriptor.mode === "write" ? "Write" : "Read-only";
+  return (
+    <Card>
+      <div className="p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-[15px] font-semibold text-[var(--color-text)]">
+                {descriptor.name}
+              </h3>
+              <Pill tone={modeTone}>{modeLabel}</Pill>
+              <Pill tone="default">{descriptor.category}</Pill>
+            </div>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              {descriptor.description}
+            </p>
+          </div>
+          <div className="shrink-0 text-right font-mono text-[10.5px] leading-relaxed text-[var(--color-text-muted)]">
+            <div>v{descriptor.version}</div>
+            <div className="mt-0.5">{descriptor.id}</div>
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -88,8 +135,14 @@ function ScopesCard({ scopes }: { scopes: string[] }) {
   );
 }
 
-function PipelineCard({ steps }: { steps: TemplateStep[] }) {
-  const [open, setOpen] = useState(false);
+function PipelineCard({
+  steps,
+  defaultOpen = false,
+}: {
+  steps: TemplateStep[];
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <Card>
       <div className="p-6">

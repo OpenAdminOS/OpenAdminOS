@@ -8,6 +8,8 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- new-agent: review step now shows the drafted agent's name, description, mode, category, and version; modal subtitle switches to a review-mode caption; pipeline card opens by default so the proposed steps are visible without an extra click.
+
 ### Removed
 
 ### Fixed

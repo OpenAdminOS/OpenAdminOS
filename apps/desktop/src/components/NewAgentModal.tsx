@@ -117,7 +117,11 @@ export function NewAgentModal({
     <Modal open={open} onClose={onClose} size="lg">
       <ModalHeader
         title="New agent"
-        subtitle="Describe what the agent should do. The active LLM provider drafts a YAML manifest you can review before saving."
+        subtitle={
+          draft
+            ? "Review what the LLM drafted. You can go back to refine the prompt, or open the raw YAML to make manual tweaks before saving."
+            : "Describe what the agent should do. The active LLM provider drafts a YAML manifest you can review before saving."
+        }
         onClose={onClose}
       />
 
@@ -281,7 +285,11 @@ function DraftPane({
         )}
 
         {valid && previewForRenderer && (
-          <ManifestPreview preview={previewForRenderer} />
+          <ManifestPreview
+            preview={previewForRenderer}
+            showDescriptor
+            defaultPipelineOpen
+          />
         )}
 
         {!valid && (
