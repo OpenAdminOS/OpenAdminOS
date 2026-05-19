@@ -16,6 +16,10 @@
     "os-update-posture": {
       "installs": 1,
       "installs7d": 1
+    },
+    "tenant-health-report": {
+      "installs": 0,
+      "installs7d": 0
     }
   }
 }

@@ -49,6 +49,46 @@
         "preferredModel": {
           "type": "string",
           "description": "Optional. Suggests an LLM model the agent works well against; the host may ignore it."
+        },
+        "connectors": {
+          "type": "array",
+          "description": "Egress connector dependencies declared by this agent. Each entry pins a connector id, a minimum connector version, and the capability ids/versions the agent invokes. See docs/SPEC.md §2 (Connector abstraction).",
+          "items": { "$ref": "#/$defs/connectorRequirement" }
+        }
+      }
+    },
+
+    "connectorRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "minVersion", "capabilities", "required"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Connector id (e.g. 'teams'). Validated against the host's registered connectors at manifest load."
+        },
+        "minVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[\\w.-]+)?$",
+          "description": "Minimum connector implementation version. The runtime accepts any installed version >= minVersion within the same major."
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "version"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "version": { "type": "integer", "minimum": 1 }
+            }
+          }
+        },
+        "required": {
+          "type": "boolean",
+          "description": "When true, preflight fails the run if the connector is unconfigured or unhealthy. When false, ctx.connectors[id] may be undefined at run time."
         }
       }
     },
@@ -69,7 +109,8 @@
         { "$ref": "#/$defs/graphSkill" },
         { "$ref": "#/$defs/transformSkill" },
         { "$ref": "#/$defs/llmSkill" },
-        { "$ref": "#/$defs/writeSkill" }
+        { "$ref": "#/$defs/writeSkill" },
+        { "$ref": "#/$defs/connectorSkill" }
       ]
     },
 
@@ -230,6 +271,52 @@
                   "description": "Graph scopes required to apply actions of this kind. Concatenated with graph-step scopes."
                 },
                 "actionTemplate": { "$ref": "#/$defs/actionTemplate" }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "connectorSkill": {
+      "allOf": [
+        { "$ref": "#/$defs/skillBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "label": true,
+            "detail": true,
+            "format": { "const": "connector" },
+            "when": {
+              "type": "string",
+              "description": "Optional gating expression. Supports `ctx.connectors.<id>.available` — when set, the step is skipped if the named connector was not built at preflight (typically because it's declared as optional and unconfigured)."
+            },
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["connector", "capability", "args"],
+              "properties": {
+                "connector": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Connector id, must match an AgentConnectorRequirement.id from descriptor.connectors."
+                },
+                "capability": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Capability id within the connector (kebab-case, e.g. 'post-channel-message')."
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Capability version. Defaults to 1 if omitted."
+                },
+                "args": {
+                  "type": "object",
+                  "description": "Templated args passed to the capability method. Each leaf string is rendered through the template engine before invocation."
+                }
               }
             }
           }
