@@ -1,6 +1,6 @@
 {
   "name": "@openagents/runtime",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -20,8 +20,8 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
-    "@openagents/agent-sdk": "0.1.4",
-    "@openagents/connector-teams": "0.1.4",
+    "@openagents/agent-sdk": "0.1.5",
+    "@openagents/connector-teams": "0.1.5",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

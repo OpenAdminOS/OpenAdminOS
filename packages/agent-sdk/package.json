@@ -1,6 +1,6 @@
 {
   "name": "@openagents/agent-sdk",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "Shared TypeScript contracts for Open Agents packages.",
   "main": "./dist/index.js",

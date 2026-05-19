@@ -141,7 +141,7 @@ export interface AppStateStoreOptions {
    * deployment URL.
    */
   statsApiUrl?: string;
-  /** Version string POSTed alongside install events, e.g. `0.1.4`. */
+  /** Version string POSTed alongside install events, e.g. `0.1.5`. */
   appVersion?: string;
 }
 

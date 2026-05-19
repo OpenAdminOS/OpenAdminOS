@@ -599,7 +599,7 @@ function AboutSection() {
     <div className="max-w-[640px]">
       <SectionTitle title="About" subtitle="Open Agents is open-source and community-driven." />
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <Stat label="Version" value="0.1.4" mono />
+        <Stat label="Version" value="0.1.5" mono />
         <Stat label="License" value="MIT" />
         <Stat label="Repo" value="ugurkocde/OpenAgents" mono />
         <Stat label="Built by" value="Ugurlabs" />

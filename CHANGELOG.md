@@ -6,6 +6,18 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.5] - 2026-05-19
+
+### Added
+
 - **Privacy policy page at `/privacy`.** Honest, plain-language policy covering MSAL token storage in OS keychain, Microsoft Graph data handling on-device, local-vs-hosted LLM provider behavior, no-telemetry stance, and the waitlist-only data the marketing site collects. Maintainer contact is `support@ugurlabs.com`. Linked from the homepage footer. Required for Microsoft Store submission and for the desktop app's eventual in-app About link.
 - **Terms of use page at `/terms`.** One-page terms covering MIT-license as-is/no-warranty disclaimer, user responsibility for tenant authorization and write-agent diff approval, third-party services (Microsoft Graph + the user's LLM provider) being governed by their own terms, acceptable use, and a pointer back to the privacy policy. Linked from the homepage footer.
 - **Sitemap and robots.txt for the marketing site.** New `web/src/app/sitemap.ts` and `web/src/app/robots.ts` using Next.js App Router metadata routes. Sitemap lists `/`, `/privacy`, and `/terms`; robots allows everything except `/api/` and points crawlers at the sitemap. Makes the legal pages discoverable to search engines and to Microsoft's Store-submission crawlers.

@@ -4,7 +4,7 @@
 
 Run AI agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected. Every agent ships its full pipeline as YAML — no opaque code paths, no hidden Graph calls.
 
-> Pre-1.0. v0.1.4 ships the desktop surface end-to-end against local Ollama. Hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), LM Studio, signed installers, and the GitHub-hosted agent registry land in v0.2. Star the repo to follow along.
+> Pre-1.0. v0.1.5 ships the desktop surface end-to-end against local Ollama. Hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), LM Studio, signed installers, and the GitHub-hosted agent registry land in v0.2. Star the repo to follow along.
 
 ---
 
@@ -72,7 +72,7 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 
 ### What's shipped vs what's coming
 
-| | v0.1.4 | v0.2 |
+| | v0.1.5 | v0.2 |
 |---|---|---|
 | Tenant connect (read) | yes (MSAL interactive) | — |
 | Real Graph writes | live POSTs after typed-phrase diff confirm | additional write surface (assignment changes, policy edits) |
