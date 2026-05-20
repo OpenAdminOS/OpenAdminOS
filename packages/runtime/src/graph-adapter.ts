@@ -40,10 +40,21 @@ const MANAGED_DEVICE_SELECT = [
 ];
 
 export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
-  const baseUrl = options.baseUrl ?? "https://graph.microsoft.com/v1.0";
+  // Default to the beta endpoint everywhere. Beta supports the
+  // advanced-query filters that the investigator agents
+  // (sign-in-failure-explainer, risky-sign-in-triage,
+  // conditional-access-explainer, secure-score-prioritizer) lean on,
+  // and is dramatically faster than v1.0 for /auditLogs/* with
+  // $filter+$orderby. Risk: beta endpoints can change without notice.
+  // Acceptable trade for the v0.2 preview; revisit when Microsoft
+  // promotes the relevant resources to v1.0 with full query parity.
+  const baseUrl = options.baseUrl ?? "https://graph.microsoft.com/beta";
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxRetries = options.maxRetries ?? 3;
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  // 60s default: audit-log and sign-in queries on real tenants
+  // routinely take 30-45s. Agents that need shorter timeouts can
+  // pass `timeoutMs` explicitly when constructing the adapter.
+  const timeoutMs = options.timeoutMs ?? 60_000;
 
   return {
     async listManagedDevices(): Promise<ManagedDeviceRecord[]> {

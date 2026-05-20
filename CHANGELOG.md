@@ -16,6 +16,8 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- runtime: default Graph endpoint switched from `v1.0` to `beta`. v1.0 routinely returns timeouts on `/auditLogs/signIns` and `/auditLogs/directoryAudits` with `$filter+$orderby`; beta handles the same queries in seconds and exposes the richer payloads several investigator agents lean on (sign-in risk detail, conditional-access policy interactions, secure-score control profiles). Trade-off: beta endpoints can change without notice — acceptable for v0.2 preview; revisit when Microsoft promotes the relevant resources to v1.0 with full query parity.
+- runtime: Graph request timeout raised from 30s to 60s. Real-tenant audit-log queries on large tenants legitimately take 30-45s; the 30s default was producing false "timed out" failures that masked normal Graph latency. Agents needing tighter bounds can pass `timeoutMs` explicitly to `createGraphAdapter`.
 - docs: SPEC.md §2 Registry model rewritten — the OpenAgents repo is now the registry. App binary ships with zero agents and fetches `/agents/index.json` from the repo at runtime; cache-on-first-fetch lifecycle; per-agent `minAppVersion` gate; forkable registry source for enterprises.
 - docs: tasks/todo.md gains a v0.2 block — repo-as-registry plumbing, DSL extensions (parallel/named graph steps, multi-input LLM, `map`), new synthetic fixtures, and the bundled agent overhaul (investigator / advisor / cleanup tiers; existing read-only agents demoted to a new "Dashboards" tier).
 
