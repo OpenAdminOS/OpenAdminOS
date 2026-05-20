@@ -439,14 +439,6 @@ function TenantRow({
                 <IconCheck size={10} /> Active
               </Pill>
             )}
-            {tierLabel && (
-              <span
-                className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-                title="Detected from /subscribedSkus."
-              >
-                {tierLabel}
-              </span>
-            )}
           </div>
           <div className="mt-1 text-[12.5px] text-[var(--color-text-soft)]">
             {tenant.username}
@@ -454,16 +446,28 @@ function TenantRow({
           <div className="mt-1 font-mono text-[10.5px] text-[var(--color-text-muted)]">
             tenant-id: {tenant.id}
           </div>
-          {licenses.length > 0 && (
+          {(licenses.length > 0 || tierLabel) && (
             <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
-              <div className="mb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                Licenses
+              <div className="mb-1.5 flex items-center gap-2">
+                <span className="text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                  Licenses
+                </span>
+                {tierLabel && (
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                    title="Detected from /subscribedSkus."
+                  >
+                    {tierLabel}
+                  </span>
+                )}
               </div>
-              <ul className="space-y-0.5 text-[12px] text-[var(--color-text-soft)]">
-                {licenses.map((license) => (
-                  <li key={license.skuPartNumber}>{license.displayName}</li>
-                ))}
-              </ul>
+              {licenses.length > 0 && (
+                <ul className="space-y-0.5 text-[12px] text-[var(--color-text-soft)]">
+                  {licenses.map((license) => (
+                    <li key={license.skuPartNumber}>{license.displayName}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
         </div>
