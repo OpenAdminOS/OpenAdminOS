@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# conditional-access-explainer — loads every Conditional Access policy
+# in the tenant and asks the LLM to explain what they do, where they
+# overlap, and what's missing relative to common baselines. CA policy
+# interaction is famously hard to reason about deterministically; this
+# is the canonical "advisor" agent.
+descriptor:
+  id: conditional-access-explainer
+  name: Conditional Access explainer
+  description: Reads every CA policy in the tenant and produces a plain-English explanation of what they do, where they overlap, and what's missing.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: policies
+  tier: agent
+  mode: read
+  preferredModel: llama3.1:8b
+
+skills:
+  - id: load_policies
+    format: graph
+    label: Load all Conditional Access policies
+    detail: Reads every CA policy in the tenant via Microsoft Graph.
+    settings:
+      method: GET
+      path: /identity/conditionalAccess/policies
+      select:
+        - id
+        - displayName
+        - state
+        - conditions
+        - grantControls
+        - sessionControls
+      scopes:
+        - Policy.Read.All
+
+  - id: by_state
+    format: transform
+    label: Count policies by state
+    settings:
+      kind: count-by-field
+      source: "{{ load_policies.output }}"
+      field: state
+
+  - id: explain
+    format: llm
+    label: Explain the CA posture
+    detail: Plain-English walkthrough of the policy set with gaps flagged.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are an Entra Conditional Access expert. Be concise and
+        factual. Never invent policies or controls — only describe the
+        ones you are given. When you flag a gap, say which Microsoft
+        Zero Trust baseline (legacy authentication block, MFA for
+        admins, device compliance for managed apps) it relates to.
+      prompt: |-
+        The tenant has {{ load_policies.output | size }} CA policies
+        ({{ by_state.output }}).
+
+        Full policy set (JSON):
+        {{ load_policies.output }}
+
+        Write three short sections:
+
+        1. **What's covered.** Group the policies by what they protect
+           (admin sign-in, all users, specific apps, etc.) and describe
+           each group in one sentence.
+
+        2. **Interactions to watch.** Highlight any pair of policies
+           whose conditions overlap, where the combined effect may be
+           surprising (e.g., two MFA policies with different grant
+           controls, or an exclusion in one policy that's not mirrored
+           in another).
+
+        3. **Common gaps.** List up to three items missing relative to
+           the Microsoft Zero Trust baseline.
+      temperature: 0.2
+      maxTokens: 700
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ explain.output.text | default("LLM unavailable — see structured data for the policy list.") }}'
+    data:
+      total: "{{ load_policies.output | size }}"
+      byState: "{{ by_state.output }}"
+      llmModel: "{{ explain.output.model }}"

@@ -605,6 +605,39 @@ The detailed phased plan to reach these acceptance criteria lives in `tasks/todo
 
 ---
 
+## 5b. Bundled agent philosophy
+
+The agents that ship in this repo are the platform's first impression. If they read like "PowerShell with an LLM blurb tacked on" — *count rows, summarise the count* — the platform looks redundant. So the bundled set is organised around a tiering decision that's load-bearing for the trust story.
+
+### Three tiers
+
+1. **Investigators** (`tier: agent`, `mode: read`, multi-source). The killer category. Correlate two or more Graph sources and let the LLM reason about the combination. Examples: `sign-in-failure-explainer` clusters failures by root cause; `risky-sign-in-triage` classifies each Identity Protection alert with per-item reasoning; `tenant-change-audit` separates routine audit entries from noteworthy ones. No script can produce these outputs.
+
+2. **Advisors** (`tier: agent`, `mode: read`, posture/policy reasoning). Take a complex policy set or scoring catalogue and produce judgment. Examples: `conditional-access-explainer` reads every CA policy and explains interactions/gaps in plain English; `secure-score-prioritizer` ranks recommendations by tenant shape and effort; `dormant-app-registrations` clusters app registrations by likely purpose with keep/review/delete recommendations.
+
+3. **Cleanup with judgment** (`tier: agent`, `mode: write`). Multi-criteria reasoning *before* the diff confirmation. The LLM produces per-item rationale that lands in the diff modal so the typed confirmation is something the admin can actually approve in good conscience. Example: `stale-guest-cleanup` filters guests by inactivity, generates a one-line per-guest rationale, and disables on confirmation. Pairs an investigator's selection logic with a write action's deliberate gating.
+
+### Dashboards are not agents
+
+Single-source LLM-narrated reports (`compliance-overview`, `os-update-posture`, `tenant-health-report`, `user-license-overview`) ship under `tier: dashboard`. They're honestly useful — they're not honestly *agents*. Demoting them keeps the bar clear: an agent has to reason, not just narrate. Agent Hub renders Agents and Dashboards as two separate top-level filters; nothing crosses the line by accident.
+
+### Why the bar matters
+
+Anyone evaluating the platform looks at the bundled agents first. If the front page is dashboards, the verdict is "fancier Get-MgUser." If the front page is investigators that correlate sign-in logs with CA policies and tell you which user's failure is the CA misconfiguration, the verdict is "this could replace a chunk of my morning." Tiering enforces that verdict.
+
+### The DSL needed to support investigators
+
+Three step kinds carry the bundled investigators today:
+
+- **`graph`** — load one or more Graph endpoints into named outputs.
+- **`transform`** — reshape (count-by-field, filter-by-age, group-by-field, sort-by). Single source per transform; multiple transforms stacked is how multi-source correlation gets expressed today (each transform reads from a prior step by id).
+- **`llm`** — read any subset of prior step outputs via the templating engine. Multi-input reasoning is achieved through the template, not a separate `inputs:` block.
+- **`map`** *(new in v0.2)* — iterate a source array and run an inner sub-pipeline per item. This is the step that enables per-item LLM reasoning (risky-sign-in triage classifies each entry individually with shared context). The map step's output is the array of last-sub-step outputs from each iteration.
+
+Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent that needs *correlation across sources* stacks graph + transform + llm with template references.
+
+---
+
 ## 5. Pre-release roadmap
 
 ### Critical (blocks v1.0)

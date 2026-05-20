@@ -35,10 +35,11 @@ export async function runAgentChecks(
 }
 
 function checkAgentUsesLlm(agent: AgentManifest): CheckResult {
-  let parsed: { skills?: Array<{ format?: string; id?: string }> };
+  type Skill = { format?: string; id?: string; settings?: { do?: Skill[] } };
+  let parsed: { skills?: Skill[] };
   try {
     const raw = readFileSync(agent.manifestPath, "utf8");
-    parsed = parseYaml(raw) as { skills?: Array<{ format?: string; id?: string }> };
+    parsed = parseYaml(raw) as { skills?: Skill[] };
   } catch (error) {
     return {
       name: "uses-llm",
@@ -48,9 +49,18 @@ function checkAgentUsesLlm(agent: AgentManifest): CheckResult {
       }`,
     };
   }
-  const skills = Array.isArray(parsed?.skills) ? parsed.skills : [];
-  const llmSteps = skills.filter((skill) => skill?.format === "llm");
-  if (llmSteps.length === 0) {
+  let count = 0;
+  const walk = (list: Skill[] | undefined): void => {
+    if (!Array.isArray(list)) return;
+    for (const skill of list) {
+      if (skill?.format === "llm") count++;
+      if (skill?.format === "map" && Array.isArray(skill?.settings?.do)) {
+        walk(skill.settings.do);
+      }
+    }
+  };
+  walk(parsed?.skills);
+  if (count === 0) {
     return {
       name: "uses-llm",
       severity: "fail",
@@ -61,9 +71,7 @@ function checkAgentUsesLlm(agent: AgentManifest): CheckResult {
   return {
     name: "uses-llm",
     severity: "pass",
-    message: `Agent invokes the LLM in ${llmSteps.length} step${
-      llmSteps.length === 1 ? "" : "s"
-    }.`,
+    message: `Agent invokes the LLM in ${count} step${count === 1 ? "" : "s"}.`,
   };
 }
 
@@ -83,6 +91,7 @@ async function checkScopesAreKnown(
 
   const failures: string[] = [];
   for (const scope of agent.scopes) {
+    if (WELL_KNOWN_GRAPH_SCOPES.has(scope)) continue;
     const known = await client.scopeIsKnown(scope);
     if (!known) {
       failures.push(scope);
@@ -108,6 +117,47 @@ async function checkScopesAreKnown(
     },
   ];
 }
+
+/**
+ * Allow-list of Graph scopes that the merill/msgraph FTS index does
+ * not surface from per-endpoint permission docs but are documented and
+ * load-bearing for several agents. Adding to this list is a tool-gap
+ * workaround, not an invitation to use scopes loosely — every entry
+ * here should be linkable to Microsoft's official Graph permissions
+ * reference.
+ */
+/**
+ * Allow-list of Graph endpoints that the merill/msgraph OpenAPI search
+ * doesn't return cleanly for collection-level paths (e.g. `/users`)
+ * but are absolutely valid. Same rationale as WELL_KNOWN_GRAPH_SCOPES.
+ */
+const WELL_KNOWN_GRAPH_ENDPOINTS = new Set<string>([
+  "GET /users",
+  "PATCH /users/{id}",
+  "GET /applications",
+  "GET /auditLogs/signIns",
+  "GET /auditLogs/directoryAudits",
+  "GET /identity/conditionalAccess/policies",
+  "GET /identityProtection/riskyUsers",
+  "GET /security/secureScoreControlProfiles",
+  "GET /security/secureScores",
+]);
+
+const WELL_KNOWN_GRAPH_SCOPES = new Set<string>([
+  "User.Read.All",
+  "User.ReadWrite.All",
+  "Directory.Read.All",
+  "Directory.ReadWrite.All",
+  "AuditLog.Read.All",
+  "Policy.Read.All",
+  "SecurityEvents.Read.All",
+  "IdentityRiskyUser.Read.All",
+  "Application.Read.All",
+  "Application.ReadWrite.All",
+  "DeviceManagementManagedDevices.Read.All",
+  "DeviceManagementManagedDevices.PrivilegedOperations.All",
+  "DeviceManagementConfiguration.Read.All",
+]);
 
 interface OperationCheckResult {
   results: CheckResult[];
@@ -146,6 +196,15 @@ async function checkOperationsExist(
 
   for (const op of agent.graphOperations) {
     const key = `${op.method} ${op.path}`;
+    if (WELL_KNOWN_GRAPH_ENDPOINTS.has(key)) {
+      endpointDocs.set(key, undefined);
+      results.push({
+        name: "operation-exists",
+        severity: "pass",
+        message: `${key} accepted via well-known allow-list (tool-index gap).`,
+      });
+      continue;
+    }
     const resolved = await client.resolveOperation(op.path, op.method);
     if (!resolved.doc && !resolved.openapi) {
       results.push({

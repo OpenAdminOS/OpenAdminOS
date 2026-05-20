@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# dormant-app-registrations — reads the tenant's app registrations and
+# asks the LLM to group them by likely purpose (production, lab, dead
+# pilot) so the admin can act on whole groups instead of opening each
+# one in the portal.
+descriptor:
+  id: dormant-app-registrations
+  name: Dormant app registrations
+  description: Reads tenant app registrations, groups them by likely purpose, and recommends keep/disable/delete per group with reasoning.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: apps
+  tier: agent
+  mode: read
+  preferredModel: llama3.1:8b
+
+skills:
+  - id: load_apps
+    format: graph
+    label: Load app registrations
+    detail: Reads the tenant's app registrations from Microsoft Graph.
+    settings:
+      method: GET
+      path: /applications
+      query:
+        $top: "200"
+      select:
+        - id
+        - appId
+        - displayName
+        - createdDateTime
+        - publisherDomain
+        - signInAudience
+        - tags
+        - description
+        - identifierUris
+      scopes:
+        - Application.Read.All
+
+  - id: by_audience
+    format: transform
+    label: Count by sign-in audience
+    settings:
+      kind: count-by-field
+      source: "{{ load_apps.output }}"
+      field: signInAudience
+
+  - id: cluster
+    format: llm
+    label: Cluster apps by likely purpose
+    detail: Three-to-five groups with keep/disable/delete recommendations.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are an Entra app registration auditor. Be concise and
+        factual. Never invent apps or counts. Default to *keep* when
+        you can't tell — destructive defaults are wrong here. Be
+        explicit when you can't classify a group ("review individually").
+      prompt: |-
+        The tenant has {{ load_apps.output | size }} app registrations.
+        Audience breakdown: {{ by_audience.output }}.
+
+        Full app list (JSON):
+        {{ load_apps.output }}
+
+        Group these apps into three to five clusters by *likely
+        purpose* (e.g., "in-tenant production integrations", "leftover
+        from migration projects", "individual dev experiments",
+        "vendor-installed", "personal Microsoft accounts test apps").
+
+        For each cluster:
+        1. Cluster name + one-line description.
+        2. Member count.
+        3. Recommendation: `keep`, `review`, `disable`, or `delete`
+           — with a one-sentence reason.
+
+        Finish with a one-line "where to start" pointing at the
+        cluster with the biggest cleanup win.
+      temperature: 0.2
+      maxTokens: 700
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ cluster.output.text | default("LLM unavailable — see structured data for the app list.") }}'
+    data:
+      total: "{{ load_apps.output | size }}"
+      byAudience: "{{ by_audience.output }}"
+      llmModel: "{{ cluster.output.model }}"

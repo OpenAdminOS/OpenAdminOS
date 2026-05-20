@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# risky-sign-in-triage — pulls Entra ID risky sign-ins from the last
+# window and asks the LLM to classify each one (likely-FP /
+# likely-compromise / unclear) with reasoning. Uses the `map` step:
+# one LLM call per risky sign-in lets the model reason about each
+# event in isolation with shared context.
+descriptor:
+  id: risky-sign-in-triage
+  name: Risky sign-in triage
+  description: Per-item classification of recent risky sign-ins as likely false-positive, likely compromise, or unclear — with reasoning.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: policies
+  tier: agent
+  mode: read
+  preferredModel: llama3.1:8b
+
+skills:
+  - id: load_risky
+    format: graph
+    label: Load recent risky sign-ins
+    detail: Reads Entra ID risky sign-in events from the last 7 days.
+    settings:
+      method: GET
+      path: /identityProtection/riskyUsers
+      query:
+        $top: "50"
+        $filter: "riskLevel ne 'none'"
+      select:
+        - id
+        - userPrincipalName
+        - userDisplayName
+        - riskLevel
+        - riskState
+        - riskDetail
+        - riskLastUpdatedDateTime
+      scopes:
+        - IdentityRiskyUser.Read.All
+
+  - id: triage_each
+    format: map
+    label: Triage each risky user individually
+    detail: One LLM call per user; classifies and explains.
+    settings:
+      source: "{{ load_risky.output }}"
+      as: subject
+      limit: 20
+      do:
+        - id: classify
+          format: llm
+          label: Classify this risky sign-in
+          when: ctx.llm.available
+          settings:
+            system: >-
+              You are an Entra Identity Protection analyst. Be concise
+              and conservative. Never invent details. Classify each
+              risky-user event as one of: `likely-false-positive`,
+              `likely-compromise`, or `unclear-needs-review`. Default
+              to `unclear-needs-review` when signals are ambiguous.
+            prompt: |-
+              Risky user event:
+              - User: {{ subject.userPrincipalName }}
+              - Risk level: {{ subject.riskLevel }}
+              - Risk state: {{ subject.riskState }}
+              - Risk detail: {{ subject.riskDetail }}
+              - Last updated: {{ subject.riskLastUpdatedDateTime }}
+
+              Return three short lines:
+              1. `classification: <likely-false-positive | likely-compromise | unclear-needs-review>`
+              2. `reasoning: <one short sentence>`
+              3. `next-step: <dismiss | confirm-compromise | review | reset-credentials-and-revoke>`
+            temperature: 0.1
+            maxTokens: 120
+
+  - id: summarize
+    format: llm
+    label: Roll up triage results
+    detail: Two-sentence executive summary of the batch.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are an Entra security analyst. Be concise, factual, and
+        avoid alarm. Two sentences max. Never invent counts.
+      prompt: |-
+        Out of {{ load_risky.output | size }} risky-user events,
+        the per-item triage produced these classifications:
+        {{ triage_each.output }}
+
+        Write two sentences: (a) what the batch looks like overall
+        (mostly FP, mixed, or concerning), (b) the one thing the
+        admin should do next.
+      temperature: 0.2
+      maxTokens: 240
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ summarize.output.text | default("LLM unavailable — per-item structured triage in data.byItem.") }}'
+    data:
+      total: "{{ load_risky.output | size }}"
+      byItem: "{{ triage_each.output }}"
+      llmModel: "{{ summarize.output.model }}"

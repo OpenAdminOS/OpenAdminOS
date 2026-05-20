@@ -6,6 +6,12 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- agents: seven new bundled agents covering investigator, advisor, and cleanup tiers — `tenant-change-audit`, `conditional-access-explainer`, `secure-score-prioritizer`, `sign-in-failure-explainer`, `risky-sign-in-triage`, `stale-guest-cleanup` (write, supersedes the deleted `disable-inactive-guests`), `dormant-app-registrations`.
+- runtime: new `format: map` step kind that iterates a source array and runs an inner sub-pipeline per item. Enables per-item LLM reasoning (used by `risky-sign-in-triage`). Schema, parser, executor, scope/operation walkers, and QA `uses-llm` check are all map-aware.
+- schemas: `graphSkill.settings` now formally allows `query` and `headers` objects, matching the TypeScript contract that has supported them since v0.1.
+- qa-graph: well-known scope and endpoint allow-lists for entries the merill/msgraph FTS index doesn't surface (e.g. `Directory.Read.All`, `User.ReadWrite.All`, `GET /users`). Documented as tool-gap workarounds, not as license to use scopes loosely.
+- docs: SPEC.md §5b — the bundled-agent philosophy (investigator / advisor / cleanup-with-judgment tiers; dashboards as a separate tier; the DSL pieces that make investigators expressible).
+
 ### Changed
 
 - docs: SPEC.md §2 Registry model rewritten — the OpenAgents repo is now the registry. App binary ships with zero agents and fetches `/agents/index.json` from the repo at runtime; cache-on-first-fetch lifecycle; per-agent `minAppVersion` gate; forkable registry source for enterprises.

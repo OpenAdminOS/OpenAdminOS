@@ -12,6 +12,7 @@ import type {
   GraphStep,
   LlmStep,
   ManagedDeviceRecord,
+  MapStep,
   ReadAgentModule,
   RunContext,
   AgentTemplate,
@@ -159,6 +160,9 @@ function validateSkill(skill: Record<string, unknown>, path: string): TemplateSt
       return skill as unknown as TransformStep;
     case "llm":
       return skill as unknown as LlmStep;
+    case "map":
+      validateMapStepSettings(settings as Record<string, unknown>, `${path}.settings`);
+      return skill as unknown as MapStep;
     case "write":
       validateWriteStepSettings(settings as Record<string, unknown>, `${path}.settings`);
       return skill as unknown as WriteStep;
@@ -170,6 +174,32 @@ function validateSkill(skill: Record<string, unknown>, path: string): TemplateSt
         `${path}.format`,
         `unknown format: ${JSON.stringify(skill.format)}`,
       );
+  }
+}
+
+function validateMapStepSettings(
+  settings: Record<string, unknown>,
+  path: string,
+): void {
+  if (typeof settings.source !== "string" || settings.source.length === 0) {
+    throw new ManifestValidationError(`${path}.source`, "must be a non-empty string");
+  }
+  if (typeof settings.as !== "string" || !/^[a-z][a-z0-9_]*$/.test(settings.as)) {
+    throw new ManifestValidationError(`${path}.as`, "must be a lowercase identifier (e.g. 'row')");
+  }
+  if (!Array.isArray(settings.do) || settings.do.length === 0) {
+    throw new ManifestValidationError(`${path}.do`, "must be a non-empty array of skills");
+  }
+  for (const [i, sub] of (settings.do as unknown[]).entries()) {
+    if (!sub || typeof sub !== "object" || Array.isArray(sub)) {
+      throw new ManifestValidationError(`${path}.do[${i}]`, "must be a skill object");
+    }
+    validateSkill(sub as Record<string, unknown>, `${path}.do[${i}]`);
+  }
+  if (settings.limit !== undefined) {
+    if (typeof settings.limit !== "number" || settings.limit < 1 || !Number.isInteger(settings.limit)) {
+      throw new ManifestValidationError(`${path}.limit`, "must be a positive integer");
+    }
   }
 }
 
@@ -627,6 +657,8 @@ async function runSkill(
       return runTransformSkill(skill, ctx, templateCtx);
     case "llm":
       return runLlmSkill(skill, ctx, templateCtx);
+    case "map":
+      return runMapSkill(skill, ctx, templateCtx);
     case "connector":
       return runConnectorSkill(skill, ctx, templateCtx);
     case "write":
@@ -639,6 +671,57 @@ async function runSkill(
       throw new Error(`Unsupported skill format: ${JSON.stringify(exhaustive)}`);
     }
   }
+}
+
+/**
+ * Iterate the resolved `source` array. For each item, run the inner
+ * pipeline in a fresh child pipeline state seeded from the outer
+ * template context plus the item binding. Collect each iteration's
+ * final-step output into this map step's own output array. When `limit`
+ * is set, items beyond the cap are skipped silently — the per-row
+ * outputs array length and any consumer's `size` filter both reflect
+ * the actual processed count.
+ */
+async function runMapSkill(
+  skill: MapStep,
+  ctx: RunContext,
+  templateCtx: () => TemplateContext,
+): Promise<unknown[]> {
+  const source = renderTemplate(skill.settings.source, templateCtx());
+  if (!Array.isArray(source)) {
+    throw new Error(
+      `map step "${skill.id}": settings.source did not resolve to an array (got ${typeof source}).`,
+    );
+  }
+  const limit = skill.settings.limit;
+  const items = typeof limit === "number" ? source.slice(0, limit) : source;
+  const as = skill.settings.as;
+  const results: unknown[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const childPipeline: PipelineState = {};
+    const childTemplateCtx = (): TemplateContext => ({
+      ...templateCtx(),
+      [as]: item,
+      ...childPipeline,
+    });
+    let lastOutput: unknown = undefined;
+    for (const sub of skill.settings.do) {
+      const out = await runSkill(sub, ctx, childTemplateCtx);
+      childPipeline[sub.id] = { output: out };
+      lastOutput = out;
+    }
+    results.push(lastOutput);
+  }
+
+  if (typeof limit === "number" && source.length > limit) {
+    ctx.log(
+      "info",
+      `map step "${skill.id}" processed ${limit} of ${source.length} item(s); the rest were skipped by settings.limit.`,
+    );
+  }
+  return results;
 }
 
 async function runConnectorSkill(
@@ -1141,9 +1224,18 @@ function buildWriteAgentModule(manifest: AgentTemplate): WriteAgentModule {
   } as WriteAgentModule;
 }
 
+function walkSkills(skills: TemplateStep[], visit: (skill: TemplateStep) => void): void {
+  for (const skill of skills) {
+    visit(skill);
+    if (skill.format === "map") {
+      walkSkills(skill.settings.do, visit);
+    }
+  }
+}
+
 function collectScopes(manifest: AgentTemplate): string[] {
   const scopes = new Set<string>();
-  for (const skill of manifest.skills) {
+  walkSkills(manifest.skills, (skill) => {
     if (skill.format === "graph") {
       for (const scope of skill.settings.scopes ?? []) {
         scopes.add(scope);
@@ -1153,14 +1245,14 @@ function collectScopes(manifest: AgentTemplate): string[] {
         scopes.add(scope);
       }
     }
-  }
+  });
   return [...scopes];
 }
 
 function collectGraphOperations(manifest: AgentTemplate): GraphOperation[] {
   const operations: GraphOperation[] = [];
-  for (const skill of manifest.skills) {
-    if (skill.format !== "graph") continue;
+  walkSkills(manifest.skills, (skill) => {
+    if (skill.format !== "graph") return;
     const op: GraphOperation = {
       method: skill.settings.method,
       path: skill.settings.path,
@@ -1172,7 +1264,7 @@ function collectGraphOperations(manifest: AgentTemplate): GraphOperation[] {
       op.notes = skill.detail;
     }
     operations.push(op);
-  }
+  });
   return operations;
 }
 

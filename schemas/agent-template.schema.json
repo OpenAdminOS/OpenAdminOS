@@ -114,6 +114,7 @@
         { "$ref": "#/$defs/graphSkill" },
         { "$ref": "#/$defs/transformSkill" },
         { "$ref": "#/$defs/llmSkill" },
+        { "$ref": "#/$defs/mapSkill" },
         { "$ref": "#/$defs/writeSkill" },
         { "$ref": "#/$defs/connectorSkill" }
       ]
@@ -163,6 +164,16 @@
                 "select": {
                   "type": "array",
                   "items": { "type": "string" }
+                },
+                "query": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "Extra OData query parameters (e.g. `$filter`, `$top`, `$orderby`). String values only — numbers and booleans must be quoted at the YAML layer."
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "Extra request headers (e.g. `ConsistencyLevel: eventual` for advanced query usage)."
                 },
                 "scopes": {
                   "type": "array",
@@ -238,6 +249,49 @@
                 "prompt": { "type": "string" },
                 "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
                 "maxTokens": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "mapSkill": {
+      "allOf": [
+        { "$ref": "#/$defs/skillBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "label": true,
+            "detail": true,
+            "format": { "const": "map" },
+            "settings": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "as", "do"],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "description": "Liquid expression resolving to an array. The `do` sub-pipeline runs once per item."
+                },
+                "as": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$",
+                  "description": "Variable name the current item is bound to inside `do`. Available as `{{ <as>.field }}`."
+                },
+                "do": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "$ref": "#/$defs/skill" },
+                  "description": "Inner pipeline. Each iteration receives a fresh context with `as` bound to the current item. The final step's output is collected into this skill's output array."
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Optional cap on the number of items processed (LLM-cost guard). Items beyond the cap are skipped silently and counted in result metadata."
+                }
               }
             }
           }

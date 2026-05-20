@@ -1,0 +1,114 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# sign-in-failure-explainer — pulls recent failed sign-ins from the
+# tenant and asks the LLM to cluster them by likely root cause. The
+# value is the *grouping*: 200 failures, 80% are the same error code
+# for the same app, vs. 200 failures spread across 50 different causes
+# — that's the difference between a known issue and a fire.
+descriptor:
+  id: sign-in-failure-explainer
+  name: Sign-in failure explainer
+  description: Pulls recent failed sign-ins and groups them by likely root cause, with reasoning for each cluster.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: policies
+  tier: agent
+  mode: read
+  preferredModel: llama3.1:8b
+
+skills:
+  - id: load_failures
+    format: graph
+    label: Load recent failed sign-ins
+    detail: Reads sign-in failures from the last 24 hours.
+    settings:
+      method: GET
+      path: /auditLogs/signIns
+      query:
+        $filter: "status/errorCode ne 0"
+        $top: "200"
+        $orderby: createdDateTime desc
+      select:
+        - id
+        - createdDateTime
+        - userPrincipalName
+        - appDisplayName
+        - status
+        - clientAppUsed
+        - ipAddress
+        - location
+        - conditionalAccessStatus
+      scopes:
+        - AuditLog.Read.All
+
+  - id: by_error
+    format: transform
+    label: Count failures by error code
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: status.errorCode
+
+  - id: by_app
+    format: transform
+    label: Count failures by app
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: appDisplayName
+
+  - id: by_user
+    format: transform
+    label: Count failures by user
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: userPrincipalName
+
+  - id: explain
+    format: llm
+    label: Cluster failures by likely root cause
+    detail: Top-three clusters with reasoning and triage suggestion.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are an Entra sign-in investigator. Be concise and factual.
+        Never invent error codes or counts — only reference the
+        figures you are given. Group failures by *root cause*, not
+        just by error code (e.g. "CA policy requires compliant
+        device" combines AADSTS53000 + AADSTS53003). Be conservative
+        about claiming compromise — most failures are not malicious.
+      prompt: |-
+        {{ load_failures.output | size }} sign-in failures in the
+        last 24 hours.
+
+        Top error codes: {{ by_error.output }}
+        Top apps: {{ by_app.output }}
+        Top users: {{ by_user.output }}
+
+        Identify up to three clusters by likely root cause. For each:
+        (a) one-line description of the root cause, (b) which users
+        and apps are affected, (c) the recommended triage step
+        ("ignore — known issue", "user education", "check device
+        compliance posture", "review CA policy", "escalate to IR").
+
+        If the failures don't cluster cleanly (e.g. all distinct
+        causes), say so honestly.
+      temperature: 0.2
+      maxTokens: 600
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ explain.output.text | default("LLM unavailable — see structured data for raw failure counts.") }}'
+    data:
+      total: "{{ load_failures.output | size }}"
+      byError: "{{ by_error.output }}"
+      byApp: "{{ by_app.output }}"
+      byUser: "{{ by_user.output }}"
+      llmModel: "{{ explain.output.model }}"

@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# secure-score-prioritizer — pulls Secure Score control profiles and
+# asks the LLM to rank the unimplemented controls by impact/effort.
+# The Secure Score portal lists everything; the value here is the
+# triage that turns 200 recommendations into a prioritized week.
+descriptor:
+  id: secure-score-prioritizer
+  name: Secure Score prioritizer
+  description: Ranks unimplemented Microsoft Secure Score controls by likely impact and effort for this tenant.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: policies
+  tier: agent
+  mode: read
+  preferredModel: llama3.1:8b
+
+skills:
+  - id: load_controls
+    format: graph
+    label: Load Secure Score control profiles
+    detail: Reads the catalogue of Secure Score controls available on the tenant.
+    settings:
+      method: GET
+      path: /security/secureScoreControlProfiles
+      select:
+        - id
+        - title
+        - controlCategory
+        - maxScore
+        - actionType
+        - implementationCost
+        - userImpact
+        - threats
+        - rank
+        - remediation
+      scopes:
+        - SecurityEvents.Read.All
+
+  - id: by_category
+    format: transform
+    label: Count controls by category
+    settings:
+      kind: count-by-field
+      source: "{{ load_controls.output }}"
+      field: controlCategory
+
+  - id: prioritize
+    format: llm
+    label: Rank recommendations
+    detail: Top-five list with reasoning and effort estimates.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are a Microsoft 365 security advisor. Be concise and
+        factual. Never invent controls or scores — only reference the
+        ones you are given. Bias toward low-effort / high-impact items
+        unless something destructive (legacy auth, broad app consent
+        permissions, missing MFA for admins) demands top billing.
+      prompt: |-
+        Here are the Secure Score control profiles available on this
+        tenant ({{ load_controls.output | size }} total, by category:
+        {{ by_category.output }}).
+
+        Full control list (JSON):
+        {{ load_controls.output }}
+
+        Pick the top five controls to prioritise this quarter. For
+        each: (a) the control title in one line, (b) why it matters
+        for this tenant in one sentence, (c) effort estimate (low /
+        medium / high) and the rough work — "config-only", "rollout
+        coordination needed", "policy authoring".
+
+        Finish with a one-line "where to start tomorrow morning".
+      temperature: 0.2
+      maxTokens: 700
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ prioritize.output.text | default("LLM unavailable — see structured data for the full control list.") }}'
+    data:
+      total: "{{ load_controls.output | size }}"
+      byCategory: "{{ by_category.output }}"
+      llmModel: "{{ prioritize.output.model }}"

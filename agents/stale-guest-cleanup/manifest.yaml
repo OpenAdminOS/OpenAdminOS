@@ -1,0 +1,113 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# stale-guest-cleanup — supersedes the deleted `disable-inactive-guests`.
+# Reads guest users, filters by sign-in age (90+ days idle), and for
+# each candidate the LLM produces a one-line rationale that ends up in
+# the diff confirmation. Disable is a typed-confirmation write step.
+descriptor:
+  id: stale-guest-cleanup
+  name: Stale guest cleanup
+  description: Surfaces guest accounts that have not signed in for 90+ days, asks the LLM for a per-guest rationale, and disables them after typed diff confirmation.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: policies
+  tier: agent
+  mode: write
+  preferredModel: llama3.1:8b
+
+skills:
+  - id: load_guests
+    format: graph
+    label: Load guest accounts
+    detail: Reads guest users from Microsoft Graph.
+    settings:
+      method: GET
+      path: /users
+      query:
+        $filter: "userType eq 'Guest'"
+        $top: "500"
+      select:
+        - id
+        - displayName
+        - userPrincipalName
+        - mail
+        - accountEnabled
+        - createdDateTime
+        - signInActivity
+        - externalUserState
+      scopes:
+        - User.Read.All
+        - AuditLog.Read.All
+
+  - id: stale
+    format: transform
+    label: Filter to guests idle for 90+ days
+    settings:
+      kind: filter-by-age
+      source: "{{ load_guests.output }}"
+      timestampField: signInActivity.lastSignInDateTime
+      inactiveDaysAtLeast: 90
+
+  - id: rationale_each
+    format: map
+    label: Build a per-guest disable rationale
+    detail: One LLM call per candidate; one-line explanation for the diff modal.
+    settings:
+      source: "{{ stale.output }}"
+      as: guest
+      limit: 50
+      do:
+        - id: reason
+          format: llm
+          label: Explain why this guest should be disabled
+          when: ctx.llm.available
+          settings:
+            system: >-
+              You are a tenant cleanup advisor. Be terse and factual.
+              One short sentence. Never invent dates or facts.
+            prompt: |-
+              Guest {{ guest.displayName }} ({{ guest.userPrincipalName }}),
+              external state: {{ guest.externalUserState }},
+              last sign-in: {{ guest.signInActivity.lastSignInDateTime }},
+              created: {{ guest.createdDateTime }}.
+
+              In one sentence, say why disabling this guest is safe
+              (or note the single thing the admin should check first).
+            temperature: 0.1
+            maxTokens: 80
+
+  - id: disable
+    format: write
+    label: Disable each stale guest
+    settings:
+      kind: graph-write
+      source: "{{ stale.output }}"
+      confirmationPhrase: "DISABLE {{ stale.output | size }} GUESTS"
+      summary: "Disabling {{ stale.output | size }} guest accounts that have not signed in for 90+ days."
+      scopes:
+        - User.ReadWrite.All
+      actionTemplate:
+        label: "Disable {{ item.displayName }} ({{ item.userPrincipalName }})"
+        severity: destructive
+        metadata:
+          userId: "{{ item.id }}"
+          userPrincipalName: "{{ item.userPrincipalName }}"
+        request:
+          method: PATCH
+          path: "/users/{{ item.id }}"
+          body:
+            accountEnabled: false
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: 'Disabled {{ stale.output | size }} guest account(s) that had not signed in for 90+ days.'
+    data:
+      candidates: "{{ stale.output | size }}"
+      totalGuests: "{{ load_guests.output | size }}"
+      perGuestRationale: "{{ rationale_each.output }}"

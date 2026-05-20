@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# tenant-change-audit — investigator that surfaces what *changed* in the
+# tenant recently and asks the LLM to point out the entries that warrant
+# a closer look. A PowerShell script can dump the audit log; only an
+# agent can read the dump and tell you which line matters.
+descriptor:
+  id: tenant-change-audit
+  name: Tenant change audit
+  description: Summarises recent directory audit entries and flags the ones that look unusual for this tenant.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: true
+  category: policies
+  tier: agent
+  mode: read
+  preferredModel: llama3.1:8b
+
+skills:
+  - id: load_audits
+    format: graph
+    label: Load recent directory audit entries
+    detail: Reads the last directory audit events from Microsoft Graph.
+    settings:
+      method: GET
+      path: /auditLogs/directoryAudits
+      query:
+        $top: "100"
+        $orderby: activityDateTime desc
+      select:
+        - id
+        - activityDateTime
+        - activityDisplayName
+        - category
+        - result
+        - initiatedBy
+        - targetResources
+      scopes:
+        - AuditLog.Read.All
+        - Directory.Read.All
+
+  - id: by_activity
+    format: transform
+    label: Count entries by activity
+    settings:
+      kind: count-by-field
+      source: "{{ load_audits.output }}"
+      field: activityDisplayName
+
+  - id: by_category
+    format: transform
+    label: Count entries by category
+    settings:
+      kind: count-by-field
+      source: "{{ load_audits.output }}"
+      field: category
+
+  - id: explain
+    format: llm
+    label: Identify the noteworthy changes
+    detail: Two-paragraph readout — what's routine vs. what should be reviewed.
+    when: ctx.llm.available
+    settings:
+      system: >-
+        You are an Entra/Intune administrator's assistant. Be concise,
+        factual, and conservative. Never invent activities or counts —
+        only use the figures you are given. Highlight entries that look
+        unusual (privileged role changes, new app consents, mass
+        modifications, off-hours admin actions).
+      prompt: |-
+        Last {{ load_audits.output | size }} directory audit entries.
+
+        By activity: {{ by_activity.output }}
+        By category: {{ by_category.output }}
+
+        Write two short paragraphs. First paragraph: the routine
+        baseline (the high-frequency, low-risk activities). Second
+        paragraph: the entries that warrant a closer look and why.
+        End with a one-line recommendation.
+      temperature: 0.2
+      maxTokens: 360
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ explain.output.text | default("LLM unavailable — see structured data for the per-activity counts.") }}'
+    data:
+      total: "{{ load_audits.output | size }}"
+      byActivity: "{{ by_activity.output }}"
+      byCategory: "{{ by_category.output }}"
+      llmModel: "{{ explain.output.model }}"

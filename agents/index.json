@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-05-20T15:20:37.535Z",
+  "generatedAt": "2026-05-20T15:37:47.021Z",
   "agents": [
     {
       "id": "compliance-overview",
@@ -21,6 +21,46 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/compliance-overview/manifest.yaml"
+    },
+    {
+      "id": "conditional-access-explainer",
+      "slug": "conditional-access-explainer",
+      "name": "Conditional Access explainer",
+      "description": "Reads every CA policy in the tenant and produces a plain-English explanation of what they do, where they overlap, and what's missing.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "policies",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "Policy.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/conditional-access-explainer/manifest.yaml"
+    },
+    {
+      "id": "dormant-app-registrations",
+      "slug": "dormant-app-registrations",
+      "name": "Dormant app registrations",
+      "description": "Reads tenant app registrations, groups them by likely purpose, and recommends keep/disable/delete per group with reasoning.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "apps",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "Application.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/dormant-app-registrations/manifest.yaml"
     },
     {
       "id": "find-inactive-devices",
@@ -82,6 +122,109 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/retire-inactive-devices/manifest.yaml"
+    },
+    {
+      "id": "risky-sign-in-triage",
+      "slug": "risky-sign-in-triage",
+      "name": "Risky sign-in triage",
+      "description": "Per-item classification of recent risky sign-ins as likely false-positive, likely compromise, or unclear — with reasoning.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "policies",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "IdentityRiskyUser.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/risky-sign-in-triage/manifest.yaml"
+    },
+    {
+      "id": "secure-score-prioritizer",
+      "slug": "secure-score-prioritizer",
+      "name": "Secure Score prioritizer",
+      "description": "Ranks unimplemented Microsoft Secure Score controls by likely impact and effort for this tenant.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "policies",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "SecurityEvents.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/secure-score-prioritizer/manifest.yaml"
+    },
+    {
+      "id": "sign-in-failure-explainer",
+      "slug": "sign-in-failure-explainer",
+      "name": "Sign-in failure explainer",
+      "description": "Pulls recent failed sign-ins and groups them by likely root cause, with reasoning for each cluster.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "policies",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "AuditLog.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/sign-in-failure-explainer/manifest.yaml"
+    },
+    {
+      "id": "stale-guest-cleanup",
+      "slug": "stale-guest-cleanup",
+      "name": "Stale guest cleanup",
+      "description": "Surfaces guest accounts that have not signed in for 90+ days, asks the LLM for a per-guest rationale, and disables them after typed diff confirmation.",
+      "version": "1.0.0",
+      "mode": "write",
+      "category": "policies",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "User.Read.All",
+        "AuditLog.Read.All",
+        "User.ReadWrite.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/stale-guest-cleanup/manifest.yaml"
+    },
+    {
+      "id": "tenant-change-audit",
+      "slug": "tenant-change-audit",
+      "name": "Tenant change audit",
+      "description": "Summarises recent directory audit entries and flags the ones that look unusual for this tenant.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "policies",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "AuditLog.Read.All",
+        "Directory.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/tenant-change-audit/manifest.yaml"
     },
     {
       "id": "tenant-health-report",

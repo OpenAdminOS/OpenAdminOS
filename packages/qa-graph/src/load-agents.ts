@@ -59,29 +59,38 @@ function parseManifest(manifestPath: string): AgentManifest {
 
   const scopes = new Set<string>();
   const graphOperations: GraphOperation[] = [];
-  for (const skill of skills) {
-    const skillScopes = skill?.settings?.scopes;
-    if (Array.isArray(skillScopes)) {
-      for (const scope of skillScopes) {
-        if (typeof scope === "string") scopes.add(scope);
+  const visit = (list: ParsedSkill[] | undefined): void => {
+    if (!Array.isArray(list)) return;
+    for (const skill of list) {
+      const skillScopes = skill?.settings?.scopes;
+      if (Array.isArray(skillScopes)) {
+        for (const scope of skillScopes) {
+          if (typeof scope === "string") scopes.add(scope);
+        }
+      }
+      if (skill?.format === "graph" && skill.settings) {
+        const method = skill.settings.method;
+        const path = skill.settings.path;
+        if (isGraphMethod(method) && typeof path === "string") {
+          const op: GraphOperation = { method, path };
+          const select = skill.settings.select;
+          if (Array.isArray(select)) {
+            const stringSelect = select.filter((item): item is string => typeof item === "string");
+            if (stringSelect.length > 0) op.select = stringSelect;
+          }
+          if (typeof skill.detail === "string" && skill.detail.length > 0) {
+            op.notes = skill.detail;
+          }
+          graphOperations.push(op);
+        }
+      }
+      if (skill?.format === "map" && skill.settings) {
+        const inner = (skill.settings as { do?: unknown }).do;
+        if (Array.isArray(inner)) visit(inner as ParsedSkill[]);
       }
     }
-    if (skill?.format === "graph" && skill.settings) {
-      const method = skill.settings.method;
-      const path = skill.settings.path;
-      if (!isGraphMethod(method) || typeof path !== "string") continue;
-      const op: GraphOperation = { method, path };
-      const select = skill.settings.select;
-      if (Array.isArray(select)) {
-        const stringSelect = select.filter((item): item is string => typeof item === "string");
-        if (stringSelect.length > 0) op.select = stringSelect;
-      }
-      if (typeof skill.detail === "string" && skill.detail.length > 0) {
-        op.notes = skill.detail;
-      }
-      graphOperations.push(op);
-    }
-  }
+  };
+  visit(skills);
 
   const id = typeof descriptor.id === "string" ? descriptor.id : "";
   return {

@@ -470,7 +470,7 @@ export type AgentDefinition = AgentContract &
 // (`{{ step_id.output }}`). No code execution — the only side effects an
 // agent can have are the Graph calls and LLM calls it declares.
 
-export type TemplateStepFormat = "graph" | "transform" | "llm" | "write" | "connector";
+export type TemplateStepFormat = "graph" | "transform" | "llm" | "map" | "write" | "connector";
 
 export interface GraphStep {
   id: string;
@@ -514,6 +514,34 @@ export interface LlmStep {
     prompt: string;
     temperature?: number;
     maxTokens?: number;
+  };
+}
+
+/**
+ * Iterates over a source array and runs an inner pipeline once per item.
+ * Used to express per-item LLM reasoning (e.g. risky sign-in triage,
+ * stale-guest cleanup rationale) where the LLM needs to look at each
+ * row individually with shared context.
+ *
+ * The current item is bound to `settings.as` inside each iteration. The
+ * final sub-step's output is collected into an array as the map step's
+ * own output. Sub-steps may reference outer-pipeline outputs too — the
+ * inner context inherits from the outer context.
+ */
+export interface MapStep {
+  id: string;
+  format: "map";
+  label: string;
+  detail?: string;
+  settings: {
+    /** Liquid expression resolving to an array. */
+    source: string;
+    /** Variable name the current item is bound to inside `do`. */
+    as: string;
+    /** Inner pipeline; runs once per item. */
+    do: TemplateStep[];
+    /** Optional cap on the number of items processed (LLM-cost guard). */
+    limit?: number;
   };
 }
 
@@ -625,6 +653,7 @@ export type TemplateStep =
   | GraphStep
   | TransformStep
   | LlmStep
+  | MapStep
   | WriteStep
   | ConnectorStep;
 
