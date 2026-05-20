@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/connector-teams && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/connector-teams && tsc -p tsconfig.json --noEmit"
+    "typecheck": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/connector-teams && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
@@ -27,9 +28,10 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.8.0",
+    "tsx": "^4.22.3",
     "typescript": "~6.0.3"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }
