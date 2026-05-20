@@ -2,7 +2,20 @@ import type {
   GraphRequestInput as SdkGraphRequestInput,
   ManagedDeviceRecord,
   RunGraphApi,
+  RunLogLevel,
 } from "@openagents/agent-sdk";
+
+/**
+ * Callback the adapter uses to surface what it's doing during a run.
+ * Mirrors `RunContext.log` so the runtime can pass its per-step logger
+ * straight through; entries land in the active step the same way as
+ * any `ctx.log(...)` call from agent code.
+ */
+export type GraphAdapterLogger = (
+  level: RunLogLevel,
+  message: string,
+  metadata?: Record<string, unknown>,
+) => void;
 
 export interface GraphAdapterOptions {
   tokenProvider: () => Promise<string>;
@@ -10,7 +23,22 @@ export interface GraphAdapterOptions {
   fetchImpl?: typeof fetch;
   maxRetries?: number;
   timeoutMs?: number;
+  /**
+   * When set, the adapter emits a `debug`-level log at request start
+   * (`→ GET /users?$select=…`) and an `info`-level log on completion
+   * (`GET /users — 200 · 47 items · 1.2s`) with structured metadata
+   * for the Logs tab's expandable details panel. Errors are emitted
+   * at `warn` with the HTTP status and a truncated response body.
+   * Omit to keep the adapter silent (default — preserves existing
+   * call-site behaviour for tests and ad-hoc usage).
+   */
+  log?: GraphAdapterLogger;
 }
+
+/** Cap on the raw response sample stored in log metadata. */
+const PREVIEW_BYTE_CAP = 4_000;
+/** First N array items included in the raw response preview. */
+const PREVIEW_ITEM_CAP = 3;
 
 interface ManagedDeviceResponseItem {
   id?: unknown;
@@ -74,6 +102,8 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
           fetchImpl,
           maxRetries,
           timeoutMs,
+          baseUrl,
+          log: options.log,
         });
         for (const item of payload.value ?? []) {
           records.push(toManagedDeviceRecord(item));
@@ -100,6 +130,8 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         maxRetries,
         timeoutMs,
         expectJson: false,
+        baseUrl,
+        log: options.log,
       });
     },
 
@@ -143,6 +175,8 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         extraHeaders: input.headers,
         body: hasBody ? JSON.stringify(input.body) : undefined,
         idempotent: method === "GET" || method === "PUT" || method === "DELETE",
+        baseUrl,
+        log: options.log,
       });
     },
   };
@@ -183,11 +217,34 @@ interface GraphRequestInput {
    * pure rate-limit signal.
    */
   idempotent?: boolean;
+  /**
+   * Adapter base URL — threaded through for telemetry shaping (so the
+   * logger can emit a path-relative URL instead of the full one).
+   * Optional; the request fires regardless.
+   */
+  baseUrl?: string;
+  /** Optional adapter logger; emits debug/info/warn at request boundaries. */
+  log?: GraphAdapterLogger;
 }
 
 async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
   const expectJson = input.expectJson ?? true;
+  const shortPath = input.baseUrl ? shortenPath(input.url, input.baseUrl) : input.url;
+  const query = extractQuery(input.url);
+  const startMs = Date.now();
   let attempt = 0;
+
+  if (input.log) {
+    input.log("debug", `→ ${input.method} ${shortPath}`, {
+      graphCall: {
+        phase: "start",
+        method: input.method,
+        path: shortPath,
+        ...(query ? { query } : {}),
+      },
+    });
+  }
+
   while (true) {
     attempt += 1;
     const token = await input.tokenProvider();
@@ -220,23 +277,109 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
       });
     } catch (error) {
       clearTimeout(timer);
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`Graph request timed out after ${input.timeoutMs}ms: ${input.url}`);
+      const durationMs = Date.now() - startMs;
+      const isTimeout = error instanceof Error && error.name === "AbortError";
+      const message = isTimeout
+        ? `Graph request timed out after ${input.timeoutMs}ms: ${input.url}`
+        : `Graph request failed (${input.url}): ${describe(error)}`;
+      if (input.log) {
+        input.log(
+          "warn",
+          `${input.method} ${shortPath} — ${isTimeout ? "timeout" : "network error"} · ${formatMs(durationMs)}`,
+          {
+            graphCall: {
+              phase: "end",
+              method: input.method,
+              path: shortPath,
+              ...(query ? { query } : {}),
+              ok: false,
+              status: isTimeout ? "timeout" : "network-error",
+              durationMs,
+              attempts: attempt,
+              error: message,
+            },
+          },
+        );
       }
-      throw new Error(`Graph request failed (${input.url}): ${describe(error)}`);
+      throw new Error(message);
     }
     clearTimeout(timer);
 
     if (response.ok) {
+      const status = response.status;
+      let parsed: unknown = undefined;
+      let bytes = 0;
       if (!expectJson) {
-        // Consume the body so the underlying connection can be reused.
-        await response.text().catch(() => "");
-        return undefined as T;
+        const text = await response.text().catch(() => "");
+        bytes = text.length;
+      } else {
+        const text = await response.text();
+        bytes = text.length;
+        if (text.length > 0) {
+          try {
+            parsed = JSON.parse(text) as unknown;
+          } catch {
+            // Body advertised JSON but didn't parse — surface the raw text
+            // in the preview so the user sees what came back.
+            parsed = text;
+          }
+        }
       }
-      return (await response.json()) as T;
+      const durationMs = Date.now() - startMs;
+      if (input.log) {
+        const preview = expectJson
+          ? buildPreview(parsed)
+          : { itemCount: undefined, shape: undefined, sample: undefined, truncated: false };
+        const countSuffix =
+          preview.itemCount !== undefined
+            ? ` · ${preview.itemCount} item${preview.itemCount === 1 ? "" : "s"}`
+            : "";
+        const attemptSuffix = attempt > 1 ? ` · ${attempt} attempts` : "";
+        input.log(
+          "info",
+          `${input.method} ${shortPath} — ${status}${countSuffix} · ${formatMs(durationMs)}${attemptSuffix}`,
+          {
+            graphCall: {
+              phase: "end",
+              method: input.method,
+              path: shortPath,
+              ...(query ? { query } : {}),
+              ok: true,
+              status,
+              durationMs,
+              attempts: attempt,
+              bytes,
+              ...(preview.itemCount !== undefined ? { itemCount: preview.itemCount } : {}),
+              ...(preview.shape ? { shape: preview.shape } : {}),
+              ...(preview.sample !== undefined ? { sample: preview.sample } : {}),
+              ...(preview.truncated ? { sampleTruncated: true } : {}),
+            },
+          },
+        );
+      }
+      return expectJson ? (parsed as T) : (undefined as T);
     }
 
     if (response.status === 401) {
+      const durationMs = Date.now() - startMs;
+      if (input.log) {
+        input.log(
+          "warn",
+          `${input.method} ${shortPath} — 401 unauthorized · ${formatMs(durationMs)}`,
+          {
+            graphCall: {
+              phase: "end",
+              method: input.method,
+              path: shortPath,
+              ...(query ? { query } : {}),
+              ok: false,
+              status: 401,
+              durationMs,
+              attempts: attempt,
+            },
+          },
+        );
+      }
       throw new Error(
         "Graph rejected the access token (HTTP 401). Tenant needs reconnect.",
       );
@@ -253,10 +396,147 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     }
 
     const body = await response.text().catch(() => "");
+    const durationMs = Date.now() - startMs;
+    if (input.log) {
+      input.log(
+        "warn",
+        `${input.method} ${shortPath} — ${response.status} · ${formatMs(durationMs)}${attempt > 1 ? ` · ${attempt} attempts` : ""}`,
+        {
+          graphCall: {
+            phase: "end",
+            method: input.method,
+            path: shortPath,
+            ...(query ? { query } : {}),
+            ok: false,
+            status: response.status,
+            durationMs,
+            attempts: attempt,
+            bytes: body.length,
+            errorBody: truncate(body, 600),
+          },
+        },
+      );
+    }
     throw new Error(
       `Graph responded with HTTP ${response.status} for ${input.url}: ${truncate(body, 200)}`,
     );
   }
+}
+
+function shortenPath(fullUrl: string, baseUrl: string): string {
+  const trimmed = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  if (fullUrl.startsWith(trimmed)) {
+    const rest = fullUrl.slice(trimmed.length);
+    const noQuery = rest.split("?")[0] ?? rest;
+    return noQuery || "/";
+  }
+  try {
+    return new URL(fullUrl).pathname;
+  } catch {
+    return fullUrl;
+  }
+}
+
+function extractQuery(fullUrl: string): Record<string, string> | undefined {
+  const qIndex = fullUrl.indexOf("?");
+  if (qIndex < 0) return undefined;
+  const search = fullUrl.slice(qIndex + 1);
+  if (search.length === 0) return undefined;
+  try {
+    const params = new URLSearchParams(search);
+    const out: Record<string, string> = {};
+    for (const [key, value] of params.entries()) {
+      out[key] = value;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+interface ResponsePreview {
+  itemCount: number | undefined;
+  shape: string | undefined;
+  sample: unknown;
+  truncated: boolean;
+}
+
+function buildPreview(parsed: unknown): ResponsePreview {
+  if (parsed === undefined || parsed === null) {
+    return { itemCount: undefined, shape: undefined, sample: undefined, truncated: false };
+  }
+  // Graph list responses: { value: [...], "@odata.nextLink"?: string }
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    Array.isArray((parsed as { value?: unknown }).value)
+  ) {
+    const arr = (parsed as { value: unknown[] }).value;
+    const first = arr[0];
+    const sample = capSample(arr.slice(0, PREVIEW_ITEM_CAP));
+    return {
+      itemCount: arr.length,
+      shape: first !== undefined ? describeShape(first) : "value[] (empty)",
+      sample: sample.value,
+      truncated: sample.truncated || arr.length > PREVIEW_ITEM_CAP,
+    };
+  }
+  // Bare arrays.
+  if (Array.isArray(parsed)) {
+    const sample = capSample(parsed.slice(0, PREVIEW_ITEM_CAP));
+    return {
+      itemCount: parsed.length,
+      shape: parsed[0] !== undefined ? describeShape(parsed[0]) : "[] (empty)",
+      sample: sample.value,
+      truncated: sample.truncated || parsed.length > PREVIEW_ITEM_CAP,
+    };
+  }
+  // Single object response.
+  const sample = capSample(parsed);
+  return {
+    itemCount: undefined,
+    shape: describeShape(parsed),
+    sample: sample.value,
+    truncated: sample.truncated,
+  };
+}
+
+function capSample(value: unknown): { value: unknown; truncated: boolean } {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    return { value: "[unserializable]", truncated: false };
+  }
+  if (serialized.length <= PREVIEW_BYTE_CAP) {
+    return { value, truncated: false };
+  }
+  // Re-emit a string-truncated form so the metadata stays small in
+  // SQLite without losing the user-visible "what came back" signal.
+  return {
+    value: `${serialized.slice(0, PREVIEW_BYTE_CAP)}…`,
+    truncated: true,
+  };
+}
+
+function describeShape(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return value.length > 0 ? `[${describeShape(value[0])}, …]` : "[]";
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>);
+    if (keys.length === 0) return "{}";
+    const shown = keys.slice(0, 8);
+    const ellipsis = keys.length > shown.length ? ", …" : "";
+    return `{ ${shown.join(", ")}${ellipsis} }`;
+  }
+  return typeof value;
+}
+
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function toManagedDeviceRecord(item: ManagedDeviceResponseItem): ManagedDeviceRecord {

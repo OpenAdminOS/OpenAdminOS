@@ -26,6 +26,16 @@ export function StatusStrip() {
             <span className="text-[var(--color-text-soft)]">
               tenant: {activeTenant.displayName}
             </span>
+            {activeTenant.entraTier && activeTenant.entraTier !== "unknown" && (
+              <span
+                className="ml-0.5 rounded px-1 text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                title="Detected from /subscribedSkus — used to badge incompatible agents."
+              >
+                {activeTenant.entraTier === "free"
+                  ? "Entra Free"
+                  : `Entra ${activeTenant.entraTier.toUpperCase()}`}
+              </span>
+            )}
           </span>
         )}
 

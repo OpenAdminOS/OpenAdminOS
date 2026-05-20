@@ -22,6 +22,7 @@ descriptor:
     verified: true
   category: compliance
   tier: dashboard
+  requiresEntraTier: free
   mode: read
   preferredModel: llama3.1:8b
 

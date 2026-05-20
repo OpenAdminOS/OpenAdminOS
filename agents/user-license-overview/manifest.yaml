@@ -10,6 +10,7 @@ descriptor:
     verified: false
   category: apps
   tier: dashboard
+  requiresEntraTier: free
   mode: read
   preferredModel: llama3.1:8b
 skills:

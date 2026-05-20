@@ -46,6 +46,11 @@
           "enum": ["agent", "dashboard"],
           "description": "Distribution tier. Defaults to 'agent' when omitted. Set 'dashboard' only for single-source LLM-narrated reports."
         },
+        "requiresEntraTier": {
+          "type": "string",
+          "enum": ["free", "p1", "p2"],
+          "description": "Minimum Entra ID licensing tier needed for the agent's Graph calls to return useful data. Defaults to 'free'. Set 'p1' for agents reading auditLogs/signIns, /auditLogs/directoryAudits, /identity/conditionalAccess/policies, or relying on signInActivity being populated. Set 'p2' for /identityProtection/riskDetections and other P2-gated resources."
+        },
         "mode": {
           "type": "string",
           "enum": ["read", "write"],

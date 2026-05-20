@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AgentTier } from "@openagents/agent-sdk";
+import type { AgentTier, RequiredEntraTier } from "@openagents/agent-sdk";
 
 export const DEFAULT_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents";
@@ -30,6 +30,8 @@ export interface RegistryIndexEntry {
   mode: "read" | "write";
   category: string;
   tier: AgentTier;
+  /** Minimum Entra ID tier. May be absent on index.json built before v0.2 schema. */
+  requiresEntraTier?: RequiredEntraTier;
   author: {
     name: string;
     handle?: string;

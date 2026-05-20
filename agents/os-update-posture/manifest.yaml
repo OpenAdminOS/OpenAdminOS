@@ -20,6 +20,7 @@ descriptor:
     verified: true
   category: updates
   tier: dashboard
+  requiresEntraTier: free
   mode: read
   preferredModel: llama3.1:8b
 

@@ -15,6 +15,7 @@ descriptor:
     verified: true
   category: apps
   tier: agent
+  requiresEntraTier: free
   mode: read
   preferredModel: llama3.1:8b
 

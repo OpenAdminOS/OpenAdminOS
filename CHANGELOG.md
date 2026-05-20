@@ -6,6 +6,10 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- agents: declarative `requiresEntraTier` (`free` / `p1` / `p2`) on every manifest. Tags the six P1-requiring agents (`tenant-change-audit`, `sign-in-failure-explainer`, `risky-sign-in-triage`, `conditional-access-explainer`, `stale-guest-cleanup`) honestly so admins know upfront which agents need Azure AD Premium. Schema, runtime parser, registry index, and SDK contract are all aware of the field.
+- runtime: `/subscribedSkus` probe runs in the background on tenant connection (and on a 24h re-probe cadence), classifies the tenant as `free` / `p1` / `p2` based on `AAD_PREMIUM` and `AAD_PREMIUM_P2` service plans, and persists the result on `TenantRecord.entraTier`. Probe failures are silent — `unknown` is treated as informational, not blocking.
+- runtime: `tenantSatisfiesRequirement` compares a tenant's detected tier against an agent's required tier. Pre-flight in `startRun` blocks the run with a clear remediation message ("X requires Entra ID P1. Active tenant is on Entra ID Free. Microsoft 365 Business Premium includes Entra ID P1…") when the tenant tier is known and falls short. Unknown tiers proceed; the actual Graph call still surfaces the real failure if it doesn't work.
+- ui: Agent Hub renders a `Requires Entra ID P1/P2` pill next to the read/write and category pills. Tone is `warning` when the active tenant doesn't satisfy the requirement (with a tooltip explaining the gap), muted otherwise. Status strip's tenant chip now shows the detected tier ("tenant: ugurlabs.com  Entra P2").
 - registry: background refresh on a 6h interval and on window-focus (gated to >1h since the last attempt). Successful fetches push `openagents:registry-refreshed` to the renderer which silently swaps in the new state — no toast, no popup, the "refreshed N ago" indicator in Agent Hub updates naturally. Background failures are silent; only manual refresh surfaces fetch errors.
 - registry: dual-source resolution — the runtime prefers a live HTTP fetch from the configured registry source, falls back to the on-disk cache, and finally falls back to the bundled `agents/` directory shipped with the binary. This is the "works today, transparently switches to remote tomorrow" approach: during the private-repo phase the bundled fallback carries the app; the moment the repo flips public the remote source takes over without any code change. Agent Hub subtitle says `remote · refreshed <time>` when HTTP succeeded and `bundled · remote registry unreachable` when the fallback is in use.
 - agents: seven new bundled agents covering investigator, advisor, and cleanup tiers — `tenant-change-audit`, `conditional-access-explainer`, `secure-score-prioritizer`, `sign-in-failure-explainer`, `risky-sign-in-triage`, `stale-guest-cleanup` (write, supersedes the deleted `disable-inactive-guests`), `dormant-app-registrations`.
@@ -24,6 +28,8 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ### Removed
 
 ### Fixed
+
+- live-run: cancelling a run now stops the active step's spinner and the "streaming" reasoning indicator. Previously `cancelRun` only flipped `run.status` to `cancelled`, leaving the in-flight step at `status: "running"` and any `thinking.streaming: true` flag untouched — so the half-circle spinner kept rotating and the reasoning block still showed the "streaming" pulse next to a "Cancelled by user." header. Adds a `"cancelled"` value to `RunStepStatus`, transitions the active step + clears streaming flags in `cancelRun`, and renders the cancelled step with a muted dash icon and muted label.
 
 ### Security
 

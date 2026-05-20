@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-05-20T16:30:41.462Z",
+  "generatedAt": "2026-05-20T20:43:45.809Z",
   "agents": [
     {
       "id": "compliance-overview",
@@ -11,6 +11,7 @@
       "mode": "read",
       "category": "compliance",
       "tier": "dashboard",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -31,6 +32,7 @@
       "mode": "read",
       "category": "policies",
       "tier": "agent",
+      "requiresEntraTier": "p1",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -51,6 +53,7 @@
       "mode": "read",
       "category": "apps",
       "tier": "agent",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -71,6 +74,7 @@
       "mode": "read",
       "category": "devices",
       "tier": "agent",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -91,6 +95,7 @@
       "mode": "read",
       "category": "updates",
       "tier": "dashboard",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -111,6 +116,7 @@
       "mode": "write",
       "category": "devices",
       "tier": "agent",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -132,6 +138,7 @@
       "mode": "read",
       "category": "policies",
       "tier": "agent",
+      "requiresEntraTier": "p1",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -152,6 +159,7 @@
       "mode": "read",
       "category": "policies",
       "tier": "agent",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -172,6 +180,7 @@
       "mode": "read",
       "category": "policies",
       "tier": "agent",
+      "requiresEntraTier": "p1",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -192,6 +201,7 @@
       "mode": "write",
       "category": "policies",
       "tier": "agent",
+      "requiresEntraTier": "p1",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -214,6 +224,7 @@
       "mode": "read",
       "category": "policies",
       "tier": "agent",
+      "requiresEntraTier": "p1",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -235,6 +246,7 @@
       "mode": "read",
       "category": "compliance",
       "tier": "dashboard",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",
@@ -255,6 +267,7 @@
       "mode": "read",
       "category": "apps",
       "tier": "dashboard",
+      "requiresEntraTier": "free",
       "author": {
         "name": "OpenAgents",
         "handle": "openagents",

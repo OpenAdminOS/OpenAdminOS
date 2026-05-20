@@ -35,6 +35,24 @@ export type AgentCategory =
  */
 export type AgentTier = "agent" | "dashboard";
 
+/**
+ * Minimum Entra ID licensing tier required for the agent's Graph calls
+ * to return useful data. `free` agents work on any tenant. `p1` agents
+ * need Entra ID P1 (Azure AD Premium P1) — most commonly because they
+ * read `/auditLogs/signIns`, `/auditLogs/directoryAudits`,
+ * `/identity/conditionalAccess/policies`, or rely on `signInActivity`
+ * being populated on user objects. `p2` agents additionally need P2
+ * (Identity Protection sign-in risk, etc.).
+ *
+ * The runtime preflights `startRun` against the active tenant's
+ * detected tier and refuses to start runs that won't return useful
+ * data. `unknown` is the tier the host stamps before the detection
+ * probe completes — treated as "informational only" (badges shown,
+ * runs not blocked).
+ */
+export type RequiredEntraTier = "free" | "p1" | "p2";
+export type DetectedEntraTier = RequiredEntraTier | "unknown";
+
 export interface AgentAuthor {
   name: string;
   handle?: string;
@@ -59,6 +77,13 @@ export interface AgentContract {
   mode: AgentMode;
   category: AgentCategory;
   tier: AgentTier;
+  /**
+   * Minimum Entra ID tier the agent needs to return useful data.
+   * Defaults to `free` when omitted at the manifest layer; tagged
+   * explicitly on every bundled agent so Agent Hub can badge them
+   * upfront and the preflight check can refuse mismatched runs.
+   */
+  requiresEntraTier: RequiredEntraTier;
   scopes: string[];
   author: AgentAuthor;
   version: string;
@@ -148,9 +173,24 @@ export interface TenantRecord {
   homeAccountId: string;
   addedAt: string;
   lastUsedAt?: string;
+  /**
+   * Detected Entra ID licensing tier for this tenant, derived from
+   * `/subscribedSkus` at connection time and refreshed on a 24h
+   * cadence. `unknown` means the probe hasn't run or failed (e.g.
+   * `Organization.Read.All` not yet consented); treated as
+   * informational — agents are badged but runs are not blocked.
+   */
+  entraTier?: DetectedEntraTier;
+  /** ISO timestamp of the last successful entraTier probe. */
+  entraTierDetectedAt?: string;
 }
 
-export type RunStepStatus = "pending" | "running" | "completed" | "failed";
+export type RunStepStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export interface RunStepThinking {
   text: string;
@@ -712,6 +752,12 @@ export interface AgentTemplate {
      * LLM-narrated reports — see {@link AgentTier}.
      */
     tier?: AgentTier;
+    /**
+     * Minimum Entra ID tier required for this agent's Graph calls to
+     * return useful data. Optional in source manifests; defaults to
+     * `free` at parse time. See {@link RequiredEntraTier}.
+     */
+    requiresEntraTier?: RequiredEntraTier;
     mode: AgentMode;
     preferredModel?: string;
     /**

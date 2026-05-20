@@ -7,6 +7,7 @@ import type {
   AgentMode,
   AgentModule,
   AgentTier,
+  RequiredEntraTier,
   AgentRunResult,
   GraphOperation,
   GraphStep,
@@ -70,6 +71,16 @@ export function parseAgentTemplate(source: string): AgentTemplate {
       throw new ManifestValidationError(
         "descriptor.tier",
         `expected "agent" or "dashboard", got ${JSON.stringify(descriptor.tier)}`,
+      );
+    }
+  }
+
+  if (descriptor.requiresEntraTier !== undefined) {
+    const t = descriptor.requiresEntraTier;
+    if (t !== "free" && t !== "p1" && t !== "p2") {
+      throw new ManifestValidationError(
+        "descriptor.requiresEntraTier",
+        `expected "free", "p1", or "p2", got ${JSON.stringify(t)}`,
       );
     }
   }
@@ -1200,6 +1211,7 @@ function commonMetadata(manifest: AgentTemplate) {
     description: descriptor.description,
     category: descriptor.category,
     tier: descriptor.tier ?? "agent",
+    requiresEntraTier: descriptor.requiresEntraTier ?? "free",
     scopes: collectScopes(manifest),
     author: descriptor.author,
     version: descriptor.version,
@@ -1285,6 +1297,7 @@ export function agentTemplateToRegistrySummary(
   mode: AgentMode;
   category: AgentCategory;
   tier: AgentTier;
+  requiresEntraTier: RequiredEntraTier;
   scopes: string[];
   author: AgentAuthor;
   version: string;
@@ -1302,6 +1315,7 @@ export function agentTemplateToRegistrySummary(
     mode: descriptor.mode,
     category: descriptor.category,
     tier: descriptor.tier ?? "agent",
+    requiresEntraTier: descriptor.requiresEntraTier ?? "free",
     scopes: collectScopes(manifest),
     author: descriptor.author,
     version: descriptor.version,

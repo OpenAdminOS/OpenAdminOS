@@ -9,6 +9,7 @@ import {
   createOllamaLlm,
   createQueuedRun,
   createTenantSession,
+  detectEntraTier,
   executeApply,
   executePlan,
   executeRun,
@@ -23,6 +24,7 @@ import {
   ManifestValidationError,
   removeAccount,
   runInteractiveFlow,
+  tenantSatisfiesRequirement,
   toInstalledAgent,
   type TokenCacheStorage,
 } from "@openagents/runtime";
@@ -32,6 +34,7 @@ import type {
   ConnectorSummary,
   RunGraphApi,
   RunLlmApi,
+  RunLogLevel,
   StartRunOptions,
   TemplateSetting,
   TenantRecord,
@@ -141,6 +144,7 @@ function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary
     mode: entry.mode,
     category: entry.category as RegistryAgentSummary["category"],
     tier: entry.tier,
+    requiresEntraTier: entry.requiresEntraTier ?? "free",
     scopes: entry.scopes,
     author: entry.author,
   };
@@ -1021,6 +1025,27 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         // with an explicit cancellation message. The original summary
         // would otherwise leak into Activity rows long after the cancel.
         summary: "Cancelled by user.",
+        // Transition any in-flight step to "cancelled" and stop any
+        // streaming reasoning indicator. Without this the UI keeps
+        // spinning the active step and showing a "streaming" badge
+        // even though the run is terminal.
+        steps: run.steps.map((step) =>
+          step.status === "running"
+            ? {
+                ...step,
+                status: "cancelled",
+                finishedAt: step.finishedAt ?? finishedAt,
+                thinking: step.thinking
+                  ? { ...step.thinking, streaming: false }
+                  : step.thinking,
+              }
+            : step.thinking?.streaming
+              ? {
+                  ...step,
+                  thinking: { ...step.thinking, streaming: false },
+                }
+              : step,
+        ),
       };
       const nextRuns = persisted.runs.map((existing) =>
         existing.id === runId ? cancelled : existing,
@@ -1236,7 +1261,55 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       });
     });
 
+    // Background probe: detect the tenant's Entra ID tier so Agent Hub
+    // can badge incompatible agents. Failure here is silent — `unknown`
+    // is treated as informational (badges shown, runs not blocked).
+    void this.probeEntraTier(tenant).catch(() => undefined);
+
     return this.getAppState();
+  }
+
+  /**
+   * Fetch `/subscribedSkus` for the given tenant and persist the
+   * detected Entra ID tier on the tenant record. Skipped if the last
+   * probe succeeded within the past 24 hours (license states change
+   * rarely). Best-effort — silent on failure.
+   */
+  private async probeEntraTier(tenant: TenantRecord): Promise<void> {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    if (
+      tenant.entraTier &&
+      tenant.entraTier !== "unknown" &&
+      tenant.entraTierDetectedAt &&
+      Date.now() - new Date(tenant.entraTierDetectedAt).getTime() < DAY_MS
+    ) {
+      return;
+    }
+    const client = this.getMsalClient();
+    const openBrowser = this.openBrowser;
+    const session = createTenantSession({
+      client,
+      tenantId: tenant.id,
+      username: tenant.username,
+      homeAccountId: tenant.homeAccountId,
+      acquireInteractive: async (scopes) =>
+        await runInteractiveFlow({ client, scopes, openBrowser }),
+    });
+    const detected = await detectEntraTier(
+      (scopes) => session.acquireTokenForScopes(scopes),
+    );
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.tenants.findIndex((t) => t.id === tenant.id);
+      if (idx < 0) return;
+      const next = [...persisted.tenants];
+      next[idx] = {
+        ...next[idx],
+        entraTier: detected,
+        entraTierDetectedAt: new Date().toISOString(),
+      };
+      await this.write({ ...persisted, tenants: next });
+    });
   }
 
   async setActiveTenant(id: string): Promise<AppState> {
@@ -1374,6 +1447,25 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         throw new Error(
           "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
         );
+      }
+
+      // Entra ID tier preflight: if the agent declares a required tier
+      // and the tenant's detected tier is known to fall short, refuse
+      // the run with a clear remediation message. `unknown` tier (not
+      // probed yet, or probe failed) is treated as informational —
+      // runs proceed and the actual Graph call may fail with a real
+      // 403, which still surfaces meaningfully via the runtime.
+      const requiredTier = agent.requiresEntraTier ?? "free";
+      if (requiredTier !== "free") {
+        const tenantRecord = persisted.tenants.find((t) => t.id === pinnedTenantId);
+        const satisfies = tenantSatisfiesRequirement(tenantRecord?.entraTier, requiredTier);
+        if (satisfies === false) {
+          const detectedLabel = tenantRecord?.entraTier === "free" ? "Entra ID Free" : `Entra ID ${tenantRecord?.entraTier?.toUpperCase()}`;
+          const requiredLabel = `Entra ID ${requiredTier.toUpperCase()}`;
+          throw new Error(
+            `${agent.name} requires ${requiredLabel}. The active tenant (${tenantRecord?.displayName ?? pinnedTenantId}) is on ${detectedLabel}. Microsoft 365 Business Premium includes Entra ID P1 — check your tenant's subscription, or pick a free-tier agent.`,
+          );
+        }
       }
 
       const queuedRun = createQueuedRun({ agent, providerId, model });

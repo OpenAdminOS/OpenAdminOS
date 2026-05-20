@@ -52,6 +52,7 @@ function parseManifest(manifestPath) {
     mode: descriptor.mode ?? "read",
     category: descriptor.category ?? "devices",
     tier: descriptor.tier ?? "agent",
+    requiresEntraTier: descriptor.requiresEntraTier ?? "free",
     author: {
       name: descriptor.author?.name ?? "unknown",
       handle: descriptor.author?.handle,

@@ -48,12 +48,47 @@ const tierDescriptions: Record<TierTab, string> = {
     "Single-source LLM-narrated reports. Useful at a glance; not what a PowerShell script can't do.",
 };
 
+/**
+ * Renders a small "Requires Entra ID P1/P2" pill when the agent
+ * declares a non-free Entra tier. Tone:
+ *   - `warning` when the active tenant's detected tier is known and
+ *     falls short (the run will be blocked at preflight).
+ *   - muted neutral when the tenant's tier is unknown or satisfies
+ *     the requirement (informational only).
+ * Returns null for free-tier agents (no badge needed).
+ */
+function EntraTierBadge({
+  required,
+  tenantTier,
+}: {
+  required: "free" | "p1" | "p2";
+  tenantTier: "free" | "p1" | "p2" | "unknown" | undefined;
+}) {
+  if (required === "free") return null;
+  const label = `Requires Entra ID ${required.toUpperCase()}`;
+  const rank: Record<string, number> = { free: 0, p1: 1, p2: 2 };
+  const tenantRank = tenantTier && tenantTier !== "unknown" ? rank[tenantTier] : -1;
+  const shortfall = tenantRank >= 0 && tenantRank < rank[required];
+  const tooltip = shortfall
+    ? `Active tenant is on Entra ID ${tenantTier?.toUpperCase()}. This agent needs ${required.toUpperCase()} to return useful data.`
+    : `This agent reads Graph endpoints that require Entra ID ${required.toUpperCase()}.`;
+  return (
+    <span title={tooltip} className="inline-flex">
+      <Pill tone={shortfall ? "warning" : "default"}>{label}</Pill>
+    </span>
+  );
+}
+
 export default function AgentHub() {
   const { state, registryAgents, installAgent, refreshRegistry } = useAppState();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
   const [tier, setTier] = useState<TierTab>("agent");
   const [refreshing, setRefreshing] = useState(false);
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((t) => t.id === state.activeTenantId)
+    : undefined;
+  const tenantTier = activeTenant?.entraTier;
   const [manifestAgent, setManifestAgent] = useState<RegistryAgentSummary | null>(
     null,
   );
@@ -226,6 +261,7 @@ export default function AgentHub() {
             agent={featured}
             installs={resolveInstallCount(featured, liveInstalls)}
             installed={isInstalled(featured)}
+            tenantTier={tenantTier}
             onInstall={() => onInstall(featured)}
             onViewManifest={() => setManifestAgent(featured)}
           />
@@ -297,6 +333,7 @@ export default function AgentHub() {
                 agent={agent}
                 installs={resolveInstallCount(agent, liveInstalls)}
                 installed={isInstalled(agent)}
+                tenantTier={tenantTier}
                 onInstall={() => onInstall(agent)}
                 onViewManifest={() => setManifestAgent(agent)}
               />
@@ -342,12 +379,14 @@ function FeaturedCard({
   agent,
   installs,
   installed,
+  tenantTier,
   onInstall,
   onViewManifest,
 }: {
   agent: RegistryAgentSummary;
   installs: number | undefined;
   installed: boolean;
+  tenantTier: "free" | "p1" | "p2" | "unknown" | undefined;
   onInstall: () => void;
   onViewManifest: () => void;
 }) {
@@ -355,13 +394,17 @@ function FeaturedCard({
     <Card>
       <div className="grid grid-cols-1 gap-6 p-7 lg:grid-cols-[1.5fr_1fr]">
         <div>
-          <div className="mb-3 inline-flex items-center gap-2">
+          <div className="mb-3 inline-flex flex-wrap items-center gap-2">
             <Pill tone="accent">
               <IconSparkle size={10} /> Featured
             </Pill>
             <Pill>
               <IconShield size={10} /> {agent.mode === "write" ? "Write" : "Read-only"}
             </Pill>
+            <EntraTierBadge
+              required={agent.requiresEntraTier ?? "free"}
+              tenantTier={tenantTier}
+            />
           </div>
           <h2 className="text-[24px] font-semibold tracking-tight text-[var(--color-text)]">
             {agent.name}
@@ -516,12 +559,14 @@ function HubAgentCard({
   agent,
   installs,
   installed,
+  tenantTier,
   onInstall,
   onViewManifest,
 }: {
   agent: RegistryAgentSummary;
   installs: number | undefined;
   installed: boolean;
+  tenantTier: "free" | "p1" | "p2" | "unknown" | undefined;
   onInstall: () => void;
   onViewManifest: () => void;
 }) {
@@ -566,6 +611,10 @@ function HubAgentCard({
             {agent.mode === "write" ? "Write" : "Read-only"}
           </Pill>
           <Pill className="capitalize">{agent.category}</Pill>
+          <EntraTierBadge
+            required={agent.requiresEntraTier ?? "free"}
+            tenantTier={tenantTier}
+          />
           <Pill>
             {agent.scopes.length} scope{agent.scopes.length === 1 ? "" : "s"}
           </Pill>

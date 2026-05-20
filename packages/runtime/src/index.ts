@@ -64,7 +64,16 @@ export {
   runInteractiveFlow,
   type TokenCacheStorage,
 } from "./msal.js";
-export { createGraphAdapter, type GraphAdapterOptions } from "./graph-adapter.js";
+export {
+  createGraphAdapter,
+  type GraphAdapterLogger,
+  type GraphAdapterOptions,
+} from "./graph-adapter.js";
+export {
+  detectEntraTier,
+  classifySkus,
+  tenantSatisfiesRequirement,
+} from "./entra-tier.js";
 export { createTenantSession } from "./msal.js";
 export {
   disposeBuiltConnectors,
@@ -192,6 +201,7 @@ export function toInstalledAgent(
     mode: agent.mode,
     category: agent.category,
     tier: agent.tier ?? "agent",
+    requiresEntraTier: agent.requiresEntraTier ?? "free",
     scopes: agent.scopes,
     author: agent.author,
     version: agent.version,
@@ -229,13 +239,28 @@ export function createQueuedRun(input: {
   };
 }
 
+/**
+ * Factory that builds the run-scoped Graph adapter. The runtime invokes
+ * it once per phase, passing its per-step logger so the adapter can
+ * emit start/end log entries that attach to whichever step is active
+ * when the Graph call fires. Hosts wire this through
+ * `(log) => createGraphAdapter({ tokenProvider, log })`.
+ */
+export type CreateGraphAdapter = (
+  log: (
+    level: RunLogLevel,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ) => void,
+) => RunGraphApi;
+
 export interface ExecuteRunInput {
   run: RunRecord;
   agent: AgentSummary;
   providerId: ProviderId;
   model?: string;
   llm?: RunLlmApi;
-  graph: RunGraphApi;
+  createGraph: CreateGraphAdapter;
   /**
    * Whether the agent is allowed to call destructive Graph methods
    * during this run. The per-write typed diff confirmation is the
@@ -391,11 +416,13 @@ async function createPhaseHandle(
     connectorAccessor = wrappedAccessor as ConnectorAccessor;
   }
 
+  const graph = input.createGraph(logFn);
+
   const ctx: RunContext = {
     agent: toAgentDefinition(input.agent),
     providerId: input.providerId,
     model: input.model,
-    graph: input.graph,
+    graph,
     llm,
     realWrites: input.realWrites ?? false,
     settings: input.agent.settings,
@@ -984,6 +1011,7 @@ function toAgentDefinition(agent: AgentSummary): RunContext["agent"] {
     mode: agent.mode,
     category: agent.category,
     tier: agent.tier ?? "agent",
+    requiresEntraTier: agent.requiresEntraTier ?? "free",
     scopes: agent.scopes,
     author: agent.author,
     version: agent.version,

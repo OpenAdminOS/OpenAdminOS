@@ -17,6 +17,7 @@ descriptor:
     handle: openagents
     verified: true
   category: devices
+  requiresEntraTier: free
   mode: read
   preferredModel: llama3.1:8b
 
