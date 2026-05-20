@@ -250,7 +250,14 @@ export interface OpenAgentsApi {
   getAppState(): Promise<AppState>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;
   refreshRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
-  setRegistrySource(url: string): Promise<void>;
+  /**
+   * Persist a new registry source URL and trigger an immediate refresh
+   * against it. Returns the same shape as `refreshRegistry()` so the
+   * renderer can react to fetch failures (e.g. typo'd URL).
+   */
+  setRegistrySource(
+    url: string,
+  ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;

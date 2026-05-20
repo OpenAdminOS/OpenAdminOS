@@ -31,6 +31,11 @@ skills:
         $filter: "status/errorCode ne 0"
         $top: "200"
         $orderby: createdDateTime desc
+      # Combining $filter on a complex sub-property with $orderby on the
+      # signIns collection requires advanced-query consistency. Microsoft
+      # Graph returns 400 without this header in several regions.
+      headers:
+        ConsistencyLevel: eventual
       select:
         - id
         - createdDateTime

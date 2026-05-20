@@ -248,12 +248,17 @@ export class AppStateStore {
     return { error: result.error, fromCache: result.fromCache, cachedAt: result.cachedAt };
   }
 
-  async setRegistrySource(url: string): Promise<void> {
+  async setRegistrySource(
+    url: string,
+  ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
     await this.serialize(async () => {
       const current = await this.read();
       const next = { ...current, registrySource: url };
       await this.write(next);
     });
+    // Trigger an immediate refresh against the new source so the
+    // renderer doesn't show stale cached agents from the old URL.
+    return this.initRegistry();
   }
 
   private getMsalClient(): PublicClientApplication {
@@ -309,10 +314,9 @@ export class AppStateStore {
       return listAllRegistryAgents(this.userAgentsDir);
     }
     // HTTP cache populated: use it as base and overlay user-authored agents.
-    const userAgents = this.userAgentsDir
-      ? listAllRegistryAgents(this.userAgentsDir).filter(
-          (a) => a.registryPath?.startsWith(this.userAgentsDir!),
-        )
+    const dir = this.userAgentsDir;
+    const userAgents = dir
+      ? listAllRegistryAgents(dir).filter((a) => a.registryPath?.startsWith(dir))
       : [];
     const bySlug = new Map<string, RegistryAgentSummary>();
     for (const a of this.registryCacheEntries) bySlug.set(a.slug, a);
