@@ -5,6 +5,47 @@
 - `icon-source.svg` — vector source of the Open Agents app icon.
 - `icon.png` — 1024×1024 PNG, consumed by `electron-builder` to derive `.icns` / `.ico`.
 
+## Microsoft Store / AppX tile assets
+
+`electron-builder`'s AppX target auto-discovers these by filename from
+`build/`. They replace the default Electron placeholder tiles which
+otherwise get flagged under Store policy **10.1.1.11 On Device Tiles**
+("Tile icons must uniquely represent the product").
+
+| File | Size | Where it shows |
+|---|---|---|
+| `StoreLogo.png` | 50×50 | Microsoft Store product page |
+| `Square44x44Logo.png` | 44×44 | App list, taskbar |
+| `Square71x71Logo.png` | 71×71 | Small Start tile |
+| `Square150x150Logo.png` | 150×150 | Medium Start tile |
+| `Square310x310Logo.png` | 310×310 | Large Start tile |
+| `Wide310x150Logo.png` | 310×150 | Wide Start tile |
+| `SplashScreen.png` | 620×300 | Launch splash |
+
+Square tiles are rendered directly from `icon-source.svg`. The wide tile
+and splash use small inline SVGs that put the icon on the brand dark
+canvas (`#0a0a0c`).
+
+### Regenerating
+
+Requires `rsvg-convert` (`brew install librsvg`):
+
+```sh
+cd apps/desktop/build
+SRC=icon-source.svg
+rsvg-convert -w 50  -h 50  $SRC -o StoreLogo.png
+rsvg-convert -w 44  -h 44  $SRC -o Square44x44Logo.png
+rsvg-convert -w 71  -h 71  $SRC -o Square71x71Logo.png
+rsvg-convert -w 150 -h 150 $SRC -o Square150x150Logo.png
+rsvg-convert -w 310 -h 310 $SRC -o Square310x310Logo.png
+rsvg-convert -w 310 -h 150 Wide310x150Logo.source.svg -o Wide310x150Logo.png
+rsvg-convert -w 620 -h 300 SplashScreen.source.svg     -o SplashScreen.png
+```
+
+`Wide310x150Logo.source.svg` and `SplashScreen.source.svg` are the
+on-brand sources for the two non-square tiles. Edit them, then rerun
+the rasterize commands above.
+
 ## macOS DMG install window
 
 The DMG install screen is styled to match the dark Open Agents brand: dark

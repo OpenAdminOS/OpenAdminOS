@@ -113,7 +113,8 @@
       "identityName": "UgurLabs.UgurLabs.OpenAgents",
       "publisher": "CN=E5B1EEE1-CB55-4BCF-9214-2A6446BB2580",
       "publisherDisplayName": "UgurLabs",
-      "languages": ["en-US"]
+      "languages": ["en-US"],
+      "showNameOnTiles": true
     },
     "linux": {
       "target": [

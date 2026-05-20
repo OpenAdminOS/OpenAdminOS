@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 300">
+  <!-- AppX SplashScreen.png source. 620x300 on brand dark canvas.
+       Rasterize: rsvg-convert -w 620 -h 300 SplashScreen.source.svg -o SplashScreen.png -->
+  <rect width="620" height="300" fill="#0a0a0c"/>
+  <g transform="translate(258 18)">
+    <rect x="0" y="0" width="264" height="264" rx="59" ry="59" fill="#1c1917"/>
+    <circle cx="132" cy="132" r="74" fill="none" stroke="#e8a87c" stroke-width="14"/>
+    <circle cx="132" cy="132" r="25" fill="#e8a87c"/>
+  </g>
+</svg>
