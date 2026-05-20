@@ -54,6 +54,36 @@ const allowedExternalProtocols = new Set(["http:", "https:", "mailto:"]);
 
 let mainWindow: BrowserWindow | null = null;
 let store: AppStateStore;
+// Wall-clock timestamp of the most recent background registry refresh
+// attempt. Used to rate-limit focus-triggered refreshes so alt-tabbing
+// doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
+// this — the user explicitly asked for a fresh fetch.
+let lastBackgroundRefreshAt = 0;
+
+/**
+ * Drive a registry index refresh from a non-user trigger (startup,
+ * 6h interval, or window focus). On a successful fetch with a newly
+ * stamped timestamp, push `openagents:registry-refreshed` to the
+ * renderer so the Agent Hub state can swap in the new list without
+ * the user clicking refresh. Failures are silent — the user only
+ * sees an error when they manually click refresh.
+ */
+async function refreshRegistryInBackground(
+  trigger: "startup" | "interval" | "focus",
+): Promise<void> {
+  lastBackgroundRefreshAt = Date.now();
+  try {
+    const result = await store.initRegistry();
+    if (result.error || result.fromCache) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("openagents:registry-refreshed", {
+      trigger,
+      cachedAt: result.cachedAt,
+    });
+  } catch {
+    // Background refresh failures are intentionally swallowed.
+  }
+}
 
 function openExternalUrl(url: string): void {
   try {
@@ -515,7 +545,7 @@ if (!gotLock) {
     void createWindow();
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
-    void store.initRegistry().catch(() => undefined);
+    void refreshRegistryInBackground("startup");
     startAutoUpdater(() => mainWindow ?? undefined);
 
     // In-process agent scheduler: ticks every 60s, fires any installed
@@ -525,6 +555,25 @@ if (!gotLock) {
     setInterval(() => {
       void store.fireDueSchedules();
     }, SCHEDULER_TICK_MS);
+
+    // Periodic registry refresh: every 6 hours, silently re-fetch the
+    // remote index so users sitting on the app for days stay current.
+    // Failures are silent — the user only sees errors when they
+    // explicitly click the Refresh button in Agent Hub.
+    const REGISTRY_TICK_MS = 6 * 60 * 60 * 1000;
+    setInterval(() => {
+      void refreshRegistryInBackground("interval");
+    }, REGISTRY_TICK_MS);
+
+    // Focus-triggered refresh: when the user re-activates the app
+    // after >1h of being unfocused, pull the index in case anything
+    // landed in the meantime. Cheap; bounded by the 1h gate.
+    const FOCUS_REFRESH_THRESHOLD_MS = 60 * 60 * 1000;
+    app.on("browser-window-focus", () => {
+      const elapsed = Date.now() - lastBackgroundRefreshAt;
+      if (elapsed < FOCUS_REFRESH_THRESHOLD_MS) return;
+      void refreshRegistryInBackground("focus");
+    });
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {

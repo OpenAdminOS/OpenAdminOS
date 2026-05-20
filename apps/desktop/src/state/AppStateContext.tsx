@@ -500,6 +500,17 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
+  // Silent swap-in when the main process completes a background
+  // registry refresh (6h interval / focus-triggered). No toast — the
+  // user discovers the new state when they next look at Agent Hub.
+  useEffect(() => {
+    const api = getOpenAgentsApi();
+    if (!api?.onRegistryRefreshed) return;
+    return api.onRegistryRefreshed(() => {
+      void refresh();
+    });
+  }, [refresh]);
+
   const value = useMemo<AppStateContextValue>(
     () => ({
       state,

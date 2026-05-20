@@ -52,6 +52,18 @@ const api: OpenAgentsApi = {
       );
     };
   },
+  onRegistryRefreshed: (
+    listener: (info: { trigger: "startup" | "interval" | "focus"; cachedAt: string | null }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: unknown,
+      payload: { trigger: "startup" | "interval" | "focus"; cachedAt: string | null },
+    ) => listener(payload);
+    ipcRenderer.on("openagents:registry-refreshed", handler);
+    return () => {
+      ipcRenderer.removeListener("openagents:registry-refreshed", handler);
+    };
+  },
   respondToConnectorConfirm: (
     requestId: string,
     decision: PendingConnectorDecision,

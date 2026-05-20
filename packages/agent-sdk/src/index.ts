@@ -307,6 +307,16 @@ export interface OpenAgentsApi {
     listener: (request: PendingConnectorConfirmation) => void,
   ): () => void;
   /**
+   * Subscribe to background registry refresh notifications. The host
+   * polls the configured registry source on a 6h cadence (and on
+   * window-focus after >1h idle) and fires this event when a fetch
+   * succeeds. Renderer should re-pull `getAppState()` and silently
+   * swap in the new list — no toast or popup expected.
+   */
+  onRegistryRefreshed(
+    listener: (info: { trigger: "startup" | "interval" | "focus"; cachedAt: string | null }) => void,
+  ): () => void;
+  /**
    * Resolves the pending confirmation identified by `requestId` with
    * the supplied decision. Calling with an unknown id is a no-op.
    */
