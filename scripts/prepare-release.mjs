@@ -40,11 +40,13 @@ const PACKAGES_TO_BUMP = [
   "packages/qa-graph/package.json",
 ];
 
-const PACKAGES_WITH_WORKSPACE_DEPS = [
-  ...PACKAGES_TO_BUMP,
-  "agents/find-inactive-devices/package.json",
-  "agents/retire-inactive-devices/package.json",
-];
+// Registry agents used to ship as workspace packages with their own
+// `package.json` that depended on `@openagents/agent-sdk`. They were
+// migrated to pure `manifest.yaml` agents in 3005bc6 ("stats: introduce
+// install-tracking pipeline + simplify agent contract"), so they no
+// longer need version bumping. If new workspace packages with
+// internal-version-pinned deps are added later, list them here.
+const PACKAGES_WITH_WORKSPACE_DEPS = [...PACKAGES_TO_BUMP];
 
 const CHANGELOG_PATH = "CHANGELOG.md";
 
