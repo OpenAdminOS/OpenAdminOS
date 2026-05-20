@@ -24,6 +24,7 @@ descriptor:
     handle: openagents
     verified: true
   category: compliance
+  tier: dashboard
   mode: read
   preferredModel: llama3.1:8b
   # Declared connector dependency. Required: the run fails preflight if

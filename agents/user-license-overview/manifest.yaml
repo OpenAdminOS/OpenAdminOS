@@ -9,6 +9,7 @@ descriptor:
     handle: openagents
     verified: false
   category: apps
+  tier: dashboard
   mode: read
   preferredModel: llama3.1:8b
 skills:

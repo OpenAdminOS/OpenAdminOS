@@ -33,10 +33,25 @@ const filters = [
 ] as const;
 type Filter = (typeof filters)[number];
 
+type TierTab = "agent" | "dashboard";
+
+const tierLabels: Record<TierTab, string> = {
+  agent: "Agents",
+  dashboard: "Dashboards",
+};
+
+const tierDescriptions: Record<TierTab, string> = {
+  agent:
+    "Multi-step reasoning across Graph. Investigators, advisors, write actions with judgment.",
+  dashboard:
+    "Single-source LLM-narrated reports. Useful at a glance; not what a PowerShell script can't do.",
+};
+
 export default function AgentHub() {
   const { state, registryAgents, installAgent } = useAppState();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
+  const [tier, setTier] = useState<TierTab>("agent");
   const [manifestAgent, setManifestAgent] = useState<RegistryAgentSummary | null>(
     null,
   );
@@ -86,7 +101,16 @@ export default function AgentHub() {
       agent.registryId ?? "",
     ]),
   );
-  const visible = registryAgents.filter((a) => {
+  const tierAgents = registryAgents.filter((a) => (a.tier ?? "agent") === tier);
+  const tierCounts = registryAgents.reduce(
+    (acc, a) => {
+      const t = (a.tier ?? "agent") as TierTab;
+      acc[t] = (acc[t] ?? 0) + 1;
+      return acc;
+    },
+    { agent: 0, dashboard: 0 } as Record<TierTab, number>,
+  );
+  const visible = tierAgents.filter((a) => {
     const matchesFilter =
       filter === "All" ||
       a.category === (filter.toLowerCase() as RegistryAgentSummary["category"]);
@@ -98,8 +122,8 @@ export default function AgentHub() {
     return matchesFilter && matchesQuery;
   });
 
-  const featured = registryAgents[0];
-  const trending = registryAgents.slice(0, 3);
+  const featured = tierAgents[0];
+  const trending = tierAgents.slice(0, 3);
   const isInstalled = (agent: RegistryAgentSummary) =>
     installedIds.has(agent.id) ||
     installedIds.has(agent.slug) ||
@@ -115,7 +139,9 @@ export default function AgentHub() {
         title="Agent Hub"
         subtitle={
           <span className="inline-flex items-center gap-2">
-            <span>{registryAgents.length} agents bundled in this repo</span>
+            <span>
+              {tierCounts.agent} agents · {tierCounts.dashboard} dashboards in this repo
+            </span>
             <span className="opacity-50">·</span>
             <span>community registry lands in v0.2</span>
           </span>
@@ -136,6 +162,34 @@ export default function AgentHub() {
         }
       />
       <PageBody>
+        {/* Tier toggle */}
+        <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+          <div className="inline-flex items-center rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border)]">
+            {(["agent", "dashboard"] as TierTab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  setTier(t);
+                  setFilter("All");
+                }}
+                className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                  t === tier
+                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
+                    : "text-[var(--color-text-soft)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                {tierLabels[t]}{" "}
+                <span className="ml-1 text-[var(--color-text-muted)]">
+                  {tierCounts[t]}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="text-[12px] text-[var(--color-text-soft)]">
+            {tierDescriptions[tier]}
+          </p>
+        </div>
+
         {/* Featured */}
         {featured ? (
           <FeaturedCard
@@ -155,7 +209,7 @@ export default function AgentHub() {
             <div className="mt-8 mb-3 flex items-center gap-2">
               <IconFire size={14} className="text-[var(--color-warning)]" />
               <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
-                Built-in agents
+                Built-in {tier === "dashboard" ? "dashboards" : "agents"}
               </h3>
               <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
             </div>
@@ -177,7 +231,7 @@ export default function AgentHub() {
         {/* Filters */}
         <div className="mt-10 mb-4 flex items-center justify-between">
           <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
-            All agents
+            All {tier === "dashboard" ? "dashboards" : "agents"}
           </h3>
           <div className="flex items-center gap-1.5">
             {filters.map((f) => (

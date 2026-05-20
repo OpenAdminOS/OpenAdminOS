@@ -8,6 +8,9 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- docs: SPEC.md §2 Registry model rewritten — the OpenAgents repo is now the registry. App binary ships with zero agents and fetches `/agents/index.json` from the repo at runtime; cache-on-first-fetch lifecycle; per-agent `minAppVersion` gate; forkable registry source for enterprises.
+- docs: tasks/todo.md gains a v0.2 block — repo-as-registry plumbing, DSL extensions (parallel/named graph steps, multi-input LLM, `map`), new synthetic fixtures, and the bundled agent overhaul (investigator / advisor / cleanup tiers; existing read-only agents demoted to a new "Dashboards" tier).
+
 ### Removed
 
 ### Fixed

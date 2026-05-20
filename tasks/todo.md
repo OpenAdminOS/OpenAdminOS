@@ -148,8 +148,88 @@ For each, the rule is: **wire it if the implementation is cheap and honest, hide
 
 ### Out of 0.1.4 scope (deferred to v0.2)
 
-- GitHub-hosted remote agent registry (currently `./agents` directory only).
 - Additional write-action kinds beyond `retire-managed-device` (schema + runtime work).
+
+## v0.2 — Repo-as-registry + bundled agent overhaul
+
+**Goal.** The OpenAgents repo becomes the registry. The app binary ships with zero agents and fetches everything from `/agents/` in this repo at runtime. The bundled agent set is reframed around three tiers (investigators, advisors, cleanup-with-judgment) so agents demonstrably out-class a PowerShell script.
+
+### Why now
+
+The existing seven agents look like PowerShell scripts with an LLM blurb tacked on (`compliance-overview`, `os-update-posture`, etc.). Agents earn their keep when the task needs judgment, correlation, or synthesis. We need bundled examples that prove the platform thesis, and a distribution model that doesn't lie about "bundled" vs. "community."
+
+### Distribution: repo-as-registry
+
+- [ ] **Index generator** — CI step that builds `agents/index.json` from `agents/*/manifest.yaml`. Entries carry: `slug`, `version`, `author`, `mode`, `category`, scope summary, `manifestUrl`, `sha`, `minAppVersion`. Gate behind the existing agent QA (`npm run qa`) so broken agents never reach `main`.
+- [ ] **Runtime fetch + cache layer** — replace filesystem load of `./agents` with HTTP fetch of `index.json` from the configured registry source. Cache index + per-agent manifests to userData. Cache survives offline; refresh on every online launch.
+- [ ] **App↔manifest version gate** — app filters out entries whose `minAppVersion` exceeds the current app version, with an "Update Open Agents to use this agent" affordance.
+- [ ] **Agent Hub UX** — "Last refreshed N ago" indicator, manual refresh button, per-agent "Update available" badge. Updates are explicit, never auto-applied.
+- [ ] **Settings: Registry source** — text field, defaults to `https://raw.githubusercontent.com/ugurlabs/openagents/main/agents/`. Lets enterprises point at a fork.
+- [ ] **Onboarding** — agent index fetch becomes a discrete step after tenant + LLM provider, before the "first agent" step.
+- [ ] **Remove binary bundling** — drop the build-time inclusion of `/agents/` in the Electron package; clean up "built-in agent" framing in code and copy.
+
+### DSL extensions (required for the new agents)
+
+Today's DSL is linear `graph → transform → llm-blurb`. Investigators need multi-source correlation; triage agents need per-row reasoning; the CA explainer needs raw-policy LLM consumption.
+
+- [ ] **Parallel/named `graph` steps** — multiple Graph calls per agent, each addressable by id. Steps may depend on each other; runtime executes in topological order.
+- [ ] **Multi-input `llm` steps** — `inputs:` block listing named prior-step outputs the LLM step consumes. Template engine resolves into the prompt.
+- [ ] **`map` step kind** — applies a sub-pipeline per row of a collection (per-item LLM reasoning, with shared context). Output is the array of sub-pipeline results.
+- [ ] **Schema + template engine + QA updates** — `schemas/agent-template.schema.json`, `template-engine.ts`, scope checker, fixture coverage validator.
+- [ ] **Bump `schemaVersion` to `2`** — runtime accepts both 1 and 2 manifests; old agents continue to run unchanged.
+
+### Synthetic Graph fixtures (new endpoints)
+
+- [ ] Sign-in logs (`/auditLogs/signIns`)
+- [ ] Conditional Access policies (`/identity/conditionalAccess/policies`) + policy evaluation results
+- [ ] Directory audit logs (`/auditLogs/directoryAudits`)
+- [ ] Secure Score + control profiles (`/security/secureScores`, `/security/secureScoreControlProfiles`)
+- [ ] App registrations (`/applications`) + sign-in activity (`/reports/appCredentialSignInActivities`)
+- [ ] Existing fixtures extended where needed (guest invitations, group memberships for `stale-guest-cleanup`)
+
+### Bundled agent overhaul
+
+**Investigators (read, multi-source correlation + LLM reasoning).** The killer category — no script can do this.
+
+- [ ] `sign-in-failure-explainer` — pick a user; pulls sign-in logs + CA policy evaluations + device compliance + recent directory changes; LLM names the cause with reasoning.
+- [ ] `risky-sign-in-triage` — last-24h risky sign-ins; per-item LLM classifies likely-FP / likely-compromise / unclear with reasoning. Uses `map`.
+- [ ] `tenant-change-audit` — directory audit log over a configurable window; LLM groups by change type, flags anomalies.
+
+**Advisors (read, posture/policy reasoning).**
+
+- [ ] `conditional-access-explainer` — loads all CA policies; LLM explains what each does, flags interactions and gaps vs. Microsoft baseline. Qualitative explanation, not a formal simulator.
+- [ ] `secure-score-prioritizer` — Secure Score recommendations ranked by tenant shape, with effort estimates.
+
+**Cleanup with judgment (write, multi-criteria reasoning before the diff).**
+
+- [ ] `stale-guest-cleanup` — replaces `disable-inactive-guests`. Guests where: no sign-in 90d AND no app assignment AND no group ownership AND inviter has left. LLM produces per-guest rationale; write step disables with typed diff confirmation.
+- [ ] `dormant-app-registrations` — app regs with no recent sign-ins, no owners, stale secrets; LLM groups by likely purpose and recommends keep/disable/delete.
+
+**Reframe the existing read-only set as "Dashboards" (not "Agents").**
+
+- [ ] New `category: dashboard` (or top-level tier) in manifest schema + Agent Hub filter.
+- [ ] Move `compliance-overview`, `os-update-posture`, `tenant-health-report`, `user-license-overview` into the Dashboards tier. Be honest in their READMEs — these are LLM-narrated reports, not agents.
+- [ ] Keep `find-inactive-devices` + `retire-inactive-devices` as the minimum-viable read+write pair. Reframe READMEs around the LLM-authored cleanup rationale.
+- [ ] Delete `disable-inactive-guests` (superseded by `stale-guest-cleanup`).
+
+### Docs
+
+- [ ] SPEC.md §2 Registry model — already updated to repo-as-registry.
+- [ ] SPEC.md §5b (new) — bundled agent philosophy: investigator / advisor / cleanup tiers + why dashboards are separate.
+- [ ] README + marketing copy — lead with investigators, not dashboards. "An AI sysadmin that reasons across Graph, not a fancier `Get-MgUser`."
+- [ ] CONTRIBUTING — how to PR a new agent: scaffold, fixture requirements, QA gate, what gets you into the index.
+
+### Acceptance criteria
+
+1. Fresh install with empty userData → onboarding completes → Agent Hub shows agents fetched from `agents/index.json` in this repo (zero agents bundled in the binary).
+2. With no network: previously cached agents are still listed and runnable; Agent Hub shows "Offline — last refreshed N ago" with no blocking errors.
+3. Pointing "Registry source" at a fork URL shows that fork's agents instead — verified end-to-end.
+4. Pushing a manifest with a `minAppVersion` greater than the running app version → that agent appears with an "Update required" state, not as runnable.
+5. `sign-in-failure-explainer` run against synthetic data correctly correlates a CA-policy-induced failure across the four sources and the LLM output names the cause.
+6. `stale-guest-cleanup` produces a diff with per-guest LLM rationale; typed confirmation gate works; no write reaches Graph without it.
+7. Agent Hub clearly separates "Agents" (investigator / advisor / cleanup tiers) from "Dashboards." The four demoted agents appear under Dashboards only.
+8. `disable-inactive-guests` is removed from `/agents/` and from any in-app references.
+9. CI gate: invalid manifest, missing fixture, or scope mismatch fails the build and `agents/index.json` does not regenerate.
 
 ## Out of scope (explicitly deferred)
 

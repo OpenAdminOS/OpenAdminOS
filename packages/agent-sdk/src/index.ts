@@ -27,6 +27,14 @@ export type AgentCategory =
   | "compliance"
   | "updates";
 
+/**
+ * Distribution tier — separates true agents (multi-source reasoning,
+ * judgment, write actions) from dashboards (single-source LLM-narrated
+ * reports). Default is `agent`; only set `dashboard` when the manifest
+ * is honestly a report and not something a PowerShell script can't do.
+ */
+export type AgentTier = "agent" | "dashboard";
+
 export interface AgentAuthor {
   name: string;
   handle?: string;
@@ -50,6 +58,7 @@ export interface AgentContract {
   description: string;
   mode: AgentMode;
   category: AgentCategory;
+  tier: AgentTier;
   scopes: string[];
   author: AgentAuthor;
   version: string;
@@ -643,6 +652,12 @@ export interface AgentTemplate {
     version: string;
     author: AgentAuthor;
     category: AgentCategory;
+    /**
+     * Distribution tier. Optional in source manifests; defaults to
+     * `agent` at parse time. Set to `dashboard` only for single-source
+     * LLM-narrated reports — see {@link AgentTier}.
+     */
+    tier?: AgentTier;
     mode: AgentMode;
     preferredModel?: string;
     /**

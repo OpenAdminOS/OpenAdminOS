@@ -19,6 +19,7 @@ descriptor:
     handle: openagents
     verified: true
   category: updates
+  tier: dashboard
   mode: read
   preferredModel: llama3.1:8b
 

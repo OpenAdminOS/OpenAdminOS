@@ -41,6 +41,11 @@
           "type": "string",
           "enum": ["devices", "apps", "policies", "compliance", "updates"]
         },
+        "tier": {
+          "type": "string",
+          "enum": ["agent", "dashboard"],
+          "description": "Distribution tier. Defaults to 'agent' when omitted. Set 'dashboard' only for single-source LLM-narrated reports."
+        },
         "mode": {
           "type": "string",
           "enum": ["read", "write"],

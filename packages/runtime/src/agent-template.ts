@@ -6,6 +6,7 @@ import type {
   AgentConnectorRequirement,
   AgentMode,
   AgentModule,
+  AgentTier,
   AgentRunResult,
   GraphOperation,
   GraphStep,
@@ -61,6 +62,15 @@ export function parseAgentTemplate(source: string): AgentTemplate {
       "descriptor.mode",
       `expected "read" or "write", got ${JSON.stringify(mode)}`,
     );
+  }
+
+  if (descriptor.tier !== undefined) {
+    if (descriptor.tier !== "agent" && descriptor.tier !== "dashboard") {
+      throw new ManifestValidationError(
+        "descriptor.tier",
+        `expected "agent" or "dashboard", got ${JSON.stringify(descriptor.tier)}`,
+      );
+    }
   }
 
   if (skills.length === 0) {
@@ -1106,6 +1116,7 @@ function commonMetadata(manifest: AgentTemplate) {
     name: descriptor.name,
     description: descriptor.description,
     category: descriptor.category,
+    tier: descriptor.tier ?? "agent",
     scopes: collectScopes(manifest),
     author: descriptor.author,
     version: descriptor.version,
@@ -1181,6 +1192,7 @@ export function agentTemplateToRegistrySummary(
   description: string;
   mode: AgentMode;
   category: AgentCategory;
+  tier: AgentTier;
   scopes: string[];
   author: AgentAuthor;
   version: string;
@@ -1197,6 +1209,7 @@ export function agentTemplateToRegistrySummary(
     description: descriptor.description,
     mode: descriptor.mode,
     category: descriptor.category,
+    tier: descriptor.tier ?? "agent",
     scopes: collectScopes(manifest),
     author: descriptor.author,
     version: descriptor.version,

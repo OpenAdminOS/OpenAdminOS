@@ -20,6 +20,10 @@
     "tenant-health-report": {
       "installs": 0,
       "installs7d": 0
+    },
+    "user-license-overview": {
+      "installs": 0,
+      "installs7d": 0
     }
   }
 }
