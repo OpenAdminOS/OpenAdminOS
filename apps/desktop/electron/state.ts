@@ -1279,17 +1279,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * Fire a tenant tier probe for every persisted tenant. Called from
    * main.ts on app startup so the StatusStrip / Settings panel
    * populate without the user needing to disconnect-and-reconnect.
-   * Each probe is independent and silent on failure.
+   * Each probe is independent and silent on failure. Passes
+   * `force: true` so the launch-time probe always re-reads
+   * /subscribedSkus — once per launch, picks up new SKUs from
+   * Microsoft without the user having to wait for the 24h cadence.
    */
   async probeAllTenants(): Promise<void> {
     const persisted = await this.read().catch(() => null);
     if (!persisted) return;
     for (const tenant of persisted.tenants) {
-      void this.probeEntraTier(tenant).catch(() => undefined);
+      void this.probeEntraTier(tenant, { force: true }).catch(() => undefined);
     }
   }
 
-  async probeEntraTier(tenant: TenantRecord): Promise<void> {
+  async probeEntraTier(
+    tenant: TenantRecord,
+    options: { force?: boolean } = {},
+  ): Promise<void> {
     const DAY_MS = 24 * 60 * 60 * 1000;
     const recent =
       tenant.entraTier &&
@@ -1299,7 +1305,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // Re-probe even when recent if the licenses panel hasn't been
     // populated yet (migration from pre-license-panel persisted state).
     const licensesMissing = tenant.relevantLicenses === undefined;
-    if (recent && !licensesMissing) {
+    if (recent && !licensesMissing && !options.force) {
       return;
     }
     const client = this.getMsalClient();
@@ -1317,6 +1323,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     );
     const detected = result?.tier ?? "unknown";
     const relevantLicenses = result?.relevantLicenses ?? [];
+    // Surface SKUs we recognise but couldn't map to a friendly name.
+    // Lands in the dev log so we can grow RELEVANT_SKU_NAMES quickly
+    // when Microsoft ships a new tier.
+    if (result?.allSkuPartNumbers) {
+      const surfaced = new Set(relevantLicenses.map((l) => l.skuPartNumber));
+      const unmatched = result.allSkuPartNumbers.filter((p) => !surfaced.has(p));
+      if (unmatched.length > 0) {
+        console.log(
+          `[probeEntraTier] ${tenant.displayName}: unmatched skuPartNumbers (add to RELEVANT_SKU_NAMES if these should appear in the Licenses panel):`,
+          unmatched,
+        );
+      }
+    }
     await this.serialize(async () => {
       const persisted = await this.read();
       const idx = persisted.tenants.findIndex((t) => t.id === tenant.id);

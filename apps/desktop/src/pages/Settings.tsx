@@ -461,12 +461,7 @@ function TenantRow({
               </div>
               <ul className="space-y-0.5 text-[12px] text-[var(--color-text-soft)]">
                 {licenses.map((license) => (
-                  <li key={license.skuPartNumber} className="flex items-center gap-2">
-                    <span>{license.displayName}</span>
-                    <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
-                      {license.consumedUnits}/{license.enabledUnits}
-                    </span>
-                  </li>
+                  <li key={license.skuPartNumber}>{license.displayName}</li>
                 ))}
               </ul>
             </div>

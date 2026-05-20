@@ -36,6 +36,9 @@ const RELEVANT_SKU_NAMES: Record<string, string> = {
   SPE_E7_NOTEAMS: "Microsoft 365 E7 (without Teams)",
   SPE_F1: "Microsoft 365 F1",
   SPE_F3: "Microsoft 365 F3",
+  // Developer-program SKUs — common in admin / lab tenants.
+  DEVELOPERPACK_E5: "Microsoft 365 E5 Developer (without Windows and Audio Conferencing)",
+  DEVELOPERPACK: "Office 365 E3 Developer",
   // Microsoft 365 Business
   SPB: "Microsoft 365 Business Premium",
   O365_BUSINESS_ESSENTIALS: "Microsoft 365 Business Basic",
@@ -105,7 +108,12 @@ export async function probeSubscribedSkus(
   tokenProvider: (scopes: string[]) => Promise<string>,
   baseUrl = "https://graph.microsoft.com/beta",
   fetchImpl: typeof fetch = fetch,
-): Promise<{ tier: DetectedEntraTier; relevantLicenses: TenantLicense[] } | null> {
+): Promise<{
+  tier: DetectedEntraTier;
+  relevantLicenses: TenantLicense[];
+  /** Every `skuPartNumber` returned by Graph, including ones we did not surface. Useful for diagnosing missing entries in the lookup table. */
+  allSkuPartNumbers: string[];
+} | null> {
   try {
     const token = await tokenProvider(["Organization.Read.All"]);
     const response = await fetchImpl(`${baseUrl}/subscribedSkus`, {
@@ -114,9 +122,13 @@ export async function probeSubscribedSkus(
     if (!response.ok) return null;
     const body = (await response.json()) as SubscribedSkusResponse;
     const skus = body.value ?? [];
+    const allSkuPartNumbers = skus
+      .map((s) => s.skuPartNumber)
+      .filter((p): p is string => typeof p === "string" && p.length > 0);
     return {
       tier: classifySkus(skus),
       relevantLicenses: extractRelevantLicenses(skus),
+      allSkuPartNumbers,
     };
   } catch {
     return null;
