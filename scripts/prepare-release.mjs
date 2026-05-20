@@ -38,6 +38,7 @@ const PACKAGES_TO_BUMP = [
   "packages/agent-sdk/package.json",
   "packages/runtime/package.json",
   "packages/qa-graph/package.json",
+  "packages/connector-teams/package.json",
 ];
 
 // Registry agents used to ship as workspace packages with their own
