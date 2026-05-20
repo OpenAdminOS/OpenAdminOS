@@ -148,14 +148,16 @@ export default function AgentHub() {
               <>
                 <span className="opacity-50">·</span>
                 <span className="text-[var(--color-text-soft)]">
-                  refreshed {new Date(state.lastRegistryRefresh).toLocaleTimeString()}
+                  remote · refreshed {new Date(state.lastRegistryRefresh).toLocaleTimeString()}
                 </span>
               </>
             )}
             {state.registryRefreshError && !state.lastRegistryRefresh && (
               <>
                 <span className="opacity-50">·</span>
-                <span className="text-[var(--color-warning)]">offline — using cached agents</span>
+                <span className="text-[var(--color-text-soft)]">
+                  bundled · remote registry unreachable
+                </span>
               </>
             )}
           </span>

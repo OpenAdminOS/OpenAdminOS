@@ -230,9 +230,22 @@ export class AppStateStore {
 
   /**
    * Fetches the registry index from the configured source, updates the
-   * in-memory cache and persisted last-refresh timestamp. Falls back to
-   * a local filesystem scan if the fetch fails and no cache exists.
-   * Safe to call multiple times (e.g., on manual refresh from Agent Hub).
+   * in-memory cache and persisted last-refresh timestamp.
+   *
+   * Source priority (first available wins):
+   *   1. Live HTTP fetch from `registrySource/index.json`
+   *   2. On-disk cache from a previous successful fetch
+   *   3. Filesystem scan of the bundled `agents/` directory (Electron
+   *      extraResources in packaged builds, repo root in dev)
+   *
+   * (3) is only reached when both (1) and (2) failed — in that case
+   * we leave `registryCacheEntries` null so `listRegistryAgents()`
+   * walks the filesystem. The bundled agents are the same set the
+   * remote registry will serve once it's public; this dual-source
+   * approach means the app works in private preview today and
+   * transparently switches to remote when the repo is flipped public.
+   *
+   * Safe to call multiple times (e.g., on manual refresh).
    */
   async initRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
     if (!this.userDataPath) {
@@ -242,8 +255,17 @@ export class AppStateStore {
     const persisted = await this.read().catch(() => defaultState);
     const registrySource = persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE;
     const result = await refreshRegistry(this.userDataPath, registrySource);
-    this.registryCacheEntries = result.entries.map(entryToRegistrySummary);
-    this.lastRegistryRefresh = result.fromCache ? null : (result.cachedAt ?? null);
+
+    const bothSourcesFailed = result.error !== null && !result.fromCache;
+    if (bothSourcesFailed) {
+      // Keep `registryCacheEntries` null so listRegistryAgents() walks
+      // the bundled filesystem fallback. Surface the error to the UI
+      // so the user knows why the remote source isn't being used.
+      this.registryCacheEntries = null;
+    } else {
+      this.registryCacheEntries = result.entries.map(entryToRegistrySummary);
+    }
+    this.lastRegistryRefresh = result.fromCache || bothSourcesFailed ? null : (result.cachedAt ?? null);
     this.registryRefreshError = result.error;
     return { error: result.error, fromCache: result.fromCache, cachedAt: result.cachedAt };
   }
