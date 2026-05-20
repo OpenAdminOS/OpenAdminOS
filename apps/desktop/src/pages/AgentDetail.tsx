@@ -7,6 +7,7 @@ import { Button } from "../components/Button";
 import { Avatar } from "../components/Avatar";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
 import { ManifestPreview } from "../components/ManifestPreview";
+import { stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
 import { RunWithMenu } from "../components/RunWithMenu";
 import { ShareMenu } from "../components/ShareMenu";
@@ -290,8 +291,8 @@ export default function AgentDetail() {
                         className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
                       >
                         <div>
-                          <div className="text-[13px] text-[var(--color-text)]">
-                            {run.summary ?? run.status}
+                          <div className="text-[13px] text-[var(--color-text)] line-clamp-2">
+                            {run.summary ? stripMarkdownToPlainText(run.summary) : run.status}
                           </div>
                           <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
                             {formatDate(run.queuedAt)} · {formatDuration(run)}

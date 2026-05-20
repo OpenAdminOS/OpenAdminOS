@@ -20,6 +20,7 @@ import {
 
 import { ShareMenu } from "../components/ShareMenu";
 import { ActivityFeed } from "../components/ActivityFeed";
+import { MarkdownPreview } from "../components/MarkdownPreview";
 import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { RunTelemetry } from "../components/RunTelemetry";
@@ -334,9 +335,16 @@ function OutcomeCard({
           <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             {statusToOutcomeLabel(run.status)}
           </div>
-          <div className="mt-3 text-[18px] font-medium leading-relaxed text-[var(--color-text)]">
-            {run.summary ?? "Run is waiting for its first update."}
-          </div>
+          {run.summary ? (
+            <MarkdownPreview
+              source={run.summary}
+              className="mt-3 text-[18px] font-medium leading-relaxed text-[var(--color-text)]"
+            />
+          ) : (
+            <div className="mt-3 text-[18px] font-medium leading-relaxed text-[var(--color-text)]">
+              Run is waiting for its first update.
+            </div>
+          )}
           {agent?.description && (
             <p className="mt-3 max-w-[640px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
               {agent.description}

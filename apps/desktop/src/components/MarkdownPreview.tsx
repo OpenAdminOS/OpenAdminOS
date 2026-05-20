@@ -42,6 +42,38 @@ export function MarkdownPreview({
   );
 }
 
+/**
+ * Strip markdown markers and collapse to a single-line plain string —
+ * for use in dense list rows (Activity feed, AgentDetail run list)
+ * where the cell is truncated and rendering as paragraphs would break
+ * the layout. Same syntax surface as `MarkdownPreview`, but the output
+ * is intentionally lossy: only the visible text survives.
+ */
+export function stripMarkdownToPlainText(source: string): string {
+  return source
+    // Fenced code blocks → drop the fences, keep the content on one line.
+    .replace(/```[\s\S]*?```/g, (match) =>
+      match.replace(/```/g, "").replace(/\r?\n+/g, " "),
+    )
+    // Headings: drop the leading hashes.
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    // Bullet / numbered list markers.
+    .replace(/^\s*[-*]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    // Inline code: keep the inner text.
+    .replace(/`([^`]+)`/g, "$1")
+    // Bold / italic markers.
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(?<![*\w])\*([^*\s][^*]*?)\*(?!\w)/g, "$1")
+    .replace(/(?<![_\w])_([^_\s][^_]*?)_(?!\w)/g, "$1")
+    // Links: keep the label, drop the URL.
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, "$1")
+    // Collapse all whitespace runs (including newlines) to a single space.
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 type Block =
   | { kind: "heading"; level: number; text: string }
   | { kind: "paragraph"; text: string }

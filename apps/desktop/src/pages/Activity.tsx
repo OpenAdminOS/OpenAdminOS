@@ -4,6 +4,7 @@ import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { IconSearch } from "../components/icons";
+import { stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { useAppState } from "../state";
 import type { RunRecord, RunStatus } from "../shared/openAgents";
 
@@ -118,7 +119,9 @@ export default function Activity() {
                       {agentNameForRun(run, state.installedAgents)}
                     </div>
                     <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-                      <span className="truncate">{run.summary ?? run.id}</span>
+                      <span className="truncate">
+                        {run.summary ? stripMarkdownToPlainText(run.summary) : run.id}
+                      </span>
                       <span className="opacity-50">·</span>
                       <span className="shrink-0">
                         {tenantLabel(run, state.tenants)}
