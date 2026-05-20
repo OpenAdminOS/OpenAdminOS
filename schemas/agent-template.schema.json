@@ -258,8 +258,8 @@
               "properties": {
                 "kind": {
                   "type": "string",
-                  "enum": ["retire-managed-device"],
-                  "description": "Registered action kind handled by the runtime. v0.1 supports retire-managed-device."
+                  "enum": ["retire-managed-device", "graph-write"],
+                  "description": "Registered action kind handled by the runtime. `graph-write` is the generic kind — any POST/PATCH/PUT/DELETE Graph endpoint. `retire-managed-device` is a legacy alias for POST /deviceManagement/managedDevices/{id}/retire kept for the bundled sample agent."
                 },
                 "source": {
                   "type": "string",
@@ -342,6 +342,26 @@
           "type": "object",
           "additionalProperties": { "type": "string" },
           "description": "Per-action metadata. Templated; values are strings at the schema layer but the runtime may parse them per action kind."
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "path"],
+          "description": "For kind `graph-write`: the Graph request to send when the action is approved. Path and body are templated per source item.",
+          "properties": {
+            "method": {
+              "type": "string",
+              "enum": ["POST", "PATCH", "PUT", "DELETE"]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/",
+              "description": "Graph path. Liquid expressions are rendered per item, e.g. `/users/{{ item.id }}`."
+            },
+            "body": {
+              "description": "Optional JSON body. Recursively templated."
+            }
+          }
         }
       }
     },

@@ -204,6 +204,37 @@ function validateWriteStepSettings(
   if (typeof tmpl.label !== "string" || tmpl.label.length === 0) {
     throw new ManifestValidationError(`${path}.actionTemplate.label`, "must be a non-empty string");
   }
+
+  // graph-write requires a Graph request template. Other kinds (e.g.
+  // the legacy retire-managed-device) have their own contract and
+  // their handler reads from metadata directly.
+  if (settings.kind === "graph-write") {
+    if (!tmpl.request || typeof tmpl.request !== "object") {
+      throw new ManifestValidationError(
+        `${path}.actionTemplate.request`,
+        'graph-write requires `request: { method, path, body? }`',
+      );
+    }
+    const req = tmpl.request as Record<string, unknown>;
+    const method = req.method;
+    if (
+      method !== "POST" &&
+      method !== "PATCH" &&
+      method !== "PUT" &&
+      method !== "DELETE"
+    ) {
+      throw new ManifestValidationError(
+        `${path}.actionTemplate.request.method`,
+        'must be one of "POST", "PATCH", "PUT", "DELETE"',
+      );
+    }
+    if (typeof req.path !== "string" || !req.path.startsWith("/")) {
+      throw new ManifestValidationError(
+        `${path}.actionTemplate.request.path`,
+        'must be a Graph path starting with "/"',
+      );
+    }
+  }
 }
 
 // ─── Pipeline state shared by read + write paths ───────────────────────────
@@ -426,6 +457,22 @@ function renderActionFromTemplate(
     }
     action.metadata = rendered;
   }
+  if (template.request) {
+    // Render the request template against the per-item context so the
+    // plan carries a concrete `{ method, path, body? }` for each
+    // action. `renderDeep` walks the body recursively so nested
+    // string leaves are templated; non-string leaves pass through.
+    const renderedPath = String(
+      renderTemplate(template.request.path, templateCtx) ?? "",
+    );
+    action.request = {
+      method: template.request.method,
+      path: renderedPath,
+    };
+    if (template.request.body !== undefined) {
+      action.request.body = renderDeep(template.request.body, templateCtx);
+    }
+  }
   return action;
 }
 
@@ -532,6 +579,27 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
       return { outcome: "real", targetId: deviceId };
     }
     return { outcome: "simulated", targetId: deviceId };
+  },
+  "graph-write": async (action, ctx) => {
+    const request = action.request;
+    if (!request) {
+      throw new Error(
+        `graph-write: action "${action.id}" is missing its rendered request.`,
+      );
+    }
+    // The targetId is whatever identifies the affected resource in the
+    // run report. For graph-write we use the rendered path — it's the
+    // most honest signal admins can audit against.
+    const targetId = request.path;
+    if (ctx.realWrites) {
+      await ctx.graph.request({
+        method: request.method,
+        path: request.path,
+        body: request.body,
+      });
+      return { outcome: "real", targetId };
+    }
+    return { outcome: "simulated", targetId };
   },
 };
 
@@ -729,7 +797,7 @@ function transformGroupByField(
 
   const result: Record<string, unknown[]> = {};
   for (const item of source as Array<Record<string, unknown>>) {
-    const raw = item?.[field];
+    const raw = readFieldPath(item, field);
     const bucket =
       raw === undefined || raw === null || raw === ""
         ? missingBucket
@@ -764,8 +832,8 @@ function transformSortBy(
       : undefined;
 
   const sorted = [...(source as Array<Record<string, unknown>>)].sort((a, b) => {
-    const av = a?.[field];
-    const bv = b?.[field];
+    const av = readFieldPath(a, field);
+    const bv = readFieldPath(b, field);
     if (av === bv) return 0;
     if (av === undefined || av === null) return 1;
     if (bv === undefined || bv === null) return -1;
@@ -783,6 +851,25 @@ function transformSortBy(
     `Sorted ${source.length} items by "${field}" ${direction}${take ? `, took top ${take}` : ""}.`,
   );
   return out;
+}
+
+/**
+ * Read a possibly-nested field path off an object. Accepts dot-notation
+ * paths like `signInActivity.lastSignInDateTime` so transforms can
+ * operate on Graph's natural nested shapes without an extra mapping
+ * step. Returns undefined when any segment is missing.
+ */
+function readFieldPath(item: unknown, fieldPath: string): unknown {
+  if (item === null || typeof item !== "object") return undefined;
+  if (!fieldPath.includes(".")) {
+    return (item as Record<string, unknown>)[fieldPath];
+  }
+  let current: unknown = item;
+  for (const segment of fieldPath.split(".")) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
 }
 
 interface GroupByAgeSpec {
@@ -819,7 +906,7 @@ function transformGroupByAge(
   }
 
   for (const item of spec.source as Array<Record<string, unknown>>) {
-    const raw = item[spec.timestampField];
+    const raw = readFieldPath(item, spec.timestampField);
     if (typeof raw !== "string") continue;
     const ms = new Date(raw).getTime();
     if (Number.isNaN(ms)) continue;
@@ -870,7 +957,7 @@ function transformFilterByAge(
   const matched: unknown[] = [];
 
   for (const item of spec.source as Array<Record<string, unknown>>) {
-    const raw = item[spec.timestampField];
+    const raw = readFieldPath(item, spec.timestampField);
     if (typeof raw !== "string") continue;
     const ms = new Date(raw).getTime();
     if (Number.isNaN(ms)) continue;
@@ -917,7 +1004,7 @@ function transformCountByField(
   }
 
   for (const item of spec.source as Array<Record<string, unknown>>) {
-    const raw = item?.[spec.field];
+    const raw = readFieldPath(item, spec.field);
     if (raw === undefined || raw === null) continue;
     const key = typeof raw === "string" ? raw : String(raw);
     result[key] = (result[key] ?? 0) + 1;

@@ -8,6 +8,7 @@ import {
   IconArrowLeft,
   IconBolt,
   IconCheck,
+  IconChevronDown,
   IconCopy,
   IconDownload,
   IconHardDrive,
@@ -603,27 +604,69 @@ function DiffConfirmPanel({
 }
 
 function ActionRow({ action, index }: { action: WriteAction; index: number }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   const destructive = action.severity === "destructive";
+  // For graph-write actions we display the HTTP method as the badge;
+  // for the legacy retire-managed-device kind (no rendered request)
+  // we fall back to the kind string so the existing UI keeps working.
+  const badgeLabel = action.request?.method ?? action.kind;
   return (
-    <div className="grid grid-cols-[40px_1fr_auto] items-center gap-4 px-5 py-3">
-      <div className="font-mono text-[10.5px] text-[var(--color-text-muted)] tabular-nums">
-        {String(index + 1).padStart(2, "0")}
-      </div>
-      <div className="min-w-0">
-        <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-          {action.label}
+    <div className="px-5 py-3">
+      <div className="grid grid-cols-[40px_1fr_auto] items-center gap-4">
+        <div className="font-mono text-[10.5px] text-[var(--color-text-muted)] tabular-nums">
+          {String(index + 1).padStart(2, "0")}
         </div>
-        {action.description && (
-          <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-            {action.description}
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
+            {action.label}
           </div>
-        )}
+          {action.description && (
+            <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+              {action.description}
+            </div>
+          )}
+        </div>
+        <Pill tone={destructive ? "danger" : "default"}>
+          <IconBolt size={9} /> {badgeLabel}
+        </Pill>
       </div>
-      <Pill tone={destructive ? "danger" : "default"}>
-        <IconBolt size={9} /> {action.kind}
-      </Pill>
+      {action.request && (
+        <div className="mt-2 pl-[56px]">
+          <button
+            type="button"
+            onClick={() => setPreviewOpen((open) => !open)}
+            className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text-soft)]"
+          >
+            <IconChevronDown
+              size={10}
+              style={{
+                transform: previewOpen ? "rotate(0deg)" : "rotate(-90deg)",
+                transition: "transform 0.15s ease",
+              }}
+            />
+            {previewOpen ? "Hide request preview" : "Show request preview"}
+          </button>
+          {previewOpen && (
+            <pre className="mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+              {formatRequestPreview(action.request)}
+            </pre>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+function formatRequestPreview(request: NonNullable<WriteAction["request"]>): string {
+  const head = `${request.method} ${request.path}`;
+  if (request.body === undefined) return head;
+  let body: string;
+  try {
+    body = JSON.stringify(request.body, null, 2);
+  } catch {
+    body = String(request.body);
+  }
+  return `${head}\n\n${body}`;
 }
 
 function formatDate(value: string) {

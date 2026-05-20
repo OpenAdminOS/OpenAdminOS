@@ -93,9 +93,16 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
     },
 
     async request(input: SdkGraphRequestInput): Promise<unknown> {
-      if (input.method !== "GET") {
+      const method = input.method;
+      if (
+        method !== "GET" &&
+        method !== "POST" &&
+        method !== "PATCH" &&
+        method !== "PUT" &&
+        method !== "DELETE"
+      ) {
         throw new Error(
-          `RunGraphApi.request: only GET is supported (got ${input.method}).`,
+          `RunGraphApi.request: unsupported method "${method}".`,
         );
       }
       if (!input.path || !input.path.startsWith("/")) {
@@ -104,14 +111,27 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         );
       }
       const url = buildGraphUrl(baseUrl, input.path, input.query);
+      // GET/DELETE typically return either JSON or 204; PATCH/PUT/POST
+      // vary. Stay generous — try to decode JSON if the response has
+      // a body, otherwise return undefined. The retry policy below
+      // never retries POST/PATCH on 5xx so a half-applied write is
+      // not silently doubled; PUT/DELETE are idempotent so retries
+      // remain in place. GET keeps the existing retry behaviour.
+      const hasBody =
+        method !== "GET" &&
+        method !== "DELETE" &&
+        input.body !== undefined;
       return await graphRequest<unknown>({
-        method: "GET",
+        method,
         url,
         tokenProvider: options.tokenProvider,
         fetchImpl,
         maxRetries,
         timeoutMs,
+        expectJson: method !== "DELETE",
         extraHeaders: input.headers,
+        body: hasBody ? JSON.stringify(input.body) : undefined,
+        idempotent: method === "GET" || method === "PUT" || method === "DELETE",
       });
     },
   };
@@ -135,7 +155,7 @@ function buildGraphUrl(
 }
 
 interface GraphRequestInput {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   url: string;
   tokenProvider: () => Promise<string>;
   fetchImpl: typeof fetch;
@@ -143,6 +163,15 @@ interface GraphRequestInput {
   timeoutMs: number;
   expectJson?: boolean;
   extraHeaders?: Record<string, string>;
+  body?: string;
+  /**
+   * Whether this request is safe to retry on 5xx. POST and PATCH are
+   * not idempotent in Graph's general contract — retrying them on a
+   * 500 risks duplicating a write. GET/PUT/DELETE are. 429 is always
+   * retried regardless because Microsoft Graph documents it as a
+   * pure rate-limit signal.
+   */
+  idempotent?: boolean;
 }
 
 async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
@@ -166,12 +195,17 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
       }
     }
 
+    if (input.body !== undefined) {
+      headers["content-type"] = "application/json";
+    }
+
     let response: Response;
     try {
       response = await input.fetchImpl(input.url, {
         method: input.method,
         headers,
         signal: controller.signal,
+        body: input.body,
       });
     } catch (error) {
       clearTimeout(timer);
@@ -197,10 +231,11 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
       );
     }
 
-    if (
-      (response.status === 429 || response.status >= 500) &&
-      attempt < input.maxRetries
-    ) {
+    const idempotent = input.idempotent ?? true;
+    const retryable =
+      response.status === 429 ||
+      (response.status >= 500 && idempotent);
+    if (retryable && attempt < input.maxRetries) {
       const retryAfter = parseRetryAfter(response.headers.get("retry-after")) ?? 2;
       await sleep(retryAfter * 1000);
       continue;

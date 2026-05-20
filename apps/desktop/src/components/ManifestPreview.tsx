@@ -289,6 +289,32 @@ function WriteDetail({ step }: { step: WriteStep }) {
           )}
         </div>
       </div>
+      {actionTemplate.request && (
+        <div className="rounded-md bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
+          <div className="text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            Request template (rendered per source item)
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11.5px]">
+            <span className="shrink-0 rounded bg-[var(--color-danger-soft)] px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-danger)]">
+              {actionTemplate.request.method}
+            </span>
+            <span className="min-w-0 truncate text-[var(--color-text)]">
+              {actionTemplate.request.path}
+            </span>
+          </div>
+          {actionTemplate.request.body !== undefined && (
+            <pre className="mt-2 overflow-x-auto rounded bg-[var(--color-bg-raised)] p-2 font-mono text-[10.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+              {(() => {
+                try {
+                  return JSON.stringify(actionTemplate.request.body, null, 2);
+                } catch {
+                  return String(actionTemplate.request.body);
+                }
+              })()}
+            </pre>
+          )}
+        </div>
+      )}
       {scopes && scopes.length > 0 && (
         <div className="text-[11px] text-[var(--color-text-muted)]">
           Uses scope{scopes.length === 1 ? "" : "s"}:{" "}

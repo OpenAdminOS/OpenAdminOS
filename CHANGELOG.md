@@ -7,15 +7,18 @@ All notable changes to Open Agents are recorded here. Format follows [Keep a Cha
 ### Added
 
 - runtime: agent-template graph steps can now call any Microsoft Graph GET endpoint via the new `RunGraphApi.request()` adapter — paths beyond `/deviceManagement/managedDevices` are dispatched generically with `$select`, `$filter`, etc.
-- runtime: two new transforms — `group-by-field` and `sort-by` — so agents working over arbitrary Graph collections have somewhere to go besides device-age math.
-- electron: vendored merill/msgraph endpoint catalogue (~28k endpoints, ~6.4k with permission scopes). The drafter pre-searches it for candidate endpoints, and the install path validates that every declared graph step targets a real endpoint with a matching delegated scope.
-- agents: sample `user-license-overview` agent demonstrating a `/users`-backed read agent.
+- runtime: generic write action kind `graph-write` — agents can declare any POST/PATCH/PUT/DELETE Graph endpoint with a templated body. The runtime renders one Graph request per source item, lists them all in the `WritePlan`, and only fires after the user types the confirmation phrase. The legacy `retire-managed-device` kind keeps working unchanged.
+- runtime: two new transforms — `group-by-field` and `sort-by` — so agents working over arbitrary Graph collections have somewhere to go besides device-age math. Transforms (filter-by-age, group-by-age, group-by-field, count-by-field, sort-by) now read nested dot-paths like `signInActivity.lastSignInDateTime`.
+- electron: vendored merill/msgraph endpoint catalogue (~28k endpoints, ~6.4k with permission scopes). The drafter pre-searches it for candidate endpoints, and the install path validates that every declared graph or graph-write step targets a real endpoint.
+- run UI: write actions now show the HTTP method as a coloured badge and expose an expandable "Request preview" with the rendered method/path/body so admins audit the exact Graph call before approving.
+- agents: sample `user-license-overview` (read) and `disable-inactive-guests` (graph-write) agents demonstrating the new shapes end-to-end.
 
 ### Changed
 
 - new-agent: review step now shows the drafted agent's name, description, mode, category, and version; modal subtitle switches to a review-mode caption; pipeline card opens by default so the proposed steps are visible without an extra click.
-- new-agent: drafter prompt no longer hardcodes a single endpoint; candidate endpoints relevant to the user's prompt are injected into the system message at draft time, and the manifest validator blocks invented paths and wrong scopes.
+- new-agent: drafter prompt no longer hardcodes a single endpoint; candidate read endpoints relevant to the user's prompt are injected at draft time, and when the prompt looks write-y (disable / delete / revoke / …) candidate POST/PATCH/DELETE endpoints are injected alongside them. Drafter examples cover both read and `graph-write` shapes.
 - runtime: `tokenProvider` for agent runs now goes through `tenantSession.acquireTokenForScopes(agent.scopes)`, so MSAL prompts for incremental consent the first time an installed agent needs new scopes.
+- runtime: retry policy for `RunGraphApi.request()` splits on idempotency — POST/PATCH retry only on 429, while GET/PUT/DELETE keep the existing 429+5xx retry behaviour.
 
 ### Removed
 

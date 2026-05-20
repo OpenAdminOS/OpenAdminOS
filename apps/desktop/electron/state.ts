@@ -723,9 +723,18 @@ export class AppStateStore {
     // Pull a shortlist of real Graph endpoints relevant to the user's
     // prompt and inject them into the system prompt. Keeps the model
     // grounded in real paths instead of inventing them, and gives it
-    // the matching delegated scope to declare.
-    const candidates = searchEndpoints(trimmed, { limit: 12, method: "GET" });
-    const system = buildNl2AgentSystemPrompt(candidates);
+    // the matching delegated scope to declare. For prompts that look
+    // write-y, also surface POST/PATCH/PUT/DELETE candidates so the
+    // model can wire up a `graph-write` step.
+    const readCandidates = searchEndpoints(trimmed, { limit: 10, method: "GET" });
+    const writeCandidates = promptLooksWritey(trimmed)
+      ? [
+          ...searchEndpoints(trimmed, { limit: 3, method: "POST" }),
+          ...searchEndpoints(trimmed, { limit: 3, method: "PATCH" }),
+          ...searchEndpoints(trimmed, { limit: 2, method: "DELETE" }),
+        ]
+      : [];
+    const system = buildNl2AgentSystemPrompt(readCandidates, writeCandidates);
     const userTurn = `Draft a manifest.yaml for the following Open Agents agent description.
 
 Description from the user:
@@ -1890,43 +1899,118 @@ function collectGraphStepErrors(
 ): string[] {
   const errors: string[] = [];
   for (const skill of manifest.skills) {
-    if (skill.format !== "graph") continue;
-    const settings = skill.settings as {
-      method?: string;
-      path?: string;
-      scopes?: string[];
-    } | null;
-    if (!settings || typeof settings.method !== "string" || typeof settings.path !== "string") {
+    if (skill.format === "graph") {
+      const settings = skill.settings as {
+        method?: string;
+        path?: string;
+        scopes?: string[];
+      } | null;
+      if (!settings || typeof settings.method !== "string" || typeof settings.path !== "string") {
+        continue;
+      }
+      const result = validatePath(
+        settings.method,
+        settings.path,
+        Array.isArray(settings.scopes) ? settings.scopes : [],
+      );
+      if (!result.ok) {
+        errors.push(
+          `graph step "${skill.id}": ${result.reason}${result.suggestion ? ` (${result.suggestion})` : ""}`,
+        );
+      }
       continue;
     }
-    const result = validatePath(
-      settings.method,
-      settings.path,
-      Array.isArray(settings.scopes) ? settings.scopes : [],
-    );
-    if (!result.ok) {
-      errors.push(
-        `graph step "${skill.id}": ${result.reason}${result.suggestion ? ` (${result.suggestion})` : ""}`,
+
+    // Generic graph-write — same catalogue check as reads, but the
+    // method+path come from the action template. The legacy
+    // retire-managed-device kind has its own hardcoded contract and
+    // is skipped here.
+    if (skill.format === "write") {
+      const settings = skill.settings as {
+        kind?: string;
+        scopes?: string[];
+        actionTemplate?: {
+          request?: { method?: string; path?: string };
+        };
+      } | null;
+      if (!settings || settings.kind !== "graph-write") continue;
+      const request = settings.actionTemplate?.request;
+      if (!request || typeof request.method !== "string" || typeof request.path !== "string") {
+        continue;
+      }
+      // The path is templated (e.g. `/users/{{ item.id }}`). The
+      // catalogue treats `{...}` segments as wildcards, so we strip
+      // Liquid placeholders to a `{}` token before lookup.
+      const lookupPath = request.path.replace(/\{\{[^}]+\}\}/g, "{}");
+      const result = validatePath(
+        request.method,
+        lookupPath,
+        Array.isArray(settings.scopes) ? settings.scopes : [],
       );
+      if (!result.ok) {
+        errors.push(
+          `write step "${skill.id}": ${result.reason}${result.suggestion ? ` (${result.suggestion})` : ""}`,
+        );
+      }
     }
   }
   return errors;
 }
 
-function buildNl2AgentSystemPrompt(candidates: EndpointSummary[]): string {
-  const candidateBlock =
-    candidates.length === 0
+const WRITEY_KEYWORDS = [
+  "disable",
+  "delete",
+  "remove",
+  "retire",
+  "wipe",
+  "revoke",
+  "reset",
+  "assign",
+  "unassign",
+  "update",
+  "patch",
+  "create",
+  "add",
+  "enable",
+  "block",
+  "unblock",
+  "restore",
+];
+
+function promptLooksWritey(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  return WRITEY_KEYWORDS.some((keyword) =>
+    new RegExp(`\\b${keyword}\\b`).test(lower),
+  );
+}
+
+function formatCandidates(candidates: EndpointSummary[]): string {
+  if (candidates.length === 0) return "(none)";
+  return candidates
+    .map((ep) => {
+      const scope =
+        ep.scopesDelegated.length > 0
+          ? ep.scopesDelegated[0]
+          : "(no delegated scope documented)";
+      const summary = ep.summary ? ` — ${ep.summary}` : "";
+      return `- ${ep.method} ${ep.path} | scope: ${scope}${summary}`;
+    })
+    .join("\n");
+}
+
+function buildNl2AgentSystemPrompt(
+  readCandidates: EndpointSummary[],
+  writeCandidates: EndpointSummary[] = [],
+): string {
+  const readBlock =
+    readCandidates.length === 0
       ? "(No catalogue match for this prompt. Pick `GET /deviceManagement/managedDevices` if no better fit exists — it is always available.)"
-      : candidates
-          .map((ep) => {
-            const scope =
-              ep.scopesDelegated.length > 0
-                ? ep.scopesDelegated[0]
-                : "(no delegated scope documented)";
-            const summary = ep.summary ? ` — ${ep.summary}` : "";
-            return `- ${ep.method} ${ep.path} | scope: ${scope}${summary}`;
-          })
-          .join("\n");
+      : formatCandidates(readCandidates);
+
+  const writeBlock =
+    writeCandidates.length === 0
+      ? ""
+      : `\n\nCandidate write endpoints (use these for a \`graph-write\` step — declare the listed scope):\n${formatCandidates(writeCandidates)}`;
 
   return `You generate Agent Template manifests for Open Agents — a desktop tool that runs AI agents against a Microsoft 365 tenant.
 
@@ -1941,12 +2025,13 @@ Hard rules:
 - Transform kinds available: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by.
 - EVERY agent MUST include at least one step with format: llm. This is what makes it an agent rather than a deterministic query — the LLM writes the headline summary an admin reads. Do not gate it with "when:". The runtime preflights the provider and fails the run if one isn't connected, so the gate is unnecessary and misleading.
 - definition.result.summary MUST reference the LLM step's output, e.g.: {{ summarize.output.text | default("Summary unavailable.") }}. Do not put raw counts in the summary line — those belong in result.data.
-- Write-action kinds available: retire-managed-device. For write agents, the LLM step should explain the planned actions in plain language; the write step's settings.summary should reference {{ explain_plan.output.text }} (or whatever the LLM step is named).
+- Write-action kinds available: \`graph-write\` (the generic kind — any POST/PATCH/PUT/DELETE Graph endpoint, with typed-confirmation diff) and \`retire-managed-device\` (legacy alias for POST /deviceManagement/managedDevices/{id}/retire). Always prefer \`graph-write\` for new agents. For write agents, the LLM step should explain the planned actions in plain language and the write step's actionTemplate.label / actionTemplate.description should make every individual action self-explanatory. \`severity: destructive\` is the safe default unless the action is plainly reversible.
+- The confirmationPhrase must spell out the operation count and noun in CAPS, e.g. "DISABLE {{ actions | size }} GUEST ACCOUNTS" or "REVOKE {{ actions | size }} SESSIONS". This is what the admin types to approve the plan.
 - Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", ").
 - Always include a top-level "# yaml-language-server: $schema=../../schemas/agent-template.schema.json" comment.
 
-Candidate Microsoft Graph endpoints for this prompt (pick from these — declare the listed scope):
-${candidateBlock}
+Candidate Microsoft Graph read endpoints for this prompt (pick from these for graph steps — declare the listed scope):
+${readBlock}${writeBlock}
 
 Reference example — read agent, bucketed by compliance state, LLM summary as headline:
 
@@ -2011,6 +2096,81 @@ definition:
       total: "{{ load_devices.output | size }}"
       counts: "{{ by_state.output }}"
       llmModel: "{{ summarize.output.model }}"
+
+Reference example — write agent using graph-write to disable inactive guest users:
+
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+descriptor:
+  id: disable-inactive-guests
+  name: Disable inactive guest accounts
+  description: Disables guest accounts that have not signed in for 90+ days after typed diff confirmation.
+  version: 1.0.0
+  author:
+    name: OpenAgents
+    handle: openagents
+    verified: false
+  category: policies
+  mode: write
+  preferredModel: llama3.1:8b
+skills:
+  - id: load_guests
+    format: graph
+    label: Load guest accounts
+    settings:
+      method: GET
+      path: /users
+      query:
+        $filter: "userType eq 'Guest'"
+      select: [id, displayName, userPrincipalName, accountEnabled, signInActivity]
+      scopes:
+        - User.Read.All
+        - AuditLog.Read.All
+  - id: stale
+    format: transform
+    label: Pick guests inactive for 90+ days
+    settings:
+      kind: filter-by-age
+      source: "{{ load_guests.output }}"
+      timestampField: signInActivity.lastSignInDateTime
+      inactiveDaysAtLeast: 90
+  - id: explain_plan
+    format: llm
+    label: Explain the disable plan
+    settings:
+      system: You are a Microsoft 365 administrator's assistant. Be concise and factual. Never invent numbers.
+      prompt: |-
+        About to disable {{ stale.output | size }} guest accounts that have
+        not signed in for 90+ days. Write a one-paragraph rationale a
+        manager could read before approving.
+      temperature: 0.2
+      maxTokens: 200
+  - id: disable_guests
+    format: write
+    label: Disable inactive guest accounts
+    settings:
+      kind: graph-write
+      source: "{{ stale.output }}"
+      confirmationPhrase: "DISABLE {{ actions | size }} GUEST ACCOUNTS"
+      scopes:
+        - User.ReadWrite.All
+      actionTemplate:
+        label: "Disable {{ item.userPrincipalName }}"
+        description: "Last sign-in {{ item.signInActivity.lastSignInDateTime | default('never') }}"
+        severity: destructive
+        request:
+          method: PATCH
+          path: "/users/{{ item.id }}"
+          body:
+            accountEnabled: false
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: '{{ explain_plan.output.text | default("Summary unavailable.") }}'
+    data:
+      total: "{{ stale.output | size }}"
+      llmModel: "{{ explain_plan.output.model }}"
 
 When the user's description is vague, pick sensible defaults and continue — don't ask clarifying questions. When you cannot fulfil a request inside the available endpoints / transforms, choose the closest supported shape rather than inventing new mechanisms.
 

@@ -212,6 +212,8 @@ export function validatePath(
     return { ok: true, endpoint };
   }
 
+  // Missing scope declaration is a real problem — the runtime cannot
+  // request a token without scopes. Block this case.
   if (declaredScopes.length === 0) {
     return {
       ok: false,
@@ -221,18 +223,14 @@ export function validatePath(
     };
   }
 
-  const intersect = declaredScopes.some((scope) =>
-    endpoint.scopesDelegated.includes(scope),
-  );
-  if (!intersect) {
-    return {
-      ok: false,
-      reason: `Declared scopes do not match what ${method.toUpperCase()} ${path} requires.`,
-      suggestion: `Replace declared scopes with one of: ${endpoint.scopesDelegated.slice(0, 5).join(", ")}.`,
-      endpoint,
-    };
-  }
-
+  // Scope-set mismatch is reported but not blocked. The merill catalogue
+  // intentionally documents one "flavour" of permissions per endpoint
+  // and frequently misses synonyms — e.g. `PATCH /users/{user-id}`
+  // lists Intune-specific scopes but not `User.ReadWrite.All`, even
+  // though the latter is the canonical scope. Hard-failing here
+  // produces false negatives that block legitimate agents, so we
+  // surface declared scopes as-is and let Graph return 403 at runtime
+  // if they're genuinely wrong (rare for well-formed prompts).
   return { ok: true, endpoint };
 }
 

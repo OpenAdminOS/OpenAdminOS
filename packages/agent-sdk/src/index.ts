@@ -512,7 +512,19 @@ export interface WriteActionTemplate {
   description?: string;
   severity?: WriteActionSeverity;
   metadata?: Record<string, string>;
+  /**
+   * For `kind: "graph-write"`: the Graph request to send when this
+   * action is approved. Path and body are templated per source item.
+   * Body is optional (DELETE typically omits it; some POSTs do too).
+   */
+  request?: {
+    method: WriteHttpMethod;
+    path: string;
+    body?: unknown;
+  };
 }
+
+export type WriteHttpMethod = "POST" | "PATCH" | "PUT" | "DELETE";
 
 /**
  * Produces a `WritePlan` from a pipeline state. The runtime pauses the
@@ -680,12 +692,18 @@ export interface RunGraphApi {
 }
 
 export interface GraphRequestInput {
-  method: "GET";
+  method: "GET" | WriteHttpMethod;
   path: string;
   /** Map of `$select`, `$filter`, `$top`, etc. Encoded into the URL. */
   query?: Record<string, string>;
   /** Optional `ConsistencyLevel: eventual` etc. */
   headers?: Record<string, string>;
+  /**
+   * JSON-serializable body for POST/PATCH/PUT. Ignored for GET/DELETE.
+   * Serialized with `JSON.stringify` and sent with
+   * `Content-Type: application/json`.
+   */
+  body?: unknown;
 }
 
 export interface LlmOptions {
@@ -805,6 +823,17 @@ export interface WriteAction {
   description?: string;
   severity?: WriteActionSeverity;
   metadata?: Record<string, unknown>;
+  /**
+   * For `graph-write` actions: the fully-rendered Graph request the
+   * runtime will fire when the user approves the plan. Path and body
+   * are already resolved against the source item; no further
+   * templating happens at apply time.
+   */
+  request?: {
+    method: WriteHttpMethod;
+    path: string;
+    body?: unknown;
+  };
 }
 
 export interface WritePlan {
