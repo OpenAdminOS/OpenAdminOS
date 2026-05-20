@@ -82,9 +82,15 @@ const entries = readdirSync(agentsRoot)
   .filter((e) => e.id.length > 0)
   .sort((a, b) => a.slug.localeCompare(b.slug));
 
+// `generatedAt` is deliberately omitted. We tried a Date.now() value
+// and a CI verify-against-checked-in step, but the live timestamp
+// guarantees CI rebuilds drift from the committed file every run.
+// Nothing in the app or registry-client actually consumes the field —
+// git history is the authoritative "when did this last change". If we
+// ever need a freshness signal, derive it from `git log -1` against
+// agents/ so the value is deterministic per commit.
 const index = {
   schemaVersion: 1,
-  generatedAt: new Date().toISOString(),
   agents: entries,
 };
 

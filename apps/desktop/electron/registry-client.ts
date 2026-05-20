@@ -44,7 +44,10 @@ export interface RegistryIndexEntry {
 
 interface RegistryIndex {
   schemaVersion: number;
-  generatedAt: string;
+  /** Optional. Older indexes carried a Date.now() string here; dropped
+   *  to keep generator output deterministic across CI runs. Kept
+   *  optional on the interface so existing cached payloads parse. */
+  generatedAt?: string;
   agents: RegistryIndexEntry[];
 }
 
