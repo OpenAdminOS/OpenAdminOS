@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   Notification,
+  session,
   shell,
   type MenuItemConstructorOptions,
 } from "electron";
@@ -85,6 +86,35 @@ function isAllowedAppNavigation(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function installSecurityGuards(): void {
+  // Deny every renderer-initiated permission request. The app has no
+  // legitimate need for camera, mic, geolocation, notifications-from-web,
+  // clipboard-read, etc. — anything we do need is wired through IPC.
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
+    callback(false);
+  });
+  session.defaultSession.setPermissionCheckHandler(() => false);
+
+  // Defense in depth: even though webviewTag is off and we deny new windows
+  // on the main BrowserWindow, harden any webContents that does get created
+  // (e.g. devtools in dev) so a hypothetical bug can't open arbitrary URLs
+  // or attach a <webview>.
+  app.on("web-contents-created", (_event, contents) => {
+    contents.on("will-attach-webview", (event) => {
+      event.preventDefault();
+    });
+    contents.setWindowOpenHandler(({ url }) => {
+      openExternalUrl(url);
+      return { action: "deny" };
+    });
+    contents.on("will-navigate", (event, url) => {
+      if (isAllowedAppNavigation(url)) return;
+      event.preventDefault();
+      openExternalUrl(url);
+    });
+  });
 }
 
 function navigate(path: string): void {
@@ -233,6 +263,8 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      devTools: !app.isPackaged,
+      webviewTag: false,
     },
   });
 
@@ -473,6 +505,7 @@ if (!gotLock) {
       },
     });
     registerIpcHandlers();
+    installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
     void createWindow();
     startAutoUpdater(() => mainWindow ?? undefined);
