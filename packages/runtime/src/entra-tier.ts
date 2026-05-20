@@ -27,6 +27,13 @@ const RELEVANT_SKU_NAMES: Record<string, string> = {
   SPE_E3: "Microsoft 365 E3",
   SPE_E5: "Microsoft 365 E5",
   SPE_E5_NOPSTNCONF: "Microsoft 365 E5 (without audio conferencing)",
+  // Microsoft 365 E7 — announced 2026-03-09, GA 2026-05-01. Bundles
+  // E5 + Copilot + Agent 365 + Work IQ + Microsoft Entra Suite.
+  // skuPartNumber is conventional (Microsoft's licensing reference
+  // doc had not been updated at v0.2 ship). Variants mirror E5.
+  SPE_E7: "Microsoft 365 E7",
+  SPE_E7_NOPSTNCONF: "Microsoft 365 E7 (without audio conferencing)",
+  SPE_E7_NOTEAMS: "Microsoft 365 E7 (without Teams)",
   SPE_F1: "Microsoft 365 F1",
   SPE_F3: "Microsoft 365 F3",
   // Microsoft 365 Business
