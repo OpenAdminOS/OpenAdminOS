@@ -416,13 +416,26 @@ function TenantRow({
   onSetActive: (id: string) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
-  const tierLabel =
+  const entraLicenseName =
     tenant.entraTier && tenant.entraTier !== "unknown"
       ? tenant.entraTier === "free"
-        ? "Entra ID Free"
-        : `Entra ID ${tenant.entraTier.toUpperCase()}`
+        ? "Microsoft Entra ID Free"
+        : `Microsoft Entra ID ${tenant.entraTier.toUpperCase()}`
       : null;
-  const licenses = tenant.relevantLicenses ?? [];
+  // Synthesise the Entra tier as the first row of the license list.
+  // Technically derived from service plans inside SKUs (not a SKU
+  // itself) but an admin thinks of it as just another license they
+  // have, so surfacing it identically removes the artificial split.
+  const skuLicenses = tenant.relevantLicenses ?? [];
+  const licenses = entraLicenseName
+    ? [
+        {
+          skuPartNumber: `__entra_${tenant.entraTier}`,
+          displayName: entraLicenseName,
+        },
+        ...skuLicenses,
+      ]
+    : skuLicenses;
   return (
     <Card>
       <div className="flex items-start gap-4 p-5">
@@ -446,28 +459,16 @@ function TenantRow({
           <div className="mt-1 font-mono text-[10.5px] text-[var(--color-text-muted)]">
             tenant-id: {tenant.id}
           </div>
-          {(licenses.length > 0 || tierLabel) && (
+          {licenses.length > 0 && (
             <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
-              <div className="mb-1.5 flex items-center gap-2">
-                <span className="text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                  Licenses
-                </span>
-                {tierLabel && (
-                  <span
-                    className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-                    title="Detected from /subscribedSkus."
-                  >
-                    {tierLabel}
-                  </span>
-                )}
+              <div className="mb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                Licenses
               </div>
-              {licenses.length > 0 && (
-                <ul className="space-y-0.5 text-[12px] text-[var(--color-text-soft)]">
-                  {licenses.map((license) => (
-                    <li key={license.skuPartNumber}>{license.displayName}</li>
-                  ))}
-                </ul>
-              )}
+              <ul className="space-y-0.5 text-[12px] text-[var(--color-text-soft)]">
+                {licenses.map((license) => (
+                  <li key={license.skuPartNumber}>{license.displayName}</li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
