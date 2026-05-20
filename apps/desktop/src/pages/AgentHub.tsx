@@ -12,6 +12,7 @@ import {
   IconCheck,
   IconDownload,
   IconFire,
+  IconRefresh,
   IconSearch,
   IconShield,
   IconSparkle,
@@ -48,10 +49,11 @@ const tierDescriptions: Record<TierTab, string> = {
 };
 
 export default function AgentHub() {
-  const { state, registryAgents, installAgent } = useAppState();
+  const { state, registryAgents, installAgent, refreshRegistry } = useAppState();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
   const [tier, setTier] = useState<TierTab>("agent");
+  const [refreshing, setRefreshing] = useState(false);
   const [manifestAgent, setManifestAgent] = useState<RegistryAgentSummary | null>(
     null,
   );
@@ -135,29 +137,55 @@ export default function AgentHub() {
   return (
     <>
       <PageHeader
-        eyebrow="Built-in"
+        eyebrow="Registry"
         title="Agent Hub"
         subtitle={
           <span className="inline-flex items-center gap-2">
             <span>
-              {tierCounts.agent} agents · {tierCounts.dashboard} dashboards in this repo
+              {tierCounts.agent} agents · {tierCounts.dashboard} dashboards
             </span>
-            <span className="opacity-50">·</span>
-            <span>community registry lands in v0.2</span>
+            {state.lastRegistryRefresh && (
+              <>
+                <span className="opacity-50">·</span>
+                <span className="text-[var(--color-text-soft)]">
+                  refreshed {new Date(state.lastRegistryRefresh).toLocaleTimeString()}
+                </span>
+              </>
+            )}
+            {state.registryRefreshError && !state.lastRegistryRefresh && (
+              <>
+                <span className="opacity-50">·</span>
+                <span className="text-[var(--color-warning)]">offline — using cached agents</span>
+              </>
+            )}
           </span>
         }
         actions={
-          <div className="relative">
-            <IconSearch
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-            />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search agents, authors, scopes"
-              className="h-9 w-[320px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
-            />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                setRefreshing(true);
+                await refreshRegistry().catch(() => undefined);
+                setRefreshing(false);
+              }}
+              disabled={refreshing}
+              title="Refresh agent registry"
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] transition-colors hover:text-[var(--color-text)] disabled:opacity-50"
+            >
+              <IconRefresh size={14} className={refreshing ? "animate-spin" : ""} />
+            </button>
+            <div className="relative">
+              <IconSearch
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search agents, authors, scopes"
+                className="h-9 w-[300px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+              />
+            </div>
           </div>
         }
       />

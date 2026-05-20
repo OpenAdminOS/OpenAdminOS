@@ -11,9 +11,11 @@
     "build": "npm run build -w @openagents/desktop",
     "typecheck": "npm run typecheck -w @openagents/agent-sdk && npm run typecheck -w @openagents/connector-teams && npm run typecheck -w @openagents/runtime && npm run typecheck -w @openagents/qa-graph && npm run typecheck -w @openagents/desktop",
     "qa": "npm run qa -w @openagents/qa-graph",
-    "dist:desktop": "npm run dist -w @openagents/desktop"
+    "test": "npm run test -w @openagents/runtime && npm run test -w @openagents/qa-graph",
+    "dist:desktop": "npm run dist -w @openagents/desktop",
+    "registry:index": "node scripts/generate-registry-index.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

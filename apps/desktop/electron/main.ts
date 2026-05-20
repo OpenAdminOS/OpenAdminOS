@@ -308,6 +308,10 @@ function registerIpcHandlers() {
   ipcMain.handle("openagents:list-registry-agents", () =>
     store.listRegistryAgents(),
   );
+  ipcMain.handle("openagents:refresh-registry", () => store.initRegistry());
+  ipcMain.handle("openagents:set-registry-source", (_event, url: string) =>
+    store.setRegistrySource(url),
+  );
   ipcMain.handle("openagents:list-providers", () => store.listProviders());
   ipcMain.handle("openagents:list-connectors", () => store.listConnectors());
   ipcMain.handle("openagents:test-connector", (_event, id: string) =>
@@ -466,6 +470,7 @@ if (!gotLock) {
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
       tokenStore,
+      userDataPath: userDataDir,
       userAgentsDir: join(userDataDir, "agents"),
       // Only packaged production builds report installs to the public
       // stats aggregator. Dev/CLI builds default to the empty string,
@@ -508,6 +513,9 @@ if (!gotLock) {
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
     void createWindow();
+    // Fetch registry index in the background after the window is ready.
+    // Falls back to local filesystem agents until the fetch completes.
+    void store.initRegistry().catch(() => undefined);
     startAutoUpdater(() => mainWindow ?? undefined);
 
     // In-process agent scheduler: ticks every 60s, fires any installed

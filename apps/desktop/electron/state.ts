@@ -57,6 +57,11 @@ import {
   validatePath,
   type EndpointSummary,
 } from "./graph-catalog.js";
+import {
+  DEFAULT_REGISTRY_SOURCE,
+  refreshRegistry,
+  type RegistryIndexEntry,
+} from "./registry-client.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
@@ -94,6 +99,8 @@ interface PersistedState {
       lastTestMessage?: string;
     }
   >;
+  /** User-overridable registry source URL. */
+  registrySource?: string;
 }
 
 interface OllamaTagsResponse {
@@ -123,6 +130,22 @@ const providerIds = new Set<ProviderId>(
  */
 const DEFAULT_STATS_API_URL = "https://www.openagents.sh";
 
+function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary {
+  return {
+    id: entry.id,
+    slug: entry.slug,
+    registryId: entry.id,
+    name: entry.name,
+    description: entry.description,
+    version: entry.version,
+    mode: entry.mode,
+    category: entry.category as RegistryAgentSummary["category"],
+    tier: entry.tier,
+    scopes: entry.scopes,
+    author: entry.author,
+  };
+}
+
 export interface AppStateStoreOptions {
   filePath: string;
   tokenStore: EncryptedSecretStore;
@@ -148,6 +171,8 @@ export interface AppStateStoreOptions {
   statsApiUrl?: string;
   /** Version string POSTed alongside install events, e.g. `0.1.5`. */
   appVersion?: string;
+  /** Writable userData directory used for the registry cache. */
+  userDataPath?: string;
 }
 
 export class AppStateStore {
@@ -159,12 +184,19 @@ export class AppStateStore {
   private readonly onRunFinished: ((run: RunRecord) => void) | undefined;
   private readonly statsApiUrl: string;
   private readonly appVersion: string;
+  private readonly userDataPath: string | undefined;
   private msalClient: PublicClientApplication | undefined;
   // Soft-cancel set. While a run id is here, progress snapshots from
   // the runtime are dropped so the run stays in "cancelled" state. The
   // background driver eventually returns; we don't (yet) plumb an
   // AbortSignal through the runtime to interrupt it mid-flight.
   private readonly cancelledRunIds = new Set<string>();
+
+  // Registry cache — populated by initRegistry(), falls back to
+  // filesystem agents until the first successful HTTP fetch.
+  private registryCacheEntries: RegistryAgentSummary[] | null = null;
+  private lastRegistryRefresh: string | null = null;
+  private registryRefreshError: string | null = null;
 
   constructor(options: AppStateStoreOptions | string, legacyTokenStore?: EncryptedSecretStore) {
     if (typeof options === "string") {
@@ -176,6 +208,7 @@ export class AppStateStore {
       this.onRunFinished = undefined;
       this.statsApiUrl = "";
       this.appVersion = "0.0.0";
+      this.userDataPath = undefined;
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
@@ -187,11 +220,40 @@ export class AppStateStore {
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
       this.appVersion = options.appVersion ?? "0.0.0";
+      this.userDataPath = options.userDataPath;
     }
     // Warm the connector-config cache so the confirm-bridge can resolve
     // human-readable target labels without an async disk read inside
     // a capability invocation. Updated on every `setConnectorConfig`.
     void this.primeConnectorConfigCache().catch(() => undefined);
+  }
+
+  /**
+   * Fetches the registry index from the configured source, updates the
+   * in-memory cache and persisted last-refresh timestamp. Falls back to
+   * a local filesystem scan if the fetch fails and no cache exists.
+   * Safe to call multiple times (e.g., on manual refresh from Agent Hub).
+   */
+  async initRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
+    if (!this.userDataPath) {
+      // No userData path — fall back to filesystem only (tests / legacy ctor).
+      return { error: null, fromCache: false, cachedAt: null };
+    }
+    const persisted = await this.read().catch(() => defaultState);
+    const registrySource = persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE;
+    const result = await refreshRegistry(this.userDataPath, registrySource);
+    this.registryCacheEntries = result.entries.map(entryToRegistrySummary);
+    this.lastRegistryRefresh = result.fromCache ? null : (result.cachedAt ?? null);
+    this.registryRefreshError = result.error;
+    return { error: result.error, fromCache: result.fromCache, cachedAt: result.cachedAt };
+  }
+
+  async setRegistrySource(url: string): Promise<void> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      const next = { ...current, registrySource: url };
+      await this.write(next);
+    });
   }
 
   private getMsalClient(): PublicClientApplication {
@@ -228,6 +290,9 @@ export class AppStateStore {
       runs: persisted.runs,
       trust: deriveTrustState({ provider: activeProvider, activeTenant }),
       tenants: persisted.tenants,
+      lastRegistryRefresh: this.lastRegistryRefresh,
+      registryRefreshError: this.registryRefreshError,
+      registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
     };
     if (persisted.activeModelByProviderId) {
       state.activeModelByProviderId = persisted.activeModelByProviderId;
@@ -239,7 +304,20 @@ export class AppStateStore {
   }
 
   listRegistryAgents(): RegistryAgentSummary[] {
-    return listAllRegistryAgents(this.userAgentsDir);
+    if (!this.registryCacheEntries) {
+      // Before first HTTP fetch: fall back to filesystem scan (dev + cold start).
+      return listAllRegistryAgents(this.userAgentsDir);
+    }
+    // HTTP cache populated: use it as base and overlay user-authored agents.
+    const userAgents = this.userAgentsDir
+      ? listAllRegistryAgents(this.userAgentsDir).filter(
+          (a) => a.registryPath?.startsWith(this.userAgentsDir!),
+        )
+      : [];
+    const bySlug = new Map<string, RegistryAgentSummary>();
+    for (const a of this.registryCacheEntries) bySlug.set(a.slug, a);
+    for (const a of userAgents) bySlug.set(a.slug, a);
+    return [...bySlug.values()].sort((l, r) => l.name.localeCompare(r.name));
   }
 
   async getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined> {

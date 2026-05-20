@@ -34,7 +34,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Cache msgraph skill
@@ -49,6 +49,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test
+
       - name: Resolve msgraph skill
         run: |
           eval "$(bash scripts/setup-qa.sh)"
@@ -56,6 +59,14 @@ jobs:
 
       - name: Graph QA gate
         run: npm run qa
+
+      - name: Regenerate registry index
+        run: npm run registry:index
+
+      - name: Verify registry index is up to date
+        run: |
+          git diff --exit-code agents/index.json || \
+            (echo "agents/index.json is out of date — run npm run registry:index and commit" && exit 1)
 
       - name: Build
         run: npm run build

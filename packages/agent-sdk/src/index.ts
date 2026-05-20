@@ -229,6 +229,12 @@ export interface AppState {
   trust: TrustState;
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /** ISO timestamp of the last successful registry index refresh. Null until first fetch. */
+  lastRegistryRefresh: string | null;
+  /** Human-readable error from the most recent registry fetch attempt. Null when clean. */
+  registryRefreshError: string | null;
+  /** Registry source URL in use (may differ from default if overridden in Settings). */
+  registrySource: string;
 }
 
 /** The host OS, normalized for renderer use. */
@@ -243,6 +249,8 @@ export interface OpenAgentsApi {
   platform: HostPlatform;
   getAppState(): Promise<AppState>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;
+  refreshRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
+  setRegistrySource(url: string): Promise<void>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;

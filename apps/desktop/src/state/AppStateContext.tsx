@@ -70,6 +70,9 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
     runs: [],
     trust: deriveTrustState(activeProvider),
     tenants: [],
+    lastRegistryRefresh: null,
+    registryRefreshError: null,
+    registrySource: "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents",
   };
 }
 
@@ -96,12 +99,12 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
 
     try {
-      const agents = await api.listRegistryAgents();
-      setRegistryAgents(agents);
-      setState((currentState) => ({
-        ...currentState,
-        registryAgents: agents,
-      }));
+      // Trigger a network fetch on the main process, then reload full app state
+      // so lastRegistryRefresh / registryRefreshError / registryAgents update together.
+      if (api.refreshRegistry) await api.refreshRegistry();
+      const nextState = await api.getAppState();
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
     } catch (caughtError) {
       setError(toError(caughtError));
     }

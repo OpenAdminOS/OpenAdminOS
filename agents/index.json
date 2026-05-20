@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-05-20T15:20:37.535Z",
+  "agents": [
+    {
+      "id": "compliance-overview",
+      "slug": "compliance-overview",
+      "name": "Compliance overview",
+      "description": "Counts Intune-managed devices by complianceState so admins can spot drift across the tenant at a glance.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "compliance",
+      "tier": "dashboard",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "DeviceManagementManagedDevices.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/compliance-overview/manifest.yaml"
+    },
+    {
+      "id": "find-inactive-devices",
+      "slug": "find-inactive-devices",
+      "name": "Find inactive devices",
+      "description": "Surfaces Intune-managed devices that have not synced recently, grouped by inactivity window.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "devices",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "DeviceManagementManagedDevices.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/find-inactive-devices/manifest.yaml"
+    },
+    {
+      "id": "os-update-posture",
+      "slug": "os-update-posture",
+      "name": "OS update posture",
+      "description": "Breaks down the Intune-managed fleet by operating system and OS version so admins can spot stale build distributions at a glance.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "updates",
+      "tier": "dashboard",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "DeviceManagementManagedDevices.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/os-update-posture/manifest.yaml"
+    },
+    {
+      "id": "retire-inactive-devices",
+      "slug": "retire-inactive-devices",
+      "name": "Retire inactive devices",
+      "description": "Companion to Find inactive devices. Retires devices that have not synced in 180+ days after typed diff confirmation.",
+      "version": "1.0.0",
+      "mode": "write",
+      "category": "devices",
+      "tier": "agent",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "DeviceManagementManagedDevices.Read.All",
+        "DeviceManagementManagedDevices.PrivilegedOperations.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/retire-inactive-devices/manifest.yaml"
+    },
+    {
+      "id": "tenant-health-report",
+      "slug": "tenant-health-report",
+      "name": "Tenant health report",
+      "description": "Posts a one-paragraph Intune compliance summary to a Microsoft Teams channel each time it runs.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "compliance",
+      "tier": "dashboard",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": true
+      },
+      "scopes": [
+        "DeviceManagementManagedDevices.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/tenant-health-report/manifest.yaml"
+    },
+    {
+      "id": "user-license-overview",
+      "slug": "user-license-overview",
+      "name": "User license overview",
+      "description": "Counts tenant users by usage location and writes a one-paragraph licensing posture summary.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "apps",
+      "tier": "dashboard",
+      "author": {
+        "name": "OpenAgents",
+        "handle": "openagents",
+        "verified": false
+      },
+      "scopes": [
+        "User.Read.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/user-license-overview/manifest.yaml"
+    }
+  ]
+}

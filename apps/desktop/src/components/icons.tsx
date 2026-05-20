@@ -72,6 +72,13 @@ export const IconSearch = ({ size = 16, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconRefresh = ({ size = 16, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M20 8A9 9 0 1 0 20.5 14" />
+    <polyline points="20 2 20 8 14 8" />
+  </svg>
+);
+
 export const IconCheck = ({ size = 16, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <path d="M5 12.5 L10 17 L19 7" />

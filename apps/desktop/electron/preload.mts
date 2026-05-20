@@ -26,6 +26,9 @@ const api: OpenAgentsApi = {
   listInstalledAgents: () => ipcRenderer.invoke("openagents:list-agents"),
   listRegistryAgents: () =>
     ipcRenderer.invoke("openagents:list-registry-agents"),
+  refreshRegistry: () => ipcRenderer.invoke("openagents:refresh-registry"),
+  setRegistrySource: (url: string) =>
+    ipcRenderer.invoke("openagents:set-registry-source", url),
   listProviders: () => ipcRenderer.invoke("openagents:list-providers"),
   listConnectors: () => ipcRenderer.invoke("openagents:list-connectors"),
   testConnector: (id: string) =>
