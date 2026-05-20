@@ -71,7 +71,9 @@ export {
 } from "./graph-adapter.js";
 export {
   detectEntraTier,
+  probeSubscribedSkus,
   classifySkus,
+  extractRelevantLicenses,
   tenantSatisfiesRequirement,
 } from "./entra-tier.js";
 export { createTenantSession } from "./msal.js";

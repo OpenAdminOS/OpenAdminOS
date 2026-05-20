@@ -9,7 +9,7 @@ import {
   createOllamaLlm,
   createQueuedRun,
   createTenantSession,
-  detectEntraTier,
+  probeSubscribedSkus,
   executeApply,
   executePlan,
   executeRun,
@@ -1275,14 +1275,31 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * probe succeeded within the past 24 hours (license states change
    * rarely). Best-effort — silent on failure.
    */
-  private async probeEntraTier(tenant: TenantRecord): Promise<void> {
+  /**
+   * Fire a tenant tier probe for every persisted tenant. Called from
+   * main.ts on app startup so the StatusStrip / Settings panel
+   * populate without the user needing to disconnect-and-reconnect.
+   * Each probe is independent and silent on failure.
+   */
+  async probeAllTenants(): Promise<void> {
+    const persisted = await this.read().catch(() => null);
+    if (!persisted) return;
+    for (const tenant of persisted.tenants) {
+      void this.probeEntraTier(tenant).catch(() => undefined);
+    }
+  }
+
+  async probeEntraTier(tenant: TenantRecord): Promise<void> {
     const DAY_MS = 24 * 60 * 60 * 1000;
-    if (
+    const recent =
       tenant.entraTier &&
       tenant.entraTier !== "unknown" &&
       tenant.entraTierDetectedAt &&
-      Date.now() - new Date(tenant.entraTierDetectedAt).getTime() < DAY_MS
-    ) {
+      Date.now() - new Date(tenant.entraTierDetectedAt).getTime() < DAY_MS;
+    // Re-probe even when recent if the licenses panel hasn't been
+    // populated yet (migration from pre-license-panel persisted state).
+    const licensesMissing = tenant.relevantLicenses === undefined;
+    if (recent && !licensesMissing) {
       return;
     }
     const client = this.getMsalClient();
@@ -1295,9 +1312,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       acquireInteractive: async (scopes) =>
         await runInteractiveFlow({ client, scopes, openBrowser }),
     });
-    const detected = await detectEntraTier(
+    const result = await probeSubscribedSkus(
       (scopes) => session.acquireTokenForScopes(scopes),
     );
+    const detected = result?.tier ?? "unknown";
+    const relevantLicenses = result?.relevantLicenses ?? [];
     await this.serialize(async () => {
       const persisted = await this.read();
       const idx = persisted.tenants.findIndex((t) => t.id === tenant.id);
@@ -1307,6 +1326,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         ...next[idx],
         entraTier: detected,
         entraTierDetectedAt: new Date().toISOString(),
+        relevantLicenses,
       };
       await this.write({ ...persisted, tenants: next });
     });
@@ -1612,7 +1632,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     pinnedTenantId?: string,
     agentScopes?: string[],
   ): Promise<{
-    graph: RunGraphApi;
+    createGraph: (
+      log: (
+        level: RunLogLevel,
+        message: string,
+        metadata?: Record<string, unknown>,
+      ) => void,
+    ) => RunGraphApi;
     tenantId: string;
     tenantSession: TenantSession;
   }> {
@@ -1660,7 +1686,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             return result.accessToken;
           };
     return {
-      graph: createGraphAdapter({ tokenProvider }),
+      createGraph: (log) => createGraphAdapter({ tokenProvider, log }),
       tenantId: tenant.id,
       tenantSession,
     };
@@ -1688,7 +1714,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         providerId: input.providerId,
         model: input.model,
         llm,
-        graph: selection.graph,
+        createGraph: selection.createGraph,
         tenant: selection.tenantSession,
         connectorConfigs: await this.readConnectorConfigs(),
         confirmCapability: requestConnectorConfirmation,
@@ -1718,7 +1744,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         model: input.model,
         plan: input.plan,
         llm,
-        graph: selection.graph,
+        createGraph: selection.createGraph,
         tenant: selection.tenantSession,
         connectorConfigs: await this.readConnectorConfigs(),
         confirmCapability: requestConnectorConfirmation,

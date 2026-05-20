@@ -183,6 +183,27 @@ export interface TenantRecord {
   entraTier?: DetectedEntraTier;
   /** ISO timestamp of the last successful entraTier probe. */
   entraTierDetectedAt?: string;
+  /**
+   * Admin-relevant subscribed SKUs detected from the same
+   * `/subscribedSkus` probe that produces `entraTier`. Filtered to
+   * the SKUs an admin would actually think about — Microsoft 365
+   * Business / Enterprise tiers, EMS, standalone Azure AD Premium.
+   * Surfaced in Settings → Tenants. Absent when the probe has not
+   * run yet or returned no relevant SKUs.
+   */
+  relevantLicenses?: TenantLicense[];
+}
+
+/** A subscribed SKU surfaced in the Settings → Tenants license panel. */
+export interface TenantLicense {
+  /** Microsoft SKU part number, e.g. `SPE_E5`, `SPB`, `EMSPREMIUM`. */
+  skuPartNumber: string;
+  /** Human-readable name resolved from the SKU lookup table. */
+  displayName: string;
+  /** Total seats prepaid for this SKU on the tenant. */
+  enabledUnits: number;
+  /** Seats assigned to users. May exceed enabledUnits during grace periods. */
+  consumedUnits: number;
 }
 
 export type RunStepStatus =

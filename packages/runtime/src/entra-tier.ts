@@ -9,7 +9,44 @@
  * negative confirmation.
  */
 
-import type { DetectedEntraTier } from "@openagents/agent-sdk";
+import type { DetectedEntraTier, TenantLicense } from "@openagents/agent-sdk";
+
+/**
+ * SKU part numbers we surface in the Settings → Tenants license panel.
+ * Limited to the SKUs an admin would actually reason about when
+ * deciding "will the agents work" — Microsoft 365 / Office 365
+ * Business + Enterprise tiers, EMS bundles, and the standalone Azure
+ * AD Premium SKUs. Unknown SKUs are still persisted in raw form on
+ * the tenant record (see TenantRecord.subscribedSkus) but excluded
+ * from the surfaced list to keep the panel readable.
+ *
+ * Reference: https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference
+ */
+const RELEVANT_SKU_NAMES: Record<string, string> = {
+  // Microsoft 365 Enterprise
+  SPE_E3: "Microsoft 365 E3",
+  SPE_E5: "Microsoft 365 E5",
+  SPE_E5_NOPSTNCONF: "Microsoft 365 E5 (without audio conferencing)",
+  SPE_F1: "Microsoft 365 F1",
+  SPE_F3: "Microsoft 365 F3",
+  // Microsoft 365 Business
+  SPB: "Microsoft 365 Business Premium",
+  O365_BUSINESS_ESSENTIALS: "Microsoft 365 Business Basic",
+  O365_BUSINESS_PREMIUM: "Microsoft 365 Business Standard",
+  O365_BUSINESS: "Microsoft 365 Apps for business",
+  OFFICESUBSCRIPTION: "Microsoft 365 Apps for enterprise",
+  // Office 365
+  STANDARDPACK: "Office 365 E1",
+  ENTERPRISEPACK: "Office 365 E3",
+  ENTERPRISEPREMIUM: "Office 365 E5",
+  ENTERPRISEPREMIUM_NOPSTNCONF: "Office 365 E5 (without audio conferencing)",
+  // Enterprise Mobility + Security
+  EMS: "Enterprise Mobility + Security E3",
+  EMSPREMIUM: "Enterprise Mobility + Security E5",
+  // Azure AD Premium standalones
+  AAD_PREMIUM: "Microsoft Entra ID P1 (standalone)",
+  AAD_PREMIUM_P2: "Microsoft Entra ID P2 (standalone)",
+};
 
 const AAD_PREMIUM_P1_SERVICE_PLAN = "AAD_PREMIUM";
 const AAD_PREMIUM_P2_SERVICE_PLAN = "AAD_PREMIUM_P2";
@@ -20,8 +57,16 @@ interface ServicePlan {
 }
 
 interface SubscribedSku {
+  skuId?: string;
+  skuPartNumber?: string;
   capabilityStatus?: string;
   servicePlans?: ServicePlan[];
+  prepaidUnits?: {
+    enabled?: number;
+    suspended?: number;
+    warning?: number;
+  };
+  consumedUnits?: number;
 }
 
 interface SubscribedSkusResponse {
@@ -39,17 +84,62 @@ export async function detectEntraTier(
   baseUrl = "https://graph.microsoft.com/beta",
   fetchImpl: typeof fetch = fetch,
 ): Promise<DetectedEntraTier> {
+  const result = await probeSubscribedSkus(tokenProvider, baseUrl, fetchImpl);
+  return result?.tier ?? "unknown";
+}
+
+/**
+ * Single-call probe that returns both the Entra tier and the list of
+ * tenant-relevant SKUs from one `/subscribedSkus` fetch. Saves a
+ * round trip vs. calling `detectEntraTier` separately. Returns null
+ * on any failure (callers treat as `tier: 'unknown'`, no licenses).
+ */
+export async function probeSubscribedSkus(
+  tokenProvider: (scopes: string[]) => Promise<string>,
+  baseUrl = "https://graph.microsoft.com/beta",
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ tier: DetectedEntraTier; relevantLicenses: TenantLicense[] } | null> {
   try {
     const token = await tokenProvider(["Organization.Read.All"]);
     const response = await fetchImpl(`${baseUrl}/subscribedSkus`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!response.ok) return "unknown";
+    if (!response.ok) return null;
     const body = (await response.json()) as SubscribedSkusResponse;
-    return classifySkus(body.value ?? []);
+    const skus = body.value ?? [];
+    return {
+      tier: classifySkus(skus),
+      relevantLicenses: extractRelevantLicenses(skus),
+    };
   } catch {
-    return "unknown";
+    return null;
   }
+}
+
+/**
+ * Filter `/subscribedSkus` down to the subset an admin actually
+ * thinks about — Microsoft 365 Business / Enterprise tiers, EMS
+ * bundles, standalone Azure AD Premium. Unknown SKUs are dropped to
+ * keep the surfaced license panel readable; the runtime persists the
+ * tenant's full SKU list separately for future use.
+ */
+export function extractRelevantLicenses(skus: SubscribedSku[]): TenantLicense[] {
+  const out: TenantLicense[] = [];
+  for (const sku of skus) {
+    if (sku.capabilityStatus !== "Enabled") continue;
+    const partNumber = sku.skuPartNumber;
+    if (!partNumber) continue;
+    const displayName = RELEVANT_SKU_NAMES[partNumber];
+    if (!displayName) continue;
+    out.push({
+      skuPartNumber: partNumber,
+      displayName,
+      enabledUnits: sku.prepaidUnits?.enabled ?? 0,
+      consumedUnits: sku.consumedUnits ?? 0,
+    });
+  }
+  // Sort by enabled units desc so the largest license shows first.
+  return out.sort((a, b) => b.enabledUnits - a.enabledUnits);
 }
 
 export function classifySkus(skus: SubscribedSku[]): DetectedEntraTier {

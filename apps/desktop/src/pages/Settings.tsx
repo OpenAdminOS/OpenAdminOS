@@ -416,6 +416,13 @@ function TenantRow({
   onSetActive: (id: string) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
+  const tierLabel =
+    tenant.entraTier && tenant.entraTier !== "unknown"
+      ? tenant.entraTier === "free"
+        ? "Entra ID Free"
+        : `Entra ID ${tenant.entraTier.toUpperCase()}`
+      : null;
+  const licenses = tenant.relevantLicenses ?? [];
   return (
     <Card>
       <div className="flex items-start gap-4 p-5">
@@ -423,7 +430,7 @@ function TenantRow({
           <IconCloud size={20} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-[14px] font-medium text-[var(--color-text)]">
               {tenant.displayName}
             </span>
@@ -432,6 +439,14 @@ function TenantRow({
                 <IconCheck size={10} /> Active
               </Pill>
             )}
+            {tierLabel && (
+              <span
+                className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                title="Detected from /subscribedSkus."
+              >
+                {tierLabel}
+              </span>
+            )}
           </div>
           <div className="mt-1 text-[12.5px] text-[var(--color-text-soft)]">
             {tenant.username}
@@ -439,6 +454,23 @@ function TenantRow({
           <div className="mt-1 font-mono text-[10.5px] text-[var(--color-text-muted)]">
             tenant-id: {tenant.id}
           </div>
+          {licenses.length > 0 && (
+            <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
+              <div className="mb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                Licenses
+              </div>
+              <ul className="space-y-0.5 text-[12px] text-[var(--color-text-soft)]">
+                {licenses.map((license) => (
+                  <li key={license.skuPartNumber} className="flex items-center gap-2">
+                    <span>{license.displayName}</span>
+                    <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                      {license.consumedUnits}/{license.enabledUnits}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           {!isActive && (

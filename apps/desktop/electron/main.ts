@@ -546,6 +546,10 @@ if (!gotLock) {
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
     void refreshRegistryInBackground("startup");
+    // Re-probe tenant tiers + license panels for every persisted
+    // tenant. Existing tenants from before the licenses panel landed
+    // need this to populate; new tenants get probed at connect time.
+    void store.probeAllTenants().catch(() => undefined);
     startAutoUpdater(() => mainWindow ?? undefined);
 
     // In-process agent scheduler: ticks every 60s, fires any installed
