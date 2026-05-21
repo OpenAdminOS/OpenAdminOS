@@ -16,7 +16,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [0.1.8] - 2026-05-21
 
-Patch release cleaning up two cosmetic regressions from the v0.1.7 rebrand. **First release built and published as a public repo** — the auto-update target now works for v0.1.7 installs on Apple Silicon.
+Patch release cleaning up two cosmetic regressions from the v0.1.7 rebrand. **First release built and published as a public repo** — the auto-update target now works for v0.1.7 installs on macOS.
 
 ### Fixed
 
@@ -29,11 +29,11 @@ Patch release cleaning up two cosmetic regressions from the v0.1.7 rebrand. **Fi
 
 ### Auto-update
 
-If you have v0.1.7 installed on Apple Silicon, your app will detect this release on next launch and prompt to install. This is the first cross-version test of the auto-update channel under the new `OpenAdminOS/OpenAdminOS` repo and `com.openadminos.desktop` bundle ID.
+If you have v0.1.7 installed on macOS, your app will detect this release on next launch and prompt to install. This is the first cross-version test of the auto-update channel under the new `OpenAdminOS/OpenAdminOS` repo and `com.openadminos.desktop` bundle ID.
 
 ### Downloads
 
-- **macOS (Apple Silicon)** -- `OpenAdminOS-0.1.8-arm64.dmg` (signed with Developer ID, notarized by Apple)
+- **macOS** -- `OpenAdminOS-0.1.8-arm64.dmg` (signed with Developer ID, notarized by Apple)
 - **Windows MSIX** -- `OpenAdminOS.0.1.8.appx` (Microsoft Store submission package; unsigned by us, the Store signs at submission)
 - Hashes published alongside the DMG in `latest-mac.yml`.
 
