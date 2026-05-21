@@ -6,7 +6,7 @@ end-of-life builds (Windows 10, older macOS majors) surface
 immediately.
 
 Ships as YAML only — no companion TypeScript. The pipeline lives
-entirely in `manifest.yaml` and is interpreted by `@openagents/runtime`
+entirely in `manifest.yaml` and is interpreted by `@openadminos/runtime`
 at run time. This is the third canonical Agent Template and the
 shape an NL2Agent draft should aim for: load the inventory, count
 twice with `count-by-field`, optionally let the LLM polish a

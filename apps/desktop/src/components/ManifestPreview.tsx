@@ -18,7 +18,7 @@ import type {
   TemplateStep,
   TransformStep,
   WriteStep,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 
 /**
  * Renders an agent's manifest as readable cards so users can audit what

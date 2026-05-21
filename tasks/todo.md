@@ -152,7 +152,7 @@ For each, the rule is: **wire it if the implementation is cheap and honest, hide
 
 ## v0.2 — Repo-as-registry + bundled agent overhaul
 
-**Goal.** The OpenAgents repo becomes the registry. The app binary ships with zero agents and fetches everything from `/agents/` in this repo at runtime. The bundled agent set is reframed around three tiers (investigators, advisors, cleanup-with-judgment) so agents demonstrably out-class a PowerShell script.
+**Goal.** The OpenAdminOS repo becomes the registry. The app binary ships with zero agents and fetches everything from `/agents/` in this repo at runtime. The bundled agent set is reframed around three tiers (investigators, advisors, cleanup-with-judgment) so agents demonstrably out-class a PowerShell script.
 
 ### Why now
 
@@ -162,9 +162,9 @@ The existing seven agents look like PowerShell scripts with an LLM blurb tacked 
 
 - [ ] **Index generator** — CI step that builds `agents/index.json` from `agents/*/manifest.yaml`. Entries carry: `slug`, `version`, `author`, `mode`, `category`, scope summary, `manifestUrl`, `sha`, `minAppVersion`. Gate behind the existing agent QA (`npm run qa`) so broken agents never reach `main`.
 - [ ] **Runtime fetch + cache layer** — replace filesystem load of `./agents` with HTTP fetch of `index.json` from the configured registry source. Cache index + per-agent manifests to userData. Cache survives offline; refresh on every online launch.
-- [ ] **App↔manifest version gate** — app filters out entries whose `minAppVersion` exceeds the current app version, with an "Update Open Agents to use this agent" affordance.
+- [ ] **App↔manifest version gate** — app filters out entries whose `minAppVersion` exceeds the current app version, with an "Update OpenAdminOS to use this agent" affordance.
 - [ ] **Agent Hub UX** — "Last refreshed N ago" indicator, manual refresh button, per-agent "Update available" badge. Updates are explicit, never auto-applied.
-- [ ] **Settings: Registry source** — text field, defaults to `https://raw.githubusercontent.com/ugurlabs/openagents/main/agents/`. Lets enterprises point at a fork.
+- [ ] **Settings: Registry source** — text field, defaults to `https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/`. Lets enterprises point at a fork.
 - [ ] **Onboarding** — agent index fetch becomes a discrete step after tenant + LLM provider, before the "first agent" step.
 - [ ] **Remove binary bundling** — drop the build-time inclusion of `/agents/` in the Electron package; clean up "built-in agent" framing in code and copy.
 
@@ -259,7 +259,7 @@ The release is done when **all** of these hold:
 ## How we'll verify
 
 - Manual click-through of every interactive control on every page (8 pages × ~6 controls each).
-- Cold-launch the app with `~/Library/Application Support/openagents` removed → confirm no synthetic device data visible anywhere.
+- Cold-launch the app with `~/Library/Application Support/OpenAdminOS` removed → confirm no synthetic device data visible anywhere.
 - Trigger a synthetic-mode run of `find-inactive-devices` → confirm it completes with zero results, not 22.
 - Confirm CI passes on the resulting branch before tagging.
 

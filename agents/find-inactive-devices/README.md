@@ -36,7 +36,7 @@ Devices that synced within the last 30 days are considered active and are exclud
 
 ## How it runs today
 
-The first runtime ships a synthetic `managedDevices` fixture inside `@openagents/runtime`. The agent computes its result from that fixture deterministically; no Microsoft Graph or LLM call is made. The fixture will be swapped for a real Graph adapter when MSAL authentication lands.
+The first runtime ships a synthetic `managedDevices` fixture inside `@openadminos/runtime`. The agent computes its result from that fixture deterministically; no Microsoft Graph or LLM call is made. The fixture will be swapped for a real Graph adapter when MSAL authentication lands.
 
 ## Files
 

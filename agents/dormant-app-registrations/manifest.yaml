@@ -10,8 +10,8 @@ descriptor:
   description: Reads tenant app registrations, groups them by likely purpose, and recommends keep/disable/delete per group with reasoning.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: apps
   tier: agent

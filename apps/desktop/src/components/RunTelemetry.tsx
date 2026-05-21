@@ -1,4 +1,4 @@
-import type { RunRecord } from "../shared/openAgents";
+import type { RunRecord } from "../shared/openAdminOS";
 
 export function RunTelemetry({
   run,

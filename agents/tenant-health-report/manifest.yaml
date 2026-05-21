@@ -20,8 +20,8 @@ descriptor:
   description: Posts a one-paragraph Intune compliance summary to a Microsoft Teams channel each time it runs.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: compliance
   tier: dashboard

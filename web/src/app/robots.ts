@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const SITE_URL = "https://openagents.sh";
+const SITE_URL = "https://openadminos.example";
 
 export default function robots(): MetadataRoute.Robots {
   return {

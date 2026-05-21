@@ -3,7 +3,7 @@ import { Button } from "./Button";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
 import { IconClock, IconWarning } from "./icons";
-import type { AgentSchedule } from "../shared/openAgents";
+import type { AgentSchedule } from "../shared/openAdminOS";
 
 const PRESETS: { label: string; seconds: number }[] = [
   { label: "Every 15m", seconds: 15 * 60 },
@@ -73,7 +73,7 @@ export function AgentScheduleCard({
         </div>
 
         <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-          Schedules only fire while Open Agents is running. Pick an interval
+          Schedules only fire while OpenAdminOS is running. Pick an interval
           and runs queue automatically against the agent's active tenant.
         </p>
 

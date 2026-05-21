@@ -23,7 +23,7 @@ import type {
   AgentManifestPreview,
   ProviderId,
   RunRecord,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 
 export default function AgentDetail() {
   const { slug } = useParams();
@@ -67,7 +67,7 @@ export default function AgentDetail() {
     let cancelled = false;
     setPreviewLoading(true);
     setPreviewError(null);
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) {
       setPreview(null);
       setPreviewLoading(false);
@@ -143,15 +143,15 @@ export default function AgentDetail() {
             <ShareMenu
               contextLabel="agent"
               onCopyLink={() => {
-                void navigator.clipboard.writeText(`openagents://agent/${agent.slug}`);
+                void navigator.clipboard.writeText(`openadminos://agent/${agent.slug}`);
               }}
-              copyLinkHint={`openagents://agent/${agent.slug}`}
+              copyLinkHint={`openadminos://agent/${agent.slug}`}
               onOpenInBrowser={() => {
-                void window.openAgents?.openExternal(
-                  `https://github.com/ugurkocde/OpenAgents/tree/main/agents/${agent.slug}`,
+                void window.openAdminOS?.openExternal(
+                  `https://github.com/OpenAdminOS/OpenAdminOS/tree/main/agents/${agent.slug}`,
                 );
               }}
-              openInBrowserHint={`github.com/ugurkocde/OpenAgents · agents/${agent.slug}`}
+              openInBrowserHint={`github.com/OpenAdminOS/OpenAdminOS · agents/${agent.slug}`}
             />
             <Button
               variant="secondary"

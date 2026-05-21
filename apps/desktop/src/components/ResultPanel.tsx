@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
 import { IconChevronDown, IconShield } from "./icons";
-import type { RunRecord } from "../shared/openAgents";
+import type { RunRecord } from "../shared/openAdminOS";
 
 /**
  * Renders the `run.result` payload as something more useful than raw

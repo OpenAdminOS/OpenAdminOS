@@ -1,4 +1,4 @@
-# Open Agents
+# OpenAdminOS
 
 **Open-source, local-first agents for Microsoft 365 admins.**
 
@@ -100,8 +100,8 @@ Each lives at `agents/<slug>/manifest.yaml`. Read them — they are the document
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/ugurkocde/OpenAgents.git
-cd OpenAgents
+git clone https://github.com/OpenAdminOS/OpenAdminOS.git
+cd OpenAdminOS
 npm install
 
 # 2. Install Ollama and pull a model (required — every agent uses the LLM at least once)
@@ -124,7 +124,7 @@ The app comes up with four agents (three read-only, one write) discoverable in t
 ```
 apps/
   desktop/        Electron host (main + preload + Vite/React renderer)
-  marketing/      Next.js marketing site (openagents.sh)
+  marketing/      Next.js marketing site (openadminos.example)
 agents/
   <slug>/         manifest.yaml + manifest.json (+ optional TS)
 packages/
@@ -193,4 +193,4 @@ MIT. See [`LICENSE`](LICENSE).
 
 ## Who's behind it
 
-Built by [Ugurlabs](https://ugurlabs.com). Free community project — sponsorships welcome, no paid tier planned for the platform itself.
+Free community project — sponsorships welcome, no paid tier planned for the platform itself.

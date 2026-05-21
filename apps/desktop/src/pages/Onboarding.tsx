@@ -25,7 +25,7 @@ import type {
   RegistryAgentSummary,
   RequestedScope,
   TenantRecord,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import { TrustBanner } from "../components/TrustBanner";
 
@@ -153,7 +153,7 @@ export default function Onboarding() {
             <IconLogo size={16} />
           </div>
           <span className="text-[13px] font-semibold tracking-tight text-[var(--color-text)]">
-            Open Agents
+            OpenAdminOS
           </span>
           <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
             v0.1.5
@@ -261,7 +261,7 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
           <IconLogo size={36} />
         </div>
         <h1 className="text-[32px] font-semibold tracking-tight text-[var(--color-text)]">
-          Welcome to Open Agents.
+          Welcome to OpenAdminOS.
         </h1>
         <p className="mt-3 max-w-[520px] text-[14.5px] leading-relaxed text-[var(--color-text-soft)]">
           Open-source, local-first agents for Microsoft 365 admins.
@@ -510,9 +510,9 @@ function ConnectTenant({
           Connect a Microsoft 365 tenant
         </h2>
         <p className="mt-1.5 max-w-[640px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
-          Sign in once with your admin account. Open Agents will open
+          Sign in once with your admin account. OpenAdminOS will open
           Microsoft's login page in your system browser. The consent
-          screen says "Microsoft Graph Command Line Tools" — Open Agents
+          screen says "Microsoft Graph Command Line Tools" — OpenAdminOS
           uses Microsoft's public Graph CLI app registration, so nothing
           needs to be registered in your tenant.
         </p>
@@ -548,7 +548,7 @@ function ConnectTenant({
             <strong className="font-medium text-[var(--color-text)]">
               This is a one-time consent.
             </strong>{" "}
-            Open Agents will use these permissions only on this device.
+            OpenAdminOS will use these permissions only on this device.
             We do not have a server that stores your tokens. You can
             revoke access at any time via Entra → Enterprise
             applications.
@@ -938,9 +938,9 @@ function OllamaInstallGuide({
   rechecking: boolean;
   onRecheck: () => void | Promise<void>;
 }) {
-  const platform = window.openAgents?.platform ?? "unknown";
+  const platform = window.openAdminOS?.platform ?? "unknown";
   const openExternal = (url: string) =>
-    void window.openAgents?.openExternal(url);
+    void window.openAdminOS?.openExternal(url);
 
   const wrapperClass = warn
     ? "overflow-hidden rounded-xl bg-[var(--color-warning-soft)] ring-1 ring-[var(--color-warning)]/30"
@@ -1010,7 +1010,7 @@ function OllamaInstallGuide({
 
         <InstallStep number={3} title="Come back here and click Recheck">
           <p className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-            Open Agents will detect Ollama as soon as it's running. No
+            OpenAdminOS will detect Ollama as soon as it's running. No
             restart needed.
           </p>
           <div className="mt-3">

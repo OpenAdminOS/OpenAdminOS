@@ -1,5 +1,5 @@
 {
-  "name": "openagents",
+  "name": "openadminos",
   "private": true,
   "version": "0.1.6",
   "workspaces": [
@@ -7,12 +7,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w @openagents/desktop",
-    "build": "npm run build -w @openagents/desktop",
-    "typecheck": "npm run typecheck -w @openagents/agent-sdk && npm run typecheck -w @openagents/connector-teams && npm run typecheck -w @openagents/runtime && npm run typecheck -w @openagents/qa-graph && npm run typecheck -w @openagents/desktop",
-    "qa": "npm run qa -w @openagents/qa-graph",
-    "test": "npm run test -w @openagents/runtime && npm run test -w @openagents/qa-graph",
-    "dist:desktop": "npm run dist -w @openagents/desktop",
+    "dev": "npm run dev -w @openadminos/desktop",
+    "build": "npm run build -w @openadminos/desktop",
+    "typecheck": "npm run typecheck -w @openadminos/agent-sdk && npm run typecheck -w @openadminos/connector-teams && npm run typecheck -w @openadminos/runtime && npm run typecheck -w @openadminos/qa-graph && npm run typecheck -w @openadminos/desktop",
+    "qa": "npm run qa -w @openadminos/qa-graph",
+    "test": "npm run test -w @openadminos/runtime && npm run test -w @openadminos/qa-graph",
+    "dist:desktop": "npm run dist -w @openadminos/desktop",
     "registry:index": "node scripts/generate-registry-index.mjs"
   },
   "engines": {

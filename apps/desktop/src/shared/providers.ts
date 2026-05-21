@@ -1,4 +1,4 @@
-import type { ProviderId } from "./openAgents.js";
+import type { ProviderId } from "./openAdminOS.js";
 
 // TODO(uli): implementations for these land in v0.2 alongside keytar OS
 // keychain support. Until then the UI surfaces them as "Coming in 0.2"

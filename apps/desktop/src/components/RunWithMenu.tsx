@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "./Button";
 import { IconChevronDown, IconCloud, IconHardDrive, IconPlay } from "./icons";
 import { isProviderImplemented } from "../shared/providers";
-import type { ProviderId, ProviderSummary } from "../shared/openAgents";
+import type { ProviderId, ProviderSummary } from "../shared/openAdminOS";
 
 interface RunWithChoice {
   providerId?: ProviderId;

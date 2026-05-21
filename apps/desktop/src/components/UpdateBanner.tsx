@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import { IconCheck, IconClose } from "./icons";
-import type { UpdateState } from "../shared/openAgents";
+import type { UpdateState } from "../shared/openAdminOS";
 
 export function UpdateBanner() {
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) return;
     let cancelled = false;
     api
@@ -40,8 +40,8 @@ export function UpdateBanner() {
         <IconCheck size={12} className="text-[var(--color-accent)]" />
         <span className="font-medium">
           {isReady
-            ? `Open Agents ${state.version ?? ""} is ready to install`
-            : `Downloading Open Agents ${state.version ?? "update"}…`}
+            ? `OpenAdminOS ${state.version ?? ""} is ready to install`
+            : `Downloading OpenAdminOS ${state.version ?? "update"}…`}
         </span>
         {isReady && (
           <span className="text-[var(--color-text-soft)]">
@@ -55,7 +55,7 @@ export function UpdateBanner() {
             variant="primary"
             size="sm"
             onClick={() => {
-              void window.openAgents?.applyUpdateNow();
+              void window.openAdminOS?.applyUpdateNow();
             }}
           >
             Restart now

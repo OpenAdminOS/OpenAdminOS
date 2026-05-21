@@ -62,7 +62,7 @@ jobs:
         # --publish never: we don't upload from electron-builder; the
         # final upload step lives in `publish-release` below so all
         # platforms attach to the same draft GitHub release.
-        run: npm run dist -w @openagents/desktop -- --win --publish never
+        run: npm run dist -w @openadminos/desktop -- --win --publish never
 
       - name: Upload MSIX artifact
         uses: actions/upload-artifact@v4
@@ -126,7 +126,7 @@ jobs:
         # Arch is declared in package.json build.mac.target, so we only
         # pass --mac on the CLI; passing --arm64 here would be redundant
         # and (with some electron-builder versions) override the config.
-        run: npm run dist -w @openagents/desktop -- --mac --publish never
+        run: npm run dist -w @openadminos/desktop -- --mac --publish never
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4

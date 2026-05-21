@@ -1,6 +1,6 @@
 import { Card } from "./Card";
 import { IconWarning } from "./icons";
-import type { RunRecord } from "../shared/openAgents";
+import type { RunRecord } from "../shared/openAdminOS";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -68,7 +68,7 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
             </div>
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
               Inspect the Logs tab for the stack trace. If this is reproducible, file
-              an issue at <span className="font-mono">github.com/ugurkocde/OpenAgents/issues</span> with
+              an issue at <span className="font-mono">github.com/OpenAdminOS/OpenAdminOS/issues</span> with
               the run id, agent slug, and error message.
             </p>
           </div>

@@ -5,7 +5,7 @@ import type {
   AgentSummary,
   AgentTemplate,
   TemplateSetting,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 
 /**
  * Renders the install-time settings form for one agent. Inputs are driven

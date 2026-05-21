@@ -1,4 +1,4 @@
-# Open Agents — Product Specification
+# OpenAdminOS — Product Specification
 
 > Source of truth for product decisions, architecture, design system, and roadmap. Read this before writing code. If reality diverges from this doc, update the doc as part of the same change.
 
@@ -6,7 +6,7 @@
 
 ## 1. What we're building
 
-**Open Agents** is an open-source desktop platform for Microsoft 365 administrators (initially Intune & Entra) to run AI agents against their tenants. Agents are TypeScript modules contributed by the community, run locally on the admin's machine, and operate against the tenant via Microsoft Graph.
+**OpenAdminOS** is an open-source desktop platform for Microsoft 365 administrators (initially Intune & Entra) to run AI agents against their tenants. Agents are TypeScript modules contributed by the community, run locally on the admin's machine, and operate against the tenant via Microsoft Graph.
 
 The product is local-first: by default, tenant data and LLM prompts never leave the user's device. The user can opt into hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), and when they do, the UI honestly reflects that data leaves the device.
 
@@ -24,7 +24,7 @@ There is no separate CLI. Power users get the same GUI; contributor tooling (age
 
 ### Why this exists
 
-Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose, cloud-only, no extensibility. Open Agents is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for Microsoft 365 admins** — local-first runtime, GitHub-hosted integrations, opinionated UX.
+Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose, cloud-only, no extensibility. OpenAdminOS is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for Microsoft 365 admins** — local-first runtime, GitHub-hosted integrations, opinionated UX.
 
 ---
 
@@ -33,10 +33,10 @@ Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose
 ### Monorepo layout
 
 ```
-openagents/
+openadminos/
 ├── apps/
 │   ├── desktop/              # Electron main + preload + renderer (Vite + React)
-│   └── marketing/            # Public marketing site (openagents.sh) — Next.js
+│   └── marketing/            # Public marketing site (openadminos.example) — Next.js
 ├── packages/
 │   ├── runtime/              # Agent execution engine
 │   ├── llm/                  # Provider abstraction + concrete providers
@@ -116,7 +116,7 @@ export default {
   id: 'intune-compliance-check',
   name: 'Intune Compliance Check',
   description: 'Lists devices that fall out of compliance and suggests remediation.',
-  author: { name: 'ugurlabs', verified: true },
+  author: { name: 'openadminos', verified: true },
   version: '1.2.0',
   mode: 'read',                        // 'read' | 'write'
   scopes: [                            // Graph permissions required
@@ -145,7 +145,7 @@ Agents may declare optional or required `connectors:` — see Connector abstract
 
 Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
 
-**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openagents/agent-sdk` in the [Unreleased] section. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. The runtime injection and the first connector — **Microsoft Teams** — land in the next release alongside the Connectors sidebar entry, the channel-picker setup UI, and the preview-and-send confirmation modal.
+**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk` in the [Unreleased] section. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. The runtime injection and the first connector — **Microsoft Teams** — land in the next release alongside the Connectors sidebar entry, the channel-picker setup UI, and the preview-and-send confirmation modal.
 
 The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships — retrofitting them after agents start consuming the API is what makes ecosystems brittle.
 
@@ -174,7 +174,7 @@ The agent's `mode: 'read' | 'write'` continues to describe Graph behavior unchan
 
 Capabilities are SemVer-major-versioned and addressed as `id@major`. Agents pin a major: `capabilities: ['post-channel-message@1']`. Connectors may ship `@2` (e.g. switches from markdown to Adaptive Cards) without breaking agents on `@1`. The connector itself is also SemVer'd; agents declare `minVersion`.
 
-Manifests declare a top-level `schemaVersion: 1`. The runtime rejects unsupported schema versions with a designed error and a "this agent was authored for a newer Open Agents" remediation. This is how we evolve the manifest shape without orphaning agents in the wild.
+Manifests declare a top-level `schemaVersion: 1`. The runtime rejects unsupported schema versions with a designed error and a "this agent was authored for a newer OpenAdminOS" remediation. This is how we evolve the manifest shape without orphaning agents in the wild.
 
 #### The interface
 
@@ -322,18 +322,18 @@ Required vs optional: a `required: true` connector that's not connected fails pr
 
 #### Type-safe registry via module augmentation
 
-The empty `ConnectorRegistry` interface in `@openagents/agent-sdk` is populated by each connector package via declaration merging. This is the standard TypeScript pattern for extensible registries (React Router, Vite, Wrangler all do this) and gives agent authors full IntelliSense without coupling the SDK to the known connector list.
+The empty `ConnectorRegistry` interface in `@openadminos/agent-sdk` is populated by each connector package via declaration merging. This is the standard TypeScript pattern for extensible registries (React Router, Vite, Wrangler all do this) and gives agent authors full IntelliSense without coupling the SDK to the known connector list.
 
 ```ts
 // packages/connector-teams/src/index.d.ts
-declare module '@openagents/agent-sdk' {
+declare module '@openadminos/agent-sdk' {
   interface ConnectorRegistry {
     teams: TeamsConnectorCapabilities;
   }
 }
 ```
 
-Inside `defineAgent({ run(ctx) { ctx.connectors.teams.postChannelMessage(...) } })`, the `.teams` property exists if and only if `@openagents/connector-teams` is installed in the workspace. Misspelled connector ids are type errors at edit time.
+Inside `defineAgent({ run(ctx) { ctx.connectors.teams.postChannelMessage(...) } })`, the `.teams` property exists if and only if `@openadminos/connector-teams` is installed in the workspace. Misspelled connector ids are type errors at edit time.
 
 #### Plugin architecture
 
@@ -341,7 +341,7 @@ Each connector ships as its own package under `packages/connector-<id>/` (in-tre
 
 ```ts
 // packages/connector-teams/src/index.ts
-import { defineConnector } from '@openagents/agent-sdk';
+import { defineConnector } from '@openadminos/agent-sdk';
 import type { TeamsConnectorCapabilities } from './capabilities';
 
 export default defineConnector<TeamsConnectorCapabilities>({
@@ -426,7 +426,7 @@ interface TeamsConnectorCapabilities {
 ```
 
 Decisions locked for the first release:
-- **Delegated permissions only.** Posts attributed to the signed-in admin ("{admin} · via Open Agents"). No Resource-Specific Consent, no per-team app installation. Application permissions are a v1.1+ concern; the descriptor's `authSource` field is the seam where that decision can change without breaking agents.
+- **Delegated permissions only.** Posts attributed to the signed-in admin ("{admin} · via OpenAdminOS"). No Resource-Specific Consent, no per-team app installation. Application permissions are a v1.1+ concern; the descriptor's `authSource` field is the seam where that decision can change without breaking agents.
 - **Teams scopes folded into the MSAL consent screen.** Granted once at tenant connect. Admins who declined initial consent see `status: 'needs-scope'` and a single re-consent button — no separate auth flow.
 - **`post-*-message` is `kind: notify`.** Users see a "Send to Teams?" preview modal with the rendered markdown and the target channel — one-click confirm, not typed phrase. Typed-phrase confirmation is reserved for destructive Graph operations; debasing it for routine notifications dulls its trust signal.
 - **`configSchema` covers default channel/chat selection.** Per-install setting; agents can override at invocation time.
@@ -437,17 +437,17 @@ Teams proves the contract generalizes across capabilities while keeping the trus
 
 ### Registry model
 
-The OpenAgents repository **is** the registry. Agents live in `/agents/<slug>/` in this repo (`ugurlabs/openagents`), each directory containing `manifest.yaml`, `README.md`, and optional fixtures. There is no separate `openagents-registry` repo and no two-tier "bundled vs. community" trust split — everything is community-by-default, contributed via PR to this repo.
+The OpenAdminOS repository **is** the registry. Agents live in `/agents/<slug>/` in this repo (`OpenAdminOS/OpenAdminOS`), each directory containing `manifest.yaml`, `README.md`, and optional fixtures. There is no separate `openadminos-registry` repo and no two-tier "bundled vs. community" trust split — everything is community-by-default, contributed via PR to this repo.
 
 The app binary ships with **zero agents**. At runtime the desktop app fetches the agent index (`/agents/index.json`, generated by CI from the manifests on every push to `main`) from the configured registry source, caches it to userData, and lets the user browse and install agents on demand. Installed agents are version-pinned; updates are surfaced as explicit "update available" badges and never auto-applied.
 
 Distribution semantics:
 
-- **Source of truth:** `https://raw.githubusercontent.com/ugurlabs/openagents/main/agents/`
+- **Source of truth:** `https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/`
 - **Index:** `agents/index.json` is generated by CI from `agents/*/manifest.yaml` after the agent QA gate (schema, scopes, endpoints, fixture coverage) passes. Broken agents never reach users.
 - **Per-agent install:** fetch manifest → write to userData → version-pin. The same Agent Hub install flow as today, just fetching from HTTP instead of reading the binary.
 - **Forkable:** Settings exposes a "Registry source" field. Enterprises can fork this repo, curate `/agents/`, and point the app at their fork. Cheap to implement, big trust win.
-- **App↔manifest version coupling:** each `index.json` entry carries `minAppVersion`. The app hides agents it can't run with a "Update Open Agents to use this agent" note. This is how the DSL can evolve without orphaning users on older app versions.
+- **App↔manifest version coupling:** each `index.json` entry carries `minAppVersion`. The app hides agents it can't run with a "Update OpenAdminOS to use this agent" note. This is how the DSL can evolve without orphaning users on older app versions.
 
 Cache lifecycle:
 
@@ -473,7 +473,7 @@ No cloud sync. No telemetry by default.
 Required before public v1 release:
 - **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing. Without EV, SmartScreen will warn users for weeks until the cert builds reputation.
 - **macOS:** Apple Developer Program ($99/yr) + notarization. Without notarization, Gatekeeper blocks the app.
-- Total: ~$500-700/yr, owned by the Ugurlabs UG entity.
+- Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.
 
@@ -577,7 +577,7 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 - 2 new screens designed and built: registry browse (`09-registry.html`) and empty states (`10-empty-states.html`)
 - LLM provider abstraction with one working provider (Ollama) — real connection, real streaming
 - One sample read-only agent runnable end-to-end against synthetic Graph data
-- Public marketing site at openagents.sh with email signup for private preview
+- Public marketing site at openadminos.example with email signup for private preview
 - Hero screenshots (in README + landing page) and a demo video
 
 ### What v0.1 deliberately defers
@@ -597,7 +597,7 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 3. With Ollama running locally and a model installed: clicking "Run" on the sample agent streams real LLM output into the live run modal, completes successfully, displays structured results.
 4. With Ollama not running: a designed error state appears with the correct recovery instruction (`ollama serve`).
 5. Trust messaging flips correctly when toggling the LLM provider between local and (mocked) hosted in §07.
-6. openagents.sh is publicly resolvable; signup form captures emails to a real backend (verified by submitting a test).
+6. openadminos.example is publicly resolvable; signup form captures emails to a real backend (verified by submitting a test).
 7. README includes a hero screenshot taken from the running app.
 8. A 60–90s demo video is publicly viewable.
 
@@ -685,7 +685,7 @@ These must exist and work well before any public release.
 - Visual diff for complex objects (CA policies, conditional access)
 - Run comparison ("what changed between last week and this week?")
 - Sharing / collaboration (deep link to run, PDF export — TenantPDF integration)
-- Agent authoring DX (`openagents agent init` scaffold, local dev/test mode, publish flow)
+- Agent authoring DX (`openadminos agent init` scaffold, local dev/test mode, publish flow)
 - Marketplace metadata (screenshots, video demos, changelog, support links per agent)
 - Health dashboard (aggregated trust score across all agents on a tenant)
 
@@ -722,7 +722,7 @@ When implementing screens in production code, port the design tokens from `_desi
 
 These are explicitly unresolved. Don't pick a default without asking.
 
-- **Sub-branding inside the product**: Open Agents is the project name; should the desktop app's window title also say "Open Agents," or is there a layer of brand inside the product (e.g., "Open Agents by Ugurlabs")?
+- **Sub-branding inside the product**: OpenAdminOS is the project name; should the desktop app's window title also say "OpenAdminOS," or is there a layer of brand inside the product (e.g., "OpenAdminOS by OpenAdminOS")?
 - **Agent signing**: who signs? Author signs and we verify? We counter-sign trusted agents? Implications for the "verified author" badge.
 - **Hosted-LLM API key storage**: OS keychain is obvious for personal use, but what about MSP scenarios where multiple admins share a workstation? Per-user or per-workstation?
 - **Telemetry, if ever added**: what's the minimum viable opt-in design that doesn't betray the local-first promise?
@@ -740,13 +740,13 @@ These are explicitly unresolved. Don't pick a default without asking.
 
 ---
 
-## 9. Adjacent products in the Ugurlabs portfolio
+## 9. Adjacent products in the OpenAdminOS portfolio
 
-For context — these exist or are in flight, and may interact with Open Agents over time:
+For context — these exist or are in flight, and may interact with OpenAdminOS over time:
 
-- **TenantPDF** (tenantpdf.com) — hosted SaaS for branded tenant documentation PDFs. Future integration: Open Agents run reports could export via TenantPDF.
+- **TenantPDF** (tenantpdf.com) — hosted SaaS for branded tenant documentation PDFs. Future integration: OpenAdminOS run reports could export via TenantPDF.
 - **IntuneDocumentation** (legacy) — frontend PDF generation tool.
 - **IntuneGet-FrontBackend** (legacy) — multi-tenant auth experiment.
-- **IntuneTUI** (deprecated) — terminal-based Intune tool. The lesson from this project drove Open Agents' decision to use a desktop GUI instead of a terminal — admins are not developer-y enough for TUIs as a primary surface.
+- **IntuneTUI** (deprecated) — terminal-based Intune tool. The lesson from this project drove OpenAdminOS' decision to use a desktop GUI instead of a terminal — admins are not developer-y enough for TUIs as a primary surface.
 
-Open Agents is the flagship community project. The others are either narrow paid products (TenantPDF) or instructive prior art.
+OpenAdminOS is the flagship community project. The others are either narrow paid products (TenantPDF) or instructive prior art.

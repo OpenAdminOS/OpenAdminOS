@@ -28,24 +28,24 @@ import type {
   PendingConnectorDecision,
   ProviderId,
   SaveTextFileArgs,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
 } from "./connector-confirm-bridge.js";
-import { listRegisteredConnectors } from "@openagents/runtime";
+import { listRegisteredConnectors } from "@openadminos/runtime";
 
 // Set the app name BEFORE anything else that could touch the macOS
 // Keychain. Electron's safeStorage uses `app.getName()` to construct
 // the Keychain service name ("<name> Safe Storage"). In a signed
-// production build that name comes from CFBundleName ("Open Agents")
+// production build that name comes from CFBundleName ("OpenAdminOS")
 // via Info.plist, but in dev (`npm run dev`, unpackaged Electron) it
 // falls back to package.json's `name` field — which is the npm
-// package id "@openagents/desktop" and ends up as the user-visible
+// package id "@openadminos/desktop" and ends up as the user-visible
 // string in Keychain prompts. Pinning it explicitly here keeps the
-// two paths consistent and gives users a single "Open Agents Safe
+// two paths consistent and gives users a single "OpenAdminOS Safe
 // Storage" entry regardless of how they're running the app.
-app.setName("Open Agents");
+app.setName("OpenAdminOS");
 
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = dirname(currentFile);
@@ -63,7 +63,7 @@ let lastBackgroundRefreshAt = 0;
 /**
  * Drive a registry index refresh from a non-user trigger (startup,
  * 6h interval, or window focus). On a successful fetch with a newly
- * stamped timestamp, push `openagents:registry-refreshed` to the
+ * stamped timestamp, push `openadminos:registry-refreshed` to the
  * renderer so the Agent Hub state can swap in the new list without
  * the user clicking refresh. Failures are silent — the user only
  * sees an error when they manually click refresh.
@@ -76,7 +76,7 @@ async function refreshRegistryInBackground(
     const result = await store.initRegistry();
     if (result.error || result.fromCache) return;
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send("openagents:registry-refreshed", {
+    mainWindow.webContents.send("openadminos:registry-refreshed", {
       trigger,
       cachedAt: result.cachedAt,
     });
@@ -151,7 +151,7 @@ function navigate(path: string): void {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.focus();
-  mainWindow.webContents.send("openagents:navigate", path);
+  mainWindow.webContents.send("openadminos:navigate", path);
 }
 
 function buildAppMenu(): Menu {
@@ -159,7 +159,7 @@ function buildAppMenu(): Menu {
 
   const appMenu: MenuItemConstructorOptions = isMac
     ? {
-        label: "Open Agents",
+        label: "OpenAdminOS",
         submenu: [
           { role: "about" },
           { type: "separator" },
@@ -243,16 +243,16 @@ function buildAppMenu(): Menu {
     role: "help",
     submenu: [
       {
-        label: "Open Agents on GitHub",
+        label: "OpenAdminOS on GitHub",
         click: () => {
-          void shell.openExternal("https://github.com/ugurkocde/OpenAgents");
+          void shell.openExternal("https://github.com/OpenAdminOS/OpenAdminOS");
         },
       },
       {
         label: "Report an issue",
         click: () => {
           void shell.openExternal(
-            "https://github.com/ugurkocde/OpenAgents/issues/new",
+            "https://github.com/OpenAdminOS/OpenAdminOS/issues/new",
           );
         },
       },
@@ -284,7 +284,7 @@ async function createWindow() {
     height: persisted.height,
     minWidth: 960,
     minHeight: 680,
-    title: "Open Agents",
+    title: "OpenAdminOS",
     backgroundColor: "#0a0c10",
     show: false,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
@@ -333,113 +333,113 @@ async function createWindow() {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle("openagents:get-app-state", () => store.getAppState());
-  ipcMain.handle("openagents:list-agents", () => store.listAgents());
-  ipcMain.handle("openagents:list-registry-agents", () =>
+  ipcMain.handle("openadminos:get-app-state", () => store.getAppState());
+  ipcMain.handle("openadminos:list-agents", () => store.listAgents());
+  ipcMain.handle("openadminos:list-registry-agents", () =>
     store.listRegistryAgents(),
   );
-  ipcMain.handle("openagents:refresh-registry", () => store.initRegistry());
-  ipcMain.handle("openagents:set-registry-source", (_event, url: string) =>
+  ipcMain.handle("openadminos:refresh-registry", () => store.initRegistry());
+  ipcMain.handle("openadminos:set-registry-source", (_event, url: string) =>
     store.setRegistrySource(url),
   );
-  ipcMain.handle("openagents:list-providers", () => store.listProviders());
-  ipcMain.handle("openagents:list-connectors", () => store.listConnectors());
-  ipcMain.handle("openagents:test-connector", (_event, id: string) =>
+  ipcMain.handle("openadminos:list-providers", () => store.listProviders());
+  ipcMain.handle("openadminos:list-connectors", () => store.listConnectors());
+  ipcMain.handle("openadminos:test-connector", (_event, id: string) =>
     store.testConnector(id),
   );
   ipcMain.handle(
-    "openagents:set-connector-config",
+    "openadminos:set-connector-config",
     (_event, id: string, config: Record<string, unknown>) =>
       store.setConnectorConfig(id, config),
   );
   ipcMain.handle(
-    "openagents:list-connector-teams",
+    "openadminos:list-connector-teams",
     (_event, id: string) => store.listConnectorTeams(id),
   );
   ipcMain.handle(
-    "openagents:list-connector-channels",
+    "openadminos:list-connector-channels",
     (_event, id: string, teamId: string) =>
       store.listConnectorChannels(id, teamId),
   );
   ipcMain.handle(
-    "openagents:respond-to-connector-confirm",
+    "openadminos:respond-to-connector-confirm",
     (_event, requestId: string, decision: PendingConnectorDecision) => {
       respondConnectorConfirm(requestId, decision);
     },
   );
-  ipcMain.handle("openagents:install-agent", (_event, agentId: string) =>
+  ipcMain.handle("openadminos:install-agent", (_event, agentId: string) =>
     store.installAgent(agentId),
   );
-  ipcMain.handle("openagents:uninstall-agent", (_event, slug: string) =>
+  ipcMain.handle("openadminos:uninstall-agent", (_event, slug: string) =>
     store.uninstallAgent(slug),
   );
-  ipcMain.handle("openagents:set-active-provider", (_event, id: ProviderId) =>
+  ipcMain.handle("openadminos:set-active-provider", (_event, id: ProviderId) =>
     store.setActiveProvider(id),
   );
   ipcMain.handle(
-    "openagents:set-active-model",
+    "openadminos:set-active-model",
     (_event, providerId: ProviderId, model: string | null) =>
       store.setActiveModel(providerId, model),
   );
   ipcMain.handle(
-    "openagents:start-run",
+    "openadminos:start-run",
     (_event, agentSlug: string, options?: { tenantId?: string }) =>
       store.startRun(agentSlug, options),
   );
-  ipcMain.handle("openagents:get-run", (_event, id: string) => store.getRun(id));
+  ipcMain.handle("openadminos:get-run", (_event, id: string) => store.getRun(id));
   ipcMain.handle(
-    "openagents:confirm-run",
+    "openadminos:confirm-run",
     (_event, runId: string, phrase: string) => store.confirmRun(runId, phrase),
   );
-  ipcMain.handle("openagents:reject-run", (_event, runId: string) =>
+  ipcMain.handle("openadminos:reject-run", (_event, runId: string) =>
     store.rejectRun(runId),
   );
-  ipcMain.handle("openagents:cancel-run", (_event, runId: string) =>
+  ipcMain.handle("openadminos:cancel-run", (_event, runId: string) =>
     store.cancelRun(runId),
   );
-  ipcMain.handle("openagents:list-tenants", () => store.listTenants());
-  ipcMain.handle("openagents:get-requested-scopes", () =>
+  ipcMain.handle("openadminos:list-tenants", () => store.listTenants());
+  ipcMain.handle("openadminos:get-requested-scopes", () =>
     store.listRequestedScopes(),
   );
-  ipcMain.handle("openagents:connect-tenant", () => store.connectTenant());
-  ipcMain.handle("openagents:set-active-tenant", (_event, id: string) =>
+  ipcMain.handle("openadminos:connect-tenant", () => store.connectTenant());
+  ipcMain.handle("openadminos:set-active-tenant", (_event, id: string) =>
     store.setActiveTenant(id),
   );
-  ipcMain.handle("openagents:disconnect-tenant", (_event, id: string) =>
+  ipcMain.handle("openadminos:disconnect-tenant", (_event, id: string) =>
     store.disconnectTenant(id),
   );
-  ipcMain.handle("openagents:get-agent-manifest", (_event, slug: string) =>
+  ipcMain.handle("openadminos:get-agent-manifest", (_event, slug: string) =>
     store.getAgentManifest(slug),
   );
   ipcMain.handle(
-    "openagents:update-agent-settings",
+    "openadminos:update-agent-settings",
     (_event, slug: string, values: Record<string, unknown>) =>
       store.updateAgentSettings(slug, values),
   );
   ipcMain.handle(
-    "openagents:update-agent-schedule",
+    "openadminos:update-agent-schedule",
     (_event, slug: string, schedule) => store.updateAgentSchedule(slug, schedule),
   );
   ipcMain.handle(
-    "openagents:draft-agent-manifest",
+    "openadminos:draft-agent-manifest",
     (_event, prompt: string) => store.draftAgentManifest(prompt),
   );
   ipcMain.handle(
-    "openagents:save-agent-draft",
+    "openadminos:save-agent-draft",
     (_event, yamlSource: string) => store.saveAgentDraft(yamlSource),
   );
-  ipcMain.handle("openagents:open-external", (_event, url: string) => {
+  ipcMain.handle("openadminos:open-external", (_event, url: string) => {
     openExternalUrl(url);
   });
-  ipcMain.handle("openagents:get-update-state", () => getUpdateState());
-  ipcMain.handle("openagents:apply-update-now", () => applyUpdateNow());
+  ipcMain.handle("openadminos:get-update-state", () => getUpdateState());
+  ipcMain.handle("openadminos:apply-update-now", () => applyUpdateNow());
   subscribeToUpdateState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("openagents:update-state", state);
+      mainWindow.webContents.send("openadminos:update-state", state);
     }
   });
   ipcMain.handle(
-    "openagents:save-text-file",
+    "openadminos:save-text-file",
     async (_event, args: SaveTextFileArgs) => {
       const parent = mainWindow ?? undefined;
       const result = parent
@@ -537,7 +537,7 @@ if (!gotLock) {
           if (!mainWindow) return;
           if (mainWindow.isMinimized()) mainWindow.restore();
           mainWindow.focus();
-          mainWindow.webContents.send("openagents:focus-run", run.id);
+          mainWindow.webContents.send("openadminos:focus-run", run.id);
         });
         notification.show();
       },

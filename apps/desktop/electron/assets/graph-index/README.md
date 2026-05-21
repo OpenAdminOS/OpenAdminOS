@@ -1,7 +1,7 @@
 # Microsoft Graph endpoint catalogue
 
 These JSON files are the local catalogue of Microsoft Graph endpoints used
-by Open Agents for three purposes:
+by OpenAdminOS for three purposes:
 
 1. Injecting candidate endpoints into the LLM drafting prompt so the model
    targets real paths instead of hallucinating.
@@ -17,7 +17,7 @@ by Open Agents for three purposes:
   permission scopes (delegated + application), supported `$` query
   parameters, and required headers.
 
-Both files cover the Graph **beta** surface. Open Agents calls
+Both files cover the Graph **beta** surface. OpenAdminOS calls
 `https://graph.microsoft.com/v1.0` by default; manifests can opt into
 `beta` per step (future work). Endpoints listed only in beta will 404
 against v1.0 at runtime — that surfaces as a normal Graph error.

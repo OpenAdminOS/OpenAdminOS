@@ -31,7 +31,7 @@ import type {
   TenantRecord,
   WriteAction,
   WritePlan,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 import {
   runReportJson,
   runReportMarkdown,
@@ -198,7 +198,7 @@ export default function RunResult() {
               size="md"
               leadingIcon={<IconDownload size={12} />}
               onClick={() => {
-                void window.openAgents?.saveTextFile({
+                void window.openAdminOS?.saveTextFile({
                   suggestedName: `${run.agentSlug}-${run.id}.json`,
                   content: runReportJson(run),
                   filters: [{ name: "JSON", extensions: ["json"] }],
@@ -210,11 +210,11 @@ export default function RunResult() {
             <ShareMenu
               contextLabel="run"
               onCopyLink={() => {
-                void navigator.clipboard.writeText(`openagents://run/${run.id}`);
+                void navigator.clipboard.writeText(`openadminos://run/${run.id}`);
               }}
-              copyLinkHint={`openagents://run/${run.id}`}
+              copyLinkHint={`openadminos://run/${run.id}`}
               onExportMarkdown={() => {
-                void window.openAgents?.saveTextFile({
+                void window.openAdminOS?.saveTextFile({
                   suggestedName: `${run.agentSlug}-${run.id}.md`,
                   content: runReportMarkdown(run, {
                     agentName: agent?.name,
@@ -488,7 +488,7 @@ function DiffConfirmPanel({
       <div className="border-b border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)] px-6 py-3">
         <div className="flex items-center gap-3 text-[12.5px] font-medium text-[var(--color-warning)]">
           <IconWarning size={14} />
-          Write operation paused for confirmation. Open Agents will not proceed until the exact phrase is typed.
+          Write operation paused for confirmation. OpenAdminOS will not proceed until the exact phrase is typed.
         </div>
       </div>
 

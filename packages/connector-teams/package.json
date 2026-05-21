@@ -1,9 +1,9 @@
 {
-  "name": "@openagents/connector-teams",
+  "name": "@openadminos/connector-teams",
   "version": "0.1.6",
   "private": true,
   "type": "module",
-  "description": "Microsoft Teams connector for Open Agents. Posts channel and chat messages via Microsoft Graph using the active tenant's delegated MSAL token.",
+  "description": "Microsoft Teams connector for OpenAdminOS. Posts channel and chat messages via Microsoft Graph using the active tenant's delegated MSAL token.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -19,11 +19,11 @@
     "dist"
   ],
   "scripts": {
-    "build": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json --noEmit"
+    "build": "npm run build -w @openadminos/agent-sdk && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/agent-sdk && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@openagents/agent-sdk": "0.1.6"
+    "@openadminos/agent-sdk": "0.1.6"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",

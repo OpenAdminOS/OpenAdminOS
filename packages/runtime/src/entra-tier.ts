@@ -9,7 +9,7 @@
  * negative confirmation.
  */
 
-import type { DetectedEntraTier, TenantLicense } from "@openagents/agent-sdk";
+import type { DetectedEntraTier, TenantLicense } from "@openadminos/agent-sdk";
 
 /**
  * SKU part numbers we surface in the Settings → Tenants license panel.

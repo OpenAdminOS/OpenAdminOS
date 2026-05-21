@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { load as parseYaml } from "js-yaml";
 
-import type { GraphOperation } from "@openagents/agent-sdk";
+import type { GraphOperation } from "@openadminos/agent-sdk";
 
 import type { AgentManifest } from "./load-agents.js";
 import type { MsgraphClient } from "./msgraph-client.js";
@@ -65,7 +65,7 @@ function checkAgentUsesLlm(agent: AgentManifest): CheckResult {
       name: "uses-llm",
       severity: "fail",
       message:
-        "Agent has no `llm` step. Every Open Agents agent is LLM-augmented by contract — add at least one `format: llm` step.",
+        "Agent has no `llm` step. Every OpenAdminOS agent is LLM-augmented by contract — add at least one `format: llm` step.",
     };
   }
   return {

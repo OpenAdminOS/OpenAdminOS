@@ -18,7 +18,7 @@ export default function App() {
   const noShell = location.pathname.startsWith("/onboarding");
 
   useEffect(() => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) return;
     const unsubscribeFocusRun = api.onFocusRun((runId) => {
       navigate(`/runs/${runId}`);

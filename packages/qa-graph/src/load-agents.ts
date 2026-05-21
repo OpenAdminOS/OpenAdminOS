@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { load as parseYaml } from "js-yaml";
 
-import type { GraphHttpMethod, GraphOperation } from "@openagents/agent-sdk";
+import type { GraphHttpMethod, GraphOperation } from "@openadminos/agent-sdk";
 
 export interface AgentManifest {
   id: string;

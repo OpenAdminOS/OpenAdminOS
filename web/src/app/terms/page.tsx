@@ -2,9 +2,9 @@ import Link from "next/link";
 import { type Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Terms of use — OpenAgents",
+  title: "Terms of use — OpenAdminOS",
   description:
-    "The terms that govern your use of the OpenAgents desktop app and openagents.sh.",
+    "The terms that govern your use of the OpenAdminOS desktop app and openadminos.example.",
 };
 
 const LAST_UPDATED = "2026-05-19";
@@ -19,7 +19,7 @@ export default function TermsPage() {
 
       <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
         <Link href="/" className="text-sm font-semibold tracking-tight">
-          OpenAgents
+          OpenAdminOS
         </Link>
       </header>
 
@@ -35,9 +35,9 @@ export default function TermsPage() {
           <section>
             <h2 className="text-base font-semibold text-white">Summary</h2>
             <p className="mt-3">
-              OpenAgents is open-source software published by UgurLabs under
+              OpenAdminOS is open-source software published by OpenAdminOS under
                 the MIT License. These terms govern your use of the desktop
-                app and the website at openagents.sh. By installing the app
+                app and the website at openadminos.example. By installing the app
                 or using the site, you agree to them.
             </p>
           </section>
@@ -50,17 +50,17 @@ export default function TermsPage() {
               The desktop app is distributed under the MIT License, the full
               text of which is included with the source at{" "}
               <Link
-                href="https://github.com/ugurkocde/OpenAgents/blob/main/LICENSE"
+                href="https://github.com/OpenAdminOS/OpenAdminOS/blob/main/LICENSE"
                 target="_blank"
                 rel="noreferrer"
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                github.com/ugurkocde/OpenAgents
+                github.com/OpenAdminOS/OpenAdminOS
               </Link>
               . That license disclaims warranties and limits liability. To
               repeat the substance in plain English: the software is provided
               &ldquo;as is&rdquo;, without warranty of any kind, express or
-              implied. UgurLabs is not liable for any damages arising from
+              implied. OpenAdminOS is not liable for any damages arising from
               your use of it.
             </p>
           </section>
@@ -85,7 +85,7 @@ export default function TermsPage() {
               </li>
               <li>
                 Community-contributed agents in the registry are not authored
-                or audited by UgurLabs. You install and run them at your own
+                or audited by OpenAdminOS. You install and run them at your own
                 discretion. Read the source before running any agent against
                 a production tenant.
               </li>
@@ -102,7 +102,7 @@ export default function TermsPage() {
               (local providers such as Ollama or LM Studio, or hosted
               providers such as Anthropic, OpenAI, or Azure OpenAI). Your use
               of those services is governed by their own terms and pricing.
-              UgurLabs is not a party to your contract with Microsoft or with
+              OpenAdminOS is not a party to your contract with Microsoft or with
               your chosen language-model provider.
             </p>
           </section>
@@ -154,10 +154,10 @@ export default function TermsPage() {
             <p className="mt-3">
               Questions about these terms:{" "}
               <Link
-                href="mailto:support@ugurlabs.com"
+                href="mailto:support@openadminos.example"
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                support@ugurlabs.com
+                support@openadminos.example
               </Link>
               .
             </p>
@@ -169,7 +169,7 @@ export default function TermsPage() {
             href="/"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
-            &larr; Back to OpenAgents
+            &larr; Back to OpenAdminOS
           </Link>
         </div>
       </main>
@@ -178,12 +178,12 @@ export default function TermsPage() {
         <span className="text-xs text-white/40">
           &copy; {new Date().getFullYear()}{" "}
           <Link
-            href="https://ugurlabs.com"
+            href="https://openadminos.example"
             target="_blank"
             rel="noreferrer"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
-            UgurLabs
+            OpenAdminOS
           </Link>
         </span>
       </footer>

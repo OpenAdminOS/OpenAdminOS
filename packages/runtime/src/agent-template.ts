@@ -25,7 +25,7 @@ import type {
   WriteActionTemplate,
   WritePlan,
   WriteStep,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 import { renderDeep, renderTemplate, type TemplateContext } from "./template-engine.js";
 

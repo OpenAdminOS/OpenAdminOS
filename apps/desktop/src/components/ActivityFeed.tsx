@@ -14,7 +14,7 @@ import type {
   RunLogRecord,
   RunRecord,
   RunStepRecord,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 
 type Tab = "pipeline" | "logs" | "reasoning";
 

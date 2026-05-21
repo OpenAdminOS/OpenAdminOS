@@ -1,5 +1,5 @@
 {
-  "name": "@openagents/runtime",
+  "name": "@openadminos/runtime",
   "version": "0.1.6",
   "private": true,
   "type": "module",
@@ -15,14 +15,14 @@
     "dist"
   ],
   "scripts": {
-    "build": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/connector-teams && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/connector-teams && tsc -p tsconfig.json --noEmit",
+    "build": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
-    "@openagents/agent-sdk": "0.1.6",
-    "@openagents/connector-teams": "0.1.6",
+    "@openadminos/agent-sdk": "0.1.6",
+    "@openadminos/connector-teams": "0.1.6",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

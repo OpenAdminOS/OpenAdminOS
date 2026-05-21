@@ -17,8 +17,8 @@ descriptor:
   description: Counts Intune-managed devices by complianceState so admins can spot drift across the tenant at a glance.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: compliance
   tier: dashboard

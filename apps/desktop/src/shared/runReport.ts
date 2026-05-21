@@ -1,4 +1,4 @@
-import type { RunRecord } from "./openAgents.js";
+import type { RunRecord } from "./openAdminOS.js";
 
 export interface RunReportContext {
   agentName?: string;

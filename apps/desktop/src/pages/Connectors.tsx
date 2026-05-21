@@ -5,7 +5,7 @@ import type {
   ConnectorChannelRef,
   ConnectorSummary,
   ConnectorTeamRef,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 import { PageBody, PageHeader } from "../components/AppShell";
 import {
@@ -28,7 +28,7 @@ export default function Connectors() {
   const [testing, setTesting] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) return;
     try {
       const summaries = await api.listConnectors();
@@ -44,7 +44,7 @@ export default function Connectors() {
 
   const handleTest = useCallback(
     async (id: string) => {
-      const api = window.openAgents;
+      const api = window.openAdminOS;
       if (!api) return;
       setTesting(id);
       setError(undefined);
@@ -114,8 +114,8 @@ export default function Connectors() {
           <button
             type="button"
             onClick={() =>
-              void window.openAgents?.openExternal(
-                "https://github.com/ugurlabs/openagents/issues/new?labels=connector",
+              void window.openAdminOS?.openExternal(
+                "https://github.com/OpenAdminOS/OpenAdminOS/issues/new?labels=connector",
               )
             }
             className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-[12px] font-medium text-[var(--color-text)] hover:bg-[var(--color-bg-raised)]"
@@ -387,7 +387,7 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
   const [savedAt, setSavedAt] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) return;
     setLoadingTeams(true);
     setError(undefined);
@@ -401,7 +401,7 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
   }, []);
 
   useEffect(() => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api || !teamId) {
       setChannels(undefined);
       return;
@@ -418,7 +418,7 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
   }, [teamId]);
 
   const handleSave = useCallback(async () => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) return;
     setSaving(true);
     setError(undefined);

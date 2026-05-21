@@ -4,7 +4,7 @@ import { type Metadata } from "next";
 import { Geist } from "next/font/google";
 
 export const metadata: Metadata = {
-  title: "OpenAgents — Private preview",
+  title: "OpenAdminOS — Private preview",
   description:
     "The privacy-first, local, open source agent platform for admins. Runs entirely on your Mac — no cloud, no telemetry.",
 };

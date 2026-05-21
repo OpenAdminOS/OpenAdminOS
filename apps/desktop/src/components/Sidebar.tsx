@@ -117,7 +117,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
         </div>
         <div className="flex items-center gap-1.5 leading-none">
           <span className="text-[12px] font-semibold tracking-tight text-[var(--color-text)]">
-            Open Agents
+            OpenAdminOS
           </span>
           <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[9.5px] text-[var(--color-text-muted)]">
             v0.1.5

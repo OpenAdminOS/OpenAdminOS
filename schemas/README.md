@@ -2,7 +2,7 @@
 
 `agent-template.schema.json` is the canonical shape for any
 `agents/<slug>/manifest.yaml` file. It mirrors the TypeScript types in
-`@openagents/agent-sdk` and is what the QA harness validates against.
+`@openadminos/agent-sdk` and is what the QA harness validates against.
 
 ## Why this file exists
 

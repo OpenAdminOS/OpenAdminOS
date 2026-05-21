@@ -12,7 +12,7 @@ export default function HomePage() {
 
       <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
         <Link href="/" className="text-sm font-semibold tracking-tight">
-          OpenAgents
+          OpenAdminOS
         </Link>
       </header>
 
@@ -76,8 +76,8 @@ export default function HomePage() {
         <div className="mt-12 w-full max-w-[88rem] pb-16 sm:mt-16">
           <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] shadow-[0_40px_160px_-20px_rgba(140,140,255,0.3)] sm:rounded-2xl">
             <Image
-              src="/openagents-app.png"
-              alt="OpenAgents app showing agent runs across Intune-managed devices"
+              src="/openadminos-app.png"
+              alt="OpenAdminOS app showing agent runs across Intune-managed devices"
               width={2400}
               height={1500}
               priority
@@ -92,12 +92,12 @@ export default function HomePage() {
         <span className="text-xs text-white/40">
           © {new Date().getFullYear()}{" "}
           <Link
-            href="https://ugurlabs.com"
+            href="https://openadminos.example"
             target="_blank"
             rel="noreferrer"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
-            UgurLabs
+            OpenAdminOS
           </Link>
           {" · "}
           <Link

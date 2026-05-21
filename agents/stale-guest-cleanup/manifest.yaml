@@ -10,8 +10,8 @@ descriptor:
   description: Surfaces guest accounts that have not signed in for 90+ days, asks the LLM for a per-guest rationale, and disables them after typed diff confirmation.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: policies
   tier: agent

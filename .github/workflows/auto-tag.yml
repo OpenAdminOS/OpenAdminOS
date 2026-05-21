@@ -71,7 +71,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Open Agents $TAG"
+          git tag -a "$TAG" -m "OpenAdminOS $TAG"
           git push origin "$TAG"
           echo "Pushed $TAG."
 

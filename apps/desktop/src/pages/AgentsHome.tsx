@@ -17,7 +17,7 @@ import {
   IconTrend,
 } from "../components/icons";
 import type { Agent } from "../types";
-import type { AgentSummary } from "../shared/openAgents";
+import type { AgentSummary } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 
 export default function AgentsHome() {

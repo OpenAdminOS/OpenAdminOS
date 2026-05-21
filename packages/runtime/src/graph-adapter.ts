@@ -3,7 +3,7 @@ import type {
   ManagedDeviceRecord,
   RunGraphApi,
   RunLogLevel,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 /**
  * Callback the adapter uses to surface what it's doing during a run.

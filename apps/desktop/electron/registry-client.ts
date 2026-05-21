@@ -14,10 +14,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AgentTier, RequiredEntraTier } from "@openagents/agent-sdk";
+import type { AgentTier, RequiredEntraTier } from "@openadminos/agent-sdk";
 
 export const DEFAULT_REGISTRY_SOURCE =
-  "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents";
+  "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
 const FETCH_TIMEOUT_MS = 10_000;
 

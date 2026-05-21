@@ -4,7 +4,7 @@ import {
   ConnectorRemoteError,
   ConnectorScopeError,
   type TenantSession,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 import { TEAMS_CONNECTOR_ID, qualifyGraphScope } from "./descriptor.js";
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openagents.sh/schemas/agent-template.schema.json",
-  "title": "Open Agents — Agent Template",
-  "description": "Declarative YAML pipeline manifest interpreted by the @openagents/runtime agent-template runner. The schema mirrors the TypeScript types in @openagents/agent-sdk and is the authoritative shape for any agents/<slug>/manifest.yaml file.",
+  "$id": "https://openadminos.example/schemas/agent-template.schema.json",
+  "title": "OpenAdminOS — Agent Template",
+  "description": "Declarative YAML pipeline manifest interpreted by the @openadminos/runtime agent-template runner. The schema mirrors the TypeScript types in @openadminos/agent-sdk and is the authoritative shape for any agents/<slug>/manifest.yaml file.",
   "type": "object",
   "additionalProperties": false,
   "required": ["descriptor", "skills", "definition"],
@@ -213,7 +213,7 @@
                     "group-by-field",
                     "sort-by"
                   ],
-                  "description": "Built-in transforms. Adding more is a one-function change in @openagents/runtime."
+                  "description": "Built-in transforms. Adding more is a one-function change in @openadminos/runtime."
                 },
                 "source": {
                   "description": "Liquid expression resolving to an array, e.g. \"{{ load_devices.output }}\"."

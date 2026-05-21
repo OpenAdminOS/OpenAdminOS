@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openagents.sh/schemas/stats.schema.json",
+  "$id": "https://openadminos.example/schemas/stats.schema.json",
   "title": "Aggregated agent stats",
-  "description": "Single source of truth for per-agent install counts and (later) ratings. Owned by the openagents-stats[bot] account; humans never edit it directly. The renderer fetches this file once on Hub open and caches.",
+  "description": "Single source of truth for per-agent install counts and (later) ratings. Owned by the openadminos-stats[bot] account; humans never edit it directly. The renderer fetches this file once on Hub open and caches.",
   "type": "object",
   "additionalProperties": false,
   "required": ["updatedAt", "agents"],

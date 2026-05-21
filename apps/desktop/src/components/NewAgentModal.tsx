@@ -6,7 +6,7 @@ import { Modal, ModalHeader } from "./Modal";
 import { ManifestPreview } from "./ManifestPreview";
 import { IconSparkle, IconWarning } from "./icons";
 import { useAppState } from "../state";
-import type { AgentDraft, AgentManifestPreview } from "../shared/openAgents";
+import type { AgentDraft, AgentManifestPreview } from "../shared/openAdminOS";
 
 /**
  * Natural-language → Agent Template flow. The user types a plain-English

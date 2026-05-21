@@ -11,8 +11,8 @@ descriptor:
   description: Pulls recent failed sign-ins and groups them by likely root cause, with reasoning for each cluster.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: policies
   tier: agent

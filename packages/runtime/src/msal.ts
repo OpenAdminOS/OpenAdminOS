@@ -8,7 +8,7 @@ import {
   type SilentFlowRequest,
   type TokenCacheContext,
 } from "@azure/msal-node";
-import type { TenantSession } from "@openagents/agent-sdk";
+import type { TenantSession } from "@openadminos/agent-sdk";
 
 export const GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
 export const DEFAULT_AUTHORITY = "https://login.microsoftonline.com/common";
@@ -108,7 +108,7 @@ const SUCCESS_TEMPLATE = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Open Agents - sign-in complete</title>
+    <title>OpenAdminOS - sign-in complete</title>
     <style>
       :root { color-scheme: light dark; }
       html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; }
@@ -122,14 +122,14 @@ const SUCCESS_TEMPLATE = `<!doctype html>
   <body>
     <div class="card">
       <h1><span class="dot"></span>Sign-in complete</h1>
-      <p>Open Agents has received the authorization code. You can close this tab and return to the desktop app.</p>
+      <p>OpenAdminOS has received the authorization code. You can close this tab and return to the desktop app.</p>
     </div>
   </body>
 </html>`;
 
 const ERROR_TEMPLATE = `<!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8" /><title>Open Agents - sign-in failed</title></head>
+  <head><meta charset="utf-8" /><title>OpenAdminOS - sign-in failed</title></head>
   <body style="margin:0;font-family:system-ui;background:#0a0c10;color:#e6e2d9;display:flex;align-items:center;justify-content:center;height:100vh">
     <div style="max-width:420px;padding:32px;border-radius:16px;background:#131418">
       <h1 style="margin:0 0 12px 0;font-size:18px">Sign-in failed</h1>

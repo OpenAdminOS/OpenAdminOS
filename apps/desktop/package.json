@@ -1,5 +1,5 @@
 {
-  "name": "@openagents/desktop",
+  "name": "@openadminos/desktop",
   "private": true,
   "version": "0.1.6",
   "type": "module",
@@ -8,15 +8,15 @@
     "dev": "npm run build:packages && npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dev:renderer": "vite",
     "build": "npm run build:packages && tsc -b && npm run build:electron && vite build",
-    "build:packages": "npm run build -w @openagents/agent-sdk && npm run build -w @openagents/runtime",
+    "build:packages": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/runtime",
     "build:electron": "tsc -p tsconfig.electron.json",
     "dist": "npm run build && electron-builder",
     "preview": "vite preview",
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
-    "@openagents/agent-sdk": "0.1.6",
-    "@openagents/runtime": "0.1.6",
+    "@openadminos/agent-sdk": "0.1.6",
+    "@openadminos/runtime": "0.1.6",
     "electron-updater": "^6.6.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -37,8 +37,8 @@
     "wait-on": "^9.0.10"
   },
   "build": {
-    "appId": "com.ugurlabs.openagents",
-    "productName": "Open Agents",
+    "appId": "com.openadminos.desktop",
+    "productName": "OpenAdminOS",
     "electronVersion": "42.1.0",
     "directories": {
       "output": "release"
@@ -65,8 +65,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "ugurkocde",
-        "repo": "OpenAgents"
+        "owner": "OpenAdminOS",
+        "repo": "OpenAdminOS"
       }
     ],
     "mac": {
@@ -80,7 +80,7 @@
       ]
     },
     "dmg": {
-      "title": "Open Agents",
+      "title": "OpenAdminOS",
       "background": "build/background.tiff",
       "icon": "build/icon.png",
       "iconSize": 128,
@@ -108,11 +108,11 @@
       ]
     },
     "appx": {
-      "applicationId": "OpenAgents",
-      "displayName": "OpenAgents",
-      "identityName": "UgurLabs.UgurLabs.OpenAgents",
+      "applicationId": "OpenAdminOS",
+      "displayName": "OpenAdminOS",
+      "identityName": "OpenAdminOS.OpenAdminOS.OpenAdminOS",
       "publisher": "CN=E5B1EEE1-CB55-4BCF-9214-2A6446BB2580",
-      "publisherDisplayName": "UgurLabs",
+      "publisherDisplayName": "OpenAdminOS",
       "languages": ["en-US"],
       "showNameOnTiles": true
     },

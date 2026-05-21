@@ -1,14 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   HostPlatform,
-  OpenAgentsApi,
+  OpenAdminOSApi,
   PendingConnectorConfirmation,
   PendingConnectorDecision,
   ProviderId,
   SaveTextFileArgs,
   StartRunOptions,
   UpdateState,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 const platform: HostPlatform =
   process.platform === "darwin"
@@ -19,35 +19,35 @@ const platform: HostPlatform =
         ? "linux"
         : "unknown";
 
-const api: OpenAgentsApi = {
+const api: OpenAdminOSApi = {
   platform,
-  getAppState: () => ipcRenderer.invoke("openagents:get-app-state"),
-  listAgents: () => ipcRenderer.invoke("openagents:list-agents"),
-  listInstalledAgents: () => ipcRenderer.invoke("openagents:list-agents"),
+  getAppState: () => ipcRenderer.invoke("openadminos:get-app-state"),
+  listAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
+  listInstalledAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
   listRegistryAgents: () =>
-    ipcRenderer.invoke("openagents:list-registry-agents"),
-  refreshRegistry: () => ipcRenderer.invoke("openagents:refresh-registry"),
+    ipcRenderer.invoke("openadminos:list-registry-agents"),
+  refreshRegistry: () => ipcRenderer.invoke("openadminos:refresh-registry"),
   setRegistrySource: (url: string) =>
-    ipcRenderer.invoke("openagents:set-registry-source", url),
-  listProviders: () => ipcRenderer.invoke("openagents:list-providers"),
-  listConnectors: () => ipcRenderer.invoke("openagents:list-connectors"),
+    ipcRenderer.invoke("openadminos:set-registry-source", url),
+  listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
+  listConnectors: () => ipcRenderer.invoke("openadminos:list-connectors"),
   testConnector: (id: string) =>
-    ipcRenderer.invoke("openagents:test-connector", id),
+    ipcRenderer.invoke("openadminos:test-connector", id),
   setConnectorConfig: (id: string, config: Record<string, unknown>) =>
-    ipcRenderer.invoke("openagents:set-connector-config", id, config),
+    ipcRenderer.invoke("openadminos:set-connector-config", id, config),
   listConnectorTeams: (id: string) =>
-    ipcRenderer.invoke("openagents:list-connector-teams", id),
+    ipcRenderer.invoke("openadminos:list-connector-teams", id),
   listConnectorChannels: (id: string, teamId: string) =>
-    ipcRenderer.invoke("openagents:list-connector-channels", id, teamId),
+    ipcRenderer.invoke("openadminos:list-connector-channels", id, teamId),
   onConnectorConfirmRequest: (
     listener: (request: PendingConnectorConfirmation) => void,
   ): (() => void) => {
     const handler = (_event: unknown, payload: PendingConnectorConfirmation) =>
       listener(payload);
-    ipcRenderer.on("openagents:connector-confirm-request", handler);
+    ipcRenderer.on("openadminos:connector-confirm-request", handler);
     return () => {
       ipcRenderer.removeListener(
-        "openagents:connector-confirm-request",
+        "openadminos:connector-confirm-request",
         handler,
       );
     };
@@ -59,9 +59,9 @@ const api: OpenAgentsApi = {
       _event: unknown,
       payload: { trigger: "startup" | "interval" | "focus"; cachedAt: string | null },
     ) => listener(payload);
-    ipcRenderer.on("openagents:registry-refreshed", handler);
+    ipcRenderer.on("openadminos:registry-refreshed", handler);
     return () => {
-      ipcRenderer.removeListener("openagents:registry-refreshed", handler);
+      ipcRenderer.removeListener("openadminos:registry-refreshed", handler);
     };
   },
   respondToConnectorConfirm: (
@@ -69,64 +69,64 @@ const api: OpenAgentsApi = {
     decision: PendingConnectorDecision,
   ) =>
     ipcRenderer.invoke(
-      "openagents:respond-to-connector-confirm",
+      "openadminos:respond-to-connector-confirm",
       requestId,
       decision,
     ),
   installAgent: (agentId: string) =>
-    ipcRenderer.invoke("openagents:install-agent", agentId),
+    ipcRenderer.invoke("openadminos:install-agent", agentId),
   uninstallAgent: (slug: string) =>
-    ipcRenderer.invoke("openagents:uninstall-agent", slug),
+    ipcRenderer.invoke("openadminos:uninstall-agent", slug),
   setActiveProvider: (id: ProviderId) =>
-    ipcRenderer.invoke("openagents:set-active-provider", id),
+    ipcRenderer.invoke("openadminos:set-active-provider", id),
   setActiveModel: (providerId: ProviderId, model: string | null) =>
-    ipcRenderer.invoke("openagents:set-active-model", providerId, model),
+    ipcRenderer.invoke("openadminos:set-active-model", providerId, model),
   startRun: (agentSlug: string, options?: StartRunOptions) =>
-    ipcRenderer.invoke("openagents:start-run", agentSlug, options),
-  getRun: (id: string) => ipcRenderer.invoke("openagents:get-run", id),
+    ipcRenderer.invoke("openadminos:start-run", agentSlug, options),
+  getRun: (id: string) => ipcRenderer.invoke("openadminos:get-run", id),
   confirmRun: (runId: string, phrase: string) =>
-    ipcRenderer.invoke("openagents:confirm-run", runId, phrase),
-  rejectRun: (runId: string) => ipcRenderer.invoke("openagents:reject-run", runId),
-  cancelRun: (runId: string) => ipcRenderer.invoke("openagents:cancel-run", runId),
-  listTenants: () => ipcRenderer.invoke("openagents:list-tenants"),
+    ipcRenderer.invoke("openadminos:confirm-run", runId, phrase),
+  rejectRun: (runId: string) => ipcRenderer.invoke("openadminos:reject-run", runId),
+  cancelRun: (runId: string) => ipcRenderer.invoke("openadminos:cancel-run", runId),
+  listTenants: () => ipcRenderer.invoke("openadminos:list-tenants"),
   getRequestedScopes: () =>
-    ipcRenderer.invoke("openagents:get-requested-scopes"),
-  connectTenant: () => ipcRenderer.invoke("openagents:connect-tenant"),
+    ipcRenderer.invoke("openadminos:get-requested-scopes"),
+  connectTenant: () => ipcRenderer.invoke("openadminos:connect-tenant"),
   setActiveTenant: (id: string) =>
-    ipcRenderer.invoke("openagents:set-active-tenant", id),
+    ipcRenderer.invoke("openadminos:set-active-tenant", id),
   disconnectTenant: (id: string) =>
-    ipcRenderer.invoke("openagents:disconnect-tenant", id),
+    ipcRenderer.invoke("openadminos:disconnect-tenant", id),
   getAgentManifest: (slug: string) =>
-    ipcRenderer.invoke("openagents:get-agent-manifest", slug),
+    ipcRenderer.invoke("openadminos:get-agent-manifest", slug),
   updateAgentSettings: (slug: string, values: Record<string, unknown>) =>
-    ipcRenderer.invoke("openagents:update-agent-settings", slug, values),
+    ipcRenderer.invoke("openadminos:update-agent-settings", slug, values),
   updateAgentSchedule: (slug, schedule) =>
-    ipcRenderer.invoke("openagents:update-agent-schedule", slug, schedule),
+    ipcRenderer.invoke("openadminos:update-agent-schedule", slug, schedule),
   draftAgentManifest: (prompt: string) =>
-    ipcRenderer.invoke("openagents:draft-agent-manifest", prompt),
+    ipcRenderer.invoke("openadminos:draft-agent-manifest", prompt),
   saveAgentDraft: (yamlSource: string) =>
-    ipcRenderer.invoke("openagents:save-agent-draft", yamlSource),
+    ipcRenderer.invoke("openadminos:save-agent-draft", yamlSource),
   openExternal: (url: string) =>
-    ipcRenderer.invoke("openagents:open-external", url),
+    ipcRenderer.invoke("openadminos:open-external", url),
   saveTextFile: (args: SaveTextFileArgs) =>
-    ipcRenderer.invoke("openagents:save-text-file", args),
-  getUpdateState: () => ipcRenderer.invoke("openagents:get-update-state"),
-  applyUpdateNow: () => ipcRenderer.invoke("openagents:apply-update-now"),
+    ipcRenderer.invoke("openadminos:save-text-file", args),
+  getUpdateState: () => ipcRenderer.invoke("openadminos:get-update-state"),
+  applyUpdateNow: () => ipcRenderer.invoke("openadminos:apply-update-now"),
   onUpdateStateChanged: (listener: (state: UpdateState) => void) => {
     const wrapped = (_event: unknown, state: UpdateState) => listener(state);
-    ipcRenderer.on("openagents:update-state", wrapped);
-    return () => ipcRenderer.off("openagents:update-state", wrapped);
+    ipcRenderer.on("openadminos:update-state", wrapped);
+    return () => ipcRenderer.off("openadminos:update-state", wrapped);
   },
   onFocusRun: (listener: (runId: string) => void) => {
     const wrapped = (_event: unknown, runId: string) => listener(runId);
-    ipcRenderer.on("openagents:focus-run", wrapped);
-    return () => ipcRenderer.off("openagents:focus-run", wrapped);
+    ipcRenderer.on("openadminos:focus-run", wrapped);
+    return () => ipcRenderer.off("openadminos:focus-run", wrapped);
   },
   onNavigate: (listener: (path: string) => void) => {
     const wrapped = (_event: unknown, path: string) => listener(path);
-    ipcRenderer.on("openagents:navigate", wrapped);
-    return () => ipcRenderer.off("openagents:navigate", wrapped);
+    ipcRenderer.on("openadminos:navigate", wrapped);
+    return () => ipcRenderer.off("openadminos:navigate", wrapped);
   },
 };
 
-contextBridge.exposeInMainWorld("openAgents", api);
+contextBridge.exposeInMainWorld("openAdminOS", api);

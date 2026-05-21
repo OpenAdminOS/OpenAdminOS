@@ -98,7 +98,7 @@ export function startAutoUpdater(getMainWindow: () => BrowserWindow | undefined)
     const options: Electron.MessageBoxOptions = {
       type: "info",
       title: "Update ready",
-      message: `Open Agents ${info.version} downloaded`,
+      message: `OpenAdminOS ${info.version} downloaded`,
       detail: "Restart to install. The update is already on disk and will apply on quit.",
       buttons: ["Restart now", "Later"],
       defaultId: 0,

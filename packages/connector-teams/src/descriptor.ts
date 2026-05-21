@@ -1,4 +1,4 @@
-import type { ConnectorDescriptor } from "@openagents/agent-sdk";
+import type { ConnectorDescriptor } from "@openadminos/agent-sdk";
 
 /**
  * Graph scope identifiers. The fully-qualified

@@ -1,12 +1,12 @@
 # CLAUDE.md — Operating Instructions
 
-You are building **Open Agents** — an open-source, local-first desktop platform for Microsoft Intune & Entra administrators to run AI agents against their tenants. This file tells you how to work on this codebase. Read it fully before doing anything else.
+You are building **OpenAdminOS** — an open-source, local-first desktop platform for Microsoft Intune & Entra administrators to run AI agents against their tenants. This file tells you how to work on this codebase. Read it fully before doing anything else.
 
 ---
 
 ## What this project is
 
-Open Agents is a **TypeScript monorepo** that ships as a polished **Electron desktop app** (Windows + macOS, Linux best-effort). One codebase, one surface — there is no CLI.
+OpenAdminOS is a **TypeScript monorepo** that ships as a polished **Electron desktop app** (Windows + macOS, Linux best-effort). One codebase, one surface — there is no CLI.
 
 The product lets a Microsoft 365 admin:
 1. Connect a tenant via MSAL (Graph API).
@@ -89,7 +89,7 @@ These are non-negotiable. If you find yourself about to violate one, stop and as
 - **Monorepo:** pnpm workspaces + Turborepo
 - **Desktop:** Electron (main + preload + renderer)
 - **Renderer UI:** Vite + React + React Router + Tailwind. Note: SPEC.md previously said Next.js 14 App Router — for the Electron renderer that's overkill (no SSR, no app/route boilerplate needed). Vite is the right call. Next.js stays for `apps/marketing/` only.
-- **Marketing site:** Next.js, deployed to Vercel at openagents.sh
+- **Marketing site:** Next.js, deployed to Vercel at openadminos.example
 - **MSAL:** `@azure/msal-node` for tenant auth, Graph API for everything else
 - **LLM abstraction:** A pluggable provider interface; concrete implementations for Ollama, LM Studio, Anthropic-via-Claude-Code, OpenAI-via-Codex, Azure OpenAI. Where possible, piggyback on locally-installed vendor CLIs (Claude Code, Codex) to avoid storing API keys and to inherit the user's existing vendor auth.
 - **Agent registry:** GitHub-hosted (like Home Assistant integrations); each agent is a TypeScript module with a manifest declaring scopes, read/write mode, model requirements
@@ -101,10 +101,10 @@ These are non-negotiable. If you find yourself about to violate one, stop and as
 
 ## Project naming and identity
 
-- Product name: **Open Agents**
-- Domain: **openagents.sh** (canonical) + redirect from openagents.ugurlabs.com
-- GitHub: **github.com/ugurlabs/openagents**
-- Parent brand: Ugurlabs (visible but not dominant — the project has its own identity)
+- Product name: **OpenAdminOS**
+- Domain: **openadminos.example** (canonical) + redirect from openadminos.example
+- GitHub: **github.com/OpenAdminOS/OpenAdminOS**
+- Parent brand: OpenAdminOS (visible but not dominant — the project has its own identity)
 - Tagline: *"Open-source, local-first agents for Microsoft 365 admins."*
 
 The brand is restrained — no AI-hype language, no "intelligent" or "smart" adjectives, no gradient swooshes. The visual identity is utilitarian, dense, terminal-adjacent. See the mockups for the established tone.
@@ -121,7 +121,7 @@ Order of attack for v0.1 (full detail in `tasks/todo.md`):
 3. Screen implementation: all 8 designed mockups + 2 new (`09-registry`, `10-empty-states`) as React routes with mocked data.
 4. LLM abstraction + Ollama provider: real interface, real streaming, smoke test.
 5. Sample agent + synthetic Graph data layer: one read-only agent runnable end-to-end.
-6. Marketing site at openagents.sh + email signup capture.
+6. Marketing site at openadminos.example + email signup capture.
 7. Polish, screenshots, demo video, tag v0.1.0.
 
 ---

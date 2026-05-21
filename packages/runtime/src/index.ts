@@ -26,7 +26,7 @@ import type {
   TenantSession,
   WriteAgentModule,
   WritePlan,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import {

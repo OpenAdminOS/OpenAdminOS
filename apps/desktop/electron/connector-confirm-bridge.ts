@@ -4,11 +4,11 @@ import type { BrowserWindow } from "electron";
 import type {
   ConfirmationDecision,
   ConnectorInvocationInfo,
-} from "@openagents/runtime";
+} from "@openadminos/runtime";
 import type {
   PendingConnectorConfirmation,
   PendingConnectorDecision,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 interface Pending {
   resolve(decision: ConfirmationDecision): void;
@@ -74,7 +74,7 @@ export async function requestConnectorConfirmation(
 
   return new Promise<ConfirmationDecision>((resolve) => {
     pending.set(requestId, { resolve });
-    window.webContents.send("openagents:connector-confirm-request", payload);
+    window.webContents.send("openadminos:connector-confirm-request", payload);
   });
 }
 

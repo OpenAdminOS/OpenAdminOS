@@ -1,4 +1,4 @@
-# Releasing Open Agents
+# Releasing OpenAdminOS
 
 This is the maintainer runbook for cutting a release. Day-to-day work doesn't touch any of this.
 
@@ -15,7 +15,7 @@ A single tag push cuts both. CI handles everything except (a) one-time Apple sec
 
 ### macOS — Apple Developer secrets
 
-Add these five repository secrets at https://github.com/ugurkocde/OpenAgents/settings/secrets/actions.
+Add these five repository secrets at https://github.com/OpenAdminOS/OpenAdminOS/settings/secrets/actions.
 
 | Secret | What | How to get it |
 |---|---|---|
@@ -35,12 +35,12 @@ The values in `apps/desktop/package.json` `build.appx` are the Partner Center-as
 
 | Field | Value |
 |---|---|
-| `identityName` | `UgurLabs.UgurLabs.OpenAgents` |
+| `identityName` | `OpenAdminOS.OpenAdminOS.OpenAdminOS` |
 | `publisher` | `CN=E5B1EEE1-CB55-4BCF-9214-2A6446BB2580` |
-| `publisherDisplayName` | `UgurLabs` |
+| `publisherDisplayName` | `OpenAdminOS` |
 | Seller ID | `82025760` |
 
-These match the Partner Center reservation for the `OpenAgents` Store name. Don't change them — Microsoft validates the MSIX against the registered identity at upload time.
+These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them — Microsoft validates the MSIX against the registered identity at upload time.
 
 #### One-time setup to enable Store auto-publish
 
@@ -55,7 +55,7 @@ Do this once, after the first manual submission has been accepted by Partner Cen
 4. **Grant the app Manager access in Partner Center.**
    Partner Center → **Account settings** → **User management** → **Azure AD applications** → **Add Azure AD applications** → pick the registration → role **Manager**. Manager is required for the Submission API; lower roles can't push packages.
 5. **Capture the Store App ID.**
-   Partner Center → **Apps** → **OpenAgents** → **Product identity**. The 12-character Store ID (looks like `9NABCDEFGHIJ`) is what `MS_STORE_APP_ID` needs.
+   Partner Center → **Apps** → **OpenAdminOS** → **Product identity**. The 12-character Store ID (looks like `9NABCDEFGHIJ`) is what `MS_STORE_APP_ID` needs.
 6. **Add the four secrets to GitHub.**
    Repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**:
 
@@ -123,9 +123,9 @@ That's it. electron-updater on existing macOS installs picks up the new `latest-
 
 **First submission (manual, once):**
 
-1. Download the `.appx` (named like `Open Agents-x.y.z.appx`) from the draft release.
+1. Download the `.appx` (named like `OpenAdminOS-x.y.z.appx`) from the draft release.
 2. Go to https://partner.microsoft.com/dashboard.
-3. Apps → **OpenAgents** → Submissions → **New submission**.
+3. Apps → **OpenAdminOS** → Submissions → **New submission**.
 4. **Packages** section → upload the `.appx`.
 5. Fill in the per-submission fields (description, screenshots, age rating, privacy policy URL, etc.). Partner Center walks you through everything.
 6. **Submit to the Store**.

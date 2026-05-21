@@ -11,8 +11,8 @@ descriptor:
   description: Per-item classification of recent risky sign-ins as likely false-positive, likely compromise, or unclear — with reasoning.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: policies
   tier: agent

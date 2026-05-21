@@ -18,7 +18,7 @@ import type {
   ProviderSummary,
   TenantRecord,
   TrustState,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
 
@@ -59,7 +59,7 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Configure how Open Agents talks to LLMs and your tenant." />
+      <PageHeader title="Settings" subtitle="Configure how OpenAdminOS talks to LLMs and your tenant." />
       <div className="flex h-full min-h-0 flex-1">
         <nav className="flex w-[200px] shrink-0 flex-col gap-0.5 border-r border-[var(--color-border-soft)] px-3 py-6">
           {sections.map((s) => (
@@ -123,7 +123,7 @@ function ProvidersSection({
     <div className="max-w-[820px]">
       <SectionTitle
         title="LLM Providers"
-        subtitle="Open Agents never stores API keys. For hosted providers, we piggyback on your installed CLI's authentication so usage runs against your existing subscription."
+        subtitle="OpenAdminOS never stores API keys. For hosted providers, we piggyback on your installed CLI's authentication so usage runs against your existing subscription."
       />
 
       <div className="mt-6 grid grid-cols-1 gap-3">
@@ -149,7 +149,7 @@ function ProvidersSection({
       </div>
       <p className="mb-4 max-w-[640px] text-[12px] text-[var(--color-text-muted)]">
         These providers are accessed by invoking the vendor's locally-installed
-        CLI. Your existing subscription is used. Open Agents never sees an API
+        CLI. Your existing subscription is used. OpenAdminOS never sees an API
         key.
       </p>
       <div className="grid grid-cols-1 gap-3">
@@ -308,7 +308,7 @@ function ProviderRow({
               size="sm"
               onClick={() => {
                 const url = providerInstallGuideUrl(provider.id);
-                if (url) void window.openAgents?.openExternal(url);
+                if (url) void window.openAdminOS?.openExternal(url);
               }}
             >
               Install guide
@@ -534,7 +534,7 @@ function GeneralSection() {
         />
         <SettingRow
           label="Theme"
-          description="Open Agents is dark-only today. A light theme is on the v1.x list."
+          description="OpenAdminOS is dark-only today. A light theme is on the v1.x list."
           control={
             <Pill>
               <StatusDot tone="muted" /> Dark only
@@ -560,7 +560,7 @@ function PrivacySection({ trust }: { trust: TrustState }) {
     <div className="max-w-[720px]">
       <SectionTitle
         title="Privacy"
-        subtitle="Open Agents is local-first by design. Here's the truth about where your data goes."
+        subtitle="OpenAdminOS is local-first by design. Here's the truth about where your data goes."
       />
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
@@ -629,12 +629,12 @@ function AboutSection() {
   const navigate = useNavigate();
   return (
     <div className="max-w-[640px]">
-      <SectionTitle title="About" subtitle="Open Agents is open-source and community-driven." />
+      <SectionTitle title="About" subtitle="OpenAdminOS is open-source and community-driven." />
       <div className="mt-6 grid grid-cols-2 gap-3">
         <Stat label="Version" value="0.1.5" mono />
         <Stat label="License" value="MIT" />
-        <Stat label="Repo" value="ugurkocde/OpenAgents" mono />
-        <Stat label="Built by" value="Ugurlabs" />
+        <Stat label="Repo" value="OpenAdminOS/OpenAdminOS" mono />
+        <Stat label="Built by" value="OpenAdminOS" />
       </div>
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <Button
@@ -648,8 +648,8 @@ function AboutSection() {
           variant="ghost"
           size="sm"
           onClick={() => {
-            void window.openAgents?.openExternal(
-              "https://github.com/ugurkocde/OpenAgents",
+            void window.openAdminOS?.openExternal(
+              "https://github.com/OpenAdminOS/OpenAdminOS",
             );
           }}
         >
@@ -659,8 +659,8 @@ function AboutSection() {
           variant="ghost"
           size="sm"
           onClick={() => {
-            void window.openAgents?.openExternal(
-              "https://github.com/ugurkocde/OpenAgents/blob/main/CHANGELOG.md",
+            void window.openAdminOS?.openExternal(
+              "https://github.com/OpenAdminOS/OpenAdminOS/blob/main/CHANGELOG.md",
             );
           }}
         >

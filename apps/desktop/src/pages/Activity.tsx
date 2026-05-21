@@ -6,7 +6,7 @@ import { Pill } from "../components/Pill";
 import { IconSearch } from "../components/icons";
 import { stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { useAppState } from "../state";
-import type { RunRecord, RunStatus } from "../shared/openAgents";
+import type { RunRecord, RunStatus } from "../shared/openAdminOS";
 
 type Filter = { kind: "all" } | { kind: "tenant"; tenantId: string };
 

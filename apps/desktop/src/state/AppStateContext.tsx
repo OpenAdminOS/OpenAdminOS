@@ -14,14 +14,14 @@ import {
   type AgentDraft,
   type AgentSchedule,
   type AppState,
-  type OpenAgentsApi,
+  type OpenAdminOSApi,
   type ProviderId,
   type RegistryAgentSummary,
   type RequestedScope,
   type RunRecord,
   type StartRunOptions,
   type TenantRecord,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 
 interface AppStateContextValue {
   state: AppState;
@@ -74,12 +74,12 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
     tenants: [],
     lastRegistryRefresh: null,
     registryRefreshError: null,
-    registrySource: "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents",
+    registrySource: "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents",
   };
 }
 
-function getOpenAgentsApi(): OpenAgentsApi | undefined {
-  return window.openAgents;
+function getOpenAdminOSApi(): OpenAdminOSApi | undefined {
+  return window.openAdminOS;
 }
 
 const AppStateContext = createContext<AppStateContextValue | undefined>(undefined);
@@ -93,7 +93,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   const [error, setError] = useState<Error | null>(null);
 
   const refreshRegistry = useCallback(async () => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
 
     if (!api) {
       setRegistryAgents([]);
@@ -113,7 +113,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const refresh = useCallback(async () => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
 
     if (!api) {
       setState((currentState) => createFallbackState(currentState.activeProviderId));
@@ -137,7 +137,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const installAgent = useCallback(async (agentId: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
 
     if (!api) {
       const fallbackError = new Error("Agent install is unavailable in browser development.");
@@ -162,7 +162,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const uninstallAgent = useCallback(async (slug: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
 
     if (!api) {
       const fallbackError = new Error(
@@ -190,7 +190,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
 
   const setActiveModel = useCallback(
     async (providerId: ProviderId, model: string | null) => {
-      const api = getOpenAgentsApi();
+      const api = getOpenAdminOSApi();
       if (!api) {
         const fallbackError = new Error(
           "Setting the active model is unavailable in browser development.",
@@ -213,7 +213,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   );
 
   const setActiveProvider = useCallback(async (id: ProviderId) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     setLoading(true);
     setError(null);
 
@@ -236,7 +236,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
 
   const startRun = useCallback(
     async (agentSlug: string, options?: StartRunOptions) => {
-      const api = getOpenAgentsApi();
+      const api = getOpenAdminOSApi();
 
       if (!api) {
         const fallbackError = new Error("Agent runs are unavailable in browser development.");
@@ -265,7 +265,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   );
 
   const confirmRun = useCallback(async (runId: string, phrase: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error("Run confirmation is unavailable in browser development.");
       setError(fallbackError);
@@ -288,13 +288,13 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const getRequestedScopes = useCallback(async (): Promise<RequestedScope[]> => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) return [];
     return api.getRequestedScopes();
   }, []);
 
   const connectTenant = useCallback(async () => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error(
         "Tenant connect is unavailable in browser development.",
@@ -317,7 +317,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const setActiveTenant = useCallback(async (id: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) return;
     setError(null);
     try {
@@ -332,7 +332,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const disconnectTenant = useCallback(async (id: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) return;
     setError(null);
     try {
@@ -348,7 +348,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
 
   const updateAgentSettings = useCallback(
     async (slug: string, values: Record<string, unknown>) => {
-      const api = getOpenAgentsApi();
+      const api = getOpenAdminOSApi();
       if (!api) {
         const fallbackError = new Error(
           "Updating agent settings is unavailable in browser development.",
@@ -372,7 +372,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
 
   const updateAgentSchedule = useCallback(
     async (slug: string, schedule: AgentSchedule | null) => {
-      const api = getOpenAgentsApi();
+      const api = getOpenAdminOSApi();
       if (!api) {
         const fallbackError = new Error(
           "Updating an agent schedule is unavailable in browser development.",
@@ -395,7 +395,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   );
 
   const draftAgentManifest = useCallback(async (prompt: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error(
         "Drafting an agent is unavailable in browser development.",
@@ -414,7 +414,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const saveAgentDraft = useCallback(async (yamlSource: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error(
         "Saving an agent draft is unavailable in browser development.",
@@ -435,7 +435,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const cancelRun = useCallback(async (runId: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error("Run cancellation is unavailable in browser development.");
       setError(fallbackError);
@@ -458,7 +458,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const rejectRun = useCallback(async (runId: string) => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error("Run rejection is unavailable in browser development.");
       setError(fallbackError);
@@ -512,7 +512,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   // registry refresh (6h interval / focus-triggered). No toast — the
   // user discovers the new state when they next look at Agent Hub.
   useEffect(() => {
-    const api = getOpenAgentsApi();
+    const api = getOpenAdminOSApi();
     if (!api?.onRegistryRefreshed) return;
     return api.onRegistryRefreshed(() => {
       void refresh();
@@ -588,5 +588,5 @@ function toError(error: unknown): Error {
     return error;
   }
 
-  return new Error(typeof error === "string" ? error : "Unknown Open Agents error.");
+  return new Error(typeof error === "string" ? error : "Unknown OpenAdminOS error.");
 }

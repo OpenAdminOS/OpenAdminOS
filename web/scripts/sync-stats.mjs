@@ -38,7 +38,7 @@ if (existsSync(localSrc)) {
 
 const token = process.env.OPENAGENTS_GITHUB_TOKEN;
 const owner = process.env.OPENAGENTS_GITHUB_OWNER ?? "ugurkocde";
-const repo = process.env.OPENAGENTS_GITHUB_REPO ?? "OpenAgents";
+const repo = process.env.OPENAGENTS_GITHUB_REPO ?? "OpenAdminOS";
 const ref =
   process.env.VERCEL_GIT_COMMIT_SHA ??
   process.env.OPENAGENTS_GITHUB_BRANCH ??

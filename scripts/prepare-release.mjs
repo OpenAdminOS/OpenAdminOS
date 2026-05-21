@@ -42,7 +42,7 @@ const PACKAGES_TO_BUMP = [
 ];
 
 // Registry agents used to ship as workspace packages with their own
-// `package.json` that depended on `@openagents/agent-sdk`. They were
+// `package.json` that depended on `@openadminos/agent-sdk`. They were
 // migrated to pure `manifest.yaml` agents in 3005bc6 ("stats: introduce
 // install-tracking pipeline + simplify agent contract"), so they no
 // longer need version bumping. If new workspace packages with
@@ -134,7 +134,7 @@ function bumpPackages(current, next) {
   for (const file of PACKAGES_WITH_WORKSPACE_DEPS) {
     let text = readFileSync(file, "utf8");
     text = text.replace(
-      new RegExp(`("@openagents/[a-z-]+": ")${currentEscaped}"`, "g"),
+      new RegExp(`("@openadminos/[a-z-]+": ")${currentEscaped}"`, "g"),
       `$1${next}"`,
     );
     writeFileSync(file, text);

@@ -1,8 +1,8 @@
 {
-  "name": "@openagents/agent-sdk",
+  "name": "@openadminos/agent-sdk",
   "version": "0.1.6",
   "type": "module",
-  "description": "Shared TypeScript contracts for Open Agents packages.",
+  "description": "Shared TypeScript contracts for OpenAdminOS packages.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

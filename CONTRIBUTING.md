@@ -1,4 +1,4 @@
-# Contributing to Open Agents
+# Contributing to OpenAdminOS
 
 Thanks for your interest. This project is community-built and contributions are how it grows.
 
@@ -11,7 +11,7 @@ Thanks for your interest. This project is community-built and contributions are 
 ## What kinds of contributions we want
 
 - **Agent contributions** — new agents in the registry are the most direct way to help. See `docs/agent-sdk.md` (coming soon).
-- **Bug reports and reproductions** — please include OS, Open Agents version, LLM provider, and a redacted log.
+- **Bug reports and reproductions** — please include OS, OpenAdminOS version, LLM provider, and a redacted log.
 - **UX improvements** — referenced against the mockups in `docs/mockups/`.
 - **Documentation** — especially scenarios we don't cover yet.
 - **Translations** — German, Dutch, French are the priority languages after English.
@@ -25,7 +25,7 @@ Thanks for your interest. This project is community-built and contributions are 
 
 ## Agent contract
 
-Every Open Agents agent is **LLM-augmented by contract**. The manifest must include at least one `format: llm` step, and the run's `result.summary` must reference that step's output (e.g. `{{ summarize.output.text | default("Summary unavailable.") }}`). Deterministic templates that simply count records are not agents — they're queries. Reach for `Get-MgDeviceManagementManagedDevice | Group-Object` or similar PowerShell instead.
+Every OpenAdminOS agent is **LLM-augmented by contract**. The manifest must include at least one `format: llm` step, and the run's `result.summary` must reference that step's output (e.g. `{{ summarize.output.text | default("Summary unavailable.") }}`). Deterministic templates that simply count records are not agents — they're queries. Reach for `Get-MgDeviceManagementManagedDevice | Group-Object` or similar PowerShell instead.
 
 The runtime hard-fails any LLM step reached without a connected provider (no silent skips), and `npm run qa` includes a `uses-llm` check that fails any manifest without a `format: llm` step.
 
@@ -53,7 +53,7 @@ npm run qa
 - A best-effort lookup of curated samples backing each GET operation (warning when none found).
 - Every agent includes at least one `format: llm` step (`uses-llm` check, hard fail).
 
-The synthetic Graph fixture in `@openagents/runtime` is also cross-checked against the real `managedDevice` schema. Adding a field to the fixture that doesn't exist on Graph fails the gate.
+The synthetic Graph fixture in `@openadminos/runtime` is also cross-checked against the real `managedDevice` schema. Adding a field to the fixture that doesn't exist on Graph fails the gate.
 
 ## Code of conduct
 

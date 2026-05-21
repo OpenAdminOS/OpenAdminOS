@@ -6,7 +6,7 @@ Copy and paste the message below as your first message to Claude Code in this re
 
 ## Paste this:
 
-I'm handing you a fresh repo for a project called **Open Agents**. Before you write any code or make any structural decisions, do this:
+I'm handing you a fresh repo for a project called **OpenAdminOS**. Before you write any code or make any structural decisions, do this:
 
 1. Read `CLAUDE.md` in the root. It tells you how to work in this codebase.
 2. Read `docs/SPEC.md` end-to-end. This is the source of truth for the product.

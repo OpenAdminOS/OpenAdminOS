@@ -1,8 +1,8 @@
-# Open Agents - marketing site
+# OpenAdminOS - marketing site
 
-Public landing page for [openagents.sh](https://openagents.sh). Captures waitlist signups in Supabase.
+Public landing page for [openadminos.example](https://openadminos.example). Captures waitlist signups in Supabase.
 
-This directory lives inside the [OpenAgents monorepo](https://github.com/ugurkocde/OpenAgents) but is intentionally **not** an npm workspace — it has its own `package.json` and `package-lock.json` and is deployed independently. Vercel's project Root Directory is set to `web`.
+This directory lives inside the [OpenAdminOS monorepo](https://github.com/OpenAdminOS/OpenAdminOS) but is intentionally **not** an npm workspace — it has its own `package.json` and `package-lock.json` and is deployed independently. Vercel's project Root Directory is set to `web`.
 
 ## Stack
 

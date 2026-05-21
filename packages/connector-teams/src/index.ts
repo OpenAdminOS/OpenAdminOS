@@ -5,7 +5,7 @@ import {
   type ConnectorBuildContext,
   type ConnectorFactory,
   type ConnectorInstance,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 import {
   TEAMS_CONNECTOR_ID,
@@ -33,14 +33,14 @@ export {
 export { renderMarkdownForTeams } from "./markdown.js";
 
 /**
- * Registry augmentation. Importing `@openagents/connector-teams` from
- * any TypeScript file that also imports `@openagents/agent-sdk`
+ * Registry augmentation. Importing `@openadminos/connector-teams` from
+ * any TypeScript file that also imports `@openadminos/agent-sdk`
  * activates the `teams` key on `ConnectorRegistry`, narrowing
  * `ctx.connectors.teams` to the typed capability surface. Consumers
  * who only load the connector at runtime (no static import) can
- * opt-in by adding `import '@openagents/connector-teams'` once.
+ * opt-in by adding `import '@openadminos/connector-teams'` once.
  */
-declare module "@openagents/agent-sdk" {
+declare module "@openadminos/agent-sdk" {
   interface ConnectorRegistry {
     teams: TeamsConnectorCapabilities;
   }

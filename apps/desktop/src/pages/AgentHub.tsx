@@ -21,7 +21,7 @@ import {
 import type {
   AgentManifestPreview,
   RegistryAgentSummary,
-} from "../shared/openAgents";
+} from "../shared/openAdminOS";
 import { useAppState } from "../state";
 
 const filters = [
@@ -113,7 +113,7 @@ export default function AgentHub() {
     setManifestLoading(true);
     setManifestError(null);
     setManifestPreview(null);
-    window.openAgents
+    window.openAdminOS
       ?.getAgentManifest(manifestAgent.slug)
       .then((result) => {
         if (cancelled) return;
@@ -673,7 +673,7 @@ function EmptyRegistry() {
   );
 }
 
-const LIVE_STATS_URL = "https://www.openagents.sh/stats/agents.json";
+const LIVE_STATS_URL = "https://openadminos.example/stats/agents.json";
 const LIVE_STATS_TIMEOUT_MS = 5_000;
 
 interface LiveStatsFile {

@@ -2,7 +2,7 @@
 
 ## App icon
 
-- `icon-source.svg` — vector source of the Open Agents app icon.
+- `icon-source.svg` — vector source of the OpenAdminOS app icon.
 - `icon.png` — 1024×1024 PNG, consumed by `electron-builder` to derive `.icns` / `.ico`.
 
 ## Microsoft Store / AppX tile assets
@@ -48,7 +48,7 @@ the rasterize commands above.
 
 ## macOS DMG install window
 
-The DMG install screen is styled to match the dark Open Agents brand: dark
+The DMG install screen is styled to match the dark OpenAdminOS brand: dark
 gradient background, a headline that tells the user what to do, and a tinted
 arrow pointing from the app icon slot to the Applications shortcut. See
 `docs/SPEC.md` for the trust story this aesthetic supports.

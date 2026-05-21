@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PendingConnectorConfirmation } from "@openagents/agent-sdk";
+import type { PendingConnectorConfirmation } from "@openadminos/agent-sdk";
 import { MarkdownPreview } from "./MarkdownPreview";
 
 /**
@@ -20,7 +20,7 @@ export function ConnectorConfirmModal() {
   const [rejecting, setRejecting] = useState(false);
 
   useEffect(() => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) return;
     return api.onConnectorConfirmRequest((request) => {
       setPending(request);
@@ -34,7 +34,7 @@ export function ConnectorConfirmModal() {
       | { approved: true }
       | { approved: false; reason: string },
   ) => {
-    const api = window.openAgents;
+    const api = window.openAdminOS;
     if (!api) return;
     setRejecting(decision.approved === false);
     await api.respondToConnectorConfirm(pending.requestId, decision);

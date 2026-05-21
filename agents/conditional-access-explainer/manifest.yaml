@@ -11,8 +11,8 @@ descriptor:
   description: Reads every CA policy in the tenant and produces a plain-English explanation of what they do, where they overlap, and what's missing.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: policies
   tier: agent

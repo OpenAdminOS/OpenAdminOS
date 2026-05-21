@@ -5,7 +5,7 @@ of compliance health across the tenant.
 
 The agent ships as YAML only — there is no TypeScript companion. The
 pipeline lives entirely in `manifest.yaml` and is interpreted by
-`@openagents/runtime` at run time.
+`@openadminos/runtime` at run time.
 
 ## Pipeline
 

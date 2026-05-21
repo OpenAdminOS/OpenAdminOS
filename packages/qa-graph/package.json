@@ -1,20 +1,20 @@
 {
-  "name": "@openagents/qa-graph",
+  "name": "@openadminos/qa-graph",
   "version": "0.1.6",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "openagents-qa-graph": "./dist/cli.js"
+    "openadminos-qa-graph": "./dist/cli.js"
   },
   "scripts": {
-    "build": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openagents/agent-sdk && tsc -p tsconfig.json --noEmit",
+    "build": "npm run build -w @openadminos/agent-sdk && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/agent-sdk && tsc -p tsconfig.json --noEmit",
     "qa": "npm run build && node ./dist/cli.js",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@openagents/agent-sdk": "0.1.6",
+    "@openadminos/agent-sdk": "0.1.6",
     "ajv": "^8.17.1",
     "js-yaml": "^4.1.1"
   },

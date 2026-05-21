@@ -114,7 +114,7 @@ export interface AgentSummary extends AgentContract {
    * Per-install run schedule. When `enabled`, the host fires the agent
    * automatically every `intervalSeconds` while the app is running.
    * Schedules do not persist across app shutdown — runs only fire while
-   * the user has Open Agents open. Absent / disabled = manual-only.
+   * the user has OpenAdminOS open. Absent / disabled = manual-only.
    */
   schedule?: AgentSchedule;
 }
@@ -317,7 +317,7 @@ export interface AppState {
 /** The host OS, normalized for renderer use. */
 export type HostPlatform = "macos" | "windows" | "linux" | "unknown";
 
-export interface OpenAgentsApi {
+export interface OpenAdminOSApi {
   /**
    * The host operating system, normalized to a small union for
    * renderer-side conditional UI (install instructions, keyboard
@@ -938,7 +938,7 @@ export interface RunContext {
    *
    * Connector packages augment `ConnectorRegistry` via TypeScript
    * declaration merging — `ctx.connectors.teams` is fully typed when
-   * `@openagents/connector-teams` is installed in the workspace.
+   * `@openadminos/connector-teams` is installed in the workspace.
    *
    * Optional in the type so the v0.1.x runtime (which has no connector
    * support yet) compiles unchanged. The v0.2 runtime always populates
@@ -1285,7 +1285,7 @@ export interface ConnectorFactory<TCapabilities> {
  * TypeScript declaration merging:
  *
  * ```ts
- * declare module '@openagents/agent-sdk' {
+ * declare module '@openadminos/agent-sdk' {
  *   interface ConnectorRegistry {
  *     teams: TeamsConnectorCapabilities;
  *   }
@@ -1293,7 +1293,7 @@ export interface ConnectorFactory<TCapabilities> {
  * ```
  *
  * `ConnectorAccessor` narrows to the augmented keys, so `ctx.connectors.teams`
- * is fully typed only when `@openagents/connector-teams` is installed in
+ * is fully typed only when `@openadminos/connector-teams` is installed in
  * the workspace. The SDK has no awareness of the known connector list.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-interface

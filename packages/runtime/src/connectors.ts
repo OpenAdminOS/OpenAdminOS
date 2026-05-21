@@ -17,12 +17,12 @@ import {
   type ConnectorInstance,
   type RunLogLevel,
   type TenantSession,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
-import { teamsConnector } from "@openagents/connector-teams";
+import { teamsConnector } from "@openadminos/connector-teams";
 
 /**
- * Static connector registry. Importing `@openagents/connector-teams`
+ * Static connector registry. Importing `@openadminos/connector-teams`
  * here also activates the `teams` key on `ConnectorRegistry` via the
  * declaration-merging block inside that package, so all downstream
  * consumers see the typed `ctx.connectors.teams` shape.
@@ -89,7 +89,7 @@ export async function preflightConnectors(
     const factory = findConnectorFactory(requirement.id);
     if (!factory) {
       throw new ConnectorValidationError(
-        `Agent declares unknown connector '${requirement.id}'. Install the matching @openagents/connector-* package or remove the requirement.`,
+        `Agent declares unknown connector '${requirement.id}'. Install the matching @openadminos/connector-* package or remove the requirement.`,
         { connectorId: requirement.id },
       );
     }

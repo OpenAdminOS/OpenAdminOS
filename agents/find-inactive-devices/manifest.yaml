@@ -13,8 +13,8 @@ descriptor:
   description: Surfaces Intune-managed devices that have not synced recently, grouped by inactivity window.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: devices
   requiresEntraTier: free

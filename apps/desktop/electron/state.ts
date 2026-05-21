@@ -28,7 +28,7 @@ import {
   tenantSatisfiesRequirement,
   toInstalledAgent,
   type TokenCacheStorage,
-} from "@openagents/runtime";
+} from "@openadminos/runtime";
 import type {
   AgentDraft,
   AgentManifestPreview,
@@ -41,7 +41,7 @@ import type {
   TemplateSetting,
   TenantRecord,
   TenantSession,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 import {
   deriveTrustState,
   providerCatalog,
@@ -52,7 +52,7 @@ import {
   type ProviderSummary,
   type RegistryAgentSummary,
   type RunRecord,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 import type { PublicClientApplication } from "@azure/msal-node";
 
 import { EncryptedSecretStore } from "./secret-store.js";
@@ -133,7 +133,7 @@ const providerIds = new Set<ProviderId>(
  * the public stats file. main.ts passes `""` in dev so we don't
  * report dev installs to production.
  */
-const DEFAULT_STATS_API_URL = "https://www.openagents.sh";
+const DEFAULT_STATS_API_URL = "https://openadminos.example";
 
 function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary {
   return {
@@ -845,7 +845,7 @@ export class AppStateStore {
         ]
       : [];
     const system = buildNl2AgentSystemPrompt(readCandidates, writeCandidates);
-    const userTurn = `Draft a manifest.yaml for the following Open Agents agent description.
+    const userTurn = `Draft a manifest.yaml for the following OpenAdminOS agent description.
 
 Description from the user:
 """
@@ -880,7 +880,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // Contract: every agent must include at least one `llm` step.
     if (manifest && !manifest.skills.some((skill) => skill.format === "llm")) {
       validationErrors.push(
-        "Manifest has no `format: llm` step. Open Agents requires every agent to invoke the LLM at least once — add a summary or rationale step.",
+        "Manifest has no `format: llm` step. OpenAdminOS requires every agent to invoke the LLM at least once — add a summary or rationale step.",
       );
       manifest = undefined;
     }
@@ -925,7 +925,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     if (!manifest.skills.some((skill) => skill.format === "llm")) {
       throw new Error(
-        "saveAgentDraft: manifest has no `format: llm` step. Open Agents requires every agent to invoke the LLM at least once.",
+        "saveAgentDraft: manifest has no `format: llm` step. OpenAdminOS requires every agent to invoke the LLM at least once.",
       );
     }
 
@@ -2267,7 +2267,7 @@ function buildNl2AgentSystemPrompt(
       ? ""
       : `\n\nCandidate write endpoints (use these for a \`graph-write\` step — declare the listed scope):\n${formatCandidates(writeCandidates)}`;
 
-  return `You generate Agent Template manifests for Open Agents — a desktop tool that runs AI agents against a Microsoft 365 tenant.
+  return `You generate Agent Template manifests for OpenAdminOS — a desktop tool that runs AI agents against a Microsoft 365 tenant.
 
 The manifest is a YAML document with three top-level keys: descriptor, skills, definition.
 
@@ -2297,8 +2297,8 @@ descriptor:
   description: Counts Intune-managed devices by compliance state and writes a plain-language posture summary.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: false
   category: compliance
   mode: read
@@ -2361,8 +2361,8 @@ descriptor:
   description: Disables guest accounts that have not signed in for 90+ days after typed diff confirmation.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: false
   category: policies
   mode: write

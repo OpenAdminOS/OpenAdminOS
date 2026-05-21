@@ -4,7 +4,7 @@ import type {
   LlmStreamChunk,
   LlmTokenUsage,
   RunLlmApi,
-} from "@openagents/agent-sdk";
+} from "@openadminos/agent-sdk";
 
 export interface OllamaProviderOptions {
   endpoint?: string;

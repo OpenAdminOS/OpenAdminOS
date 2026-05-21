@@ -2,9 +2,9 @@ import Link from "next/link";
 import { type Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Privacy policy — OpenAgents",
+  title: "Privacy policy — OpenAdminOS",
   description:
-    "How OpenAgents handles your Microsoft 365 tenant data, authentication tokens, and LLM prompts. Local-first by default.",
+    "How OpenAdminOS handles your Microsoft 365 tenant data, authentication tokens, and LLM prompts. Local-first by default.",
 };
 
 const LAST_UPDATED = "2026-05-19";
@@ -19,7 +19,7 @@ export default function PrivacyPage() {
 
       <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
         <Link href="/" className="text-sm font-semibold tracking-tight">
-          OpenAgents
+          OpenAdminOS
         </Link>
       </header>
 
@@ -35,7 +35,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-base font-semibold text-white">Summary</h2>
             <p className="mt-3">
-              OpenAgents is a desktop app for Microsoft 365 administrators. It
+              OpenAdminOS is a desktop app for Microsoft 365 administrators. It
               runs on your computer. Your Microsoft 365 tenant data and the
               prompts sent to your local language model never leave your
               machine. The only data we knowingly receive is what you type
@@ -55,22 +55,22 @@ export default function PrivacyPage() {
               Who is responsible
             </h2>
             <p className="mt-3">
-              OpenAgents is an open-source project published by UgurLabs.
+              OpenAdminOS is an open-source project published by OpenAdminOS.
               The source is at{" "}
               <Link
-                href="https://github.com/ugurkocde/OpenAgents"
+                href="https://github.com/OpenAdminOS/OpenAdminOS"
                 target="_blank"
                 rel="noreferrer"
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                github.com/ugurkocde/OpenAgents
+                github.com/OpenAdminOS/OpenAdminOS
               </Link>
               . You can reach the maintainer at{" "}
               <Link
-                href="mailto:support@ugurlabs.com"
+                href="mailto:support@openadminos.example"
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                support@ugurlabs.com
+                support@openadminos.example
               </Link>
               .
             </p>
@@ -90,8 +90,8 @@ export default function PrivacyPage() {
                 to the Graph permissions you consented to. Those tokens are
                 stored in your operating-system keychain (macOS Keychain,
                 Windows Credential Manager) and used only by the local app to
-                call Microsoft Graph. They are never transmitted to OpenAgents
-                or UgurLabs.
+                call Microsoft Graph. They are never transmitted to OpenAdminOS
+                or OpenAdminOS.
               </li>
               <li>
                 <span className="text-white">Microsoft Graph data.</span>{" "}
@@ -107,7 +107,7 @@ export default function PrivacyPage() {
                   Language-model prompts (local provider).
                 </span>{" "}
                 When you select a local LLM provider such as Ollama or LM
-                Studio, prompts and responses stay on your machine. OpenAgents
+                Studio, prompts and responses stay on your machine. OpenAdminOS
                 does not see them.
               </li>
               <li>
@@ -117,8 +117,8 @@ export default function PrivacyPage() {
                 When you select Anthropic, OpenAI, or Azure OpenAI, prompts
                 (which may contain tenant data) are sent over TLS to that
                 provider, under their privacy policy and your account with
-                them. The OpenAgents UI labels the selected provider and the
-                region the API is hosted in. OpenAgents and UgurLabs do not
+                them. The OpenAdminOS UI labels the selected provider and the
+                region the API is hosted in. OpenAdminOS and OpenAdminOS do not
                 receive a copy of these prompts.
               </li>
               <li>
@@ -154,9 +154,9 @@ export default function PrivacyPage() {
                 <span className="text-white">Waitlist signups.</span> If you
                 enter your email on the homepage, that address is stored in
                 our database (Supabase, hosted in the EU) and used only to
-                contact you about the OpenAgents private preview. You can ask
+                contact you about the OpenAdminOS private preview. You can ask
                 us to delete it at any time by emailing
-                support@ugurlabs.com.
+                support@openadminos.example.
               </li>
               <li>
                 <span className="text-white">Hosting and logs.</span> The site
@@ -191,7 +191,7 @@ export default function PrivacyPage() {
               the personal data we hold about you, to correct it, or to have
               it deleted. Because the desktop app does not transmit anything
               to us, this in practice applies to your waitlist email and any
-              support correspondence. Email support@ugurlabs.com and we will
+              support correspondence. Email support@openadminos.example and we will
               respond within 30 days.
             </p>
           </section>
@@ -214,7 +214,7 @@ export default function PrivacyPage() {
             href="/"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
-            &larr; Back to OpenAgents
+            &larr; Back to OpenAdminOS
           </Link>
         </div>
       </main>
@@ -223,12 +223,12 @@ export default function PrivacyPage() {
         <span className="text-xs text-white/40">
           &copy; {new Date().getFullYear()}{" "}
           <Link
-            href="https://ugurlabs.com"
+            href="https://openadminos.example"
             target="_blank"
             rel="noreferrer"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
-            UgurLabs
+            OpenAdminOS
           </Link>
         </span>
       </footer>

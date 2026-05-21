@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { load as parseYaml } from "js-yaml";
 
 const DEFAULT_BASE =
-  "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main";
+  "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main";
 
 const args = process.argv.slice(2);
 const baseUrlIdx = args.indexOf("--base-url");

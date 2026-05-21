@@ -10,8 +10,8 @@ descriptor:
   description: Ranks unimplemented Microsoft Secure Score controls by likely impact and effort for this tenant.
   version: 1.0.0
   author:
-    name: OpenAgents
-    handle: openagents
+    name: OpenAdminOS
+    handle: openadminos
     verified: true
   category: policies
   tier: agent

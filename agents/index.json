@@ -12,15 +12,15 @@
       "tier": "dashboard",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/compliance-overview/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/compliance-overview/manifest.yaml"
     },
     {
       "id": "conditional-access-explainer",
@@ -33,15 +33,15 @@
       "tier": "agent",
       "requiresEntraTier": "p1",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "Policy.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/conditional-access-explainer/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml"
     },
     {
       "id": "dormant-app-registrations",
@@ -54,15 +54,15 @@
       "tier": "agent",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "Application.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/dormant-app-registrations/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/dormant-app-registrations/manifest.yaml"
     },
     {
       "id": "find-inactive-devices",
@@ -75,15 +75,15 @@
       "tier": "agent",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/find-inactive-devices/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/find-inactive-devices/manifest.yaml"
     },
     {
       "id": "os-update-posture",
@@ -96,15 +96,15 @@
       "tier": "dashboard",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/os-update-posture/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml"
     },
     {
       "id": "retire-inactive-devices",
@@ -117,8 +117,8 @@
       "tier": "agent",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
@@ -126,7 +126,7 @@
         "DeviceManagementManagedDevices.PrivilegedOperations.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/retire-inactive-devices/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/retire-inactive-devices/manifest.yaml"
     },
     {
       "id": "risky-sign-in-triage",
@@ -139,15 +139,15 @@
       "tier": "agent",
       "requiresEntraTier": "p1",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "IdentityRiskyUser.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/risky-sign-in-triage/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/risky-sign-in-triage/manifest.yaml"
     },
     {
       "id": "secure-score-prioritizer",
@@ -160,15 +160,15 @@
       "tier": "agent",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "SecurityEvents.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/secure-score-prioritizer/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/secure-score-prioritizer/manifest.yaml"
     },
     {
       "id": "sign-in-failure-explainer",
@@ -181,15 +181,15 @@
       "tier": "agent",
       "requiresEntraTier": "p1",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "AuditLog.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/sign-in-failure-explainer/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/sign-in-failure-explainer/manifest.yaml"
     },
     {
       "id": "stale-guest-cleanup",
@@ -202,8 +202,8 @@
       "tier": "agent",
       "requiresEntraTier": "p1",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
@@ -212,7 +212,7 @@
         "User.ReadWrite.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/stale-guest-cleanup/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/stale-guest-cleanup/manifest.yaml"
     },
     {
       "id": "tenant-change-audit",
@@ -225,8 +225,8 @@
       "tier": "agent",
       "requiresEntraTier": "p1",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
@@ -234,7 +234,7 @@
         "Directory.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/tenant-change-audit/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml"
     },
     {
       "id": "tenant-health-report",
@@ -247,15 +247,15 @@
       "tier": "dashboard",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": true
       },
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/tenant-health-report/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-health-report/manifest.yaml"
     },
     {
       "id": "user-license-overview",
@@ -268,15 +268,15 @@
       "tier": "dashboard",
       "requiresEntraTier": "free",
       "author": {
-        "name": "OpenAgents",
-        "handle": "openagents",
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
         "verified": false
       },
       "scopes": [
         "User.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/ugurkocde/OpenAgents/main/agents/user-license-overview/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/user-license-overview/manifest.yaml"
     }
   ]
 }

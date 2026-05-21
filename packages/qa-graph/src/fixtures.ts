@@ -1,6 +1,6 @@
 import type { FixtureSpec } from "./checks.js";
 
-// Mirrors `ManagedDeviceRecord` in `@openagents/agent-sdk`. When the SDK
+// Mirrors `ManagedDeviceRecord` in `@openadminos/agent-sdk`. When the SDK
 // adds or removes a field on `ManagedDeviceRecord`, update this list so the
 // QA gate keeps tracking the actual fixture surface against Graph.
 export const managedDeviceFixture: FixtureSpec = {
