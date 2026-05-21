@@ -4,6 +4,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.7] - 2026-05-21
+
 ### Changed
 
 - **Project renamed: Open Agents -> OpenAdminOS.** Repo moved to `OpenAdminOS/OpenAdminOS`. Affects the display name across the desktop app and marketing site, the Electron `productName` and `appId` (`com.openadminos.desktop`), all workspace npm packages (`@openagents/*` -> `@openadminos/*`), every internal IPC channel (`openagents:*` -> `openadminos:*`), the `window.openAgents` preload bridge (-> `window.openAdminOS`), the `OpenAgentsApi` SDK type, the custom URL scheme (`openagents://` -> `openadminos://`), and every README/SPEC reference. The parent-brand attribution (Ugurlabs) was dropped and the marketing domain switched from `openagents.sh` to `openadminos.com`. **Existing macOS installs will land on a fresh user-data-dir** (`~/Library/Application Support/OpenAdminOS` instead of `Open Agents`) — tenant connections, run history, and settings do not migrate. Code signing identity and auto-update channel need to be reconfigured under the new bundle ID.
