@@ -140,11 +140,14 @@ jobs:
           retention-days: 7
 
   publish-release:
-    name: Publish to draft release
+    name: Publish release
     needs: [windows-msix, macos-arm64]
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -153,10 +156,65 @@ jobs:
       - name: List artifacts
         run: ls -R artifacts
 
-      - name: Upload to draft release
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: bash
+        # TAG_NAME is sourced from github.ref_name via env so it's a
+        # plain $VAR shell expansion, not a templated string — keeps
+        # the workflow injection-safe per
+        # https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Refuse anything that isn't strict semver — defence in depth
+          # against an attacker pushing a tag like "v0.1.8;evil" to a
+          # fork PR. (We already gate on refs/tags/v* above, but a
+          # belt-and-braces second check is cheap.)
+          if ! printf '%s' "$TAG_NAME" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?$'; then
+            echo "::error::Refusing to extract notes — tag '$TAG_NAME' does not match strict semver." >&2
+            exit 1
+          fi
+          version="${TAG_NAME#v}"
+          notes=$(awk -v ver="$version" '
+            BEGIN { capture = 0 }
+            /^## \[/ {
+              if (capture == 1) { exit }
+              if ($0 ~ ("^## \\[" ver "\\]")) { capture = 1; next }
+            }
+            capture == 1 { print }
+          ' CHANGELOG.md)
+          if [ -z "$notes" ]; then
+            echo "::warning::No CHANGELOG section found for $version — falling back to auto-generated notes."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            {
+              echo 'body<<RELEASE_NOTES_EOF'
+              printf '%s\n' "$notes"
+              echo RELEASE_NOTES_EOF
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish release (with CHANGELOG body)
+        if: ${{ steps.notes.outputs.found == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          draft: false
+          make_latest: true
+          body: ${{ steps.notes.outputs.body }}
+          files: |
+            artifacts/windows-msix/*
+            artifacts/macos-arm64/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release (fallback auto-generated)
+        if: ${{ steps.notes.outputs.found != 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          make_latest: true
           generate_release_notes: true
           files: |
             artifacts/windows-msix/*

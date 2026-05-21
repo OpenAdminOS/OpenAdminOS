@@ -5,8 +5,8 @@ import Link from "next/link";
 // (A version-less /api/download/[platform] route would avoid this,
 // but a hardcoded URL is fine while we ship infrequently.)
 const MACOS_DMG_URL =
-  "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/v0.1.7/OpenAdminOS-0.1.7-arm64.dmg";
-const CURRENT_VERSION = "v0.1.7";
+  "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/v0.1.8/OpenAdminOS-0.1.8-arm64.dmg";
+const CURRENT_VERSION = "v0.1.8";
 
 export default function HomePage() {
   return (

@@ -16,19 +16,26 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [0.1.8] - 2026-05-21
 
-### Added
-
-### Changed
-
-- ui: version pill in Sidebar, StatusStrip, Settings, and Onboarding now reads from `apps/desktop/package.json` at build time via a `__APP_VERSION__` constant injected by `vite.config.ts`. Four sites had hardcoded `v0.1.5` strings that survived two version bumps; the new pattern makes `prepare-release.mjs` the only place the version is ever touched.
-
-### Removed
-
-- web: dropped the orphaned `.env.example` left over from the Supabase waitlist. Marketing site has no build-time required env vars anymore — every remaining env var is optional and only consumed by the runtime stats routes.
+Patch release cleaning up two cosmetic regressions from the v0.1.7 rebrand. **First release built and published as a public repo** — the auto-update target now works for v0.1.7 installs on Apple Silicon.
 
 ### Fixed
 
-- dmg: macOS install background rebranded to OpenAdminOS. The top-strip section label and the "Drag X to Applications" headline were still rasterized with the old "Open Agents" wording in `background.tiff`, since the bulk rename only touched source code, not pre-rendered images. Regenerated background-1x.png, background-2x.png, and background.tiff from the updated SVG.
+- **DMG install background no longer shows "Open Agents".** The top-strip section label (`OPEN AGENTS` -> `OPENADMINOS`) and the install headline (`Drag Open Agents to Applications` -> `Drag OpenAdminOS to Applications`) were still rasterized with the old wording inside `background.tiff`. The bulk text rename in v0.1.7 only touched source code; pre-rendered images had to be regenerated separately. Source SVG in `apps/desktop/build/dmg-background.svg`, regen steps in `apps/desktop/build/README.md`.
+- **Version pill in the desktop UI is now correct.** Sidebar, status strip, Settings -> About, and the onboarding step indicator all showed `v0.1.5` because the strings were hardcoded in four places. They now read from `apps/desktop/package.json` at build time via a `__APP_VERSION__` constant injected by `vite.config.ts`. `prepare-release.mjs` is the only place the version is ever touched, end to end.
+
+### Removed
+
+- `web/.env.example` — orphan from the Supabase waitlist (deleted in v0.1.7). The marketing site has no build-time required env vars anymore; every remaining env var is optional and only consumed at request time by the stats routes.
+
+### Auto-update
+
+If you have v0.1.7 installed on Apple Silicon, your app will detect this release on next launch and prompt to install. This is the first cross-version test of the auto-update channel under the new `OpenAdminOS/OpenAdminOS` repo and `com.openadminos.desktop` bundle ID.
+
+### Downloads
+
+- **macOS (Apple Silicon)** -- `OpenAdminOS-0.1.8-arm64.dmg` (signed with Developer ID, notarized by Apple)
+- **Windows MSIX** -- `OpenAdminOS.0.1.8.appx` (Microsoft Store submission package; unsigned by us, the Store signs at submission)
+- Hashes published alongside the DMG in `latest-mac.yml`.
 
 ### Security
 
