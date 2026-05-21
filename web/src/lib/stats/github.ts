@@ -6,18 +6,18 @@ let cachedOctokit: Octokit | null = null;
 
 function getOctokit(): Octokit {
   if (cachedOctokit) return cachedOctokit;
-  const token = process.env.OPENAGENTS_GITHUB_TOKEN;
-  if (!token) throw new Error("Missing OPENAGENTS_GITHUB_TOKEN.");
+  const token = process.env.OPENADMINOS_GITHUB_TOKEN;
+  if (!token) throw new Error("Missing OPENADMINOS_GITHUB_TOKEN.");
   cachedOctokit = new Octokit({ auth: token });
   return cachedOctokit;
 }
 
 function repoConfig() {
-  const owner = process.env.OPENAGENTS_GITHUB_OWNER;
-  const repo = process.env.OPENAGENTS_GITHUB_REPO;
-  const branch = process.env.OPENAGENTS_GITHUB_BRANCH ?? "main";
+  const owner = process.env.OPENADMINOS_GITHUB_OWNER;
+  const repo = process.env.OPENADMINOS_GITHUB_REPO;
+  const branch = process.env.OPENADMINOS_GITHUB_BRANCH ?? "main";
   if (!owner || !repo) {
-    throw new Error("Missing OPENAGENTS_GITHUB_OWNER / OPENAGENTS_GITHUB_REPO.");
+    throw new Error("Missing OPENADMINOS_GITHUB_OWNER / OPENADMINOS_GITHUB_REPO.");
   }
   return { owner, repo, branch };
 }

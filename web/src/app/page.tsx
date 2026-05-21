@@ -1,6 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
-import { WaitlistForm } from "./_components/waitlist-form";
+
+// Pinned to the current release. Bump on each tagged release.
+// (A version-less /api/download/[platform] route would avoid this,
+// but a hardcoded URL is fine while we ship infrequently.)
+const MACOS_DMG_URL =
+  "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/v0.1.7/OpenAdminOS-0.1.7-arm64.dmg";
+const CURRENT_VERSION = "v0.1.7";
 
 export default function HomePage() {
   return (
@@ -18,26 +24,29 @@ export default function HomePage() {
 
       <main className="relative z-10 flex flex-1 flex-col items-center px-6 sm:px-10">
         <div className="flex flex-col items-center pt-10 text-center sm:pt-14">
-          <span className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-wider text-white/70">
+          <Link
+            href={`https://github.com/OpenAdminOS/OpenAdminOS/releases/tag/${CURRENT_VERSION}`}
+            target="_blank"
+            rel="noreferrer"
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-wider text-white/70 transition hover:border-white/20 hover:text-white"
+          >
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            Private preview
-          </span>
+            {CURRENT_VERSION} — release notes
+          </Link>
 
           <h1 className="max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
-            Privacy-first, local, open source agents for admins.
+            Open-source, local-first agents for Microsoft 365 admins.
           </h1>
 
-          <div className="mt-7 flex w-full justify-center">
-            <WaitlistForm />
-          </div>
+          <p className="mt-4 max-w-2xl text-balance text-base text-white/60 sm:text-lg">
+            Connect a tenant, pick a local LLM, run read-only agents against
+            Intune and Entra. Tenant data and prompts stay on your machine.
+          </p>
 
-          <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              title="Available after private preview"
-              className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/40"
+          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+            <a
+              href={MACOS_DMG_URL}
+              className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
             >
               <svg
                 aria-hidden
@@ -47,16 +56,16 @@ export default function HomePage() {
                 <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zM256.6 105.8c30.3-36 27.6-68.8 26.7-80.6-26.8 1.6-57.8 18.3-75.5 38.8-19.5 22-31 49.2-28.5 80 29 2.2 55.5-12.7 77.3-38.2z" />
               </svg>
               Download for macOS
-              <span className="ml-1 text-[10px] font-normal uppercase tracking-wider text-white/30">
-                Soon
+              <span className="ml-1 text-[10px] font-normal uppercase tracking-wider text-[#0a0a0c]/50">
+                Apple Silicon
               </span>
-            </button>
+            </a>
             <button
               type="button"
               disabled
               aria-disabled="true"
-              title="Available after private preview"
-              className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/40"
+              title="Windows build is unsigned right now; coming after Microsoft Store signing lands."
+              className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/40"
             >
               <svg
                 aria-hidden
@@ -71,6 +80,18 @@ export default function HomePage() {
               </span>
             </button>
           </div>
+
+          <p className="mt-3 text-[11.5px] text-white/40">
+            Free and open-source. MIT licensed.{" "}
+            <Link
+              href="https://github.com/OpenAdminOS/OpenAdminOS"
+              target="_blank"
+              rel="noreferrer"
+              className="underline-offset-4 hover:text-white/70 hover:underline"
+            >
+              github.com/OpenAdminOS/OpenAdminOS
+            </Link>
+          </p>
         </div>
 
         <div className="mt-12 w-full max-w-[88rem] pb-16 sm:mt-16">

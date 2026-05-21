@@ -40,10 +40,10 @@ interface GithubContentEntry {
 }
 
 async function fetchSlugsFromGithub(): Promise<Set<string>> {
-  const owner = requireEnv("OPENAGENTS_GITHUB_OWNER");
-  const repo = requireEnv("OPENAGENTS_GITHUB_REPO");
-  const token = requireEnv("OPENAGENTS_GITHUB_TOKEN");
-  const branch = process.env.OPENAGENTS_GITHUB_BRANCH ?? "main";
+  const owner = requireEnv("OPENADMINOS_GITHUB_OWNER");
+  const repo = requireEnv("OPENADMINOS_GITHUB_REPO");
+  const token = requireEnv("OPENADMINOS_GITHUB_TOKEN");
+  const branch = process.env.OPENADMINOS_GITHUB_BRANCH ?? "main";
 
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/agents?ref=${branch}`;
   const response = await fetch(url, {
