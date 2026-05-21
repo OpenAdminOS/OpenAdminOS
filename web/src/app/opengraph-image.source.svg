@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <!--
+    Open Graph image source (1200x630, the Facebook/LinkedIn/etc.
+    canonical OG size). Mirrors the GitHub social-preview layout but
+    at OG aspect.
+
+    Rasterize:
+      rsvg-convert -w 1200 -h 630 opengraph-image.source.svg -o opengraph-image.png
+      (and copy to twitter-image.png)
+  -->
+  <rect width="1200" height="630" fill="#0a0a0c"/>
+
+  <!-- Icon tile, 280x280, vertically centered, padded from left -->
+  <g transform="translate(120 175)">
+    <rect x="0" y="0" width="280" height="280" rx="63" ry="63" fill="#e8a87c"/>
+    <!-- Chevron -->
+    <path d="M 74 85 L 145 140 L 74 195"
+          fill="none"
+          stroke="#1c1917"
+          stroke-width="28"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+    <!-- Cursor -->
+    <rect x="167" y="184" width="52" height="15" rx="7.5" ry="7.5" fill="#1c1917"/>
+  </g>
+
+  <!-- Wordmark + tagline on the right -->
+  <text x="470" y="300" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="68" font-weight="600" letter-spacing="-2" fill="#f5f5f5">
+    OpenAdminOS
+  </text>
+  <text x="470" y="355" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="26" font-weight="400" fill="#9a958e">
+    Open-source, local-first agents
+  </text>
+  <text x="470" y="390" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="26" font-weight="400" fill="#9a958e">
+    for Microsoft 365 admins.
+  </text>
+
+  <!-- URL footer -->
+  <text x="470" y="460" font-family="Menlo, Consolas, monospace"
+        font-size="18" font-weight="400" fill="#5a544d">
+    openadminos.com
+  </text>
+</svg>

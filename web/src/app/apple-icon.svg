@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180">
+  <!--
+    Apple touch icon (180x180 — iOS home-screen + Safari tab favourites).
+    Full D2 design with the cursor included since this renders large
+    enough for the detail to survive.
+  -->
+  <rect width="180" height="180" rx="40" ry="40" fill="#e8a87c"/>
+  <!-- Chevron -->
+  <path d="M 47 54 L 93 90 L 47 126"
+        fill="none"
+        stroke="#1c1917"
+        stroke-width="18"
+        stroke-linejoin="round"
+        stroke-linecap="round"/>
+  <!-- Cursor -->
+  <rect x="107" y="118" width="33" height="10" rx="5" ry="5" fill="#1c1917"/>
+</svg>
