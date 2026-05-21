@@ -31,8 +31,6 @@
 - **No app registration required.** Sign in with your own admin identity via MSAL (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secrets, no consent dance with a third-party multi-tenant app.
 - **Author agents in plain English.** Describe what you want; the local LLM drafts a manifest grounded in the JSON Schema; one click installs it.
 
-> Pre-1.0. v0.1.8 ships the desktop surface end-to-end against local Ollama. Hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), LM Studio, and the GitHub-hosted agent registry land in v0.2. Star the repo to follow along.
-
 ## Download
 
 | Platform | Asset |
