@@ -2,6 +2,17 @@
 
 **Open-source, local-first agents for Microsoft 365 admins.**
 
+[![CI](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml)
+[![Release](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/OpenAdminOS/OpenAdminOS?include_prereleases&sort=semver)](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/OpenAdminOS/OpenAdminOS/total)](https://github.com/OpenAdminOS/OpenAdminOS/releases)
+[![License: MIT](https://img.shields.io/github/license/OpenAdminOS/OpenAdminOS)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/OpenAdminOS/OpenAdminOS?style=flat)](https://github.com/OpenAdminOS/OpenAdminOS/stargazers)
+[![Issues](https://img.shields.io/github/issues/OpenAdminOS/OpenAdminOS)](https://github.com/OpenAdminOS/OpenAdminOS/issues)
+[![Last commit](https://img.shields.io/github/last-commit/OpenAdminOS/OpenAdminOS)](https://github.com/OpenAdminOS/OpenAdminOS/commits/main)
+
+![OpenAdminOS desktop app](docs/demo.png)
+
 Run AI agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected. Every agent ships its full pipeline as YAML — no opaque code paths, no hidden Graph calls.
 
 > Pre-1.0. v0.1.5 ships the desktop surface end-to-end against local Ollama. Hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), LM Studio, signed installers, and the GitHub-hosted agent registry land in v0.2. Star the repo to follow along.
