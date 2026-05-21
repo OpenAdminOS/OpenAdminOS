@@ -1,33 +1,47 @@
+<div align="center">
+
 # OpenAdminOS
 
-**Open-source, local-first agents for Microsoft 365 admins.**
+**Open-source, local-first AI agents for Microsoft 365 admins.**
+
+Run agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected.
 
 [![CI](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml)
 [![Release](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml)
-[![Latest release](https://img.shields.io/github/v/release/OpenAdminOS/OpenAdminOS?include_prereleases&sort=semver)](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/OpenAdminOS/OpenAdminOS/total)](https://github.com/OpenAdminOS/OpenAdminOS/releases)
+[![Latest release](https://img.shields.io/github/v/release/OpenAdminOS/OpenAdminOS?include_prereleases&sort=semver&label=release)](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/OpenAdminOS/OpenAdminOS/total?label=downloads)](https://github.com/OpenAdminOS/OpenAdminOS/releases)
 [![License: MIT](https://img.shields.io/github/license/OpenAdminOS/OpenAdminOS)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/OpenAdminOS/OpenAdminOS?style=flat)](https://github.com/OpenAdminOS/OpenAdminOS/stargazers)
 [![Issues](https://img.shields.io/github/issues/OpenAdminOS/OpenAdminOS)](https://github.com/OpenAdminOS/OpenAdminOS/issues)
 [![Last commit](https://img.shields.io/github/last-commit/OpenAdminOS/OpenAdminOS)](https://github.com/OpenAdminOS/OpenAdminOS/commits/main)
 
+[**Download**](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) · [**Website**](https://openadminos.com) · [**Docs**](docs/SPEC.md) · [**Contributing**](CONTRIBUTING.md) · [**Changelog**](CHANGELOG.md)
+
 ![OpenAdminOS desktop app](docs/demo.png)
 
-Run AI agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected. Every agent ships its full pipeline as YAML — no opaque code paths, no hidden Graph calls.
-
-> Pre-1.0. v0.1.5 ships the desktop surface end-to-end against local Ollama. Hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), LM Studio, signed installers, and the GitHub-hosted agent registry land in v0.2. Star the repo to follow along.
+</div>
 
 ---
 
-## What it does
+## Why OpenAdminOS
 
-An Intune / Entra admin can:
+- **Local-first by default.** Pick a local LLM (Ollama, LM Studio) and tenant data plus prompts never leave the device. No telemetry, no analytics, no error reporting that could carry tenant content. Switching to a hosted provider changes the trust banner honestly.
+- **Every agent is auditable YAML.** No opaque code paths, no hidden Graph calls. Read the full pipeline — every Graph endpoint, every transform, every prompt — before you install.
+- **Write agents always pause for typed diff confirmation.** No "trust this agent" toggle. Destructive changes require typing the phrase shown against the live diff (`type RETIRE 47 DEVICES to proceed`), every time.
+- **No app registration required.** Sign in with your own admin identity via MSAL (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secrets, no consent dance with a third-party multi-tenant app.
+- **Author agents in plain English.** Describe what you want; the local LLM drafts a manifest grounded in the JSON Schema; one click installs it.
 
-1. **Connect a tenant** via MSAL interactive sign-in (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secret, no app registration — the user signs in with their own identity in their own browser.
-2. **Pick an LLM provider** — local (Ollama, LM Studio) or hosted (Anthropic, OpenAI, Azure OpenAI). Trust messaging changes honestly with the choice.
-3. **Browse a registry of agents.** Each agent declares the Graph scopes it needs and whether it reads or writes. The full pipeline (every Graph call, every transform, every LLM prompt) is visible before install.
-4. **Run agents** — read agents run autonomously; **write agents always pause for typed diff confirmation** ("type `RETIRE 47 DEVICES` to proceed").
-5. **Author new agents in plain English.** Describe what you want, the local LLM drafts a YAML manifest, the JSON Schema validates it, and you install it in one click.
+> Pre-1.0. v0.1.8 ships the desktop surface end-to-end against local Ollama. Hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), LM Studio, and the GitHub-hosted agent registry land in v0.2. Star the repo to follow along.
+
+## Download
+
+| Platform | Asset |
+|---|---|
+| macOS (Apple Silicon) | [`OpenAdminOS-<version>-arm64.dmg`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) — signed with Developer ID, notarized |
+| Windows | [`OpenAdminOS.<version>.appx`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) — Microsoft Store package |
+| From source | See [Quickstart](#quickstart) below |
+
+---
 
 ## What's in the box (v0.1)
 
