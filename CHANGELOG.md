@@ -14,6 +14,24 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+## [0.1.8] - 2026-05-21
+
+### Added
+
+### Changed
+
+- ui: version pill in Sidebar, StatusStrip, Settings, and Onboarding now reads from `apps/desktop/package.json` at build time via a `__APP_VERSION__` constant injected by `vite.config.ts`. Four sites had hardcoded `v0.1.5` strings that survived two version bumps; the new pattern makes `prepare-release.mjs` the only place the version is ever touched.
+
+### Removed
+
+- web: dropped the orphaned `.env.example` left over from the Supabase waitlist. Marketing site has no build-time required env vars anymore — every remaining env var is optional and only consumed by the runtime stats routes.
+
+### Fixed
+
+- dmg: macOS install background rebranded to OpenAdminOS. The top-strip section label and the "Drag X to Applications" headline were still rasterized with the old "Open Agents" wording in `background.tiff`, since the bulk rename only touched source code, not pre-rendered images. Regenerated background-1x.png, background-2x.png, and background.tiff from the updated SVG.
+
+### Security
+
 ## [0.1.7] - 2026-05-21
 
 ### Changed
