@@ -12,8 +12,96 @@ import type { TenantSession } from "@openagents/agent-sdk";
 
 export const GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
 export const DEFAULT_AUTHORITY = "https://login.microsoftonline.com/common";
+// Bundled at initial sign-in so the admin sees ONE Microsoft consent
+// screen and every bundled read-only agent can run without a second
+// consent prompt. Audited against every agent manifest under /agents
+// (see `DEFAULT_SCOPE_METADATA` for which agent uses which scope).
+// Write scopes are deliberately excluded — each write-mode agent
+// requests its specific scope at install/run time, with a separate
+// consent screen, per the project's trust policy.
 export const DEFAULT_SCOPES = [
   "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All",
+  "https://graph.microsoft.com/Organization.Read.All",
+  "https://graph.microsoft.com/Directory.Read.All",
+  "https://graph.microsoft.com/User.Read.All",
+  "https://graph.microsoft.com/Policy.Read.All",
+  "https://graph.microsoft.com/Application.Read.All",
+  "https://graph.microsoft.com/AuditLog.Read.All",
+  "https://graph.microsoft.com/IdentityRiskyUser.Read.All",
+  "https://graph.microsoft.com/SecurityEvents.Read.All",
+];
+
+export interface RequestedScopeMetadata {
+  name: string;
+  mode: "read" | "write";
+  rationale: string;
+}
+
+// User-facing rationale for the scope set requested at initial sign-in.
+// Ordered to mirror what a manager scanning the consent screen would
+// want to grok first (operational → identity/users → security).
+//
+// Agents the admin installs later from the registry that declare a
+// scope NOT in this set will trigger an incremental MSAL consent
+// prompt at install time. MSAL also adds the reserved scopes
+// `openid`, `profile`, and `offline_access` on every interactive
+// request — those are not admin-consent permissions and are surfaced
+// in the UI as a small footnote, not as separate rows.
+export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
+  {
+    name: "DeviceManagementManagedDevices.Read.All",
+    mode: "read",
+    rationale:
+      "Reads Intune-enrolled devices and their state (compliance, OS version, last sync). Used by Compliance overview, Find inactive devices, OS update posture, and Tenant health report.",
+  },
+  {
+    name: "Organization.Read.All",
+    mode: "read",
+    rationale:
+      "Reads /subscribedSkus so the status strip can show which Entra ID tier (Free / P1 / P2) the tenant is on and badge agents that need P1 or P2 features.",
+  },
+  {
+    name: "Directory.Read.All",
+    mode: "read",
+    rationale:
+      "Reads directory metadata (users, groups, roles) so audit entries and policy targets can be rendered with human-readable names rather than raw object IDs.",
+  },
+  {
+    name: "User.Read.All",
+    mode: "read",
+    rationale:
+      "Reads user profile data — license assignment, location, last sign-in. Used by User license overview and as a prerequisite read for Stale guest cleanup.",
+  },
+  {
+    name: "Policy.Read.All",
+    mode: "read",
+    rationale:
+      "Reads conditional access and related tenant policies so the Conditional access explainer can describe what's enforced and why.",
+  },
+  {
+    name: "Application.Read.All",
+    mode: "read",
+    rationale:
+      "Reads registered apps in Entra so the Dormant app registrations agent can flag apps that haven't been used.",
+  },
+  {
+    name: "AuditLog.Read.All",
+    mode: "read",
+    rationale:
+      "Reads sign-in logs and directory audit events. Used by Sign-in failure explainer, Tenant change audit, and as a prerequisite read for Stale guest cleanup.",
+  },
+  {
+    name: "IdentityRiskyUser.Read.All",
+    mode: "read",
+    rationale:
+      "Reads Entra ID Protection's risky-user signals so the Risky sign-in triage agent can group and explain risk events. Requires Entra ID P2 to return data — the scope can still be consented on Free/P1 tenants but the agent will surface no results.",
+  },
+  {
+    name: "SecurityEvents.Read.All",
+    mode: "read",
+    rationale:
+      "Reads Microsoft Secure Score controls so the Secure score prioritizer can rank improvement actions by impact.",
+  },
 ];
 
 const SUCCESS_TEMPLATE = `<!doctype html>

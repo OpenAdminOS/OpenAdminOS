@@ -17,6 +17,7 @@ import {
   type OpenAgentsApi,
   type ProviderId,
   type RegistryAgentSummary,
+  type RequestedScope,
   type RunRecord,
   type StartRunOptions,
   type TenantRecord,
@@ -38,6 +39,7 @@ interface AppStateContextValue {
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: () => Promise<TenantRecord | undefined>;
+  getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
   disconnectTenant: (id: string) => Promise<void>;
   updateAgentSettings: (
@@ -285,6 +287,12 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const getRequestedScopes = useCallback(async (): Promise<RequestedScope[]> => {
+    const api = getOpenAgentsApi();
+    if (!api) return [];
+    return api.getRequestedScopes();
+  }, []);
+
   const connectTenant = useCallback(async () => {
     const api = getOpenAgentsApi();
     if (!api) {
@@ -528,6 +536,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       rejectRun,
       cancelRun,
       connectTenant,
+      getRequestedScopes,
       setActiveTenant,
       disconnectTenant,
       updateAgentSettings,
@@ -542,6 +551,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       disconnectTenant,
       draftAgentManifest,
       error,
+      getRequestedScopes,
       installAgent,
       loading,
       refresh,

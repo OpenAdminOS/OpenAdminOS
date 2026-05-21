@@ -59,9 +59,11 @@ export {
   createMsalClient,
   DEFAULT_AUTHORITY,
   DEFAULT_SCOPES,
+  DEFAULT_SCOPE_METADATA,
   GRAPH_CLI_CLIENT_ID,
   removeAccount,
   runInteractiveFlow,
+  type RequestedScopeMetadata,
   type TokenCacheStorage,
 } from "./msal.js";
 export {

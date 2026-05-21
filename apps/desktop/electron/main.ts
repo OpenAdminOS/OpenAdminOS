@@ -398,6 +398,9 @@ function registerIpcHandlers() {
     store.cancelRun(runId),
   );
   ipcMain.handle("openagents:list-tenants", () => store.listTenants());
+  ipcMain.handle("openagents:get-requested-scopes", () =>
+    store.listRequestedScopes(),
+  );
   ipcMain.handle("openagents:connect-tenant", () => store.connectTenant());
   ipcMain.handle("openagents:set-active-tenant", (_event, id: string) =>
     store.setActiveTenant(id),

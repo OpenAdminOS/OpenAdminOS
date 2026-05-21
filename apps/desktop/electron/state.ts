@@ -9,6 +9,7 @@ import {
   createOllamaLlm,
   createQueuedRun,
   createTenantSession,
+  DEFAULT_SCOPE_METADATA,
   probeSubscribedSkus,
   executeApply,
   executePlan,
@@ -32,6 +33,7 @@ import type {
   AgentDraft,
   AgentManifestPreview,
   ConnectorSummary,
+  RequestedScope,
   RunGraphApi,
   RunLlmApi,
   RunLogLevel,
@@ -1208,6 +1210,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async listTenants(): Promise<TenantRecord[]> {
     const persisted = await this.read();
     return persisted.tenants;
+  }
+
+  async listRequestedScopes(): Promise<RequestedScope[]> {
+    // Strips the Graph resource prefix so the renderer can display the
+    // bare scope name (e.g. "DeviceManagementManagedDevices.Read.All")
+    // while the constant in msal.ts keeps the fully-qualified URI MSAL
+    // requires.
+    return DEFAULT_SCOPE_METADATA.map((scope) => ({
+      name: scope.name,
+      mode: scope.mode,
+      rationale: scope.rationale,
+    }));
   }
 
   async connectTenant(): Promise<AppState> {

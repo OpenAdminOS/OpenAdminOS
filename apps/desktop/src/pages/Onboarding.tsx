@@ -23,11 +23,13 @@ import type {
   ProviderId,
   ProviderSummary,
   RegistryAgentSummary,
+  RequestedScope,
   TenantRecord,
 } from "../shared/openAgents";
 import { isProviderImplemented } from "../shared/providers";
+import { TrustBanner } from "../components/TrustBanner";
 
-const steps = ["Welcome", "Pick LLM", "Connect tenant", "First agent"] as const;
+const steps = ["Welcome", "Connect tenant", "Pick LLM", "First agent"] as const;
 type Step = (typeof steps)[number];
 
 export default function Onboarding() {
@@ -39,6 +41,7 @@ export default function Onboarding() {
     setActiveProvider,
     startRun,
     connectTenant,
+    getRequestedScopes,
     refresh,
   } = useAppState();
   const [step, setStep] = useState<Step>("Welcome");
@@ -62,10 +65,16 @@ export default function Onboarding() {
   }, [registryAgents, selectedAgentId]);
 
   // Re-probe provider status while the user might be installing or
-  // starting Ollama in another window. Only the two steps that surface
-  // provider state need this — Welcome and Connect tenant don't.
+  // starting Ollama in another window. Pre-warm during Connect tenant
+  // so Pick LLM lands with fresh status — Welcome doesn't surface
+  // provider state, so it doesn't need the poll.
   useEffect(() => {
-    if (step !== "Pick LLM" && step !== "First agent") return;
+    if (
+      step !== "Connect tenant" &&
+      step !== "Pick LLM" &&
+      step !== "First agent"
+    )
+      return;
     const intervalId = window.setInterval(() => {
       void refresh();
     }, 3000);
@@ -85,7 +94,7 @@ export default function Onboarding() {
         setWorking(false);
       }
     }
-    setStep("Connect tenant");
+    setStep("First agent");
   };
 
   const handleConnectTenant = async () => {
@@ -93,7 +102,7 @@ export default function Onboarding() {
     setWorking(true);
     try {
       await connectTenant();
-      setStep("First agent");
+      setStep("Pick LLM");
     } catch (caughtError) {
       setError(toMessage(caughtError));
     } finally {
@@ -196,18 +205,7 @@ export default function Onboarding() {
           )}
 
           {step === "Welcome" && (
-            <Welcome onContinue={() => setStep("Pick LLM")} />
-          )}
-          {step === "Pick LLM" && (
-            <PickLLM
-              providers={state.providers}
-              selected={selectedProvider}
-              onSelect={setSelectedProvider}
-              onBack={() => setStep("Welcome")}
-              onContinue={() => void handlePickLlmContinue()}
-              onRecheck={() => void refresh()}
-              working={working}
-            />
+            <Welcome onContinue={() => setStep("Connect tenant")} />
           )}
           {step === "Connect tenant" && (
             <ConnectTenant
@@ -216,9 +214,21 @@ export default function Onboarding() {
                   ? state.tenants.find((t) => t.id === state.activeTenantId)
                   : undefined
               }
+              loadScopes={getRequestedScopes}
               onConnect={() => void handleConnectTenant()}
-              onContinueWithActive={() => setStep("First agent")}
-              onBack={() => setStep("Pick LLM")}
+              onContinueWithActive={() => setStep("Pick LLM")}
+              onBack={() => setStep("Welcome")}
+              working={working}
+            />
+          )}
+          {step === "Pick LLM" && (
+            <PickLLM
+              providers={state.providers}
+              selected={selectedProvider}
+              onSelect={setSelectedProvider}
+              onBack={() => setStep("Connect tenant")}
+              onContinue={() => void handlePickLlmContinue()}
+              onRecheck={() => void refresh()}
               working={working}
             />
           )}
@@ -231,7 +241,7 @@ export default function Onboarding() {
               )}
               onRecheck={() => void refresh()}
               onSelect={setSelectedAgentId}
-              onBack={() => setStep("Connect tenant")}
+              onBack={() => setStep("Pick LLM")}
               onContinue={() => void handleInstallAndFinish()}
               onSkip={() => navigate("/")}
               working={working}
@@ -272,7 +282,7 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
         <FeatureCard
           icon={<IconCloud size={16} className="text-[var(--color-info)]" />}
           title="No API keys"
-          body="Local Ollama today. Hosted providers piggyback on your installed CLI."
+          body="Local Ollama today. Anthropic and OpenAI providers reuse your existing CLI login — no API keys to manage."
         />
       </div>
 
@@ -285,8 +295,9 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
         >
           Get started
         </Button>
-        <span className="text-[11.5px] text-[var(--color-text-muted)]">
-          Takes about a minute. You'll sign in to Microsoft once.
+        <span className="max-w-[420px] text-center text-[11.5px] text-[var(--color-text-muted)]">
+          You'll sign in to Microsoft once. If you don't already have Ollama
+          installed, plan a few extra minutes for a ~4 GB download.
         </span>
       </div>
     </div>
@@ -323,13 +334,33 @@ function PickLLM({
           Pick an LLM provider
         </h2>
         <p className="mt-1.5 max-w-[600px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
+          Local providers keep tenant data and prompts on this device.
+          Hosted providers reuse your existing vendor CLI login, so Open
+          Agents never stores API keys.
+        </p>
+        <p className="mt-1.5 max-w-[600px] text-[12px] leading-relaxed text-[var(--color-text-muted)]">
           Local Ollama is the only provider available today. LM Studio and
           hosted providers (Anthropic, OpenAI, Azure OpenAI) land in v0.2.
-          Local providers keep tenant data on this device; hosted providers
-          will piggyback on your installed CLI's authentication so we never
-          store API keys.
         </p>
       </div>
+
+      {selectedProvider && (
+        <div className="mb-5">
+          {selectedProvider.isLocal ? (
+            <TrustBanner variant="local" title="Local-only mode active.">
+              Tenant data and prompts stay on this device. Switching to a
+              hosted provider below will change this — the data residency
+              status will update everywhere in the app.
+            </TrustBanner>
+          ) : (
+            <TrustBanner variant="hosted" title="Hosted provider selected.">
+              Prompts and tenant context will be sent to{" "}
+              {selectedProvider.name}. Switch to Ollama or LM Studio for
+              local-only operation.
+            </TrustBanner>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-3">
         {providers.map((p) => {
@@ -369,7 +400,7 @@ function PickLLM({
                       </Pill>
                     ) : (
                       <Pill>
-                        <StatusDot tone="info" /> CLI piggyback
+                        <StatusDot tone="info" /> {hostedLoginLabel(p.id)}
                       </Pill>
                     )}
                     {!implemented ? (
@@ -435,33 +466,60 @@ function PickLLM({
 
 function ConnectTenant({
   activeTenant,
+  loadScopes,
   onConnect,
   onContinueWithActive,
   onBack,
   working,
 }: {
   activeTenant: TenantRecord | undefined;
+  loadScopes: () => Promise<RequestedScope[]>;
   onConnect: () => void;
   onContinueWithActive: () => void;
   onBack: () => void;
   working: boolean;
 }) {
+  const [scopes, setScopes] = useState<RequestedScope[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Always pre-load the scope list — even when an active tenant is
+  // present and the user might just click Continue. Network/IPC is
+  // cheap and it primes the cache if they click "Connect another".
+  useEffect(() => {
+    let cancelled = false;
+    setLoadError(null);
+    loadScopes()
+      .then((next) => {
+        if (!cancelled) setScopes(next);
+      })
+      .catch((caught) => {
+        if (!cancelled) setLoadError(toMessage(caught));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadScopes]);
+
+  const reads = (scopes ?? []).filter((s) => s.mode === "read");
+  const writes = (scopes ?? []).filter((s) => s.mode === "write");
+
   return (
-    <div>
-      <div className="mb-7">
+    <div className="flex flex-col">
+      <div className="mb-6">
         <h2 className="text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
           Connect a Microsoft 365 tenant
         </h2>
         <p className="mt-1.5 max-w-[640px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
           Sign in once with your admin account. Open Agents will open
-          Microsoft's login page in your system browser and read managed
-          devices, policies, and compliance state from Graph against the
-          tenants you allow.
+          Microsoft's login page in your system browser. The consent
+          screen says "Microsoft Graph Command Line Tools" — Open Agents
+          uses Microsoft's public Graph CLI app registration, so nothing
+          needs to be registered in your tenant.
         </p>
       </div>
 
-      {activeTenant ? (
-        <Card className="ring-2 ring-[var(--color-accent)]/30">
+      {activeTenant && (
+        <Card className="mb-6 ring-2 ring-[var(--color-accent)]/30">
           <div className="flex items-start gap-4 p-5">
             <Avatar name={activeTenant.displayName} size={40} />
             <div className="min-w-0 flex-1">
@@ -482,46 +540,94 @@ function ConnectTenant({
             </div>
           </div>
         </Card>
-      ) : (
-        <Card>
-          <div className="flex flex-col p-6">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
-              <IconCloud size={20} />
-            </div>
-            <div className="mt-3 text-[14.5px] font-medium text-[var(--color-text)]">
-              Sign in with your Microsoft 365 admin account
-            </div>
-            <p className="mt-1.5 max-w-[560px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-              Open Agents reads device, policy, and compliance state from
-              Microsoft Graph. The consent screen says "Microsoft Graph
-              Command Line Tools". You can disconnect at any time from
-              Settings → Tenants.
-            </p>
-            <div className="mt-5">
-              <Button
-                variant="primary"
-                leadingIcon={<IconShield size={12} />}
-                onClick={onConnect}
-                disabled={working}
-              >
-                {working ? "Waiting for sign-in…" : "Sign in to Microsoft"}
-              </Button>
-            </div>
-          </div>
-        </Card>
       )}
 
-      <div className="mt-8 flex items-center justify-between">
+      <Card>
+        <div className="p-6">
+          <p className="mb-5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <strong className="font-medium text-[var(--color-text)]">
+              This is a one-time consent.
+            </strong>{" "}
+            Open Agents will use these permissions only on this device.
+            We do not have a server that stores your tokens. You can
+            revoke access at any time via Entra → Enterprise
+            applications.
+          </p>
+
+          <div className="font-mono text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            // Read permissions ·{" "}
+            {scopes ? `${reads.length} scope${reads.length === 1 ? "" : "s"}` : "loading…"}
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3">
+            {scopes === null && !loadError && (
+              <>
+                <ScopeRowSkeleton />
+                <ScopeRowSkeleton />
+              </>
+            )}
+            {loadError && (
+              <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+                {loadError}
+              </div>
+            )}
+            {reads.map((scope) => (
+              <div
+                key={scope.name}
+                className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[12.5px] text-[var(--color-text)]">
+                    {scope.name}
+                  </span>
+                  <Pill tone="info">
+                    <StatusDot tone="info" /> Read
+                  </Pill>
+                </div>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                  {scope.rationale}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <p className="mt-4 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+            This set covers every bundled read-only agent. If you later
+            install an agent from the registry that declares a scope
+            outside this set, you'll get a fresh Microsoft consent
+            prompt for that specific scope at install time.
+          </p>
+          <p className="mt-2 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+            Microsoft also adds the standard sign-in scopes{" "}
+            <span className="font-mono">openid</span>,{" "}
+            <span className="font-mono">profile</span>, and{" "}
+            <span className="font-mono">offline_access</span> (read your
+            name, sign you in, keep the refresh token). These are baseline
+            for any Microsoft sign-in and aren't admin-consent
+            permissions.
+          </p>
+
+          <div className="mt-6 border-t border-[var(--color-border-soft)] pt-5">
+            <div className="font-mono text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              // Write permissions ·{" "}
+              {scopes ? `${writes.length} scope${writes.length === 1 ? "" : "s"} by default` : "0 by default"}
+            </div>
+            <div className="mt-3 rounded-lg border border-dashed border-[var(--color-border-strong)] bg-[var(--color-bg-raised)]/40 px-4 py-3 text-center text-[12px] text-[var(--color-text-soft)]">
+              No write permissions requested. Each write-mode agent will
+              ask for its specific scope at install time, with a separate
+              consent screen.
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <StickyOnboardingFooter>
         <Button variant="ghost" onClick={onBack} disabled={working}>
           Back
         </Button>
-        {activeTenant && (
+        {activeTenant ? (
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              onClick={onConnect}
-              disabled={working}
-            >
+            <Button variant="ghost" onClick={onConnect} disabled={working}>
               {working ? "Waiting…" : "Connect another"}
             </Button>
             <Button
@@ -533,7 +639,48 @@ function ConnectTenant({
               Continue with this tenant
             </Button>
           </div>
+        ) : (
+          <Button
+            variant="primary"
+            leadingIcon={<IconShield size={12} />}
+            onClick={onConnect}
+            disabled={working || scopes === null || loadError !== null}
+          >
+            {working
+              ? "Waiting for sign-in…"
+              : "Approve and continue to Microsoft"}
+          </Button>
         )}
+      </StickyOnboardingFooter>
+    </div>
+  );
+}
+
+function ScopeRowSkeleton() {
+  return (
+    <div className="animate-pulse rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
+      <div className="h-3.5 w-2/3 rounded bg-[var(--color-border-soft)]" />
+      <div className="mt-2 h-2.5 w-11/12 rounded bg-[var(--color-border-soft)]" />
+      <div className="mt-1.5 h-2.5 w-3/4 rounded bg-[var(--color-border-soft)]" />
+    </div>
+  );
+}
+
+function StickyOnboardingFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className={[
+        // Stick to the bottom of the scrolling content area. Pulled
+        // outside the 820px max-width container with negative margin so
+        // the backdrop spans the full width of the scroll viewport.
+        "sticky bottom-0 z-10 mt-6 -mx-6",
+        // Top border + background so cards behind it don't bleed through.
+        "border-t border-[var(--color-border-soft)] bg-[var(--color-bg)]/85 backdrop-blur",
+        "px-6 py-3.5",
+      ].join(" ")}
+    >
+      <div className="mx-auto flex max-w-[820px] items-center justify-between">
+        {children}
       </div>
     </div>
   );
@@ -703,11 +850,13 @@ function ProviderNotReadyCard({
   onRecheck: () => void;
 }) {
   const [rechecking, setRechecking] = useState(false);
+  const [attemptedRecheck, setAttemptedRecheck] = useState(false);
 
   const isOllama = provider.id === "ollama";
 
   const onRecheckClick = async () => {
     setRechecking(true);
+    setAttemptedRecheck(true);
     try {
       onRecheck();
       // Give the host a moment to re-probe before re-enabling — the
@@ -719,16 +868,38 @@ function ProviderNotReadyCard({
     }
   };
 
+  // Treat the first encounter as instructional, not failure. Only flip
+  // to warning styling once the user has clicked Recheck and the probe
+  // still came back negative, or when the provider explicitly reports
+  // an error (set up but unreachable).
+  const warn =
+    provider.status === "error" ||
+    (attemptedRecheck && provider.status !== "connected");
+
   if (!isOllama) {
     return (
-      <div className="rounded-xl bg-[var(--color-warning-soft)] p-5 ring-1 ring-[var(--color-warning)]/30">
+      <div
+        className={
+          warn
+            ? "rounded-xl bg-[var(--color-warning-soft)] p-5 ring-1 ring-[var(--color-warning)]/30"
+            : "rounded-xl bg-[var(--color-surface)] p-5 ring-1 ring-[var(--color-border-soft)]"
+        }
+      >
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/35">
-            <IconWarning size={14} />
+          <div
+            className={
+              warn
+                ? "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/35"
+                : "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25"
+            }
+          >
+            {warn ? <IconWarning size={14} /> : <IconCloud size={14} />}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-[13.5px] font-medium text-[var(--color-text)]">
-              {provider.name} isn't reachable.
+              {warn
+                ? `${provider.name} isn't reachable.`
+                : `${provider.name} isn't installed yet.`}
             </div>
             <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
               Install or start the provider, then recheck.
@@ -749,13 +920,21 @@ function ProviderNotReadyCard({
     );
   }
 
-  return <OllamaInstallGuide rechecking={rechecking} onRecheck={onRecheckClick} />;
+  return (
+    <OllamaInstallGuide
+      warn={warn}
+      rechecking={rechecking}
+      onRecheck={onRecheckClick}
+    />
+  );
 }
 
 function OllamaInstallGuide({
+  warn,
   rechecking,
   onRecheck,
 }: {
+  warn: boolean;
   rechecking: boolean;
   onRecheck: () => void | Promise<void>;
 }) {
@@ -763,15 +942,25 @@ function OllamaInstallGuide({
   const openExternal = (url: string) =>
     void window.openAgents?.openExternal(url);
 
+  const wrapperClass = warn
+    ? "overflow-hidden rounded-xl bg-[var(--color-warning-soft)] ring-1 ring-[var(--color-warning)]/30"
+    : "overflow-hidden rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border-soft)]";
+  const headerClass = warn
+    ? "flex items-start gap-3 border-b border-[var(--color-warning)]/20 bg-[var(--color-warning-soft)] px-5 py-4"
+    : "flex items-start gap-3 border-b border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/40 px-5 py-4";
+  const iconClass = warn
+    ? "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/35"
+    : "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25";
+
   return (
-    <div className="overflow-hidden rounded-xl bg-[var(--color-warning-soft)] ring-1 ring-[var(--color-warning)]/30">
-      <div className="flex items-start gap-3 border-b border-[var(--color-warning)]/20 bg-[var(--color-warning-soft)] px-5 py-4">
-        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/35">
-          <IconWarning size={14} />
+    <div className={wrapperClass}>
+      <div className={headerClass}>
+        <div className={iconClass}>
+          {warn ? <IconWarning size={14} /> : <IconHardDrive size={14} />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium text-[var(--color-text)]">
-            Ollama isn't running on this device.
+            {warn ? "Ollama isn't running on this device." : "Let's install Ollama."}
           </div>
           <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
             Ollama is a free, open-source app that runs LLMs locally. Open
@@ -984,6 +1173,19 @@ function UnknownPlatformInstallStep({
       </div>
     </>
   );
+}
+
+function hostedLoginLabel(id: ProviderId): string {
+  switch (id) {
+    case "anthropic":
+      return "Uses your Claude Code login";
+    case "openai":
+      return "Uses your Codex login";
+    case "azure-openai":
+      return "Uses your Azure CLI login";
+    default:
+      return "Hosted";
+  }
 }
 
 function toMessage(error: unknown): string {

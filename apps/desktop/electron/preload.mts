@@ -89,6 +89,8 @@ const api: OpenAgentsApi = {
   rejectRun: (runId: string) => ipcRenderer.invoke("openagents:reject-run", runId),
   cancelRun: (runId: string) => ipcRenderer.invoke("openagents:cancel-run", runId),
   listTenants: () => ipcRenderer.invoke("openagents:list-tenants"),
+  getRequestedScopes: () =>
+    ipcRenderer.invoke("openagents:get-requested-scopes"),
   connectTenant: () => ipcRenderer.invoke("openagents:connect-tenant"),
   setActiveTenant: (id: string) =>
     ipcRenderer.invoke("openagents:set-active-tenant", id),

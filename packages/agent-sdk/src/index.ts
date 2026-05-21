@@ -166,6 +166,22 @@ export interface StartRunOptions {
   model?: string;
 }
 
+/**
+ * One Microsoft Graph permission scope the host will request — surfaced
+ * to the renderer so the pre-consent scope preview can list exactly
+ * what MSAL is about to ask for, with a plain-English rationale.
+ *
+ * Today the host only requests one scope at sign-in
+ * (`DeviceManagementManagedDevices.Read.All`). Additional read scopes
+ * are requested incrementally via `acquireTokenForScopes` the first
+ * time an agent needs them. Write scopes are never requested by default.
+ */
+export interface RequestedScope {
+  name: string;
+  mode: "read" | "write";
+  rationale: string;
+}
+
 export interface TenantRecord {
   id: string;
   displayName: string;
@@ -412,6 +428,17 @@ export interface OpenAgentsApi {
    */
   cancelRun(runId: string): Promise<RunRecord>;
   listTenants(): Promise<TenantRecord[]>;
+  /**
+   * Returns the Graph scopes the host will request at initial sign-in,
+   * each with a user-facing rationale. The renderer uses this to render
+   * the in-app pre-consent screen so the user can review permissions
+   * before being handed off to Microsoft's consent UI.
+   *
+   * Source of truth lives in the main process (the same constant the
+   * MSAL interactive flow consumes), so the renderer never drifts from
+   * what is actually requested.
+   */
+  getRequestedScopes(): Promise<RequestedScope[]>;
   connectTenant(): Promise<AppState>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
