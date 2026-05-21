@@ -70,7 +70,7 @@ export function StatusStrip() {
           </Link>
         )}
         <span className="text-[var(--color-text-faint)]">
-          v0.1.5 · local-first
+          v{__APP_VERSION__} · local-first
         </span>
       </div>
     </footer>

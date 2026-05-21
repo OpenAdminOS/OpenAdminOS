@@ -120,7 +120,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             OpenAdminOS
           </span>
           <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[9.5px] text-[var(--color-text-muted)]">
-            v0.1.5
+            v{__APP_VERSION__}
           </span>
         </div>
         <span

@@ -631,7 +631,7 @@ function AboutSection() {
     <div className="max-w-[640px]">
       <SectionTitle title="About" subtitle="OpenAdminOS is open-source and community-driven." />
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <Stat label="Version" value="0.1.5" mono />
+        <Stat label="Version" value={__APP_VERSION__} mono />
         <Stat label="License" value="MIT" />
         <Stat label="Repo" value="OpenAdminOS/OpenAdminOS" mono />
         <Stat label="Built by" value="OpenAdminOS" />

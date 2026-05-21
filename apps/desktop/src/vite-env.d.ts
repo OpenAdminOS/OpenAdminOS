@@ -8,4 +8,7 @@ declare global {
   interface Window {
     openAdminOS?: OpenAdminOSApi;
   }
+
+  // Injected by vite.config.ts at build time from apps/desktop/package.json.
+  const __APP_VERSION__: string;
 }

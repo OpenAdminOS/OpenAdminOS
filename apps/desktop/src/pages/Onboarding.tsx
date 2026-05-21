@@ -156,7 +156,7 @@ export default function Onboarding() {
             OpenAdminOS
           </span>
           <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
-            v0.1.5
+            v{__APP_VERSION__}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
