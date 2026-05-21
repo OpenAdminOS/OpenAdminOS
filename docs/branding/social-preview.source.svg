@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640">
+  <!--
+    GitHub repo social-preview image. 1280x640 (2:1) per
+    docs.github.com/repositories/customizing-your-repository/customizing-your-repositorys-social-media-preview.
+
+    Dark canvas with the OpenAdminOS icon tile on the left, wordmark
+    and tagline on the right. Matches the wide-tile composition used
+    in the Microsoft Store assets so the brand reads consistently
+    across surfaces.
+
+    Rasterize:
+      rsvg-convert -w 1280 -h 640 social-preview.source.svg -o social-preview.png
+  -->
+  <rect width="1280" height="640" fill="#0a0a0c"/>
+
+  <!-- Icon tile, 280x280, vertically centered, padded from left -->
+  <g transform="translate(140 180)">
+    <rect x="0" y="0" width="280" height="280" rx="63" ry="63" fill="#e8a87c"/>
+    <!-- Chevron -->
+    <path d="M 74 85 L 145 140 L 74 195"
+          fill="none"
+          stroke="#1c1917"
+          stroke-width="28"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+    <!-- Cursor -->
+    <rect x="167" y="184" width="52" height="15" rx="7.5" ry="7.5" fill="#1c1917"/>
+  </g>
+
+  <!-- Wordmark + tagline on the right -->
+  <text x="500" y="305" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="72" font-weight="600" letter-spacing="-2" fill="#f5f5f5">
+    OpenAdminOS
+  </text>
+  <text x="500" y="360" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="26" font-weight="400" fill="#9a958e">
+    Open-source, local-first agents
+  </text>
+  <text x="500" y="395" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="26" font-weight="400" fill="#9a958e">
+    for Microsoft 365 admins.
+  </text>
+
+  <!-- URL footer -->
+  <text x="500" y="465" font-family="Menlo, Consolas, monospace"
+        font-size="18" font-weight="400" fill="#5a544d">
+    github.com/OpenAdminOS/OpenAdminOS
+  </text>
+</svg>
