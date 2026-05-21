@@ -1,10 +1,10 @@
 <div align="center">
 
-# OpenAdminOS
+<h1>OpenAdminOS</h1>
 
-**Open-source, local-first AI agents for Microsoft 365 admins.**
+<p><strong>Open-source, local-first AI agents for Microsoft 365 admins.</strong></p>
 
-Run agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected.
+<p>Run agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected.</p>
 
 [![CI](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml)
 [![Release](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml)
