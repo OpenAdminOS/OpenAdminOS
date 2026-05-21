@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openadminos.example/schemas/agent-template.schema.json",
+  "$id": "https://openadminos.com/schemas/agent-template.schema.json",
   "title": "OpenAdminOS — Agent Template",
   "description": "Declarative YAML pipeline manifest interpreted by the @openadminos/runtime agent-template runner. The schema mirrors the TypeScript types in @openadminos/agent-sdk and is the authoritative shape for any agents/<slug>/manifest.yaml file.",
   "type": "object",

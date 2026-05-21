@@ -90,7 +90,7 @@ export async function commitStats(input: {
   // No author / committer override — let GitHub attribute the commit to
   // the PAT owner. Vercel's deployment-authorization check rejects any
   // commit whose author email doesn't map to a GitHub account, so the
-  // previous `stats-bot@openadminos.example` placeholder caused production
+  // previous `stats-bot@openadminos.com` placeholder caused production
   // redeploys to bounce.
   await octokit.repos.createOrUpdateFileContents({
     owner,

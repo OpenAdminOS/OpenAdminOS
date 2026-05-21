@@ -124,7 +124,7 @@ The app comes up with four agents (three read-only, one write) discoverable in t
 ```
 apps/
   desktop/        Electron host (main + preload + Vite/React renderer)
-  marketing/      Next.js marketing site (openadminos.example)
+  marketing/      Next.js marketing site (openadminos.com)
 agents/
   <slug>/         manifest.yaml + manifest.json (+ optional TS)
 packages/

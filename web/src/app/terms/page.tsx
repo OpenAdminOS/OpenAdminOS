@@ -4,7 +4,7 @@ import { type Metadata } from "next";
 export const metadata: Metadata = {
   title: "Terms of use — OpenAdminOS",
   description:
-    "The terms that govern your use of the OpenAdminOS desktop app and openadminos.example.",
+    "The terms that govern your use of the OpenAdminOS desktop app and openadminos.com.",
 };
 
 const LAST_UPDATED = "2026-05-19";
@@ -37,7 +37,7 @@ export default function TermsPage() {
             <p className="mt-3">
               OpenAdminOS is open-source software published by OpenAdminOS under
                 the MIT License. These terms govern your use of the desktop
-                app and the website at openadminos.example. By installing the app
+                app and the website at openadminos.com. By installing the app
                 or using the site, you agree to them.
             </p>
           </section>
@@ -154,10 +154,10 @@ export default function TermsPage() {
             <p className="mt-3">
               Questions about these terms:{" "}
               <Link
-                href="mailto:support@openadminos.example"
+                href="mailto:support@openadminos.com"
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                support@openadminos.example
+                support@openadminos.com
               </Link>
               .
             </p>
@@ -178,7 +178,7 @@ export default function TermsPage() {
         <span className="text-xs text-white/40">
           &copy; {new Date().getFullYear()}{" "}
           <Link
-            href="https://openadminos.example"
+            href="https://openadminos.com"
             target="_blank"
             rel="noreferrer"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"

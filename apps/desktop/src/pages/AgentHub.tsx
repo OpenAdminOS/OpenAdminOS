@@ -673,7 +673,7 @@ function EmptyRegistry() {
   );
 }
 
-const LIVE_STATS_URL = "https://openadminos.example/stats/agents.json";
+const LIVE_STATS_URL = "https://openadminos.com/stats/agents.json";
 const LIVE_STATS_TIMEOUT_MS = 5_000;
 
 interface LiveStatsFile {

@@ -36,7 +36,7 @@ Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose
 openadminos/
 ├── apps/
 │   ├── desktop/              # Electron main + preload + renderer (Vite + React)
-│   └── marketing/            # Public marketing site (openadminos.example) — Next.js
+│   └── marketing/            # Public marketing site (openadminos.com) — Next.js
 ├── packages/
 │   ├── runtime/              # Agent execution engine
 │   ├── llm/                  # Provider abstraction + concrete providers
@@ -577,7 +577,7 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 - 2 new screens designed and built: registry browse (`09-registry.html`) and empty states (`10-empty-states.html`)
 - LLM provider abstraction with one working provider (Ollama) — real connection, real streaming
 - One sample read-only agent runnable end-to-end against synthetic Graph data
-- Public marketing site at openadminos.example with email signup for private preview
+- Public marketing site at openadminos.com with email signup for private preview
 - Hero screenshots (in README + landing page) and a demo video
 
 ### What v0.1 deliberately defers
@@ -597,7 +597,7 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 3. With Ollama running locally and a model installed: clicking "Run" on the sample agent streams real LLM output into the live run modal, completes successfully, displays structured results.
 4. With Ollama not running: a designed error state appears with the correct recovery instruction (`ollama serve`).
 5. Trust messaging flips correctly when toggling the LLM provider between local and (mocked) hosted in §07.
-6. openadminos.example is publicly resolvable; signup form captures emails to a real backend (verified by submitting a test).
+6. openadminos.com is publicly resolvable; signup form captures emails to a real backend (verified by submitting a test).
 7. README includes a hero screenshot taken from the running app.
 8. A 60–90s demo video is publicly viewable.
 

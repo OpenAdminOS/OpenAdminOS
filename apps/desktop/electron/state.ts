@@ -133,7 +133,7 @@ const providerIds = new Set<ProviderId>(
  * the public stats file. main.ts passes `""` in dev so we don't
  * report dev installs to production.
  */
-const DEFAULT_STATS_API_URL = "https://openadminos.example";
+const DEFAULT_STATS_API_URL = "https://openadminos.com";
 
 function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary {
   return {

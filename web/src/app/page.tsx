@@ -92,7 +92,7 @@ export default function HomePage() {
         <span className="text-xs text-white/40">
           © {new Date().getFullYear()}{" "}
           <Link
-            href="https://openadminos.example"
+            href="https://openadminos.com"
             target="_blank"
             rel="noreferrer"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"

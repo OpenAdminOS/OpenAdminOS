@@ -67,10 +67,10 @@ export default function PrivacyPage() {
               </Link>
               . You can reach the maintainer at{" "}
               <Link
-                href="mailto:support@openadminos.example"
+                href="mailto:support@openadminos.com"
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                support@openadminos.example
+                support@openadminos.com
               </Link>
               .
             </p>
@@ -156,7 +156,7 @@ export default function PrivacyPage() {
                 our database (Supabase, hosted in the EU) and used only to
                 contact you about the OpenAdminOS private preview. You can ask
                 us to delete it at any time by emailing
-                support@openadminos.example.
+                support@openadminos.com.
               </li>
               <li>
                 <span className="text-white">Hosting and logs.</span> The site
@@ -191,7 +191,7 @@ export default function PrivacyPage() {
               the personal data we hold about you, to correct it, or to have
               it deleted. Because the desktop app does not transmit anything
               to us, this in practice applies to your waitlist email and any
-              support correspondence. Email support@openadminos.example and we will
+              support correspondence. Email support@openadminos.com and we will
               respond within 30 days.
             </p>
           </section>
@@ -223,7 +223,7 @@ export default function PrivacyPage() {
         <span className="text-xs text-white/40">
           &copy; {new Date().getFullYear()}{" "}
           <Link
-            href="https://openadminos.example"
+            href="https://openadminos.com"
             target="_blank"
             rel="noreferrer"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
