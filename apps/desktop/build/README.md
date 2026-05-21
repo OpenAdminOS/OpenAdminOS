@@ -2,6 +2,14 @@
 
 ## App icon
 
+The OpenAdminOS mark is an inverse-polarity squircle — accent orange
+canvas with a dark shell-prompt `>_` glyph. Inverse polarity makes it
+pop in a Windows tile grid where most apps use dark backgrounds, and
+the prompt glyph reads as "admin-at-a-terminal" without skewing
+purely developer-tool. See `icon-concepts/` for the rejected
+directions (concentric circles, bracketed prompt, tile grid) that
+led here.
+
 - `icon-source.svg` — vector source of the OpenAdminOS app icon.
 - `icon.png` — 1024×1024 PNG, consumed by `electron-builder` to derive `.icns` / `.ico`.
 

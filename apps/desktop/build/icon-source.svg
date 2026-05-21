@@ -1,18 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <!--
-    Open Agents app icon.
+    OpenAdminOS app icon.
 
-    macOS app-icon template: 1024x1024 canvas with ~100px transparent
-    margin on all sides; the visible icon body lives inside an 824x824
-    area so the artwork matches the size of other Dock icons. The
-    rounded-square mask uses ~22.5% corner radius (Apple's "squircle"
-    proportions).
+    Inverse-polarity squircle: accent orange canvas with a dark shell
+    prompt ">_". Reads as an admin-at-a-prompt — fits the
+    utilitarian, terminal-adjacent brand without being a generic
+    developer tool. The orange-on-dark composition pops in a Windows
+    tile grid where most app icons use dark backgrounds.
+
+    Layout: 1024x1024 canvas with ~100px transparent margin on all
+    sides so the visible body lives in an 824x824 area, matching the
+    size of other Dock icons. The rounded-square mask uses ~22.5%
+    corner radius (Apple's "squircle" proportions).
   -->
-  <rect
-    x="100" y="100" width="824" height="824"
-    rx="185" ry="185"
-    fill="#1c1917"
-  />
-  <circle cx="512" cy="512" r="232" fill="none" stroke="#e8a87c" stroke-width="45"/>
-  <circle cx="512" cy="512" r="77"  fill="#e8a87c"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#e8a87c"/>
+
+  <!-- Chevron > on the left, slightly smaller to make room for the cursor -->
+  <path d="M 270 310 L 530 512 L 270 714"
+        fill="none"
+        stroke="#1c1917"
+        stroke-width="100"
+        stroke-linejoin="round"
+        stroke-linecap="round"/>
+
+  <!-- Cursor _ to the right of the chevron tip, on the prompt baseline -->
+  <rect x="610" y="670" width="190" height="56" rx="28" ry="28" fill="#1c1917"/>
 </svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    Concept B — Bracketed prompt "[O>".
+
+    Three glyphs reading left-to-right: open square bracket, solid O,
+    right chevron. Strong terminal/CLI connotation that fits the
+    "utilitarian, terminal-adjacent" brand from CLAUDE.md without
+    looking like a generic developer tool.
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#1c1917"/>
+
+  <!-- Open square bracket [ on the left -->
+  <path d="M 314 348 L 274 348 L 274 676 L 314 676"
+        fill="none"
+        stroke="#e8a87c"
+        stroke-width="56"
+        stroke-linejoin="miter"
+        stroke-linecap="butt"/>
+
+  <!-- O (annulus) in the middle -->
+  <circle cx="512" cy="512" r="116" fill="none" stroke="#e8a87c" stroke-width="56"/>
+
+  <!-- Right chevron > on the right -->
+  <path d="M 690 380 L 770 512 L 690 644"
+        fill="none"
+        stroke="#e8a87c"
+        stroke-width="56"
+        stroke-linejoin="miter"
+        stroke-linecap="butt"/>
+</svg>

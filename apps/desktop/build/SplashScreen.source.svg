@@ -1,10 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 300">
   <!-- AppX SplashScreen.png source. 620x300 on brand dark canvas.
+       The D2 icon-tile centered, with the OpenAdminOS wordmark below.
        Rasterize: rsvg-convert -w 620 -h 300 SplashScreen.source.svg -o SplashScreen.png -->
   <rect width="620" height="300" fill="#0a0a0c"/>
-  <g transform="translate(258 18)">
-    <rect x="0" y="0" width="264" height="264" rx="59" ry="59" fill="#1c1917"/>
-    <circle cx="132" cy="132" r="74" fill="none" stroke="#e8a87c" stroke-width="14"/>
-    <circle cx="132" cy="132" r="25" fill="#e8a87c"/>
+
+  <!-- Centered icon tile (140x140) -->
+  <g transform="translate(240 50)">
+    <rect x="0" y="0" width="140" height="140" rx="32" ry="32" fill="#e8a87c"/>
+    <!-- Chevron -->
+    <path d="M 37 43 L 72 70 L 37 97"
+          fill="none"
+          stroke="#1c1917"
+          stroke-width="14"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+    <!-- Cursor -->
+    <rect x="84" y="92" width="26" height="8" rx="4" ry="4" fill="#1c1917"/>
   </g>
+
+  <!-- Wordmark below the tile -->
+  <text x="310" y="240" text-anchor="middle"
+        font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="24" font-weight="600" letter-spacing="-0.5" fill="#f5f5f5">
+    OpenAdminOS
+  </text>
 </svg>

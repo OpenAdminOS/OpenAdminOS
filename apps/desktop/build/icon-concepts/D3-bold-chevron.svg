@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    D3 — Bolder chevron, no cursor.
+    Heaviest stroke for maximum legibility at small sizes; nothing else
+    competes for attention. The shape itself is the icon.
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#e8a87c"/>
+
+  <path d="M 348 268 L 740 512 L 348 756"
+        fill="none"
+        stroke="#1c1917"
+        stroke-width="150"
+        stroke-linejoin="round"
+        stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    Concept A — Open "C" with admin pin.
+
+    Bold C-shape with a deliberate gap on the right (the "open" of
+    OpenAdminOS). A small accent tile inside the C reads as a selected
+    item / tenant pin. Distinctive because most ring icons close the
+    ring; the gap is the differentiator.
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#1c1917"/>
+
+  <!-- C arc: from top-right (~80°) counterclockwise through left to
+       bottom-right (~280°). Stroke is thick so it reads at 44x44. -->
+  <path d="M 696 308 A 282 282 0 1 0 696 716"
+        fill="none"
+        stroke="#e8a87c"
+        stroke-width="110"
+        stroke-linecap="round"/>
+
+  <!-- Pin square inside the C (slightly off-center to read as 'selected') -->
+  <rect x="468" y="468" width="88" height="88" rx="14" ry="14" fill="#e8a87c"/>
+</svg>

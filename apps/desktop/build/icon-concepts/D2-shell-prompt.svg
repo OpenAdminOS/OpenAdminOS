@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    D2 — Shell prompt ">_" inline.
+    Chevron and cursor on the same baseline like a real shell prompt.
+    Cursor is short and chunky so it survives small sizes.
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#e8a87c"/>
+
+  <!-- Chevron > on the left, slightly smaller to make room for cursor -->
+  <path d="M 270 310 L 530 512 L 270 714"
+        fill="none"
+        stroke="#1c1917"
+        stroke-width="100"
+        stroke-linejoin="round"
+        stroke-linecap="round"/>
+
+  <!-- Cursor _ to the right of the chevron tip, on the baseline -->
+  <rect x="610" y="670" width="190" height="56" rx="28" ry="28" fill="#1c1917"/>
+</svg>

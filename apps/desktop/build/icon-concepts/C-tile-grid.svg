@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    Concept C — 2x2 tile grid with accent.
+
+    Four small rounded squares in a 2x2 layout. Top-left tile is the
+    accent color, the other three are muted. Reads as: Microsoft tiles,
+    admin dashboards, modules. The asymmetric accent placement makes
+    the icon distinctive at any size and references Windows-native UI.
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#1c1917"/>
+
+  <!-- 2x2 grid, ~286px tiles with ~40px gutter, centered -->
+  <!-- top-left: accent -->
+  <rect x="306" y="306" width="186" height="186" rx="32" ry="32" fill="#e8a87c"/>
+  <!-- top-right: muted -->
+  <rect x="532" y="306" width="186" height="186" rx="32" ry="32" fill="#3a3431"/>
+  <!-- bottom-left: muted -->
+  <rect x="306" y="532" width="186" height="186" rx="32" ry="32" fill="#3a3431"/>
+  <!-- bottom-right: muted -->
+  <rect x="532" y="532" width="186" height="186" rx="32" ry="32" fill="#3a3431"/>
+</svg>

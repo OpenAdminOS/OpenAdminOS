@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    D1 — Just the chevron. Cursor removed.
+    Cleanest, most legible at 44x44.
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#e8a87c"/>
+
+  <path d="M 372 280 L 712 512 L 372 744"
+        fill="none"
+        stroke="#1c1917"
+        stroke-width="120"
+        stroke-linejoin="round"
+        stroke-linecap="round"/>
+</svg>

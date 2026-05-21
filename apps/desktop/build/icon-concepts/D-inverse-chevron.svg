@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    Concept D — Inverse polarity: accent tile, dark chevron + cursor.
+
+    Reverses the dominant color so the icon pops in a Windows tile grid
+    where most app icons use dark or saturated backgrounds. A bold dark
+    chevron with an underscore cursor underneath reads as "prompt" /
+    "where to type" — admin-on-a-machine identity. The strong shape
+    survives at 44x44 better than fine detail.
+  -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#e8a87c"/>
+
+  <!-- Bold chevron > -->
+  <path d="M 372 312 L 660 512 L 372 712"
+        fill="none"
+        stroke="#1c1917"
+        stroke-width="100"
+        stroke-linejoin="round"
+        stroke-linecap="round"/>
+
+  <!-- Cursor underscore beneath the chevron -->
+  <rect x="372" y="772" width="288" height="36" rx="18" ry="18" fill="#1c1917"/>
+</svg>
