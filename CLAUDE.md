@@ -55,9 +55,9 @@ When you build them, save them as `docs/mockups/09-registry.html`, `docs/mockups
 - Commit messages: `area: short imperative summary` (e.g. `runtime: add per-agent cost tracking`, `ui: empty state for zero tenants`).
 - Don't bundle unrelated changes — if you touched something incidental, commit it separately.
 
-### When in doubt, ask Uli
+### When in doubt, ask
 
-Decisions that are *not* in SPEC.md should be flagged, not invented. If you're choosing between two reasonable approaches and the spec is silent, leave a `// TODO(uli): <question>` comment and surface the question rather than picking unilaterally. This applies especially to:
+Decisions that are *not* in SPEC.md should be flagged, not invented. If you're choosing between two reasonable approaches and the spec is silent, leave a `// TODO(ugur): <question>` comment and surface the question rather than picking unilaterally. This applies especially to:
 
 - Naming choices (public API surface, package names, route names)
 - Defaults that affect trust messaging (which LLM provider is default, what telemetry is on/off)

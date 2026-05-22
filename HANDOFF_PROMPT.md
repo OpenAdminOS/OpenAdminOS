@@ -24,7 +24,7 @@ A few things I want to make sure you internalize from the spec before starting:
 - **The CLI and the desktop app share the same UI.** Don't fork the React tree.
 - **Open source from commit zero.** Public repo, MIT license, contributing guide already in place. Don't suggest delaying the public push.
 
-When in doubt about anything not covered in the spec, leave a `// TODO(uli):` comment with your question rather than picking a default. I'd rather answer a question than have to undo an unilateral choice.
+When in doubt about anything not covered in the spec, leave a `// TODO(ugur):` comment with your question rather than picking a default. I'd rather answer a question than have to undo an unilateral choice.
 
 Ready when you are.
 
