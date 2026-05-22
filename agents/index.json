@@ -107,10 +107,10 @@
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml"
     },
     {
-      "id": "retire-inactive-devices",
-      "slug": "retire-inactive-devices",
-      "name": "Retire inactive devices",
-      "description": "Companion to Find inactive devices. Retires devices that have not synced in 180+ days after typed diff confirmation.",
+      "id": "offboarding-agent",
+      "slug": "offboarding-agent",
+      "name": "Offboarding agent",
+      "description": "Identifies stale devices using Intune sync + Entra sign-in signals and retires them after typed confirmation. Open replacement for Microsoft's retired Intune Device Offboarding Agent.",
       "version": "1.0.0",
       "mode": "write",
       "category": "devices",
@@ -123,10 +123,11 @@
       },
       "scopes": [
         "DeviceManagementManagedDevices.Read.All",
-        "DeviceManagementManagedDevices.PrivilegedOperations.All"
+        "DeviceManagementManagedDevices.PrivilegedOperations.All",
+        "Device.Read.All"
       ],
-      "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/retire-inactive-devices/manifest.yaml"
+      "minAppVersion": "0.1.9",
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml"
     },
     {
       "id": "risky-sign-in-triage",

@@ -36,22 +36,22 @@ export default function AgentsHome() {
       setRunError(error instanceof Error ? error.message : String(error));
     }
   };
-  const retireAgentId = "retire-inactive-devices";
-  const retireInstalled = state.installedAgents.some(
-    (agent) => agent.slug === retireAgentId,
+  const offboardingAgentId = "offboarding-agent";
+  const offboardingInstalled = state.installedAgents.some(
+    (agent) => agent.slug === offboardingAgentId,
   );
-  const retireAvailable = registryAgents.some(
-    (agent) => agent.slug === retireAgentId,
+  const offboardingAvailable = registryAgents.some(
+    (agent) => agent.slug === offboardingAgentId,
   );
 
   const handleTryWriteAgent = async () => {
     setRunError(null);
     try {
-      if (!retireInstalled) {
-        if (!retireAvailable) return;
-        await installAgent(retireAgentId);
+      if (!offboardingInstalled) {
+        if (!offboardingAvailable) return;
+        await installAgent(offboardingAgentId);
       }
-      const run = await startRun(retireAgentId);
+      const run = await startRun(offboardingAgentId);
       navigate(`/runs/${run.id}`);
     } catch (error) {
       setRunError(error instanceof Error ? error.message : String(error));
@@ -270,15 +270,15 @@ export default function AgentsHome() {
                   </span>
                 </div>
                 <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
-                  Pair "Find inactive devices" with "Retire inactive devices" to
+                  Pair "Find inactive devices" with the "Offboarding agent" to
                   see the diff confirmation flow.
                 </p>
                 <button
                   onClick={() => void handleTryWriteAgent()}
-                  disabled={!retireAvailable}
+                  disabled={!offboardingAvailable}
                   className="mt-3 text-[11.5px] font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {retireInstalled ? "Run retire" : "Add + run retire"} →
+                  {offboardingInstalled ? "Run offboarding" : "Add + run offboarding"} →
                 </button>
               </div>
             </Card>

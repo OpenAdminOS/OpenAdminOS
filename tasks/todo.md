@@ -323,6 +323,138 @@ The goal of v0.1 was to ship the platform thesis end-to-end against synthetic + 
 - SQLite migration for run history (currently JSON-backed)
 - Scheduled triggers (`triggers[].kind: scheduled`) — manifest already declares them; interpreter only honours manual today
 
+# Per-agent over-the-air updates (0.2.0)
+
+**Status: planned.** Today agent updates ride app updates only — manifests load from the bundled tree and `installedAgents[].version` is a never-checked snapshot. We give every installed agent an opt-in "Update available" path that fetches the new manifest from GitHub and applies it without an app upgrade.
+
+## Why
+
+- Agents iterate faster than the app. A bug fix or feature on `offboarding-agent` shouldn't require a 50 MB Electron release.
+- The GitHub repo is public; `agents/index.json` already ships `version` per agent and a raw `manifestUrl`. The version-comparison data is already on disk in the registry cache.
+- Trust requirement: user-controlled. Click to update, never silent. Same human-in-the-loop ethos as the diff-confirm flow.
+
+## Source of truth — the "meta file" the user asked about
+
+**`agents/index.json` at the registry root is the meta file.** Each entry carries `id`, `slug`, `version` (semver string), and `manifestUrl` (raw GitHub URL to that agent's manifest.yaml). The desktop app fetches this index at launch and caches it to `<userData>/registry-cache/index.json`. To check for updates we compare `installedAgents[slug].version` against `registryIndex[slug].version` — both already in scope, no new metadata file needed.
+
+## Acceptance criteria
+
+- On every `getAppState()`, each entry in `installedAgents[]` gains a derived `updateAvailable?: { version: string; manifestUrl: string }` field when the registry version is newer than the installed version. Not persisted; recomputed on read.
+- AgentsHome cards show a chip "Update available → 1.1.0" when present. AgentDetail page shows a prominent callout with current → new version and an "Update" button.
+- "Update" button → `updateAgent(slug)` IPC → main process fetches `manifestUrl`, parses + validates against the schema, persists to `<userData>/agent-updates/<slug>/manifest.yaml`, then updates `installedAgents[slug]` with the new registry-summary fields (version, scopes, description, name, mode, category).
+- `loadAgentManifestPreview` / `resolveAgentDirectory` check `<userData>/agent-updates/<slug>/` first; bundled tree is the fallback. Other agents are unaffected.
+- User settings, schedule, and `installedAt` are preserved across update. Settings keys that no longer exist in the new manifest are dropped silently; the rest are kept verbatim.
+- Failure modes are surfaced inline, never silent: network error, schema-invalid manifest, slug mismatch between fetched manifest and registry entry. On failure the previously-installed manifest stays in place.
+- No auto-update. No background polling. Detection rides the existing registry refresh on app launch + the user's manual "Refresh" button in the registry panel.
+- Tests cover: semver compare, fetch+validate+persist happy path, schema-invalid manifest rejection, settings preservation, slug mismatch rejection.
+
+## Out of scope (deferred)
+
+- Auto-update toggle. Diff modal showing scope additions explicitly (we just list the new scopes inline on the callout). Typed confirmation for scope-adding updates. Per-agent rollback. Background polling between launches.
+
+## Steps
+
+- [ ] `packages/agent-sdk/src/index.ts`: add `updateAvailable?: { version: string; manifestUrl: string }` to `AgentSummary`.
+- [ ] `packages/runtime/src/index.ts`: export `compareSemver(a, b)` helper; teach `resolveAgentDirectory` to check a caller-supplied override dir first.
+- [ ] `apps/desktop/electron/state.ts`:
+  - Inject the override dir (`<userData>/agent-updates`) into manifest resolution.
+  - Compute `updateAvailable` in `getAppState()` by diffing installed vs registry cache.
+  - New `updateAgent(slug)` method — fetch, validate, persist, refresh state.
+- [ ] `apps/desktop/electron/main.ts`: register `openadminos:update-agent` IPC.
+- [ ] `apps/desktop/electron/preload.mts`: expose `updateAgent` on the bridge.
+- [ ] `apps/desktop/src/state/AppStateContext.tsx`: wire `updateAgent`.
+- [ ] `apps/desktop/src/pages/AgentDetail.tsx`: render the "Update available" callout + button.
+- [ ] `apps/desktop/src/pages/AgentsHome.tsx`: render the chip on cards where `updateAvailable` is set.
+- [ ] Tests in `packages/runtime/src/`: semver compare unit tests.
+- [ ] Tests in `apps/desktop/electron/`: update flow happy + sad paths (or move logic into runtime for testability).
+- [ ] CHANGELOG `[Unreleased]` entry.
+- [ ] `npm run typecheck && npm test && npm run qa && npm run build` green.
+
+## Review
+
+(filled in after execution)
+
+# Offboarding agent (0.1.9 — breaking rename of retire-inactive-devices)
+
+**Status: planned.** Rename `retire-inactive-devices` to `offboarding-agent`, widen its read surface, and reposition it as the open-source replacement for Microsoft's retired Intune Device Offboarding Agent. **No migration shim.** 0.1.9 ships the new agent and overwrites anyone's installed copy of the old one.
+
+## Why
+
+- Microsoft's Security Copilot Device Offboarding Agent retires from the Intune admin center 2026-06-01. It was advisory (suggestion list + one Entra disable); admins did the work manually.
+- Our current `retire-inactive-devices` already executes — we should claim the offboarding-agent name and broaden the signal so we're objectively more useful, not just a rename.
+- Pre-1.0 install base is small; ugur will force-overwrite in 0.1.9, so a clean break is acceptable.
+
+## Acceptance criteria
+
+- Directory `agents/offboarding-agent/` exists; `agents/retire-inactive-devices/` is gone.
+- Manifest `descriptor.id` is `offboarding-agent`, name `Offboarding agent`, package name `@openadminos/agent-offboarding-agent`.
+- Pipeline reads **both** `/deviceManagement/managedDevices` and `/devices` (Entra) and correlates by Intune `azureADDeviceId` ↔ Entra `deviceId`. Flags candidates that are stale by both signals (configurable strategy `both` | `intune-only` | `entra-only`, default `both`).
+- Staleness signals used:
+  - Intune `managedDevice.lastSyncDateTime` exceeds `staleDays`.
+  - Entra `device.approximateLastSignInDateTime` exceeds `staleDays`. Note in rationale that this signal is approximate and lags up to ~14 days per MS docs.
+- Hard exclusions (never include in plan):
+  - `managementState` already in `retirePending` | `retireIssued` | `retireFailed` | `wipePending` | `wipeIssued` | `deletePending` — already in flight.
+  - Entra `accountEnabled: false` — already disabled, retire is still meaningful but de-emphasize.
+- Required Graph $select fields:
+  - managedDevices: add `azureADDeviceId`, `managementState` to existing select.
+  - Entra devices: `id`, `deviceId`, `displayName`, `accountEnabled`, `approximateLastSignInDateTime`, `operatingSystem`, `trustType`, `isManaged`.
+- New settings:
+  - `staleDays` (integer, default 180) — replaces `retireDays`.
+  - `strategy` (enum: `both` | `intune-only` | `entra-only`, default `both`).
+  - `instructions` (string, optional) — free-text guidance fed into the rationale LLM step (mirrors MS's tuning surface).
+- Confirmation phrase becomes `OFFBOARD N DEVICES` (was `RETIRE N DEVICES`). Single write action remains `retire-managed-device` per device (Entra disable is a follow-up; needs runtime change to lift one-write-step cap).
+- Required Graph scopes: `DeviceManagementManagedDevices.Read.All`, `DeviceManagementManagedDevices.PrivilegedOperations.All`, **+ new `Device.Read.All`** for Entra correlation.
+- All references updated: [agents/index.json](../agents/index.json), [README.md](../README.md), [apps/desktop/src/pages/AgentsHome.tsx](../apps/desktop/src/pages/AgentsHome.tsx), [stats/agents.json](../stats/agents.json), [package-lock.json](../package-lock.json) workspace entry, NL2Agent prompts in [apps/desktop/electron/state.ts](../apps/desktop/electron/state.ts) if any.
+- `agents/index.json` no longer carries a `retire-inactive-devices` entry (clean break — anyone hitting the old `manifestUrl` 404s, which is the intended signal to upgrade).
+- README, manifest description, and LLM rationale framing use plain offboarding language; no AI-hype.
+- `npm run typecheck && npm run qa && npm run build` green.
+- CHANGELOG `[Unreleased]` entry calls out the breaking rename and the 0.1.9 force-overwrite plan.
+
+## Out of scope (deferred to its own issue)
+
+- Multi-step write plan (Intune retire + Entra `accountEnabled: false` PATCH in one confirmation). Blocked by [packages/runtime/src/agent-template.ts:114](../packages/runtime/src/agent-template.ts:114) one-write-step cap.
+- Defender / ABM remediation guidance links in the diff UI.
+- 0.1.9 release machinery (force-overwrite logic on app upgrade) — handled by ugur separately.
+
+## Steps
+
+- [x] `git mv agents/retire-inactive-devices agents/offboarding-agent`
+- [ ] Rewrite `agents/offboarding-agent/manifest.yaml` — new id, name, description; add Entra `/devices` load skill; correlation transform; `instructions` setting; offboarding phrase.
+- [ ] Rewrite `agents/offboarding-agent/README.md` — offboarding framing, signals, what it does + doesn't do, contrast with retired MS agent.
+- [ ] Update `agents/offboarding-agent/package.json` name to `@openadminos/agent-offboarding-agent`.
+- [ ] Update [agents/index.json](../agents/index.json) entry (id, slug, manifestUrl, description).
+- [ ] Update [apps/desktop/src/pages/AgentsHome.tsx:39](../apps/desktop/src/pages/AgentsHome.tsx:39) hardcoded id.
+- [ ] Update [README.md:116](../README.md:116) agent table row.
+- [ ] Update [stats/agents.json](../stats/agents.json) key.
+- [ ] Update [tasks/todo.md:212](#) and [tasks/todo.md:308](#) historical lines? No — leave history alone except where it would mislead a reader looking at active scope.
+- [ ] Grep `retire-inactive-devices` post-change — should only appear in CHANGELOG history.
+- [ ] Run `npm run typecheck && npm run qa && npm run build`.
+- [ ] Add `[Unreleased]` CHANGELOG entry.
+
+## Companion sweep (separate commit): TODO(uli) → TODO(ugur)
+
+- [x] [CLAUDE.md:60](../CLAUDE.md:60)
+- [x] [HANDOFF_PROMPT.md:27](../HANDOFF_PROMPT.md:27)
+- [x] [packages/agent-sdk/src/index.ts:1021](../packages/agent-sdk/src/index.ts:1021)
+- [x] [apps/desktop/src/shared/providers.ts:3](../apps/desktop/src/shared/providers.ts:3)
+- [x] Historical entry in [tasks/todo.md:97](#) left untouched per plan.
+
+## Review
+
+**Status: done, ready to commit.** All acceptance criteria met. `npm run typecheck` clean, `npm test` 53/53, `npm run qa` 77 pass / 20 warn (pre-existing) / 0 fail, `npm run build` succeeds.
+
+**One scope deviation from the original plan:** I told ugur up-front that cross-service correlation needed no runtime change — that was wrong. The runtime only shipped five transform kinds (`group-by-age`, `filter-by-age`, etc.), none of which can join two arrays. Added a new `correlate-stale-devices` transform kind in [packages/runtime/src/agent-template.ts](../packages/runtime/src/agent-template.ts) plus a one-line relaxation of `transformSkill.settings.required` in [schemas/agent-template.schema.json](../schemas/agent-template.schema.json) so the new kind validates without forcing a `source` key. Same shape as existing transforms; minimal blast radius.
+
+**What landed:**
+- `agents/offboarding-agent/` (manifest + README) replacing `agents/retire-inactive-devices/`.
+- Reads Intune + Entra, correlates by `azureADDeviceId` ↔ `deviceId`, filters by strategy (`both` | `intune-only` | `entra-only`), excludes in-flight management states, surfaces `instructions` to the rationale LLM.
+- Confirmation phrase: `OFFBOARD N DEVICES`.
+- Registry, top-level README, stats, AgentsHome.tsx, package-lock.json all updated. No alias for the old slug — clean break as requested.
+
+**Deferred (separate work):**
+- Multi-step write plan (Intune retire + Entra `accountEnabled: false`). Blocked by the one-write-step cap in [packages/runtime/src/agent-template.ts:114](../packages/runtime/src/agent-template.ts:114).
+- 0.1.9 force-overwrite logic on app upgrade — ugur owns this.
+
 ## How to run
 
 ```bash

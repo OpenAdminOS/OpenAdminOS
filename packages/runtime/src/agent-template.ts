@@ -874,9 +874,11 @@ async function runTransformSkill(
       return transformGroupByField(skill.id, settings, ctx);
     case "sort-by":
       return transformSortBy(skill.id, settings, ctx);
+    case "correlate-stale-devices":
+      return transformCorrelateStaleDevices(skill.id, settings, ctx);
     default:
       throw new Error(
-        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by.`,
+        `transform "${skill.id}": unknown kind "${String(kind)}". Supported: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices.`,
       );
   }
 }
@@ -1071,6 +1073,165 @@ function transformFilterByAge(
 
   ctx.log("info", `Filter-by-age >= ${threshold}d kept ${matched.length} of ${(spec.source as unknown[]).length}.`);
   return matched;
+}
+
+// Devices in any of these Intune managementState values are already mid-retire
+// or mid-delete. Including them in a new offboarding plan would double-action.
+const IN_FLIGHT_MANAGEMENT_STATES = new Set([
+  "retirePending",
+  "retireIssued",
+  "retireFailed",
+  "wipePending",
+  "wipeIssued",
+  "deletePending",
+]);
+
+type CorrelationStrategy = "both" | "intune-only" | "entra-only";
+
+interface CorrelateStaleDevicesSpec {
+  intuneSource: unknown;
+  entraSource: unknown;
+  staleDays: number | string;
+  strategy: CorrelationStrategy | string;
+}
+
+interface IntuneDeviceLite {
+  id?: string;
+  deviceName?: string;
+  userPrincipalName?: string;
+  operatingSystem?: string;
+  osVersion?: string;
+  lastSyncDateTime?: string;
+  azureADDeviceId?: string;
+  managementState?: string;
+  [key: string]: unknown;
+}
+
+interface EntraDeviceLite {
+  id?: string;
+  deviceId?: string;
+  displayName?: string;
+  accountEnabled?: boolean;
+  approximateLastSignInDateTime?: string;
+  operatingSystem?: string;
+  trustType?: string;
+  isManaged?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Join Intune managedDevices with Entra device records by
+ * `azureADDeviceId === deviceId` and emit offboarding candidates.
+ *
+ * Output rows always preserve the Intune side as the primary identity (the
+ * write step retires via the Intune deviceId) and merge in the Entra
+ * timestamp + Entra object id when a match exists. Devices already in flight
+ * (retirePending et al.) are dropped before the strategy filter.
+ */
+function transformCorrelateStaleDevices(
+  skillId: string,
+  settings: Record<string, unknown>,
+  ctx: RunContext,
+): unknown[] {
+  const spec = settings as unknown as CorrelateStaleDevicesSpec;
+  if (!Array.isArray(spec.intuneSource)) {
+    throw new Error(
+      `transform "${skillId}": correlate-stale-devices expects "intuneSource" to resolve to an array.`,
+    );
+  }
+  if (!Array.isArray(spec.entraSource)) {
+    throw new Error(
+      `transform "${skillId}": correlate-stale-devices expects "entraSource" to resolve to an array.`,
+    );
+  }
+  const threshold = Number(spec.staleDays);
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    throw new Error(
+      `transform "${skillId}": correlate-stale-devices requires "staleDays" as a non-negative number.`,
+    );
+  }
+  const strategy = String(spec.strategy ?? "both") as CorrelationStrategy;
+  if (
+    strategy !== "both" &&
+    strategy !== "intune-only" &&
+    strategy !== "entra-only"
+  ) {
+    throw new Error(
+      `transform "${skillId}": correlate-stale-devices "strategy" must be one of "both", "intune-only", "entra-only" (got "${strategy}").`,
+    );
+  }
+
+  const now = Date.now();
+  const msPerDay = 86_400_000;
+  const thresholdMs = threshold * msPerDay;
+
+  const entraByDeviceId = new Map<string, EntraDeviceLite>();
+  for (const entry of spec.entraSource as EntraDeviceLite[]) {
+    if (entry && typeof entry.deviceId === "string" && entry.deviceId.length > 0) {
+      entraByDeviceId.set(entry.deviceId.toLowerCase(), entry);
+    }
+  }
+
+  const ageMs = (iso: unknown): number | null => {
+    if (typeof iso !== "string") return null;
+    const ms = new Date(iso).getTime();
+    if (Number.isNaN(ms)) return null;
+    return now - ms;
+  };
+
+  const candidates: Array<Record<string, unknown>> = [];
+  let inFlightSkipped = 0;
+
+  for (const intune of spec.intuneSource as IntuneDeviceLite[]) {
+    if (!intune || typeof intune !== "object") continue;
+    if (
+      typeof intune.managementState === "string" &&
+      IN_FLIGHT_MANAGEMENT_STATES.has(intune.managementState)
+    ) {
+      inFlightSkipped++;
+      continue;
+    }
+
+    const aad = typeof intune.azureADDeviceId === "string" ? intune.azureADDeviceId.toLowerCase() : "";
+    const entra = aad ? entraByDeviceId.get(aad) : undefined;
+
+    const intuneAge = ageMs(intune.lastSyncDateTime);
+    const entraAge = ageMs(entra?.approximateLastSignInDateTime);
+    const intuneStale = intuneAge !== null && intuneAge >= thresholdMs;
+    const entraStale = entraAge !== null && entraAge >= thresholdMs;
+
+    let matches = false;
+    switch (strategy) {
+      case "intune-only":
+        matches = intuneStale;
+        break;
+      case "entra-only":
+        matches = entraStale;
+        break;
+      case "both":
+      default:
+        matches = intuneStale && entraStale;
+        break;
+    }
+    if (!matches) continue;
+
+    candidates.push({
+      ...intune,
+      entraObjectId: entra?.id ?? null,
+      approximateLastSignInDateTime: entra?.approximateLastSignInDateTime ?? null,
+      entraAccountEnabled: entra?.accountEnabled ?? null,
+      entraTrustType: entra?.trustType ?? null,
+    });
+  }
+
+  ctx.log(
+    "info",
+    `Correlate stale devices (strategy=${strategy}, staleDays=${threshold}): kept ${candidates.length} of ${
+      (spec.intuneSource as unknown[]).length
+    }; skipped ${inFlightSkipped} already in flight.`,
+  );
+
+  return candidates;
 }
 
 interface CountByFieldSpec {

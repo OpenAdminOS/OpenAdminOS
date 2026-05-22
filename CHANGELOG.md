@@ -6,9 +6,14 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- **Offboarding agent** (`agents/offboarding-agent`) — open-source replacement for Microsoft's retired Intune Device Offboarding Agent. Reads `/deviceManagement/managedDevices` (Intune) and `/devices` (Entra), correlates by `azureADDeviceId` ↔ `deviceId`, and flags candidates that are stale by both signals (configurable: `both` | `intune-only` | `entra-only`). Excludes devices already in flight (`retirePending`, `retireIssued`, `wipePending`, `deletePending`). New free-text `instructions` setting feeds admin-supplied guidance into the LLM rationale step. Confirmation phrase: `OFFBOARD N DEVICES`. Unlike the Microsoft agent, this one actually executes the Intune retire — it is not a suggestion list. Requires the new scope `Device.Read.All` alongside the existing managed-device read + privileged-operations scopes.
+- `correlate-stale-devices` transform kind in the agent-template runtime — joins two device arrays by `azureADDeviceId`/`deviceId`, applies a per-strategy staleness filter, and skips in-flight management states. Documented and validated alongside the existing `filter-by-age` / `group-by-age` family.
+
 ### Changed
 
 ### Removed
+
+- **Breaking: `retire-inactive-devices` agent removed without a migration shim.** Replaced wholesale by `offboarding-agent`. Anyone whose desktop install still references the old slug will see it as orphaned in the registry; 0.1.9 will force-install the new agent on app upgrade. The registry entry, manifest URL, and stats key are all gone. Historical CHANGELOG entries that mention the old slug are left intact for traceability.
 
 ### Fixed
 

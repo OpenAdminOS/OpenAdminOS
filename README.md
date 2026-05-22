@@ -113,7 +113,7 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 | Agent | Category | Mode | What it does |
 |---|---|---|---|
 | `find-inactive-devices` | devices | read | Buckets managed devices by last-sync age. |
-| `retire-inactive-devices` | devices | write | Plans retires for devices ≥180 days inactive, pauses for typed confirmation. |
+| `offboarding-agent` | devices | write | Correlates Intune sync + Entra sign-in to flag stale devices, retires them after typed confirmation. Open replacement for Microsoft's retired Intune Device Offboarding Agent. |
 | `compliance-overview` | compliance | read | Counts devices by `complianceState`. |
 | `os-update-posture` | updates | read | Tallies fleet by OS + OS version; surfaces end-of-life build risk via LLM summary. |
 

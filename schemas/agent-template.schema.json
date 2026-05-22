@@ -202,7 +202,7 @@
             "format": { "const": "transform" },
             "settings": {
               "type": "object",
-              "required": ["kind", "source"],
+              "required": ["kind"],
               "properties": {
                 "kind": {
                   "type": "string",
@@ -211,12 +211,13 @@
                     "filter-by-age",
                     "count-by-field",
                     "group-by-field",
-                    "sort-by"
+                    "sort-by",
+                    "correlate-stale-devices"
                   ],
-                  "description": "Built-in transforms. Adding more is a one-function change in @openadminos/runtime."
+                  "description": "Built-in transforms. Adding more is a one-function change in @openadminos/runtime. Most transforms take a single `source` (Liquid expression resolving to an array); `correlate-stale-devices` takes `intuneSource` and `entraSource` instead."
                 },
                 "source": {
-                  "description": "Liquid expression resolving to an array, e.g. \"{{ load_devices.output }}\"."
+                  "description": "Liquid expression resolving to an array, e.g. \"{{ load_devices.output }}\". Used by all transforms except `correlate-stale-devices`."
                 }
               }
             }

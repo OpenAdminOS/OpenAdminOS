@@ -1,0 +1,173 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# Agent Template manifest for offboarding-agent.
+#
+# Open-source replacement for Microsoft's retired Intune Device Offboarding
+# Agent. Reads device inventory from both Intune (managedDevices) and Entra
+# (devices), correlates by azureADDeviceId, and surfaces stale candidates
+# the admin can offboard with typed confirmation. Unlike the Microsoft
+# agent, this one actually executes the Intune retire — it is not a
+# suggestion list.
+
+descriptor:
+  id: offboarding-agent
+  name: Offboarding agent
+  description: Identifies stale devices using Intune sync + Entra sign-in signals and retires them after typed confirmation. Open replacement for Microsoft's retired Intune Device Offboarding Agent.
+  version: 1.0.0
+  author:
+    name: OpenAdminOS
+    handle: openadminos
+    verified: true
+  category: devices
+  requiresEntraTier: free
+  mode: write
+  preferredModel: llama3.1:8b
+
+# ─── pipeline ──────────────────────────────────────────────────────────────
+skills:
+
+  # 1) Read managedDevices from Intune. azureADDeviceId is the join key
+  #    against Entra; managementState lets us exclude devices already mid-retire.
+  - id: load_intune_devices
+    format: graph
+    label: Load Intune managed devices
+    detail: Reads managedDevices from the active tenant.
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+        - userPrincipalName
+        - operatingSystem
+        - osVersion
+        - lastSyncDateTime
+        - enrolledDateTime
+        - complianceState
+        - azureADDeviceId
+        - managementState
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+
+  # 2) Read Entra device records. `deviceId` here equals managedDevice.azureADDeviceId.
+  #    approximateLastSignInDateTime is the staleness signal on the Entra side;
+  #    per MS docs it can lag up to ~14 days, surfaced in the rationale.
+  - id: load_entra_devices
+    format: graph
+    label: Load Entra device records
+    detail: Reads /devices for cross-service correlation.
+    settings:
+      method: GET
+      path: /devices
+      select:
+        - id
+        - deviceId
+        - displayName
+        - accountEnabled
+        - approximateLastSignInDateTime
+        - operatingSystem
+        - trustType
+        - isManaged
+      scopes:
+        - Device.Read.All
+
+  # 3) Correlate the two inventories and pick offboarding candidates.
+  #    Strategy controls which signal must indicate staleness:
+  #      both        -> stale in Intune sync AND stale in Entra sign-in
+  #      intune-only -> stale in Intune sync (ignores Entra)
+  #      entra-only  -> stale in Entra sign-in (ignores Intune)
+  #    Devices already in flight (retirePending / retireIssued / wipePending /
+  #    deletePending) are always excluded.
+  - id: select_offboarding_candidates
+    format: transform
+    label: Select offboarding candidates
+    detail: "Correlates Intune + Entra; flags devices stale by `{{ settings.strategy }}` past {{ settings.staleDays }} days."
+    settings:
+      kind: correlate-stale-devices
+      intuneSource: "{{ load_intune_devices.output }}"
+      entraSource: "{{ load_entra_devices.output }}"
+      staleDays: "{{ settings.staleDays }}"
+      strategy: "{{ settings.strategy }}"
+
+  # 4) Plain-language rationale for the diff confirmation. Pulls in the
+  #    admin's free-text instructions and the lag caveat on the Entra signal.
+  - id: explain_plan
+    format: llm
+    label: Explain the offboarding plan
+    detail: One-paragraph rationale shown alongside the typed-confirmation prompt.
+    settings:
+      system: >-
+        You are a Microsoft 365 administrator's assistant. Be concise and
+        factual. Write a single short paragraph (3 sentences max) that an
+        admin can paste into a change ticket. Never invent numbers; use only
+        the figures you are given. Honor the admin's instructions if any are
+        provided.
+      prompt: |-
+        About to offboard {{ select_offboarding_candidates.output | size }} devices.
+        Threshold: {{ settings.staleDays }} days. Strategy: {{ settings.strategy }}.
+
+        Write a short paragraph explaining what the admin is approving:
+        - The count, threshold, and strategy in plain English.
+        - Why stale devices are an attack-surface and license-cost concern.
+        - One sentence on what happens: Intune retire removes management state
+          (the device itself is not wiped unless policy says so); the Entra
+          device object stays enabled in this version.
+        - If the strategy uses the Entra signal, note that
+          approximateLastSignInDateTime can lag up to ~14 days.
+
+        Admin instructions (may be empty):
+        {{ settings.instructions | default("(none)") }}
+      temperature: 0.2
+      maxTokens: 260
+
+  # 5) Emit one retire action per candidate. The runtime pauses here.
+  - id: plan_offboarding
+    format: write
+    label: Build offboarding plan
+    detail: One Intune retire action per candidate device. Entra disable is a follow-up.
+    settings:
+      kind: retire-managed-device
+      source: "{{ select_offboarding_candidates.output }}"
+      confirmationPhrase: "OFFBOARD {{ actions | size }} DEVICES"
+      summary: >-
+        {{ explain_plan.output.text | default("Offboard stale devices past the configured threshold.") }}
+      scopes:
+        - DeviceManagementManagedDevices.PrivilegedOperations.All
+      actionTemplate:
+        label: "Offboard {{ item.deviceName }}"
+        description: "{{ item.userPrincipalName }} - {{ item.operatingSystem }} - Intune sync {{ item.lastSyncDateTime }} - Entra sign-in {{ item.approximateLastSignInDateTime | default('n/a') }}"
+        severity: destructive
+        metadata:
+          deviceId: "{{ item.id }}"
+          deviceName: "{{ item.deviceName }}"
+          userPrincipalName: "{{ item.userPrincipalName }}"
+          operatingSystem: "{{ item.operatingSystem }}"
+          lastSyncDateTime: "{{ item.lastSyncDateTime }}"
+          azureADDeviceId: "{{ item.azureADDeviceId }}"
+          entraObjectId: "{{ item.entraObjectId }}"
+          approximateLastSignInDateTime: "{{ item.approximateLastSignInDateTime }}"
+
+# ─── what makes it an agent ────────────────────────────────────────────────
+definition:
+  settings:
+    - id: staleDays
+      label: Stale threshold (days)
+      type: integer
+      default: 180
+      description: A device must exceed this many days of inactivity on the selected signal(s) to be flagged.
+
+    - id: strategy
+      label: Correlation strategy
+      type: string
+      default: both
+      description: "How to combine the Intune and Entra staleness signals. One of: both (stale in both), intune-only (only Intune sync matters), entra-only (only Entra sign-in matters)."
+
+    - id: instructions
+      label: Custom instructions
+      type: string
+      default: ""
+      description: Optional free-text guidance fed to the rationale step. Use this to encode org-specific rules (for example, exclude kiosk devices, prefer Apple BYOD, etc.).
+
+  triggers:
+    - id: manual
+      kind: manual
