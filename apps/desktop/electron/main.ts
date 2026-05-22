@@ -373,6 +373,9 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:uninstall-agent", (_event, slug: string) =>
     store.uninstallAgent(slug),
   );
+  ipcMain.handle("openadminos:update-agent", (_event, slug: string) =>
+    store.updateAgent(slug),
+  );
   ipcMain.handle("openadminos:set-active-provider", (_event, id: ProviderId) =>
     store.setActiveProvider(id),
   );

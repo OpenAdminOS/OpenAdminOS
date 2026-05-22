@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
+  compareSemver,
   createGraphAdapter,
   createMsalClient,
   createOllamaLlm,
@@ -25,6 +26,7 @@ import {
   ManifestValidationError,
   removeAccount,
   runInteractiveFlow,
+  setAgentUpdatesDir,
   tenantSatisfiesRequirement,
   toInstalledAgent,
   type TokenCacheStorage,
@@ -149,6 +151,7 @@ function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary
     requiresEntraTier: entry.requiresEntraTier ?? "free",
     scopes: entry.scopes,
     author: entry.author,
+    manifestUrl: entry.manifestUrl,
   };
 }
 
@@ -228,10 +231,20 @@ export class AppStateStore {
       this.appVersion = options.appVersion ?? "0.0.0";
       this.userDataPath = options.userDataPath;
     }
+    // Point the runtime at the OTA-updated manifest tree (if userData is
+    // configured). When an agent has been updated via `updateAgent`, the
+    // runtime resolves its manifest from here instead of the bundled tree.
+    if (this.userDataPath) {
+      setAgentUpdatesDir(join(this.userDataPath, "agent-updates"));
+    }
     // Warm the connector-config cache so the confirm-bridge can resolve
     // human-readable target labels without an async disk read inside
     // a capability invocation. Updated on every `setConnectorConfig`.
     void this.primeConnectorConfigCache().catch(() => undefined);
+  }
+
+  private agentUpdatesRoot(): string | undefined {
+    return this.userDataPath ? join(this.userDataPath, "agent-updates") : undefined;
   }
 
   /**
@@ -315,11 +328,17 @@ export class AppStateStore {
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
       : undefined;
 
+    const registryAgents = this.listRegistryAgents();
+    const installedAgents = this.decorateInstalledWithUpdateInfo(
+      persisted.installedAgents,
+      registryAgents,
+    );
+
     const state: AppState = {
       activeProviderId: activeProvider?.id ?? "ollama",
       providers,
-      registryAgents: this.listRegistryAgents(),
-      installedAgents: persisted.installedAgents,
+      registryAgents,
+      installedAgents,
       runs: persisted.runs,
       trust: deriveTrustState({ provider: activeProvider, activeTenant }),
       tenants: persisted.tenants,
@@ -1099,6 +1118,172 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (installedSlug && installIdForReport) {
       this.reportInstall(installedSlug, installIdForReport);
     }
+
+    return this.getAppState();
+  }
+
+  /**
+   * Attach `updateAvailable` to any installed agent whose registry version
+   * is newer than what the user has. Pure function over the registry cache
+   * — no I/O, no persistence, recomputed on every `getAppState()`. When
+   * no match is found (e.g. an agent that was removed from the registry,
+   * or a user-authored agent) the field is simply omitted.
+   */
+  private decorateInstalledWithUpdateInfo(
+    installed: AgentSummary[],
+    registry: RegistryAgentSummary[],
+  ): AgentSummary[] {
+    const bySlug = new Map<string, RegistryAgentSummary>();
+    for (const entry of registry) {
+      bySlug.set(entry.slug, entry);
+      if (entry.id !== entry.slug) bySlug.set(entry.id, entry);
+    }
+    return installed.map((agent) => {
+      const candidate = bySlug.get(agent.slug) ?? bySlug.get(agent.id);
+      if (!candidate || !candidate.manifestUrl) return agent;
+      if (compareSemver(candidate.version, agent.version) <= 0) return agent;
+      return {
+        ...agent,
+        updateAvailable: {
+          version: candidate.version,
+          manifestUrl: candidate.manifestUrl,
+        },
+      };
+    });
+  }
+
+  /**
+   * Apply an over-the-air update to a single installed agent. Fetches the
+   * new manifest from the registry's `manifestUrl`, validates it against
+   * the agent-template schema, persists the result to
+   * `<userData>/agent-updates/<slug>/manifest.yaml`, and refreshes the
+   * `installedAgents` entry with the registry-summary fields (version,
+   * scopes, description, name, mode, category). User settings, schedule,
+   * and `installedAt` are preserved; settings keys that no longer exist
+   * in the new manifest are dropped silently. Failures (network, schema,
+   * slug mismatch) throw with an actionable message and leave the
+   * previously-installed manifest in place.
+   */
+  async updateAgent(slug: string): Promise<AppState> {
+    if (!this.userDataPath) {
+      throw new Error(
+        "updateAgent: userDataPath is not configured; cannot persist the updated manifest.",
+      );
+    }
+    const registryAgents = this.listRegistryAgents();
+    const target =
+      registryAgents.find((entry) => entry.slug === slug || entry.id === slug);
+    if (!target) {
+      throw new Error(`updateAgent: agent "${slug}" is not in the registry.`);
+    }
+    if (!target.manifestUrl) {
+      throw new Error(
+        `updateAgent: agent "${slug}" has no manifestUrl; nothing to fetch.`,
+      );
+    }
+
+    // Fetch with a bounded timeout. Failures here surface to the user as
+    // a clear error string — they keep their installed manifest.
+    const FETCH_TIMEOUT_MS = 15_000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let manifestText: string;
+    try {
+      const response = await fetch(target.manifestUrl, {
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} from ${target.manifestUrl}`);
+      }
+      manifestText = await response.text();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`updateAgent: failed to fetch manifest — ${reason}`);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Validate the manifest before writing anything to disk. This rejects
+    // a malformed update without trampling the installed copy.
+    let parsedManifest;
+    try {
+      parsedManifest = parseAgentTemplate(manifestText);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `updateAgent: fetched manifest for "${slug}" is invalid — ${reason}`,
+      );
+    }
+    if (parsedManifest.descriptor.id !== target.id) {
+      throw new Error(
+        `updateAgent: fetched manifest declares id "${parsedManifest.descriptor.id}" but registry expected "${target.id}".`,
+      );
+    }
+
+    // Persist the new manifest under the override directory, atomically:
+    // write to a tmp file first, then rename. Avoids a half-written file
+    // if the process dies mid-write.
+    const updatesRoot = this.agentUpdatesRoot();
+    if (!updatesRoot) {
+      throw new Error("updateAgent: agent-updates root is unavailable.");
+    }
+    const agentDir = join(updatesRoot, slug);
+    await mkdir(agentDir, { recursive: true });
+    const finalPath = join(agentDir, "manifest.yaml");
+    const tmpPath = `${finalPath}.tmp`;
+    await writeFile(tmpPath, manifestText.endsWith("\n") ? manifestText : `${manifestText}\n`, "utf8");
+    await rename(tmpPath, finalPath);
+
+    // Reconcile `installedAgents`. Refresh the registry-derived fields
+    // from `target`, keep user-controlled fields (settings, schedule,
+    // installedAt) intact. Drop any settings keys the new manifest no
+    // longer declares so we don't carry forward dead config silently.
+    const declared = parsedManifest.definition.settings ?? [];
+    const declaredIds = new Set(declared.map((s) => s.id));
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgent: "${slug}" is not installed.`);
+      }
+      const previous = persisted.installedAgents[idx];
+      // Prune any settings whose keys the new manifest no longer declares.
+      // When the new manifest declares zero settings (or all previous keys
+      // were dropped), we explicitly clear `settings` rather than spreading
+      // it conditionally — otherwise `...previous` would leave the stale
+      // settings object behind. Removing the key entirely keeps the
+      // persisted JSON tidy.
+      const prunedSettings = previous.settings
+        ? Object.fromEntries(
+            Object.entries(previous.settings).filter(([key]) => declaredIds.has(key)),
+          )
+        : {};
+      const hasRemainingSettings = Object.keys(prunedSettings).length > 0;
+
+      const { settings: _droppedPreviousSettings, ...previousWithoutSettings } = previous;
+      const next: AgentSummary = {
+        ...previousWithoutSettings,
+        name: target.name,
+        description: target.description,
+        version: target.version,
+        mode: target.mode,
+        category: target.category,
+        tier: target.tier ?? previous.tier,
+        requiresEntraTier: target.requiresEntraTier ?? previous.requiresEntraTier,
+        scopes: target.scopes,
+        author: target.author,
+        ...(hasRemainingSettings ? { settings: prunedSettings } : {}),
+      };
+      // `updateAvailable` is derived state — never persist it.
+      delete next.updateAvailable;
+
+      const installedAgents = [...persisted.installedAgents];
+      installedAgents[idx] = next;
+      await this.write({ ...persisted, installedAgents });
+    });
 
     return this.getAppState();
   }

@@ -33,6 +33,7 @@ export default function AgentDetail() {
     startRun,
     updateAgentSettings,
     uninstallAgent,
+    updateAgent,
     updateAgentSchedule,
   } = useAppState();
   const toast = useToast();
@@ -43,6 +44,7 @@ export default function AgentDetail() {
   const [previewLoading, setPreviewLoading] = useState(true);
   const [configureOpen, setConfigureOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   const handleStartRun = async (choice?: { providerId?: ProviderId; model?: string }) => {
     if (!agent) return;
@@ -206,6 +208,39 @@ export default function AgentDetail() {
         }
       />
       <PageBody>
+        {agent.updateAvailable && (
+          <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-accent-soft)] px-4 py-3 ring-1 ring-[var(--color-accent)]/30">
+            <div className="text-[12.5px] leading-relaxed text-[var(--color-text)]">
+              <span className="font-medium">Update available.</span>{" "}
+              <span className="font-mono">v{agent.version}</span>
+              <span className="opacity-50"> → </span>
+              <span className="font-mono">v{agent.updateAvailable.version}</span>
+              <span className="opacity-70">
+                {" "}
+                — fetches the new manifest from GitHub and replaces this agent's local copy. Your settings and schedule are preserved.
+              </span>
+            </div>
+            <Button
+              variant="secondary"
+              disabled={updating}
+              onClick={() => {
+                setUpdating(true);
+                void updateAgent(agent.slug)
+                  .then(() => {
+                    toast.success(`${agent.name} updated.`);
+                  })
+                  .catch((error) => {
+                    toast.error(
+                      error instanceof Error ? error.message : String(error),
+                    );
+                  })
+                  .finally(() => setUpdating(false));
+              }}
+            >
+              {updating ? "Updating…" : "Update"}
+            </Button>
+          </div>
+        )}
         {runError && (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 ring-1 ring-[var(--color-danger)]/30">
             <div className="text-[12.5px] leading-relaxed text-[var(--color-danger)]">

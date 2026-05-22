@@ -23,6 +23,15 @@ export interface Agent {
   installs?: number;
   lastRunAt?: string;
   preferredModel?: string;
+  /**
+   * Set by the host when the registry advertises a newer version than the
+   * one currently installed. Mirrors `AgentSummary.updateAvailable` from
+   * `@openadminos/agent-sdk`.
+   */
+  updateAvailable?: {
+    version: string;
+    manifestUrl: string;
+  };
 }
 
 export interface RunStep {

@@ -32,6 +32,7 @@ interface AppStateContextValue {
   refreshRegistry: () => Promise<void>;
   installAgent: (agentId: string) => Promise<void>;
   uninstallAgent: (slug: string) => Promise<void>;
+  updateAgent: (slug: string) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
   startRun: (agentSlug: string, options?: StartRunOptions) => Promise<RunRecord>;
@@ -183,6 +184,33 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       const uninstallError = toError(caughtError);
       setError(uninstallError);
       throw uninstallError;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const updateAgent = useCallback(async (slug: string) => {
+    const api = getOpenAdminOSApi();
+
+    if (!api) {
+      const fallbackError = new Error(
+        "Agent update is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const nextState = await api.updateAgent(slug);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const updateError = toError(caughtError);
+      setError(updateError);
+      throw updateError;
     } finally {
       setLoading(false);
     }
@@ -529,6 +557,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       refreshRegistry,
       installAgent,
       uninstallAgent,
+      updateAgent,
       setActiveModel,
       setActiveProvider,
       startRun,
@@ -565,6 +594,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       startRun,
       state,
       uninstallAgent,
+      updateAgent,
       updateAgentSchedule,
       updateAgentSettings,
     ],

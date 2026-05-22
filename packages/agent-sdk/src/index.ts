@@ -117,6 +117,21 @@ export interface AgentSummary extends AgentContract {
    * the user has OpenAdminOS open. Absent / disabled = manual-only.
    */
   schedule?: AgentSchedule;
+  /**
+   * Set by the host when the public registry advertises a version newer
+   * than the one currently installed for this agent. Derived from the
+   * registry cache on every `getAppState()` read — not persisted.
+   * Undefined means the installed version matches (or exceeds) the
+   * registry version, or no registry entry was found.
+   */
+  updateAvailable?: AgentUpdateInfo;
+}
+
+export interface AgentUpdateInfo {
+  /** Semver string from `agents/index.json` at the registry root. */
+  version: string;
+  /** Raw GitHub URL of the new manifest.yaml. */
+  manifestUrl: string;
 }
 
 export interface AgentSchedule {
@@ -130,6 +145,13 @@ export interface RegistryAgentSummary extends AgentContract {
   registryId: string;
   registryPath?: string;
   installs?: number;
+  /**
+   * Raw GitHub URL to this agent's `manifest.yaml`. Populated for entries
+   * sourced from the remote registry index; absent for filesystem-scanned
+   * (bundled or user-authored) entries that don't have a published URL.
+   * Used by the per-agent OTA update flow.
+   */
+  manifestUrl?: string;
 }
 
 export type RunStatus =
@@ -409,6 +431,15 @@ export interface OpenAdminOSApi {
    * directory are deleted entirely.
    */
   uninstallAgent(slug: string): Promise<AppState>;
+  /**
+   * Apply an over-the-air update to an installed agent. The host fetches
+   * the new manifest from the registry's `manifestUrl`, validates it,
+   * persists it to a user-data override location, and updates the
+   * `installedAgents[]` entry. User settings/schedule are preserved.
+   * Throws on network or schema failures, leaving the installed manifest
+   * in place. Surfaced in the UI via `AgentSummary.updateAvailable`.
+   */
+  updateAgent(slug: string): Promise<AppState>;
   setActiveProvider(id: ProviderId): Promise<AppState>;
   /**
    * Pin the active model for the given provider. Pass `null` to revert
@@ -1018,7 +1049,7 @@ export interface WriteAgentModule extends AgentDefinition {
 
 export type AgentModule = ReadAgentModule | WriteAgentModule;
 
-// TODO(uli): only the `ollama` provider has a working runtime adapter as
+// TODO(ugur): only the `ollama` provider has a working runtime adapter as
 // of v0.1.x. LM Studio + the three hosted providers below are kept in the
 // catalog as forward-compat placeholders but flagged "Coming in 0.2" by
 // the renderer (see apps/desktop/src/shared/providers.ts) until adapters

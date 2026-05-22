@@ -81,6 +81,11 @@ export function AgentCard({
           <Pill>
             {agent.scopes.length} scope{agent.scopes.length === 1 ? "" : "s"}
           </Pill>
+          {"updateAvailable" in agent && agent.updateAvailable && (
+            <Pill tone="accent">
+              Update → v{agent.updateAvailable.version}
+            </Pill>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--color-border-soft)] pt-3">

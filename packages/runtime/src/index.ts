@@ -838,7 +838,60 @@ export async function loadAgentModule(
   return agentTemplateToModule(manifest);
 }
 
+/**
+ * Optional override directory for OTA-updated agent manifests. When set,
+ * `resolveAgentDirectory` checks `<dir>/<slug>/manifest.yaml` before the
+ * bundled tree, so an over-the-air update applied from the public registry
+ * takes precedence over the manifest shipped with the app. Set once at
+ * desktop startup via `setAgentUpdatesDir`. Defaults to undefined (no
+ * override) so runtime tests and the CLI continue to read straight from
+ * the bundled tree.
+ */
+let agentUpdatesDir: string | undefined;
+
+export function setAgentUpdatesDir(dir: string | undefined): void {
+  agentUpdatesDir = dir;
+}
+
+export function getAgentUpdatesDir(): string | undefined {
+  return agentUpdatesDir;
+}
+
+/**
+ * Compare two semver-ish strings of the form `MAJOR.MINOR.PATCH`.
+ * Returns 1 if a > b, -1 if a < b, 0 if equal. Missing components default
+ * to 0 (so "1.0" compares equal to "1.0.0"). Non-numeric segments are
+ * treated as 0 — this is a forgiving comparator suitable for the update
+ * detection path, not a full semver parser.
+ */
+export function compareSemver(a: string, b: string): number {
+  const left = a.split(".").map((s) => Number.parseInt(s, 10) || 0);
+  const right = b.split(".").map((s) => Number.parseInt(s, 10) || 0);
+  const len = Math.max(left.length, right.length, 3);
+  for (let i = 0; i < len; i++) {
+    const l = left[i] ?? 0;
+    const r = right[i] ?? 0;
+    if (l > r) return 1;
+    if (l < r) return -1;
+  }
+  return 0;
+}
+
 function resolveAgentDirectory(agent: AgentSummary | RegistryAgentSummary): string {
+  // 0. OTA-updated manifest (if any) overrides the bundled copy. User-
+  //    authored agents with an absolute registryPath still take precedence
+  //    over this — they're locally edited and shouldn't be silently
+  //    replaced by an update.
+  if (agentUpdatesDir && !(agent.registryPath && isAbsolutePath(agent.registryPath))) {
+    const overrideDir = join(agentUpdatesDir, agent.slug);
+    if (existsSync(overrideDir) && statSync(overrideDir).isDirectory()) {
+      const overrideManifest = join(overrideDir, "manifest.yaml");
+      if (existsSync(overrideManifest)) {
+        return overrideDir;
+      }
+    }
+  }
+
   // 1. Absolute registryPath wins (user-authored agents stamp their
   //    absolute path on save). This lets the same slug coexist between
   //    the bundled tree and the user dir without collision.

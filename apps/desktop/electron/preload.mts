@@ -77,6 +77,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:install-agent", agentId),
   uninstallAgent: (slug: string) =>
     ipcRenderer.invoke("openadminos:uninstall-agent", slug),
+  updateAgent: (slug: string) =>
+    ipcRenderer.invoke("openadminos:update-agent", slug),
   setActiveProvider: (id: ProviderId) =>
     ipcRenderer.invoke("openadminos:set-active-provider", id),
   setActiveModel: (providerId: ProviderId, model: string | null) =>
