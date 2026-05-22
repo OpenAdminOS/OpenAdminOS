@@ -50,6 +50,9 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Pin npm version
+        run: npm install -g npm@11.6.2
+
       - name: Read current version
         id: current
         run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
