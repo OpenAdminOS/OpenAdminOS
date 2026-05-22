@@ -16,7 +16,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Removed
 
-- **Breaking: `retire-inactive-devices` agent removed without a migration shim.** Replaced wholesale by `offboarding-agent`. Anyone whose desktop install still references the old slug will see it as orphaned in the registry; 0.1.9 will force-install the new agent on app upgrade. The registry entry, manifest URL, and stats key are all gone. Historical CHANGELOG entries that mention the old slug are left intact for traceability.
+- **Breaking: `retire-inactive-devices` agent removed.** Replaced wholesale by `offboarding-agent`. On first launch of 0.1.9 the persisted entry for the old slug is filtered out of `installedAgents[]` — no migration of settings, no card-rename. Users reinstall `offboarding-agent` fresh from the registry, which now ships in the app bundle. Historical CHANGELOG entries that mention the old slug are left intact for traceability.
 
 ### Fixed
 

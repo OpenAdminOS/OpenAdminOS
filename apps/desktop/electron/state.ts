@@ -2075,7 +2075,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           ? parsed.activeProviderId
           : defaultState.activeProviderId,
         installedAgents: Array.isArray(parsed.installedAgents)
-          ? parsed.installedAgents
+          ? // 0.1.9: force-drop the legacy `retire-inactive-devices` slug.
+            // The agent was renamed to `offboarding-agent`; we don't migrate
+            // settings — users reinstall the new one fresh from the registry.
+            parsed.installedAgents.filter(
+              (agent) =>
+                !(
+                  agent &&
+                  typeof agent === "object" &&
+                  (
+                    (agent as { slug?: unknown }).slug === "retire-inactive-devices" ||
+                    (agent as { id?: unknown }).id === "retire-inactive-devices"
+                  )
+                ),
+            )
           : defaultState.installedAgents,
         runs: Array.isArray(parsed.runs) ? parsed.runs : defaultState.runs,
         tenants,
