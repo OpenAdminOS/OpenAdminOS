@@ -86,6 +86,29 @@
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/find-inactive-devices/manifest.yaml"
     },
     {
+      "id": "offboarding-agent",
+      "slug": "offboarding-agent",
+      "name": "Offboarding agent",
+      "description": "Identifies stale devices using Intune sync + Entra sign-in signals and retires them after typed confirmation. Open replacement for Microsoft's retired Intune Device Offboarding Agent.",
+      "version": "1.0.0",
+      "mode": "write",
+      "category": "devices",
+      "tier": "agent",
+      "requiresEntraTier": "free",
+      "author": {
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
+        "verified": true
+      },
+      "scopes": [
+        "DeviceManagementManagedDevices.Read.All",
+        "Device.Read.All",
+        "DeviceManagementManagedDevices.PrivilegedOperations.All"
+      ],
+      "minAppVersion": "0.1.0",
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml"
+    },
+    {
       "id": "os-update-posture",
       "slug": "os-update-posture",
       "name": "OS update posture",
@@ -105,29 +128,6 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml"
-    },
-    {
-      "id": "offboarding-agent",
-      "slug": "offboarding-agent",
-      "name": "Offboarding agent",
-      "description": "Identifies stale devices using Intune sync + Entra sign-in signals and retires them after typed confirmation. Open replacement for Microsoft's retired Intune Device Offboarding Agent.",
-      "version": "1.0.0",
-      "mode": "write",
-      "category": "devices",
-      "tier": "agent",
-      "requiresEntraTier": "free",
-      "author": {
-        "name": "OpenAdminOS",
-        "handle": "openadminos",
-        "verified": true
-      },
-      "scopes": [
-        "DeviceManagementManagedDevices.Read.All",
-        "DeviceManagementManagedDevices.PrivilegedOperations.All",
-        "Device.Read.All"
-      ],
-      "minAppVersion": "0.1.9",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml"
     },
     {
       "id": "risky-sign-in-triage",
