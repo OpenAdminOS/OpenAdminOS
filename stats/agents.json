@@ -1,57 +1,57 @@
 {
-  "updatedAt": "2026-05-23T06:00:30.203Z",
+  "updatedAt": "2026-05-25T20:00:34.272Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 3,
-      "installs7d": 4
+      "installs": 4,
+      "installs7d": 3
     },
     "offboarding-agent": {
-      "installs": 2,
-      "installs7d": 2
-    },
-    "compliance-overview": {
       "installs": 3,
       "installs7d": 3
     },
+    "compliance-overview": {
+      "installs": 4,
+      "installs7d": 3
+    },
     "os-update-posture": {
-      "installs": 2,
+      "installs": 3,
       "installs7d": 2
     },
     "tenant-health-report": {
-      "installs": 1,
-      "installs7d": 1
-    },
-    "user-license-overview": {
-      "installs": 1,
-      "installs7d": 1
-    },
-    "conditional-access-explainer": {
       "installs": 2,
       "installs7d": 2
     },
+    "user-license-overview": {
+      "installs": 2,
+      "installs7d": 2
+    },
+    "conditional-access-explainer": {
+      "installs": 3,
+      "installs7d": 3
+    },
     "dormant-app-registrations": {
-      "installs": 1,
-      "installs7d": 1
+      "installs": 2,
+      "installs7d": 2
     },
     "risky-sign-in-triage": {
       "installs": 2,
       "installs7d": 2
     },
     "secure-score-prioritizer": {
-      "installs": 1,
-      "installs7d": 1
-    },
-    "sign-in-failure-explainer": {
-      "installs": 1,
-      "installs7d": 1
-    },
-    "stale-guest-cleanup": {
       "installs": 2,
       "installs7d": 2
     },
+    "sign-in-failure-explainer": {
+      "installs": 2,
+      "installs7d": 2
+    },
+    "stale-guest-cleanup": {
+      "installs": 3,
+      "installs7d": 3
+    },
     "tenant-change-audit": {
-      "installs": 1,
-      "installs7d": 1
+      "installs": 2,
+      "installs7d": 2
     }
   }
 }
