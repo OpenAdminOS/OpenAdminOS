@@ -25,7 +25,7 @@
 
 ## Why OpenAdminOS
 
-- **Local-first by default.** Pick a local LLM (Ollama, LM Studio) and tenant data plus prompts never leave the device. No telemetry, no analytics, no error reporting that could carry tenant content. Switching to a hosted provider changes the trust banner honestly.
+- **Local-first by default.** Pick a local LLM (Ollama today; LM Studio planned) and tenant data plus prompts never leave the device. No telemetry, no analytics, no error reporting that could carry tenant content. Switching to a hosted provider changes the trust banner honestly.
 - **Every agent is auditable YAML.** No opaque code paths, no hidden Graph calls. Read the full pipeline — every Graph endpoint, every transform, every prompt — before you install.
 - **Write agents always pause for typed diff confirmation.** No "trust this agent" toggle. Destructive changes require typing the phrase shown against the live diff (`type RETIRE 47 DEVICES to proceed`), every time.
 - **No app registration required.** Sign in with your own admin identity via MSAL (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secrets, no consent dance with a third-party multi-tenant app.
@@ -91,20 +91,21 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 
 - **Tenant data never leaves the device** when a local LLM is selected. No telemetry, no analytics, no error reporting that could include tenant content.
 - **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed-phrase confirmation against the live diff, every time.
-- **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. Run against synthetic mode (no tenant) and the apply phase emits a simulated trace. There is no separate global "enable writes" toggle — the typed-phrase confirmation per run is the only gate.
+- **No tenant, no run.** The desktop shell is gated behind Microsoft 365 tenant connection. With no active tenant, the app stays on onboarding; agents do not run against fallback demo data.
+- **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. There is no separate global "enable writes" toggle — the typed-phrase confirmation per run is the only gate.
 
 ### What's shipped vs what's coming
 
-| | v0.1.5 | v0.2 |
+| | v0.1.9 | Later |
 |---|---|---|
-| Tenant connect (read) | yes (MSAL interactive) | — |
+| Tenant connect | yes (MSAL interactive; required before app shell) | — |
 | Real Graph writes | live POSTs after typed-phrase diff confirm | additional write surface (assignment changes, policy edits) |
 | Local LLM (Ollama) | yes, with `think: false` for reasoning models | — |
 | LM Studio / Anthropic / OpenAI / Azure OpenAI | toggles disabled, "Coming in 0.2" | yes |
 | Per-run schedules | yes (in-process tick while app is open) | OS-level via launchd / Task Scheduler |
 | Auto-update via electron-updater | yes (banner + native dialog) | — |
 | Signed installers + notarization | workflows ready, certs not yet purchased | yes |
-| GitHub-hosted agent registry | local `./agents` only | yes |
+| GitHub-hosted agent registry | fetches `agents/index.json`, caches locally, falls back to bundled agents | forkable enterprise registries |
 | SQLite run history | JSON-file backed | yes |
 | Secrets in OS keychain (keytar) | Electron `safeStorage` only | yes |
 
@@ -116,8 +117,10 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 | `offboarding-agent` | devices | write | Correlates Intune sync + Entra sign-in to flag stale devices, retires them after typed confirmation. Open replacement for Microsoft's retired Intune Device Offboarding Agent. |
 | `compliance-overview` | compliance | read | Counts devices by `complianceState`. |
 | `os-update-posture` | updates | read | Tallies fleet by OS + OS version; surfaces end-of-life build risk via LLM summary. |
+| `sign-in-failure-explainer` | policies | read | Correlates sign-in logs, Conditional Access, device state, and directory changes to explain failures. |
+| `stale-guest-cleanup` | policies | write | Flags stale guests with LLM rationale and disables them only after typed confirmation. |
 
-Each lives at `agents/<slug>/manifest.yaml`. Read them — they are the documentation of what the runtime can do.
+The repo currently indexes 13 agent and dashboard manifests under `agents/<slug>/manifest.yaml`. Read them — they are the documentation of what the runtime can do.
 
 ## Quickstart
 
@@ -140,7 +143,7 @@ npm run qa          # JSON Schema + Graph QA
 npm run build       # production bundle
 ```
 
-The app comes up with four agents (three read-only, one write) discoverable in the Agent Hub. Without a connected tenant, agents run in synthetic mode against an empty Graph fixture — the pipeline executes end-to-end but produces zero records. Connect a real tenant in Settings → Tenants to see actual device data.
+On first launch, the app routes to onboarding until a Microsoft 365 tenant is connected. After tenant connection, Agent Hub fetches the registry index from this repo, caches it locally, and lets you install agents against the active tenant. Agents only run with an active tenant.
 
 ## Architecture
 
@@ -152,7 +155,7 @@ agents/
   <slug>/         manifest.yaml + manifest.json (+ optional TS)
 packages/
   agent-sdk/      Shared types (no runtime)
-  runtime/        Agent Template interpreter, LLM providers, MSAL, synthetic Graph
+  runtime/        Agent Template interpreter, LLM providers, MSAL, Graph adapter
   qa-graph/       Offline manifest QA (schema + msgraph)
 schemas/
   agent-template.schema.json    The canonical contract for manifest.yaml

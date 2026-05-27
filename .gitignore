@@ -45,3 +45,5 @@ src-tauri/target/
 apps/desktop/release/
 .vercel
 .env*.local
+scripts/waitlist-recipients.txt
+scripts/.broadcast-state.json

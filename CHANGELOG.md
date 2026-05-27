@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- README now matches the current desktop app behavior: tenant connection is mandatory before running agents, Agent Hub uses the GitHub-hosted registry with local cache/fallback, and the shipped-version table reflects v0.1.9.
+
 ### Removed
 
 ### Fixed
