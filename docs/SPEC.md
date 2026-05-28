@@ -71,7 +71,7 @@ We previously planned for Tauri (smaller binaries, native webview). After analyz
 - **Proven path for this category.** Claude Desktop, VS Code, Linear, Slack, Figma, 1Password — all Electron. The "Electron is bloated" critique mattered more on 8GB-RAM machines than on modern admin workstations.
 - **t3code is Electron.** Our reference architecture uses Electron with `node-pty` and long-lived subprocess work — patterns port directly.
 
-The cost we accept: ~80–150MB installer size (vs ~5–10MB Tauri), ~150–250MB idle memory per window. For an IT-admin tool on managed devices this can pinch corporate deployment limits, but it's not a blocker. Trust posture is *architectural* (no telemetry, local-first, write confirmation), not framework-derived.
+The cost we accept: ~80–150MB installer size (vs ~5–10MB Tauri), ~150–250MB idle memory per window. For an IT-admin tool on managed devices this can pinch corporate deployment limits, but it's not a blocker. Trust posture is *architectural* (no tenant-content telemetry, local-first, write confirmation), not framework-derived.
 
 ### Reference architecture: t3code
 
@@ -466,7 +466,13 @@ SQLite via `better-sqlite3` for:
 - Run history (full structured logs)
 - LLM provider configurations (with hosted-provider API keys in OS keychain)
 
-No cloud sync. No telemetry by default.
+No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
+error-reporting telemetry. Packaged production builds may send a minimal public
+registry install-count event when a public agent is installed: agent slug, app
+version, OS platform, and a random per-installation UUID used only for
+deduplication. The stats endpoint may use IP addresses for short-lived rate
+limiting. These events must never include tenant identifiers, user identifiers,
+prompts, run results, or Microsoft Graph data.
 
 ### Code signing
 

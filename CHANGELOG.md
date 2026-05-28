@@ -8,6 +8,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Privacy, terms, README, and marketing copy now disclose production registry install-count reporting where needed, remove stale email-capture references, and keep the no-tenant-telemetry guarantee precise.
 - Marketing landing page now uses a fuller t3.codes-style product narrative with trust/provider proof, registry preview, write-confirmation showcase, open-source proof, and a final download CTA.
 - Marketing release badge and macOS download CTA now resolve from the latest GitHub release instead of requiring a manual version bump.
 - Marketing footer now keeps the OpenAdminOS wordmark as plain text and links to the company LinkedIn page with an icon.
@@ -53,7 +54,7 @@ Patch release cleaning up two cosmetic regressions from the v0.1.7 rebrand. **Fi
 
 ### Removed
 
-- `web/.env.example` — orphan from the Supabase waitlist (deleted in v0.1.7). The marketing site has no build-time required env vars anymore; every remaining env var is optional and only consumed at request time by the stats routes.
+- `web/.env.example` — orphan from the earlier email capture flow (deleted in v0.1.7). The marketing site has no build-time required env vars anymore; every remaining env var is optional and only consumed at request time by the stats routes.
 
 ### Auto-update
 
@@ -144,7 +145,7 @@ If you have v0.1.7 installed on macOS, your app will detect this release on next
 
 ### Added
 
-- **Privacy policy page at `/privacy`.** Honest, plain-language policy covering MSAL token storage in OS keychain, Microsoft Graph data handling on-device, local-vs-hosted LLM provider behavior, no-telemetry stance, and the waitlist-only data the marketing site collects. Maintainer contact is `support@openadminos.com`. Linked from the homepage footer. Required for Microsoft Store submission and for the desktop app's eventual in-app About link.
+- **Privacy policy page at `/privacy`.** Honest, plain-language policy covering MSAL token storage in OS keychain, Microsoft Graph data handling on-device, local-vs-hosted LLM provider behavior, and the no-tenant-telemetry stance. Maintainer contact is `support@openadminos.com`. Linked from the homepage footer. Required for Microsoft Store submission and for the desktop app's eventual in-app About link.
 - **Terms of use page at `/terms`.** One-page terms covering MIT-license as-is/no-warranty disclaimer, user responsibility for tenant authorization and write-agent diff approval, third-party services (Microsoft Graph + the user's LLM provider) being governed by their own terms, acceptable use, and a pointer back to the privacy policy. Linked from the homepage footer.
 - **Sitemap and robots.txt for the marketing site.** New `web/src/app/sitemap.ts` and `web/src/app/robots.ts` using Next.js App Router metadata routes. Sitemap lists `/`, `/privacy`, and `/terms`; robots allows everything except `/api/` and points crawlers at the sitemap. Makes the legal pages discoverable to search engines and to Microsoft's Store-submission crawlers.
 - **Microsoft Store auto-publish workflow.** New `.github/workflows/store-publish.yml` fires on `release: published` (and `workflow_dispatch`), downloads the `.appx` from the GitHub release assets, and submits it to Partner Center via Microsoft's official `msstore` Developer CLI. The first submission stays manual; subsequent releases auto-submit once `PARTNER_CENTER_TENANT_ID`, `PARTNER_CENTER_CLIENT_ID`, `PARTNER_CENTER_CLIENT_SECRET`, and `MS_STORE_APP_ID` are configured as repo secrets. The workflow skips cleanly (with a warning) until the secrets exist, so it's safe to land before the manual onboarding is finished. `docs/RELEASING.md` documents the one-time Partner Center → Azure AD app registration → Manager-role onboarding plus the secret names.

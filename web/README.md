@@ -1,6 +1,6 @@
 # OpenAdminOS - marketing site
 
-Public landing page for [openadminos.com](https://openadminos.com). Captures waitlist signups in Supabase.
+Public landing page for [openadminos.com](https://openadminos.com).
 
 This directory lives inside the [OpenAdminOS monorepo](https://github.com/OpenAdminOS/OpenAdminOS) but is intentionally **not** an npm workspace — it has its own `package.json` and `package-lock.json` and is deployed independently. Vercel's project Root Directory is set to `web`.
 
@@ -9,7 +9,6 @@ This directory lives inside the [OpenAdminOS monorepo](https://github.com/OpenAd
 - Next.js 15 (App Router)
 - React 19
 - Tailwind CSS 4
-- Supabase JS (waitlist storage)
 - `@t3-oss/env-nextjs` + Zod (env validation)
 
 ## Local development
@@ -18,7 +17,6 @@ This directory lives inside the [OpenAdminOS monorepo](https://github.com/OpenAd
 cd web
 npm install
 cp .env.example .env
-# fill in NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
 npm run dev
 ```
 
@@ -26,12 +24,9 @@ The dev server runs on http://localhost:3000.
 
 ## Environment variables
 
-| Name                            | Required | Description                                  |
-| ------------------------------- | -------- | -------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | Yes      | Supabase project URL.                        |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes      | Supabase anon key (safe to ship to clients). |
-
-Both must be set in Vercel's project Environment Variables for production.
+The static marketing pages have no required build-time environment variables.
+The optional stats routes use server-side variables documented in
+`web/src/env.js`.
 
 ## Deployment
 

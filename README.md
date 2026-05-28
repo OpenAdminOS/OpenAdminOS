@@ -25,7 +25,7 @@
 
 ## Why OpenAdminOS
 
-- **Local-first by default.** Pick a local LLM (Ollama today; LM Studio planned) and tenant data plus prompts never leave the device. No telemetry, no analytics, no error reporting that could carry tenant content. Switching to a hosted provider changes the trust banner honestly.
+- **Local-first by default.** Pick a local LLM (Ollama today; LM Studio planned) and tenant data plus prompts never leave the device. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. Switching to a hosted provider changes the trust banner honestly.
 - **Every agent is auditable YAML.** No opaque code paths, no hidden Graph calls. Read the full pipeline — every Graph endpoint, every transform, every prompt — before you install.
 - **Write agents always pause for typed diff confirmation.** No "trust this agent" toggle. Destructive changes require typing the phrase shown against the live diff (`type RETIRE 47 DEVICES to proceed`), every time.
 - **No app registration required.** Sign in with your own admin identity via MSAL (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secrets, no consent dance with a third-party multi-tenant app.
@@ -89,7 +89,7 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 
 ### Trust model (non-negotiable)
 
-- **Tenant data never leaves the device** when a local LLM is selected. No telemetry, no analytics, no error reporting that could include tenant content.
+- **Tenant data never leaves the device** when a local LLM is selected. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry.
 - **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed-phrase confirmation against the live diff, every time.
 - **No tenant, no run.** The desktop shell is gated behind Microsoft 365 tenant connection. With no active tenant, the app stays on onboarding; agents do not run against fallback demo data.
 - **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. There is no separate global "enable writes" toggle — the typed-phrase confirmation per run is the only gate.

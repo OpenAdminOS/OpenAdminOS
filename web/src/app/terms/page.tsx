@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     "The terms that govern your use of the OpenAdminOS desktop app and openadminos.com.",
 };
 
-const LAST_UPDATED = "2026-05-19";
+const LAST_UPDATED = "2026-05-28";
 
 export default function TermsPage() {
   return (
@@ -44,10 +44,10 @@ export default function TermsPage() {
           <section>
             <h2 className="text-base font-semibold text-white">Summary</h2>
             <p className="mt-3">
-              OpenAdminOS is open-source software published by OpenAdminOS under
-                the MIT License. These terms govern your use of the desktop
-                app and the website at openadminos.com. By installing the app
-                or using the site, you agree to them.
+              OpenAdminOS is open-source software maintained by the OpenAdminOS
+              project under the MIT License. These terms govern your use of the
+              desktop app and the website at openadminos.com. By installing the
+              app or using the site, you agree to them.
             </p>
           </section>
 

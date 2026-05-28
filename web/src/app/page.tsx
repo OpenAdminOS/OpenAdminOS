@@ -101,7 +101,7 @@ const PROOF_ITEMS = [
   ["MIT", "Commercial-friendly license"],
   ["TypeScript", "Agents, runtime, desktop, and site"],
   ["SQLite", "Run history stays local"],
-  ["No telemetry", "No tenant content leaves by default"],
+  ["No tenant telemetry", "No tenant content leaves by default"],
 ];
 
 export default async function HomePage() {

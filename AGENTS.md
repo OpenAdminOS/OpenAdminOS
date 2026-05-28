@@ -69,7 +69,7 @@ Decisions that are *not* in SPEC.md should be flagged, not invented. If you're c
 
 These are non-negotiable. If you find yourself about to violate one, stop and ask.
 
-1. **Tenant data and LLM prompts never leave the user's machine when a local provider is selected.** No telemetry, no analytics, no error reporting that could include tenant content. When a hosted provider is selected, the UI must honestly state where data goes (e.g., "Anthropic API · US").
+1. **Tenant data and LLM prompts never leave the user's machine when a local provider is selected.** No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. When a hosted provider is selected, the UI must honestly state where data goes (e.g., "Anthropic API · US").
 
 2. **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. No "trust this agent" exception. Every write operation gets human-in-the-loop approval, every time. Destructive operations require typed confirmation (e.g., user must type `RETIRE 47 DEVICES` to proceed).
 
@@ -120,7 +120,7 @@ Order of attack for v0.1 (full detail in `tasks/todo.md`):
 3. Screen implementation: all 8 designed mockups + 2 new (`09-registry`, `10-empty-states`) as React routes with mocked data.
 4. LLM abstraction + Ollama provider: real interface, real streaming, smoke test.
 5. Sample agent + synthetic Graph data layer: one read-only agent runnable end-to-end.
-6. Marketing site at openadminos.com + email signup capture.
+6. Marketing site at openadminos.com with download, trust-model, registry, and write-confirmation sections.
 7. Polish, screenshots, demo video, tag v0.1.0.
 
 ---
