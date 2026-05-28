@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.2.0] - 2026-05-28
+
+### Added
+
 - Desktop sidebar now has an Agents → Schedules submenu with a schedules overview page for active per-agent schedules, run-now actions, disable controls, and command-palette navigation.
 - OS scheduler registration for macOS/Windows: after tenant sign-in, OpenAdminOS can install a per-user LaunchAgent or Task Scheduler task so due agent schedules run through the signed app while the UI is closed.
 - OpenAI Codex LLM provider backed by the locally installed `codex` CLI. The adapter probes CLI install/auth state, populates the model picker from Codex's local model cache, and runs agent LLM steps through `codex exec --ephemeral --skip-git-repo-check -s read-only` without storing OpenAI API keys.
