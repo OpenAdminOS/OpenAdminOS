@@ -4,3 +4,215 @@
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
+
+@keyframes diff-row-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes diff-badge-attention {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+  }
+
+  45% {
+    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.08);
+  }
+}
+
+@keyframes diff-admin-input-type {
+  0%,
+  22% {
+    max-width: 0;
+  }
+
+  72%,
+  100% {
+    max-width: 17ch;
+  }
+}
+
+@keyframes diff-confirm-caret {
+  0%,
+  48% {
+    opacity: 1;
+  }
+
+  49%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes diff-admin-cursor-click {
+  0%,
+  68% {
+    left: 0.75rem;
+    opacity: 0;
+    transform: scale(1);
+  }
+
+  76% {
+    left: calc(100% - 4.4rem);
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  84% {
+    left: calc(100% - 4.4rem);
+    opacity: 1;
+    transform: scale(0.88);
+  }
+
+  92% {
+    left: calc(100% - 4.4rem);
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  100% {
+    left: calc(100% - 4.4rem);
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes diff-button-click {
+  0%,
+  78%,
+  92%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+
+  84% {
+    transform: translateY(1px) scale(0.96);
+  }
+}
+
+@keyframes diff-click-ripple {
+  0%,
+  78% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+
+  84% {
+    opacity: 0.42;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.8);
+  }
+}
+
+.diff-row {
+  opacity: 0;
+}
+
+.diff-demo-active .diff-row {
+  animation: diff-row-in 520ms ease-out both;
+}
+
+.diff-demo-active .diff-row:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.diff-demo-active .diff-row:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.diff-demo-active .diff-badge {
+  animation: diff-badge-attention 1.8s ease-in-out 2;
+}
+
+.diff-confirm-input {
+  max-width: 0;
+  width: 17ch;
+}
+
+.diff-demo-active .diff-confirm-input {
+  animation: diff-admin-input-type 3s steps(17, end) 500ms forwards;
+}
+
+.diff-confirm-caret {
+  animation: diff-confirm-caret 900ms step-end infinite;
+}
+
+.diff-confirm-button {
+  min-width: 5.75rem;
+  overflow: hidden;
+  position: relative;
+  text-align: center;
+  transition:
+    background-color 240ms ease,
+    border-color 240ms ease,
+    color 240ms ease;
+}
+
+.diff-demo-active .diff-confirm-button {
+  animation: diff-button-click 5.1s ease-in-out forwards;
+}
+
+.diff-click-ripple {
+  background: rgba(254, 243, 199, 0.36);
+  border-radius: 999px;
+  height: 2.4rem;
+  left: 38%;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 52%;
+  transform: translate(-50%, -50%) scale(0.2);
+  width: 2.4rem;
+}
+
+.diff-demo-active .diff-click-ripple {
+  animation: diff-click-ripple 5.1s ease-in-out forwards;
+}
+
+.diff-demo-approved .diff-confirm-caret {
+  display: none;
+}
+
+.diff-demo-cursor {
+  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.45));
+  left: 0.75rem;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0.7rem;
+  transform: scale(1);
+  width: 1.25rem;
+  z-index: 2;
+}
+
+.diff-demo-active .diff-demo-cursor {
+  animation: diff-admin-cursor-click 5.1s ease-in-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diff-row,
+  .diff-badge,
+  .diff-confirm-input,
+  .diff-confirm-caret,
+  .diff-confirm-button,
+  .diff-click-ripple,
+  .diff-demo-cursor {
+    animation: none;
+  }
+
+  .diff-confirm-input {
+    max-width: none;
+  }
+}

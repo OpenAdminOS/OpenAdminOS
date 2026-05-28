@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing landing page now uses a fuller t3.codes-style product narrative with trust/provider proof, registry preview, write-confirmation showcase, open-source proof, and a final download CTA.
+- Marketing release badge and macOS download CTA now resolve from the latest GitHub release instead of requiring a manual version bump.
 - README now matches the current desktop app behavior: tenant connection is mandatory before running agents, Agent Hub uses the GitHub-hosted registry with local cache/fallback, and the shipped-version table reflects v0.1.9.
 
 ### Removed

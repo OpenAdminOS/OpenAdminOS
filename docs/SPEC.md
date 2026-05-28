@@ -568,7 +568,7 @@ These were debated and decided. Don't relitigate without explicit reason.
 
 ## 5a. v0.1 — Private preview showcase
 
-The first shippable milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page that captures private-preview signups. Built to generate screenshots, demo videos, and signups — not to be production-deployable against real tenants.
+The first shippable milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest — not to be production-deployable against real tenants.
 
 ### What v0.1 includes
 
@@ -577,7 +577,7 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 - 2 new screens designed and built: registry browse (`09-registry.html`) and empty states (`10-empty-states.html`)
 - LLM provider abstraction with one working provider (Ollama) — real connection, real streaming
 - One sample read-only agent runnable end-to-end against synthetic Graph data
-- Public marketing site at openadminos.com with email signup for private preview
+- Public marketing site at openadminos.com with download, GitHub, product screenshot, trust-model, registry, and write-confirmation sections
 - Hero screenshots (in README + landing page) and a demo video
 
 ### What v0.1 deliberately defers
@@ -597,7 +597,7 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 3. With Ollama running locally and a model installed: clicking "Run" on the sample agent streams real LLM output into the live run modal, completes successfully, displays structured results.
 4. With Ollama not running: a designed error state appears with the correct recovery instruction (`ollama serve`).
 5. Trust messaging flips correctly when toggling the LLM provider between local and (mocked) hosted in §07.
-6. openadminos.com is publicly resolvable; signup form captures emails to a real backend (verified by submitting a test).
+6. openadminos.com is publicly resolvable and presents a working download/GitHub CTA with the local-first trust model visible on the page.
 7. README includes a hero screenshot taken from the running app.
 8. A 60–90s demo video is publicly viewable.
 

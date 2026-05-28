@@ -1,51 +1,175 @@
 import Image from "next/image";
 import Link from "next/link";
 
-// Pinned to the current release. Bump on each tagged release.
-// (A version-less /api/download/[platform] route would avoid this,
-// but a hardcoded URL is fine while we ship infrequently.)
-const MACOS_DMG_URL =
-  "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/v0.1.8/OpenAdminOS-0.1.8-arm64.dmg";
-const CURRENT_VERSION = "v0.1.8";
+import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
 
-export default function HomePage() {
+const RELEASES_URL = "https://github.com/OpenAdminOS/OpenAdminOS/releases";
+const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
+const LATEST_RELEASE_API_URL =
+  "https://api.github.com/repos/OpenAdminOS/OpenAdminOS/releases/latest";
+
+export const revalidate = 900;
+
+interface GitHubReleaseAsset {
+  browser_download_url?: string;
+  name?: string;
+}
+
+interface GitHubLatestRelease {
+  assets?: GitHubReleaseAsset[];
+  html_url?: string;
+  tag_name?: string;
+}
+
+async function getLatestRelease() {
+  try {
+    const response = await fetch(LATEST_RELEASE_API_URL, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      next: { revalidate },
+    });
+
+    if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+
+    const release = (await response.json()) as GitHubLatestRelease;
+    const macosAsset = release.assets?.find((asset) => {
+      const name = asset.name?.toLowerCase() ?? "";
+      return name.endsWith(".dmg") && name.includes("arm64");
+    });
+
+    return {
+      macosDmgUrl: macosAsset?.browser_download_url ?? LATEST_RELEASE_URL,
+      releaseNotesUrl: release.html_url ?? LATEST_RELEASE_URL,
+      version: release.tag_name ?? "Latest release",
+    };
+  } catch {
+    return {
+      macosDmgUrl: LATEST_RELEASE_URL,
+      releaseNotesUrl: LATEST_RELEASE_URL,
+      version: "Latest release",
+    };
+  }
+}
+
+const TRUST_ITEMS = [
+  {
+    label: "Ollama",
+    detail: "Local model · tenant data stays on this device",
+    command: "ollama serve",
+  },
+  {
+    label: "LM Studio",
+    detail: "Local server · no vendor API key stored",
+    command: "localhost:1234",
+  },
+  {
+    label: "Hosted providers",
+    detail: "OpenAI, Anthropic, or Azure OpenAI · labeled before every run",
+    command: "explicit egress",
+  },
+  {
+    label: "Microsoft Graph",
+    detail: "Every agent declares scopes before install",
+    command: "admin consent",
+  },
+];
+
+const AGENTS = [
+  {
+    name: "Intune stale device audit",
+    mode: "Read-only",
+    scopes: "DeviceManagementManagedDevices.Read.All",
+    description: "Find devices that have stopped checking in and explain why they matter.",
+  },
+  {
+    name: "Risky sign-in triage",
+    mode: "Read-only",
+    scopes: "IdentityRiskEvent.Read.All",
+    description: "Summarize risky sign-ins with tenant-specific remediation notes.",
+  },
+  {
+    name: "Stale guest cleanup",
+    mode: "Write",
+    scopes: "User.ReadWrite.All",
+    description: "Prepare a reviewed disable plan for guests that have gone inactive.",
+  },
+];
+
+const PROOF_ITEMS = [
+  ["MIT", "Commercial-friendly license"],
+  ["TypeScript", "Agents, runtime, desktop, and site"],
+  ["SQLite", "Run history stays local"],
+  ["No telemetry", "No tenant content leaves by default"],
+];
+
+export default async function HomePage() {
+  const latestRelease = await getLatestRelease();
+
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#0a0a0c] text-white">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#070709] text-white">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[600px] bg-[radial-gradient(ellipse_at_top,rgba(140,140,255,0.10),transparent_70%)]"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"
       />
 
-      <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
+      <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
         <Link href="/" className="text-sm font-semibold tracking-tight">
           OpenAdminOS
         </Link>
+        <nav className="hidden items-center gap-6 text-sm text-white/55 sm:flex">
+          <Link href="#agents" className="transition hover:text-white">
+            Agents
+          </Link>
+          <Link href="#safety" className="transition hover:text-white">
+            Safety
+          </Link>
+          <Link
+            href="https://github.com/OpenAdminOS/OpenAdminOS"
+            target="_blank"
+            rel="noreferrer"
+            className="transition hover:text-white"
+          >
+            GitHub
+          </Link>
+          <a
+            href={latestRelease.macosDmgUrl}
+            className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
+          >
+            Download
+          </a>
+        </nav>
       </header>
 
       <main className="relative z-10 flex flex-1 flex-col items-center px-6 sm:px-10">
-        <div className="flex flex-col items-center pt-10 text-center sm:pt-14">
+        <section className="flex flex-col items-center pt-10 text-center sm:pt-14">
           <Link
-            href={`https://github.com/OpenAdminOS/OpenAdminOS/releases/tag/${CURRENT_VERSION}`}
+            href={latestRelease.releaseNotesUrl}
             target="_blank"
             rel="noreferrer"
             className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-wider text-white/70 transition hover:border-white/20 hover:text-white"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            {CURRENT_VERSION} — release notes
+            {latestRelease.version} — release notes
           </Link>
 
-          <h1 className="max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
-            Open-source, local-first agents for Microsoft 365 admins.
+          <h1 className="max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
+            The open-source control plane for Microsoft 365 agents.
           </h1>
 
-          <p className="mt-4 max-w-2xl text-balance text-base text-white/60 sm:text-lg">
-            Connect a tenant, pick a local LLM, run read-only agents against
-            Intune and Entra. Tenant data and prompts stay on your machine.
+          <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-white/60 sm:text-lg">
+            Run scoped agents against Intune and Entra, keep local runs local,
+            and review every change before it touches your tenant.
           </p>
 
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
             <a
-              href={MACOS_DMG_URL}
+              href={latestRelease.macosDmgUrl}
               className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
             >
               <svg
@@ -89,21 +213,194 @@ export default function HomePage() {
               github.com/OpenAdminOS/OpenAdminOS
             </Link>
           </p>
-        </div>
+        </section>
 
-        <div className="mt-12 w-full max-w-[88rem] pb-16 sm:mt-16">
-          <div className="relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] shadow-[0_40px_160px_-20px_rgba(140,140,255,0.3)] sm:rounded-2xl">
-            <Image
-              src="/openadminos-app.png"
-              alt="OpenAdminOS app showing agent runs across Intune-managed devices"
-              width={2400}
-              height={1500}
-              priority
-              sizes="(min-width: 1408px) 1408px, 100vw"
-              className="h-auto w-full"
-            />
+        <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
+          <Image
+            src="/openadminos-app.png"
+            alt="OpenAdminOS app showing agent runs across Intune-managed devices"
+            width={2400}
+            height={1500}
+            priority
+            sizes="(min-width: 1408px) 1408px, 100vw"
+            className="h-auto w-full drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)]"
+          />
+        </section>
+
+        <section className="grid w-full max-w-7xl gap-5 py-20 md:grid-cols-[0.95fr_1.05fr] md:items-start">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300/80">
+              Local-first by default
+            </p>
+            <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
+              Bring your own tenant. Bring your own model.
+            </h2>
+            <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
+              OpenAdminOS does not resell tokens or hide egress behind vague
+              copy. Local providers are marked local. Hosted providers are
+              marked hosted before a run starts.
+            </p>
           </div>
-        </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {TRUST_ITEMS.map((item) => (
+              <div
+                key={item.label}
+                className="rounded-lg border border-white/10 bg-white/[0.035] p-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold">{item.label}</h3>
+                  <code className="rounded border border-white/10 bg-black/35 px-2 py-1 font-mono text-[11px] text-white/50">
+                    {item.command}
+                  </code>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-white/55">
+                  {item.detail}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section
+          id="agents"
+          className="w-full max-w-7xl border-y border-white/10 py-20"
+        >
+          <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">
+                Agent registry
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+                Community agents with declared scopes.
+              </h2>
+              <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+                Agents install from a GitHub-hosted registry. Each one declares
+                the Graph scopes it needs, whether it reads or writes, and what
+                kind of model it expects.
+              </p>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12]">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40">
+                <span>Agent</span>
+                <span>Mode</span>
+                <span>Scope</span>
+              </div>
+              {AGENTS.map((agent) => (
+                <div
+                  key={agent.name}
+                  className="grid gap-3 border-b border-white/10 px-4 py-4 last:border-b-0 md:grid-cols-[minmax(0,1fr)_96px_minmax(260px,320px)]"
+                >
+                  <div>
+                    <h3 className="text-sm font-semibold text-white/90">
+                      {agent.name}
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-white/50">
+                      {agent.description}
+                    </p>
+                  </div>
+                  <span
+                    className={`h-fit rounded-md border px-2 py-1 text-xs font-medium ${
+                      agent.mode === "Write"
+                        ? "border-amber-300/25 bg-amber-300/10 text-amber-200"
+                        : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
+                    }`}
+                  >
+                    {agent.mode}
+                  </span>
+                  <code className="break-all font-mono text-xs leading-5 text-white/50">
+                    {agent.scopes}
+                  </code>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section
+          id="safety"
+          className="grid w-full max-w-7xl gap-8 py-20 lg:grid-cols-[1fr_1fr] lg:items-center"
+        >
+          <DiffConfirmationDemo />
+
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/80">
+              Human in the loop
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+              Changes wait for your approval.
+            </h2>
+            <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+              Read-only agents can run autonomously. Any change shows a diff
+              first, and destructive actions require typed confirmation. There
+              is no trust-this-agent bypass.
+            </p>
+          </div>
+        </section>
+
+        <section className="w-full max-w-7xl border-t border-white/10 py-20">
+          <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                Open source
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+                If the trust model matters, fork the whole thing.
+              </h2>
+              <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+                The runtime, app, bundled agents, and registry contract are open
+                from day one. Audit it, change it, ship your own agents.
+              </p>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/35 p-4 font-mono text-sm text-white/60">
+              <p className="text-white/35">~/code</p>
+              <p className="mt-3">$ gh repo fork OpenAdminOS/OpenAdminOS --clone</p>
+              <p className="text-emerald-300/80">✓ Cloned OpenAdminOS</p>
+              <p className="mt-3">$ pnpm install</p>
+              <p className="text-emerald-300/80">✓ workspace ready</p>
+              <p className="mt-3">$ pnpm dev</p>
+              <p className="text-sky-300/80">OpenAdminOS desktop app started</p>
+            </div>
+          </div>
+          <div className="mt-8 grid gap-3 sm:grid-cols-4">
+            {PROOF_ITEMS.map(([label, detail]) => (
+              <div
+                key={label}
+                className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+              >
+                <p className="text-sm font-semibold">{label}</p>
+                <p className="mt-2 text-sm leading-5 text-white/50">{detail}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="w-full max-w-4xl pb-20 pt-4 text-center">
+          <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl">
+            Your Microsoft 365 agents deserve a review gate.
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-white/60 sm:text-base">
+            OpenAdminOS is free, open source, and built for admins who need the
+            model to help without giving it unchecked access to the tenant.
+          </p>
+          <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <a
+              href={latestRelease.macosDmgUrl}
+              className="rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+            >
+              Download for macOS
+            </a>
+            <Link
+              href="https://github.com/OpenAdminOS/OpenAdminOS"
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/72 transition hover:border-white/20 hover:text-white"
+            >
+              Star on GitHub
+            </Link>
+          </div>
+        </section>
       </main>
 
       <footer className="relative z-10 flex flex-col items-center gap-2 px-6 py-8 text-center sm:px-10">
