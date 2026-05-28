@@ -405,15 +405,7 @@ export default async function HomePage() {
 
       <footer className="relative z-10 flex flex-col items-center gap-2 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-white/40">
-          © {new Date().getFullYear()}{" "}
-          <Link
-            href="https://openadminos.com"
-            target="_blank"
-            rel="noreferrer"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
-          >
-            OpenAdminOS
-          </Link>
+          © {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
@@ -427,6 +419,22 @@ export default async function HomePage() {
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
             Terms
+          </Link>
+          {" · "}
+          <Link
+            href="https://www.linkedin.com/company/openadminos/"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="OpenAdminOS on LinkedIn"
+            className="inline-flex align-[-2px] text-white/45 transition hover:text-white/75"
+          >
+            <svg
+              aria-hidden
+              viewBox="0 0 24 24"
+              className="h-3.5 w-3.5 fill-current"
+            >
+              <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.95v5.66H9.34V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.32 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14Zm1.78 13.02H3.53V9H7.1v11.45ZM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.46c.98 0 1.77-.77 1.77-1.72V1.72C24 .77 23.21 0 22.23 0Z" />
+            </svg>
           </Link>
         </span>
       </footer>
