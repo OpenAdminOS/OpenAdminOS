@@ -446,6 +446,11 @@ export default async function HomePage() {
             </svg>
           </Link>
         </span>
+        <p className="max-w-2xl text-balance text-[11px] leading-5 text-white/30">
+          Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks of
+          the Microsoft group of companies. OpenAdminOS is not affiliated with,
+          endorsed by, or sponsored by Microsoft.
+        </p>
       </footer>
     </div>
   );

@@ -146,6 +146,18 @@ export default function TermsPage() {
 
           <section>
             <h2 className="text-base font-semibold text-white">
+              Microsoft trademarks
+            </h2>
+            <p className="mt-3">
+              Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks
+              of the Microsoft group of companies. OpenAdminOS is not affiliated
+              with, endorsed by, or sponsored by Microsoft. References to those
+              services describe compatibility and administration targets only.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-base font-semibold text-white">
               Changes
             </h2>
             <p className="mt-3">
