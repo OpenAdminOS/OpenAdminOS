@@ -18,7 +18,16 @@ export default function PrivacyPage() {
       />
 
       <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
+        >
+          <img
+            src="/icon.svg"
+            alt=""
+            aria-hidden
+            className="h-5 w-5 rounded-[4px]"
+          />
           OpenAdminOS
         </Link>
       </header>
@@ -221,15 +230,7 @@ export default function PrivacyPage() {
 
       <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-white/40">
-          &copy; {new Date().getFullYear()}{" "}
-          <Link
-            href="https://openadminos.com"
-            target="_blank"
-            rel="noreferrer"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
-          >
-            OpenAdminOS
-          </Link>
+          &copy; {new Date().getFullYear()} OpenAdminOS
         </span>
       </footer>
     </div>

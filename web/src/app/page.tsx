@@ -119,7 +119,16 @@ export default async function HomePage() {
       />
 
       <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
+        >
+          <img
+            src="/icon.svg"
+            alt=""
+            aria-hidden
+            className="h-5 w-5 rounded-[4px]"
+          />
           OpenAdminOS
         </Link>
         <nav className="hidden items-center gap-6 text-sm text-white/55 sm:flex">

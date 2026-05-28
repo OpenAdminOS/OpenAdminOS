@@ -11,6 +11,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Marketing landing page now uses a fuller t3.codes-style product narrative with trust/provider proof, registry preview, write-confirmation showcase, open-source proof, and a final download CTA.
 - Marketing release badge and macOS download CTA now resolve from the latest GitHub release instead of requiring a manual version bump.
 - Marketing footer now keeps the OpenAdminOS wordmark as plain text and links to the company LinkedIn page with an icon.
+- Marketing and legal pages now pass mobile-width overflow checks, and reduced-motion users see the diff confirmation content without animation.
+- Marketing and legal page headers now show the OpenAdminOS app icon next to the wordmark.
 - README now matches the current desktop app behavior: tenant connection is mandatory before running agents, Agent Hub uses the GitHub-hosted registry with local cache/fallback, and the shipped-version table reflects v0.1.9.
 
 ### Removed

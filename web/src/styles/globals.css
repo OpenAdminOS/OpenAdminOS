@@ -215,4 +215,15 @@
   .diff-confirm-input {
     max-width: none;
   }
+
+  .diff-row,
+  .diff-demo-cursor,
+  .diff-click-ripple {
+    opacity: 1;
+  }
+
+  .diff-demo-cursor,
+  .diff-click-ripple {
+    display: none;
+  }
 }
