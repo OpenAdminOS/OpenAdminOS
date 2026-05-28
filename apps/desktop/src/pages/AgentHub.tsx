@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
@@ -11,12 +12,9 @@ import {
   IconBolt,
   IconCheck,
   IconDownload,
-  IconFire,
   IconRefresh,
   IconSearch,
   IconShield,
-  IconSparkle,
-  IconTrend,
 } from "../components/icons";
 import type {
   AgentManifestPreview,
@@ -24,29 +22,8 @@ import type {
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 
-const filters = [
-  "All",
-  "Devices",
-  "Apps",
-  "Policies",
-  "Compliance",
-  "Updates",
-] as const;
-type Filter = (typeof filters)[number];
-
-type TierTab = "agent" | "dashboard";
-
-const tierLabels: Record<TierTab, string> = {
-  agent: "Agents",
-  dashboard: "Dashboards",
-};
-
-const tierDescriptions: Record<TierTab, string> = {
-  agent:
-    "Multi-step reasoning across Graph. Investigators, advisors, write actions with judgment.",
-  dashboard:
-    "Single-source LLM-narrated reports. Useful at a glance; not what a PowerShell script can't do.",
-};
+type InstallFilter = "all" | "available" | "installed";
+type ModeFilter = "all" | "read" | "write";
 
 /**
  * Renders a small "Requires Entra ID P1/P2" pill when the agent
@@ -81,9 +58,11 @@ function EntraTierBadge({
 
 export default function AgentHub() {
   const { state, registryAgents, installAgent, refreshRegistry } = useAppState();
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("All");
-  const [tier, setTier] = useState<TierTab>("agent");
+  const [category, setCategory] = useState("all");
+  const [installFilter, setInstallFilter] = useState<InstallFilter>("all");
+  const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
   const [refreshing, setRefreshing] = useState(false);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((t) => t.id === state.activeTenantId)
@@ -97,6 +76,9 @@ export default function AgentHub() {
   );
   const [manifestError, setManifestError] = useState<string | null>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
+  const [showManifestRaw, setShowManifestRaw] = useState(false);
+  const [confirmInstall, setConfirmInstall] = useState(false);
+  const [installingAgentId, setInstallingAgentId] = useState<string | null>(null);
   // Live install counts fetched from the public stats endpoint on Hub
   // mount. Falls back silently to the bundled values on `agent.installs`
   // when the fetch fails (offline, network error, etc.).
@@ -107,6 +89,8 @@ export default function AgentHub() {
       setManifestPreview(null);
       setManifestError(null);
       setManifestLoading(false);
+      setShowManifestRaw(false);
+      setConfirmInstall(false);
       return;
     }
     let cancelled = false;
@@ -138,63 +122,62 @@ export default function AgentHub() {
       agent.registryId ?? "",
     ]),
   );
-  const tierAgents = registryAgents.filter((a) => (a.tier ?? "agent") === tier);
-  const tierCounts = registryAgents.reduce(
-    (acc, a) => {
-      const t = (a.tier ?? "agent") as TierTab;
-      acc[t] = (acc[t] ?? 0) + 1;
-      return acc;
-    },
-    { agent: 0, dashboard: 0 } as Record<TierTab, number>,
-  );
-  const visible = tierAgents.filter((a) => {
-    const matchesFilter =
-      filter === "All" ||
-      a.category === (filter.toLowerCase() as RegistryAgentSummary["category"]);
-    const matchesQuery =
-      query.trim() === "" ||
-      a.name.toLowerCase().includes(query.toLowerCase()) ||
-      a.description.toLowerCase().includes(query.toLowerCase()) ||
-      a.author.name.toLowerCase().includes(query.toLowerCase());
-    return matchesFilter && matchesQuery;
-  });
-
-  const featured = tierAgents[0];
-  const trending = tierAgents.slice(0, 3);
   const isInstalled = (agent: RegistryAgentSummary) =>
     installedIds.has(agent.id) ||
     installedIds.has(agent.slug) ||
     installedIds.has(agent.registryId);
-  const onInstall = (agent: RegistryAgentSummary) => {
-    void installAgent(agent.registryId);
+  const categories = Array.from(
+    new Set(registryAgents.map((agent) => agent.category).filter(Boolean)),
+  ).sort((a, b) => a.localeCompare(b));
+  const visible = registryAgents.filter((a) => {
+    const installed = isInstalled(a);
+    const normalizedQuery = query.trim().toLowerCase();
+    const matchesCategory = category === "all" || a.category === category;
+    const matchesInstall =
+      installFilter === "all" ||
+      (installFilter === "installed" ? installed : !installed);
+    const matchesMode = modeFilter === "all" || a.mode === modeFilter;
+    const matchesQuery =
+      normalizedQuery === "" ||
+      [
+        a.name,
+        a.description,
+        a.author.name,
+        a.category,
+        a.mode,
+        a.version,
+        ...a.scopes,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery);
+    return matchesCategory && matchesInstall && matchesMode && matchesQuery;
+  });
+
+  const installedCount = registryAgents.filter(isInstalled).length;
+  const onInstall = async (agent: RegistryAgentSummary) => {
+    setInstallingAgentId(agent.id);
+    try {
+      await installAgent(agent.registryId);
+      setConfirmInstall(false);
+    } finally {
+      setInstallingAgentId(null);
+    }
+  };
+  const onOpenAgent = (agent: RegistryAgentSummary) => {
+    navigate(`/agents/${agent.slug}`);
   };
 
   return (
     <>
       <PageHeader
-        eyebrow="Registry"
+        eyebrow="Store"
         title="Agent Hub"
         subtitle={
           <span className="inline-flex items-center gap-2">
             <span>
-              {tierCounts.agent} agents · {tierCounts.dashboard} dashboards
+              {registryAgents.length} agents · {installedCount} installed
             </span>
-            {state.lastRegistryRefresh && (
-              <>
-                <span className="opacity-50">·</span>
-                <span className="text-[var(--color-text-soft)]">
-                  remote · refreshed {new Date(state.lastRegistryRefresh).toLocaleTimeString()}
-                </span>
-              </>
-            )}
-            {state.registryRefreshError && !state.lastRegistryRefresh && (
-              <>
-                <span className="opacity-50">·</span>
-                <span className="text-[var(--color-text-soft)]">
-                  bundled · remote registry unreachable
-                </span>
-              </>
-            )}
           </span>
         }
         actions={
@@ -206,7 +189,7 @@ export default function AgentHub() {
                 setRefreshing(false);
               }}
               disabled={refreshing}
-              title="Refresh agent registry"
+              title="Refresh agent catalog"
               className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] transition-colors hover:text-[var(--color-text)] disabled:opacity-50"
             >
               <IconRefresh size={14} className={refreshing ? "animate-spin" : ""} />
@@ -227,118 +210,89 @@ export default function AgentHub() {
         }
       />
       <PageBody>
-        {/* Tier toggle */}
-        <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-          <div className="inline-flex items-center rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border)]">
-            {(["agent", "dashboard"] as TierTab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => {
-                  setTier(t);
-                  setFilter("All");
-                }}
-                className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${
-                  t === tier
-                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
-                    : "text-[var(--color-text-soft)] hover:text-[var(--color-text)]"
-                }`}
-              >
-                {tierLabels[t]}{" "}
-                <span className="ml-1 text-[var(--color-text-muted)]">
-                  {tierCounts[t]}
-                </span>
-              </button>
-            ))}
-          </div>
-          <p className="text-[12px] text-[var(--color-text-soft)]">
-            {tierDescriptions[tier]}
-          </p>
-        </div>
-
-        {/* Featured */}
-        {featured ? (
-          <FeaturedCard
-            agent={featured}
-            installs={resolveInstallCount(featured, liveInstalls)}
-            installed={isInstalled(featured)}
-            tenantTier={tenantTier}
-            onInstall={() => onInstall(featured)}
-            onViewManifest={() => setManifestAgent(featured)}
-          />
-        ) : (
+        {registryAgents.length === 0 ? (
           <EmptyRegistry />
-        )}
-
-        {/* Trending rail */}
-        {trending.length > 0 && (
-          <>
-            <div className="mt-8 mb-3 flex items-center gap-2">
-              <IconFire size={14} className="text-[var(--color-warning)]" />
-              <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
-                Built-in {tier === "dashboard" ? "dashboards" : "agents"}
-              </h3>
-              <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
-            </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              {trending.map((a) => (
-                <TrendingCard
-                  key={a.id}
-                  agent={a}
-                  installs={resolveInstallCount(a, liveInstalls)}
-                  installed={isInstalled(a)}
-                  onInstall={() => onInstall(a)}
-                  onViewManifest={() => setManifestAgent(a)}
-                />
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Filters */}
-        <div className="mt-10 mb-4 flex items-center justify-between">
-          <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
-            All {tier === "dashboard" ? "dashboards" : "agents"}
-          </h3>
-          <div className="flex items-center gap-1.5">
-            {filters.map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${
-                  f === filter
-                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
-                    : "bg-transparent text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                }`}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {visible.length === 0 ? (
-          <HubFilterEmpty
-            query={query}
-            filter={filter}
-            onReset={() => {
-              setQuery("");
-              setFilter("All");
-            }}
-          />
         ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {visible.map((agent) => (
-              <HubAgentCard
-                key={agent.id}
-                agent={agent}
-                installs={resolveInstallCount(agent, liveInstalls)}
-                installed={isInstalled(agent)}
-                tenantTier={tenantTier}
-                onInstall={() => onInstall(agent)}
-                onViewManifest={() => setManifestAgent(agent)}
+          <>
+            <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div>
+                <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
+                  Agents
+                </h3>
+                <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+                  {visible.length} shown · {installedCount} installed · write agents always require confirmation
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 xl:justify-end">
+                <FilterButton active={installFilter === "all"} onClick={() => setInstallFilter("all")}>
+                  All
+                </FilterButton>
+                <FilterButton active={installFilter === "available"} onClick={() => setInstallFilter("available")}>
+                  Available
+                </FilterButton>
+                <FilterButton active={installFilter === "installed"} onClick={() => setInstallFilter("installed")}>
+                  Installed
+                </FilterButton>
+                <span className="mx-1 hidden h-5 w-px bg-[var(--color-border-soft)] md:block" />
+                <FilterButton active={modeFilter === "all"} onClick={() => setModeFilter("all")}>
+                  Read + write
+                </FilterButton>
+                <FilterButton active={modeFilter === "read"} onClick={() => setModeFilter("read")}>
+                  Read-only
+                </FilterButton>
+                <FilterButton active={modeFilter === "write"} onClick={() => setModeFilter("write")}>
+                  Write
+                </FilterButton>
+                <span className="mx-1 hidden h-5 w-px bg-[var(--color-border-soft)] md:block" />
+                <FilterButton active={category === "all"} onClick={() => setCategory("all")}>
+                  All categories
+                </FilterButton>
+                {categories.map((entry) => (
+                  <FilterButton
+                    key={entry}
+                    active={category === entry}
+                    onClick={() => setCategory(entry)}
+                  >
+                    {titleCase(entry)}
+                  </FilterButton>
+                ))}
+              </div>
+            </div>
+
+            {visible.length === 0 ? (
+              <HubFilterEmpty
+                query={query}
+                category={category}
+                onReset={() => {
+                  setQuery("");
+                  setCategory("all");
+                  setInstallFilter("all");
+                  setModeFilter("all");
+                }}
               />
-            ))}
-          </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                {visible.map((agent) => (
+                  <HubAgentCard
+                    key={agent.id}
+                    agent={agent}
+                    installs={resolveInstallCount(agent, liveInstalls)}
+                    installed={isInstalled(agent)}
+                    tenantTier={tenantTier}
+                    onInstall={() => {
+                      setManifestAgent(agent);
+                      setConfirmInstall(true);
+                    }}
+                    onOpen={() => onOpenAgent(agent)}
+                    onViewDetails={() => {
+                      setConfirmInstall(false);
+                      setManifestAgent(agent);
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
 
       </PageBody>
@@ -348,11 +302,183 @@ export default function AgentHub() {
         size="lg"
       >
         <ModalHeader
-          title={manifestAgent?.name ?? "Manifest"}
-          subtitle={manifestAgent ? `v${manifestAgent.version} · ${manifestAgent.author.name}` : undefined}
+          title={manifestAgent?.name ?? "Agent details"}
+          subtitle={manifestAgent ? `${manifestAgent.category} · v${manifestAgent.version}` : undefined}
           onClose={() => setManifestAgent(null)}
         />
         <div className="overflow-y-auto p-6">
+          {manifestAgent && (
+            <AgentInstallDetails
+              agent={manifestAgent}
+              installed={isInstalled(manifestAgent)}
+              tenantTier={tenantTier}
+              manifestPreview={manifestPreview}
+              manifestLoading={manifestLoading}
+              manifestError={manifestError}
+              confirmInstall={confirmInstall}
+              installing={installingAgentId === manifestAgent.id}
+              showRaw={showManifestRaw}
+              onToggleRaw={() => setShowManifestRaw((current) => !current)}
+              onRequestInstall={() => setConfirmInstall(true)}
+              onCancelInstall={() => setConfirmInstall(false)}
+              onConfirmInstall={() => {
+                void onInstall(manifestAgent);
+              }}
+              onOpen={() => onOpenAgent(manifestAgent)}
+            />
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+function AgentInstallDetails({
+  agent,
+  installed,
+  tenantTier,
+  manifestPreview,
+  manifestLoading,
+  manifestError,
+  confirmInstall,
+  installing,
+  showRaw,
+  onToggleRaw,
+  onRequestInstall,
+  onCancelInstall,
+  onConfirmInstall,
+  onOpen,
+}: {
+  agent: RegistryAgentSummary;
+  installed: boolean;
+  tenantTier: "free" | "p1" | "p2" | "unknown" | undefined;
+  manifestPreview: AgentManifestPreview | null;
+  manifestLoading: boolean;
+  manifestError: string | null;
+  confirmInstall: boolean;
+  installing: boolean;
+  showRaw: boolean;
+  onToggleRaw: () => void;
+  onRequestInstall: () => void;
+  onCancelInstall: () => void;
+  onConfirmInstall: () => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone={agent.mode === "write" ? "warning" : "default"}>
+              {agent.mode === "write" ? "Write" : "Read-only"}
+            </Pill>
+            <Pill className="capitalize">{agent.category}</Pill>
+            <EntraTierBadge
+              required={agent.requiresEntraTier ?? "free"}
+              tenantTier={tenantTier}
+            />
+          </div>
+          <p className="mt-4 text-[14px] leading-relaxed text-[var(--color-text)]">
+            {agent.description}
+          </p>
+          <div className="mt-5 flex items-center gap-2">
+            {installed ? (
+              <Button variant="primary" leadingIcon={<IconCheck size={12} />} onClick={onOpen}>
+                Open agent
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={onRequestInstall}>
+                Install
+              </Button>
+            )}
+            <Button variant="secondary" onClick={onToggleRaw}>
+              {showRaw ? "Hide manifest" : "Review manifest"}
+            </Button>
+          </div>
+        </div>
+        <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            Author
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-[13px] text-[var(--color-text)]">
+            <Avatar name={agent.author.name} size={20} />
+            <span>{agent.author.name}</span>
+            {agent.author.verified && (
+              <IconBadgeCheck size={12} className="text-[var(--color-accent)]" />
+            )}
+          </div>
+          <div className="mt-4 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            Permissions
+          </div>
+          <div className="mt-2 text-[12px] text-[var(--color-text-soft)]">
+            {agent.scopes.length} Graph scope{agent.scopes.length === 1 ? "" : "s"}
+          </div>
+        </div>
+      </div>
+
+      {!installed && confirmInstall && (
+        <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-accent)]/35">
+          <div className="text-[13px] font-medium text-[var(--color-text)]">
+            Confirm installation
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+            OpenAdminOS will pin this agent locally. It can request the Graph
+            scopes listed below when you run it, and write-mode agents still
+            pause for diff confirmation before tenant changes.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {agent.scopes.map((scope) => (
+              <Pill key={scope}>
+                <span className="font-mono text-[10.5px]">{scope}</span>
+              </Pill>
+            ))}
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" disabled={installing} onClick={onCancelInstall}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" disabled={installing} onClick={onConfirmInstall}>
+              {installing ? "Installing…" : "Confirm install"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <DecisionFact
+          label="Tenant impact"
+          value={agent.mode === "write" ? "Can propose changes" : "Read-only"}
+          detail={agent.mode === "write" ? "Changes still require confirmation." : "Cannot mutate tenant state."}
+        />
+        <DecisionFact
+          label="License"
+          value={(agent.requiresEntraTier ?? "free") === "free" ? "No premium tier declared" : `Entra ID ${(agent.requiresEntraTier ?? "free").toUpperCase()}`}
+          detail="Checked before a run when tenant tier is known."
+        />
+        <DecisionFact
+          label="Install state"
+          value={installed ? "Installed" : "Available"}
+          detail={installed ? "Open it from this dialog or Agents." : "Installs a local pinned copy."}
+        />
+      </div>
+
+      {agent.scopes.length > 0 && (
+        <div>
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            Required scopes
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {agent.scopes.map((scope) => (
+              <Pill key={scope}>
+                <span className="font-mono text-[10.5px]">{scope}</span>
+              </Pill>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showRaw && (
+        <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
           {manifestLoading && (
             <div className="text-[13px] text-[var(--color-text-muted)]">Loading manifest…</div>
           )}
@@ -364,194 +490,61 @@ export default function AgentHub() {
           {!manifestLoading && !manifestError && manifestPreview && (
             <ManifestPreview preview={manifestPreview} />
           )}
-          {!manifestLoading && !manifestError && !manifestPreview && manifestAgent && (
+          {!manifestLoading && !manifestError && !manifestPreview && (
             <div className="text-[13px] text-[var(--color-text-muted)]">
               No manifest is available for this agent yet.
             </div>
           )}
         </div>
-      </Modal>
-    </>
+      )}
+    </div>
   );
 }
 
-function FeaturedCard({
-  agent,
-  installs,
-  installed,
-  tenantTier,
-  onInstall,
-  onViewManifest,
+function DecisionFact({
+  label,
+  value,
+  detail,
 }: {
-  agent: RegistryAgentSummary;
-  installs: number | undefined;
-  installed: boolean;
-  tenantTier: "free" | "p1" | "p2" | "unknown" | undefined;
-  onInstall: () => void;
-  onViewManifest: () => void;
+  label: string;
+  value: string;
+  detail: string;
 }) {
   return (
-    <Card>
-      <div className="grid grid-cols-1 gap-6 p-7 lg:grid-cols-[1.5fr_1fr]">
-        <div>
-          <div className="mb-3 inline-flex flex-wrap items-center gap-2">
-            <Pill tone="accent">
-              <IconSparkle size={10} /> Featured
-            </Pill>
-            <Pill>
-              <IconShield size={10} /> {agent.mode === "write" ? "Write" : "Read-only"}
-            </Pill>
-            <EntraTierBadge
-              required={agent.requiresEntraTier ?? "free"}
-              tenantTier={tenantTier}
-            />
-          </div>
-          <h2 className="text-[24px] font-semibold tracking-tight text-[var(--color-text)]">
-            {agent.name}
-          </h2>
-          <div className="mt-2 inline-flex items-center gap-2">
-            <Avatar name={agent.author.name} size={22} />
-            <span className="text-[12.5px] text-[var(--color-text-soft)]">
-              {agent.author.name}
-            </span>
-            {agent.author.verified && (
-              <IconBadgeCheck size={12} className="text-[var(--color-accent)]" />
-            )}
-            <span className="opacity-50">·</span>
-            <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
-              v{agent.version}
-            </span>
-          </div>
-          <p className="mt-4 max-w-[520px] text-[14px] leading-relaxed text-[var(--color-text-soft)]">
-            {agent.description}
-          </p>
-
-          <div className="mt-5 flex items-center gap-2">
-            <Button
-              size="md"
-              variant={installed ? "ghost" : "primary"}
-              disabled={installed}
-              leadingIcon={installed ? <IconCheck size={12} /> : undefined}
-              onClick={onInstall}
-            >
-              {installed ? "Installed" : "Install"}
-            </Button>
-            <Button size="md" variant="secondary" onClick={onViewManifest}>
-              View manifest
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Category
-            </div>
-            <div className="mt-1.5 flex items-center justify-between gap-3 text-[13px] capitalize text-[var(--color-text)]">
-              <span>{agent.category}</span>
-              <InstallCount count={installs} size="md" />
-            </div>
-          </div>
-          <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Graph scopes
-            </div>
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {agent.scopes.length === 0 ? (
-                <span className="text-[12px] text-[var(--color-text-muted)]">
-                  None declared
-                </span>
-              ) : (
-                agent.scopes.slice(0, 3).map((scope) => (
-                  <Pill key={scope}>
-                    <span className="font-mono text-[10px]">{scope}</span>
-                  </Pill>
-                ))
-              )}
-              {agent.scopes.length > 3 && (
-                <span className="text-[10.5px] text-[var(--color-text-muted)]">
-                  +{agent.scopes.length - 3}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+    <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
       </div>
-    </Card>
+      <div className="mt-1 text-[13px] font-medium text-[var(--color-text)]">
+        {value}
+      </div>
+      <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+        {detail}
+      </div>
+    </div>
   );
 }
 
-function TrendingCard({
-  agent,
-  installs,
-  installed,
-  onInstall,
-  onViewManifest,
+function FilterButton({
+  active,
+  onClick,
+  children,
 }: {
-  agent: RegistryAgentSummary;
-  installs: number | undefined;
-  installed: boolean;
-  onInstall: () => void;
-  onViewManifest: () => void;
+  active: boolean;
+  onClick: () => void;
+  children: string;
 }) {
   return (
-    <Card interactive onClick={onViewManifest}>
-      <div className="flex flex-col gap-3 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
-            {agent.mode === "write" ? (
-              <IconBolt size={16} className="text-[var(--color-warning)]" />
-            ) : (
-              <IconShield size={16} className="text-[var(--color-text-soft)]" />
-            )}
-          </div>
-          <div className="flex items-center gap-1 rounded-md bg-[var(--color-warning-soft)] px-2 py-1 text-[10.5px] font-medium text-[var(--color-warning)]">
-            <IconTrend size={10} />
-            Built-in
-          </div>
-        </div>
-        <div>
-          <div className="text-[13.5px] font-medium text-[var(--color-text)]">
-            {agent.name}
-          </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
-            <Avatar name={agent.author.name} size={14} />
-            <span>{agent.author.name}</span>
-            {agent.author.verified && (
-              <IconBadgeCheck size={10} className="text-[var(--color-accent)]" />
-            )}
-          </div>
-        </div>
-        <p className="line-clamp-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
-          {agent.description}
-        </p>
-        <div className="mt-1 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[10.5px] text-[var(--color-text-muted)] capitalize">
-              {agent.category}
-            </span>
-            {typeof installs === "number" && (
-              <>
-                <span className="text-[10.5px] text-[var(--color-text-muted)] opacity-50">·</span>
-                <InstallCount count={installs} />
-              </>
-            )}
-          </div>
-          <Button
-            size="sm"
-            variant={installed ? "ghost" : "primary"}
-            disabled={installed}
-            leadingIcon={installed ? <IconCheck size={11} /> : undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              onInstall();
-            }}
-          >
-            {installed ? "Installed" : "Install"}
-          </Button>
-        </div>
-      </div>
-    </Card>
+    <button
+      onClick={onClick}
+      className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${
+        active
+          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
+          : "bg-transparent text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -561,18 +554,28 @@ function HubAgentCard({
   installed,
   tenantTier,
   onInstall,
-  onViewManifest,
+  onOpen,
+  onViewDetails,
 }: {
   agent: RegistryAgentSummary;
   installs: number | undefined;
   installed: boolean;
   tenantTier: "free" | "p1" | "p2" | "unknown" | undefined;
   onInstall: () => void;
-  onViewManifest: () => void;
+  onOpen: () => void;
+  onViewDetails: () => void;
 }) {
   return (
     <Card>
-      <div className="flex flex-col gap-4 p-5">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onViewDetails}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") onViewDetails();
+        }}
+        className="flex cursor-pointer flex-col gap-4 p-5 outline-none transition-colors hover:bg-[var(--color-surface)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40"
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
@@ -633,20 +636,37 @@ function HubAgentCard({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onViewManifest}>
-              View manifest
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(event) => {
+                event.stopPropagation();
+                onViewDetails();
+              }}
+            >
+              Details
             </Button>
             {installed ? (
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 leadingIcon={<IconCheck size={12} />}
-                disabled
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen();
+                }}
               >
-                Installed
+                Open
               </Button>
             ) : (
-              <Button variant="primary" size="sm" onClick={onInstall}>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onInstall();
+                }}
+              >
                 Install
               </Button>
             )}
@@ -662,11 +682,10 @@ function EmptyRegistry() {
     <Card>
       <div className="flex flex-col items-center justify-center p-10 text-center">
         <div className="text-[15px] font-medium text-[var(--color-text)]">
-          No built-in agents found
+          No agents found
         </div>
         <div className="mt-1 max-w-[440px] text-[13px] text-[var(--color-text-muted)]">
-          Add an agent manifest under the root agents directory to make it appear
-          here.
+          Refresh the catalog or point Settings to a source with agent manifests.
         </div>
       </div>
     </Card>
@@ -772,17 +791,25 @@ function formatInstallCount(count: number): string {
   return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
+function titleCase(value: string): string {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
 function HubFilterEmpty({
   query,
-  filter,
+  category,
   onReset,
 }: {
   query: string;
-  filter: Filter;
+  category: string;
   onReset: () => void;
 }) {
   const hasQuery = query.trim().length > 0;
-  const hasFilter = filter !== "All";
+  const hasFilter = category !== "all";
   return (
     <Card>
       <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
@@ -792,10 +819,10 @@ function HubFilterEmpty({
         </div>
         <div className="max-w-[440px] text-[13px] text-[var(--color-text-muted)]">
           {hasQuery && hasFilter
-            ? `Nothing matches "${query}" in the ${filter} category.`
+            ? `Nothing matches "${query}" in the ${titleCase(category)} category.`
             : hasQuery
               ? `Nothing matches "${query}" across all categories.`
-              : `No agents in the ${filter} category yet.`}
+              : `No agents in the ${titleCase(category)} category yet.`}
         </div>
         {(hasQuery || hasFilter) && (
           <Button variant="secondary" size="sm" onClick={onReset}>

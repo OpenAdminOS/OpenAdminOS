@@ -3,17 +3,17 @@
 # Agent Template manifest for os-update-posture.
 #
 # A YAML-only Agent Template in the `updates` category. Reads the
-# managed-device inventory once, counts the fleet by operating system
-# and by full OS version, then optionally asks the LLM for a posture
-# summary calling out Windows-10-era builds and other end-of-life
-# concerns. Demonstrates that the Agent Template DSL can express realistic
-# Intune admin posture reports without any new transforms.
+# managed-device inventory once, counts the fleet by operating system,
+# OS version, compliance, ownership, enrollment, and inventory freshness,
+# then asks the LLM for a conservative posture summary. Lifecycle dates
+# change, so the agent reports version concentration and stale inventory
+# signals without inventing vendor support status.
 
 descriptor:
   id: os-update-posture
   name: OS update posture
-  description: Breaks down the Intune-managed fleet by operating system and OS version so admins can spot stale build distributions at a glance.
-  version: 1.0.0
+  description: Reviews Intune OS version distribution, compliance, ownership, enrollment, and stale inventory signals so admins can prioritize update work.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -41,6 +41,13 @@ skills:
         - operatingSystem
         - osVersion
         - lastSyncDateTime
+        - enrolledDateTime
+        - complianceState
+        - managementState
+        - managedDeviceOwnerType
+        - deviceEnrollmentType
+        - manufacturer
+        - model
       scopes:
         - DeviceManagementManagedDevices.Read.All
 
@@ -56,36 +63,119 @@ skills:
   - id: by_os_version
     format: transform
     label: Tally by full OS version
-    detail: Counts devices by the specific osVersion string so end-of-life builds (e.g. Windows 10.21H2) surface clearly.
+    detail: Counts devices by the specific osVersion string so old build concentrations and outliers surface clearly.
     settings:
       kind: count-by-field
       source: "{{ load_devices.output }}"
       field: osVersion
 
+  - id: by_compliance
+    format: transform
+    label: Tally by compliance state
+    detail: Shows whether update posture concerns overlap with compliant, noncompliant, or unknown devices.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: complianceState
+      buckets:
+        - compliant
+        - noncompliant
+        - unknown
+
+  - id: by_owner_type
+    format: transform
+    label: Group by ownership
+    detail: Separates corporate and personal device ownership where Graph provides it.
+    settings:
+      kind: group-by-field
+      source: "{{ load_devices.output }}"
+      field: managedDeviceOwnerType
+      missing: unknown
+
+  - id: by_enrollment_type
+    format: transform
+    label: Group by enrollment type
+    detail: Shows whether older OS builds are concentrated in a specific enrollment path.
+    settings:
+      kind: group-by-field
+      source: "{{ load_devices.output }}"
+      field: deviceEnrollmentType
+      missing: unknown
+
+  - id: stale_inventory
+    format: transform
+    label: Find stale inventory records
+    detail: Flags devices that have not synced recently, so the update posture is not treated as current.
+    settings:
+      kind: filter-by-age
+      source: "{{ load_devices.output }}"
+      timestampField: lastSyncDateTime
+      inactiveDaysAtLeast: "{{ settings.staleSyncDays }}"
+
+  - id: stale_by_os
+    format: transform
+    label: Group stale inventory by operating system
+    detail: Shows whether stale inventory is concentrated by platform.
+    settings:
+      kind: group-by-field
+      source: "{{ stale_inventory.output }}"
+      field: operatingSystem
+      missing: unknown
+
+  - id: oldest_inventory
+    format: transform
+    label: Sample oldest inventory records
+    detail: Lists the oldest sync timestamps first for evidence in the report.
+    settings:
+      kind: sort-by
+      source: "{{ stale_inventory.output }}"
+      field: lastSyncDateTime
+      direction: asc
+      take: 10
+
   - id: summarize
     format: llm
     label: Summarize update posture
-    detail: Highlights end-of-life or near-EOL builds and recommends the highest-priority remediation.
+    detail: Highlights OS version concentration, stale inventory, and the highest-priority review work.
     settings:
       system: >-
-        You are a Microsoft 365 administrator's assistant. Be concise and
-        factual. Two short sentences plus one prioritized recommendation,
-        no filler. Call out Windows 10 builds explicitly because Windows
-        10 reaches end-of-life soon. Never invent numbers; use only the
-        figures you are given.
+        You are an Intune update posture reviewer for Microsoft 365 admins.
+        Be concise, factual, and conservative. Do not claim that an OS build is
+        unsupported unless that status is explicitly present in the supplied
+        data. Treat old or uncommon osVersion values as review targets, not
+        confirmed vulnerabilities. Use only the supplied counts and samples.
       prompt: |-
         Tenant managed devices: {{ load_devices.output | size }}.
         By operating system: {{ by_os.output }}
         By OS version: {{ by_os_version.output }}
+        By compliance state: {{ by_compliance.output }}
+        Devices by owner type: {{ by_owner_type.output }}
+        Devices by enrollment type: {{ by_enrollment_type.output }}
+        Inventory stale >= {{ settings.staleSyncDays }} days: {{ stale_inventory.output | size }} devices.
+        Stale inventory by OS: {{ stale_by_os.output }}
+        Oldest stale inventory sample: {{ oldest_inventory.output }}
 
-        Write an executive summary an Intune admin can paste into a ticket.
-        Lead with the biggest update risk, then one short prioritised
-        recommendation.
+        Write a compact report with these sections:
+        1. Main finding.
+        2. Update posture signals.
+        3. Recommended next actions.
+
+        Call out the largest OS/version concentration, notable stale-inventory
+        signals, and whether compliance or ownership changes the priority.
+        If the inventory is stale, say that the admin should refresh/check
+        device sync before making update decisions.
       temperature: 0.2
-      maxTokens: 200
+      maxTokens: 420
 
 # ─── what makes it an agent ────────────────────────────────────────────────
 definition:
+  settings:
+    - id: staleSyncDays
+      label: Stale inventory threshold (days)
+      type: integer
+      default: 14
+      description: Devices that have not synced for at least this many days are flagged as stale inventory.
+
   triggers:
     - id: manual
       kind: manual
@@ -100,5 +190,13 @@ definition:
       totalDevices: "{{ load_devices.output | size }}"
       byOs: "{{ by_os.output }}"
       byOsVersion: "{{ by_os_version.output }}"
+      byCompliance: "{{ by_compliance.output }}"
+      byOwnerType: "{{ by_owner_type.output }}"
+      byEnrollmentType: "{{ by_enrollment_type.output }}"
+      staleInventoryCount: "{{ stale_inventory.output | size }}"
+      staleInventoryByOs: "{{ stale_by_os.output }}"
+      oldestInventory: "{{ oldest_inventory.output }}"
       llmSummary: "{{ summarize.output.text }}"
       llmModel: "{{ summarize.output.model }}"
+      thresholds:
+        staleSyncDays: "{{ settings.staleSyncDays }}"

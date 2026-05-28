@@ -1,14 +1,15 @@
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
 #
 # stale-guest-cleanup — supersedes the deleted `disable-inactive-guests`.
-# Reads guest users, filters by sign-in age (90+ days idle), and for
-# each candidate the LLM produces a one-line rationale that ends up in
-# the diff confirmation. Disable is a typed-confirmation write step.
+# Reads enabled guest users, filters by sign-in age, cost-caps the
+# action list, and for each candidate the LLM produces a one-line
+# rationale that ends up in the diff confirmation. Disable is a
+# typed-confirmation write step.
 descriptor:
   id: stale-guest-cleanup
   name: Stale guest cleanup
-  description: Surfaces guest accounts that have not signed in for 90+ days, asks the LLM for a per-guest rationale, and disables them after typed diff confirmation.
-  version: 1.0.0
+  description: Builds a capped disable plan for enabled guest accounts with stale sign-in activity, external-state context, and per-guest rationale.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -28,7 +29,7 @@ skills:
       method: GET
       path: /users
       query:
-        $filter: "userType eq 'Guest'"
+        $filter: "userType eq 'Guest' and accountEnabled eq true"
         $top: "500"
       select:
         - id
@@ -39,39 +40,61 @@ skills:
         - createdDateTime
         - signInActivity
         - externalUserState
+        - externalUserStateChangeDateTime
       scopes:
         - User.Read.All
         - AuditLog.Read.All
 
   - id: stale
     format: transform
-    label: Filter to guests idle for 90+ days
+    label: Filter to guests idle beyond threshold
     settings:
       kind: filter-by-age
       source: "{{ load_guests.output }}"
       timestampField: signInActivity.lastSignInDateTime
-      inactiveDaysAtLeast: 90
+      inactiveDaysAtLeast: "{{ settings.inactiveDays }}"
+
+  - id: by_external_state
+    format: transform
+    label: Count stale guests by external state
+    detail: Separates accepted, pending, and unknown external-user states.
+    settings:
+      kind: count-by-field
+      source: "{{ stale.output }}"
+      field: externalUserState
+
+  - id: oldest_stale
+    format: transform
+    label: Sort stale guests by oldest sign-in
+    detail: Oldest sign-ins are reviewed first and cap the write plan.
+    settings:
+      kind: sort-by
+      source: "{{ stale.output }}"
+      field: signInActivity.lastSignInDateTime
+      direction: asc
+      take: 50
 
   - id: rationale_each
     format: map
     label: Build a per-guest disable rationale
     detail: One LLM call per candidate; one-line explanation for the diff modal.
     settings:
-      source: "{{ stale.output }}"
+      source: "{{ oldest_stale.output }}"
       as: guest
-      limit: 50
       do:
         - id: reason
           format: llm
           label: Explain why this guest should be disabled
-          when: ctx.llm.available
           settings:
             system: >-
               You are a tenant cleanup advisor. Be terse and factual.
-              One short sentence. Never invent dates or facts.
+              One short sentence. Never invent dates or facts. Stale
+              guest sign-in is a cleanup signal, not proof that the guest
+              is safe to remove. Mention the check if the record is ambiguous.
             prompt: |-
               Guest {{ guest.displayName }} ({{ guest.userPrincipalName }}),
               external state: {{ guest.externalUserState }},
+              external state changed: {{ guest.externalUserStateChangeDateTime }},
               last sign-in: {{ guest.signInActivity.lastSignInDateTime }},
               created: {{ guest.createdDateTime }}.
 
@@ -85,9 +108,9 @@ skills:
     label: Disable each stale guest
     settings:
       kind: graph-write
-      source: "{{ stale.output }}"
-      confirmationPhrase: "DISABLE {{ stale.output | size }} GUESTS"
-      summary: "Disabling {{ stale.output | size }} guest accounts that have not signed in for 90+ days."
+      source: "{{ oldest_stale.output }}"
+      confirmationPhrase: "DISABLE {{ oldest_stale.output | size }} GUESTS"
+      summary: "Disabling {{ oldest_stale.output | size }} enabled guest accounts that have not signed in for {{ settings.inactiveDays }}+ days."
       scopes:
         - User.ReadWrite.All
       actionTemplate:
@@ -96,6 +119,8 @@ skills:
         metadata:
           userId: "{{ item.id }}"
           userPrincipalName: "{{ item.userPrincipalName }}"
+          externalUserState: "{{ item.externalUserState }}"
+          lastSignInDateTime: "{{ item.signInActivity.lastSignInDateTime }}"
         request:
           method: PATCH
           path: "/users/{{ item.id }}"
@@ -103,12 +128,24 @@ skills:
             accountEnabled: false
 
 definition:
+  settings:
+    - id: inactiveDays
+      label: Inactive guest threshold (days)
+      type: integer
+      default: 90
+      description: Enabled guests inactive at least this many days are considered for disable.
+
   triggers:
     - id: manual
       kind: manual
   result:
-    summary: 'Disabled {{ stale.output | size }} guest account(s) that had not signed in for 90+ days.'
+    summary: 'Prepared disable actions for {{ oldest_stale.output | size }} guest account(s) inactive for {{ settings.inactiveDays }}+ days.'
     data:
-      candidates: "{{ stale.output | size }}"
+      candidates: "{{ oldest_stale.output | size }}"
+      totalStale: "{{ stale.output | size }}"
       totalGuests: "{{ load_guests.output | size }}"
+      byExternalState: "{{ by_external_state.output }}"
+      candidatesReviewed: "{{ oldest_stale.output }}"
       perGuestRationale: "{{ rationale_each.output }}"
+      thresholds:
+        inactiveDays: "{{ settings.inactiveDays }}"

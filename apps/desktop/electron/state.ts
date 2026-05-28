@@ -6,8 +6,10 @@ import {
   acquireTokenSilent,
   compareSemver,
   createGraphAdapter,
+  createCodexLlm,
   createMsalClient,
   createOllamaLlm,
+  createRegistryInstallCountPayload,
   createQueuedRun,
   createTenantSession,
   DEFAULT_SCOPE_METADATA,
@@ -23,6 +25,7 @@ import {
   noSecrets,
   noopLlm,
   parseAgentTemplate,
+  probeCodexLlm,
   ManifestValidationError,
   removeAccount,
   runInteractiveFlow,
@@ -39,6 +42,7 @@ import type {
   RunGraphApi,
   RunLlmApi,
   RunLogLevel,
+  ProviderTestResult,
   StartRunOptions,
   TemplateSetting,
   TenantRecord,
@@ -49,6 +53,7 @@ import {
   providerCatalog,
   type AgentSchedule,
   type AgentSummary,
+  type AgentTeamsDelivery,
   type AppState,
   type ProviderId,
   type ProviderSummary,
@@ -57,7 +62,7 @@ import {
 } from "@openadminos/agent-sdk";
 import type { PublicClientApplication } from "@azure/msal-node";
 
-import { EncryptedSecretStore } from "./secret-store.js";
+import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import {
   searchEndpoints,
@@ -91,6 +96,11 @@ interface PersistedState {
    * any hardware identifier.
    */
   installId?: string;
+  /**
+   * Whether packaged builds report aggregate public registry install counts.
+   * Defaults to true; users can disable it from Settings -> Privacy.
+   */
+  registryInstallCountsEnabled?: boolean;
   /**
    * Per-connector persisted state. Keyed by connector id. Stores the
    * user-supplied config (validated against the connector's
@@ -157,7 +167,7 @@ function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary
 
 export interface AppStateStoreOptions {
   filePath: string;
-  tokenStore: EncryptedSecretStore;
+  tokenStore: TokenCacheStorage;
   openBrowser?(url: string): Promise<void>;
   /**
    * Writable directory where user-authored agents (NL2Agent output)
@@ -187,7 +197,7 @@ export interface AppStateStoreOptions {
 export class AppStateStore {
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
-  private readonly tokenStore: EncryptedSecretStore;
+  private readonly tokenStore: TokenCacheStorage;
   private readonly openBrowser: (url: string) => Promise<void>;
   private readonly userAgentsDir: string | undefined;
   private readonly onRunFinished: ((run: RunRecord) => void) | undefined;
@@ -207,11 +217,11 @@ export class AppStateStore {
   private lastRegistryRefresh: string | null = null;
   private registryRefreshError: string | null = null;
 
-  constructor(options: AppStateStoreOptions | string, legacyTokenStore?: EncryptedSecretStore) {
+  constructor(options: AppStateStoreOptions | string, legacyTokenStore?: TokenCacheStorage) {
     if (typeof options === "string") {
       this.filePath = options;
       this.tokenStore =
-        legacyTokenStore ?? new EncryptedSecretStore(`${options}.tokens.bin`);
+        legacyTokenStore ?? new SafeStorageTokenCacheStore(`${options}.tokens.bin`);
       this.openBrowser = async () => undefined;
       this.userAgentsDir = undefined;
       this.onRunFinished = undefined;
@@ -302,6 +312,21 @@ export class AppStateStore {
     return this.initRegistry();
   }
 
+  async setRegistryInstallCountsEnabled(enabled: boolean): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      const next: PersistedState = {
+        ...current,
+        registryInstallCountsEnabled: enabled,
+      };
+      if (!enabled) {
+        delete next.installId;
+      }
+      await this.write(next);
+    });
+    return this.getAppState();
+  }
+
   private getMsalClient(): PublicClientApplication {
     if (this.msalClient) return this.msalClient;
     const cacheStorage: TokenCacheStorage = {
@@ -345,6 +370,8 @@ export class AppStateStore {
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
+      registryInstallCountsEnabled: persisted.registryInstallCountsEnabled !== false,
+      schedulerStatus: this.deriveSchedulerStatus(persisted),
     };
     if (persisted.activeModelByProviderId) {
       state.activeModelByProviderId = persisted.activeModelByProviderId;
@@ -397,13 +424,75 @@ export class AppStateStore {
   async listProviders(): Promise<ProviderSummary[]> {
     return Promise.all(
       providerCatalog.map(async (provider) => {
-        if (provider.id !== "ollama") {
-          return provider;
-        }
-
-        return checkOllama(provider);
+        if (provider.id === "ollama") return checkOllama(provider);
+        if (provider.id === "openai") return checkCodex(provider);
+        return provider;
       }),
     );
+  }
+
+  async testProvider(
+    providerId: ProviderId,
+    model?: string,
+  ): Promise<ProviderTestResult> {
+    if (!isProviderId(providerId)) {
+      throw new Error(`Unknown provider: ${String(providerId)}`);
+    }
+    const providers = await this.listProviders();
+    const provider = providers.find((entry) => entry.id === providerId);
+    if (!provider) {
+      throw new Error(`Provider not found: ${providerId}`);
+    }
+    if (provider.status !== "connected") {
+      return {
+        providerId,
+        ok: false,
+        message: provider.detail ?? `${provider.name} is not connected.`,
+      };
+    }
+    const selectedModel = model ?? provider.defaultModel ?? provider.models[0];
+    if (selectedModel && provider.models.length > 0 && !provider.models.includes(selectedModel)) {
+      throw new Error(
+        `Model "${selectedModel}" is not available for ${provider.name}.`,
+      );
+    }
+
+    const startedAt = Date.now();
+    const llm = await this.buildLlm(providerId, selectedModel);
+    if (!llm.available) {
+      return {
+        providerId,
+        ok: false,
+        message: `${provider.name} is not available to the runtime.`,
+      };
+    }
+    try {
+      const completion = await llm.complete({
+        ...(selectedModel ? { model: selectedModel } : {}),
+        system:
+          "Connectivity smoke test. Reply with exactly: OPENADMINOS_PROVIDER_OK",
+        prompt: "Reply with exactly: OPENADMINOS_PROVIDER_OK",
+        maxTokens: 24,
+      });
+      const normalized = completion.text.trim();
+      const ok = normalized.includes("OPENADMINOS_PROVIDER_OK");
+      return {
+        providerId,
+        ok,
+        model: completion.model,
+        durationMs: Date.now() - startedAt,
+        message: ok
+          ? `${provider.name} returned a valid smoke-test response.`
+          : `${provider.name} responded, but not with the expected smoke-test text.`,
+      };
+    } catch (error) {
+      return {
+        providerId,
+        ok: false,
+        durationMs: Date.now() - startedAt,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   async listConnectors(): Promise<ConnectorSummary[]> {
@@ -740,6 +829,11 @@ export class AppStateStore {
       if (typeof schedule.enabled !== "boolean") {
         throw new Error("updateAgentSchedule: enabled must be a boolean.");
       }
+      for (const key of ["notifyOnSuccess", "notifyOnFailure", "notifyOnChangeOnly"] as const) {
+        if (schedule[key] !== undefined && typeof schedule[key] !== "boolean") {
+          throw new Error(`updateAgentSchedule: ${key} must be a boolean when provided.`);
+        }
+      }
     }
 
     await this.serialize(async () => {
@@ -761,6 +855,10 @@ export class AppStateStore {
           schedule: {
             enabled: schedule.enabled,
             intervalSeconds: Math.floor(schedule.intervalSeconds),
+            notifyOnSuccess: schedule.notifyOnSuccess ?? existing.schedule?.notifyOnSuccess ?? true,
+            notifyOnFailure: schedule.notifyOnFailure ?? existing.schedule?.notifyOnFailure ?? true,
+            notifyOnChangeOnly:
+              schedule.notifyOnChangeOnly ?? existing.schedule?.notifyOnChangeOnly ?? false,
             ...(schedule.lastScheduledRunAt
               ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
               : existing.schedule?.lastScheduledRunAt
@@ -775,12 +873,44 @@ export class AppStateStore {
     return this.getAppState();
   }
 
+  async updateAgentTeamsDelivery(
+    slug: string,
+    delivery: AgentTeamsDelivery | null,
+  ): Promise<AppState> {
+    const sanitized =
+      delivery === null ? null : sanitizeTeamsDelivery(delivery);
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentTeamsDelivery: agent "${slug}" is not installed.`);
+      }
+      const existing = persisted.installedAgents[idx];
+      const nextAgents = [...persisted.installedAgents];
+      const currentDelivery = existing.delivery ?? {};
+      const nextDelivery =
+        sanitized === null
+          ? removeEmptyDelivery({ ...currentDelivery, teams: undefined })
+          : removeEmptyDelivery({ ...currentDelivery, teams: sanitized });
+      nextAgents[idx] = {
+        ...existing,
+        ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
+      };
+      await this.write({ ...persisted, installedAgents: nextAgents });
+    });
+
+    return this.getAppState();
+  }
+
   /**
    * Walk all installed agents and fire any whose schedule is enabled +
    * due. Runs against the agent's active-tenant default; in-flight runs
-   * for the same agent are skipped to avoid stampedes. Schedules only
-   * fire while the host is running; this is the honest contract for a
-   * desktop tool.
+   * for the same agent are skipped to avoid stampedes. Visible app
+   * sessions call this on a timer; OS scheduler registrations launch the
+   * same app entrypoint in hidden mode while the user is signed in.
    */
   async fireDueSchedules(): Promise<void> {
     const persisted = await this.read();
@@ -807,19 +937,65 @@ export class AppStateStore {
       if (inFlight) continue;
 
       try {
-        await this.startRun(agent.slug);
+        await this.startRun(agent.slug, { trigger: "schedule" });
         await this.updateAgentSchedule(agent.slug, {
           enabled: true,
           intervalSeconds: schedule.intervalSeconds,
+          notifyOnSuccess: schedule.notifyOnSuccess,
+          notifyOnFailure: schedule.notifyOnFailure,
+          notifyOnChangeOnly: schedule.notifyOnChangeOnly,
           lastScheduledRunAt: new Date(nowMs).toISOString(),
         });
       } catch (error) {
+        await this.persistScheduledRunFailure(agent, schedule, error, nowMs);
         console.error(
           `[scheduler] agent "${agent.slug}" failed to start:`,
           error,
         );
       }
     }
+  }
+
+  private async persistScheduledRunFailure(
+    agent: AgentSummary,
+    schedule: AgentSchedule,
+    error: unknown,
+    nowMs: number,
+  ): Promise<void> {
+    const now = new Date(nowMs).toISOString();
+    const message = error instanceof Error ? error.message : String(error);
+    const summary = humanizeScheduledRunError(message);
+    const runId = `run_${nowMs.toString(36)}_${randomUUID().slice(0, 8)}`;
+    const failedRun: RunRecord = {
+      id: runId,
+      agentSlug: agent.slug,
+      status: "failed",
+      queuedAt: now,
+      startedAt: now,
+      finishedAt: now,
+      trigger: "schedule",
+      summary,
+      error: message,
+      steps: [],
+      logs: [
+        {
+          id: randomUUID(),
+          runId,
+          timestamp: now,
+          level: "error",
+          message,
+        },
+      ],
+    };
+    await this.persistRunSnapshot(failedRun);
+    await this.updateAgentSchedule(agent.slug, {
+      enabled: true,
+      intervalSeconds: schedule.intervalSeconds,
+      notifyOnSuccess: schedule.notifyOnSuccess,
+      notifyOnFailure: schedule.notifyOnFailure,
+      notifyOnChangeOnly: schedule.notifyOnChangeOnly,
+      lastScheduledRunAt: now,
+    });
   }
 
   /**
@@ -1100,11 +1276,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         throw new Error(`Unknown registry agent: ${agentId}`);
       }
 
-      const installId = persisted.installId ?? randomUUID();
+      const registryInstallCountsEnabled =
+        persisted.registryInstallCountsEnabled !== false;
+      const installId = registryInstallCountsEnabled
+        ? persisted.installId ?? randomUUID()
+        : persisted.installId;
 
       await this.write({
         ...persisted,
-        installId,
+        ...(installId ? { installId } : {}),
         installedAgents: [
           ...persisted.installedAgents,
           toInstalledAgent(registryAgent, new Date()),
@@ -1112,7 +1292,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       });
 
       installedSlug = registryAgent.slug;
-      installIdForReport = installId;
+      installIdForReport = registryInstallCountsEnabled ? installId : undefined;
     });
 
     if (installedSlug && installIdForReport) {
@@ -1304,12 +1484,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (this.userAgentsDir && this.isUserAuthoredSlug(slug)) return;
 
     const url = `${this.statsApiUrl.replace(/\/$/, "")}/api/install`;
-    const body = JSON.stringify({
+    const body = JSON.stringify(createRegistryInstallCountPayload({
       slug,
-      installId,
+      rawInstallId: installId,
       version: this.appVersion,
       platform: process.platform,
-    });
+    }));
     void fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1397,6 +1577,65 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return persisted.tenants;
   }
 
+  async hasConnectedTenant(): Promise<boolean> {
+    const persisted = await this.read();
+    return persisted.tenants.length > 0;
+  }
+
+  async hasEnabledSchedule(): Promise<boolean> {
+    const persisted = await this.read();
+    return persisted.installedAgents.some((agent) => agent.schedule?.enabled === true);
+  }
+
+  async getAgentSchedule(slug: string): Promise<AgentSchedule | undefined> {
+    const persisted = await this.read();
+    return persisted.installedAgents.find((agent) => agent.slug === slug)?.schedule;
+  }
+
+  async getSchedulerStatus() {
+    const persisted = await this.read();
+    return this.deriveSchedulerStatus(persisted);
+  }
+
+  private deriveSchedulerStatus(persisted: PersistedState) {
+    const scheduledAgents = persisted.installedAgents.filter(
+      (agent) => agent.schedule?.enabled === true,
+    );
+    const next = scheduledAgents
+      .map((agent) => {
+        const schedule = agent.schedule;
+        const last = schedule?.lastScheduledRunAt
+          ? new Date(schedule.lastScheduledRunAt).getTime()
+          : Date.now();
+        return {
+          agent,
+          dueAt: last + (schedule?.intervalSeconds ?? 3600) * 1000,
+        };
+      })
+      .sort((a, b) => a.dueAt - b.dueAt)[0];
+    const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule");
+    const latestWake = scheduledRuns[0];
+    const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
+    const latestFailureMessage = latestWake?.status === "failed"
+      ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.")
+      : undefined;
+    return {
+      supported: process.platform !== "linux",
+      enabled: false,
+      requiresTenant: persisted.tenants.length === 0,
+      activeScheduleCount: scheduledAgents.length,
+      ...(latestWake ? { lastWakeAt: latestWake.queuedAt } : {}),
+      ...(latestSuccess?.finishedAt ? { lastSuccessAt: latestSuccess.finishedAt } : {}),
+      ...(latestFailureMessage ? { lastError: latestFailureMessage } : {}),
+      ...(next
+        ? {
+            nextDueAt: new Date(next.dueAt).toISOString(),
+            nextDueAgentName: next.agent.name,
+          }
+        : {}),
+    };
+  }
+
   async listRequestedScopes(): Promise<RequestedScope[]> {
     // Strips the Graph resource prefix so the renderer can display the
     // bare scope name (e.g. "DeviceManagementManagedDevices.Read.All")
@@ -1475,13 +1714,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * rarely). Best-effort — silent on failure.
    */
   /**
-   * Fire a tenant tier probe for every persisted tenant. Called from
-   * main.ts on app startup so the StatusStrip / Settings panel
-   * populate without the user needing to disconnect-and-reconnect.
-   * Each probe is independent and silent on failure. Passes
-   * `force: true` so the launch-time probe always re-reads
-   * /subscribedSkus — once per launch, picks up new SKUs from
-   * Microsoft without the user having to wait for the 24h cadence.
+   * Fire a tenant tier probe for every persisted tenant. Do not call
+   * this during app startup: MSAL token-cache reads can trigger the
+   * macOS Keychain prompt before the user has taken an auth-related
+   * action. Keep this behind explicit tenant or run flows.
    */
   async probeAllTenants(): Promise<void> {
     const persisted = await this.read().catch(() => null);
@@ -1637,8 +1873,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       let model: string | undefined;
       if (typeof options.model === "string" && options.model.length > 0) {
         if (knownModels.length > 0 && !knownModels.includes(options.model)) {
+          const recovery =
+            activeProvider?.id === "ollama"
+              ? ` Pull it with \`ollama pull ${options.model}\` and try again.`
+              : " Pick one of the models reported by the provider and try again.";
           throw new Error(
-            `Model "${options.model}" is not installed for ${activeProvider?.name ?? providerId}. Pull it with \`ollama pull ${options.model}\` and try again.`,
+            `Model "${options.model}" is not available for ${activeProvider?.name ?? providerId}.${recovery}`,
           );
         }
         model = options.model;
@@ -1708,6 +1948,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
       const queuedRun = createQueuedRun({ agent, providerId, model });
       queuedRun.tenantId = pinnedTenantId;
+      queuedRun.trigger = options.trigger ?? "manual";
 
       await this.write({
         ...persisted,
@@ -1830,20 +2071,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     providerId: ProviderId,
     model: string | undefined,
   ): Promise<RunLlmApi> {
-    if (providerId !== "ollama") {
-      return noopLlm;
-    }
     const providers = await this.listProviders();
-    const ollama = providers.find((provider) => provider.id === "ollama");
-    if (!ollama || ollama.status !== "connected") {
+    const provider = providers.find((entry) => entry.id === providerId);
+    if (!provider || provider.status !== "connected") {
       return noopLlm;
     }
-    const defaultModel = model ?? ollama.defaultModel ?? ollama.models[0];
-    const options: { defaultModel?: string } = {};
-    if (defaultModel) {
-      options.defaultModel = defaultModel;
+
+    const defaultModel = model ?? provider.defaultModel ?? provider.models[0];
+    if (providerId === "ollama") {
+      const options: { defaultModel?: string } = {};
+      if (defaultModel) {
+        options.defaultModel = defaultModel;
+      }
+      return createOllamaLlm(options);
     }
-    return createOllamaLlm(options);
+    if (providerId === "openai") {
+      return createCodexLlm({ defaultModel });
+    }
+    return noopLlm;
   }
 
   private async buildGraph(
@@ -1991,30 +2236,180 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
   }
 
-  private persistRunSnapshot(run: RunRecord): Promise<void> {
+  private async persistRunSnapshot(run: RunRecord): Promise<void> {
     if (this.cancelledRunIds.has(run.id)) {
       // Run was soft-cancelled: discard further progress snapshots so
       // the stored state stays in the "cancelled" terminal state even
       // while background work finishes returning.
       return Promise.resolve();
     }
-    return this.serialize(async () => {
+    let deliveryCandidate: RunRecord | undefined;
+    await this.serialize(async () => {
       const persisted = await this.read();
       const previous = persisted.runs.find((existing) => existing.id === run.id);
       const wasTerminal = previous ? isTerminalRunStatus(previous.status) : false;
       const isNowTerminal = isTerminalRunStatus(run.status);
+      const nextRun =
+        isNowTerminal && run.status === "completed" && run.trigger === "schedule"
+          ? this.withScheduleChangeState(run, persisted.runs)
+          : run;
       const exists = previous !== undefined;
       const nextRuns = exists
-        ? persisted.runs.map((existing) => (existing.id === run.id ? run : existing))
-        : [run, ...persisted.runs];
+        ? persisted.runs.map((existing) => (existing.id === nextRun.id ? nextRun : existing))
+        : [nextRun, ...persisted.runs];
       await this.write({ ...persisted, runs: nextRuns });
       if (!wasTerminal && isNowTerminal && this.onRunFinished) {
         try {
-          this.onRunFinished(run);
+          this.onRunFinished(nextRun);
         } catch (error) {
           console.error("[state] onRunFinished listener failed", error);
         }
       }
+      if (!wasTerminal && isNowTerminal) {
+        deliveryCandidate = nextRun;
+      }
+    });
+    if (deliveryCandidate) {
+      void this.deliverRunToTeams(deliveryCandidate);
+    }
+  }
+
+  private withScheduleChangeState(run: RunRecord, runs: RunRecord[]): RunRecord {
+    const previous = runs.find(
+      (candidate) =>
+        candidate.id !== run.id &&
+        candidate.agentSlug === run.agentSlug &&
+        candidate.trigger === "schedule" &&
+        candidate.status === "completed",
+    );
+    if (!previous) return { ...run, changeState: "new" };
+    return {
+      ...run,
+      changeState:
+        fingerprintRunOutput(previous) === fingerprintRunOutput(run)
+          ? "unchanged"
+          : "changed",
+    };
+  }
+
+  private async deliverRunToTeams(run: RunRecord): Promise<void> {
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    const delivery = agent?.delivery?.teams;
+    if (!agent || !shouldDeliverRunToTeams(run, delivery)) return;
+
+    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    const tenant = tenantId
+      ? persisted.tenants.find((candidate) => candidate.id === tenantId)
+      : undefined;
+    if (!tenant) {
+      await this.appendRunLog(run.id, "warn", "Teams delivery skipped: no tenant session available.");
+      return;
+    }
+
+    const factory = findConnectorFactory("teams");
+    if (!factory) {
+      await this.appendRunLog(run.id, "warn", "Teams delivery skipped: Teams connector is not registered.");
+      return;
+    }
+
+    const baseConfig = persisted.connectors?.teams?.config ?? {};
+    const config =
+      delivery?.useDefaultTarget === false
+        ? {
+            ...baseConfig,
+            ...(delivery.teamId ? { defaultTeamId: delivery.teamId } : {}),
+            ...(delivery.channelId ? { defaultChannelId: delivery.channelId } : {}),
+            ...(delivery.teamName ? { defaultTeamName: delivery.teamName } : {}),
+            ...(delivery.channelName ? { defaultChannelName: delivery.channelName } : {}),
+          }
+        : baseConfig;
+
+    const client = this.getMsalClient();
+    const openBrowser = this.openBrowser;
+    const tenantSession = createTenantSession({
+      client,
+      tenantId: tenant.id,
+      username: tenant.username,
+      homeAccountId: tenant.homeAccountId,
+      acquireInteractive: async (scopes) =>
+        runInteractiveFlow({ client, scopes, openBrowser }),
+    });
+
+    const instance = await factory.build({
+      tenant: tenantSession,
+      config,
+      secrets: noSecrets,
+      log: () => undefined,
+      idempotencyKeyFor: (stepId, iteration) =>
+        `${run.id}:teams-delivery:${stepId}:${iteration}`,
+    });
+
+    try {
+      const capabilities = instance.capabilities as {
+        postChannelMessage?: (args: {
+          teamId?: string;
+          channelId?: string;
+          markdown: string;
+        }) => Promise<unknown>;
+      };
+      if (typeof capabilities.postChannelMessage !== "function") {
+        throw new Error("Teams connector does not expose postChannelMessage.");
+      }
+      await capabilities.postChannelMessage({
+        ...(delivery?.useDefaultTarget === false && delivery.teamId
+          ? { teamId: delivery.teamId }
+          : {}),
+        ...(delivery?.useDefaultTarget === false && delivery.channelId
+          ? { channelId: delivery.channelId }
+          : {}),
+        markdown: formatTeamsDeliveryMessage(run, agent, tenant),
+      });
+      await this.appendRunLog(run.id, "info", "Run report delivered to Microsoft Teams.", {
+        connectorId: "teams",
+      });
+    } catch (error) {
+      await this.appendRunLog(
+        run.id,
+        "warn",
+        `Teams delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+        { connectorId: "teams" },
+      );
+    } finally {
+      await instance.dispose().catch(() => undefined);
+    }
+  }
+
+  private async appendRunLog(
+    runId: string,
+    level: RunLogLevel,
+    message: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const timestamp = new Date().toISOString();
+      const nextRuns = persisted.runs.map((run) =>
+        run.id === runId
+          ? {
+              ...run,
+              logs: [
+                ...run.logs,
+                {
+                  id: `log_${randomUUID()}`,
+                  runId,
+                  timestamp,
+                  level,
+                  message,
+                  ...(metadata ? { metadata } : {}),
+                },
+              ],
+            }
+          : run,
+      );
+      await this.write({ ...persisted, runs: nextRuns });
     });
   }
 
@@ -2099,6 +2494,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (typeof parsed.installId === "string" && parsed.installId.length > 0) {
         state.installId = parsed.installId;
       }
+      if (typeof parsed.registryInstallCountsEnabled === "boolean") {
+        state.registryInstallCountsEnabled = parsed.registryInstallCountsEnabled;
+      }
+      if (typeof parsed.registrySource === "string" && parsed.registrySource.length > 0) {
+        state.registrySource = parsed.registrySource;
+      }
       const rawActiveModels = (parsed as { activeModelByProviderId?: unknown })
         .activeModelByProviderId;
       if (rawActiveModels && typeof rawActiveModels === "object" && !Array.isArray(rawActiveModels)) {
@@ -2179,6 +2580,27 @@ function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && providerIds.has(value as ProviderId);
 }
 
+function humanizeScheduledRunError(message: string): string {
+  const raw = message.trim();
+  const lower = raw.toLowerCase();
+  if (lower.includes("graph request failed") && lower.includes("fetch failed")) {
+    return "Microsoft Graph request failed. Check network or VPN connectivity, then rerun the schedule.";
+  }
+  if (lower.includes("graph request failed") && (lower.includes("401") || lower.includes("unauthorized"))) {
+    return "Microsoft Graph rejected the request because the tenant sign-in expired. Reconnect the tenant, then rerun the schedule.";
+  }
+  if (lower.includes("graph request failed") && (lower.includes("403") || lower.includes("forbidden"))) {
+    return "Microsoft Graph rejected the request because required permissions are missing. Reconnect the tenant and approve the agent scopes.";
+  }
+  if (lower.includes("no active tenant") || lower.includes("tenant required")) {
+    return "No active tenant is available. Connect a tenant before scheduled runs can start.";
+  }
+  if (raw.length > 180) {
+    return `${raw.slice(0, 177)}...`;
+  }
+  return raw || "Scheduled run failed.";
+}
+
 /**
  * MSAL's interactive flow throws raw library errors whose messages are
  * accurate but unfriendly ("AADSTS500113: No reply address was found"…).
@@ -2235,6 +2657,118 @@ function isTerminalRunStatus(status: RunRecord["status"]): boolean {
   );
 }
 
+function sanitizeTeamsDelivery(delivery: AgentTeamsDelivery): AgentTeamsDelivery {
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+    throw new Error("updateAgentTeamsDelivery: delivery must be an object or null.");
+  }
+  const useDefaultTarget = delivery.useDefaultTarget !== false;
+  const sanitized: AgentTeamsDelivery = {
+    enabled: delivery.enabled === true,
+    useDefaultTarget,
+    includeManualRuns: delivery.includeManualRuns ?? true,
+    includeScheduledRuns: delivery.includeScheduledRuns ?? true,
+    notifyOnSuccess: delivery.notifyOnSuccess ?? true,
+    notifyOnFailure: delivery.notifyOnFailure ?? false,
+    notifyOnChangeOnly: delivery.notifyOnChangeOnly ?? false,
+  };
+  if (!useDefaultTarget) {
+    if (!delivery.teamId || !delivery.channelId) {
+      throw new Error(
+        "updateAgentTeamsDelivery: teamId and channelId are required when not using the default Teams channel.",
+      );
+    }
+    sanitized.teamId = delivery.teamId;
+    sanitized.channelId = delivery.channelId;
+    if (delivery.teamName) sanitized.teamName = delivery.teamName;
+    if (delivery.channelName) sanitized.channelName = delivery.channelName;
+  }
+  return sanitized;
+}
+
+function removeEmptyDelivery(
+  delivery: NonNullable<AgentSummary["delivery"]>,
+): AgentSummary["delivery"] {
+  return delivery.teams ? delivery : undefined;
+}
+
+function shouldDeliverRunToTeams(
+  run: RunRecord,
+  delivery: AgentTeamsDelivery | undefined,
+): delivery is AgentTeamsDelivery {
+  if (!delivery?.enabled) return false;
+  if (run.status !== "completed" && run.status !== "failed") return false;
+  if (run.trigger === "schedule") {
+    if (delivery.includeScheduledRuns === false) return false;
+    if (delivery.notifyOnChangeOnly === true && run.changeState === "unchanged") {
+      return false;
+    }
+  } else if (delivery.includeManualRuns === false) {
+    return false;
+  }
+  if (run.status === "completed" && delivery.notifyOnSuccess === false) return false;
+  if (run.status === "failed" && delivery.notifyOnFailure !== true) return false;
+  return true;
+}
+
+function formatTeamsDeliveryMessage(
+  run: RunRecord,
+  agent: AgentSummary,
+  tenant: TenantRecord,
+): string {
+  const status = run.status === "completed" ? "Completed" : "Failed";
+  const lines = [
+    `## ${agent.name}`,
+    "",
+    `**Status:** ${status}`,
+    `**Tenant:** ${tenant.displayName}`,
+    `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
+    `**Queued:** ${run.queuedAt}`,
+  ];
+  if (run.changeState) {
+    lines.push(`**Finding state:** ${run.changeState}`);
+  }
+  if (run.providerId) {
+    lines.push(
+      `**Model:** ${run.providerId}${run.model ? ` · ${run.model}` : ""}`,
+    );
+  }
+  if (run.error) {
+    lines.push("", "### Error", "", run.error);
+  }
+  if (run.summary) {
+    lines.push("", "### Summary", "", run.summary);
+  }
+  if (run.steps.length > 0) {
+    lines.push("", "### Pipeline", "");
+    for (const step of run.steps) {
+      lines.push(`- ${step.status}: ${step.label}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function fingerprintRunOutput(run: RunRecord): string {
+  const source =
+    run.result === undefined
+      ? run.summary ?? ""
+      : stableStringify(run.result);
+  return source
+    .replace(/\s+/g, " ")
+    .replace(/["'`*_#>-]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(object[key])}`)
+    .join(",")}}`;
+}
+
 async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
@@ -2280,6 +2814,38 @@ async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> 
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function checkCodex(provider: ProviderSummary): Promise<ProviderSummary> {
+  const probe = await probeCodexLlm();
+  if (!probe.installed) {
+    return {
+      ...provider,
+      status: "not-installed",
+      detail: probe.detail ?? "Codex CLI (`codex`) is not installed or not on PATH.",
+      models: [],
+    };
+  }
+
+  if (!probe.ready) {
+    return {
+      ...provider,
+      status: "error",
+      detail:
+        probe.detail ??
+        `Codex CLI is installed but not authenticated. Run \`codex login\` and try again.`,
+      models: probe.models,
+      defaultModel: probe.defaultModel,
+    };
+  }
+
+  return {
+    ...provider,
+    status: "connected",
+    detail: probe.detail ?? `Authenticated via ${probe.authPath}`,
+    models: probe.models,
+    defaultModel: probe.defaultModel,
+  };
 }
 
 
@@ -2645,4 +3211,3 @@ function stripCodeFences(source: string): string {
   }
   return s.trim();
 }
-

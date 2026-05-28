@@ -1,6 +1,6 @@
 # Find inactive devices
 
-Read-only built-in agent that surfaces Intune-managed devices that have not synced recently and groups them into actionable inactivity bands.
+Read-only built-in agent that reviews Intune-managed device inactivity by last sync age, compliance state, operating system, ownership, enrollment type, and oldest-device evidence. It is intentionally review-first: stale sync is treated as an investigation signal, not automatic cleanup approval.
 
 ## Required Graph permission
 
@@ -8,7 +8,7 @@ Read-only built-in agent that surfaces Intune-managed devices that have not sync
 
 ## Inactivity buckets
 
-The agent reads `managedDevices` from the active tenant and assigns each device to a bucket based on days since `lastSyncDateTime`:
+The agent reads `managedDevices` from the active tenant and assigns each device to one bucket based on days since `lastSyncDateTime`:
 
 | Bucket   | Inactivity     | Suggested action |
 | -------- | -------------- | ---------------- |
@@ -16,30 +16,45 @@ The agent reads `managedDevices` from the active tenant and assigns each device 
 | Stale    | 90 to 179 days | Contact owner before any cleanup action. |
 | Retire   | 180+ days      | Review for retirement and reassignment. |
 
-Devices that synced within the last 30 days are considered active and are excluded from the result.
+Devices that synced within the warn threshold are considered active and are excluded from the inactive buckets.
+
+## Additional signals
+
+The report also includes:
+
+- Compliance breakdown for stale and retirement-candidate devices.
+- Warn-band operating system concentration.
+- Retirement-candidate ownership breakdown where Graph provides `managedDeviceOwnerType`.
+- Oldest retirement-candidate sample, sorted by `lastSyncDateTime`.
+- Conservative LLM guidance on what to verify before cleanup.
 
 ## Result shape
 
 ```jsonc
 {
   "totalDevices": 22,
-  "totalInactive": 12,
+  "inactiveCounts": { "warn": 4, "stale": 5, "retire": 3 },
   "buckets": {
     "warn":   [{ "id", "deviceName", "userPrincipalName", "operatingSystem", "lastSyncDateTime" }],
     "stale":  [...],
     "retire": [...]
   },
-  "recommendations": ["..."],
+  "breakdowns": {
+    "staleByCompliance": { "compliant": 2, "noncompliant": 1, "unknown": 2 },
+    "retireByCompliance": { "compliant": 1, "noncompliant": 1, "unknown": 1 },
+    "inactiveByOs": { "Windows": [...] },
+    "retireByOwnerType": { "company": [...] }
+  },
+  "oldestRetireCandidates": [{ "deviceName", "lastSyncDateTime" }],
+  "llmSummary": "...",
   "thresholds": { "warnDays": 30, "staleDays": 90, "retireDays": 180 }
 }
 ```
 
 ## How it runs today
 
-The first runtime ships a synthetic `managedDevices` fixture inside `@openadminos/runtime`. The agent computes its result from that fixture deterministically; no Microsoft Graph or LLM call is made. The fixture will be swapped for a real Graph adapter when MSAL authentication lands.
+The desktop runtime calls Microsoft Graph through the active tenant session, runs deterministic transforms locally, and asks the selected LLM provider for the final short report.
 
 ## Files
 
-- `manifest.json` — registry metadata used by the Agent Hub.
-- `src/agent.ts` — the agent module, compiled to `dist/agent.js`.
-- `tsconfig.json`, `package.json` — workspace package wiring.
+- `manifest.yaml` — declarative agent pipeline interpreted by `@openadminos/runtime`.

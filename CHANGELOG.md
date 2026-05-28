@@ -6,20 +6,64 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Desktop sidebar now has an Agents → Schedules submenu with a schedules overview page for active per-agent schedules, run-now actions, disable controls, and command-palette navigation.
+- OS scheduler registration for macOS/Windows: after tenant sign-in, OpenAdminOS can install a per-user LaunchAgent or Task Scheduler task so due agent schedules run through the signed app while the UI is closed.
+- OpenAI Codex LLM provider backed by the locally installed `codex` CLI. The adapter probes CLI install/auth state, populates the model picker from Codex's local model cache, and runs agent LLM steps through `codex exec --ephemeral --skip-git-repo-check -s read-only` without storing OpenAI API keys.
+- LLM provider smoke tests in Settings. Connected Ollama/OpenAI Codex rows now have a Test action that runs a tiny completion and reports model + response time.
+- Run detail now shows a compact execution context strip with tenant, provider, model, and queued/finished time so livestream viewers can see exactly what was used.
+- Schedules page now has Run due and Run all actions for demoing scheduled agents without waiting for the next interval.
+- Agent reports now stream into the run page while LLM steps generate. Ollama uses native chat streaming; OpenAI Codex uses `codex exec --json` message events with a final-message fallback.
+- Ollama LLM runs now wait up to 3 minutes by default, with a specific timeout remediation for slower local models.
+
 ### Changed
 
-- Privacy, terms, README, and marketing copy now disclose production registry install-count reporting where needed, remove stale email-capture references, and keep the no-tenant-telemetry guarantee precise.
+- Privacy, terms, README, and marketing copy now disclose production registry install counts where needed, remove stale email-capture references, and keep the no-tenant-telemetry guarantee precise.
+- Settings → Privacy now has a Registry install counts toggle; when enabled, public agent installs report only slug, app version, platform, and a yearly per-agent hash.
 - Marketing landing page now uses a fuller t3.codes-style product narrative with trust/provider proof, registry preview, write-confirmation showcase, open-source proof, and a final download CTA.
 - Marketing release badge and macOS download CTA now resolve from the latest GitHub release instead of requiring a manual version bump.
 - Marketing footer now keeps the OpenAdminOS wordmark as plain text and links to the company LinkedIn page with an icon.
 - Marketing and legal pages now pass mobile-width overflow checks, and reduced-motion users see the diff confirmation content without animation.
 - Marketing and legal page headers now show the OpenAdminOS app icon next to the wordmark.
-- README now matches the current desktop app behavior: tenant connection is mandatory before running agents, Agent Hub uses the GitHub-hosted registry with local cache/fallback, and the shipped-version table reflects v0.1.9.
 - Marketing footer and terms now include Microsoft trademark and non-affiliation language.
+- README now matches the current desktop app behavior: tenant connection is mandatory before running agents, Agent Hub uses the GitHub-hosted registry with local cache/fallback, and the shipped-version table reflects v0.2.0.
+- Conditional Access explainer now reviews report-only/disabled policies, broad exclusions, grant/session controls, client app types, risk conditions, stale policies, and Zero Trust coverage as manifest v1.1.0.
+- Dormant app registrations agent now reads credential, permission, redirect URI, app role, publisher-domain, and age signals, reports a stricter review-first cleanup posture, and ships as manifest v1.1.0.
+- Onboarding and provider settings now describe Ollama and OpenAI Codex as available providers, with hosted-provider trust messaging for Codex.
+- Onboarding provider copy now uses the OpenAdminOS name, removes stale "Coming in 0.2" badges, and shows detected model counts/defaults for connected providers.
+- Settings model counts now say "available" for hosted providers and "installed" for local providers.
+- Run result layout now leads with the agent report, moves tenant/provider/model into a compact run-context side rail, and keeps telemetry below the report instead of letting metadata dominate the first viewport.
+- Run result report markdown now renders numbered report sections as compact headings with calmer body typography, so generated agent output reads like a report instead of oversized raw markdown.
+- Run result pages no longer show the raw structured result panel by default, keeping the page focused on the agent report, pipeline, logs, and telemetry.
+- Agent detail pages now keep the Schedule card in the visible right sidebar instead of burying it below the manifest preview.
+- Schedule cards now support custom numeric intervals in minutes or hours in addition to the preset chips.
+- Scheduled runs are now stamped as scheduler-triggered, always produce a completion/failure OS notification, and automatically unregister the per-user OS scheduler when the last enabled schedule is removed.
+- Schedules page countdowns now update live by second under one minute, switch to a spinner while a scheduled run is queued/running, and briefly show a green completion check after the run finishes.
+- macOS run notifications now keep native notification references alive and log native `show`/`failed` events so unsigned dev-build notification failures are visible.
+- Schedules now include a health panel, recent schedule activity timeline, per-agent notification preferences, changed/no-change finding badges, and failed scheduled-run records when background preflight fails.
+- Activity now has manual, scheduled, failed, and needs-confirmation filters so scheduled automation is easy to audit.
+- Agent detail pages now expose Schedule as a header action, and run result pages add a compact Main finding / Risk / Next action brief above the run telemetry.
+- OpenAI Codex provider settings now show Codex auth, default model, available model count, and smoke-test feedback in one place.
+- Desktop runtime now uses Electron 42.3.0 for the v0.2 signed build.
+- Scheduler health now shows short actionable Graph failure text, clears stale errors after a later successful scheduled run, and no longer displays the macOS signed-build notification caveat.
+- Agent Hub now uses a simplified store-style browse layout with one catalog, no Agents/Dashboards split, dynamic category filters, scope-aware search, install/open actions, and no oversized featured or registry-metric cards.
+- Agent Hub details now hide raw manifests behind an explicit review action, onboarding uses catalog-style first-agent cards, agent runs open a tenant/provider/model preflight review before queueing, and Schedules hides internal health diagnostics unless attention is needed.
+- Agent runs now block preflight without an active tenant, warn on hosted providers and likely incremental consent, Agent Hub installs require explicit permission confirmation, Schedules exposes latest outcome plus notification preferences, Settings includes a 0.2 readiness panel, and workspace/app versions now read 0.2.0.
+- Run provider menus and Settings now label unfinished provider/options as "Coming soon" instead of tying them to the v0.2 release.
+- Agent detail pages now include per-agent Microsoft Teams delivery rules for terminal run reports, with default/custom channel targets and manual/scheduled success/failure filters.
+- Find inactive devices now reviews sync age alongside compliance, OS, ownership, enrollment, and oldest-device evidence, and ships as manifest v1.1.0 with review-first cleanup guidance.
+- Offboarding agent now enriches retire plans with compliance, OS, ownership, enrollment, trust, account, and inactivity-day evidence, excludes personal devices by default, and ships as manifest v1.1.0.
+- OS update posture now reviews OS version distribution alongside compliance, ownership, enrollment, and stale inventory evidence, and ships as manifest v1.1.0 with conservative lifecycle wording.
+- Risky sign-in triage is now honest about reading Entra risky users, requires Entra ID P2, adds risk-level/state/detail/processing breakdowns, and ships as manifest v1.1.0.
+- Secure Score prioritizer, sign-in failure explainer, stale guest cleanup, tenant change audit, tenant health report, user license overview, and compliance overview now ship as manifest v1.1.0 with richer deterministic evidence and more conservative report prompts.
+- Tenant health report no longer hard-requires Teams posting; scheduled/report delivery is handled by installed-agent delivery settings.
 
 ### Removed
 
+- Windows AppX packages are no longer uploaded as workflow artifacts or attached to GitHub Releases while the Windows signing path is pending; CI still builds the AppX for packaging validation.
+
 ### Fixed
+
+- Write agents now complete as no-op runs when their filters produce zero actions instead of failing before confirmation.
 
 ### Security
 
@@ -63,7 +107,6 @@ If you have v0.1.7 installed on macOS, your app will detect this release on next
 ### Downloads
 
 - **macOS** -- `OpenAdminOS-0.1.8-arm64.dmg` (signed with Developer ID, notarized by Apple)
-- **Windows MSIX** -- `OpenAdminOS.0.1.8.appx` (Microsoft Store submission package; unsigned by us, the Store signs at submission)
 - Hashes published alongside the DMG in `latest-mac.yml`.
 
 ### Security
@@ -148,7 +191,6 @@ If you have v0.1.7 installed on macOS, your app will detect this release on next
 - **Privacy policy page at `/privacy`.** Honest, plain-language policy covering MSAL token storage in OS keychain, Microsoft Graph data handling on-device, local-vs-hosted LLM provider behavior, and the no-tenant-telemetry stance. Maintainer contact is `support@openadminos.com`. Linked from the homepage footer. Required for Microsoft Store submission and for the desktop app's eventual in-app About link.
 - **Terms of use page at `/terms`.** One-page terms covering MIT-license as-is/no-warranty disclaimer, user responsibility for tenant authorization and write-agent diff approval, third-party services (Microsoft Graph + the user's LLM provider) being governed by their own terms, acceptable use, and a pointer back to the privacy policy. Linked from the homepage footer.
 - **Sitemap and robots.txt for the marketing site.** New `web/src/app/sitemap.ts` and `web/src/app/robots.ts` using Next.js App Router metadata routes. Sitemap lists `/`, `/privacy`, and `/terms`; robots allows everything except `/api/` and points crawlers at the sitemap. Makes the legal pages discoverable to search engines and to Microsoft's Store-submission crawlers.
-- **Microsoft Store auto-publish workflow.** New `.github/workflows/store-publish.yml` fires on `release: published` (and `workflow_dispatch`), downloads the `.appx` from the GitHub release assets, and submits it to Partner Center via Microsoft's official `msstore` Developer CLI. The first submission stays manual; subsequent releases auto-submit once `PARTNER_CENTER_TENANT_ID`, `PARTNER_CENTER_CLIENT_ID`, `PARTNER_CENTER_CLIENT_SECRET`, and `MS_STORE_APP_ID` are configured as repo secrets. The workflow skips cleanly (with a warning) until the secrets exist, so it's safe to land before the manual onboarding is finished. `docs/RELEASING.md` documents the one-time Partner Center → Azure AD app registration → Manager-role onboarding plus the secret names.
 - **Microsoft Teams connector (first connector).** End-to-end implementation across the monorepo:
   - **`packages/connector-teams`** — new package implementing `TeamsConnectorCapabilities` (`listTeams`, `listChannels`, `postChannelMessage`, `postChatMessage`) against Microsoft Graph. Includes a small Markdown→Teams HTML renderer (bold, italic, code, links, headings, lists) so agent output renders correctly in Teams chat. Registers itself onto `ConnectorRegistry` via TypeScript declaration merging.
   - **Runtime wiring (`packages/runtime/src/connectors.ts`)** — static connector registry, preflight (build + healthcheck + dispose lifecycle), capability invocation wrapper that injects runtime-supplied idempotency keys, emits `ConnectorAuditEntry`, gates `notify`/`mutating`/`destructive` calls through a `confirmInvocation` callback, and maps typed `ConnectorError` failures to retry/reauth/reconfigure/fatal recovery actions. `ctx.connectors` is now injected into every `RunContext` when an agent declares connector requirements.

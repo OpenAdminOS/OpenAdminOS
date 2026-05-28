@@ -141,6 +141,7 @@ const ERROR_TEMPLATE = `<!doctype html>
 export interface TokenCacheStorage {
   read(): Promise<string>;
   write(serialized: string): Promise<void>;
+  clear?(): Promise<void>;
 }
 
 export function createCachePlugin(storage: TokenCacheStorage): ICachePlugin {

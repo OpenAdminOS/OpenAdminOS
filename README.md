@@ -36,7 +36,7 @@
 | Platform | Asset |
 |---|---|
 | macOS (Apple Silicon) | [`OpenAdminOS-<version>-arm64.dmg`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) — signed with Developer ID, notarized |
-| Windows | [`OpenAdminOS.<version>.appx`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) — Microsoft Store package |
+| Windows | Not published while the Windows signing path is pending |
 | From source | See [Quickstart](#quickstart) below |
 
 ---

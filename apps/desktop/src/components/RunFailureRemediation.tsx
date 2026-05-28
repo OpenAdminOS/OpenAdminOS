@@ -20,6 +20,11 @@ const SUGGESTIONS: Suggestion[] = [
     body: "Run `ollama pull <model>` for the model you selected in Settings → LLM Providers, then try again.",
   },
   {
+    match: (e) => /ollama/i.test(e) && /timed out|timeout|aborted/i.test(e),
+    title: "Ollama generation timed out",
+    body: "The local model did not finish in time. OpenAdminOS now waits up to 3 minutes by default; restart the app to pick up that change. For very large local models, set `OPENAGENTS_OLLAMA_TIMEOUT_MS` higher or pick a smaller model.",
+  },
+  {
     match: (e) => /timed out|timeout|aborted/i.test(e),
     title: "Request timed out",
     body: "The LLM or Microsoft Graph took longer than expected. Try a smaller model, narrow the agent's scope, or check your network.",

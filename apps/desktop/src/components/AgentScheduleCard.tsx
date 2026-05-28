@@ -22,6 +22,8 @@ export function AgentScheduleCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customValue, setCustomValue] = useState("30");
+  const [customUnit, setCustomUnit] = useState<"minutes" | "hours">("minutes");
 
   const apply = async (next: AgentSchedule | null) => {
     setBusy(true);
@@ -37,6 +39,17 @@ export function AgentScheduleCard({
 
   const enabled = schedule?.enabled === true;
   const currentSeconds = schedule?.intervalSeconds ?? 60 * 60;
+  const notificationPrefs = {
+    notifyOnSuccess: schedule?.notifyOnSuccess ?? true,
+    notifyOnFailure: schedule?.notifyOnFailure ?? true,
+    notifyOnChangeOnly: schedule?.notifyOnChangeOnly ?? false,
+  };
+  const parsedCustom = Number.parseInt(customValue, 10);
+  const customSeconds =
+    Number.isFinite(parsedCustom) && parsedCustom > 0
+      ? parsedCustom * (customUnit === "hours" ? 60 * 60 : 60)
+      : 0;
+  const customValid = customSeconds >= 60;
   const nextFireMs = schedule?.lastScheduledRunAt
     ? new Date(schedule.lastScheduledRunAt).getTime() +
       currentSeconds * 1000
@@ -73,8 +86,9 @@ export function AgentScheduleCard({
         </div>
 
         <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-          Schedules only fire while OpenAdminOS is running. Pick an interval
-          and runs queue automatically against the agent's active tenant.
+          Pick an interval and runs queue automatically against the agent's
+          active tenant. Enable the OS scheduler in Settings to run due agents
+          while the UI is closed.
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-1.5">
@@ -88,6 +102,7 @@ export function AgentScheduleCard({
                   void apply({
                     enabled: true,
                     intervalSeconds: preset.seconds,
+                    ...notificationPrefs,
                     ...(schedule?.lastScheduledRunAt
                       ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
                       : {}),
@@ -104,6 +119,109 @@ export function AgentScheduleCard({
             );
           })}
         </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label className="sr-only" htmlFor="custom-schedule-interval">
+            Custom schedule interval
+          </label>
+          <input
+            id="custom-schedule-interval"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={customValue}
+            disabled={busy}
+            onChange={(event) => setCustomValue(event.target.value)}
+            className="h-8 w-20 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2.5 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <select
+            value={customUnit}
+            disabled={busy}
+            onChange={(event) =>
+              setCustomUnit(event.target.value === "hours" ? "hours" : "minutes")
+            }
+            className="h-8 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <option value="minutes">minutes</option>
+            <option value="hours">hours</option>
+          </select>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy || !customValid}
+            onClick={() =>
+              void apply({
+                enabled: true,
+                intervalSeconds: customSeconds,
+                ...notificationPrefs,
+                ...(schedule?.lastScheduledRunAt
+                  ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
+                  : {}),
+              })
+            }
+          >
+            Set custom
+          </Button>
+        </div>
+
+        {enabled && (
+          <div className="mt-4 rounded-md bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Notifications
+            </div>
+            <div className="mt-2 grid gap-2 text-[11.5px] text-[var(--color-text-soft)]">
+              <ScheduleCheckbox
+                checked={notificationPrefs.notifyOnSuccess}
+                label="Notify on success"
+                disabled={busy}
+                onChange={(checked) =>
+                  void apply({
+                    enabled: true,
+                    intervalSeconds: currentSeconds,
+                    ...notificationPrefs,
+                    notifyOnSuccess: checked,
+                    ...(schedule?.lastScheduledRunAt
+                      ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
+                      : {}),
+                  })
+                }
+              />
+              <ScheduleCheckbox
+                checked={notificationPrefs.notifyOnFailure}
+                label="Notify on failure"
+                disabled={busy}
+                onChange={(checked) =>
+                  void apply({
+                    enabled: true,
+                    intervalSeconds: currentSeconds,
+                    ...notificationPrefs,
+                    notifyOnFailure: checked,
+                    ...(schedule?.lastScheduledRunAt
+                      ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
+                      : {}),
+                  })
+                }
+              />
+              <ScheduleCheckbox
+                checked={notificationPrefs.notifyOnChangeOnly}
+                label="Only notify when findings change"
+                disabled={busy}
+                onChange={(checked) =>
+                  void apply({
+                    enabled: true,
+                    intervalSeconds: currentSeconds,
+                    ...notificationPrefs,
+                    notifyOnChangeOnly: checked,
+                    ...(schedule?.lastScheduledRunAt
+                      ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
+                      : {}),
+                  })
+                }
+              />
+            </div>
+          </div>
+        )}
 
         {enabled && (
           <div className="mt-3 font-mono text-[11px] text-[var(--color-text-muted)]">
@@ -130,6 +248,31 @@ export function AgentScheduleCard({
         )}
       </div>
     </Card>
+  );
+}
+
+function ScheduleCheckbox({
+  checked,
+  label,
+  disabled,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-3.5 w-3.5 accent-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+      />
+      <span>{label}</span>
+    </label>
   );
 }
 

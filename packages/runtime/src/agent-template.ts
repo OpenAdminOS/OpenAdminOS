@@ -1093,6 +1093,7 @@ interface CorrelateStaleDevicesSpec {
   entraSource: unknown;
   staleDays: number | string;
   strategy: CorrelationStrategy | string;
+  excludePersonalDevices?: boolean | string;
 }
 
 interface IntuneDeviceLite {
@@ -1104,6 +1105,9 @@ interface IntuneDeviceLite {
   lastSyncDateTime?: string;
   azureADDeviceId?: string;
   managementState?: string;
+  complianceState?: string;
+  managedDeviceOwnerType?: string;
+  deviceEnrollmentType?: string;
   [key: string]: unknown;
 }
 
@@ -1164,6 +1168,7 @@ function transformCorrelateStaleDevices(
   const now = Date.now();
   const msPerDay = 86_400_000;
   const thresholdMs = threshold * msPerDay;
+  const excludePersonalDevices = toBoolean(spec.excludePersonalDevices);
 
   const entraByDeviceId = new Map<string, EntraDeviceLite>();
   for (const entry of spec.entraSource as EntraDeviceLite[]) {
@@ -1181,6 +1186,7 @@ function transformCorrelateStaleDevices(
 
   const candidates: Array<Record<string, unknown>> = [];
   let inFlightSkipped = 0;
+  let personalSkipped = 0;
 
   for (const intune of spec.intuneSource as IntuneDeviceLite[]) {
     if (!intune || typeof intune !== "object") continue;
@@ -1189,6 +1195,14 @@ function transformCorrelateStaleDevices(
       IN_FLIGHT_MANAGEMENT_STATES.has(intune.managementState)
     ) {
       inFlightSkipped++;
+      continue;
+    }
+    if (
+      excludePersonalDevices &&
+      typeof intune.managedDeviceOwnerType === "string" &&
+      intune.managedDeviceOwnerType.toLowerCase() === "personal"
+    ) {
+      personalSkipped++;
       continue;
     }
 
@@ -1221,6 +1235,12 @@ function transformCorrelateStaleDevices(
       approximateLastSignInDateTime: entra?.approximateLastSignInDateTime ?? null,
       entraAccountEnabled: entra?.accountEnabled ?? null,
       entraTrustType: entra?.trustType ?? null,
+      entraIsManaged: entra?.isManaged ?? null,
+      intuneInactiveDays:
+        intuneAge === null ? null : Math.max(0, Math.floor(intuneAge / msPerDay)),
+      entraInactiveDays:
+        entraAge === null ? null : Math.max(0, Math.floor(entraAge / msPerDay)),
+      matchedStrategy: strategy,
     });
   }
 
@@ -1228,10 +1248,22 @@ function transformCorrelateStaleDevices(
     "info",
     `Correlate stale devices (strategy=${strategy}, staleDays=${threshold}): kept ${candidates.length} of ${
       (spec.intuneSource as unknown[]).length
-    }; skipped ${inFlightSkipped} already in flight.`,
+    }; skipped ${inFlightSkipped} already in flight${
+      excludePersonalDevices ? ` and ${personalSkipped} personal device(s)` : ""
+    }.`,
   );
 
   return candidates;
+}
+
+function toBoolean(value: unknown): boolean {
+  if (value === true) return true;
+  if (value === false || value === undefined || value === null) return false;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }
+  return false;
 }
 
 interface CountByFieldSpec {

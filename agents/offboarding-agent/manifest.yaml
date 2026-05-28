@@ -12,8 +12,8 @@
 descriptor:
   id: offboarding-agent
   name: Offboarding agent
-  description: Identifies stale devices using Intune sync + Entra sign-in signals and retires them after typed confirmation. Open replacement for Microsoft's retired Intune Device Offboarding Agent.
-  version: 1.0.0
+  description: Builds a conservative stale-device offboarding plan from Intune sync, Entra sign-in, ownership, compliance, and trust signals, then retires devices after typed confirmation.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -46,6 +46,10 @@ skills:
         - complianceState
         - azureADDeviceId
         - managementState
+        - managedDeviceOwnerType
+        - deviceEnrollmentType
+        - manufacturer
+        - model
       scopes:
         - DeviceManagementManagedDevices.Read.All
 
@@ -88,6 +92,61 @@ skills:
       entraSource: "{{ load_entra_devices.output }}"
       staleDays: "{{ settings.staleDays }}"
       strategy: "{{ settings.strategy }}"
+      excludePersonalDevices: "{{ settings.excludePersonalDevices }}"
+
+  - id: candidates_by_compliance
+    format: transform
+    label: Count candidates by compliance state
+    detail: Shows whether candidates are compliant, noncompliant, or unknown.
+    settings:
+      kind: count-by-field
+      source: "{{ select_offboarding_candidates.output }}"
+      field: complianceState
+      buckets:
+        - compliant
+        - noncompliant
+        - unknown
+
+  - id: candidates_by_os
+    format: transform
+    label: Group candidates by operating system
+    detail: Surfaces platform concentration before retirement.
+    settings:
+      kind: group-by-field
+      source: "{{ select_offboarding_candidates.output }}"
+      field: operatingSystem
+      missing: unknown
+
+  - id: candidates_by_owner_type
+    format: transform
+    label: Group candidates by ownership
+    detail: Confirms whether personal devices were excluded from the plan.
+    settings:
+      kind: group-by-field
+      source: "{{ select_offboarding_candidates.output }}"
+      field: managedDeviceOwnerType
+      missing: unknown
+
+  - id: candidates_by_trust_type
+    format: transform
+    label: Group candidates by Entra trust type
+    detail: Separates Azure AD joined, hybrid, and unknown trust states.
+    settings:
+      kind: group-by-field
+      source: "{{ select_offboarding_candidates.output }}"
+      field: entraTrustType
+      missing: unknown
+
+  - id: oldest_candidates
+    format: transform
+    label: Sample oldest candidates
+    detail: Lists the highest Intune inactivity ages first for confirmation evidence.
+    settings:
+      kind: sort-by
+      source: "{{ select_offboarding_candidates.output }}"
+      field: intuneInactiveDays
+      direction: desc
+      take: 10
 
   # 4) Plain-language rationale for the diff confirmation. Pulls in the
   #    admin's free-text instructions and the lag caveat on the Entra signal.
@@ -97,28 +156,37 @@ skills:
     detail: One-paragraph rationale shown alongside the typed-confirmation prompt.
     settings:
       system: >-
-        You are a Microsoft 365 administrator's assistant. Be concise and
-        factual. Write a single short paragraph (3 sentences max) that an
-        admin can paste into a change ticket. Never invent numbers; use only
-        the figures you are given. Honor the admin's instructions if any are
-        provided.
+        You are an Intune device offboarding reviewer. Be conservative,
+        factual, and explicit about evidence. This is a destructive plan:
+        do not imply the action is safe merely because devices are stale.
+        Use only the supplied counts, strategy, and samples. Honor the admin's
+        instructions if any are provided.
       prompt: |-
         About to offboard {{ select_offboarding_candidates.output | size }} devices.
         Threshold: {{ settings.staleDays }} days. Strategy: {{ settings.strategy }}.
+        Personal devices excluded: {{ settings.excludePersonalDevices }}.
 
-        Write a short paragraph explaining what the admin is approving:
-        - The count, threshold, and strategy in plain English.
-        - Why stale devices are an attack-surface and license-cost concern.
-        - One sentence on what happens: Intune retire removes management state
-          (the device itself is not wiped unless policy says so); the Entra
-          device object stays enabled in this version.
-        - If the strategy uses the Entra signal, note that
-          approximateLastSignInDateTime can lag up to ~14 days.
+        Candidate compliance breakdown: {{ candidates_by_compliance.output }}.
+        Candidates by operating system: {{ candidates_by_os.output }}.
+        Candidates by owner type: {{ candidates_by_owner_type.output }}.
+        Candidates by Entra trust type: {{ candidates_by_trust_type.output }}.
+        Oldest candidate sample: {{ oldest_candidates.output }}.
+
+        Write a short change-ticket rationale with these sections:
+        1. What will happen.
+        2. Evidence used.
+        3. Checks before approval.
+
+        Include that Intune retire removes the management relationship and
+        corporate data according to platform policy; it does not disable the
+        Entra device object in this version. If the strategy uses the Entra
+        signal, note that approximateLastSignInDateTime can lag up to about
+        14 days. If the count is zero, say no retirement action is proposed.
 
         Admin instructions (may be empty):
         {{ settings.instructions | default("(none)") }}
       temperature: 0.2
-      maxTokens: 260
+      maxTokens: 420
 
   # 5) Emit one retire action per candidate. The runtime pauses here.
   - id: plan_offboarding
@@ -135,17 +203,27 @@ skills:
         - DeviceManagementManagedDevices.PrivilegedOperations.All
       actionTemplate:
         label: "Offboard {{ item.deviceName }}"
-        description: "{{ item.userPrincipalName }} - {{ item.operatingSystem }} - Intune sync {{ item.lastSyncDateTime }} - Entra sign-in {{ item.approximateLastSignInDateTime | default('n/a') }}"
+        description: "{{ item.userPrincipalName }} - {{ item.operatingSystem }} {{ item.osVersion | default('') }} - owner {{ item.managedDeviceOwnerType | default('unknown') }} - compliance {{ item.complianceState | default('unknown') }} - Intune inactive {{ item.intuneInactiveDays | default('n/a') }}d - Entra inactive {{ item.entraInactiveDays | default('n/a') }}d"
         severity: destructive
         metadata:
           deviceId: "{{ item.id }}"
           deviceName: "{{ item.deviceName }}"
           userPrincipalName: "{{ item.userPrincipalName }}"
           operatingSystem: "{{ item.operatingSystem }}"
+          osVersion: "{{ item.osVersion }}"
+          complianceState: "{{ item.complianceState }}"
+          managedDeviceOwnerType: "{{ item.managedDeviceOwnerType }}"
+          deviceEnrollmentType: "{{ item.deviceEnrollmentType }}"
+          manufacturer: "{{ item.manufacturer }}"
+          model: "{{ item.model }}"
           lastSyncDateTime: "{{ item.lastSyncDateTime }}"
+          intuneInactiveDays: "{{ item.intuneInactiveDays }}"
           azureADDeviceId: "{{ item.azureADDeviceId }}"
           entraObjectId: "{{ item.entraObjectId }}"
+          entraTrustType: "{{ item.entraTrustType }}"
+          entraAccountEnabled: "{{ item.entraAccountEnabled }}"
           approximateLastSignInDateTime: "{{ item.approximateLastSignInDateTime }}"
+          entraInactiveDays: "{{ item.entraInactiveDays }}"
 
 # ─── what makes it an agent ────────────────────────────────────────────────
 definition:
@@ -161,6 +239,12 @@ definition:
       type: string
       default: both
       description: "How to combine the Intune and Entra staleness signals. One of: both (stale in both), intune-only (only Intune sync matters), entra-only (only Entra sign-in matters)."
+
+    - id: excludePersonalDevices
+      label: Exclude personal devices
+      type: boolean
+      default: true
+      description: Excludes Intune devices whose managedDeviceOwnerType is personal before the retire plan is built.
 
     - id: instructions
       label: Custom instructions

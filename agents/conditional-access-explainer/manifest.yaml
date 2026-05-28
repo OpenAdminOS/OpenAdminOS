@@ -1,15 +1,16 @@
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
 #
 # conditional-access-explainer — loads every Conditional Access policy
-# in the tenant and asks the LLM to explain what they do, where they
-# overlap, and what's missing relative to common baselines. CA policy
-# interaction is famously hard to reason about deterministically; this
-# is the canonical "advisor" agent.
+# in the tenant and asks the LLM to explain coverage, risky patterns,
+# disabled/report-only controls, exclusions, and gaps relative to
+# common Microsoft Zero Trust baselines. CA policy interaction is
+# famously hard to reason about deterministically; this is the
+# canonical "advisor" agent.
 descriptor:
   id: conditional-access-explainer
   name: Conditional Access explainer
-  description: Reads every CA policy in the tenant and produces a plain-English explanation of what they do, where they overlap, and what's missing.
-  version: 1.0.0
+  description: Reviews Conditional Access policies for coverage, exclusions, report-only controls, overlaps, and common Zero Trust gaps.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -31,6 +32,8 @@ skills:
       select:
         - id
         - displayName
+        - createdDateTime
+        - modifiedDateTime
         - state
         - conditions
         - grantControls
@@ -46,41 +49,113 @@ skills:
       source: "{{ load_policies.output }}"
       field: state
 
+  - id: by_grant_operator
+    format: transform
+    label: Count policies by grant operator
+    settings:
+      kind: count-by-field
+      source: "{{ load_policies.output }}"
+      field: grantControls.operator
+      missing: "(no grant controls)"
+
+  - id: by_client_apps
+    format: transform
+    label: Count policies by client app types
+    settings:
+      kind: count-by-field
+      source: "{{ load_policies.output }}"
+      field: conditions.clientAppTypes
+      missing: "(not scoped)"
+
+  - id: by_signin_risk
+    format: transform
+    label: Count policies by sign-in risk condition
+    settings:
+      kind: count-by-field
+      source: "{{ load_policies.output }}"
+      field: conditions.signInRiskLevels
+      missing: "(none)"
+
+  - id: by_user_risk
+    format: transform
+    label: Count policies by user risk condition
+    settings:
+      kind: count-by-field
+      source: "{{ load_policies.output }}"
+      field: conditions.userRiskLevels
+      missing: "(none)"
+
+  - id: by_modified_age
+    format: transform
+    label: Group policies by modification age
+    settings:
+      kind: group-by-age
+      source: "{{ load_policies.output }}"
+      timestampField: modifiedDateTime
+      groups:
+        - name: "not modified in 2y+"
+          inactiveDaysAtLeast: 730
+        - name: "not modified in 1y+"
+          inactiveDaysAtLeast: 365
+        - name: "not modified in 180d+"
+          inactiveDaysAtLeast: 180
+
   - id: explain
     format: llm
-    label: Explain the CA posture
-    detail: Plain-English walkthrough of the policy set with gaps flagged.
+    label: Review Conditional Access posture
+    detail: Coverage, interaction, exclusion, and Zero Trust gap review.
     when: ctx.llm.available
     settings:
       system: >-
-        You are an Entra Conditional Access expert. Be concise and
-        factual. Never invent policies or controls — only describe the
-        ones you are given. When you flag a gap, say which Microsoft
-        Zero Trust baseline (legacy authentication block, MFA for
-        admins, device compliance for managed apps) it relates to.
+        You are an Entra Conditional Access expert reviewing a real
+        tenant policy set for Microsoft 365 admins. Be concise,
+        factual, and skeptical. Never invent policies, users, groups,
+        apps, or controls. If the JSON does not prove coverage, say
+        "not proven from this policy set." Treat report-only and
+        disabled policies as not enforcing protection. Treat exclusions
+        as important risk evidence, not noise.
       prompt: |-
         The tenant has {{ load_policies.output | size }} CA policies
-        ({{ by_state.output }}).
+        by state: {{ by_state.output }}.
+        Grant operator breakdown: {{ by_grant_operator.output }}.
+        Client app type breakdown: {{ by_client_apps.output }}.
+        Sign-in risk condition breakdown: {{ by_signin_risk.output }}.
+        User risk condition breakdown: {{ by_user_risk.output }}.
+        Modified-age breakdown: {{ by_modified_age.output }}.
 
         Full policy set (JSON):
         {{ load_policies.output }}
 
-        Write three short sections:
+        Review for these specific signals:
+        - disabled or report-only policies that appear security-critical
+        - broad exclusions in users, groups, applications, platforms, locations, or client app types
+        - legacy authentication / other client app coverage
+        - MFA coverage for admins and privileged roles
+        - coverage for all users versus narrow groups only
+        - unmanaged or non-compliant device controls
+        - guest / external user coverage
+        - risky user and risky sign-in controls
+        - session controls such as sign-in frequency, persistent browser, app enforced restrictions, or Continuous Access Evaluation
+        - overlapping policies with different grant controls or exclusions
 
-        1. **What's covered.** Group the policies by what they protect
-           (admin sign-in, all users, specific apps, etc.) and describe
-           each group in one sentence.
+        Produce this exact report shape:
 
-        2. **Interactions to watch.** Highlight any pair of policies
-           whose conditions overlap, where the combined effect may be
-           surprising (e.g., two MFA policies with different grant
-           controls, or an exclusion in one policy that's not mirrored
-           in another).
+        1. Main finding.
+        One short paragraph with the strongest posture theme.
 
-        3. **Common gaps.** List up to three items missing relative to
-           the Microsoft Zero Trust baseline.
+        2. Coverage map.
+        Bullets for admin MFA, all-user MFA, legacy auth block, device compliance, guest/external access, risky sign-ins/users, and session controls. Each bullet must say covered / partially covered / not proven and cite policy names.
+
+        3. Interactions to watch.
+        Three to five bullets. Each must name the involved policy or policies and the overlap, exclusion, report-only state, or grant-control conflict.
+
+        4. Gaps and stale controls.
+        Three to five bullets tied to concrete baseline areas. Include disabled/report-only policies and policies not modified for a long time when relevant.
+
+        5. Next action.
+        One concrete first admin action. Prefer reviewing exclusions or moving a critical report-only policy toward enforcement when supported by evidence.
       temperature: 0.2
-      maxTokens: 700
+      maxTokens: 1100
 
 definition:
   triggers:
@@ -91,4 +166,9 @@ definition:
     data:
       total: "{{ load_policies.output | size }}"
       byState: "{{ by_state.output }}"
+      byGrantOperator: "{{ by_grant_operator.output }}"
+      byClientApps: "{{ by_client_apps.output }}"
+      bySignInRisk: "{{ by_signin_risk.output }}"
+      byUserRisk: "{{ by_user_risk.output }}"
+      byModifiedAge: "{{ by_modified_age.output }}"
       llmModel: "{{ explain.output.model }}"

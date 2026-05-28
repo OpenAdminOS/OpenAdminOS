@@ -1,7 +1,7 @@
 {
   "name": "@openadminos/desktop",
   "private": true,
-  "version": "0.1.9",
+  "version": "0.2.0",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -15,8 +15,8 @@
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
-    "@openadminos/agent-sdk": "0.1.9",
-    "@openadminos/runtime": "0.1.9",
+    "@openadminos/agent-sdk": "0.2.0",
+    "@openadminos/runtime": "0.2.0",
     "electron-updater": "^6.6.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -29,7 +29,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^9.1.2",
-    "electron": "^42.1.0",
+    "electron": "^42.3.0",
     "electron-builder": "^26.8.1",
     "tailwindcss": "^4.0.0",
     "typescript": "~6.0.3",
@@ -39,7 +39,7 @@
   "build": {
     "appId": "com.openadminos.desktop",
     "productName": "OpenAdminOS",
-    "electronVersion": "42.1.0",
+    "electronVersion": "42.3.0",
     "directories": {
       "output": "release"
     },

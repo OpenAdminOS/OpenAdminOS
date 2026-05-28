@@ -1,8 +1,9 @@
 # Sign-in failure explainer
 
 Read-only investigator. Pulls the last 200 sign-in failures, groups
-them by error code, app, and user, and asks the LLM to cluster them by
-likely root cause with a triage suggestion per cluster.
+them by error code, app, user, client app, Conditional Access status,
+and sign-in risk signals, then asks the LLM to cluster them by likely
+root cause with a triage suggestion per cluster.
 
 ## Why this earns its keep
 
@@ -25,6 +26,10 @@ clusters.
   "byError": { "50126": 92, "53003": 41, "50053": 28, ... },
   "byApp": { "Office 365": 88, "Teams": 41, ... },
   "byUser": { "user1@tenant.com": 12, ... },
+  "byClientApp": { "Browser": 120, "Mobile Apps and Desktop clients": 41 },
+  "byConditionalAccessStatus": { "failure": 77, "notApplied": 32 },
+  "byRiskDuringSignIn": { "none": 150, "medium": 8 },
+  "recentSample": [{ "userPrincipalName": "user1@tenant.com", "status": { "errorCode": 53003 } }],
   "llmModel": "llama3.1:8b"
 }
 ```
@@ -34,8 +39,8 @@ clusters.
 - Window is the last 200 failures (the Graph `signIns` endpoint
   doesn't honour a clean time-window filter, so we cap by count).
 - The LLM is conservative about claiming compromise. If you suspect
-  attack, also run `risky-sign-in-triage`, which looks at
-  `signIn.riskLevelDuringSignIn` specifically.
+  account compromise, also run `risky-sign-in-triage`, which reads
+  Entra risky-user records from Identity Protection.
 - This is a *clustering* agent, not a *root-cause-by-user* agent. To
   investigate a specific user, file a follow-up that takes the UPN as
   a per-run input (deferred, needs a small UX change to support

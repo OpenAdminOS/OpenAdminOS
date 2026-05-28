@@ -1,14 +1,14 @@
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
 #
 # secure-score-prioritizer — pulls Secure Score control profiles and
-# asks the LLM to rank the unimplemented controls by impact/effort.
+# asks the LLM to rank control-profile review targets by impact/effort.
 # The Secure Score portal lists everything; the value here is the
 # triage that turns 200 recommendations into a prioritized week.
 descriptor:
   id: secure-score-prioritizer
   name: Secure Score prioritizer
-  description: Ranks unimplemented Microsoft Secure Score controls by likely impact and effort for this tenant.
-  version: 1.0.0
+  description: Prioritizes Microsoft Secure Score control profiles by category, action type, effort signals, user impact, and max-score upside.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -49,33 +49,74 @@ skills:
       source: "{{ load_controls.output }}"
       field: controlCategory
 
+  - id: by_action_type
+    format: transform
+    label: Count controls by action type
+    detail: Separates configuration, review, and third-party action shapes where Secure Score provides them.
+    settings:
+      kind: count-by-field
+      source: "{{ load_controls.output }}"
+      field: actionType
+
+  - id: by_implementation_cost
+    format: transform
+    label: Count controls by implementation cost
+    detail: Shows the effort bands Microsoft attaches to the controls.
+    settings:
+      kind: count-by-field
+      source: "{{ load_controls.output }}"
+      field: implementationCost
+
+  - id: by_user_impact
+    format: transform
+    label: Count controls by user impact
+    detail: Shows whether recommended controls are expected to affect end users.
+    settings:
+      kind: count-by-field
+      source: "{{ load_controls.output }}"
+      field: userImpact
+
+  - id: top_score_upside
+    format: transform
+    label: Sample highest max-score controls
+    detail: Sorts controls by maxScore so the report can focus on larger point opportunities.
+    settings:
+      kind: sort-by
+      source: "{{ load_controls.output }}"
+      field: maxScore
+      direction: desc
+      take: 15
+
   - id: prioritize
     format: llm
     label: Rank recommendations
-    detail: Top-five list with reasoning and effort estimates.
-    when: ctx.llm.available
+    detail: Top-five review list with reasoning and effort estimates.
     settings:
       system: >-
         You are a Microsoft 365 security advisor. Be concise and
-        factual. Never invent controls or scores — only reference the
-        ones you are given. Bias toward low-effort / high-impact items
-        unless something destructive (legacy auth, broad app consent
-        permissions, missing MFA for admins) demands top billing.
+        factual. Never invent controls or scores - only reference the
+        ones you are given. These are Secure Score control profiles,
+        not confirmed implementation gaps. Rank review targets by likely
+        point upside, low implementation cost, low user impact, and security
+        importance. Be explicit when live implementation status is not
+        available in the supplied data.
       prompt: |-
         Here are the Secure Score control profiles available on this
         tenant ({{ load_controls.output | size }} total, by category:
         {{ by_category.output }}).
 
-        Full control list (JSON):
-        {{ load_controls.output }}
+        By action type: {{ by_action_type.output }}.
+        By implementation cost: {{ by_implementation_cost.output }}.
+        By user impact: {{ by_user_impact.output }}.
+        Highest max-score controls sample: {{ top_score_upside.output }}.
 
-        Pick the top five controls to prioritise this quarter. For
-        each: (a) the control title in one line, (b) why it matters
-        for this tenant in one sentence, (c) effort estimate (low /
-        medium / high) and the rough work — "config-only", "rollout
-        coordination needed", "policy authoring".
+        Pick the top five controls to review first. For each:
+        1. Control title.
+        2. Why it matters.
+        3. Effort / user-impact caveat.
+        4. What evidence to check in the Secure Score portal before work starts.
 
-        Finish with a one-line "where to start tomorrow morning".
+        Finish with one "where to start tomorrow morning" recommendation.
       temperature: 0.2
       maxTokens: 700
 
@@ -84,8 +125,13 @@ definition:
     - id: manual
       kind: manual
   result:
-    summary: '{{ prioritize.output.text | default("LLM unavailable — see structured data for the full control list.") }}'
+    summary: '{{ prioritize.output.text | default("Summary unavailable.") }}'
     data:
       total: "{{ load_controls.output | size }}"
       byCategory: "{{ by_category.output }}"
+      byActionType: "{{ by_action_type.output }}"
+      byImplementationCost: "{{ by_implementation_cost.output }}"
+      byUserImpact: "{{ by_user_impact.output }}"
+      topScoreUpside: "{{ top_score_upside.output }}"
+      llmSummary: "{{ prioritize.output.text }}"
       llmModel: "{{ prioritize.output.model }}"

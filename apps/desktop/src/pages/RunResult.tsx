@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
@@ -9,6 +9,7 @@ import {
   IconBolt,
   IconCheck,
   IconChevronDown,
+  IconCloud,
   IconCopy,
   IconDownload,
   IconHardDrive,
@@ -20,8 +21,7 @@ import {
 
 import { ShareMenu } from "../components/ShareMenu";
 import { ActivityFeed } from "../components/ActivityFeed";
-import { MarkdownPreview } from "../components/MarkdownPreview";
-import { ResultPanel } from "../components/ResultPanel";
+import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { RunTelemetry } from "../components/RunTelemetry";
 import { useAppState } from "../state";
@@ -50,6 +50,9 @@ export default function RunResult() {
   const isAwaiting = run?.status === "awaiting-confirmation";
   const tenantDisplayName = run?.tenantId
     ? state.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName
+    : undefined;
+  const runProvider = run?.providerId
+    ? state.providers.find((provider) => provider.id === run.providerId)
     : undefined;
   const [now, setNow] = useState(() => Date.now());
 
@@ -153,15 +156,9 @@ export default function RunResult() {
               )}
             </span>
             <span className="inline-flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
-              <span>{formatDate(run.queuedAt)}</span>
+              <span>Run result</span>
               <span className="opacity-50">·</span>
-              <span>{run.providerId ?? "provider pending"}</span>
-              {run.model && (
-                <>
-                  <span className="opacity-50">·</span>
-                  <span className="font-mono">{run.model}</span>
-                </>
-              )}
+              <span>{formatDate(run.queuedAt)}</span>
               <span className="opacity-50">·</span>
               <button
                 onClick={() => {
@@ -261,7 +258,6 @@ export default function RunResult() {
           </>
         }
       />
-      <RunTelemetry run={run} nowMs={now} isLive={isLive} />
       <PageBody>
         <TenantDriftNote
           runTenantId={run.tenantId}
@@ -276,7 +272,15 @@ export default function RunResult() {
           }}
         />
 
-        <OutcomeCard run={run} agent={agent} trustLabel={state.trust.label} />
+        <OutcomeCard
+          run={run}
+          agent={agent}
+          trustLabel={state.trust.label}
+          trustDetail={state.trust.detail}
+          providerName={runProvider?.name ?? run.providerId}
+          providerIsLocal={runProvider?.isLocal}
+          tenantName={tenantDisplayName}
+        />
 
         {isAwaiting && run.plan && (
           <DiffConfirmPanel
@@ -291,9 +295,17 @@ export default function RunResult() {
 
         <RunFailureRemediation run={run} />
 
-        <ActivityFeed run={run} />
+        <div className="mb-6 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
+          <RunTelemetry
+            run={run}
+            nowMs={now}
+            isLive={isLive}
+            providerIsLocal={runProvider?.isLocal}
+            providerName={runProvider?.name}
+          />
+        </div>
 
-        <ResultPanel run={run} />
+        <ActivityFeed run={run} />
 
         <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
           <span
@@ -323,25 +335,37 @@ function OutcomeCard({
   run,
   agent,
   trustLabel,
+  trustDetail,
+  providerName,
+  providerIsLocal,
+  tenantName,
 }: {
   run: RunRecord;
   agent: ReturnType<typeof useAppState>["state"]["installedAgents"][number] | undefined;
   trustLabel: string;
+  trustDetail: string;
+  providerName?: string;
+  providerIsLocal?: boolean;
+  tenantName?: string;
 }) {
+  const providerTone = providerIsLocal ? "success" : "warning";
+  const brief = buildRunBrief(run, agent?.description);
+  const displaySummary = run.liveSummary ?? run.summary;
+  const summaryIsStreaming = Boolean(run.liveSummary) && (run.status === "running" || run.status === "queued");
   return (
     <Card className="mb-6">
-      <div className="grid grid-cols-1 gap-0 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="p-6">
           <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            {statusToOutcomeLabel(run.status)}
+            {statusToOutcomeLabel(run.status)} report
           </div>
-          {run.summary ? (
-            <MarkdownPreview
-              source={run.summary}
-              className="mt-3 text-[18px] font-medium leading-relaxed text-[var(--color-text)]"
+          {displaySummary ? (
+            <LiveReportPreview
+              source={displaySummary}
+              streaming={summaryIsStreaming}
             />
           ) : (
-            <div className="mt-3 text-[18px] font-medium leading-relaxed text-[var(--color-text)]">
+            <div className="mt-4 text-[15px] font-medium leading-relaxed text-[var(--color-text)]">
               Run is waiting for its first update.
             </div>
           )}
@@ -349,6 +373,13 @@ function OutcomeCard({
             <p className="mt-3 max-w-[640px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
               {agent.description}
             </p>
+          )}
+          {brief && (
+            <div className="mt-5 grid gap-2 rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)] md:grid-cols-3">
+              <BriefItem label="Main finding" value={brief.main} />
+              <BriefItem label="Risk" value={brief.risk} />
+              <BriefItem label="Next action" value={brief.action} />
+            </div>
           )}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Pill>
@@ -367,21 +398,144 @@ function OutcomeCard({
         </div>
         <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] p-6 lg:border-l lg:border-t-0">
           <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            Data residency
+            Run context
           </div>
-          <div className="mt-3 flex items-center gap-2">
-            <IconHardDrive size={14} className="text-[var(--color-success)]" />
-            <span className="text-[13px] font-medium text-[var(--color-text)]">
+          <div className="mt-3 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
+            <RunContextCell
+              label="Tenant"
+              value={tenantName ?? run.tenantId ?? "No tenant"}
+              subvalue={run.tenantId ? "Pinned at queue time" : "Run cannot access Graph"}
+            />
+            <div className="h-px bg-[var(--color-border-soft)]" />
+            <RunContextCell
+              label="Provider"
+              value={providerName ?? "Provider pending"}
+              subvalue={providerIsLocal ? "Local-only" : "Hosted LLM"}
+              tone={providerTone}
+              icon={providerIsLocal ? <IconHardDrive size={13} /> : <IconCloud size={13} />}
+            />
+            <div className="h-px bg-[var(--color-border-soft)]" />
+            <RunContextCell
+              label="Model"
+              value={run.model ?? "Provider default"}
+              subvalue={run.model ? "Pinned for this run" : "Resolved by provider"}
+            />
+            <div className="h-px bg-[var(--color-border-soft)]" />
+            <RunContextCell
+              label="Queued"
+              value={formatDate(run.queuedAt)}
+              subvalue={run.finishedAt ? `Finished ${formatDate(run.finishedAt)}` : "In local history"}
+            />
+          </div>
+          <div className="mt-4 rounded-md bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+            <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-text)]">
+              <span
+                className={
+                  providerIsLocal
+                    ? "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
+                    : "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]"
+                }
+              />
               {trustLabel}
-            </span>
-          </div>
-          <div className="mt-4 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
-            Run records are written to this profile's local store. They never
-            leave the device when a local LLM provider is selected.
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              {trustDetail}
+            </div>
           </div>
         </div>
       </div>
     </Card>
+  );
+}
+
+function LiveReportPreview({
+  source,
+  streaming,
+}: {
+  source: string;
+  streaming: boolean;
+}) {
+  return (
+    <div className="relative mt-4 max-w-[920px]">
+      <MarkdownPreview
+        source={source}
+        className="text-[14px] font-normal leading-relaxed text-[var(--color-text)]"
+      />
+      {streaming && (
+        <span className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-accent)]" />
+          generating report
+        </span>
+      )}
+    </div>
+  );
+}
+
+function BriefItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <div className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function buildRunBrief(
+  run: RunRecord,
+  fallbackDescription: string | undefined,
+): { main: string; risk: string; action: string } | null {
+  const text = stripMarkdownToPlainText(run.liveSummary ?? run.summary ?? "").trim();
+  if (!text) return null;
+  const sentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  const main = sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence;
+  const lower = text.toLowerCase();
+  const risk =
+    lower.includes("missing") || lower.includes("gap") || lower.includes("risk")
+      ? "Review the flagged gaps before they become operational drift."
+      : fallbackDescription ?? "Use the report to decide whether this tenant state needs attention.";
+  const action =
+    lower.includes("recommendation")
+      ? "Follow the recommendation in the report and rerun after remediation."
+      : "Open the report, verify the finding, and rerun after any change.";
+  return { main, risk, action };
+}
+
+function RunContextCell({
+  label,
+  value,
+  subvalue,
+  tone = "default",
+  icon,
+}: {
+  label: string;
+  value: string;
+  subvalue: string;
+  tone?: "default" | "success" | "warning";
+  icon?: ReactNode;
+}) {
+  const toneClass =
+    tone === "success"
+      ? "text-[var(--color-success)]"
+      : tone === "warning"
+        ? "text-[var(--color-warning)]"
+        : "text-[var(--color-text)]";
+  return (
+    <div className="min-w-0 p-4">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <div className={`mt-1 flex min-w-0 items-center gap-1.5 text-[13px] font-medium ${toneClass}`}>
+        {icon}
+        <span className="truncate">{value}</span>
+      </div>
+      <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+        {subvalue}
+      </div>
+    </div>
   );
 }
 

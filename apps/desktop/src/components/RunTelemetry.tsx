@@ -4,10 +4,14 @@ export function RunTelemetry({
   run,
   nowMs,
   isLive,
+  providerIsLocal,
+  providerName,
 }: {
   run: RunRecord;
   nowMs: number;
   isLive: boolean;
+  providerIsLocal?: boolean;
+  providerName?: string;
 }) {
   const completedSteps = run.steps.filter((step) => step.status === "completed").length;
   const failedSteps = run.steps.filter((step) => step.status === "failed").length;
@@ -47,7 +51,11 @@ export function RunTelemetry({
         caption={tokensCaption}
       />
       <TelemetryCell label="Model" value={run.model ?? "—"} mono />
-      <TelemetryCell label="Cost" value="—" caption="local · not billed" />
+      <TelemetryCell
+        label="Cost"
+        value="—"
+        caption={providerIsLocal ? "local · not billed" : `hosted · ${providerName ?? "provider"}`}
+      />
     </div>
   );
 }

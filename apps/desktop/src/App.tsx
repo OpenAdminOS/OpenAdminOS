@@ -10,6 +10,7 @@ import Connectors from "./pages/Connectors";
 import Settings from "./pages/Settings";
 import Onboarding from "./pages/Onboarding";
 import RunResult from "./pages/RunResult";
+import Schedules from "./pages/Schedules";
 
 export default function App() {
   const location = useLocation();
@@ -61,6 +62,7 @@ export default function App() {
     <AppShell>
       <Routes>
         <Route path="/" element={<AgentsHome />} />
+        <Route path="/agents/schedules" element={<Schedules />} />
         <Route path="/agents/:slug" element={<AgentDetail />} />
         <Route path="/hub" element={<AgentHub />} />
         <Route path="/connectors" element={<Connectors />} />

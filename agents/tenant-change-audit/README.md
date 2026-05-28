@@ -1,9 +1,9 @@
 # Tenant change audit
 
 Read-only investigator. Pulls the last 100 directory audit entries from
-Microsoft Graph, tallies them by activity and category, and asks the
-local LLM to separate the routine baseline from entries that warrant a
-closer look.
+Microsoft Graph, tallies them by activity, category, result, and actor,
+keeps a recent sample, and asks the LLM to separate the routine
+baseline from entries that warrant a closer look.
 
 ## Why this earns its keep
 
@@ -26,6 +26,9 @@ ninety seconds.
   "total": 100,
   "byActivity": { "Update user": 32, "Add member to group": 12, ... },
   "byCategory": { "UserManagement": 44, "GroupManagement": 21, ... },
+  "byResult": { "success": 96, "failure": 4 },
+  "byActor": { "admin@tenant.com": 18 },
+  "recentSample": [{ "activityDisplayName": "Add app role assignment to service principal" }],
   "llmModel": "llama3.1:8b"
 }
 ```

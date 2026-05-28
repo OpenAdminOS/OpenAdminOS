@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/runtime",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -21,8 +21,8 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
-    "@openadminos/agent-sdk": "0.1.9",
-    "@openadminos/connector-teams": "0.1.9",
+    "@openadminos/agent-sdk": "0.2.0",
+    "@openadminos/connector-teams": "0.2.0",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

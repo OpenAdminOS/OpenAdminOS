@@ -1,14 +1,13 @@
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
 #
-# dormant-app-registrations — reads the tenant's app registrations and
-# asks the LLM to group them by likely purpose (production, lab, dead
-# pilot) so the admin can act on whole groups instead of opening each
-# one in the portal.
+# dormant-app-registrations — reads tenant app registrations with
+# security-relevant metadata and asks the LLM to identify likely stale,
+# risky, or ownerless review clusters without defaulting to deletion.
 descriptor:
   id: dormant-app-registrations
   name: Dormant app registrations
-  description: Reads tenant app registrations, groups them by likely purpose, and recommends keep/disable/delete per group with reasoning.
-  version: 1.0.0
+  description: Reviews app registrations for stale experiments, risky exposure, credentials, and cleanup candidates with evidence-backed recommendations.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -39,6 +38,16 @@ skills:
         - tags
         - description
         - identifierUris
+        - notes
+        - serviceManagementReference
+        - appRoles
+        - api
+        - requiredResourceAccess
+        - passwordCredentials
+        - keyCredentials
+        - web
+        - spa
+        - publicClient
       scopes:
         - Application.Read.All
 
@@ -50,39 +59,98 @@ skills:
       source: "{{ load_apps.output }}"
       field: signInAudience
 
+  - id: by_publisher_domain
+    format: transform
+    label: Count by publisher domain
+    settings:
+      kind: count-by-field
+      source: "{{ load_apps.output }}"
+      field: publisherDomain
+      missing: "(no publisher domain)"
+
+  - id: by_created_age
+    format: transform
+    label: Group apps by age
+    settings:
+      kind: group-by-age
+      source: "{{ load_apps.output }}"
+      timestampField: createdDateTime
+      groups:
+        - name: "created 3y+ ago"
+          inactiveDaysAtLeast: 1095
+        - name: "created 1y+ ago"
+          inactiveDaysAtLeast: 365
+        - name: "created 90d+ ago"
+          inactiveDaysAtLeast: 90
+
+  - id: oldest_apps
+    format: transform
+    label: Select oldest app registrations
+    settings:
+      kind: sort-by
+      source: "{{ load_apps.output }}"
+      field: createdDateTime
+      direction: asc
+      take: 25
+
   - id: cluster
     format: llm
-    label: Cluster apps by likely purpose
-    detail: Three-to-five groups with keep/disable/delete recommendations.
+    label: Review app registration cleanup posture
+    detail: Evidence-backed cleanup clusters with explicit safe next steps.
     when: ctx.llm.available
     settings:
       system: >-
-        You are an Entra app registration auditor. Be concise and
-        factual. Never invent apps or counts. Default to *keep* when
-        you can't tell — destructive defaults are wrong here. Be
-        explicit when you can't classify a group ("review individually").
+        You are an Entra app registration auditor for Microsoft 365
+        admins. Be concise, skeptical, and evidence-driven. Never
+        invent apps, owners, usage, or counts. You cannot prove an app
+        is unused from this dataset alone, so do not recommend deletion
+        unless the evidence is very strong. Default to review, not
+        delete, when usage or ownership is unclear.
       prompt: |-
         The tenant has {{ load_apps.output | size }} app registrations.
         Audience breakdown: {{ by_audience.output }}.
+        Publisher domain breakdown: {{ by_publisher_domain.output }}.
+        Created-age breakdown: {{ by_created_age.output }}.
 
-        Full app list (JSON):
+        Oldest 25 app registrations (JSON):
+        {{ oldest_apps.output }}
+
+        Full app registration list with selected risk signals (JSON):
         {{ load_apps.output }}
 
-        Group these apps into three to five clusters by *likely
-        purpose* (e.g., "in-tenant production integrations", "leftover
-        from migration projects", "individual dev experiments",
-        "vendor-installed", "personal Microsoft accounts test apps").
+        Review for these signals:
+        - broad exposure: signInAudience other than AzureADMyOrg
+        - missing publisher domain, weak description, or unclear naming
+        - old creation date with no business context in tags/description/notes
+        - passwordCredentials or keyCredentials present, especially multiple or long-lived
+        - requiredResourceAccess suggesting Graph or tenant-wide permissions
+        - redirect URI surface in web/spa/publicClient
+        - appRoles or exposed API scopes that imply the app is integrated into production
 
-        For each cluster:
-        1. Cluster name + one-line description.
-        2. Member count.
-        3. Recommendation: `keep`, `review`, `disable`, or `delete`
-           — with a one-sentence reason.
+        Produce this exact report shape:
 
-        Finish with a one-line "where to start" pointing at the
-        cluster with the biggest cleanup win.
+        1. Main finding.
+        One short paragraph with the strongest cleanup or risk theme.
+
+        2. Review first.
+        Three to five bullets. Each bullet must include: cluster name,
+        member count, representative app names, evidence, and action
+        (`keep`, `review`, `rotate credentials`, `restrict exposure`, or
+        `delete after owner confirmation`).
+
+        3. Do not delete yet.
+        Bullets for clusters that look production-like, have app roles,
+        redirect URIs, exposed API scopes, or unclear ownership.
+
+        4. Missing data.
+        State that this run does not include service principal sign-in
+        activity or app owners, and list exactly what the admin should
+        verify before cleanup.
+
+        5. Next action.
+        One concrete first action for the admin.
       temperature: 0.2
-      maxTokens: 700
+      maxTokens: 1000
 
 definition:
   triggers:
@@ -93,4 +161,7 @@ definition:
     data:
       total: "{{ load_apps.output | size }}"
       byAudience: "{{ by_audience.output }}"
+      byPublisherDomain: "{{ by_publisher_domain.output }}"
+      byCreatedAge: "{{ by_created_age.output }}"
+      oldestApps: "{{ oldest_apps.output }}"
       llmModel: "{{ cluster.output.model }}"

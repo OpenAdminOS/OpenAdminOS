@@ -8,7 +8,13 @@ import { stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { useAppState } from "../state";
 import type { RunRecord, RunStatus } from "../shared/openAdminOS";
 
-type Filter = { kind: "all" } | { kind: "tenant"; tenantId: string };
+type Filter =
+  | { kind: "all" }
+  | { kind: "tenant"; tenantId: string }
+  | { kind: "manual" }
+  | { kind: "scheduled" }
+  | { kind: "failed" }
+  | { kind: "needs-confirmation" };
 
 export default function Activity() {
   const navigate = useNavigate();
@@ -18,19 +24,32 @@ export default function Activity() {
 
   const counts = useMemo(() => {
     const total = state.runs.length;
+    const manual = state.runs.filter((run) => run.trigger !== "schedule").length;
+    const scheduled = state.runs.filter((run) => run.trigger === "schedule").length;
+    const failed = state.runs.filter((run) => run.status === "failed").length;
+    const needsConfirmation = state.runs.filter((run) => run.status === "awaiting-confirmation").length;
     const byTenant = new Map<string, number>();
     for (const run of state.runs) {
       if (run.tenantId) {
         byTenant.set(run.tenantId, (byTenant.get(run.tenantId) ?? 0) + 1);
       }
     }
-    return { total, byTenant };
+    return { total, manual, scheduled, failed, needsConfirmation, byTenant };
   }, [state.runs]);
 
   const filteredRuns = useMemo(() => {
-    const base = filter.kind === "all"
-      ? state.runs
-      : state.runs.filter((run) => run.tenantId === filter.tenantId);
+    const base =
+      filter.kind === "all"
+        ? state.runs
+        : filter.kind === "tenant"
+          ? state.runs.filter((run) => run.tenantId === filter.tenantId)
+          : filter.kind === "manual"
+            ? state.runs.filter((run) => run.trigger !== "schedule")
+            : filter.kind === "scheduled"
+              ? state.runs.filter((run) => run.trigger === "schedule")
+              : filter.kind === "failed"
+                ? state.runs.filter((run) => run.status === "failed")
+                : state.runs.filter((run) => run.status === "awaiting-confirmation");
     const q = query.trim().toLowerCase();
     if (q.length === 0) return base;
     return base.filter((run) => {
@@ -72,14 +91,39 @@ export default function Activity() {
         }
       />
       <PageBody>
-        {showFilters && (
-          <div className="mb-4 flex flex-wrap items-center gap-1.5">
+        <div className="mb-4 flex flex-wrap items-center gap-1.5">
             <FilterChip
-              label="All tenants"
+              label="All"
               count={counts.total}
               active={filter.kind === "all"}
               onClick={() => setFilter({ kind: "all" })}
             />
+            <FilterChip
+              label="Manual"
+              count={counts.manual}
+              active={filter.kind === "manual"}
+              onClick={() => setFilter({ kind: "manual" })}
+            />
+            <FilterChip
+              label="Scheduled"
+              count={counts.scheduled}
+              active={filter.kind === "scheduled"}
+              onClick={() => setFilter({ kind: "scheduled" })}
+            />
+            <FilterChip
+              label="Failed"
+              count={counts.failed}
+              active={filter.kind === "failed"}
+              onClick={() => setFilter({ kind: "failed" })}
+            />
+            <FilterChip
+              label="Needs confirmation"
+              count={counts.needsConfirmation}
+              active={filter.kind === "needs-confirmation"}
+              onClick={() => setFilter({ kind: "needs-confirmation" })}
+            />
+            {showFilters && (
+              <>
             {state.tenants.map((tenant) => (
               <FilterChip
                 key={tenant.id}
@@ -89,8 +133,9 @@ export default function Activity() {
                 onClick={() => setFilter({ kind: "tenant", tenantId: tenant.id })}
               />
             ))}
+              </>
+            )}
           </div>
-        )}
 
         <Card>
           <div className="divide-y divide-[var(--color-border-soft)]">
@@ -126,6 +171,12 @@ export default function Activity() {
                       <span className="shrink-0">
                         {tenantLabel(run, state.tenants)}
                       </span>
+                      {run.trigger === "schedule" && (
+                        <>
+                          <span className="opacity-50">·</span>
+                          <span className="shrink-0">scheduled</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <span className="text-[var(--color-text-soft)]">

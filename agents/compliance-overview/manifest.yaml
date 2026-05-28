@@ -14,8 +14,8 @@
 descriptor:
   id: compliance-overview
   name: Compliance overview
-  description: Counts Intune-managed devices by complianceState so admins can spot drift across the tenant at a glance.
-  version: 1.0.0
+  description: Reviews Intune compliance by state, operating system, ownership, enrollment, and stale inventory signals.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -45,6 +45,9 @@ skills:
         - operatingSystem
         - complianceState
         - lastSyncDateTime
+        - managedDeviceOwnerType
+        - deviceEnrollmentType
+        - managementState
       scopes:
         - DeviceManagementManagedDevices.Read.All
 
@@ -65,6 +68,43 @@ skills:
         - noncompliant
         - unknown
 
+  - id: by_os
+    format: transform
+    label: Count devices by operating system
+    detail: Shows whether compliance drift is concentrated by platform.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: operatingSystem
+
+  - id: by_owner_type
+    format: transform
+    label: Count devices by ownership
+    detail: Separates corporate and personal device ownership where Graph provides it.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: managedDeviceOwnerType
+
+  - id: by_enrollment_type
+    format: transform
+    label: Count devices by enrollment type
+    detail: Shows whether compliance drift lines up with enrollment path.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: deviceEnrollmentType
+
+  - id: stale_inventory
+    format: transform
+    label: Find stale inventory records
+    detail: Flags devices that have not synced recently so compliance counts are interpreted carefully.
+    settings:
+      kind: filter-by-age
+      source: "{{ load_devices.output }}"
+      timestampField: lastSyncDateTime
+      inactiveDaysAtLeast: "{{ settings.staleSyncDays }}"
+
   # 3) Optional LLM summary. Gated on availability so the agent still
   #    completes against synthetic mode without Ollama running.
   - id: summarize
@@ -73,24 +113,39 @@ skills:
     detail: Two-sentence executive summary plus one prioritised action.
     settings:
       system: >-
-        You are a Microsoft 365 administrator's assistant. Be concise and
-        factual. Two sentences maximum, then one short prioritised action.
-        Skip filler. Never invent numbers — use only the figures you are
-        given.
+        You are an Intune compliance reviewer. Be concise, factual, and
+        conservative. Never invent numbers - use only the figures you are
+        given. Treat stale inventory as a caveat before making compliance
+        conclusions.
       prompt: |-
         Tenant managed devices: {{ load_devices.output | size }}.
         Compliant: {{ by_state.output.compliant }}.
         Noncompliant: {{ by_state.output.noncompliant }}.
         Unknown: {{ by_state.output.unknown }}.
+        By OS: {{ by_os.output }}.
+        By ownership: {{ by_owner_type.output }}.
+        By enrollment: {{ by_enrollment_type.output }}.
+        Stale inventory >= {{ settings.staleSyncDays }} days: {{ stale_inventory.output | size }}.
 
-        Write an executive summary an Intune admin can paste into a
-        ticket. Lead with the biggest risk, then one short prioritised
-        action.
+        Write a compact report with these sections:
+        1. Main finding.
+        2. Compliance drift signals.
+        3. Recommended next action.
+
+        Call out whether noncompliance or unknown status appears material,
+        and whether stale inventory weakens the confidence of the counts.
       temperature: 0.2
-      maxTokens: 180
+      maxTokens: 360
 
 # ─── what makes it an agent ────────────────────────────────────────────────
 definition:
+  settings:
+    - id: staleSyncDays
+      label: Stale inventory threshold (days)
+      type: integer
+      default: 14
+      description: Devices that have not synced for at least this many days are flagged as stale inventory.
+
   triggers:
     - id: manual
       kind: manual
@@ -108,5 +163,11 @@ definition:
         compliant: "{{ by_state.output.compliant }}"
         noncompliant: "{{ by_state.output.noncompliant }}"
         unknown: "{{ by_state.output.unknown }}"
+      byOs: "{{ by_os.output }}"
+      byOwnerType: "{{ by_owner_type.output }}"
+      byEnrollmentType: "{{ by_enrollment_type.output }}"
+      staleInventoryCount: "{{ stale_inventory.output | size }}"
       llmSummary: "{{ summarize.output.text }}"
       llmModel: "{{ summarize.output.model }}"
+      thresholds:
+        staleSyncDays: "{{ settings.staleSyncDays }}"

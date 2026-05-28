@@ -20,7 +20,7 @@ export function getRedis(): Redis {
  * Upstash database can host other projects without collision.
  *
  *   oa:pending:installs:<slug>             integer     pending install delta
- *   oa:dedup:<installId>:<slug>            string      "1" + 1y TTL
+ *   oa:dedup:<installId>:<slug>            string      "1" + 1y TTL; installId is a yearly per-agent digest for current clients
  *   oa:rate:install:<ip>:<bucket>          integer     rate-limit counter (60s TTL)
  *   oa:installs7d:<slug>                   zset        installId → unix-ms score
  *   oa:slugs                               string      JSON-encoded array, 1h TTL
@@ -33,7 +33,7 @@ export const keys = {
   knownSlugs: () => `oa:slugs`,
 } as const;
 
-/** Lifetime of a dedup entry. One year is effectively permanent for an install. */
+/** Lifetime of a dedup entry. Current clients rotate install ids annually. */
 export const DEDUP_TTL_SECONDS = 365 * 24 * 60 * 60;
 
 /** Rate-limit window for `/api/install` per IP. */

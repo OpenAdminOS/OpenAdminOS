@@ -4,6 +4,7 @@ import {
   IconActivity,
   IconAgents,
   IconBolt,
+  IconClock,
   IconHub,
   IconPlay,
   IconSearch,
@@ -76,6 +77,14 @@ export function CommandPalette({
         group: "Navigate",
         icon: <IconHub size={13} className="text-[var(--color-accent)]" />,
         action: go("/hub"),
+      },
+      {
+        id: "nav-schedules",
+        label: "Go to Schedules",
+        hint: "Review active agent schedules",
+        group: "Navigate",
+        icon: <IconClock size={13} className="text-[var(--color-accent)]" />,
+        action: go("/agents/schedules"),
       },
       {
         id: "nav-activity",

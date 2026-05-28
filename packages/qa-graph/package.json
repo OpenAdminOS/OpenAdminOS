@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/qa-graph",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@openadminos/agent-sdk": "0.1.9",
+    "@openadminos/agent-sdk": "0.2.0",
     "ajv": "^8.17.1",
     "js-yaml": "^4.1.1"
   },

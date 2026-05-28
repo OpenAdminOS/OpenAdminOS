@@ -110,6 +110,21 @@ function parseBlocks(input: string): Block[] {
       continue;
     }
 
+    const reportSection = line.match(/^\s*(\d+)\.\s+(.{1,90})$/);
+    if (
+      reportSection &&
+      !/^\s*\d+\.\s+/.test(lines[i + 1] ?? "") &&
+      ((lines[i + 1] ?? "").trim() === "" || !/^\s{2,}\S/.test(lines[i + 1] ?? ""))
+    ) {
+      blocks.push({
+        kind: "heading",
+        level: 3,
+        text: `${reportSection[1]}. ${reportSection[2]}`,
+      });
+      i += 1;
+      continue;
+    }
+
     if (/^\s*\d+\.\s+/.test(line)) {
       const items: string[] = [];
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i] ?? "")) {
@@ -159,9 +174,9 @@ function renderBlock(block: Block, index: number): ReactNode {
   switch (block.kind) {
     case "heading": {
       const headingClasses: Record<number, string> = {
-        1: "mt-3 text-[15px] font-semibold first:mt-0",
-        2: "mt-3 text-[14px] font-semibold first:mt-0",
-        3: "mt-2.5 text-[13.5px] font-semibold first:mt-0",
+        1: "mt-4 text-[15px] font-semibold first:mt-0",
+        2: "mt-4 text-[14px] font-semibold first:mt-0",
+        3: "mt-3.5 text-[13px] font-semibold first:mt-0",
         4: "mt-2 text-[13px] font-semibold first:mt-0",
         5: "mt-2 text-[12.5px] font-semibold uppercase tracking-wider first:mt-0",
         6: "mt-2 text-[11.5px] font-semibold uppercase tracking-wider first:mt-0",
@@ -217,7 +232,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <ul
           key={index}
-          className="mt-2 list-disc space-y-0.5 pl-5 first:mt-0"
+          className="mt-2 list-disc space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
             <li key={idx}>{renderInline(item)}</li>
@@ -228,7 +243,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <ol
           key={index}
-          className="mt-2 list-decimal space-y-0.5 pl-5 first:mt-0"
+          className="mt-2 list-decimal space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
             <li key={idx}>{renderInline(item)}</li>

@@ -18,6 +18,14 @@ export interface ProviderSummary {
   defaultModel?: string;
 }
 
+export interface ProviderTestResult {
+  providerId: ProviderId;
+  ok: boolean;
+  message: string;
+  model?: string;
+  durationMs?: number;
+}
+
 export type AgentMode = "read" | "write";
 
 export type AgentCategory =
@@ -112,11 +120,18 @@ export interface AgentSummary extends AgentContract {
   settings?: Record<string, unknown>;
   /**
    * Per-install run schedule. When `enabled`, the host fires the agent
-   * automatically every `intervalSeconds` while the app is running.
-   * Schedules do not persist across app shutdown — runs only fire while
-   * the user has OpenAdminOS open. Absent / disabled = manual-only.
-   */
+   * automatically every `intervalSeconds`. The desktop host may also
+   * register a per-user OS scheduler after tenant sign-in so due runs
+   * continue while the UI is closed. Absent / disabled = manual-only.
+  */
   schedule?: AgentSchedule;
+  /**
+   * Per-install delivery routes for run results. These are user-owned
+   * routing preferences, separate from connector steps declared by an
+   * agent manifest. Saved delivery routes may post terminal run reports
+   * after the agent finishes.
+   */
+  delivery?: AgentDeliverySettings;
   /**
    * Set by the host when the public registry advertises a version newer
    * than the one currently installed for this agent. Derived from the
@@ -137,8 +152,33 @@ export interface AgentUpdateInfo {
 export interface AgentSchedule {
   enabled: boolean;
   intervalSeconds: number;
+  notifyOnSuccess?: boolean;
+  notifyOnFailure?: boolean;
+  notifyOnChangeOnly?: boolean;
   /** When the scheduler last fired this agent. Updated by the host. */
   lastScheduledRunAt?: string;
+}
+
+export interface AgentDeliverySettings {
+  teams?: AgentTeamsDelivery;
+}
+
+export interface AgentTeamsDelivery {
+  enabled: boolean;
+  /**
+   * When true, the connector's global default channel is used. When
+   * false, `teamId` and `channelId` identify this agent's target.
+   */
+  useDefaultTarget?: boolean;
+  teamId?: string;
+  channelId?: string;
+  teamName?: string;
+  channelName?: string;
+  includeManualRuns?: boolean;
+  includeScheduledRuns?: boolean;
+  notifyOnSuccess?: boolean;
+  notifyOnFailure?: boolean;
+  notifyOnChangeOnly?: boolean;
 }
 
 export interface RegistryAgentSummary extends AgentContract {
@@ -186,6 +226,12 @@ export interface StartRunOptions {
    * default per the agent's manifest and provider settings.
    */
   model?: string;
+  /**
+   * Internal queue source. Manual runs are user-clicked; schedule runs
+   * are fired by the app/OS scheduler and should still notify even if
+   * the app window is open.
+   */
+  trigger?: "manual" | "schedule";
 }
 
 /**
@@ -291,6 +337,14 @@ export interface RunRecord {
   rejectedAt?: string;
   providerId?: ProviderId;
   model?: string;
+  trigger?: "manual" | "schedule";
+  changeState?: "new" | "changed" | "unchanged";
+  /**
+   * Best-effort live LLM report text while a run is still executing.
+   * Cleared when the terminal summary is written. Providers that only
+   * expose final messages may update this once near the end.
+   */
+  liveSummary?: string;
   summary?: string;
   result?: unknown;
   error?: string;
@@ -334,10 +388,47 @@ export interface AppState {
   registryRefreshError: string | null;
   /** Registry source URL in use (may differ from default if overridden in Settings). */
   registrySource: string;
+  /** Whether packaged builds report aggregate public registry install counts. */
+  registryInstallCountsEnabled: boolean;
+  schedulerStatus?: SchedulerStatus;
 }
 
 /** The host OS, normalized for renderer use. */
 export type HostPlatform = "macos" | "windows" | "linux" | "unknown";
+export interface SchedulerLaunchSettings {
+  /** Whether this OS/build supports registering OpenAdminOS with the OS scheduler. */
+  supported: boolean;
+  /** Whether OpenAdminOS is currently registered to run due schedules in the background. */
+  enabled: boolean;
+  /** True when the OS supports scheduling but no Microsoft tenant is connected yet. */
+  requiresTenant?: boolean;
+  /** Human-readable caveat for unsupported or degraded platforms. */
+  detail?: string;
+  /** ISO timestamp of the latest scheduled run queued by this install. */
+  lastWakeAt?: string;
+  /** ISO timestamp of the latest successful scheduled run. */
+  lastSuccessAt?: string;
+  /** Human-readable latest scheduled-run failure, if any. */
+  lastError?: string;
+  /** ISO timestamp of the next due scheduled run, if any. */
+  nextDueAt?: string;
+  /** Name of the next agent due to run, if any. */
+  nextDueAgentName?: string;
+  /** Number of enabled schedules in this profile. */
+  activeScheduleCount?: number;
+}
+
+export type SchedulerStatus = SchedulerLaunchSettings;
+
+export interface ReleaseDiagnostics {
+  appVersion: string;
+  packaged: boolean;
+  signed: boolean;
+  platform: HostPlatform;
+  notificationSupported: boolean;
+  notificationPermission: "granted" | "denied" | "default" | "unknown";
+  scheduler: SchedulerLaunchSettings;
+}
 
 export interface OpenAdminOSApi {
   /**
@@ -347,6 +438,9 @@ export interface OpenAdminOSApi {
    */
   platform: HostPlatform;
   getAppState(): Promise<AppState>;
+  getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings>;
+  getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
+  setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;
   refreshRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   /**
@@ -357,9 +451,11 @@ export interface OpenAdminOSApi {
   setRegistrySource(
     url: string,
   ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
+  setRegistryInstallCountsEnabled(enabled: boolean): Promise<AppState>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
+  testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
   /**
    * Returns every connector registered in the host, with its
    * persisted config and last health-check outcome.
@@ -487,10 +583,20 @@ export interface OpenAdminOSApi {
   /**
    * Persist a per-install run schedule for the named agent. Pass `null`
    * to remove the schedule (i.e. revert to manual-only). The host's
-   * in-process scheduler fires the agent every `intervalSeconds` while
-   * the app is open.
-   */
+   * scheduler fires the agent every `intervalSeconds`; with OS scheduler
+   * enabled, OpenAdminOS can run due schedules while the UI is closed.
+  */
   updateAgentSchedule(slug: string, schedule: AgentSchedule | null): Promise<AppState>;
+  /**
+   * Persist per-agent Microsoft Teams delivery. Pass null to remove
+   * the route. Delivery posts terminal run reports through the Teams
+   * connector using either the connector default channel or the saved
+   * per-agent channel.
+   */
+  updateAgentTeamsDelivery(
+    slug: string,
+    delivery: AgentTeamsDelivery | null,
+  ): Promise<AppState>;
   /**
    * Generate a draft `manifest.yaml` from a natural-language description
    * using the active LLM provider. Returns the YAML source as a string
@@ -1049,11 +1155,9 @@ export interface WriteAgentModule extends AgentDefinition {
 
 export type AgentModule = ReadAgentModule | WriteAgentModule;
 
-// TODO(ugur): only the `ollama` provider has a working runtime adapter as
-// of v0.1.x. LM Studio + the three hosted providers below are kept in the
-// catalog as forward-compat placeholders but flagged "Coming in 0.2" by
-// the renderer (see apps/desktop/src/shared/providers.ts) until adapters
-// + keytar-backed credential storage land.
+// TODO(ugur): LM Studio, Anthropic, and Azure OpenAI are kept in the catalog
+// as forward-compat placeholders until adapters land. OpenAI uses the
+// locally-installed Codex CLI, so OpenAdminOS never stores an OpenAI API key.
 export const providerCatalog: readonly ProviderSummary[] = [
   {
     id: "ollama",
@@ -1087,12 +1191,12 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "openai",
-    name: "OpenAI",
+    name: "OpenAI Codex",
     description:
-      "Hosted OpenAI models. Tenant prompts leave this device when active.",
+      "Hosted OpenAI models through the local Codex CLI. Tenant prompts leave this device when active.",
     isLocal: false,
-    status: "not-installed",
-    detail: "Hosted provider setup is not implemented yet",
+    status: "available",
+    detail: "Waiting for Codex CLI connection check",
     models: [],
   },
   {

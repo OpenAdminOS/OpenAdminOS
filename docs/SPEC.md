@@ -98,6 +98,21 @@ Concrete providers, all required for v1:
 - `OpenAIProvider` (hosted)
 - `AzureOpenAIProvider` (hosted)
 
+Current implementation note: OpenAI support is delivered through the user's
+locally installed Codex CLI (`codex`) rather than a stored OpenAI API key.
+OpenAdminOS probes the CLI and `~/.codex/auth.json`, then invokes
+`codex exec --ephemeral --skip-git-repo-check -s read-only` for agent LLM
+steps. It does not force a model by default; Codex uses the user's configured
+account-supported default unless a run later pins an explicit model. This
+preserves the "no vendor API keys in OpenAdminOS" trust boundary, but tenant
+prompts still leave the device because the selected model is hosted.
+The model picker is populated from Codex's local `models_cache.json`, with
+`config.toml` supplying the default model when present.
+Provider settings include an explicit smoke test action for connected providers;
+the test runs a tiny completion and reports the model and response time. This is
+intentionally visible because hosted/local provider trust is a core product
+decision, not hidden plumbing.
+
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
 ### Agent contract
@@ -107,6 +122,7 @@ Per-agent model overrides are required: an agent's manifest can specify a prefer
 Concretely:
 - The agent's `result.summary` should reference the LLM step's output (e.g. `{{ summarize.output.text | default("...") }}`), not a deterministic count template. The deterministic counts belong in `result.data` for structured rendering.
 - Write agents use the LLM to *explain* the plan in plain language before the typed-confirmation prompt — they don't get a pass.
+- If a write agent produces zero actions after applying its filters, the run completes as a no-op result. Typed confirmation is required for every non-empty write plan, but an empty plan must not be reported as a failure.
 - If you genuinely don't need an LLM (e.g. a pure data export), this product is the wrong tool; reach for `Get-MgDeviceManagementManagedDevice | Export-Csv` or a similar deterministic script instead.
 
 An agent is a TypeScript module with a default-exported manifest and a `run` function:
@@ -456,6 +472,8 @@ Cache lifecycle:
 - Failed refresh is silent — keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
 - App works fully offline against the cached set after the first successful fetch.
 
+Agent Hub UX should feel like an app store for admin agents, but without fake editorial weight. Until there is real curation data, do not render a giant "Featured" hero based on list order or split the same catalog into separate top-level surfaces. Use one consistent browse grid, dynamic category/mode/install filters, clear install/open actions, install counts where available, and trust/permission badges that help admins decide what to install. Registry freshness is diagnostic detail; do not make remote/cache state a primary card. Agent detail/manifest views should be decision-first: show what the agent does, install state, required scopes, mode, and tenant impact before exposing raw YAML. Installing from Agent Hub requires an explicit permission review step; a card click opens details, while the actual install action confirms the declared Graph scopes.
+
 This is modeled on **Home Assistant integrations** (https://developers.home-assistant.io/docs/creating_integration_file_structure/) — one repo, PR-driven contribution, explicit version pinning per install.
 
 ### Local storage
@@ -468,16 +486,17 @@ SQLite via `better-sqlite3` for:
 
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
 error-reporting telemetry. Packaged production builds may send a minimal public
-registry install-count event when a public agent is installed: agent slug, app
-version, OS platform, and a random per-installation UUID used only for
-deduplication. The stats endpoint may use IP addresses for short-lived rate
-limiting. These events must never include tenant identifiers, user identifiers,
-prompts, run results, or Microsoft Graph data.
+registry install count event when a public agent is installed: agent slug, app
+version, OS platform, and a yearly per-agent SHA-256 hash derived from a random
+local install ID. Users can disable registry install counts in Settings. The
+stats endpoint may use IP addresses for short-lived rate limiting. These events
+must never include tenant identifiers, user identifiers, prompts, run results,
+or Microsoft Graph data.
 
 ### Code signing
 
 Required before public v1 release:
-- **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing. Without EV, SmartScreen will warn users for weeks until the cert builds reputation.
+- **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, CI may build AppX packages for validation, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr) + notarization. Without notarization, Gatekeeper blocks the app.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
@@ -564,11 +583,15 @@ These were debated and decided. Don't relitigate without explicit reason.
 | Write-mode agent confirmation | Always pause for diff, every time | Trust requires no exceptions |
 | Activity stream default | Plain language with raw-log toggle | Admins want comprehension first, debug detail on demand |
 | Default LLM provider | Ollama (local) | Trust positioning starts with the default |
-| Telemetry default | Off | Local-first means local-first |
+| Tenant/prompt/run/error telemetry default | Off | Local-first means local-first; registry install counts are a separate aggregate counter with a Settings opt-out |
 | Update model for agents | Pin by default, explicit upgrade | Avoids surprise behavior changes mid-shift |
 | Tenant scope expiry behavior | Block all agent runs until re-auth | No partial-trust states |
 | Multi-tenant switcher | Color-coded, search-first, scope-guarded | MSPs may manage 100+ tenants |
 | Failed write agent recovery | Show diff of partial state, suggest manual review | Never auto-rollback |
+| Scheduled background runs | Per-user OS scheduler after tenant sign-in | Agents never run without a tenant; macOS uses LaunchAgent, Windows uses Task Scheduler |
+| Run notifications | Manual runs notify only when app is not focused; scheduled runs follow per-agent notification preferences | Admins get background completion/failure visibility without duplicating visible manual-run state |
+
+macOS notification caveat: Electron 42 uses Apple's `UNNotification` framework. Native notifications require a code-signed app bundle on macOS; unsigned `electron .` dev runs can fail to deliver notifications even when `launchd` successfully runs the scheduler. The app must listen for native notification `failed` events so this is visible during development. Production verification must be done from the signed/notarized DMG.
 
 ---
 
@@ -581,20 +604,20 @@ The first shippable milestone. Goal: a polished Electron app that visually repre
 - Electron app shell (Win + Mac, Linux best-effort) with the full design system
 - All 8 mockup screens implemented as real React routes (visual fidelity matching `docs/mockups/`)
 - 2 new screens designed and built: registry browse (`09-registry.html`) and empty states (`10-empty-states.html`)
-- LLM provider abstraction with one working provider (Ollama) — real connection, real streaming
+- LLM provider abstraction with Ollama and OpenAI Codex providers. Ollama streams locally; OpenAI Codex uses the local Codex CLI and returns the final assistant message.
 - One sample read-only agent runnable end-to-end against synthetic Graph data
 - Public marketing site at openadminos.com with download, GitHub, product screenshot, trust-model, registry, and write-confirmation sections
 - Hero screenshots (in README + landing page) and a demo video
 
 ### What v0.1 deliberately defers
 
-- Other LLM providers (LM Studio, Anthropic-via-Claude-Code, OpenAI-via-Codex, Azure OpenAI)
+- Other LLM providers (LM Studio, Anthropic-via-Claude-Code, Azure OpenAI)
 - Write agents and diff confirmation behavior (UI built for screenshots, no real writes)
 - GitHub-backed registry (registry browse uses static JSON in v0.1)
 - Persistent SQLite (in-memory + localStorage acceptable for v0.1)
 - Code signing (build pipeline ready; certs deferred)
 - Auto-update
-- Audit log export, scheduled runs, notification routing — all v1.0 territory
+- Audit log export and advanced notification routing — v1.0 territory
 
 ### v0.1 acceptance criteria
 
@@ -617,26 +640,26 @@ The agents that ship in this repo are the platform's first impression. If they r
 
 ### Three tiers
 
-1. **Investigators** (`tier: agent`, `mode: read`, multi-source). The killer category. Correlate two or more Graph sources and let the LLM reason about the combination. Examples: `sign-in-failure-explainer` clusters failures by root cause; `risky-sign-in-triage` classifies each Identity Protection alert with per-item reasoning; `tenant-change-audit` separates routine audit entries from noteworthy ones. No script can produce these outputs.
+1. **Investigators** (`tier: agent`, `mode: read`, multi-source). The killer category. Correlate two or more Graph sources and let the LLM reason about the combination. Examples: `sign-in-failure-explainer` clusters failures by root cause; `risky-sign-in-triage` classifies Entra risky-user records with per-item reasoning and must not imply raw sign-in evidence unless a future correlation step supplies it; `tenant-change-audit` separates routine audit entries from noteworthy ones. No script can produce these outputs.
 
-2. **Advisors** (`tier: agent`, `mode: read`, posture/policy reasoning). Take a complex policy set or scoring catalogue and produce judgment. Examples: `conditional-access-explainer` reads every CA policy and explains interactions/gaps in plain English; `secure-score-prioritizer` ranks recommendations by tenant shape and effort; `dormant-app-registrations` clusters app registrations by likely purpose with keep/review/delete recommendations.
+2. **Advisors** (`tier: agent`, `mode: read`, posture/policy reasoning). Take a complex policy set or scoring catalogue and produce judgment. Examples: `conditional-access-explainer` reviews Conditional Access coverage, disabled/report-only controls, broad exclusions, stale policies, grant/session controls, legacy auth, device compliance, guest access, and risky-user/sign-in coverage; `secure-score-prioritizer` ranks recommendations by tenant shape and effort; `dormant-app-registrations` reviews app registrations using exposure, credential, permission, redirect URI, app-role, publisher-domain, and age signals, then separates cleanup candidates from apps that need owner verification before deletion.
 
 3. **Cleanup with judgment** (`tier: agent`, `mode: write`). Multi-criteria reasoning *before* the diff confirmation. The LLM produces per-item rationale that lands in the diff modal so the typed confirmation is something the admin can actually approve in good conscience. Example: `stale-guest-cleanup` filters guests by inactivity, generates a one-line per-guest rationale, and disables on confirmation. Pairs an investigator's selection logic with a write action's deliberate gating.
 
-### Dashboards are not agents
+### Reports still appear as agents
 
-Single-source LLM-narrated reports (`compliance-overview`, `os-update-posture`, `tenant-health-report`, `user-license-overview`) ship under `tier: dashboard`. They're honestly useful — they're not honestly *agents*. Demoting them keeps the bar clear: an agent has to reason, not just narrate. Agent Hub renders Agents and Dashboards as two separate top-level filters; nothing crosses the line by accident.
+Single-source LLM-narrated report entries (`compliance-overview`, `os-update-posture`, `tenant-health-report`, `user-license-overview`) are less powerful than investigator-style agents, but the product does not split them into a separate top-level Agent Hub surface. Users should not have to understand internal taxonomy before installing something useful. Agent Hub renders one catalog and relies on badges, descriptions, and mode/category filters to explain what each entry does. Posture agents must not invent lifecycle or support status from version strings alone; they can identify concentrations, outliers, stale inventory, and review targets, but claims like "unsupported" need explicit supplied evidence.
 
 ### Why the bar matters
 
-Anyone evaluating the platform looks at the bundled agents first. If the front page is dashboards, the verdict is "fancier Get-MgUser." If the front page is investigators that correlate sign-in logs with CA policies and tell you which user's failure is the CA misconfiguration, the verdict is "this could replace a chunk of my morning." Tiering enforces that verdict.
+Anyone evaluating the platform looks at the bundled catalog first. If the first impression is simple row counts with an LLM blurb, the verdict is "fancier Get-MgUser." If the first impression is investigators that correlate sign-in logs with CA policies and tell you which user's failure is the CA misconfiguration, the verdict is "this could replace a chunk of my morning." The catalog should make those stronger agents easy to find without splitting the page into separate product concepts.
 
 ### The DSL needed to support investigators
 
 Three step kinds carry the bundled investigators today:
 
 - **`graph`** — load one or more Graph endpoints into named outputs.
-- **`transform`** — reshape (count-by-field, filter-by-age, group-by-field, sort-by). Single source per transform; multiple transforms stacked is how multi-source correlation gets expressed today (each transform reads from a prior step by id).
+- **`transform`** — reshape (count-by-field, filter-by-age, group-by-field, sort-by, correlate-stale-devices). Single source per transform; multiple transforms stacked is how multi-source correlation gets expressed today (each transform reads from a prior step by id). Destructive stale-device plans are conservative by default: the offboarding correlation transform skips in-flight Intune devices and can exclude personal/BYOD devices before any retire action is built.
 - **`llm`** — read any subset of prior step outputs via the templating engine. Multi-input reasoning is achieved through the template, not a separate `inputs:` block.
 - **`map`** *(new in v0.2)* — iterate a source array and run an inner sub-pipeline per item. This is the step that enables per-item LLM reasoning (risky-sign-in triage classifies each entry individually with shared context). The map step's output is the array of last-sub-step outputs from each iteration.
 
@@ -662,8 +685,12 @@ These must exist and work well before any public release.
 
 ### Important (in v1.0, doesn't have to be perfect)
 
-- Scheduled runs (recurrence, pause/resume, notification routing)
-- Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; the Teams connector is the first egress target wired through this surface.
+- Scheduled runs are available for installed agents. The UI creates the per-agent recurrence; once at least one Microsoft tenant is connected, OpenAdminOS can register a per-user OS scheduler so due runs continue while the UI is closed. macOS uses `~/Library/LaunchAgents/com.openadminos.scheduler.plist`; Windows uses Task Scheduler. Jobs still run as the signed OpenAdminOS app for the logged-in user, use the persisted MSAL token cache, write results to local history, and do not run when the machine is off or no user session exists. The Schedules view prioritizes active schedules, next run, last run, and recent scheduled activity. OS registration and scheduler errors are shown as compact remediation notices only when the user needs to act.
+- Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; the Teams connector is the first egress target wired through this surface. Agents can save a Teams delivery rule that posts terminal run reports to either the connector default channel or a per-agent channel, with manual/scheduled, success/failure, and changed-only controls. Saved delivery rules are explicit approval to post without another prompt. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
+- Agents should not hard-code routine Teams posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to Teams, or both.
+- Manual agent runs open a preflight review before queueing. It shows the active tenant, provider residency, model, mode, and Graph scopes. It blocks when no tenant is active, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
+- Settings → About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
+- Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
 - Run history with filters (agent, tenant, date, status)
 - Audit log export (JSON/CSV with cryptographic timestamps for compliance buyers)
 - Keyboard shortcuts (⌘K palette, ⌘R rerun, ⌘/ search, ⌘? help)
@@ -679,7 +706,7 @@ These must exist and work well before any public release.
 - Cost budgets & rate limits (per-agent or per-day spend caps for hosted LLMs)
 - Localization framework (DE/NL/FR are the priority markets after EN)
 - Accessibility audit (WCAG AA contrast, keyboard nav, screen reader labels)
-- Opt-in telemetry (Posthog self-hosted or similar; aggregated, never per-tenant)
+- Opt-in product analytics (Posthog self-hosted or similar; aggregated, never per-tenant)
 - Opt-in crash reporting (Sentry-equivalent for app crashes only)
 - Auto-update channel (`electron-updater` against signed releases; needed for security patching)
 - Offline / partial connectivity behavior (retry, cached state, resume on reconnect)

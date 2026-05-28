@@ -1,17 +1,16 @@
 # Secure Score prioritizer
 
-Read-only advisor. Reads the tenant's full Secure Score control
-catalogue and asks the LLM to pick the top five controls to prioritise,
-with reasoning and rough effort estimates.
+Read-only advisor. Reads Microsoft Secure Score control profiles,
+breaks them down by category, action type, implementation cost, user
+impact, and max-score upside, then asks the LLM to pick the first
+controls an admin should review.
 
 ## Why this earns its keep
 
-The Secure Score portal lists every recommendation but leaves the
-ranking to you. That ranking — what's actually worth doing this
-quarter, given your tenant's shape and the effort each control needs —
-is exactly the judgment call a senior consultant makes and a script
-can't. The LLM reads the full catalogue, applies tenant-aware
-weighting, and returns a prioritised list with one-line rationale.
+The Secure Score portal lists controls but does not automatically tell
+you which ones are low-friction, high-upside review targets for this
+tenant. The agent keeps the deterministic parts visible, then uses the
+LLM to turn profile metadata into a practical review order.
 
 ## Required Graph permissions
 
@@ -23,6 +22,9 @@ weighting, and returns a prioritised list with one-line rationale.
 {
   "total": 187,
   "byCategory": { "Identity": 64, "Apps": 41, "Data": 38, "Device": 44 },
+  "byImplementationCost": { "low": 73, "moderate": 62, "high": 18 },
+  "byUserImpact": { "low": 80, "moderate": 38, "high": 16 },
+  "topScoreUpside": [{ "title": "Require MFA for admins", "maxScore": 10 }],
   "llmModel": "llama3.1:8b"
 }
 ```
@@ -32,11 +34,9 @@ shows the breakdown by category on the result page.
 
 ## Caveats
 
-- This agent reads `secureScoreControlProfiles` (the catalogue), not
-  `secureScores` (your point-in-time score). The catalogue contains
-  the full set of controls and their max scores; tenant-specific
-  implementation status is layered on by the LLM from the control
-  metadata. A future variant could also pull `secureScores` to refine
-  recommendations against the live posture.
+- This agent reads `secureScoreControlProfiles` (control metadata), not
+  `secureScores` (point-in-time tenant score). It recommends what to
+  review first; it does not claim a control is unimplemented unless
+  that evidence is added by a future live-score step.
 - Pricing/effort guidance is qualitative. Treat it as a starting point,
   not a procurement decision.

@@ -33,13 +33,18 @@ interface OllamaChatChunk {
   eval_count?: number;
 }
 
+const DEFAULT_OLLAMA_TIMEOUT_MS = 180_000;
+
 export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi {
   const endpoint =
     options.endpoint ?? process.env.OPENAGENTS_OLLAMA_URL ?? "http://127.0.0.1:11434";
   const defaultModel = options.defaultModel;
   const timeoutMs =
     options.timeoutMs ??
-    Number.parseInt(process.env.OPENAGENTS_OLLAMA_TIMEOUT_MS ?? "60000", 10);
+    Number.parseInt(
+      process.env.OPENAGENTS_OLLAMA_TIMEOUT_MS ?? String(DEFAULT_OLLAMA_TIMEOUT_MS),
+      10,
+    );
 
   return {
     available: true,

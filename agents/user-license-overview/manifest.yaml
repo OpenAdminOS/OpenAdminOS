@@ -2,12 +2,12 @@
 descriptor:
   id: user-license-overview
   name: User license overview
-  description: Counts tenant users by usage location and writes a one-paragraph licensing posture summary.
-  version: 1.0.0
+  description: Reviews tenant user licensing hygiene by usage location, account state, and assigned-license presence.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
-    verified: false
+    verified: true
   category: apps
   tier: dashboard
   requiresEntraTier: free
@@ -21,7 +21,14 @@ skills:
     settings:
       method: GET
       path: /users
-      select: [id, displayName, userPrincipalName, usageLocation, accountEnabled]
+      select:
+        - id
+        - displayName
+        - userPrincipalName
+        - usageLocation
+        - accountEnabled
+        - assignedLicenses
+        - userType
       scopes:
         - User.Read.All
   - id: by_location
@@ -32,24 +39,58 @@ skills:
       source: "{{ load_users.output }}"
       field: usageLocation
       missing: "(unset)"
+
+  - id: by_account_enabled
+    format: transform
+    label: Count users by account state
+    settings:
+      kind: count-by-field
+      source: "{{ load_users.output }}"
+      field: accountEnabled
+
+  - id: by_user_type
+    format: transform
+    label: Count users by user type
+    settings:
+      kind: count-by-field
+      source: "{{ load_users.output }}"
+      field: userType
+
+  - id: missing_usage_location
+    format: transform
+    label: Find users missing usage location
+    detail: Groups users whose usageLocation is unset, which can block license assignment.
+    settings:
+      kind: group-by-field
+      source: "{{ load_users.output }}"
+      field: usageLocation
+      missing: "(unset)"
   - id: summarize
     format: llm
     label: Summarize licensing posture
-    detail: One paragraph summary highlighting countries with the most users.
+    detail: Compact summary highlighting country buckets and license-readiness gaps.
     settings:
       system: >-
-        You are a Microsoft 365 administrator's assistant. Be concise and
-        factual. One short paragraph. Never invent numbers — use only the
-        figures you are given.
+        You are a Microsoft 365 licensing hygiene reviewer. Be concise and
+        factual. Never invent numbers - use only the figures you are given.
+        Do not infer exact product license names from assignedLicenses here;
+        this agent only checks user-level readiness signals.
       prompt: |-
         Total users: {{ load_users.output | size }}.
-        Distribution: {{ by_location.output }}.
+        By usage location: {{ by_location.output }}.
+        By account state: {{ by_account_enabled.output }}.
+        By user type: {{ by_user_type.output }}.
+        Users by usage location, with unset bucket included: {{ missing_usage_location.output }}.
 
-        Write a one-paragraph licensing posture summary that highlights
-        the two largest country buckets and flags any users with no
-        usage location set.
+        Write a compact report with these sections:
+        1. Main finding.
+        2. Licensing readiness signals.
+        3. Recommended next actions.
+
+        Highlight the largest location buckets, unset usage locations, and
+        disabled/guest population caveats.
       temperature: 0.2
-      maxTokens: 220
+      maxTokens: 360
 definition:
   triggers:
     - id: manual
@@ -59,4 +100,8 @@ definition:
     data:
       total: "{{ load_users.output | size }}"
       byLocation: "{{ by_location.output }}"
+      byAccountEnabled: "{{ by_account_enabled.output }}"
+      byUserType: "{{ by_user_type.output }}"
+      usageLocationBuckets: "{{ missing_usage_location.output }}"
+      llmSummary: "{{ summarize.output.text }}"
       llmModel: "{{ summarize.output.model }}"

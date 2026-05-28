@@ -8,6 +8,7 @@ import {
   IconSettings,
   IconLogo,
   IconCommand,
+  IconClock,
 } from "./icons";
 import { StatusDot } from "./Pill";
 import { Sparkline } from "./Sparkline";
@@ -21,6 +22,7 @@ interface NavItem {
   end?: boolean;
   badge?: string | number;
   badgeTone?: "default" | "warning";
+  indent?: boolean;
 }
 
 function NavRow({ item }: { item: NavItem }) {
@@ -29,11 +31,11 @@ function NavRow({ item }: { item: NavItem }) {
       to={item.to}
       end={item.end}
       className={({ isActive }) =>
-        `group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all duration-150 ${
+        `group relative flex items-center gap-2.5 rounded-lg py-1.5 text-[13px] font-medium transition-all duration-150 ${
           isActive
             ? "bg-gradient-to-r from-[var(--color-surface-hover)] to-[var(--color-surface)] text-[var(--color-text)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
             : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-        }`
+        } ${item.indent ? "ml-5 px-2" : "px-2.5"}`
       }
     >
       {({ isActive }) => (
@@ -82,6 +84,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       run.status === "running" ||
       run.status === "awaiting-confirmation",
   ).length;
+  const scheduledAgentCount = state.installedAgents.filter(
+    (agent) => agent.schedule?.enabled === true,
+  ).length;
   const mainNav: NavItem[] = [
     {
       to: "/",
@@ -89,6 +94,13 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       icon: <IconAgents size={16} />,
       end: true,
       badge: state.installedAgents.length,
+    },
+    {
+      to: "/agents/schedules",
+      label: "Schedules",
+      icon: <IconClock size={14} />,
+      badge: scheduledAgentCount > 0 ? scheduledAgentCount : undefined,
+      indent: true,
     },
     { to: "/hub", label: "Agent Hub", icon: <IconHub size={16} /> },
     { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },

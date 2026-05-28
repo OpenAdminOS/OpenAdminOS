@@ -1,9 +1,9 @@
 # Stale guest cleanup
 
-Write-mode investigator + cleaner. Loads every guest user, filters to
-those that haven't signed in for 90+ days, asks the LLM for a one-line
-disable rationale per guest, and disables them after typed
-confirmation.
+Write-mode investigator + cleaner. Loads enabled guest users, filters
+to those whose last sign-in is older than the configured threshold,
+caps the action list, asks the LLM for a one-line disable rationale per
+guest, and disables them after typed confirmation.
 
 Supersedes `disable-inactive-guests` (deleted in the v0.2 cleanup) —
 the new version adds the per-guest rationale, which makes the diff
@@ -25,21 +25,21 @@ the proposed action.
 
 ## Pipeline
 
-1. Load all guests (up to 500).
-2. Filter to those whose `signInActivity.lastSignInDateTime` is 90+
-   days ago (or absent, which usually means "never signed in").
-3. For each candidate (up to 50 per run, cost-capped), the LLM
+1. Load enabled guests (up to 500).
+2. Filter to those whose `signInActivity.lastSignInDateTime` is older
+   than `inactiveDays` (default 90).
+3. Sort by oldest sign-in and cap the write plan at 50 candidates.
+4. For each candidate, the LLM
    produces a one-sentence rationale.
-4. Plan + typed confirmation: `DISABLE N GUESTS`.
-5. Apply: `PATCH /users/{id}` with `accountEnabled: false` per guest.
+5. Plan + typed confirmation: `DISABLE N GUESTS`.
+6. Apply: `PATCH /users/{id}` with `accountEnabled: false` per guest.
 
 ## Caveats
 
 - The cleanup is *disable*, not *delete*. Reversible via the same
   endpoint with `accountEnabled: true`.
-- `signInActivity` requires Entra ID P1 or higher. On tenants without
-  P1, the field will be absent for all guests and the filter will
-  match everyone — in that case, swap to filtering on
-  `createdDateTime` instead.
-- Cost cap of 50 LLM calls per run; remaining candidates are still in
-  the disable plan, they just don't get a per-guest rationale.
+- `signInActivity` requires Entra ID P1 or higher. If Graph does not
+  return sign-in timestamps, the age filter does not match those users;
+  the agent will not disable them based on missing evidence.
+- Cost and blast-radius cap: 50 disable actions per run, and every
+  planned action gets a matching rationale.

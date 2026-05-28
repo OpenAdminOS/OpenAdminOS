@@ -2,23 +2,16 @@
 #
 # Agent Template manifest for tenant-health-report.
 #
-# Reads the Intune managed-device inventory, tallies devices by
-# compliance state, asks the LLM for a one-paragraph executive
-# summary, and posts the summary to a Microsoft Teams channel via
-# the Teams connector. The Teams post fires only when the
-# connector is configured AND the user approves the preview-and-send
-# modal.
-#
-# Demonstrates:
-#   - declaring a connector dependency via `descriptor.connectors`
-#   - templating capability args from earlier pipeline output
-#   - the `format: connector` step (kind: notify → preview-and-send modal)
+# Reads the Intune managed-device inventory, tallies compliance and
+# inventory freshness signals, and asks the LLM for a concise tenant
+# health report. Delivery to Teams is configured at the app's per-agent
+# delivery layer, not hard-wired into this agent.
 
 descriptor:
   id: tenant-health-report
   name: Tenant health report
-  description: Posts a one-paragraph Intune compliance summary to a Microsoft Teams channel each time it runs.
-  version: 1.0.0
+  description: Summarizes Intune tenant health from compliance, OS, ownership, and stale inventory signals for scheduled or manual review.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -28,17 +21,6 @@ descriptor:
   requiresEntraTier: free
   mode: read
   preferredModel: llama3.1:8b
-  # Declared connector dependency. Required: the run fails preflight if
-  # the Teams connector cannot be built (no tenant, scope consent
-  # declined, etc.). The user re-consents inline the first time the
-  # capability fires — see per-capability incremental consent in
-  # docs/SPEC.md §2 Connector abstraction.
-  connectors:
-    - id: teams
-      minVersion: 1.0.0
-      capabilities:
-        - { id: post-channel-message, version: 1 }
-      required: true
 
 # ─── pipeline ──────────────────────────────────────────────────────────────
 skills:
@@ -58,6 +40,9 @@ skills:
         - operatingSystem
         - complianceState
         - lastSyncDateTime
+        - managedDeviceOwnerType
+        - deviceEnrollmentType
+        - managementState
       scopes:
         - DeviceManagementManagedDevices.Read.All
 
@@ -75,78 +60,91 @@ skills:
         - noncompliant
         - unknown
 
+  - id: by_os
+    format: transform
+    label: Count devices by operating system
+    detail: Shows whether tenant health issues are concentrated by platform.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: operatingSystem
+
+  - id: by_owner_type
+    format: transform
+    label: Count devices by ownership
+    detail: Separates corporate and personal device ownership where Graph provides it.
+    settings:
+      kind: count-by-field
+      source: "{{ load_devices.output }}"
+      field: managedDeviceOwnerType
+
+  - id: stale_inventory
+    format: transform
+    label: Find stale inventory records
+    detail: Flags devices whose Intune inventory has not refreshed recently.
+    settings:
+      kind: filter-by-age
+      source: "{{ load_devices.output }}"
+      timestampField: lastSyncDateTime
+      inactiveDaysAtLeast: "{{ settings.staleSyncDays }}"
+
   # 3) LLM summary — what gets posted.
   - id: summarize
     format: llm
     label: Summarize tenant health
-    detail: One-paragraph compliance posture, written to live in a Teams channel.
+    detail: Compact tenant-health report suitable for Activity, schedules, or Teams delivery.
     settings:
       system: >-
-        You are a Microsoft 365 administrator's assistant writing a short
-        compliance update for the team's Teams channel. Plain English,
-        no exclamation marks, no marketing language. One paragraph max.
-        Never invent figures — use only the counts you are given.
+        You are an Intune tenant health reviewer. Plain English, no
+        exclamation marks, no marketing language. Never invent figures - use
+        only the counts you are given. Treat stale inventory as a data-quality
+        caveat before making compliance claims.
       prompt: |-
         Tenant managed devices: {{ load_devices.output | size }}.
         Compliant: {{ by_state.output.compliant }}.
         Noncompliant: {{ by_state.output.noncompliant }}.
         Unknown: {{ by_state.output.unknown }}.
+        By OS: {{ by_os.output }}.
+        By ownership: {{ by_owner_type.output }}.
+        Stale inventory >= {{ settings.staleSyncDays }} days: {{ stale_inventory.output | size }}.
 
-        Write a one-paragraph compliance summary the IT team can read in
-        Teams. Lead with the biggest risk if any, then a single
-        prioritised action. Reference the actual counts.
+        Write a compact report with these sections:
+        1. Main finding.
+        2. Health signals.
+        3. Recommended next action.
+
+        Lead with the biggest risk if any. If unknown or stale inventory is
+        material, make refreshing/checking device sync the first action.
       temperature: 0.2
-      maxTokens: 220
-
-  # 4) Post the summary to Teams. `kind: notify` so the runtime gates
-  #    this call with the preview-and-send confirmation modal — the
-  #    user sees the rendered markdown and the target channel before
-  #    anything fires. teamId/channelId fall back to the Teams
-  #    connector's saved defaults (set on the Connectors page); the
-  #    agent only needs to supply the body.
-  - id: post_to_teams
-    format: connector
-    label: Post summary to Teams
-    detail: Sends the LLM-generated summary to the configured channel.
-    settings:
-      connector: teams
-      capability: post-channel-message
-      version: 1
-      args:
-        markdown: |-
-          ## Tenant health report
-
-          {{ summarize.output.text }}
-
-          ---
-          Counts: {{ by_state.output.compliant }} compliant · {{ by_state.output.noncompliant }} noncompliant · {{ by_state.output.unknown }} unknown · {{ load_devices.output | size }} total.
+      maxTokens: 360
 
 # ─── what makes it an agent ────────────────────────────────────────────────
 definition:
+  settings:
+    - id: staleSyncDays
+      label: Stale inventory threshold (days)
+      type: integer
+      default: 14
+      description: Devices that have not synced for at least this many days are flagged as stale inventory.
+
   triggers:
     - id: manual
       kind: manual
 
-  # No per-install settings required. The Teams connector's saved
-  # default team + channel (set on the Connectors page) is the
-  # target; an admin who wants this agent to post somewhere different
-  # can either change the connector default or override `args.teamId`
-  # and `args.channelId` on the connector step above.
-
   # Shape of the run record's `result` field.
   result:
     summary: >-
-      Posted Intune health summary to Teams: {{ by_state.output.compliant }}
-      compliant, {{ by_state.output.noncompliant }} noncompliant,
-      {{ by_state.output.unknown }} unknown.
+      {{ summarize.output.text | default("Summary unavailable.") }}
     data:
       totalDevices: "{{ load_devices.output | size }}"
       counts:
         compliant: "{{ by_state.output.compliant }}"
         noncompliant: "{{ by_state.output.noncompliant }}"
         unknown: "{{ by_state.output.unknown }}"
-      teamsMessage:
-        messageId: "{{ post_to_teams.output.messageId }}"
-        webUrl: "{{ post_to_teams.output.webUrl }}"
+      byOs: "{{ by_os.output }}"
+      byOwnerType: "{{ by_owner_type.output }}"
+      staleInventoryCount: "{{ stale_inventory.output | size }}"
       llmSummary: "{{ summarize.output.text }}"
       llmModel: "{{ summarize.output.model }}"
+      thresholds:
+        staleSyncDays: "{{ settings.staleSyncDays }}"

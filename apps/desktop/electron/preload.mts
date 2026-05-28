@@ -22,6 +22,12 @@ const platform: HostPlatform =
 const api: OpenAdminOSApi = {
   platform,
   getAppState: () => ipcRenderer.invoke("openadminos:get-app-state"),
+  getSchedulerLaunchSettings: () =>
+    ipcRenderer.invoke("openadminos:get-scheduler-launch-settings"),
+  getReleaseDiagnostics: () =>
+    ipcRenderer.invoke("openadminos:get-release-diagnostics"),
+  setSchedulerLaunchEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-scheduler-launch-enabled", enabled),
   listAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
   listInstalledAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
   listRegistryAgents: () =>
@@ -29,7 +35,11 @@ const api: OpenAdminOSApi = {
   refreshRegistry: () => ipcRenderer.invoke("openadminos:refresh-registry"),
   setRegistrySource: (url: string) =>
     ipcRenderer.invoke("openadminos:set-registry-source", url),
+  setRegistryInstallCountsEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-registry-install-counts-enabled", enabled),
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
+  testProvider: (providerId: ProviderId, model?: string) =>
+    ipcRenderer.invoke("openadminos:test-provider", providerId, model),
   listConnectors: () => ipcRenderer.invoke("openadminos:list-connectors"),
   testConnector: (id: string) =>
     ipcRenderer.invoke("openadminos:test-connector", id),
@@ -104,6 +114,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:update-agent-settings", slug, values),
   updateAgentSchedule: (slug, schedule) =>
     ipcRenderer.invoke("openadminos:update-agent-schedule", slug, schedule),
+  updateAgentTeamsDelivery: (slug, delivery) =>
+    ipcRenderer.invoke("openadminos:update-agent-teams-delivery", slug, delivery),
   draftAgentManifest: (prompt: string) =>
     ipcRenderer.invoke("openadminos:draft-agent-manifest", prompt),
   saveAgentDraft: (yamlSource: string) =>

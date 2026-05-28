@@ -29,6 +29,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
 import {
   parseAgentTemplate,
   agentTemplateToModule,
@@ -45,6 +46,12 @@ import {
 } from "./connectors.js";
 
 export { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+export { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
+export {
+  createRegistryInstallCountPayload,
+  type RegistryInstallCountPayload,
+  type RegistryInstallCountPayloadInput,
+} from "./install-stats.js";
 export {
   ManifestValidationError,
   parseAgentTemplate,
@@ -354,6 +361,16 @@ async function createPhaseHandle(
       };
       void input.onProgress(working);
     },
+    updateLiveSummary: (text, streaming) => {
+      const liveSummary = cleanLiveLlmText(text);
+      if (liveSummary.length === 0) return;
+      working = {
+        ...working,
+        liveSummary,
+        summary: streaming ? liveSummary : working.summary,
+      };
+      void input.onProgress(working);
+    },
     accumulateTokens: (usage) => {
       working = { ...working, tokens: mergeTokenUsage(working.tokens, usage) };
       void input.onProgress(working);
@@ -513,6 +530,7 @@ interface ThinkingHooks {
     stepId: string,
     update: (current: RunStepThinking | undefined) => RunStepThinking | undefined,
   ): void;
+  updateLiveSummary(text: string, streaming: boolean): void;
   accumulateTokens(usage: LlmTokenUsage): void;
 }
 
@@ -583,6 +601,7 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
               streaming: !chunk.done,
             }));
           }
+          hooks.updateLiveSummary(chunk.accumulated, !chunk.done);
           if (chunk.done && chunk.tokenUsage) {
             hooks.accumulateTokens(chunk.tokenUsage);
           }
@@ -599,6 +618,13 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
       }
     },
   };
+}
+
+function cleanLiveLlmText(value: string): string {
+  return value
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think>/gi, "")
+    .trim();
 }
 
 async function failPhase(
@@ -648,6 +674,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<RunRecord> {
       status: "completed",
       finishedAt,
       summary: outcome.summary,
+      liveSummary: undefined,
       result: outcome.result,
       logs: [
         ...working.logs,
@@ -690,10 +717,40 @@ export async function executePlan(input: ExecuteRunInput): Promise<RunRecord> {
     validatePlan(plan, input.agent.slug);
 
     const pausedAt = new Date().toISOString();
+    if (plan.actions.length === 0) {
+      const completed = handle.setWorking((working) => ({
+        ...working,
+        status: "completed",
+        finishedAt: pausedAt,
+        summary: plan.summary,
+        liveSummary: undefined,
+        plan,
+        result: {
+          mode: input.realWrites ? "real" : "simulated",
+          total: 0,
+          successCount: 0,
+          failureCount: 0,
+          skippedReason: "No write actions matched the current tenant inventory.",
+        },
+        logs: [
+          ...working.logs,
+          buildLog(
+            working.id,
+            "info",
+            "Plan ready (0 actions). No confirmation required.",
+            pausedAt,
+          ),
+        ],
+      }));
+      await handle.emit();
+      return completed;
+    }
+
     const awaiting = handle.setWorking((working) => ({
       ...working,
       status: "awaiting-confirmation",
       summary: plan.summary,
+      liveSummary: undefined,
       plan,
       logs: [
         ...working.logs,
@@ -746,6 +803,7 @@ export async function executeApply(input: ExecuteApplyInput): Promise<RunRecord>
       status: "completed",
       finishedAt,
       summary: outcome.summary,
+      liveSummary: undefined,
       result: outcome.result,
       logs: [
         ...working.logs,
@@ -773,8 +831,8 @@ function validatePlan(plan: WritePlan, agentSlug: string): void {
   if (typeof plan.confirmationPhrase !== "string" || plan.confirmationPhrase.length === 0) {
     throw new Error(`Agent "${agentSlug}" returned a plan without a confirmation phrase.`);
   }
-  if (!Array.isArray(plan.actions) || plan.actions.length === 0) {
-    throw new Error(`Agent "${agentSlug}" returned a plan with no actions.`);
+  if (!Array.isArray(plan.actions)) {
+    throw new Error(`Agent "${agentSlug}" returned a plan without an actions array.`);
   }
   for (const action of plan.actions) {
     if (
@@ -1075,4 +1133,3 @@ function toAgentDefinition(agent: AgentSummary): RunContext["agent"] {
     preferredModel: agent.preferredModel,
   };
 }
-

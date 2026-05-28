@@ -1,9 +1,9 @@
 # Conditional Access explainer
 
 Read-only advisor. Loads every Conditional Access policy in the tenant
-and produces a three-section readout: what each group of policies
-protects, where policies interact in ways that may be surprising, and
-the most prominent gaps relative to the Microsoft Zero Trust baseline.
+and produces a posture readout: what is covered, what is only
+partially covered, where policies interact in surprising ways, and
+which disabled/report-only controls or exclusions need review.
 
 ## Why this earns its keep
 
@@ -16,7 +16,9 @@ express.
 
 The output is not a formal simulator (we don't enumerate user × app ×
 device permutations). It's a senior consultant reading the policy set
-and telling you what to look at.
+and telling you what to look at: admin MFA, all-user MFA, legacy auth,
+device compliance, guest access, risky sign-ins/users, session
+controls, stale policies, and broad exclusions.
 
 ## Required Graph permissions
 
@@ -28,12 +30,18 @@ and telling you what to look at.
 {
   "total": 14,
   "byState": { "enabled": 11, "enabledForReportingButNotEnforced": 2, "disabled": 1 },
+  "byGrantOperator": { "OR": 7, "AND": 2, "(no grant controls)": 1 },
+  "byClientApps": { "all": 8, "browser,mobileAppsAndDesktopClients": 3 },
+  "bySignInRisk": { "(none)": 11, "high,medium": 2 },
+  "byUserRisk": { "(none)": 12, "high": 1 },
+  "byModifiedAge": { "not modified in 2y+": [...], "not modified in 1y+": [...] },
   "llmModel": "llama3.1:8b"
 }
 ```
 
-The narrative lives in `summary`. The structured `data` block backs the
-per-state pill row on the result page.
+The narrative lives in `summary`. It follows the report shape `Main
+finding`, `Coverage map`, `Interactions to watch`, `Gaps and stale
+controls`, and `Next action`.
 
 ## Caveats
 
@@ -43,5 +51,10 @@ per-state pill row on the result page.
   a specific user can sign in tomorrow — for that, use the live "What
   if" tool in Entra. It will tell you which policies in your set are
   the ones that decision depends on.
+- Report-only and disabled policies are treated as not enforcing
+  protection. The report can still call them useful candidates for
+  promotion.
+- The report can only reason from policy JSON. It does not know group
+  membership, named location definitions, or real sign-in traffic.
 - Best run on a tenant with a stable policy set. Re-running after every
   policy change is fine but probably overkill.

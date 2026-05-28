@@ -143,14 +143,14 @@ export function RunWithMenu({
                     )}
                     {!enabled && (
                       <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--color-text-muted)]">
-                        0.2
+                        soon
                       </span>
                     )}
                   </div>
 
                   {!enabled ? (
                     <div className="px-3 pb-2 text-[11px] text-[var(--color-text-muted)]">
-                      Coming in 0.2
+                      Coming soon
                     </div>
                   ) : models.length === 0 ? (
                     <div className="px-3 pb-2 text-[11px] text-[var(--color-text-muted)]">

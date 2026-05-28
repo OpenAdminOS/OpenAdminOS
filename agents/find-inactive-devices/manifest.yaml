@@ -10,8 +10,8 @@
 descriptor:
   id: find-inactive-devices
   name: Find inactive devices
-  description: Surfaces Intune-managed devices that have not synced recently, grouped by inactivity window.
-  version: 1.0.0
+  description: Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -41,6 +41,11 @@ skills:
         - lastSyncDateTime
         - enrolledDateTime
         - complianceState
+        - managementState
+        - managedDeviceOwnerType
+        - deviceEnrollmentType
+        - manufacturer
+        - model
       scopes:
         - DeviceManagementManagedDevices.Read.All
 
@@ -61,28 +66,99 @@ skills:
         - name: retire
           inactiveDaysAtLeast: "{{ settings.retireDays }}"
 
+  - id: stale_by_compliance
+    format: transform
+    label: Count stale devices by compliance state
+    detail: Breaks stale devices down by complianceState.
+    settings:
+      kind: count-by-field
+      source: "{{ categorize_by_age.output.stale }}"
+      field: complianceState
+      buckets:
+        - compliant
+        - noncompliant
+        - unknown
+
+  - id: retire_by_compliance
+    format: transform
+    label: Count retirement candidates by compliance state
+    detail: Breaks retirement candidates down by complianceState.
+    settings:
+      kind: count-by-field
+      source: "{{ categorize_by_age.output.retire }}"
+      field: complianceState
+      buckets:
+        - compliant
+        - noncompliant
+        - unknown
+
+  - id: inactive_by_os
+    format: transform
+    label: Group warn-band devices by operating system
+    detail: Shows whether early inactivity is concentrated by platform.
+    settings:
+      kind: group-by-field
+      source: "{{ categorize_by_age.output.warn }}"
+      field: operatingSystem
+      missing: unknown
+
+  - id: retire_by_owner_type
+    format: transform
+    label: Group retirement candidates by ownership
+    detail: Separates corporate and personal device ownership where Graph provides it.
+    settings:
+      kind: group-by-field
+      source: "{{ categorize_by_age.output.retire }}"
+      field: managedDeviceOwnerType
+      missing: unknown
+
+  - id: oldest_devices
+    format: transform
+    label: Sample oldest inactive devices
+    detail: Lists the oldest sync timestamps first for evidence in the report.
+    settings:
+      kind: sort-by
+      source: "{{ categorize_by_age.output.retire }}"
+      field: lastSyncDateTime
+      direction: asc
+      take: 10
+
   # 3) Optional LLM polish. Gated on availability so the agent still
   #    completes against synthetic mode without Ollama.
   - id: summarize
     format: llm
     label: Summarize findings with local LLM
-    detail: Generates a 2-sentence executive summary plus two recommendations.
+    detail: Generates a short device hygiene report with review-first actions.
     settings:
       system: >-
-        You are a Microsoft 365 administrator's assistant. Be concise and
-        factual. Skip filler. Return at most three sentences followed by two
-        short prioritized recommendations.
+        You are an Intune device hygiene reviewer for Microsoft 365 admins.
+        Be concise, factual, and conservative. Do not recommend deleting or
+        retiring devices solely because lastSyncDateTime is old. Treat stale
+        sync as an investigation signal that must be checked against ownership,
+        enrollment type, compliance state, replacement/offboarding records, and
+        business context. Use only the supplied counts and samples.
       prompt: |-
         Total managed devices: {{ load_devices.output | size }}.
         Warn band (>= {{ settings.warnDays }} days): {{ categorize_by_age.output.warn | size }} devices.
         Stale band (>= {{ settings.staleDays }} days): {{ categorize_by_age.output.stale | size }} devices.
         Retire band (>= {{ settings.retireDays }} days): {{ categorize_by_age.output.retire | size }} devices.
 
-        Write an executive summary an Intune admin can paste into a ticket.
-        Lead with the most important band, then two short prioritized
-        recommendations.
+        Stale compliance breakdown: {{ stale_by_compliance.output }}.
+        Retirement-candidate compliance breakdown: {{ retire_by_compliance.output }}.
+        Warn-band devices by operating system: {{ inactive_by_os.output }}.
+        Retirement candidates by owner type: {{ retire_by_owner_type.output }}.
+        Oldest retirement-candidate sample: {{ oldest_devices.output }}.
+
+        Write a compact report with these sections:
+        1. Main finding.
+        2. What to verify before cleanup.
+        3. Recommended next actions.
+
+        Call out concentrations by OS, owner type, or compliance state when
+        visible. If the retire band is empty, say that clearly and focus on
+        monitoring the stale band.
       temperature: 0.2
-      maxTokens: 220
+      maxTokens: 420
 
 # ─── what makes it an agent ────────────────────────────────────────────────
 definition:
@@ -118,10 +194,20 @@ definition:
       {{ summarize.output.text | default("Summary unavailable.") }}
     data:
       totalDevices: "{{ load_devices.output | size }}"
+      inactiveCounts:
+        warn: "{{ categorize_by_age.output.warn | size }}"
+        stale: "{{ categorize_by_age.output.stale | size }}"
+        retire: "{{ categorize_by_age.output.retire | size }}"
       buckets:
         warn: "{{ categorize_by_age.output.warn }}"
         stale: "{{ categorize_by_age.output.stale }}"
         retire: "{{ categorize_by_age.output.retire }}"
+      breakdowns:
+        staleByCompliance: "{{ stale_by_compliance.output }}"
+        retireByCompliance: "{{ retire_by_compliance.output }}"
+        inactiveByOs: "{{ inactive_by_os.output }}"
+        retireByOwnerType: "{{ retire_by_owner_type.output }}"
+      oldestRetireCandidates: "{{ oldest_devices.output }}"
       llmSummary: "{{ summarize.output.text }}"
       llmModel: "{{ summarize.output.model }}"
       thresholds:

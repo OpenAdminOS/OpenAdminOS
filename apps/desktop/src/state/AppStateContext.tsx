@@ -13,6 +13,7 @@ import {
   providerCatalog,
   type AgentDraft,
   type AgentSchedule,
+  type AgentTeamsDelivery,
   type AppState,
   type OpenAdminOSApi,
   type ProviderId,
@@ -35,6 +36,7 @@ interface AppStateContextValue {
   updateAgent: (slug: string) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
+  setRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
   startRun: (agentSlug: string, options?: StartRunOptions) => Promise<RunRecord>;
   confirmRun: (runId: string, phrase: string) => Promise<RunRecord>;
   rejectRun: (runId: string) => Promise<RunRecord>;
@@ -50,6 +52,10 @@ interface AppStateContextValue {
   updateAgentSchedule: (
     slug: string,
     schedule: AgentSchedule | null,
+  ) => Promise<void>;
+  updateAgentTeamsDelivery: (
+    slug: string,
+    delivery: AgentTeamsDelivery | null,
   ) => Promise<void>;
   draftAgentManifest: (prompt: string) => Promise<AgentDraft>;
   saveAgentDraft: (yamlSource: string) => Promise<void>;
@@ -76,6 +82,7 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
     lastRegistryRefresh: null,
     registryRefreshError: null,
     registrySource: "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents",
+    registryInstallCountsEnabled: true,
   };
 }
 
@@ -262,6 +269,28 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const setRegistryInstallCountsEnabled = useCallback(async (enabled: boolean) => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      setState((currentState) => ({
+        ...currentState,
+        registryInstallCountsEnabled: enabled,
+      }));
+      return;
+    }
+
+    setError(null);
+    try {
+      const nextState = await api.setRegistryInstallCountsEnabled(enabled);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const settingsError = toError(caughtError);
+      setError(settingsError);
+      throw settingsError;
+    }
+  }, []);
+
   const startRun = useCallback(
     async (agentSlug: string, options?: StartRunOptions) => {
       const api = getOpenAdminOSApi();
@@ -422,6 +451,30 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     [],
   );
 
+  const updateAgentTeamsDelivery = useCallback(
+    async (slug: string, delivery: AgentTeamsDelivery | null) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating Teams delivery is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentTeamsDelivery(slug, delivery);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const deliveryError = toError(caughtError);
+        setError(deliveryError);
+        throw deliveryError;
+      }
+    },
+    [],
+  );
+
   const draftAgentManifest = useCallback(async (prompt: string) => {
     const api = getOpenAdminOSApi();
     if (!api) {
@@ -560,6 +613,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgent,
       setActiveModel,
       setActiveProvider,
+      setRegistryInstallCountsEnabled,
       startRun,
       confirmRun,
       rejectRun,
@@ -570,6 +624,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       disconnectTenant,
       updateAgentSettings,
       updateAgentSchedule,
+      updateAgentTeamsDelivery,
       draftAgentManifest,
       saveAgentDraft,
     }),
@@ -590,6 +645,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       saveAgentDraft,
       setActiveModel,
       setActiveProvider,
+      setRegistryInstallCountsEnabled,
       setActiveTenant,
       startRun,
       state,
@@ -597,6 +653,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgent,
       updateAgentSchedule,
       updateAgentSettings,
+      updateAgentTeamsDelivery,
     ],
   );
 

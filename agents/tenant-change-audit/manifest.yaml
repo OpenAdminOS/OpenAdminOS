@@ -7,8 +7,8 @@
 descriptor:
   id: tenant-change-audit
   name: Tenant change audit
-  description: Summarises recent directory audit entries and flags the ones that look unusual for this tenant.
-  version: 1.0.0
+  description: Reviews recent directory audit entries by activity, category, result, actor, and target context to flag changes worth checking.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -58,11 +58,38 @@ skills:
       source: "{{ load_audits.output }}"
       field: category
 
+  - id: by_result
+    format: transform
+    label: Count entries by result
+    settings:
+      kind: count-by-field
+      source: "{{ load_audits.output }}"
+      field: result
+
+  - id: by_actor
+    format: transform
+    label: Count entries by actor
+    detail: Groups entries by initiatedBy.user.userPrincipalName when available.
+    settings:
+      kind: count-by-field
+      source: "{{ load_audits.output }}"
+      field: initiatedBy.user.userPrincipalName
+
+  - id: recent_sample
+    format: transform
+    label: Sample recent audit entries
+    detail: Keeps the latest entries available as evidence for the report.
+    settings:
+      kind: sort-by
+      source: "{{ load_audits.output }}"
+      field: activityDateTime
+      direction: desc
+      take: 20
+
   - id: explain
     format: llm
     label: Identify the noteworthy changes
     detail: Two-paragraph readout — what's routine vs. what should be reviewed.
-    when: ctx.llm.available
     settings:
       system: >-
         You are an Entra/Intune administrator's assistant. Be concise,
@@ -75,11 +102,19 @@ skills:
 
         By activity: {{ by_activity.output }}
         By category: {{ by_category.output }}
+        By result: {{ by_result.output }}
+        By actor: {{ by_actor.output }}
+        Recent sample: {{ recent_sample.output }}
 
-        Write two short paragraphs. First paragraph: the routine
-        baseline (the high-frequency, low-risk activities). Second
-        paragraph: the entries that warrant a closer look and why.
-        End with a one-line recommendation.
+        Write a compact report with these sections:
+        1. Main finding.
+        2. Routine baseline.
+        3. Changes to review.
+        4. Recommended next action.
+
+        Call out failed changes, privileged role changes, consent changes,
+        app credential changes, mass edits, or one actor dominating the batch
+        when visible. If the sample only shows routine changes, say that.
       temperature: 0.2
       maxTokens: 360
 
@@ -88,9 +123,13 @@ definition:
     - id: manual
       kind: manual
   result:
-    summary: '{{ explain.output.text | default("LLM unavailable — see structured data for the per-activity counts.") }}'
+    summary: '{{ explain.output.text | default("Summary unavailable.") }}'
     data:
       total: "{{ load_audits.output | size }}"
       byActivity: "{{ by_activity.output }}"
       byCategory: "{{ by_category.output }}"
+      byResult: "{{ by_result.output }}"
+      byActor: "{{ by_actor.output }}"
+      recentSample: "{{ recent_sample.output }}"
+      llmSummary: "{{ explain.output.text }}"
       llmModel: "{{ explain.output.model }}"

@@ -6,6 +6,7 @@ import { Button } from "../components/Button";
 import {
   IconArrowRight,
   IconBadgeCheck,
+  IconBolt,
   IconCheck,
   IconCloud,
   IconCopy,
@@ -282,7 +283,7 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
         <FeatureCard
           icon={<IconCloud size={16} className="text-[var(--color-info)]" />}
           title="No API keys"
-          body="Local Ollama today. Anthropic and OpenAI providers reuse your existing CLI login — no API keys to manage."
+          body="Ollama runs locally. OpenAI Codex reuses your Codex CLI login — no API keys to manage."
         />
       </div>
 
@@ -335,12 +336,12 @@ function PickLLM({
         </h2>
         <p className="mt-1.5 max-w-[600px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
           Local providers keep tenant data and prompts on this device.
-          Hosted providers reuse your existing vendor CLI login, so Open
-          Agents never stores API keys.
+          OpenAI Codex reuses your existing Codex login, so OpenAdminOS
+          never stores OpenAI API keys.
         </p>
         <p className="mt-1.5 max-w-[600px] text-[12px] leading-relaxed text-[var(--color-text-muted)]">
-          Local Ollama is the only provider available today. LM Studio and
-          hosted providers (Anthropic, OpenAI, Azure OpenAI) land in v0.2.
+          Choose Ollama for local-only runs or OpenAI Codex for hosted runs
+          through the local Codex CLI.
         </p>
       </div>
 
@@ -355,8 +356,8 @@ function PickLLM({
           ) : (
             <TrustBanner variant="hosted" title="Hosted provider selected.">
               Prompts and tenant context will be sent to{" "}
-              {selectedProvider.name}. Switch to Ollama or LM Studio for
-              local-only operation.
+              {selectedProvider.name}. Switch to Ollama for local-only
+              operation.
             </TrustBanner>
           )}
         </div>
@@ -405,7 +406,7 @@ function PickLLM({
                     )}
                     {!implemented ? (
                       <Pill>
-                        <StatusDot tone="muted" /> Coming in 0.2
+                        <StatusDot tone="muted" /> Planned
                       </Pill>
                     ) : (
                       <>
@@ -423,6 +424,21 @@ function PickLLM({
                   <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
                     {p.description}
                   </p>
+                  {implemented && p.status === "connected" && p.models.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                        Models
+                      </span>
+                      <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                        {p.models.length} {p.isLocal ? "installed" : "available"}
+                      </span>
+                      {p.defaultModel && (
+                        <Pill tone="accent">
+                          default <span className="font-mono">{p.defaultModel}</span>
+                        </Pill>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div
                   className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ${
@@ -707,7 +723,7 @@ function PickAgent({
   onRecheck: () => void;
   working: boolean;
 }) {
-  const featured = useMemo(() => agents.slice(0, 3), [agents]);
+  const featured = useMemo(() => agents.slice(0, 6), [agents]);
   const providerReady =
     activeProvider !== undefined &&
     isProviderImplemented(activeProvider.id) &&
@@ -720,8 +736,8 @@ function PickAgent({
           Install your first agent
         </h2>
         <p className="mt-1.5 max-w-[600px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
-          Pick a read-only agent to start. You can install more from the Agent
-          Hub anytime.
+          Pick an agent to install and run first. The full catalog stays
+          available in Agent Hub.
         </p>
       </div>
 
@@ -734,12 +750,12 @@ function PickAgent({
       {featured.length === 0 ? (
         <Card>
           <div className="p-6 text-[13px] text-[var(--color-text-muted)]">
-            No built-in agents are available yet. Add an agent under the root
-            agents directory.
+            No agents are available yet. Refresh the catalog from Agent Hub
+            after setup.
           </div>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           {featured.map((a) => {
             const active = a.registryId === selectedId;
             return (
@@ -753,12 +769,16 @@ function PickAgent({
                     : ""
                 }
               >
-                <div className="flex items-start gap-4 p-5">
+                <div className="flex min-h-[150px] items-start gap-4 p-5">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
-                    <IconShield size={18} className="text-[var(--color-text-soft)]" />
+                    {a.mode === "write" ? (
+                      <IconBolt size={18} className="text-[var(--color-warning)]" />
+                    ) : (
+                      <IconShield size={18} className="text-[var(--color-text-soft)]" />
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[14px] font-medium text-[var(--color-text)]">
                         {a.name}
                       </span>
@@ -774,10 +794,14 @@ function PickAgent({
                       <Pill tone={a.mode === "write" ? "warning" : "default"}>
                         {a.mode === "write" ? "Write" : "Read-only"}
                       </Pill>
+                      <Pill className="capitalize">{a.category}</Pill>
                     </div>
                     <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
                       {a.description}
                     </p>
+                    <div className="mt-3 text-[11px] text-[var(--color-text-muted)]">
+                      {a.scopes.length} scope{a.scopes.length === 1 ? "" : "s"} · v{a.version}
+                    </div>
                   </div>
                   <div
                     className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ${

@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  *    GitHub (`lib/stats/slugs.ts`, 1h cache)
  *  - Per-IP rate limit, 30/min sliding window via a fixed bucket key
  *  - Per-(installId, slug) dedup — same machine never counts twice for
- *    the same agent. TTL is 1y; effectively permanent for an install.
+ *    the same agent during the current annual digest window. TTL is 1y.
  *
  * Idempotent. Same client retrying with the same `installId` returns
  * 200 with `{ counted: false }`.

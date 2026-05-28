@@ -8,8 +8,8 @@
 descriptor:
   id: sign-in-failure-explainer
   name: Sign-in failure explainer
-  description: Pulls recent failed sign-ins and groups them by likely root cause, with reasoning for each cluster.
-  version: 1.0.0
+  description: Clusters recent failed sign-ins by error, app, user, client app, Conditional Access status, and location signals.
+  version: 1.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -47,6 +47,8 @@ skills:
         - ipAddress
         - location
         - conditionalAccessStatus
+        - riskLevelAggregated
+        - riskLevelDuringSignIn
       scopes:
         - AuditLog.Read.All
 
@@ -74,11 +76,45 @@ skills:
       source: "{{ load_failures.output }}"
       field: userPrincipalName
 
+  - id: by_client_app
+    format: transform
+    label: Count failures by client app
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: clientAppUsed
+
+  - id: by_ca_status
+    format: transform
+    label: Count failures by Conditional Access status
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: conditionalAccessStatus
+
+  - id: by_risk_during_sign_in
+    format: transform
+    label: Count failures by sign-in risk level
+    settings:
+      kind: count-by-field
+      source: "{{ load_failures.output }}"
+      field: riskLevelDuringSignIn
+
+  - id: recent_sample
+    format: transform
+    label: Sample recent failures
+    detail: Keeps the newest failures available as evidence for clustering.
+    settings:
+      kind: sort-by
+      source: "{{ load_failures.output }}"
+      field: createdDateTime
+      direction: desc
+      take: 20
+
   - id: explain
     format: llm
     label: Cluster failures by likely root cause
     detail: Top-three clusters with reasoning and triage suggestion.
-    when: ctx.llm.available
     settings:
       system: >-
         You are an Entra sign-in investigator. Be concise and factual.
@@ -94,12 +130,20 @@ skills:
         Top error codes: {{ by_error.output }}
         Top apps: {{ by_app.output }}
         Top users: {{ by_user.output }}
+        Top client apps: {{ by_client_app.output }}
+        Conditional Access status: {{ by_ca_status.output }}
+        Risk during sign-in: {{ by_risk_during_sign_in.output }}
+        Recent failure sample: {{ recent_sample.output }}
 
-        Identify up to three clusters by likely root cause. For each:
-        (a) one-line description of the root cause, (b) which users
-        and apps are affected, (c) the recommended triage step
-        ("ignore — known issue", "user education", "check device
-        compliance posture", "review CA policy", "escalate to IR").
+        Write a compact report with these sections:
+        1. Main finding.
+        2. Likely root-cause clusters.
+        3. Recommended next actions.
+
+        For each cluster, name the affected users/apps when visible and choose
+        a triage path: ignore known issue, user education, check device
+        compliance posture, review CA policy, reset credentials, or escalate
+        to incident response.
 
         If the failures don't cluster cleanly (e.g. all distinct
         causes), say so honestly.
@@ -111,10 +155,15 @@ definition:
     - id: manual
       kind: manual
   result:
-    summary: '{{ explain.output.text | default("LLM unavailable — see structured data for raw failure counts.") }}'
+    summary: '{{ explain.output.text | default("Summary unavailable.") }}'
     data:
       total: "{{ load_failures.output | size }}"
       byError: "{{ by_error.output }}"
       byApp: "{{ by_app.output }}"
       byUser: "{{ by_user.output }}"
+      byClientApp: "{{ by_client_app.output }}"
+      byConditionalAccessStatus: "{{ by_ca_status.output }}"
+      byRiskDuringSignIn: "{{ by_risk_during_sign_in.output }}"
+      recentSample: "{{ recent_sample.output }}"
+      llmSummary: "{{ explain.output.text }}"
       llmModel: "{{ explain.output.model }}"

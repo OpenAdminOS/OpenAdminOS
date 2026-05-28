@@ -9,11 +9,13 @@ import {
   shell,
   type MenuItemConstructorOptions,
 } from "electron";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { AppStateStore } from "./state.js";
-import { EncryptedSecretStore } from "./secret-store.js";
+import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import {
   applyUpdateNow,
   getUpdateState,
@@ -27,7 +29,11 @@ import {
 import type {
   PendingConnectorDecision,
   ProviderId,
+  ReleaseDiagnostics,
+  RunRecord,
   SaveTextFileArgs,
+  SchedulerLaunchSettings,
+  StartRunOptions,
 } from "@openadminos/agent-sdk";
 import {
   installConnectorConfirmBridge,
@@ -46,19 +52,351 @@ import { listRegisteredConnectors } from "@openadminos/runtime";
 // two paths consistent and gives users a single "OpenAdminOS Safe
 // Storage" entry regardless of how they're running the app.
 app.setName("OpenAdminOS");
+// Do not let Chromium initialize macOS Keychain for the default
+// Electron profile. We don't store passwords/cookies in the renderer,
+// and the prompt wording ("Electron wants to use your confidential
+// information...") is unacceptable as a first-run trust signal.
+if (process.platform === "darwin" && !app.isPackaged) {
+  app.commandLine.appendSwitch("use-mock-keychain");
+}
 
 const currentFile = fileURLToPath(import.meta.url);
 const currentDir = dirname(currentFile);
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
 const allowedExternalProtocols = new Set(["http:", "https:", "mailto:"]);
+const BACKGROUND_SCHEDULER_ARG = "--background-scheduler";
+const isBackgroundSchedulerLaunch = process.argv.includes(BACKGROUND_SCHEDULER_ARG);
+const MACOS_SCHEDULER_LABEL = "com.openadminos.scheduler";
+const WINDOWS_SCHEDULER_TASK = "OpenAdminOS Scheduler";
 
 let mainWindow: BrowserWindow | null = null;
 let store: AppStateStore;
+const activeNotifications = new Set<Notification>();
 // Wall-clock timestamp of the most recent background registry refresh
 // attempt. Used to rate-limit focus-triggered refreshes so alt-tabbing
 // doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
 // this — the user explicitly asked for a fresh fetch.
 let lastBackgroundRefreshAt = 0;
+
+function schedulerProgramArguments(): string[] {
+  if (app.isPackaged) {
+    return [process.execPath, BACKGROUND_SCHEDULER_ARG];
+  }
+
+  // In dev, the executable is Electron itself, so the app path must be
+  // passed explicitly before our scheduler arg.
+  return [process.execPath, app.getAppPath(), BACKGROUND_SCHEDULER_ARG];
+}
+
+function escapePlistValue(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function macosSchedulerPlistPath(): string {
+  return join(app.getPath("home"), "Library", "LaunchAgents", `${MACOS_SCHEDULER_LABEL}.plist`);
+}
+
+function writeMacosLaunchAgent(): void {
+  const plistPath = macosSchedulerPlistPath();
+  const logDir = join(app.getPath("userData"), "logs");
+  mkdirSync(dirname(plistPath), { recursive: true });
+  mkdirSync(logDir, { recursive: true });
+
+  const programArguments = schedulerProgramArguments()
+    .map((arg) => `    <string>${escapePlistValue(arg)}</string>`)
+    .join("\n");
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${MACOS_SCHEDULER_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+${programArguments}
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>StandardOutPath</key>
+  <string>${escapePlistValue(join(logDir, "scheduler.log"))}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapePlistValue(join(logDir, "scheduler.error.log"))}</string>
+</dict>
+</plist>
+`;
+
+  writeFileSync(plistPath, plist, { encoding: "utf8", mode: 0o644 });
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const domain = uid === undefined ? "gui" : `gui/${uid}`;
+  try {
+    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" });
+  } catch {
+    // The agent may not be loaded yet.
+  }
+  execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "ignore" });
+  execFileSync("launchctl", ["enable", `${domain}/${MACOS_SCHEDULER_LABEL}`], {
+    stdio: "ignore",
+  });
+}
+
+function removeMacosLaunchAgent(): void {
+  const plistPath = macosSchedulerPlistPath();
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const domain = uid === undefined ? "gui" : `gui/${uid}`;
+  try {
+    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" });
+  } catch {
+    // Already unloaded.
+  }
+  rmSync(plistPath, { force: true });
+}
+
+function isWindowsSchedulerTaskRegistered(): boolean {
+  try {
+    execFileSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function registerWindowsSchedulerTask(): void {
+  const [command, ...args] = schedulerProgramArguments();
+  const taskRun = [`"${command}"`, ...args.map((arg) => `"${arg}"`)].join(" ");
+  execFileSync(
+    "schtasks.exe",
+    [
+      "/Create",
+      "/F",
+      "/SC",
+      "MINUTE",
+      "/MO",
+      "1",
+      "/TN",
+      WINDOWS_SCHEDULER_TASK,
+      "/TR",
+      taskRun,
+    ],
+    { stdio: "ignore", windowsHide: true },
+  );
+}
+
+function removeWindowsSchedulerTask(): void {
+  try {
+    execFileSync("schtasks.exe", ["/Delete", "/F", "/TN", WINDOWS_SCHEDULER_TASK], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  } catch {
+    // Already removed.
+  }
+}
+
+async function getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings> {
+  if (process.platform === "linux") {
+    return {
+      supported: false,
+      enabled: false,
+      detail: "Linux OS scheduler registration is not wired yet.",
+    };
+  }
+
+  try {
+    const hasTenant = store ? await store.hasConnectedTenant() : false;
+    const status = store ? await store.getSchedulerStatus() : undefined;
+    const enabled =
+      process.platform === "darwin"
+        ? existsSync(macosSchedulerPlistPath())
+        : isWindowsSchedulerTaskRegistered();
+    return {
+      supported: true,
+      enabled,
+      detail:
+        process.platform === "win32"
+          ? "Uses Windows Task Scheduler to run due agents while you are signed in to Windows."
+          : "Uses a per-user macOS LaunchAgent to run due agents while you are signed in to macOS.",
+      requiresTenant: !hasTenant,
+      activeScheduleCount: status?.activeScheduleCount,
+      lastWakeAt: status?.lastWakeAt,
+      lastSuccessAt: status?.lastSuccessAt,
+      lastError: status?.lastError,
+      nextDueAt: status?.nextDueAt,
+      nextDueAgentName: status?.nextDueAgentName,
+    };
+  } catch (error) {
+    return {
+      supported: false,
+      enabled: false,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function getReleaseDiagnostics(): Promise<ReleaseDiagnostics> {
+  const platform =
+    process.platform === "darwin"
+      ? "macos"
+      : process.platform === "win32"
+        ? "windows"
+        : process.platform === "linux"
+          ? "linux"
+          : "unknown";
+  const notificationPermission =
+    process.platform === "darwin" || process.platform === "win32"
+      ? "granted"
+      : "unknown";
+  return {
+    appVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    signed: app.isPackaged,
+    platform,
+    notificationSupported: Notification.isSupported(),
+    notificationPermission,
+    scheduler: await getSchedulerLaunchSettings(),
+  };
+}
+
+async function setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings> {
+  if (process.platform === "linux") {
+    return getSchedulerLaunchSettings();
+  }
+
+  if (enabled && !(await store.hasConnectedTenant())) {
+    throw new Error(
+      "Connect at least one Microsoft 365 tenant before enabling scheduled background runs.",
+    );
+  }
+
+  if (process.platform === "darwin") {
+    if (enabled) writeMacosLaunchAgent();
+    else removeMacosLaunchAgent();
+  } else if (process.platform === "win32") {
+    if (enabled) registerWindowsSchedulerTask();
+    else removeWindowsSchedulerTask();
+  }
+
+  return getSchedulerLaunchSettings();
+}
+
+async function registerSchedulerIfReady(trigger: "tenant" | "schedule"): Promise<void> {
+  try {
+    if (!(await store.hasConnectedTenant())) return;
+    if (!(await store.hasEnabledSchedule())) return;
+    const settings = await getSchedulerLaunchSettings();
+    if (!settings.supported || settings.enabled) return;
+    await setSchedulerLaunchEnabled(true);
+  } catch (error) {
+    console.warn(`[scheduler] OS registration after ${trigger} failed:`, error);
+  }
+}
+
+async function unregisterSchedulerIfUnused(): Promise<void> {
+  try {
+    if (await store.hasEnabledSchedule()) return;
+    const settings = await getSchedulerLaunchSettings();
+    if (!settings.supported || !settings.enabled) return;
+    await setSchedulerLaunchEnabled(false);
+  } catch (error) {
+    console.warn("[scheduler] OS unregistration after schedule removal failed:", error);
+  }
+}
+
+function showRunNotification(run: RunRecord): void {
+  if (!Notification.isSupported()) {
+    console.warn("[notification] OS notifications are not supported on this system.");
+    return;
+  }
+
+  // Skip notifications if the user is already focused on the app — they
+  // will see the result without being interrupted. Scheduled runs are
+  // the exception: they are ambient background work, so completion/failure
+  // should still surface.
+  if (run.trigger !== "schedule" && mainWindow && mainWindow.isFocused()) return;
+
+  const title =
+    run.status === "completed"
+      ? run.trigger === "schedule"
+        ? "Scheduled agent run completed"
+        : "Agent run completed"
+      : run.status === "failed"
+        ? run.trigger === "schedule"
+          ? "Scheduled agent run failed"
+          : "Agent run failed"
+        : run.status === "cancelled"
+          ? "Agent run cancelled"
+          : "Agent run rejected";
+  const notification = new Notification({
+    id: run.id,
+    groupId: run.agentSlug,
+    title,
+    subtitle: run.agentSlug,
+    body: notificationBodyForRun(run),
+    silent: false,
+  });
+
+  activeNotifications.add(notification);
+  const release = () => activeNotifications.delete(notification);
+  notification.on("show", () => {
+    console.info(`[notification] shown for run ${run.id}`);
+  });
+  notification.on("failed", (_event, error) => {
+    console.warn(`[notification] failed for run ${run.id}: ${error}`);
+    release();
+  });
+  notification.on("close", release);
+  notification.on("click", () => {
+    release();
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    mainWindow.webContents.send("openadminos:focus-run", run.id);
+  });
+  notification.show();
+}
+
+async function maybeShowRunNotification(run: RunRecord): Promise<void> {
+  if (run.trigger === "schedule") {
+    const schedule = await store.getAgentSchedule(run.agentSlug);
+    const isFailure = run.status === "failed" || run.status === "cancelled" || run.status === "rejected";
+    const successAllowed = schedule?.notifyOnSuccess ?? true;
+    const failureAllowed = schedule?.notifyOnFailure ?? true;
+    const changeOnly = schedule?.notifyOnChangeOnly ?? false;
+    if (isFailure && !failureAllowed) return;
+    if (!isFailure && !successAllowed) return;
+    if (!isFailure && changeOnly && run.changeState === "unchanged") return;
+  }
+
+  showRunNotification(run);
+}
+
+function notificationBodyForRun(run: RunRecord): string {
+  const statusSuffix =
+    run.changeState === "new"
+      ? "new finding"
+      : run.changeState === "changed"
+        ? "findings changed"
+        : run.changeState === "unchanged"
+          ? "no change"
+          : run.status;
+  const raw = run.error ?? run.summary ?? "";
+  const cleaned = raw
+    .replace(/[`*_#>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const excerpt =
+    cleaned.length > 120 ? `${cleaned.slice(0, 117).trim()}...` : cleaned;
+  return excerpt ? `${run.agentSlug} · ${statusSuffix} · ${excerpt}` : `${run.agentSlug} · ${statusSuffix}`;
+}
 
 /**
  * Drive a registry index refresh from a non-user trigger (startup,
@@ -275,7 +613,7 @@ function buildAppMenu(): Menu {
   return Menu.buildFromTemplate([appMenu, editMenu, viewMenu, windowMenu, helpMenu]);
 }
 
-async function createWindow() {
+async function createWindow({ show = true }: { show?: boolean } = {}) {
   const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
     ...(typeof persisted.x === "number" ? { x: persisted.x } : {}),
@@ -308,7 +646,9 @@ async function createWindow() {
   }
 
   mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
+    if (show) {
+      mainWindow?.show();
+    }
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -334,6 +674,16 @@ async function createWindow() {
 
 function registerIpcHandlers() {
   ipcMain.handle("openadminos:get-app-state", () => store.getAppState());
+  ipcMain.handle("openadminos:get-scheduler-launch-settings", () =>
+    getSchedulerLaunchSettings(),
+  );
+  ipcMain.handle("openadminos:get-release-diagnostics", () =>
+    getReleaseDiagnostics(),
+  );
+  ipcMain.handle(
+    "openadminos:set-scheduler-launch-enabled",
+    (_event, enabled: boolean) => setSchedulerLaunchEnabled(Boolean(enabled)),
+  );
   ipcMain.handle("openadminos:list-agents", () => store.listAgents());
   ipcMain.handle("openadminos:list-registry-agents", () =>
     store.listRegistryAgents(),
@@ -342,7 +692,16 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:set-registry-source", (_event, url: string) =>
     store.setRegistrySource(url),
   );
+  ipcMain.handle(
+    "openadminos:set-registry-install-counts-enabled",
+    (_event, enabled: boolean) => store.setRegistryInstallCountsEnabled(Boolean(enabled)),
+  );
   ipcMain.handle("openadminos:list-providers", () => store.listProviders());
+  ipcMain.handle(
+    "openadminos:test-provider",
+    (_event, providerId: ProviderId, model?: string) =>
+      store.testProvider(providerId, model),
+  );
   ipcMain.handle("openadminos:list-connectors", () => store.listConnectors());
   ipcMain.handle("openadminos:test-connector", (_event, id: string) =>
     store.testConnector(id),
@@ -370,9 +729,11 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:install-agent", (_event, agentId: string) =>
     store.installAgent(agentId),
   );
-  ipcMain.handle("openadminos:uninstall-agent", (_event, slug: string) =>
-    store.uninstallAgent(slug),
-  );
+  ipcMain.handle("openadminos:uninstall-agent", async (_event, slug: string) => {
+    const state = await store.uninstallAgent(slug);
+    void unregisterSchedulerIfUnused();
+    return state;
+  });
   ipcMain.handle("openadminos:update-agent", (_event, slug: string) =>
     store.updateAgent(slug),
   );
@@ -386,7 +747,7 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:start-run",
-    (_event, agentSlug: string, options?: { tenantId?: string }) =>
+    (_event, agentSlug: string, options?: StartRunOptions) =>
       store.startRun(agentSlug, options),
   );
   ipcMain.handle("openadminos:get-run", (_event, id: string) => store.getRun(id));
@@ -404,7 +765,11 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:get-requested-scopes", () =>
     store.listRequestedScopes(),
   );
-  ipcMain.handle("openadminos:connect-tenant", () => store.connectTenant());
+  ipcMain.handle("openadminos:connect-tenant", async () => {
+    const state = await store.connectTenant();
+    void registerSchedulerIfReady("tenant");
+    return state;
+  });
   ipcMain.handle("openadminos:set-active-tenant", (_event, id: string) =>
     store.setActiveTenant(id),
   );
@@ -421,7 +786,17 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:update-agent-schedule",
-    (_event, slug: string, schedule) => store.updateAgentSchedule(slug, schedule),
+    async (_event, slug: string, schedule) => {
+      const state = await store.updateAgentSchedule(slug, schedule);
+      if (schedule?.enabled === true) void registerSchedulerIfReady("schedule");
+      else void unregisterSchedulerIfUnused();
+      return state;
+    },
+  );
+  ipcMain.handle(
+    "openadminos:update-agent-teams-delivery",
+    (_event, slug: string, delivery) =>
+      store.updateAgentTeamsDelivery(slug, delivery),
   );
   ipcMain.handle(
     "openadminos:draft-agent-manifest",
@@ -468,14 +843,23 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    if (!mainWindow) {
+  app.on("second-instance", (_event, argv) => {
+    if (argv.includes(BACKGROUND_SCHEDULER_ARG)) {
+      void store?.fireDueSchedules();
       return;
     }
 
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      if (app.dock) app.dock.show();
+      void createWindow({ show: true });
+      return;
+    }
+
+    if (app.dock) app.dock.show();
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
     }
+    mainWindow.show();
     mainWindow.focus();
   });
 
@@ -494,7 +878,7 @@ if (!gotLock) {
     }
 
     const userDataDir = app.getPath("userData");
-    const tokenStore = new EncryptedSecretStore(join(userDataDir, "tokens.bin"));
+    const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
 
     installConnectorConfirmBridge({
       getMainWindow: () => mainWindow,
@@ -519,48 +903,32 @@ if (!gotLock) {
         await shell.openExternal(url);
       },
       onRunFinished: (run) => {
-        if (!Notification.isSupported()) return;
-        // Skip notifications if the user is already focused on the
-        // app — they will see the result without being interrupted.
-        if (mainWindow && mainWindow.isFocused()) return;
-        const title =
-          run.status === "completed"
-            ? "Agent run completed"
-            : run.status === "failed"
-              ? "Agent run failed"
-              : run.status === "cancelled"
-                ? "Agent run cancelled"
-                : "Agent run rejected";
-        const notification = new Notification({
-          title,
-          body: run.summary ?? `${run.agentSlug} · ${run.status}`,
-          silent: false,
-        });
-        notification.on("click", () => {
-          if (!mainWindow) return;
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.focus();
-          mainWindow.webContents.send("openadminos:focus-run", run.id);
-        });
-        notification.show();
+        void maybeShowRunNotification(run);
       },
     });
     registerIpcHandlers();
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
-    void createWindow();
+    if (isBackgroundSchedulerLaunch && app.dock) {
+      app.dock.hide();
+    }
+    if (!isBackgroundSchedulerLaunch) {
+      void createWindow({ show: true });
+    }
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
     void refreshRegistryInBackground("startup");
-    // Re-probe tenant tiers + license panels for every persisted
-    // tenant. Existing tenants from before the licenses panel landed
-    // need this to populate; new tenants get probed at connect time.
-    void store.probeAllTenants().catch(() => undefined);
     startAutoUpdater(() => mainWindow ?? undefined);
 
-    // In-process agent scheduler: ticks every 60s, fires any installed
-    // agent whose schedule is enabled + due. Honest by design — runs
-    // only fire while the user has the app open.
+    // Agent scheduler: for normal visible launches, wait for the
+    // regular minute tick instead of immediately catching up. Immediate
+    // catch-up can touch the MSAL token cache and trigger a macOS
+    // Keychain prompt before the user has done anything. Hidden
+    // background launches are explicitly scheduler work, so they catch
+    // up immediately.
+    if (isBackgroundSchedulerLaunch) {
+      void store.fireDueSchedules();
+    }
     const SCHEDULER_TICK_MS = 60_000;
     setInterval(() => {
       void store.fireDueSchedules();
@@ -587,7 +955,12 @@ if (!gotLock) {
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        void createWindow();
+        if (app.dock) app.dock.show();
+        void createWindow({ show: true });
+      } else if (mainWindow && !mainWindow.isDestroyed()) {
+        if (app.dock) app.dock.show();
+        mainWindow.show();
+        mainWindow.focus();
       }
     });
   });

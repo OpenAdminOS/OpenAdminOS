@@ -136,17 +136,17 @@ export default function PrivacyPage() {
                 your machine.
               </li>
               <li>
-                <span className="text-white">Agent install counts.</span> In
-                packaged production builds, the app sends a small install-count
-                event when you install a public registry agent. The event
-                contains the agent slug, app version, operating-system platform,
-                and a random per-installation UUID used to avoid counting the
-                same machine twice for the same agent. It does not include
-                tenant identifiers, user identifiers, prompts, run results, or
-                Microsoft Graph data. The website endpoint also uses your IP
-                address briefly for rate limiting and stores the deduplication
-                UUID for up to one year. These counts are used only to publish
-                aggregate registry stats.
+                <span className="text-white">Registry install counts.</span> In
+                packaged production builds, the app can send a small registry
+                install count event when you install a public registry agent.
+                You can disable this in Settings. The event contains the agent
+                slug, app version, operating-system platform, and a yearly
+                per-agent SHA-256 hash derived from a random local install ID.
+                It does not include tenant identifiers, user identifiers,
+                prompts, run results, or Microsoft Graph data. The website
+                endpoint also uses your IP address briefly for rate limiting
+                and stores the deduplication hash for up to one year. These
+                counts are used only to publish aggregate registry stats.
               </li>
               <li>
                 <span className="text-white">Auto-update.</span> The app can
@@ -204,7 +204,7 @@ export default function PrivacyPage() {
               the personal data we hold about you, to correct it, or to have
               it deleted. Because the desktop app does not transmit tenant
               content to us, this in practice applies to support
-              correspondence and the limited install-count data described
+              correspondence and the limited registry install count data described
               above. Email support@openadminos.com and we will respond within
               30 days.
             </p>
