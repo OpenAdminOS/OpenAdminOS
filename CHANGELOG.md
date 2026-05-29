@@ -29,6 +29,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Graph QA no longer emits warnings for bundled valid Graph endpoints, select-property checks, curated sample backing, or AJV `date-time` / `uri` schema formats.
 - Build your own Agent flow now has clearer guided options, a working version editor, an edit-cancel path that closes cleanly, a less duplicated review surface, honest preflight warning copy, Settings recovery for unavailable providers, and Open agent as the primary post-save action.
 - Build your own Agent now rejects path-like or otherwise invalid local agent slugs before writing to the user-agents directory, and write-agent community submission copy now describes typed-confirmation write actions.
+- Corrupt or undecryptable MSAL token cache files are now cleared so scheduled runs ask the admin to reconnect the tenant instead of showing Electron's raw safeStorage ciphertext error.
 
 ### Security
 
