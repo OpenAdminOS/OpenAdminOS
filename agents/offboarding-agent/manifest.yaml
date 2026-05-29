@@ -14,6 +14,7 @@ descriptor:
   name: Offboarding agent
   description: Builds a conservative stale-device offboarding plan from Intune sync, Entra sign-in, ownership, compliance, and trust signals, then retires devices after typed confirmation.
   version: 1.1.0
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos

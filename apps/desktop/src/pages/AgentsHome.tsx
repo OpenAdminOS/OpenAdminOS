@@ -116,7 +116,7 @@ export default function AgentsHome() {
               leadingIcon={<IconPlus size={14} />}
               onClick={() => setNewAgentOpen(true)}
             >
-              New agent
+              Build your own Agent
             </Button>
           </>
         }

@@ -1,7 +1,7 @@
 {
   "name": "openadminos",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -11,7 +11,7 @@
     "build": "npm run build -w @openadminos/desktop",
     "typecheck": "npm run typecheck -w @openadminos/agent-sdk && npm run typecheck -w @openadminos/connector-teams && npm run typecheck -w @openadminos/runtime && npm run typecheck -w @openadminos/qa-graph && npm run typecheck -w @openadminos/desktop",
     "qa": "npm run qa -w @openadminos/qa-graph",
-    "test": "npm run test -w @openadminos/runtime && npm run test -w @openadminos/qa-graph",
+    "test": "npm run test -w @openadminos/runtime && npm run test -w @openadminos/qa-graph && npm run test -w @openadminos/desktop",
     "dist:desktop": "npm run dist -w @openadminos/desktop",
     "registry:index": "node scripts/generate-registry-index.mjs"
   },

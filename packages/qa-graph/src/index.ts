@@ -14,3 +14,5 @@ export {
   type ManifestSchemaReport,
 } from "./schema-check.js";
 export { runStatsChecks, type StatsReport } from "./stats-check.js";
+export { runContentSafetyChecks } from "./content-safety.js";
+export { runRegistryIndexChecks } from "./registry-index-check.js";

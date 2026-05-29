@@ -734,8 +734,13 @@ function registerIpcHandlers() {
     void unregisterSchedulerIfUnused();
     return state;
   });
-  ipcMain.handle("openadminos:update-agent", (_event, slug: string) =>
-    store.updateAgent(slug),
+  ipcMain.handle("openadminos:get-agent-update-review", (_event, slug: string) =>
+    store.getAgentUpdateReview(slug),
+  );
+  ipcMain.handle(
+    "openadminos:update-agent",
+    (_event, slug: string, options?: { confirmTrustChanges?: boolean }) =>
+      store.updateAgent(slug, options),
   );
   ipcMain.handle("openadminos:set-active-provider", (_event, id: ProviderId) =>
     store.setActiveProvider(id),
@@ -803,8 +808,54 @@ function registerIpcHandlers() {
     (_event, prompt: string) => store.draftAgentManifest(prompt),
   );
   ipcMain.handle(
+    "openadminos:validate-agent-draft",
+    (_event, yamlSource: string, allowedSlug?: string) =>
+      store.validateAgentDraft(yamlSource, allowedSlug),
+  );
+  ipcMain.handle(
+    "openadminos:preflight-agent-draft",
+    (_event, yamlSource: string, allowedSlug?: string) =>
+      store.preflightAgentDraft(yamlSource, allowedSlug),
+  );
+  ipcMain.handle(
     "openadminos:save-agent-draft",
     (_event, yamlSource: string) => store.saveAgentDraft(yamlSource),
+  );
+  ipcMain.handle(
+    "openadminos:update-user-agent-draft",
+    (_event, slug: string, yamlSource: string) =>
+      store.updateUserAgentDraft(slug, yamlSource),
+  );
+  ipcMain.handle(
+    "openadminos:export-agent-draft-bundle",
+    async (_event, yamlSource: string) => {
+      const parent = mainWindow ?? undefined;
+      const result = parent
+        ? await dialog.showOpenDialog(parent, {
+            title: "Export agent bundle",
+            buttonLabel: "Export here",
+            properties: ["openDirectory", "createDirectory"],
+          })
+        : await dialog.showOpenDialog({
+            title: "Export agent bundle",
+            buttonLabel: "Export here",
+            properties: ["openDirectory", "createDirectory"],
+          });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { canceled: true };
+      }
+      return store.exportAgentDraftBundle(yamlSource, result.filePaths[0]);
+    },
+  );
+  ipcMain.handle(
+    "openadminos:prepare-agent-community-submission",
+    (_event, yamlSource: string, metadata, allowedSlug?: string) =>
+      store.prepareAgentCommunitySubmission(yamlSource, metadata, allowedSlug),
+  );
+  ipcMain.handle(
+    "openadminos:submit-agent-community-submission",
+    (_event, yamlSource: string, metadata, allowedSlug?: string) =>
+      store.submitAgentCommunitySubmission(yamlSource, metadata, allowedSlug),
   );
   ipcMain.handle("openadminos:open-external", (_event, url: string) => {
     openExternalUrl(url);
