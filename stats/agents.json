@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-28T21:00:47.236Z",
+  "updatedAt": "2026-05-29T07:00:43.218Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 7,
@@ -10,8 +10,8 @@
       "installs7d": 4
     },
     "compliance-overview": {
-      "installs": 7,
-      "installs7d": 6
+      "installs": 8,
+      "installs7d": 7
     },
     "os-update-posture": {
       "installs": 3,
