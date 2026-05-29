@@ -69,6 +69,12 @@ const isBackgroundSchedulerLaunch = process.argv.includes(BACKGROUND_SCHEDULER_A
 const MACOS_SCHEDULER_LABEL = "com.openadminos.scheduler";
 const WINDOWS_SCHEDULER_TASK = "OpenAdminOS Scheduler";
 
+if (process.platform === "darwin" && isBackgroundSchedulerLaunch) {
+  // Apply before `whenReady()` so a LaunchAgent scheduler wake does not
+  // briefly flash OpenAdminOS in the Dock while the hidden process starts.
+  app.setActivationPolicy("accessory");
+}
+
 let mainWindow: BrowserWindow | null = null;
 let store: AppStateStore;
 const activeNotifications = new Set<Notification>();
@@ -77,6 +83,13 @@ const activeNotifications = new Set<Notification>();
 // doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
 // this — the user explicitly asked for a fresh fetch.
 let lastBackgroundRefreshAt = 0;
+
+function showDockForInteractiveSession(): void {
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+  }
+  if (app.dock) app.dock.show();
+}
 
 function schedulerProgramArguments(): string[] {
   if (app.isPackaged) {
@@ -901,12 +914,12 @@ if (!gotLock) {
     }
 
     if (!mainWindow || mainWindow.isDestroyed()) {
-      if (app.dock) app.dock.show();
+      showDockForInteractiveSession();
       void createWindow({ show: true });
       return;
     }
 
-    if (app.dock) app.dock.show();
+    showDockForInteractiveSession();
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
     }
@@ -1006,10 +1019,10 @@ if (!gotLock) {
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        if (app.dock) app.dock.show();
+        showDockForInteractiveSession();
         void createWindow({ show: true });
       } else if (mainWindow && !mainWindow.isDestroyed()) {
-        if (app.dock) app.dock.show();
+        showDockForInteractiveSession();
         mainWindow.show();
         mainWindow.focus();
       }
