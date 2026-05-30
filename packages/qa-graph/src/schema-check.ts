@@ -28,6 +28,8 @@ export interface ManifestSchemaReport {
 export function runManifestSchemaChecks(): ManifestSchemaReport[] {
   const schema = loadSchema();
   const ajv = new Ajv2020({ allErrors: true, strict: false });
+  ajv.addFormat("date-time", true);
+  ajv.addFormat("uri", true);
   const validate = ajv.compile(schema);
 
   const reports: ManifestSchemaReport[] = [];

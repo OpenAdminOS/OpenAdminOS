@@ -1,0 +1,33 @@
+# OpenAdminOS code owners
+#
+# Branch protection should require review from Code Owners on `main`.
+# Use a real user today so GitHub can enforce reviews immediately.
+# Replace with @OpenAdminOS/maintainers when that org team exists.
+
+# Repository policy and release automation
+/.github/CODEOWNERS @ugurkocde
+/.github/workflows/** @ugurkocde
+
+# Public registry submissions and shipped agents
+/agents/** @ugurkocde
+/stats/** @ugurkocde
+
+# Agent manifest schema and registry QA gates
+/schemas/** @ugurkocde
+/packages/qa-graph/** @ugurkocde
+/scripts/generate-registry-index.mjs @ugurkocde
+
+# Runtime and SDK surfaces that define agent trust boundaries
+/packages/agent-sdk/** @ugurkocde
+/packages/runtime/src/agent-template.ts @ugurkocde
+/packages/runtime/src/index.ts @ugurkocde
+
+# Desktop registry/install/update trust boundary
+/apps/desktop/electron/registry-client.ts @ugurkocde
+/apps/desktop/electron/state.ts @ugurkocde
+/apps/desktop/electron/main.ts @ugurkocde
+/apps/desktop/electron/preload.mts @ugurkocde
+
+# Public community-submission intake
+/web/src/app/api/agent-submissions/** @ugurkocde
+/web/src/lib/stats/** @ugurkocde

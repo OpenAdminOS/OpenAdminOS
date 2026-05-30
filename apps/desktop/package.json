@@ -1,7 +1,7 @@
 {
   "name": "@openadminos/desktop",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -12,11 +12,12 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "dist": "npm run build && electron-builder",
     "preview": "vite preview",
+    "test": "node --import tsx --test \"electron/**/*.test.ts\"",
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
-    "@openadminos/agent-sdk": "0.2.0",
-    "@openadminos/runtime": "0.2.0",
+    "@openadminos/agent-sdk": "0.2.1",
+    "@openadminos/runtime": "0.2.1",
     "electron-updater": "^6.6.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

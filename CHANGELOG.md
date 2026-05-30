@@ -4,15 +4,38 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-29
+
 ### Added
 
+- v0.2.1 candidate backlog covering Build your own Agent reliability, community sharing through GitHub PRs, and registry trust hardening.
+- Build your own Agent now has guided prompt context fields, an LLM repair pass for invalid YAML, editable manifest validation, and a capability review before Save & install.
+- Build your own Agent drafting now knows about schema v2 patterns, avoids reserved slugs, defaults new user-authored agents to `0.1.0`, validates connector declarations, and suggests alternate slugs on collision.
+- Build your own Agent now supports local preflight before save, in-place editing for user-authored agents, upstream-ready local folder export, version editing, and builder-focused tests.
+- User-authored agents can now start a guided Share with community flow with metadata collection, local QA gate, generated submission package, builder success entry point, submitted-review state, and public GitHub issue creation through the rate-limited web API.
+- Registry updates now record installed-agent provenance and require an explicit trust review before applying updates that add Graph scopes, change write actions, add connector egress, or raise `minAppVersion`.
+- Registry QA now checks duplicate slugs, semver, README presence, index coverage, and content safety for secrets, tenant identifiers, personal data, and unsupported guarantee language.
+- Public agents now declare `minAppVersion`, and Agent Hub/Agent Detail show "Update OpenAdminOS" instead of allowing install, run, or update flows for agents that require a newer app.
+- CODEOWNERS now requests maintainer review for public agents, registry QA/schema/generation, SDK/runtime trust boundaries, desktop registry/update code, workflows, and community submission intake.
+
 ### Changed
+
+- v0.2.1 community sharing scope is public-only: private registry forks and internal/private share flows are deferred.
 
 ### Removed
 
 ### Fixed
 
+- Graph QA no longer emits warnings for bundled valid Graph endpoints, select-property checks, curated sample backing, or AJV `date-time` / `uri` schema formats.
+- Build your own Agent flow now has clearer guided options, a working version editor, an edit-cancel path that closes cleanly, a less duplicated review surface, honest preflight warning copy, Settings recovery for unavailable providers, and Open agent as the primary post-save action.
+- Build your own Agent now rejects path-like or otherwise invalid local agent slugs before writing to the user-agents directory, and write-agent community submission copy now describes typed-confirmation write actions.
+- Corrupt or undecryptable MSAL token cache files are now cleared so scheduled runs ask the admin to reconnect the tenant instead of showing Electron's raw safeStorage ciphertext error.
+- macOS background scheduler launches now use accessory activation before startup so OpenAdminOS does not briefly flash in the Dock for scheduled runs.
+
 ### Security
+
+- Registry updates now perform trust-boundary review before writing the manifest override, so an unconfirmed update cannot shadow the installed agent on disk.
+- Community submission intake now parses and validates submitted manifests server-side, rebuilds the GitHub issue body on the server, updates duplicate open submissions with the latest manifest digest, and no longer trusts the desktop-provided QA body as authority.
 
 ## [0.2.0] - 2026-05-28
 

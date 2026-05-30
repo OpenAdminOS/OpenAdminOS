@@ -111,7 +111,7 @@ export class MsgraphClient {
       "--resource",
       name,
       "--limit",
-      "10",
+      "50",
     ]);
     return envelope.results?.find((entry) => entry.name === name);
   }

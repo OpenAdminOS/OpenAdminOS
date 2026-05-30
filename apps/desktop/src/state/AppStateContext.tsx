@@ -12,6 +12,11 @@ import {
   deriveTrustState,
   providerCatalog,
   type AgentDraft,
+  type AgentCommunitySubmissionMetadata,
+  type AgentCommunitySubmissionReview,
+  type AgentCommunitySubmissionResult,
+  type AgentDraftPreflightResult,
+  type AgentUpdateReview,
   type AgentSchedule,
   type AgentTeamsDelivery,
   type AppState,
@@ -33,7 +38,11 @@ interface AppStateContextValue {
   refreshRegistry: () => Promise<void>;
   installAgent: (agentId: string) => Promise<void>;
   uninstallAgent: (slug: string) => Promise<void>;
-  updateAgent: (slug: string) => Promise<void>;
+  getAgentUpdateReview: (slug: string) => Promise<AgentUpdateReview>;
+  updateAgent: (
+    slug: string,
+    options?: { confirmTrustChanges?: boolean },
+  ) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
   setRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
@@ -58,7 +67,24 @@ interface AppStateContextValue {
     delivery: AgentTeamsDelivery | null,
   ) => Promise<void>;
   draftAgentManifest: (prompt: string) => Promise<AgentDraft>;
+  validateAgentDraft: (yamlSource: string, allowedSlug?: string) => Promise<AgentDraft>;
+  preflightAgentDraft: (
+    yamlSource: string,
+    allowedSlug?: string,
+  ) => Promise<AgentDraftPreflightResult>;
   saveAgentDraft: (yamlSource: string) => Promise<void>;
+  updateUserAgentDraft: (slug: string, yamlSource: string) => Promise<void>;
+  exportAgentDraftBundle: (yamlSource: string) => Promise<string | undefined>;
+  prepareAgentCommunitySubmission: (
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ) => Promise<AgentCommunitySubmissionReview>;
+  submitAgentCommunitySubmission: (
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ) => Promise<AgentCommunitySubmissionResult>;
 }
 
 interface AppStateProviderProps {
@@ -73,6 +99,7 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
 
   return {
     activeProviderId,
+    appVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
     providers,
     registryAgents: [],
     installedAgents: [],
@@ -196,7 +223,20 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
-  const updateAgent = useCallback(async (slug: string) => {
+  const getAgentUpdateReview = useCallback(async (slug: string) => {
+    const api = getOpenAdminOSApi();
+
+    if (!api?.getAgentUpdateReview) {
+      throw new Error("Agent update review is unavailable in browser development.");
+    }
+
+    return api.getAgentUpdateReview(slug);
+  }, []);
+
+  const updateAgent = useCallback(async (
+    slug: string,
+    options?: { confirmTrustChanges?: boolean },
+  ) => {
     const api = getOpenAdminOSApi();
 
     if (!api) {
@@ -211,7 +251,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     setError(null);
 
     try {
-      const nextState = await api.updateAgent(slug);
+      const nextState = await api.updateAgent(slug, options);
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
     } catch (caughtError) {
@@ -494,6 +534,44 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const validateAgentDraft = useCallback(async (yamlSource: string, allowedSlug?: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      const fallbackError = new Error(
+        "Validating an agent draft is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+    setError(null);
+    try {
+      return await api.validateAgentDraft(yamlSource, allowedSlug);
+    } catch (caughtError) {
+      const validationError = toError(caughtError);
+      setError(validationError);
+      throw validationError;
+    }
+  }, []);
+
+  const preflightAgentDraft = useCallback(async (yamlSource: string, allowedSlug?: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      const fallbackError = new Error(
+        "Testing an agent draft is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+    setError(null);
+    try {
+      return await api.preflightAgentDraft(yamlSource, allowedSlug);
+    } catch (caughtError) {
+      const preflightError = toError(caughtError);
+      setError(preflightError);
+      throw preflightError;
+    }
+  }, []);
+
   const saveAgentDraft = useCallback(async (yamlSource: string) => {
     const api = getOpenAdminOSApi();
     if (!api) {
@@ -514,6 +592,111 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       throw saveError;
     }
   }, []);
+
+  const updateUserAgentDraft = useCallback(async (slug: string, yamlSource: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      const fallbackError = new Error(
+        "Updating an agent draft is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+    setError(null);
+    try {
+      const nextState = await api.updateUserAgentDraft(slug, yamlSource);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const updateError = toError(caughtError);
+      setError(updateError);
+      throw updateError;
+    }
+  }, []);
+
+  const exportAgentDraftBundle = useCallback(async (yamlSource: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      const fallbackError = new Error(
+        "Exporting an agent bundle is unavailable in browser development.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+    setError(null);
+    try {
+      const result = await api.exportAgentDraftBundle(yamlSource);
+      return result.canceled ? undefined : result.directoryPath;
+    } catch (caughtError) {
+      const exportError = toError(caughtError);
+      setError(exportError);
+      throw exportError;
+    }
+  }, []);
+
+  const prepareAgentCommunitySubmission = useCallback(
+    async (
+      yamlSource: string,
+      metadata: AgentCommunitySubmissionMetadata,
+      allowedSlug?: string,
+    ) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Preparing a community submission is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        return await api.prepareAgentCommunitySubmission(
+          yamlSource,
+          metadata,
+          allowedSlug,
+        );
+      } catch (caughtError) {
+        const prepareError = toError(caughtError);
+        setError(prepareError);
+        throw prepareError;
+      }
+    },
+    [],
+  );
+
+  const submitAgentCommunitySubmission = useCallback(
+    async (
+      yamlSource: string,
+      metadata: AgentCommunitySubmissionMetadata,
+      allowedSlug?: string,
+    ) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Submitting a community agent is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const result = await api.submitAgentCommunitySubmission(
+          yamlSource,
+          metadata,
+          allowedSlug,
+        );
+        const nextState = await api.getAppState();
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+        return result;
+      } catch (caughtError) {
+        const submitError = toError(caughtError);
+        setError(submitError);
+        throw submitError;
+      }
+    },
+    [],
+  );
 
   const cancelRun = useCallback(async (runId: string) => {
     const api = getOpenAdminOSApi();
@@ -610,6 +793,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       refreshRegistry,
       installAgent,
       uninstallAgent,
+      getAgentUpdateReview,
       updateAgent,
       setActiveModel,
       setActiveProvider,
@@ -626,7 +810,13 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgentSchedule,
       updateAgentTeamsDelivery,
       draftAgentManifest,
+      validateAgentDraft,
+      preflightAgentDraft,
       saveAgentDraft,
+      updateUserAgentDraft,
+      exportAgentDraftBundle,
+      prepareAgentCommunitySubmission,
+      submitAgentCommunitySubmission,
     }),
     [
       cancelRun,
@@ -635,6 +825,8 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       disconnectTenant,
       draftAgentManifest,
       error,
+      exportAgentDraftBundle,
+      getAgentUpdateReview,
       getRequestedScopes,
       installAgent,
       loading,
@@ -642,6 +834,8 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       refreshRegistry,
       registryAgents,
       rejectRun,
+      preflightAgentDraft,
+      prepareAgentCommunitySubmission,
       saveAgentDraft,
       setActiveModel,
       setActiveProvider,
@@ -649,11 +843,14 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveTenant,
       startRun,
       state,
+      submitAgentCommunitySubmission,
       uninstallAgent,
       updateAgent,
       updateAgentSchedule,
       updateAgentSettings,
       updateAgentTeamsDelivery,
+      updateUserAgentDraft,
+      validateAgentDraft,
     ],
   );
 

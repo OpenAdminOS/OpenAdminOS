@@ -1408,6 +1408,7 @@ function commonMetadata(manifest: AgentTemplate) {
     scopes: collectScopes(manifest),
     author: descriptor.author,
     version: descriptor.version,
+    minAppVersion: descriptor.minAppVersion,
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
   };
 }
@@ -1494,6 +1495,7 @@ export function agentTemplateToRegistrySummary(
   scopes: string[];
   author: AgentAuthor;
   version: string;
+  minAppVersion?: string;
   preferredModel?: string;
   graphOperations: GraphOperation[];
   connectors?: AgentConnectorRequirement[];
@@ -1512,6 +1514,7 @@ export function agentTemplateToRegistrySummary(
     scopes: collectScopes(manifest),
     author: descriptor.author,
     version: descriptor.version,
+    minAppVersion: descriptor.minAppVersion,
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
     graphOperations: collectGraphOperations(manifest),
     ...(descriptor.connectors && descriptor.connectors.length > 0

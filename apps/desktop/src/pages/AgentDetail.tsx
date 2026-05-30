@@ -13,18 +13,23 @@ import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
 import { RunWithMenu } from "../components/RunWithMenu";
 import { ShareMenu } from "../components/ShareMenu";
 import { useToast } from "../components/Toast";
+import { NewAgentModal } from "../components/NewAgentModal";
+import { CommunityShareModal } from "../components/CommunityShareModal";
 import {
   IconArrowLeft,
   IconBadgeCheck,
   IconBolt,
   IconClock,
   IconConnectors,
+  IconExternal,
+  IconShare,
   IconShield,
 } from "../components/icons";
 import { useAppState } from "../state";
 import type {
   AgentManifestPreview,
   AgentTeamsDelivery,
+  AgentUpdateReview,
   ConnectorChannelRef,
   ConnectorSummary,
   ConnectorTeamRef,
@@ -41,9 +46,11 @@ export default function AgentDetail() {
     startRun,
     updateAgentSettings,
     uninstallAgent,
+    getAgentUpdateReview,
     updateAgent,
     updateAgentSchedule,
     updateAgentTeamsDelivery,
+    exportAgentDraftBundle,
   } = useAppState();
   const toast = useToast();
   const agent = state.installedAgents.find((a) => a.slug === slug);
@@ -52,6 +59,9 @@ export default function AgentDetail() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(true);
   const [configureOpen, setConfigureOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [communityShareOpen, setCommunityShareOpen] = useState(false);
+  const [updateReview, setUpdateReview] = useState<AgentUpdateReview | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
@@ -69,6 +79,38 @@ export default function AgentDetail() {
   const queueRunPreflight = (choice?: { providerId?: ProviderId; model?: string }) => {
     setRunError(null);
     setPendingRunChoice(choice ?? {});
+  };
+
+  const reviewAndApplyUpdate = async () => {
+    if (!agent) return;
+    setUpdating(true);
+    try {
+      const review = await getAgentUpdateReview(agent.slug);
+      if (review.requiresConfirmation) {
+        setUpdateReview(review);
+        return;
+      }
+      await updateAgent(agent.slug);
+      toast.success(`${agent.name} updated.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const applyReviewedUpdate = async () => {
+    if (!agent) return;
+    setUpdating(true);
+    try {
+      await updateAgent(agent.slug, { confirmTrustChanges: true });
+      setUpdateReview(null);
+      toast.success(`${agent.name} updated.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const handleStartRun = async (choice?: { providerId?: ProviderId; model?: string }) => {
@@ -117,7 +159,7 @@ export default function AgentDetail() {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, agent?.version]);
 
   useEffect(() => {
     window.openAdminOS
@@ -171,6 +213,20 @@ export default function AgentDetail() {
                 <Pill tone="accent">YAML template</Pill>
               </>
             )}
+            {agent.communitySubmission && (
+              <>
+                <span className="opacity-50">·</span>
+                <Pill tone="success">Submitted for review</Pill>
+              </>
+            )}
+            {agent.compatibility?.supported === false && (
+              <>
+                <span className="opacity-50">·</span>
+                <Pill tone="warning">
+                  Needs OpenAdminOS {agent.compatibility.minAppVersion}
+                </Pill>
+              </>
+            )}
           </span>
         }
         actions={
@@ -188,6 +244,50 @@ export default function AgentDetail() {
               }}
               openInBrowserHint={`github.com/OpenAdminOS/OpenAdminOS · agents/${agent.slug}`}
             />
+            {preview?.isUserAuthored && (
+              <>
+                {agent.communitySubmission && (
+                  <Button
+                    variant="secondary"
+                    leadingIcon={<IconExternal size={12} />}
+                    onClick={() => {
+                      void window.openAdminOS?.openExternal(
+                        agent.communitySubmission!.issueUrl,
+                      );
+                    }}
+                  >
+                    Open issue
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  leadingIcon={<IconShare size={12} />}
+                  onClick={() => setCommunityShareOpen(true)}
+                >
+                  Share with community
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setEditOpen(true)}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    void exportAgentDraftBundle(preview.sourceText)
+                      .then((path) => {
+                        if (path) toast.success(`Exported to ${path}.`);
+                      })
+                      .catch((error) => {
+                        toast.error(error instanceof Error ? error.message : String(error));
+                      });
+                  }}
+                >
+                  Export bundle
+                </Button>
+              </>
+            )}
             <Button
               variant="secondary"
               leadingIcon={<IconClock size={12} />}
@@ -244,6 +344,7 @@ export default function AgentDetail() {
               providers={state.providers}
               activeProviderId={state.activeProviderId}
               activeModelByProviderId={state.activeModelByProviderId}
+              disabled={agent.compatibility?.supported === false}
               onRun={(choice) => {
                 queueRunPreflight(choice);
               }}
@@ -252,36 +353,45 @@ export default function AgentDetail() {
         }
       />
       <PageBody>
+        {agent.compatibility?.supported === false && (
+          <div className="mb-4 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/30">
+            <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+              Update OpenAdminOS before running this agent.
+            </div>
+            <div className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+              {agent.name} requires OpenAdminOS {agent.compatibility.minAppVersion} or newer.
+              You are running {agent.compatibility.appVersion}.
+            </div>
+          </div>
+        )}
         {agent.updateAvailable && (
-          <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-accent-soft)] px-4 py-3 ring-1 ring-[var(--color-accent)]/30">
+          <div className={`mb-4 flex items-start justify-between gap-3 rounded-lg px-4 py-3 ring-1 ${
+            updateRequiresNewerApp(agent)
+              ? "bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/30"
+              : "bg-[var(--color-accent-soft)] ring-[var(--color-accent)]/30"
+          }`}>
             <div className="text-[12.5px] leading-relaxed text-[var(--color-text)]">
-              <span className="font-medium">Update available.</span>{" "}
+              <span className="font-medium">
+                {updateRequiresNewerApp(agent) ? "App update required." : "Update available."}
+              </span>{" "}
               <span className="font-mono">v{agent.version}</span>
               <span className="opacity-50"> → </span>
               <span className="font-mono">v{agent.updateAvailable.version}</span>
               <span className="opacity-70">
                 {" "}
-                — fetches the new manifest from GitHub and replaces this agent's local copy. Your settings and schedule are preserved.
+                {updateRequiresNewerApp(agent)
+                  ? `— this agent update requires OpenAdminOS ${agent.updateAvailable.minAppVersion}. Update the app before applying it.`
+                  : "— fetches the new manifest from GitHub and replaces this agent's local copy. Your settings and schedule are preserved."}
               </span>
             </div>
             <Button
               variant="secondary"
-              disabled={updating}
+              disabled={updating || updateRequiresNewerApp(agent)}
               onClick={() => {
-                setUpdating(true);
-                void updateAgent(agent.slug)
-                  .then(() => {
-                    toast.success(`${agent.name} updated.`);
-                  })
-                  .catch((error) => {
-                    toast.error(
-                      error instanceof Error ? error.message : String(error),
-                    );
-                  })
-                  .finally(() => setUpdating(false));
+                void reviewAndApplyUpdate();
               }}
             >
-              {updating ? "Updating…" : "Update"}
+              {updateRequiresNewerApp(agent) ? "Update OpenAdminOS" : updating ? "Checking…" : "Review update"}
             </Button>
           </div>
         )}
@@ -458,6 +568,110 @@ export default function AgentDetail() {
           onSave={(values) => updateAgentSettings(agent.slug, values)}
         />
       )}
+      {preview?.isUserAuthored && (
+        <NewAgentModal
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+          initialYamlSource={preview.sourceText}
+          editingSlug={agent.slug}
+        />
+      )}
+      {preview?.isUserAuthored && (
+        <CommunityShareModal
+          open={communityShareOpen}
+          onClose={() => setCommunityShareOpen(false)}
+          preview={preview}
+          slug={agent.slug}
+        />
+      )}
+      <Modal
+        open={updateReview !== null}
+        onClose={() => {
+          if (!updating) setUpdateReview(null);
+        }}
+        size="lg"
+      >
+        <ModalHeader
+          title="Review trust changes"
+          subtitle={
+            updateReview
+              ? `${agent.name} v${updateReview.fromVersion} -> v${updateReview.toVersion}`
+              : undefined
+          }
+          onClose={() => setUpdateReview(null)}
+          badge={<Pill tone="warning">Registry update</Pill>}
+        />
+        {updateReview && (
+          <div className="space-y-3 overflow-y-auto p-6">
+            <div className="rounded-md bg-[var(--color-bg-subtle)] p-3 text-[12px] leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
+              Manifest SHA-256{" "}
+              <span className="break-all font-mono text-[var(--color-text)]">
+                {updateReview.manifestSha256}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {updateReview.changes.map((change) => (
+                <div
+                  key={change.id}
+                  className="rounded-md bg-[var(--color-bg-subtle)] p-3 ring-1 ring-[var(--color-border)]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium text-[var(--color-text)]">
+                      {change.label}
+                    </div>
+                    <Pill
+                      tone={
+                        change.severity === "danger"
+                          ? "danger"
+                          : change.severity === "warn"
+                            ? "warning"
+                            : "default"
+                      }
+                    >
+                      {change.severity}
+                    </Pill>
+                  </div>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-muted)]">
+                    {change.detail}
+                  </p>
+                  {(change.before || change.after) && (
+                    <div className="mt-2 grid gap-2 text-[11.5px] sm:grid-cols-2">
+                      <div>
+                        <div className="mb-1 text-[var(--color-text-muted)]">
+                          Before
+                        </div>
+                        <div className="break-words font-mono text-[var(--color-text)]">
+                          {change.before ?? "none"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-1 text-[var(--color-text-muted)]">
+                          After
+                        </div>
+                        <div className="break-words font-mono text-[var(--color-text)]">
+                          {change.after ?? "none"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-[var(--color-border-soft)] pt-4">
+              <Button
+                variant="ghost"
+                disabled={updating}
+                onClick={() => setUpdateReview(null)}
+              >
+                Cancel
+              </Button>
+              <Button disabled={updating} onClick={() => void applyReviewedUpdate()}>
+                {updating ? "Updating..." : "Apply update"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
       {agent && (
         <RunPreflightModal
           open={pendingRunChoice !== null}
@@ -1104,4 +1318,24 @@ function formatDuration(run: RunRecord) {
     new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime();
   if (Number.isNaN(durationMs) || durationMs < 0) return "-";
   return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function updateRequiresNewerApp(agent: {
+  compatibility?: { appVersion: string };
+  updateAvailable?: { minAppVersion?: string };
+}) {
+  const min = agent.updateAvailable?.minAppVersion;
+  const current = agent.compatibility?.appVersion;
+  if (!min || !current) return false;
+  return compareSemver(current, min) < 0;
+}
+
+function compareSemver(left: string, right: string): number {
+  const l = left.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const r = right.split(".").map((part) => Number.parseInt(part, 10) || 0);
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (l[i] ?? 0) - (r[i] ?? 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
 }

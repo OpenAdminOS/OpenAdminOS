@@ -1,6 +1,10 @@
-import { app } from "electron";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import electron from "electron";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const electronApp = electron.app;
+const currentDir = dirname(fileURLToPath(import.meta.url));
 
 export interface EndpointSummary {
   method: string;
@@ -57,11 +61,13 @@ let cached: CatalogState | null = null;
  * from the source tree.
  */
 function indexDir(): string {
-  if (app.isPackaged) {
+  if (electronApp?.isPackaged) {
     return join(process.resourcesPath, "graph-index");
   }
+  const sourceAssets = join(currentDir, "assets", "graph-index");
+  if (existsSync(sourceAssets)) return sourceAssets;
   // dist-electron/electron/graph-catalog.js → ../../electron/assets/graph-index
-  return join(__dirname, "..", "..", "electron", "assets", "graph-index");
+  return join(currentDir, "..", "..", "electron", "assets", "graph-index");
 }
 
 /**

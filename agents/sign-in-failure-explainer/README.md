@@ -25,11 +25,11 @@ clusters.
   "total": 187,
   "byError": { "50126": 92, "53003": 41, "50053": 28, ... },
   "byApp": { "Office 365": 88, "Teams": 41, ... },
-  "byUser": { "user1@tenant.com": 12, ... },
+  "byUser": { "<user-principal-name>": 12, ... },
   "byClientApp": { "Browser": 120, "Mobile Apps and Desktop clients": 41 },
   "byConditionalAccessStatus": { "failure": 77, "notApplied": 32 },
   "byRiskDuringSignIn": { "none": 150, "medium": 8 },
-  "recentSample": [{ "userPrincipalName": "user1@tenant.com", "status": { "errorCode": 53003 } }],
+  "recentSample": [{ "userPrincipalName": "<user-principal-name>", "status": { "errorCode": 53003 } }],
   "llmModel": "llama3.1:8b"
 }
 ```

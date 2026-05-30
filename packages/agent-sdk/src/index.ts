@@ -110,7 +110,11 @@ export interface AgentSummary extends AgentContract {
   installedAt: string;
   registryId?: string;
   registryPath?: string;
+  minAppVersion?: string;
   lastRunAt?: string;
+  communitySubmission?: AgentCommunitySubmissionState;
+  provenance?: AgentManifestProvenance;
+  compatibility?: AgentCompatibility;
   /**
    * Per-install overrides for the agent's `definition.settings[]` block.
    * Values are validated against the manifest's declared types at write
@@ -142,11 +146,60 @@ export interface AgentSummary extends AgentContract {
   updateAvailable?: AgentUpdateInfo;
 }
 
+export interface AgentCommunitySubmissionState {
+  status: "submitted";
+  issueUrl: string;
+  issueNumber?: number;
+  submittedAt: string;
+}
+
 export interface AgentUpdateInfo {
   /** Semver string from `agents/index.json` at the registry root. */
   version: string;
   /** Raw GitHub URL of the new manifest.yaml. */
   manifestUrl: string;
+  /** Minimum OpenAdminOS version required by the registry entry. */
+  minAppVersion?: string;
+}
+
+export interface AgentCompatibility {
+  supported: boolean;
+  appVersion: string;
+  minAppVersion: string;
+  reason?: string;
+}
+
+export interface AgentManifestProvenance {
+  source: "registry" | "bundled" | "user";
+  manifestUrl?: string;
+  registryPath?: string;
+  manifestSha256?: string;
+  installedVersion: string;
+  installedAt: string;
+  updatedAt?: string;
+  registryRef?: string;
+  minAppVersion?: string;
+}
+
+export type AgentUpdateTrustSeverity = "info" | "warn" | "danger";
+
+export interface AgentUpdateTrustChange {
+  id: string;
+  label: string;
+  severity: AgentUpdateTrustSeverity;
+  detail: string;
+  before?: string;
+  after?: string;
+}
+
+export interface AgentUpdateReview {
+  slug: string;
+  fromVersion: string;
+  toVersion: string;
+  manifestUrl: string;
+  manifestSha256: string;
+  requiresConfirmation: boolean;
+  changes: AgentUpdateTrustChange[];
 }
 
 export interface AgentSchedule {
@@ -185,6 +238,8 @@ export interface RegistryAgentSummary extends AgentContract {
   registryId: string;
   registryPath?: string;
   installs?: number;
+  minAppVersion?: string;
+  compatibility?: AgentCompatibility;
   /**
    * Raw GitHub URL to this agent's `manifest.yaml`. Populated for entries
    * sourced from the remote registry index; absent for filesystem-scanned
@@ -368,6 +423,7 @@ export interface TrustState {
 }
 
 export interface AppState {
+  appVersion: string;
   activeProviderId: ProviderId;
   /**
    * User-picked model override per provider. Renderer-visible mirror of
@@ -535,7 +591,11 @@ export interface OpenAdminOSApi {
    * Throws on network or schema failures, leaving the installed manifest
    * in place. Surfaced in the UI via `AgentSummary.updateAvailable`.
    */
-  updateAgent(slug: string): Promise<AppState>;
+  getAgentUpdateReview(slug: string): Promise<AgentUpdateReview>;
+  updateAgent(
+    slug: string,
+    options?: { confirmTrustChanges?: boolean },
+  ): Promise<AppState>;
   setActiveProvider(id: ProviderId): Promise<AppState>;
   /**
    * Pin the active model for the given provider. Pass `null` to revert
@@ -606,12 +666,50 @@ export interface OpenAdminOSApi {
    */
   draftAgentManifest(prompt: string): Promise<AgentDraft>;
   /**
+   * Validate edited `manifest.yaml` without saving it. Used by the
+   * Build your own Agent review pane so users can correct YAML and
+   * re-run the same schema / Graph catalogue checks the host enforces
+   * during save.
+   */
+  validateAgentDraft(yamlSource: string, allowedSlug?: string): Promise<AgentDraft>;
+  /**
+   * Run host-side checks against an unsaved draft without executing
+   * Graph queries or applying writes.
+   */
+  preflightAgentDraft(
+    yamlSource: string,
+    allowedSlug?: string,
+  ): Promise<AgentDraftPreflightResult>;
+  /**
    * Persist a user-authored agent (typically the output of
    * `draftAgentManifest` after the user has reviewed it) to the
    * writable user-agents directory. The agent appears in the registry
    * immediately, ready to install.
    */
   saveAgentDraft(yamlSource: string): Promise<AppState>;
+  /** Replace the manifest for an existing user-authored agent. */
+  updateUserAgentDraft(slug: string, yamlSource: string): Promise<AppState>;
+  /** Export an upstream-ready local folder for a draft. */
+  exportAgentDraftBundle(yamlSource: string): Promise<ExportAgentBundleResult>;
+  /**
+   * Build the public community-submission payload and run blocking
+   * checks. This does not create a GitHub issue.
+   */
+  prepareAgentCommunitySubmission(
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ): Promise<AgentCommunitySubmissionReview>;
+  /**
+   * Submit a validated user-authored agent as a public GitHub issue.
+   * The desktop app never receives GitHub credentials; the configured
+   * OpenAdminOS web endpoint performs server-side issue creation.
+   */
+  submitAgentCommunitySubmission(
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ): Promise<AgentCommunitySubmissionResult>;
   /**
    * Open an http/https URL in the user's default browser. Other
    * schemes are rejected by the host. Used for "open docs" / "view
@@ -670,6 +768,63 @@ export interface SaveTextFileResult {
   filePath?: string;
 }
 
+export interface AgentDraftPreflightCheck {
+  id: string;
+  label: string;
+  status: "pass" | "warn" | "fail";
+  detail: string;
+}
+
+export interface AgentDraftPreflightResult {
+  ok: boolean;
+  checks: AgentDraftPreflightCheck[];
+}
+
+export type AgentCommunitySubmissionCheckStatus = "pass" | "fail" | "warn";
+
+export interface AgentCommunitySubmissionMetadata {
+  name: string;
+  description: string;
+  category: AgentCategory;
+  maintainerName: string;
+  supportUrl: string;
+  licenseConfirmed: boolean;
+  privacyNotes: string;
+  changelog: string;
+}
+
+export interface AgentCommunitySubmissionCheck {
+  id: string;
+  label: string;
+  status: AgentCommunitySubmissionCheckStatus;
+  detail: string;
+  fix?: string;
+}
+
+export interface AgentCommunitySubmissionPackage {
+  manifestYaml: string;
+  readmeMarkdown: string;
+  metadataJson: string;
+}
+
+export interface AgentCommunitySubmissionReview {
+  ok: boolean;
+  checks: AgentCommunitySubmissionCheck[];
+  issueTitle: string;
+  issueBody: string;
+  package: AgentCommunitySubmissionPackage;
+}
+
+export interface AgentCommunitySubmissionResult {
+  issueUrl: string;
+  issueNumber?: number;
+}
+
+export interface ExportAgentBundleResult {
+  canceled: boolean;
+  directoryPath?: string;
+}
+
 /**
  * Output of a draft-agent generation pass. The renderer feeds this
  * straight into a Manifest Preview (`kind: "agent-template"`) so the
@@ -697,6 +852,7 @@ export interface AgentDraft {
 export interface AgentManifestPreview {
   kind: "agent-template";
   registryPath?: string;
+  isUserAuthored?: boolean;
   manifest: AgentTemplate;
   sourceText: string;
 }
@@ -929,6 +1085,12 @@ export interface AgentTemplate {
     name: string;
     description: string;
     version: string;
+    /**
+     * Minimum OpenAdminOS app version required to install/run this
+     * manifest. Public registry agents must declare it so older apps
+     * can show an upgrade prompt instead of attempting unsupported DSL.
+     */
+    minAppVersion?: string;
     author: AgentAuthor;
     category: AgentCategory;
     /**
