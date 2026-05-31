@@ -50,6 +50,7 @@ openadminos/
 ├── docs/
 │   ├── SPEC.md               # This file
 │   ├── ARCHITECTURE.md       # Deeper dive (write as needed)
+│   ├── gitbook/              # Public GitBook docs source
 │   └── mockups/              # HTML design reference
 ├── tasks/
 │   ├── todo.md               # Active work plan with acceptance criteria
@@ -76,6 +77,14 @@ The cost we accept: ~80–150MB installer size (vs ~5–10MB Tauri), ~150–250M
 ### Reference architecture: t3code
 
 Study https://github.com/pingdotgg/t3code before structuring the monorepo. The shape we want is the same: **one TypeScript monorepo that ships a polished Electron desktop app**, with a clean provider-adapter pattern and shared schema package. Don't copy `apps/desktop` wholesale (Effect adoption is a deeper commitment than we need yet), but the directory shape, contracts package, and adapter abstraction all transfer.
+
+### Public documentation model
+
+Public documentation is GitBook-synced from `docs/gitbook`, with the repository root `.gitbook.yaml` setting `root: ./docs/gitbook`. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the GitBook root.
+
+Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/index.json` and regenerates GitBook pages under `docs/gitbook/generated` from `agents/*/manifest.yaml` plus the registry index. Generated pages include the agent catalog, per-agent pages, the Microsoft Graph scope matrix, the write safety matrix, and the LLM provider matrix. Generated pages should not be edited manually; update the manifest or generator instead.
+
+The docs GitHub Action checks generated docs on pull requests and, after commits to `main`, opens a documentation update PR if generated output changed. It does not silently publish LLM-authored documentation to `main`.
 
 ### LLM provider abstraction
 

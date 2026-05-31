@@ -8,6 +8,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- GitBook documentation source under `docs/gitbook`, deterministic generated agent/reference docs, and a GitHub Action that opens docs update PRs after relevant commits to `main`.
 - v0.2.1 candidate backlog covering Build your own Agent reliability, community sharing through GitHub PRs, and registry trust hardening.
 - Build your own Agent now has guided prompt context fields, an LLM repair pass for invalid YAML, editable manifest validation, and a capability review before Save & install.
 - Build your own Agent drafting now knows about schema v2 patterns, avoids reserved slugs, defaults new user-authored agents to `0.1.0`, validates connector declarations, and suggests alternate slugs on collision.
@@ -20,6 +21,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Public GitBook docs now hide generator implementation details, show admin-readable confirmation phrases, and correctly document nested LLM steps in agent pages.
 - v0.2.1 community sharing scope is public-only: private registry forks and internal/private share flows are deferred.
 
 ### Removed
