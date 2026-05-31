@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-30T02:00:38.754Z",
+  "updatedAt": "2026-05-31T13:00:15.563Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 8,
@@ -7,7 +7,7 @@
     },
     "offboarding-agent": {
       "installs": 5,
-      "installs7d": 4
+      "installs7d": 3
     },
     "compliance-overview": {
       "installs": 9,
@@ -26,8 +26,8 @@
       "installs7d": 4
     },
     "conditional-access-explainer": {
-      "installs": 7,
-      "installs7d": 5
+      "installs": 8,
+      "installs7d": 6
     },
     "dormant-app-registrations": {
       "installs": 5,
