@@ -8,8 +8,6 @@ description: "Prioritizes Microsoft Secure Score control profiles by category, a
 
 Prioritizes Microsoft Secure Score control profiles by category, action type, effort signals, user impact, and max-score upside.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

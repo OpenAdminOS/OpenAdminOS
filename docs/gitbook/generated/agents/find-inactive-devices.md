@@ -8,8 +8,6 @@ description: "Reviews Intune-managed device inactivity by sync age, compliance, 
 
 Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

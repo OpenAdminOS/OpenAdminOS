@@ -8,8 +8,6 @@ description: "Reviews Intune OS version distribution, compliance, ownership, enr
 
 Reviews Intune OS version distribution, compliance, ownership, enrollment, and stale inventory signals so admins can prioritize update work.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

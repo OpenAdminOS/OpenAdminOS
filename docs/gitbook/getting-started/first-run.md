@@ -12,7 +12,7 @@ On first launch, OpenAdminOS guides you through the minimum setup required befor
 3. Pick an LLM provider.
 4. Install and run a first agent.
 
-There is no synthetic tenant mode. If no tenant is connected, OpenAdminOS keeps you in onboarding and agents cannot start.
+There is no demo tenant mode. If no tenant is connected, OpenAdminOS keeps you in onboarding and agents cannot start.
 
 ## Provider Choice
 

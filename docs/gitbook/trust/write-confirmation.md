@@ -13,6 +13,6 @@ Every write operation gets a confirmation step. Destructive operations require a
 
 If a write agent produces zero actions after filters are applied, the run completes as a no-op. It is not treated as a failed confirmation.
 
-## Generated Reference
+## Reference
 
-The generated write safety matrix lists the current write-mode agents and the actions declared by their manifests.
+The write safety matrix lists the current write-mode agents and their declared actions.

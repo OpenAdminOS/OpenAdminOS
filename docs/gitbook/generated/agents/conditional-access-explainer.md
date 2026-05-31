@@ -8,8 +8,6 @@ description: "Reviews Conditional Access policies for coverage, exclusions, repo
 
 Reviews Conditional Access policies for coverage, exclusions, report-only controls, overlaps, and common Zero Trust gaps.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

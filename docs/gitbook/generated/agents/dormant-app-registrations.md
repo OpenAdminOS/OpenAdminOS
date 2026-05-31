@@ -8,8 +8,6 @@ description: "Reviews app registrations for stale experiments, risky exposure, c
 
 Reviews app registrations for stale experiments, risky exposure, credentials, and cleanup candidates with evidence-backed recommendations.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

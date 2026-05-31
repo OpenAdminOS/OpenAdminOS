@@ -8,8 +8,6 @@ description: "Summarizes Intune tenant health from compliance, OS, ownership, an
 
 Summarizes Intune tenant health from compliance, OS, ownership, and stale inventory signals for scheduled or manual review.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

@@ -8,8 +8,6 @@ description: "Reviews Intune compliance by state, operating system, ownership, e
 
 Reviews Intune compliance by state, operating system, ownership, enrollment, and stale inventory signals.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

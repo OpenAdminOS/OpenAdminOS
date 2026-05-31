@@ -8,8 +8,6 @@ description: "Classifies recent Entra risky users by risk level, state, detail, 
 
 Classifies recent Entra risky users by risk level, state, detail, and processing status with conservative next-step guidance.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |
@@ -43,6 +41,7 @@ This is a read-only agent. It does not declare write operations.
 
 | Step | Settings |
 | --- | --- |
+| Classify this risky user | temperature 0.1 · max tokens 150 |
 | Roll up triage results | temperature 0.2 · max tokens 420 |
 
 ## Settings

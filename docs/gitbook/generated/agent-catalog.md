@@ -1,14 +1,14 @@
 ---
 title: "Agent catalog"
-description: "Generated catalog of OpenAdminOS agents and dashboards."
+description: "Catalog of OpenAdminOS agents and dashboards."
 ---
 
 
 # Agent Catalog
 
-This catalog is generated from checked-in agent manifests. It is intentionally metadata-first: mode, scopes, tenant data access, and write behavior come from structured files in the repository.
+This catalog lists the current OpenAdminOS agents and dashboards. Mode, scopes, tenant data access, and write behavior are taken from each agent's reviewed metadata.
 
-Last generated from repository state: 2026-05-28 · `8b9007b`.
+Last updated: 2026-05-28 · `8b9007b`.
 
 | Agent | Mode | Tier | Category | Required Entra tier | Scopes |
 | --- | --- | --- | --- | --- | --- |

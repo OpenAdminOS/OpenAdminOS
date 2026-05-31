@@ -8,8 +8,6 @@ description: "Reviews recent directory audit entries by activity, category, resu
 
 Reviews recent directory audit entries by activity, category, result, actor, and target context to flag changes worth checking.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

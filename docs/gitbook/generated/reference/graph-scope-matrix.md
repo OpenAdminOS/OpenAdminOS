@@ -1,12 +1,12 @@
 ---
 title: "Graph scope matrix"
-description: "Generated Microsoft Graph permission matrix for OpenAdminOS agents."
+description: "Microsoft Graph permission matrix for OpenAdminOS agents."
 ---
 
 
 # Graph Scope Matrix
 
-This page is generated from agent manifests. It shows which agents declare each Microsoft Graph scope.
+This reference shows which agents require each Microsoft Graph scope.
 
 | Scope | Agents |
 | --- | --- |

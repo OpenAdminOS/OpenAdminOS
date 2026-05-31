@@ -8,8 +8,6 @@ description: "Builds a capped disable plan for enabled guest accounts with stale
 
 Builds a capped disable plan for enabled guest accounts with stale sign-in activity, external-state context, and per-guest rationale.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |
@@ -41,13 +39,15 @@ Builds a capped disable plan for enabled guest accounts with stale sign-in activ
 
 | Step | Action | Confirmation | Scopes |
 | --- | --- | --- | --- |
-| Disable each stale guest | `graph-write` | `DISABLE {{ oldest_stale.output \| size }} GUESTS` | `User.ReadWrite.All` |
+| Disable each stale guest | Graph write | `DISABLE N GUESTS` | `User.ReadWrite.All` |
 
 Write agents always pause for confirmation in OpenAdminOS. Destructive operations require the typed confirmation phrase shown by the app.
 
 ## LLM Use
 
-No LLM step is declared. This should fail agent QA because OpenAdminOS agents are expected to use the configured model.
+| Step | Settings |
+| --- | --- |
+| Explain why this guest should be disabled | temperature 0.1 · max tokens 80 |
 
 ## Settings
 

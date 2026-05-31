@@ -10,6 +10,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Public GitBook docs now hide generator implementation details, show admin-readable confirmation phrases, and correctly document nested LLM steps in agent pages.
+
 ### Removed
 
 ### Fixed

@@ -21,4 +21,4 @@ The app is local-first by default. Tenant data and prompts stay on the device wh
 
 OpenAdminOS v0.2 focuses on Intune and Entra administrators. The current agent catalog includes investigators, advisors, dashboards, and cleanup agents built on Microsoft Graph.
 
-Use the generated agent catalog when you need the authoritative list of agents, scopes, and write behavior.
+Use the agent catalog when you need the authoritative list of agents, scopes, and write behavior.

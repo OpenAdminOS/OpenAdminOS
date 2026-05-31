@@ -85,8 +85,39 @@ function frontMatter(title, description) {
   return `---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(description)}\n---\n\n`;
 }
 
+function displayDefault(value) {
+  if (value === undefined || value === null || value === "") return "None";
+  return `\`${mdEscape(value)}\``;
+}
+
+function displayConfirmation(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "Runtime confirmation required";
+  return `\`${mdEscape(text.replace(/\{\{[^}]+\}\}/g, "N").replace(/\s+/g, " "))}\``;
+}
+
+function displayAction(value) {
+  const action = String(value ?? "").trim();
+  if (action === "graph-write") return "Graph write";
+  if (!action) return "Write operation";
+  return action
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function flattenSkills(skills) {
+  const flat = [];
+  for (const skill of Array.isArray(skills) ? skills : []) {
+    flat.push(skill);
+    const nested = skill?.settings?.do ?? skill?.settings?.steps ?? skill?.settings?.pipeline;
+    flat.push(...flattenSkills(nested));
+  }
+  return flat;
+}
+
 function collectManifestDetails(manifest) {
-  const skills = Array.isArray(manifest?.skills) ? manifest.skills : [];
+  const skills = flattenSkills(manifest?.skills);
   const graphCalls = [];
   const scopes = new Set();
   const writeActions = [];
@@ -157,8 +188,6 @@ function agentPage(agent) {
     "",
     sentence(agent.description),
     "",
-    "> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.",
-    "",
     "## Classification",
     "",
     "| Field | Value |",
@@ -207,7 +236,7 @@ function agentPage(agent) {
     lines.push("| Step | Action | Confirmation | Scopes |", "| --- | --- | --- | --- |");
     for (const action of details.writeActions) {
       lines.push(
-        `| ${mdEscape(action.label ?? action.id)} | \`${mdEscape(action.kind)}\` | ${action.confirmation ? `\`${mdEscape(action.confirmation)}\`` : "Required by runtime"} | ${action.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`,
+        `| ${mdEscape(action.label ?? action.id)} | ${mdEscape(displayAction(action.kind))} | ${displayConfirmation(action.confirmation)} | ${action.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`,
       );
     }
     lines.push("");
@@ -236,7 +265,7 @@ function agentPage(agent) {
     lines.push("| Setting | Type | Default | Description |", "| --- | --- | --- | --- |");
     for (const setting of details.settings) {
       lines.push(
-        `| \`${mdEscape(setting.id)}\` | ${mdEscape(setting.type)} | \`${mdEscape(setting.default ?? "")}\` | ${mdEscape(setting.description ?? setting.label ?? "")} |`,
+        `| \`${mdEscape(setting.id)}\` | ${mdEscape(setting.type)} | ${displayDefault(setting.default)} | ${mdEscape(setting.description ?? setting.label ?? "")} |`,
       );
     }
     lines.push("");
@@ -249,12 +278,12 @@ function agentPage(agent) {
 function agentCatalogPage(agents) {
   const changed = lastChanged("agents");
   const lines = [
-    frontMatter("Agent catalog", "Generated catalog of OpenAdminOS agents and dashboards."),
+    frontMatter("Agent catalog", "Catalog of OpenAdminOS agents and dashboards."),
     "# Agent Catalog",
     "",
-    "This catalog is generated from checked-in agent manifests. It is intentionally metadata-first: mode, scopes, tenant data access, and write behavior come from structured files in the repository.",
+    "This catalog lists the current OpenAdminOS agents and dashboards. Mode, scopes, tenant data access, and write behavior are taken from each agent's reviewed metadata.",
     "",
-    `Last generated from repository state: ${changed.date} · \`${changed.hash}\`.`,
+    `Last updated: ${changed.date} · \`${changed.hash}\`.`,
     "",
     "| Agent | Mode | Tier | Category | Required Entra tier | Scopes |",
     "| --- | --- | --- | --- | --- | --- |",
@@ -281,10 +310,10 @@ function scopeMatrixPage(agents) {
   }
 
   const lines = [
-    frontMatter("Graph scope matrix", "Generated Microsoft Graph permission matrix for OpenAdminOS agents."),
+    frontMatter("Graph scope matrix", "Microsoft Graph permission matrix for OpenAdminOS agents."),
     "# Graph Scope Matrix",
     "",
-    "This page is generated from agent manifests. It shows which agents declare each Microsoft Graph scope.",
+    "This reference shows which agents require each Microsoft Graph scope.",
     "",
     "| Scope | Agents |",
     "| --- | --- |",
@@ -302,10 +331,10 @@ function scopeMatrixPage(agents) {
 
 function writeSafetyMatrixPage(agents) {
   const lines = [
-    frontMatter("Write safety matrix", "Generated write-operation reference for OpenAdminOS agents."),
+    frontMatter("Write safety matrix", "Write-operation reference for OpenAdminOS agents."),
     "# Write Safety Matrix",
     "",
-    "OpenAdminOS write agents always pause for human confirmation. This generated page lists the write-mode agents and the write actions declared in their manifests.",
+    "OpenAdminOS write agents always pause for human confirmation. This reference lists the current write-mode agents, their declared write actions, and the required confirmation text.",
     "",
     "| Agent | Action | Confirmation | Scopes |",
     "| --- | --- | --- | --- |",
@@ -326,7 +355,7 @@ function writeSafetyMatrixPage(agents) {
     for (const action of details.writeActions) {
       rows += 1;
       lines.push(
-        `| [${mdEscape(agent.name)}](../agents/${agent.slug}.md) | \`${mdEscape(action.kind)}\` | ${action.confirmation ? `\`${mdEscape(action.confirmation)}\`` : "Runtime confirmation required"} | ${action.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`,
+        `| [${mdEscape(agent.name)}](../agents/${agent.slug}.md) | ${mdEscape(displayAction(action.kind))} | ${displayConfirmation(action.confirmation)} | ${action.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`,
       );
     }
   }
@@ -375,7 +404,7 @@ function summaryPage(agents) {
 ## Agents
 
 - [Agent docs overview](agents/README.md)
-- [Generated agent catalog](generated/agent-catalog.md)
+- [Agent catalog](generated/agent-catalog.md)
 - [Graph scope matrix](generated/reference/graph-scope-matrix.md)
 - [Write safety matrix](generated/reference/write-safety-matrix.md)
 ${agentLinks}
@@ -384,7 +413,6 @@ ${agentLinks}
 
 - [Architecture](developers/architecture.md)
 - [Documentation automation](developers/documentation-automation.md)
-- [GitBook theme](developers/gitbook-theme.md)
 - [LLM provider matrix](generated/reference/llm-provider-matrix.md)
 `;
 }

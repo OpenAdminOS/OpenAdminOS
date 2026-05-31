@@ -8,8 +8,6 @@ description: "Reviews tenant user licensing hygiene by usage location, account s
 
 Reviews tenant user licensing hygiene by usage location, account state, and assigned-license presence.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

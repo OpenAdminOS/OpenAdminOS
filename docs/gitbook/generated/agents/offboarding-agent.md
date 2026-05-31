@@ -8,8 +8,6 @@ description: "Builds a conservative stale-device offboarding plan from Intune sy
 
 Builds a conservative stale-device offboarding plan from Intune sync, Entra sign-in, ownership, compliance, and trust signals, then retires devices after typed confirmation.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |
@@ -42,7 +40,7 @@ Builds a conservative stale-device offboarding plan from Intune sync, Entra sign
 
 | Step | Action | Confirmation | Scopes |
 | --- | --- | --- | --- |
-| Build offboarding plan | `retire-managed-device` | `OFFBOARD {{ actions \| size }} DEVICES` | `DeviceManagementManagedDevices.PrivilegedOperations.All` |
+| Build offboarding plan | Retire Managed Device | `OFFBOARD N DEVICES` | `DeviceManagementManagedDevices.PrivilegedOperations.All` |
 
 Write agents always pause for confirmation in OpenAdminOS. Destructive operations require the typed confirmation phrase shown by the app.
 
@@ -59,7 +57,7 @@ Write agents always pause for confirmation in OpenAdminOS. Destructive operation
 | `staleDays` | integer | `180` | A device must exceed this many days of inactivity on the selected signal(s) to be flagged. |
 | `strategy` | string | `both` | How to combine the Intune and Entra staleness signals. One of: both (stale in both), intune-only (only Intune sync matters), entra-only (only Entra sign-in matters). |
 | `excludePersonalDevices` | boolean | `true` | Excludes Intune devices whose managedDeviceOwnerType is personal before the retire plan is built. |
-| `instructions` | string | `` | Optional free-text guidance fed to the rationale step. Use this to encode org-specific rules (for example, exclude kiosk devices, prefer Apple BYOD, etc.). |
+| `instructions` | string | None | Optional free-text guidance fed to the rationale step. Use this to encode org-specific rules (for example, exclude kiosk devices, prefer Apple BYOD, etc.). |
 
 ## Source
 

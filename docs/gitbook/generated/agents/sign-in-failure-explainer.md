@@ -8,8 +8,6 @@ description: "Clusters recent failed sign-ins by error, app, user, client app, C
 
 Clusters recent failed sign-ins by error, app, user, client app, Conditional Access status, and location signals.
 
-> This page is generated from `agents/index.json` and the agent manifest. Edit the manifest, then run `npm run docs:generate`.
-
 ## Classification
 
 | Field | Value |

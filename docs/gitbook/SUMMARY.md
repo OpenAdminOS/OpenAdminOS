@@ -16,7 +16,7 @@
 ## Agents
 
 - [Agent docs overview](agents/README.md)
-- [Generated agent catalog](generated/agent-catalog.md)
+- [Agent catalog](generated/agent-catalog.md)
 - [Graph scope matrix](generated/reference/graph-scope-matrix.md)
 - [Write safety matrix](generated/reference/write-safety-matrix.md)
 - [Compliance overview](generated/agents/compliance-overview.md)
@@ -37,5 +37,4 @@
 
 - [Architecture](developers/architecture.md)
 - [Documentation automation](developers/documentation-automation.md)
-- [GitBook theme](developers/gitbook-theme.md)
 - [LLM provider matrix](generated/reference/llm-provider-matrix.md)

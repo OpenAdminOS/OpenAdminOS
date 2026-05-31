@@ -1,19 +1,20 @@
 ---
 title: "Agents"
-description: "How OpenAdminOS agents are documented."
+description: "How OpenAdminOS agents are classified and reviewed."
 ---
 
 # Agents
 
-OpenAdminOS agents are defined by repository manifests. The docs treat those manifests as the source of truth for mode, scopes, tenant data access, write behavior, model use, and settings.
+OpenAdminOS agents are reviewed units of automation for Microsoft 365 administration. Each agent declares what it reads, whether it can write, which Microsoft Graph scopes it needs, and which model behavior it expects.
 
-The generated pages are rebuilt by `npm run docs:generate`.
+The agent catalog is the fastest way to inspect what an agent can do before installing or running it.
 
-## Documentation Rules
+## What To Check
 
-- Agent pages are generated from `agents/index.json` and `agents/*/manifest.yaml`.
-- Public safety claims must come from structured manifest fields.
-- Prose can explain behavior, but it must not contradict the manifest.
-- New agents should not merge unless the generated docs are updated.
+- **Mode** tells you whether the agent is read-only or can prepare write operations.
+- **Graph scopes** show the Microsoft permissions the agent may request.
+- **Tenant data access** lists the Graph endpoints used by the agent.
+- **Write behavior** lists the operation and confirmation requirement for write agents.
+- **Required Entra tier** shows whether the tenant needs Entra ID Free, P1, or P2 features.
 
-Start with the generated agent catalog for the current list.
+Start with the agent catalog for the current list.
