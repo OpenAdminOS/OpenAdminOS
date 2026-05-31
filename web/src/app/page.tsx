@@ -165,6 +165,14 @@ export default async function HomePage() {
             Safety
           </Link>
           <Link
+            href="https://docs.openadminos.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="transition hover:text-white"
+          >
+            Documentation
+          </Link>
+          <Link
             href="https://github.com/OpenAdminOS/OpenAdminOS"
             target="_blank"
             rel="noreferrer"
