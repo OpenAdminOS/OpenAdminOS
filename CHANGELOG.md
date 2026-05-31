@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- GitBook documentation source under `docs/gitbook`, deterministic generated agent/reference docs, and a GitHub Action that opens docs update PRs after relevant commits to `main`.
+
 ### Changed
 
 ### Removed

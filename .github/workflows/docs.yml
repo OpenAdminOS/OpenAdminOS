@@ -1,0 +1,110 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/docs.yml"
+      - ".gitbook.yaml"
+      - "agents/**"
+      - "apps/**"
+      - "docs/**"
+      - "package.json"
+      - "package-lock.json"
+      - "packages/**"
+      - "scripts/generate-gitbook-docs.mjs"
+      - "scripts/generate-registry-index.mjs"
+  pull_request:
+    paths:
+      - ".github/workflows/docs.yml"
+      - ".gitbook.yaml"
+      - "agents/**"
+      - "docs/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/generate-gitbook-docs.mjs"
+      - "scripts/generate-registry-index.mjs"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  verify:
+    name: generate and verify docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Pin npm version
+        run: npm install -g npm@11.6.2
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate docs
+        run: npm run docs:generate
+
+      - name: Verify docs are current on pull requests
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git diff --exit-code docs/gitbook agents/index.json .gitbook.yaml || \
+            (echo "Generated docs are stale. Run npm run docs:generate and commit the result." && exit 1)
+
+      - name: Open docs update PR
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet docs/gitbook agents/index.json .gitbook.yaml; then
+            echo "Docs are already current."
+            exit 0
+          fi
+
+          branch="docs/auto-update-${GITHUB_SHA::7}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add docs/gitbook agents/index.json .gitbook.yaml
+          git commit -m "docs: update generated GitBook pages"
+          git push -u origin "$branch"
+
+          if gh pr list --head "$branch" --json number --jq '.[0].number' | grep -q '^[0-9]'; then
+            echo "PR already exists for $branch."
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "docs: update generated GitBook pages" \
+            --body "Automated documentation update.
+
+          This PR was generated after a commit to main changed repository context used by the GitBook docs.
+
+          Deterministic sources:
+          - \`agents/index.json\`
+          - \`agents/*/manifest.yaml\`
+          - \`scripts/generate-gitbook-docs.mjs\`
+
+          Review generated agent pages, Graph scope matrix, and write safety matrix before merging."

@@ -13,7 +13,9 @@
     "qa": "npm run qa -w @openadminos/qa-graph",
     "test": "npm run test -w @openadminos/runtime && npm run test -w @openadminos/qa-graph",
     "dist:desktop": "npm run dist -w @openadminos/desktop",
-    "registry:index": "node scripts/generate-registry-index.mjs"
+    "registry:index": "node scripts/generate-registry-index.mjs",
+    "docs:generate": "npm run registry:index && node scripts/generate-gitbook-docs.mjs",
+    "docs:check": "npm run docs:generate && git diff --exit-code docs/gitbook agents/index.json .gitbook.yaml"
   },
   "engines": {
     "node": ">=22"
