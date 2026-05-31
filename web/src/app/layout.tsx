@@ -5,9 +5,9 @@ import { Geist } from "next/font/google";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://openadminos.com"),
-  title: "OpenAdminOS — Local-first agents for Microsoft 365 tenants",
+  title: "OpenAdminOS — Local-first AI agents for Microsoft 365 admins",
   description:
-    "A local-first desktop app for Microsoft 365 tenant administrators. Run AI agents against your tenant, keep local runs on your device, and review every change before it happens.",
+    "AI agents for Microsoft 365 admins that run from your own machine. Keep sensitive work local, avoid per-token costs with local models, and approve every change before it happens.",
 };
 
 export const viewport = {

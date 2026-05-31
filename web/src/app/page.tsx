@@ -168,12 +168,14 @@ export default async function HomePage() {
           </Link>
 
           <h1 className="max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
-            A local-first desktop app for Microsoft 365 tenant administrators.
+            AI agents for Microsoft 365 admins that run from your own machine.
           </h1>
 
           <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-white/60 sm:text-lg">
-            Run AI agents against your tenant, keep local runs on your device,
-            and review every change before it happens.
+            Keep sensitive work local, avoid per-token costs with local models,
+            and approve every change before it happens. Use agents to
+            investigate tenant issues, explain policy behavior, and prepare
+            changes.
           </p>
 
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">

@@ -4,7 +4,7 @@
 
 <p><strong>Open-source, local-first AI agents for Microsoft 365 admins.</strong></p>
 
-<p>Run agents against your Intune and Entra tenants from your own machine. Tenant data and prompts stay on-device when a local LLM is selected.</p>
+<p>Run AI agents against your Microsoft 365 tenant from your own machine. Keep sensitive work local, avoid per-token costs with local models, and approve every change before it happens.</p>
 
 [![CI](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml)
 [![Release](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml)

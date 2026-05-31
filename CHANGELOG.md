@@ -6,7 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
-- Marketing hero copy now frames OpenAdminOS around Microsoft 365 tenant administration instead of only Intune and Entra.
+- Marketing hero and README copy now frame OpenAdminOS around local-first AI agents for Microsoft 365 admins, including local model cost and approval-gate benefits.
 
 ## [0.2.1] - 2026-05-29
 
