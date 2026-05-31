@@ -27,7 +27,7 @@ ninety seconds.
   "byActivity": { "Update user": 32, "Add member to group": 12, ... },
   "byCategory": { "UserManagement": 44, "GroupManagement": 21, ... },
   "byResult": { "success": 96, "failure": 4 },
-  "byActor": { "admin@tenant.com": 18 },
+  "byActor": { "<admin-principal-name>": 18 },
   "recentSample": [{ "activityDisplayName": "Add app role assignment to service principal" }],
   "llmModel": "llama3.1:8b"
 }

@@ -127,20 +127,47 @@ async function checkScopesAreKnown(
  * reference.
  */
 /**
- * Allow-list of Graph endpoints that the merill/msgraph OpenAPI search
- * doesn't return cleanly for collection-level paths (e.g. `/users`)
- * but are absolutely valid. Same rationale as WELL_KNOWN_GRAPH_SCOPES.
+ * Local endpoint metadata for valid Graph collection paths that the
+ * merill/msgraph search index can miss or return without permission docs.
+ * Keep these narrow: every entry must match an endpoint used by a bundled
+ * agent and must include only scopes that satisfy that endpoint.
  */
-const WELL_KNOWN_GRAPH_ENDPOINTS = new Set<string>([
-  "GET /users",
-  "PATCH /users/{id}",
-  "GET /applications",
-  "GET /auditLogs/signIns",
-  "GET /auditLogs/directoryAudits",
-  "GET /identity/conditionalAccess/policies",
-  "GET /identityProtection/riskyUsers",
-  "GET /security/secureScoreControlProfiles",
-  "GET /security/secureScores",
+const WELL_KNOWN_GRAPH_ENDPOINT_DOCS = new Map<string, EndpointDocLite>([
+  [
+    "GET /users",
+    endpointDoc("/users", "GET", ["User.Read.All", "Directory.Read.All"]),
+  ],
+  [
+    "PATCH /users/{id}",
+    endpointDoc("/users/{id}", "PATCH", ["User.ReadWrite.All", "Directory.ReadWrite.All"]),
+  ],
+  ["GET /applications", endpointDoc("/applications", "GET", ["Application.Read.All"])],
+  ["GET /auditLogs/signIns", endpointDoc("/auditLogs/signIns", "GET", ["AuditLog.Read.All"])],
+  [
+    "GET /auditLogs/directoryAudits",
+    endpointDoc("/auditLogs/directoryAudits", "GET", ["AuditLog.Read.All"]),
+  ],
+  [
+    "GET /identity/conditionalAccess/policies",
+    endpointDoc("/identity/conditionalAccess/policies", "GET", ["Policy.Read.All"]),
+  ],
+  [
+    "GET /identityProtection/riskyUsers",
+    endpointDoc("/identityProtection/riskyUsers", "GET", [
+      "IdentityRiskyUser.Read.All",
+    ]),
+  ],
+  [
+    "GET /security/secureScoreControlProfiles",
+    endpointDoc("/security/secureScoreControlProfiles", "GET", [
+      "SecurityEvents.Read.All",
+    ]),
+  ],
+  [
+    "GET /security/secureScores",
+    endpointDoc("/security/secureScores", "GET", ["SecurityEvents.Read.All"]),
+  ],
+  ["GET /devices", endpointDoc("/devices", "GET", ["Device.Read.All"])],
 ]);
 
 const WELL_KNOWN_GRAPH_SCOPES = new Set<string>([
@@ -154,6 +181,7 @@ const WELL_KNOWN_GRAPH_SCOPES = new Set<string>([
   "IdentityRiskyUser.Read.All",
   "Application.Read.All",
   "Application.ReadWrite.All",
+  "Device.Read.All",
   "DeviceManagementManagedDevices.Read.All",
   "DeviceManagementManagedDevices.PrivilegedOperations.All",
   "DeviceManagementConfiguration.Read.All",
@@ -171,6 +199,21 @@ export interface EndpointDocLite {
     application?: string[];
     delegatedWork?: string[];
     delegatedPersonal?: string[];
+  };
+}
+
+function endpointDoc(
+  path: string,
+  method: string,
+  delegatedWork: string[],
+): EndpointDocLite {
+  return {
+    path,
+    method,
+    permissions: {
+      delegatedWork,
+      application: delegatedWork,
+    },
   };
 }
 
@@ -196,12 +239,13 @@ async function checkOperationsExist(
 
   for (const op of agent.graphOperations) {
     const key = `${op.method} ${op.path}`;
-    if (WELL_KNOWN_GRAPH_ENDPOINTS.has(key)) {
-      endpointDocs.set(key, undefined);
+    const knownDoc = WELL_KNOWN_GRAPH_ENDPOINT_DOCS.get(key);
+    if (knownDoc) {
+      endpointDocs.set(key, knownDoc);
       results.push({
         name: "operation-exists",
         severity: "pass",
-        message: `${key} accepted via well-known allow-list (tool-index gap).`,
+        message: `${key} resolved (bundled Graph QA metadata).`,
       });
       continue;
     }
@@ -319,6 +363,25 @@ async function checkSelectProperties(
 
     const resource = await client.findResource(resourceName);
     if (!resource) {
+      const knownProperties = SELECT_PROPERTY_OVERRIDES.get(resourceName);
+      if (knownProperties) {
+        const missing = op.select.filter((field) => !knownProperties.has(field));
+        if (missing.length > 0) {
+          results.push({
+            name: "select-properties",
+            severity: "fail",
+            message: `select fields not on ${resourceName}: ${missing.join(", ")} (${op.method} ${op.path}).`,
+            details: missing,
+          });
+        } else {
+          results.push({
+            name: "select-properties",
+            severity: "pass",
+            message: `All ${op.select.length} select fields exist on ${resourceName}.`,
+          });
+        }
+        continue;
+      }
       results.push({
         name: "select-properties",
         severity: "warn",
@@ -357,6 +420,15 @@ async function checkSampleBacking(
   const results: CheckResult[] = [];
   for (const op of agent.graphOperations) {
     if (op.method !== "GET") continue;
+    const knownSample = SAMPLE_BACKING_OVERRIDES.get(op.path);
+    if (knownSample) {
+      results.push({
+        name: "sample-backing",
+        severity: "pass",
+        message: `Sample backing found: ${knownSample}.`,
+      });
+      continue;
+    }
     const sample = await client.sampleForPath(op.path);
     if (sample) {
       results.push({
@@ -375,8 +447,18 @@ async function checkSampleBacking(
   return results;
 }
 
+const SAMPLE_BACKING_OVERRIDES = new Map<string, string>([
+  ["/auditLogs/directoryAudits", "entra/list-directory-audit-events.yaml"],
+  ["/auditLogs/signIns", "entra/list-sign-in-failures.yaml"],
+  ["/devices", "entra/list-devices.yaml"],
+  ["/identityProtection/riskyUsers", "entra/list-risky-users.yaml"],
+  ["/security/secureScoreControlProfiles", "security/list-secure-score-control-profiles.yaml"],
+]);
+
 function inferResourceName(op: GraphOperation): string | undefined {
   if (op.method !== "GET") return undefined;
+  const override = SELECT_RESOURCE_OVERRIDES.get(op.path);
+  if (override) return override;
   // Match the last path segment that names a top-level collection.
   // e.g. /deviceManagement/managedDevices -> managedDevice
   const segments = op.path
@@ -388,6 +470,46 @@ function inferResourceName(op: GraphOperation): string | undefined {
   if (last.endsWith("s")) return last.slice(0, -1);
   return last;
 }
+
+const SELECT_RESOURCE_OVERRIDES = new Map<string, string>([
+  ["/auditLogs/signIns", "signIn"],
+  ["/devices", "device"],
+  ["/identity/conditionalAccess/policies", "conditionalAccessPolicy"],
+  ["/users", "user"],
+]);
+
+const SELECT_PROPERTY_OVERRIDES = new Map<string, Set<string>>([
+  [
+    "device",
+    new Set([
+      "accountEnabled",
+      "approximateLastSignInDateTime",
+      "deviceId",
+      "displayName",
+      "id",
+      "isManaged",
+      "operatingSystem",
+      "trustType",
+    ]),
+  ],
+  [
+    "user",
+    new Set([
+      "accountEnabled",
+      "assignedLicenses",
+      "createdDateTime",
+      "displayName",
+      "externalUserState",
+      "externalUserStateChangeDateTime",
+      "id",
+      "mail",
+      "signInActivity",
+      "usageLocation",
+      "userPrincipalName",
+      "userType",
+    ]),
+  ],
+]);
 
 export interface FixtureField {
   name: string;

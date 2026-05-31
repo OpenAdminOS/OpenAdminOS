@@ -86,6 +86,11 @@ export function AgentCard({
               Update → v{agent.updateAvailable.version}
             </Pill>
           )}
+          {agent.compatibility?.supported === false && (
+            <Pill tone="warning">
+              Needs OpenAdminOS {agent.compatibility.minAppVersion}
+            </Pill>
+          )}
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--color-border-soft)] pt-3">
@@ -94,14 +99,21 @@ export function AgentCard({
           </span>
           <Button
             size="sm"
-            variant="primary"
+            variant={agent.compatibility?.supported === false ? "secondary" : "primary"}
             leadingIcon={<IconPlay size={11} />}
+            disabled={agent.compatibility?.supported === false}
+            title={
+              agent.compatibility?.supported === false
+                ? `Update OpenAdminOS to ${agent.compatibility.minAppVersion} before running this agent.`
+                : undefined
+            }
             onClick={(e) => {
               e.stopPropagation();
+              if (agent.compatibility?.supported === false) return;
               onRun?.(agent);
             }}
           >
-            Run
+            {agent.compatibility?.supported === false ? "Update app" : "Run"}
           </Button>
         </div>
       </div>

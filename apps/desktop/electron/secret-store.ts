@@ -5,15 +5,11 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 /**
  * MSAL token cache for the desktop process.
  *
- * Deliberately in-memory: using Electron safeStorage on macOS triggers a
- * scary Keychain prompt at app startup ("Electron wants to use your
- * confidential information..."). For an admin tool, that prompt is worse
- * for trust than asking the user to sign in again after a restart.
- *
- * Tenant records are still persisted in state.json, but OAuth refresh
- * tokens are not written to disk. If the process restarts and MSAL cannot
- * acquire silently, the existing tenant session falls back to interactive
- * Microsoft sign-in when a token is actually needed.
+ * The cache is encrypted with Electron safeStorage. If macOS Keychain or
+ * Windows secure storage can no longer decrypt a previous cache value (for
+ * example after app identity/keychain changes), we delete the cache and let
+ * MSAL behave as if there is no cached account. That produces the product
+ * recovery path users can act on: reconnect the tenant.
  */
 export class SafeStorageTokenCacheStore implements TokenCacheStorage {
   constructor(private readonly filePath: string) {}
@@ -29,6 +25,10 @@ export class SafeStorageTokenCacheStore implements TokenCacheStorage {
       return safeStorage.decryptString(encrypted);
     } catch (error) {
       if (isMissingFile(error)) return "";
+      if (isSafeStorageDecryptError(error)) {
+        await this.clear();
+        return "";
+      }
       throw error;
     }
   }
@@ -46,6 +46,13 @@ export class SafeStorageTokenCacheStore implements TokenCacheStorage {
   async clear(): Promise<void> {
     await rm(this.filePath, { force: true });
   }
+}
+
+function isSafeStorageDecryptError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /decrypt|ciphertext|safeStorage/i.test(error.message)
+  );
 }
 
 function isMissingFile(error: unknown): boolean {

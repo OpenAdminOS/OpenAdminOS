@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   acquireTokenSilent,
   compareSemver,
@@ -36,7 +36,14 @@ import {
 } from "@openadminos/runtime";
 import type {
   AgentDraft,
+  AgentCommunitySubmissionMetadata,
+  AgentCommunitySubmissionReview,
+  AgentCommunitySubmissionResult,
+  AgentDraftPreflightResult,
+  ExportAgentBundleResult,
   AgentManifestPreview,
+  AgentUpdateReview,
+  AgentUpdateTrustChange,
   ConnectorSummary,
   RequestedScope,
   RunGraphApi,
@@ -44,6 +51,7 @@ import type {
   RunLogLevel,
   ProviderTestResult,
   StartRunOptions,
+  AgentTemplate,
   TemplateSetting,
   TenantRecord,
   TenantSession,
@@ -146,9 +154,13 @@ const providerIds = new Set<ProviderId>(
  * report dev installs to production.
  */
 const DEFAULT_STATS_API_URL = "https://openadminos.com";
+const AGENT_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary {
-  return {
+function entryToRegistrySummary(
+  entry: RegistryIndexEntry,
+  appVersion: string,
+): RegistryAgentSummary {
+  return withAgentCompatibility({
     id: entry.id,
     slug: entry.slug,
     registryId: entry.id,
@@ -162,7 +174,8 @@ function entryToRegistrySummary(entry: RegistryIndexEntry): RegistryAgentSummary
     scopes: entry.scopes,
     author: entry.author,
     manifestUrl: entry.manifestUrl,
-  };
+    minAppVersion: entry.minAppVersion,
+  }, appVersion);
 }
 
 export interface AppStateStoreOptions {
@@ -292,7 +305,9 @@ export class AppStateStore {
       // so the user knows why the remote source isn't being used.
       this.registryCacheEntries = null;
     } else {
-      this.registryCacheEntries = result.entries.map(entryToRegistrySummary);
+      this.registryCacheEntries = result.entries.map((entry) =>
+        entryToRegistrySummary(entry, this.appVersion),
+      );
     }
     this.lastRegistryRefresh = result.fromCache || bothSourcesFailed ? null : (result.cachedAt ?? null);
     this.registryRefreshError = result.error;
@@ -361,6 +376,7 @@ export class AppStateStore {
 
     const state: AppState = {
       activeProviderId: activeProvider?.id ?? "ollama",
+      appVersion: this.appVersion,
       providers,
       registryAgents,
       installedAgents,
@@ -385,7 +401,9 @@ export class AppStateStore {
   listRegistryAgents(): RegistryAgentSummary[] {
     if (!this.registryCacheEntries) {
       // Before first HTTP fetch: fall back to filesystem scan (dev + cold start).
-      return listAllRegistryAgents(this.userAgentsDir);
+      return listAllRegistryAgents(this.userAgentsDir).map((agent) =>
+        withAgentCompatibility(agent, this.appVersion),
+      );
     }
     // HTTP cache populated: use it as base and overlay user-authored agents.
     const dir = this.userAgentsDir;
@@ -394,7 +412,7 @@ export class AppStateStore {
       : [];
     const bySlug = new Map<string, RegistryAgentSummary>();
     for (const a of this.registryCacheEntries) bySlug.set(a.slug, a);
-    for (const a of userAgents) bySlug.set(a.slug, a);
+    for (const a of userAgents) bySlug.set(a.slug, withAgentCompatibility(a, this.appVersion));
     return [...bySlug.values()].sort((l, r) => l.name.localeCompare(r.name));
   }
 
@@ -405,7 +423,12 @@ export class AppStateStore {
       (agent) => agent.slug === slug || agent.id === slug,
     );
     if (registryAgent) {
-      return loadAgentManifestPreview(registryAgent);
+      const preview = loadAgentManifestPreview(registryAgent);
+      if (!preview) return undefined;
+      return {
+        ...preview,
+        isUserAuthored: this.isUserAuthoredRegistryPath(preview.registryPath),
+      };
     }
     // Fall back to an installed agent for the rare case where it's no
     // longer in the registry but still in user state.
@@ -413,7 +436,13 @@ export class AppStateStore {
     const installed = persisted.installedAgents.find(
       (agent) => agent.slug === slug || agent.id === slug,
     );
-    return installed ? loadAgentManifestPreview(installed) : undefined;
+    if (!installed) return undefined;
+    const preview = loadAgentManifestPreview(installed);
+    if (!preview) return undefined;
+    return {
+      ...preview,
+      isUserAuthored: this.isUserAuthoredRegistryPath(preview.registryPath),
+    };
   }
 
   async listAgents(): Promise<AgentSummary[]> {
@@ -1039,7 +1068,12 @@ export class AppStateStore {
           ...searchEndpoints(trimmed, { limit: 2, method: "DELETE" }),
         ]
       : [];
-    const system = buildNl2AgentSystemPrompt(readCandidates, writeCandidates);
+    const reservedSlugs = this.getReservedAgentSlugs();
+    const system = buildNl2AgentSystemPrompt(
+      readCandidates,
+      writeCandidates,
+      reservedSlugs,
+    );
     const userTurn = `Draft a manifest.yaml for the following OpenAdminOS agent description.
 
 Description from the user:
@@ -1056,43 +1090,140 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       maxTokens: 1400,
     });
 
-    const yamlSource = stripCodeFences(completion.text).trim();
+    let draft = validateAgentDraftSource(
+      stripCodeFences(completion.text).trim(),
+      reservedSlugs,
+    );
 
-    let manifest: AgentDraft["manifest"];
-    const validationErrors: string[] = [];
-    try {
-      manifest = parseAgentTemplate(yamlSource);
-    } catch (error) {
-      if (error instanceof ManifestValidationError) {
-        validationErrors.push(error.message);
-      } else if (error instanceof Error) {
-        validationErrors.push(error.message);
-      } else {
-        validationErrors.push(String(error));
-      }
-    }
-
-    // Contract: every agent must include at least one `llm` step.
-    if (manifest && !manifest.skills.some((skill) => skill.format === "llm")) {
-      validationErrors.push(
-        "Manifest has no `format: llm` step. OpenAdminOS requires every agent to invoke the LLM at least once — add a summary or rationale step.",
+    // Repair once with the exact host validation errors. This keeps the
+    // builder useful when the first pass is close but misses a schema
+    // detail or Graph catalogue requirement.
+    if (draft.validationErrors.length > 0) {
+      const repaired = await llm.complete({
+        system,
+        prompt: buildNl2AgentRepairPrompt(trimmed, draft),
+        temperature: 0.1,
+        maxTokens: 1600,
+      });
+      draft = validateAgentDraftSource(
+        stripCodeFences(repaired.text).trim(),
+        reservedSlugs,
       );
-      manifest = undefined;
     }
 
-    // Catalogue check: every graph step must target a real Graph
-    // endpoint and declare a matching delegated scope.
-    if (manifest) {
-      const graphErrors = collectGraphStepErrors(manifest);
-      if (graphErrors.length > 0) {
-        validationErrors.push(...graphErrors);
-        manifest = undefined;
-      }
+    return draft;
+  }
+
+  /**
+   * Validate an edited `manifest.yaml` without saving it. This mirrors
+   * `saveAgentDraft`'s hard gates but returns structured errors so the
+   * renderer can keep the user in the review pane.
+   */
+  async validateAgentDraft(
+    yamlSource: string,
+    allowedSlug?: string,
+  ): Promise<AgentDraft> {
+    return validateAgentDraftSource(
+      yamlSource,
+      this.getReservedAgentSlugs(allowedSlug),
+    );
+  }
+
+  async preflightAgentDraft(
+    yamlSource: string,
+    allowedSlug?: string,
+  ): Promise<AgentDraftPreflightResult> {
+    const checks: AgentDraftPreflightResult["checks"] = [];
+    const persisted = await this.read();
+    const activeTenant = persisted.activeTenantId
+      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+      : undefined;
+
+    checks.push(
+      activeTenant
+        ? {
+            id: "tenant",
+            label: "Tenant",
+            status: "pass",
+            detail: `Will run against ${activeTenant.displayName}.`,
+          }
+        : {
+            id: "tenant",
+            label: "Tenant",
+            status: "fail",
+            detail: "Connect or select a Microsoft 365 tenant before installing.",
+          },
+    );
+
+    const provider = (await this.listProviders()).find(
+      (candidate) => candidate.id === persisted.activeProviderId,
+    );
+    checks.push(
+      provider?.status === "connected"
+        ? {
+            id: "provider",
+            label: "LLM provider",
+            status: "pass",
+            detail: `${provider.name} is connected (${provider.isLocal ? "local" : "hosted"}).`,
+          }
+        : {
+            id: "provider",
+            label: "LLM provider",
+            status: "fail",
+            detail: "Connect a local or hosted LLM provider before installing.",
+          },
+    );
+
+    const draft = validateAgentDraftSource(
+      yamlSource,
+      this.getReservedAgentSlugs(allowedSlug),
+    );
+    if (!draft.manifest) {
+      checks.push({
+        id: "manifest",
+        label: "Manifest",
+        status: "fail",
+        detail: draft.validationErrors.join("; "),
+      });
+      return { ok: false, checks };
     }
 
-    return validationErrors.length > 0
-      ? { yamlSource, validationErrors }
-      : { yamlSource, manifest, validationErrors: [] };
+    const manifest = draft.manifest;
+    checks.push({
+      id: "manifest",
+      label: "Manifest",
+      status: "pass",
+      detail: "Schema, Graph catalogue, LLM-step, slug, and connector declarations pass.",
+    });
+
+    const scopes = collectManifestScopes(manifest);
+    checks.push({
+      id: "scopes",
+      label: "Graph scopes",
+      status: manifest.descriptor.mode === "write" ? "warn" : "pass",
+      detail:
+        manifest.descriptor.mode === "write"
+          ? `${scopes.length} scope(s) declared. Microsoft may prompt for incremental consent.`
+          : `${scopes.length} scope(s) declared.`,
+    });
+
+    checks.push(...preflightConnectorRequirements(manifest));
+
+    const writeSteps = manifest.skills.filter((skill) => skill.format === "write");
+    checks.push({
+      id: "writes",
+      label: "Write gate",
+      status: writeSteps.length > 0 ? "warn" : "pass",
+      detail:
+        writeSteps.length > 0
+          ? `${writeSteps.length} write step(s) will pause for typed confirmation. This preflight does not apply Graph changes.`
+          : "No write steps declared.",
+    });
+
+    return {
+      ok: !checks.some((check) => check.status === "fail"),
+      checks,
+    };
   }
 
   /**
@@ -1111,37 +1242,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       throw new Error("saveAgentDraft: user-agents directory is not configured.");
     }
 
-    let manifest;
-    try {
-      manifest = parseAgentTemplate(yamlSource);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`saveAgentDraft: manifest failed schema validation: ${message}`);
-    }
-    if (!manifest.skills.some((skill) => skill.format === "llm")) {
+    const draft = validateAgentDraftSource(yamlSource, this.getReservedAgentSlugs());
+    if (!draft.manifest || draft.validationErrors.length > 0) {
       throw new Error(
-        "saveAgentDraft: manifest has no `format: llm` step. OpenAdminOS requires every agent to invoke the LLM at least once.",
+        `saveAgentDraft: manifest failed validation: ${draft.validationErrors.join("; ")}`,
       );
     }
 
-    const graphErrors = collectGraphStepErrors(manifest);
-    if (graphErrors.length > 0) {
-      throw new Error(
-        `saveAgentDraft: manifest references unknown Graph endpoints — ${graphErrors.join("; ")}`,
-      );
-    }
-
+    const manifest = draft.manifest;
     const slug = manifest.descriptor.id;
-    const bundledSlugs = new Set(
-      listAllRegistryAgents(undefined).map((agent) => agent.slug),
-    );
-    if (bundledSlugs.has(slug)) {
-      throw new Error(
-        `saveAgentDraft: slug "${slug}" is already taken by a bundled agent. Choose a different descriptor.id.`,
-      );
-    }
-
-    const agentDir = join(this.userAgentsDir, slug);
+    const agentDir = safeUserAgentDirectory(this.userAgentsDir, slug);
     if (existsSync(agentDir)) {
       throw new Error(
         `saveAgentDraft: an agent named "${slug}" already exists in your user-agents directory.`,
@@ -1149,9 +1259,220 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
 
     await mkdir(agentDir, { recursive: true });
-    await writeFile(join(agentDir, "manifest.yaml"), `${yamlSource.trimEnd()}\n`, "utf8");
+    await writeFile(join(agentDir, "manifest.yaml"), `${draft.yamlSource.trimEnd()}\n`, "utf8");
 
     return this.getAppState();
+  }
+
+  async updateUserAgentDraft(slug: string, yamlSource: string): Promise<AppState> {
+    if (!this.userAgentsDir) {
+      throw new Error("updateUserAgentDraft: user-agents directory is not configured.");
+    }
+    const agentDir = safeUserAgentDirectory(this.userAgentsDir, slug);
+    if (!existsSync(agentDir)) {
+      throw new Error(`updateUserAgentDraft: "${slug}" is not a user-authored agent.`);
+    }
+
+    const draft = validateAgentDraftSource(yamlSource, this.getReservedAgentSlugs(slug));
+    if (!draft.manifest || draft.validationErrors.length > 0) {
+      throw new Error(
+        `updateUserAgentDraft: manifest failed validation: ${draft.validationErrors.join("; ")}`,
+      );
+    }
+    if (draft.manifest.descriptor.id !== slug) {
+      throw new Error(
+        `updateUserAgentDraft: descriptor.id must stay "${slug}". Use export if you want a new agent slug.`,
+      );
+    }
+
+    await writeFile(join(agentDir, "manifest.yaml"), `${draft.yamlSource.trimEnd()}\n`, "utf8");
+
+    const registryAgent = findRegistryAgentById(slug, this.userAgentsDir);
+    if (registryAgent) {
+      await this.serialize(async () => {
+        const persisted = await this.read();
+        await this.write({
+          ...persisted,
+          installedAgents: persisted.installedAgents.map((agent) => {
+            if (agent.slug !== slug && agent.id !== slug) return agent;
+            return {
+              ...toInstalledAgent(registryAgent, agent.installedAt),
+              settings: agent.settings,
+              schedule: agent.schedule,
+              delivery: agent.delivery,
+              lastRunAt: agent.lastRunAt,
+              communitySubmission: agent.communitySubmission,
+              provenance: buildAgentProvenance({
+                agent: registryAgent,
+                installedAt: agent.installedAt,
+                updatedAt: new Date().toISOString(),
+                manifestText: draft.yamlSource,
+                source: "user",
+              }),
+            };
+          }),
+        });
+      });
+    }
+
+    return this.getAppState();
+  }
+
+  async exportAgentDraftBundle(
+    yamlSource: string,
+    parentDirectory: string,
+  ): Promise<ExportAgentBundleResult> {
+    const draft = validateAgentDraftSource(yamlSource, []);
+    if (!draft.manifest || draft.validationErrors.length > 0) {
+      throw new Error(
+        `exportAgentDraftBundle: manifest failed validation: ${draft.validationErrors.join("; ")}`,
+      );
+    }
+
+    const manifest = draft.manifest;
+    assertValidAgentSlug(manifest.descriptor.id);
+    const outputDir = join(parentDirectory, manifest.descriptor.id);
+    if (existsSync(outputDir)) {
+      throw new Error(`Export folder already exists: ${outputDir}`);
+    }
+
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(join(outputDir, "manifest.yaml"), `${draft.yamlSource.trimEnd()}\n`, "utf8");
+    await writeFile(join(outputDir, "README.md"), buildAgentReadme(manifest), "utf8");
+    await writeFile(
+      join(outputDir, "metadata.json"),
+      `${JSON.stringify(buildAgentBundleMetadata(manifest), null, 2)}\n`,
+      "utf8",
+    );
+
+    return { canceled: false, directoryPath: outputDir };
+  }
+
+  async prepareAgentCommunitySubmission(
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ): Promise<AgentCommunitySubmissionReview> {
+    const draft = validateAgentDraftSource(
+      yamlSource,
+      this.getReservedAgentSlugs(allowedSlug),
+    );
+    return buildAgentCommunitySubmissionReview(yamlSource, metadata, draft);
+  }
+
+  async submitAgentCommunitySubmission(
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ): Promise<AgentCommunitySubmissionResult> {
+    const review = await this.prepareAgentCommunitySubmission(
+      yamlSource,
+      metadata,
+      allowedSlug,
+    );
+    if (!review.ok) {
+      throw new Error("Community submission is blocked until QA failures are fixed.");
+    }
+    if (this.statsApiUrl.length === 0) {
+      throw new Error(
+        "Community submission endpoint is not configured in this build.",
+      );
+    }
+
+    const response = await fetch(
+      `${this.statsApiUrl.replace(/\/$/, "")}/api/agent-submissions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          metadata,
+          issueTitle: review.issueTitle,
+          issueBody: review.issueBody,
+          package: review.package,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+
+    let parsed: unknown = null;
+    try {
+      parsed = await response.json();
+    } catch {
+      parsed = null;
+    }
+
+    if (!response.ok) {
+      const message =
+        parsed &&
+        typeof parsed === "object" &&
+        "error" in parsed &&
+        typeof parsed.error === "string"
+          ? parsed.error
+          : `Community submission failed with HTTP ${response.status}.`;
+      throw new Error(message);
+    }
+
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !("issueUrl" in parsed) ||
+      typeof parsed.issueUrl !== "string"
+    ) {
+      throw new Error("Community submission endpoint returned an invalid response.");
+    }
+
+    const result = {
+      issueUrl: parsed.issueUrl,
+      ...("issueNumber" in parsed && typeof parsed.issueNumber === "number"
+        ? { issueNumber: parsed.issueNumber }
+        : {}),
+    };
+
+    const submittedSlug =
+      allowedSlug ??
+      review.package.manifestYaml.match(/^\s*id:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*$/m)?.[1];
+    if (submittedSlug) {
+      await this.serialize(async () => {
+        const persisted = await this.read();
+        await this.write({
+          ...persisted,
+          installedAgents: persisted.installedAgents.map((agent) =>
+            agent.slug === submittedSlug || agent.id === submittedSlug
+              ? {
+                  ...agent,
+                  communitySubmission: {
+                    status: "submitted",
+                    issueUrl: result.issueUrl,
+                    ...("issueNumber" in result ? { issueNumber: result.issueNumber } : {}),
+                    submittedAt: new Date().toISOString(),
+                  },
+                }
+              : agent,
+          ),
+        });
+      });
+    }
+
+    return result;
+  }
+
+  private getReservedAgentSlugs(allowedSlug?: string): string[] {
+    const slugs = new Set<string>();
+    for (const agent of this.listRegistryAgents()) {
+      slugs.add(agent.slug);
+      slugs.add(agent.id);
+    }
+    if (allowedSlug) {
+      slugs.delete(allowedSlug);
+    }
+    return [...slugs].filter(Boolean).sort();
+  }
+
+  private isUserAuthoredRegistryPath(registryPath?: string): boolean {
+    if (!registryPath || !this.userAgentsDir) return false;
+    return registryPath
+      .replace(/\\/g, "/")
+      .startsWith(this.userAgentsDir.replace(/\\/g, "/"));
   }
 
   async uninstallAgent(slug: string): Promise<AppState> {
@@ -1271,10 +1592,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         return;
       }
 
-      const registryAgent = findRegistryAgentById(agentId, this.userAgentsDir);
+      const registryAgent = this.listRegistryAgents().find(
+        (agent) =>
+          agent.id === agentId ||
+          agent.slug === agentId ||
+          agent.registryId === agentId,
+      );
       if (!registryAgent) {
         throw new Error(`Unknown registry agent: ${agentId}`);
       }
+      const compatibleRegistryAgent = withAgentCompatibility(
+        registryAgent,
+        this.appVersion,
+      );
+      assertAgentCompatible(compatibleRegistryAgent, "install");
 
       const registryInstallCountsEnabled =
         persisted.registryInstallCountsEnabled !== false;
@@ -1282,16 +1613,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         ? persisted.installId ?? randomUUID()
         : persisted.installId;
 
+      const installedAt = new Date();
+      const installed = toInstalledAgent(compatibleRegistryAgent, installedAt);
+      installed.provenance = buildAgentProvenance({
+        agent: compatibleRegistryAgent,
+        installedAt: installed.installedAt,
+      });
+
       await this.write({
         ...persisted,
         ...(installId ? { installId } : {}),
-        installedAgents: [
-          ...persisted.installedAgents,
-          toInstalledAgent(registryAgent, new Date()),
-        ],
+        installedAgents: [...persisted.installedAgents, installed],
       });
 
-      installedSlug = registryAgent.slug;
+      installedSlug = compatibleRegistryAgent.slug;
       installIdForReport = registryInstallCountsEnabled ? installId : undefined;
     });
 
@@ -1320,13 +1655,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     return installed.map((agent) => {
       const candidate = bySlug.get(agent.slug) ?? bySlug.get(agent.id);
-      if (!candidate || !candidate.manifestUrl) return agent;
-      if (compareSemver(candidate.version, agent.version) <= 0) return agent;
+      const compatibleAgent = withAgentCompatibility(
+        {
+          ...agent,
+          minAppVersion:
+            candidate?.minAppVersion ??
+            agent.minAppVersion ??
+            agent.provenance?.minAppVersion,
+        },
+        this.appVersion,
+      );
+      if (!candidate || !candidate.manifestUrl) return compatibleAgent;
+      if (compareSemver(candidate.version, agent.version) <= 0) return compatibleAgent;
       return {
-        ...agent,
+        ...compatibleAgent,
         updateAvailable: {
           version: candidate.version,
           manifestUrl: candidate.manifestUrl,
+          minAppVersion: candidate.minAppVersion,
         },
       };
     });
@@ -1344,76 +1690,39 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * slug mismatch) throw with an actionable message and leave the
    * previously-installed manifest in place.
    */
-  async updateAgent(slug: string): Promise<AppState> {
+  async getAgentUpdateReview(slug: string): Promise<AgentUpdateReview> {
+    const { target, manifestText, parsedManifest, manifestSha256 } =
+      await this.fetchAgentUpdateManifest(slug, "getAgentUpdateReview");
+    const installed = (await this.read()).installedAgents.find(
+      (agent) => agent.slug === slug || agent.id === slug,
+    );
+    if (!installed) {
+      throw new Error(`getAgentUpdateReview: "${slug}" is not installed.`);
+    }
+    return buildAgentUpdateReview({
+      previous: installed,
+      target,
+      parsedManifest,
+      manifestText,
+      manifestSha256,
+    });
+  }
+
+  async updateAgent(
+    slug: string,
+    options?: { confirmTrustChanges?: boolean },
+  ): Promise<AppState> {
     if (!this.userDataPath) {
       throw new Error(
         "updateAgent: userDataPath is not configured; cannot persist the updated manifest.",
       );
     }
-    const registryAgents = this.listRegistryAgents();
-    const target =
-      registryAgents.find((entry) => entry.slug === slug || entry.id === slug);
-    if (!target) {
-      throw new Error(`updateAgent: agent "${slug}" is not in the registry.`);
-    }
-    if (!target.manifestUrl) {
-      throw new Error(
-        `updateAgent: agent "${slug}" has no manifestUrl; nothing to fetch.`,
-      );
-    }
-
-    // Fetch with a bounded timeout. Failures here surface to the user as
-    // a clear error string — they keep their installed manifest.
-    const FETCH_TIMEOUT_MS = 15_000;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    let manifestText: string;
-    try {
-      const response = await fetch(target.manifestUrl, {
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status} from ${target.manifestUrl}`);
-      }
-      manifestText = await response.text();
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(`updateAgent: failed to fetch manifest — ${reason}`);
-    } finally {
-      clearTimeout(timer);
-    }
-
-    // Validate the manifest before writing anything to disk. This rejects
-    // a malformed update without trampling the installed copy.
-    let parsedManifest;
-    try {
-      parsedManifest = parseAgentTemplate(manifestText);
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `updateAgent: fetched manifest for "${slug}" is invalid — ${reason}`,
-      );
-    }
-    if (parsedManifest.descriptor.id !== target.id) {
-      throw new Error(
-        `updateAgent: fetched manifest declares id "${parsedManifest.descriptor.id}" but registry expected "${target.id}".`,
-      );
-    }
+    const { target, manifestText, parsedManifest, manifestSha256 } =
+      await this.fetchAgentUpdateManifest(slug, "updateAgent");
 
     // Persist the new manifest under the override directory, atomically:
     // write to a tmp file first, then rename. Avoids a half-written file
     // if the process dies mid-write.
-    const updatesRoot = this.agentUpdatesRoot();
-    if (!updatesRoot) {
-      throw new Error("updateAgent: agent-updates root is unavailable.");
-    }
-    const agentDir = join(updatesRoot, slug);
-    await mkdir(agentDir, { recursive: true });
-    const finalPath = join(agentDir, "manifest.yaml");
-    const tmpPath = `${finalPath}.tmp`;
-    await writeFile(tmpPath, manifestText.endsWith("\n") ? manifestText : `${manifestText}\n`, "utf8");
-    await rename(tmpPath, finalPath);
-
     // Reconcile `installedAgents`. Refresh the registry-derived fields
     // from `target`, keep user-controlled fields (settings, schedule,
     // installedAt) intact. Drop any settings keys the new manifest no
@@ -1430,6 +1739,37 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         throw new Error(`updateAgent: "${slug}" is not installed.`);
       }
       const previous = persisted.installedAgents[idx];
+      const review = buildAgentUpdateReview({
+        previous,
+        target,
+        parsedManifest,
+        manifestText,
+        manifestSha256,
+      });
+      if (review.requiresConfirmation && options?.confirmTrustChanges !== true) {
+        throw new Error(
+          "updateAgent: this update changes agent trust boundaries. Review and confirm the changes before applying it.",
+        );
+      }
+
+      // Persist the new manifest only after trust-boundary confirmation
+      // has passed. Otherwise an unconfirmed update could still shadow the
+      // installed manifest through the agent-updates override directory.
+      const updatesRoot = this.agentUpdatesRoot();
+      if (!updatesRoot) {
+        throw new Error("updateAgent: agent-updates root is unavailable.");
+      }
+      const agentDir = join(updatesRoot, slug);
+      await mkdir(agentDir, { recursive: true });
+      const finalPath = join(agentDir, "manifest.yaml");
+      const tmpPath = `${finalPath}.tmp`;
+      await writeFile(
+        tmpPath,
+        manifestText.endsWith("\n") ? manifestText : `${manifestText}\n`,
+        "utf8",
+      );
+      await rename(tmpPath, finalPath);
+
       // Prune any settings whose keys the new manifest no longer declares.
       // When the new manifest declares zero settings (or all previous keys
       // were dropped), we explicitly clear `settings` rather than spreading
@@ -1456,6 +1796,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         scopes: target.scopes,
         author: target.author,
         ...(hasRemainingSettings ? { settings: prunedSettings } : {}),
+        provenance: buildAgentProvenance({
+          agent: target,
+          installedAt: previous.installedAt,
+          updatedAt: new Date().toISOString(),
+          manifestText,
+          manifestSha256,
+        }),
       };
       // `updateAvailable` is derived state — never persist it.
       delete next.updateAvailable;
@@ -1466,6 +1813,70 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
 
     return this.getAppState();
+  }
+
+  private async fetchAgentUpdateManifest(
+    slug: string,
+    context: "getAgentUpdateReview" | "updateAgent",
+  ): Promise<{
+    target: RegistryAgentSummary;
+    manifestText: string;
+    parsedManifest: ReturnType<typeof parseAgentTemplate>;
+    manifestSha256: string;
+  }> {
+    const registryAgents = this.listRegistryAgents();
+    const target =
+      registryAgents.find((entry) => entry.slug === slug || entry.id === slug);
+    if (!target) {
+      throw new Error(`${context}: agent "${slug}" is not in the registry.`);
+    }
+    if (!target.manifestUrl) {
+      throw new Error(
+        `${context}: agent "${slug}" has no manifestUrl; nothing to fetch.`,
+      );
+    }
+    assertAgentCompatible(target, context === "updateAgent" ? "update" : "review");
+
+    const FETCH_TIMEOUT_MS = 15_000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let manifestText: string;
+    try {
+      const response = await fetch(target.manifestUrl, {
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} from ${target.manifestUrl}`);
+      }
+      manifestText = await response.text();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`${context}: failed to fetch manifest — ${reason}`);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    let parsedManifest;
+    try {
+      parsedManifest = parseAgentTemplate(manifestText);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `${context}: fetched manifest for "${slug}" is invalid — ${reason}`,
+      );
+    }
+    if (parsedManifest.descriptor.id !== target.id) {
+      throw new Error(
+        `${context}: fetched manifest declares id "${parsedManifest.descriptor.id}" but registry expected "${target.id}".`,
+      );
+    }
+
+    return {
+      target,
+      manifestText,
+      parsedManifest,
+      manifestSha256: sha256(manifestText),
+    };
   }
 
   /**
@@ -1842,6 +2253,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (!agent) {
         throw new Error(`Agent is not installed: ${agentSlug}`);
       }
+      assertAgentCompatible(
+        withAgentCompatibility(agent, this.appVersion),
+        "run",
+      );
 
       const providers = await this.listProviders();
       // Honor a per-run provider override if supplied; otherwise fall
@@ -2913,11 +3328,11 @@ function sanitizeSettingsAgainstSchema(
  * we use in the bundled agents. The temperature is kept low so output
  * stays close to the examples.
  */
-function collectGraphStepErrors(
-  manifest: { skills: Array<{ id: string; format: string; settings: unknown }> },
-): string[] {
+type DraftSkillLike = { id: string; format: string; settings: unknown };
+
+function collectGraphStepErrors(manifest: { skills: DraftSkillLike[] }): string[] {
   const errors: string[] = [];
-  for (const skill of manifest.skills) {
+  for (const skill of iterateDraftSkills(manifest.skills)) {
     if (skill.format === "graph") {
       const settings = skill.settings as {
         method?: string;
@@ -2976,6 +3391,66 @@ function collectGraphStepErrors(
   return errors;
 }
 
+function collectConnectorStepErrors(manifest: {
+  descriptor: {
+    connectors?: Array<{
+      id: string;
+      capabilities: Array<{ id: string; version: number }>;
+    }>;
+  };
+  skills: DraftSkillLike[];
+}): string[] {
+  const errors: string[] = [];
+  const requirements = new Map(
+    (manifest.descriptor.connectors ?? []).map((connector) => [
+      connector.id,
+      connector,
+    ]),
+  );
+
+  for (const skill of iterateDraftSkills(manifest.skills)) {
+    if (skill.format !== "connector") continue;
+    const settings = skill.settings as {
+      connector?: string;
+      capability?: string;
+      version?: number;
+    } | null;
+    if (!settings?.connector || !settings.capability) continue;
+
+    const requirement = requirements.get(settings.connector);
+    if (!requirement) {
+      errors.push(
+        `connector step "${skill.id}": descriptor.connectors must declare "${settings.connector}".`,
+      );
+      continue;
+    }
+
+    const version = settings.version ?? 1;
+    const hasCapability = requirement.capabilities.some(
+      (capability) =>
+        capability.id === settings.capability && capability.version === version,
+    );
+    if (!hasCapability) {
+      errors.push(
+        `connector step "${skill.id}": descriptor.connectors.${settings.connector} must declare capability "${settings.capability}" version ${version}.`,
+      );
+    }
+  }
+
+  return errors;
+}
+
+function* iterateDraftSkills(skills: DraftSkillLike[]): Iterable<DraftSkillLike> {
+  for (const skill of skills) {
+    yield skill;
+    if (skill.format !== "map") continue;
+    const settings = skill.settings as { do?: DraftSkillLike[] } | null;
+    if (Array.isArray(settings?.do)) {
+      yield* iterateDraftSkills(settings.do);
+    }
+  }
+}
+
 const WRITEY_KEYWORDS = [
   "disable",
   "delete",
@@ -3003,6 +3478,665 @@ function promptLooksWritey(prompt: string): boolean {
   );
 }
 
+function validateAgentDraftSource(
+  yamlSource: string,
+  reservedSlugs: string[] = [],
+): AgentDraft {
+  const source = typeof yamlSource === "string" ? yamlSource.trim() : "";
+  if (source.length === 0) {
+    return {
+      yamlSource: "",
+      validationErrors: ["Manifest YAML is empty."],
+    };
+  }
+
+  let manifest: AgentDraft["manifest"];
+  const validationErrors: string[] = [];
+  try {
+    manifest = parseAgentTemplate(source);
+  } catch (error) {
+    if (error instanceof ManifestValidationError) {
+      validationErrors.push(error.message);
+    } else if (error instanceof Error) {
+      validationErrors.push(error.message);
+    } else {
+      validationErrors.push(String(error));
+    }
+  }
+
+  if (manifest && !manifest.skills.some((skill) => skill.format === "llm")) {
+    validationErrors.push(
+      "Manifest has no `format: llm` step. OpenAdminOS requires every agent to invoke the LLM at least once — add a summary or rationale step.",
+    );
+    manifest = undefined;
+  }
+
+  if (manifest) {
+    const reserved = new Set(reservedSlugs);
+    const slug = manifest.descriptor.id;
+    if (!AGENT_SLUG_RE.test(slug)) {
+      validationErrors.push(
+        `Slug "${slug}" is invalid. Use lowercase letters, numbers, and single hyphens only, for example "inactive-device-review".`,
+      );
+      manifest = undefined;
+    } else if (reserved.has(slug)) {
+      validationErrors.push(
+        `Slug "${slug}" is already used by another agent. Try "${suggestAvailableSlug(slug, reserved)}" instead.`,
+      );
+      manifest = undefined;
+    }
+  }
+
+  if (manifest) {
+    const semanticErrors = [
+      ...collectGraphStepErrors(manifest),
+      ...collectConnectorStepErrors(manifest),
+    ];
+    if (semanticErrors.length > 0) {
+      validationErrors.push(...semanticErrors);
+      manifest = undefined;
+    }
+  }
+
+  return validationErrors.length > 0
+    ? { yamlSource: source, validationErrors }
+    : { yamlSource: `${source}\n`, manifest, validationErrors: [] };
+}
+
+function assertValidAgentSlug(slug: string): void {
+  if (!AGENT_SLUG_RE.test(slug)) {
+    throw new Error(
+      `Invalid agent slug "${slug}". Use lowercase letters, numbers, and single hyphens only.`,
+    );
+  }
+}
+
+function safeUserAgentDirectory(userAgentsDir: string, slug: string): string {
+  assertValidAgentSlug(slug);
+  const root = resolve(userAgentsDir);
+  const target = resolve(root, slug);
+  const rel = relative(root, target);
+  if (rel.startsWith("..") || rel === ".." || rel.includes(`..${sep}`) || rel.length === 0) {
+    throw new Error(`Invalid user agent directory for slug "${slug}".`);
+  }
+  return target;
+}
+
+function collectManifestScopes(manifest: AgentTemplate): string[] {
+  const scopes = new Set<string>();
+  for (const skill of iterateDraftSkills(manifest.skills)) {
+    if (skill.format === "graph" || skill.format === "write") {
+      const settings = skill.settings as { scopes?: string[] };
+      if (Array.isArray(settings.scopes)) {
+        for (const scope of settings.scopes) scopes.add(scope);
+      }
+    }
+  }
+  return [...scopes].sort();
+}
+
+function preflightConnectorRequirements(
+  manifest: AgentTemplate,
+): AgentDraftPreflightResult["checks"] {
+  const requirements = manifest.descriptor.connectors ?? [];
+  if (requirements.length === 0) {
+    return [
+      {
+        id: "connectors",
+        label: "Connectors",
+        status: "pass",
+        detail: "No connector egress declared.",
+      },
+    ];
+  }
+
+  const registered = new Map(
+    listRegisteredConnectors().map((descriptor) => [
+      descriptor.id,
+      descriptor,
+    ]),
+  );
+
+  return requirements.map((requirement) => {
+    const descriptor = registered.get(requirement.id);
+    if (!descriptor) {
+      return {
+        id: `connector:${requirement.id}`,
+        label: `Connector: ${requirement.id}`,
+        status: "fail",
+        detail: "Connector is not registered in this OpenAdminOS build.",
+      };
+    }
+
+    const missing = requirement.capabilities.filter(
+      (needed) =>
+        !descriptor.capabilities.some(
+          (actual) =>
+            actual.id === needed.id && actual.version === needed.version,
+        ),
+    );
+    if (missing.length > 0) {
+      return {
+        id: `connector:${requirement.id}`,
+        label: `Connector: ${descriptor.name}`,
+        status: "fail",
+        detail: `Missing capability ${missing.map((cap) => `${cap.id}@${cap.version}`).join(", ")}.`,
+      };
+    }
+
+    return {
+      id: `connector:${requirement.id}`,
+      label: `Connector: ${descriptor.name}`,
+      status: requirement.required ? "warn" : "pass",
+      detail: requirement.required
+        ? "Required connector is supported by this build. Configure and test it from Connectors before running this agent."
+        : "Optional connector is understood by this build.",
+    };
+  });
+}
+
+function buildAgentReadme(manifest: AgentTemplate): string {
+  const scopes = collectManifestScopes(manifest);
+  const connectors = manifest.descriptor.connectors ?? [];
+  return `# ${manifest.descriptor.name}
+
+${manifest.descriptor.description}
+
+## Mode
+
+${manifest.descriptor.mode === "write" ? "Write agent. Every write action pauses for typed confirmation before Graph changes are applied." : "Read-only agent. It does not mutate tenant state."}
+
+## Graph permissions
+
+${scopes.length > 0 ? scopes.map((scope) => `- \`${scope}\``).join("\n") : "- None declared"}
+
+## Connectors
+
+${connectors.length > 0 ? connectors.map((connector) => `- \`${connector.id}\` (${connector.required ? "required" : "optional"})`).join("\n") : "- None"}
+
+## Local-first note
+
+This bundle was exported from OpenAdminOS. It includes only agent source files and metadata. It does not include tenant data, prompts, run results, provider settings, tokens, or secrets.
+`;
+}
+
+function buildCommunityAgentReadme(
+  manifest: AgentTemplate,
+  metadata: AgentCommunitySubmissionMetadata,
+): string {
+  const scopes = collectManifestScopes(manifest);
+  const connectors = manifest.descriptor.connectors ?? [];
+  return `# ${metadata.name.trim() || manifest.descriptor.name}
+
+${metadata.description.trim() || manifest.descriptor.description}
+
+## Maintainer
+
+- ${metadata.maintainerName.trim() || "Not provided"}
+- Support: ${metadata.supportUrl.trim() || "Not provided"}
+
+## Mode
+
+${manifest.descriptor.mode === "write" ? "Write agent. Every write action pauses for typed confirmation before Graph changes are applied." : "Read-only agent. It does not mutate tenant state."}
+
+## Graph permissions
+
+${scopes.length > 0 ? scopes.map((scope) => `- \`${scope}\``).join("\n") : "- None declared"}
+
+## Connectors
+
+${connectors.length > 0 ? connectors.map((connector) => `- \`${connector.id}\` (${connector.required ? "required" : "optional"})`).join("\n") : "- None"}
+
+## Privacy and egress
+
+${metadata.privacyNotes.trim() || "No additional privacy or egress notes provided."}
+
+## Changelog
+
+${metadata.changelog.trim() || "- Initial community submission."}
+
+## Submission note
+
+This bundle was prepared by OpenAdminOS for public community review. It includes only agent source files and metadata. It does not include tenant data, prompts, run results, provider settings, tokens, or secrets.
+`;
+}
+
+function buildAgentBundleMetadata(manifest: AgentTemplate) {
+  return {
+    schema: "openadminos-agent-bundle/v1",
+    exportedAt: new Date(0).toISOString(),
+    agent: {
+      id: manifest.descriptor.id,
+      name: manifest.descriptor.name,
+      version: manifest.descriptor.version,
+      mode: manifest.descriptor.mode,
+      category: manifest.descriptor.category,
+      scopes: collectManifestScopes(manifest),
+      connectors: manifest.descriptor.connectors ?? [],
+    },
+    files: ["manifest.yaml", "README.md", "metadata.json"],
+    excludes: [
+      "tenant data",
+      "run history",
+      "prompts",
+      "provider settings",
+      "tokens",
+      "secrets",
+    ],
+  };
+}
+
+function buildCommunitySubmissionMetadata(
+  manifest: AgentTemplate,
+  metadata: AgentCommunitySubmissionMetadata,
+) {
+  return {
+    schema: "openadminos-agent-community-submission/v1",
+    submittedAt: new Date(0).toISOString(),
+    agent: {
+      id: manifest.descriptor.id,
+      name: metadata.name.trim() || manifest.descriptor.name,
+      description: metadata.description.trim() || manifest.descriptor.description,
+      version: manifest.descriptor.version,
+      mode: manifest.descriptor.mode,
+      category: metadata.category || manifest.descriptor.category,
+      scopes: collectManifestScopes(manifest),
+      connectors: manifest.descriptor.connectors ?? [],
+    },
+    maintainer: {
+      name: metadata.maintainerName.trim(),
+      supportUrl: metadata.supportUrl.trim(),
+    },
+    privacyNotes: metadata.privacyNotes.trim(),
+    changelog: metadata.changelog.trim(),
+    excludes: [
+      "tenant data",
+      "run history",
+      "prompts",
+      "provider settings",
+      "tokens",
+      "secrets",
+    ],
+  };
+}
+
+function buildAgentCommunitySubmissionReview(
+  yamlSource: string,
+  metadata: AgentCommunitySubmissionMetadata,
+  draft: AgentDraft,
+): AgentCommunitySubmissionReview {
+  const checks: AgentCommunitySubmissionReview["checks"] = [];
+  const manifest = draft.manifest;
+
+  checks.push({
+    id: "metadata-name",
+    label: "Agent name",
+    status: metadata.name.trim().length >= 3 ? "pass" : "fail",
+    detail:
+      metadata.name.trim().length >= 3
+        ? "Name is present."
+        : "Agent name is missing or too short.",
+    fix: "Use a clear public name, for example `Inactive device reviewer`.",
+  });
+  checks.push({
+    id: "metadata-description",
+    label: "Description",
+    status: metadata.description.trim().length >= 20 ? "pass" : "fail",
+    detail:
+      metadata.description.trim().length >= 20
+        ? "Description is present."
+        : "Description needs enough context for maintainers.",
+    fix: "Describe what the agent reads, what it reports, and when an admin should use it.",
+  });
+  checks.push({
+    id: "metadata-maintainer",
+    label: "Maintainer",
+    status: metadata.maintainerName.trim().length >= 2 ? "pass" : "fail",
+    detail:
+      metadata.maintainerName.trim().length >= 2
+        ? "Maintainer name is present."
+        : "Maintainer name is required for review follow-up.",
+    fix: "Add your display name or organization name.",
+  });
+  checks.push(validateSupportUrl(metadata.supportUrl));
+  checks.push({
+    id: "license",
+    label: "License",
+    status: metadata.licenseConfirmed ? "pass" : "fail",
+    detail: metadata.licenseConfirmed
+      ? "MIT contribution confirmation is checked."
+      : "Community submissions must be contributed under the project license.",
+    fix: "Confirm that you can submit this agent under the MIT license.",
+  });
+  checks.push({
+    id: "privacy-notes",
+    label: "Privacy notes",
+    status: metadata.privacyNotes.trim().length >= 10 ? "pass" : "fail",
+    detail:
+      metadata.privacyNotes.trim().length >= 10
+        ? "Privacy and egress notes are present."
+        : "Privacy and egress notes are missing.",
+    fix: "State what data the agent reads and whether it uses connectors or hosted providers.",
+  });
+
+  if (!manifest) {
+    checks.push({
+      id: "manifest",
+      label: "Manifest",
+      status: "fail",
+      detail: draft.validationErrors.join("; ") || "Manifest failed validation.",
+      fix: "Open Edit, fix the YAML validation errors, then run QA again.",
+    });
+    return finalizeCommunitySubmissionReview(yamlSource, metadata, undefined, checks);
+  }
+
+  checks.push({
+    id: "manifest",
+    label: "Manifest",
+    status: draft.validationErrors.length === 0 ? "pass" : "fail",
+    detail:
+      draft.validationErrors.length === 0
+        ? "Schema, Graph endpoints, scopes, connector declarations, and LLM-step checks pass."
+        : draft.validationErrors.join("; "),
+    fix: "Open Edit, fix the YAML validation errors, then run QA again.",
+  });
+  checks.push({
+    id: "metadata-category",
+    label: "Category",
+    status: metadata.category === manifest.descriptor.category ? "pass" : "fail",
+    detail:
+      metadata.category === manifest.descriptor.category
+        ? "Submission category matches the manifest."
+        : `Submission category "${metadata.category}" does not match manifest category "${manifest.descriptor.category}".`,
+    fix: "Edit the manifest descriptor.category or choose the matching category before submitting.",
+  });
+
+  const writeSteps = manifest.skills.filter((skill) => skill.format === "write");
+  checks.push({
+    id: "write-confirmation",
+    label: "Write confirmation",
+    status:
+      manifest.descriptor.mode === "write" && writeSteps.length === 0 ? "fail" : "pass",
+    detail:
+      writeSteps.length > 0
+        ? `${writeSteps.length} write step(s) will use typed confirmation.`
+        : manifest.descriptor.mode === "write"
+          ? "Write agent declares no write step."
+          : "Read-only agent has no write steps.",
+    fix: "Declare write actions with a confirmation phrase, or change the manifest mode to read.",
+  });
+
+  const connectors = manifest.descriptor.connectors ?? [];
+  checks.push({
+    id: "connectors",
+    label: "Connector declarations",
+    status: connectors.length > 0 ? "warn" : "pass",
+    detail:
+      connectors.length > 0
+        ? `${connectors.length} connector declaration(s) will be highlighted for maintainer review.`
+        : "No connector egress declared.",
+    fix: "If connector egress is not intentional, remove the connector declaration and steps.",
+  });
+
+  const highRiskScopes = collectManifestScopes(manifest).filter(isHighRiskScope);
+  checks.push({
+    id: "security-scopes",
+    label: "Security flags",
+    status:
+      highRiskScopes.length > 0 || writeSteps.length > 0 || connectors.length > 0
+        ? "warn"
+        : "pass",
+    detail:
+      highRiskScopes.length > 0
+        ? `High-risk scope(s) require maintainer review: ${highRiskScopes.join(", ")}.`
+        : writeSteps.length > 0
+          ? "Write actions require maintainer review."
+          : connectors.length > 0
+            ? "External connector egress requires maintainer review."
+            : "No high-risk scopes, write actions, or connector egress detected.",
+    fix: "Keep scopes as narrow as possible and explain why each write or connector action is needed.",
+  });
+
+  const secretMatches = findSecretLikeValues(
+    [
+      yamlSource,
+      metadata.name,
+      metadata.description,
+      metadata.maintainerName,
+      metadata.supportUrl,
+      metadata.privacyNotes,
+      metadata.changelog,
+    ].join("\n"),
+  );
+  checks.push({
+    id: "secrets",
+    label: "Secret scan",
+    status: secretMatches.length === 0 ? "pass" : "fail",
+    detail:
+      secretMatches.length === 0
+        ? "No obvious token, key, password, or tenant-id values found."
+        : `Possible secret-like text found: ${secretMatches.join(", ")}.`,
+    fix: "Remove tokens, tenant IDs, client secrets, API keys, and environment-specific values before submitting.",
+  });
+
+  const readme = buildCommunityAgentReadme(manifest, metadata);
+  checks.push({
+    id: "readme",
+    label: "README",
+    status: readme.length > 200 ? "pass" : "fail",
+    detail:
+      readme.length > 200
+        ? "README can be generated from the agent and metadata."
+        : "README is too short for review.",
+    fix: "Fill in description, privacy notes, and changelog, then run QA again.",
+  });
+
+  checks.push({
+    id: "public-issue",
+    label: "Public issue",
+    status: "pass",
+    detail: "Submission will create a public GitHub issue for maintainer review.",
+  });
+
+  return finalizeCommunitySubmissionReview(yamlSource, metadata, manifest, checks);
+}
+
+function finalizeCommunitySubmissionReview(
+  yamlSource: string,
+  metadata: AgentCommunitySubmissionMetadata,
+  manifest: AgentTemplate | undefined,
+  checks: AgentCommunitySubmissionReview["checks"],
+): AgentCommunitySubmissionReview {
+  const fallbackName = metadata.name.trim() || "New agent";
+  const issueTitle = `[New Agent] ${manifest?.descriptor.name ?? fallbackName}`;
+  const readmeMarkdown = manifest
+    ? buildCommunityAgentReadme(manifest, metadata)
+    : `# ${fallbackName}\n\n${metadata.description.trim()}\n`;
+  const metadataJson = JSON.stringify(
+    manifest
+      ? buildCommunitySubmissionMetadata(manifest, metadata)
+      : { schema: "openadminos-agent-community-submission/v1", agent: { name: fallbackName } },
+    null,
+    2,
+  );
+  const issueBody = buildCommunityIssueBody({
+    metadata,
+    manifest,
+    yamlSource,
+    readmeMarkdown,
+    metadataJson,
+    checks,
+  });
+  const blockingFailures = checks.some((check) => check.status === "fail");
+  const bodyTooLarge = issueBody.length > 58_000;
+  if (bodyTooLarge) {
+    checks.push({
+      id: "issue-size",
+      label: "Issue size",
+      status: "fail",
+      detail: "Submission is too large for a GitHub issue.",
+      fix: "Shorten long prompt text, comments, descriptions, or embedded examples in the manifest.",
+    });
+  }
+  return {
+    ok: !blockingFailures && !bodyTooLarge,
+    checks,
+    issueTitle,
+    issueBody,
+    package: {
+      manifestYaml: `${yamlSource.trimEnd()}\n`,
+      readmeMarkdown,
+      metadataJson: `${metadataJson}\n`,
+    },
+  };
+}
+
+function validateSupportUrl(
+  supportUrl: string,
+): AgentCommunitySubmissionReview["checks"][number] {
+  const trimmed = supportUrl.trim();
+  if (trimmed.startsWith("@") && trimmed.length > 1) {
+    return {
+      id: "support",
+      label: "Support contact",
+      status: "pass",
+      detail: "GitHub handle is present.",
+    };
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "https:" && parsed.hostname.length > 0) {
+      return {
+        id: "support",
+        label: "Support contact",
+        status: "pass",
+        detail: "Support URL is valid.",
+      };
+    }
+  } catch {
+    // handled below
+  }
+  return {
+    id: "support",
+    label: "Support contact",
+    status: "fail",
+    detail: "Support contact must be a GitHub handle or HTTPS URL.",
+    fix: "Use `@handle` or an HTTPS URL maintainers can use for follow-up.",
+  };
+}
+
+function buildCommunityIssueBody(input: {
+  metadata: AgentCommunitySubmissionMetadata;
+  manifest: AgentTemplate | undefined;
+  yamlSource: string;
+  readmeMarkdown: string;
+  metadataJson: string;
+  checks: AgentCommunitySubmissionReview["checks"];
+}): string {
+  const manifest = input.manifest;
+  const scopes = manifest ? collectManifestScopes(manifest) : [];
+  const connectors = manifest?.descriptor.connectors ?? [];
+  const writeSteps = manifest?.skills.filter((skill) => skill.format === "write") ?? [];
+  const checkLines = input.checks
+    .map((check) => `- [${check.status === "fail" ? " " : "x"}] ${check.label}: ${check.detail}`)
+    .join("\n");
+  return `## Summary
+
+${input.metadata.description.trim()}
+
+## Metadata
+
+- Name: ${input.metadata.name.trim()}
+- Category: ${input.metadata.category}
+- Maintainer: ${input.metadata.maintainerName.trim()}
+- Support: ${input.metadata.supportUrl.trim()}
+- License confirmed: ${input.metadata.licenseConfirmed ? "yes" : "no"}
+
+## Agent
+
+- Slug: ${manifest?.descriptor.id ?? "Unavailable"}
+- Version: ${manifest?.descriptor.version ?? "Unavailable"}
+- Mode: ${manifest?.descriptor.mode ?? "Unavailable"}
+- Graph scopes: ${scopes.length > 0 ? scopes.map((scope) => `\`${scope}\``).join(", ") : "None declared"}
+- Write steps: ${writeSteps.length}
+- Connectors: ${connectors.length > 0 ? connectors.map((connector) => `\`${connector.id}\``).join(", ") : "None"}
+
+## Privacy and egress
+
+${input.metadata.privacyNotes.trim()}
+
+## Changelog
+
+${input.metadata.changelog.trim() || "- Initial community submission."}
+
+## Local QA
+
+${checkLines}
+
+## Submitted files
+
+<details>
+<summary>manifest.yaml</summary>
+
+\`\`\`yaml
+${input.yamlSource.trimEnd()}
+\`\`\`
+</details>
+
+<details>
+<summary>README.md</summary>
+
+\`\`\`md
+${input.readmeMarkdown.trimEnd()}
+\`\`\`
+</details>
+
+<details>
+<summary>metadata.json</summary>
+
+\`\`\`json
+${input.metadataJson.trimEnd()}
+\`\`\`
+</details>
+
+## Exclusion statement
+
+This submission was prepared by OpenAdminOS. It must not include tenant data, prompts, run history, provider settings, tokens, or secrets.
+`;
+}
+
+function isHighRiskScope(scope: string): boolean {
+  return (
+    scope.includes("ReadWrite") ||
+    scope.includes("Privileged") ||
+    scope.endsWith(".All") && /Directory|User|Application/.test(scope)
+  );
+}
+
+function findSecretLikeValues(source: string): string[] {
+  const patterns: Array<[string, RegExp]> = [
+    ["password", /\bpassword\s*[:=]\s*["']?[^"'\s]{6,}/i],
+    ["secret", /\b(client[_-]?secret|secret)\s*[:=]\s*["']?[^"'\s]{8,}/i],
+    ["api key", /\b(api[_-]?key|token)\s*[:=]\s*["']?[^"'\s]{12,}/i],
+    ["tenant id", /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+    ["private key", /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+  ];
+  const matches = new Set<string>();
+  for (const [label, pattern] of patterns) {
+    if (pattern.test(source)) matches.add(label);
+  }
+  return [...matches];
+}
+
+function suggestAvailableSlug(baseSlug: string, reservedSlugs: Set<string>): string {
+  const base = baseSlug.replace(/-\d+$/, "") || "custom-agent";
+  for (let i = 2; i < 100; i += 1) {
+    const candidate = `${base}-${i}`;
+    if (!reservedSlugs.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now().toString(36)}`;
+}
+
 function formatCandidates(candidates: EndpointSummary[]): string {
   if (candidates.length === 0) return "(none)";
   return candidates
@@ -3020,6 +4154,7 @@ function formatCandidates(candidates: EndpointSummary[]): string {
 function buildNl2AgentSystemPrompt(
   readCandidates: EndpointSummary[],
   writeCandidates: EndpointSummary[] = [],
+  reservedSlugs: string[] = [],
 ): string {
   const readBlock =
     readCandidates.length === 0
@@ -3031,6 +4166,11 @@ function buildNl2AgentSystemPrompt(
       ? ""
       : `\n\nCandidate write endpoints (use these for a \`graph-write\` step — declare the listed scope):\n${formatCandidates(writeCandidates)}`;
 
+  const reservedSlugBlock =
+    reservedSlugs.length === 0
+      ? "(none)"
+      : reservedSlugs.slice(0, 80).map((slug) => `- ${slug}`).join("\n");
+
   return `You generate Agent Template manifests for OpenAdminOS — a desktop tool that runs AI agents against a Microsoft 365 tenant.
 
 The manifest is a YAML document with three top-level keys: descriptor, skills, definition.
@@ -3039,15 +4179,26 @@ Hard rules:
 - mode is "read" unless the user explicitly asks for a destructive (write) agent.
 - category must be one of: devices, apps, policies, compliance, updates.
 - Slug ids are lower-case hyphen-separated, e.g. "find-inactive-devices".
+- Do not reuse any reserved slug listed below. Pick a specific new slug such as "inactive-device-risk-review" rather than "test-agent".
+- New user-authored drafts start at version: 0.1.0. Use SemVer exactly.
 - Skill ids are lower-case snake_case, e.g. "load_devices".
 - Graph steps: pick the closest match from the candidate endpoints listed below. Do not invent endpoints — if none of the candidates fit, fall back to GET /deviceManagement/managedDevices. Always declare the scope shown alongside the endpoint.
-- Transform kinds available: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by.
+- Query values must be YAML strings, including numeric-looking OData values. Example: $top: "25".
+- Transform kinds available: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices.
+- Use definition.settings for user-adjustable values. Reference them as {{ settings.settingId }}. Supported setting types: string, integer, boolean.
+- Use a scheduled trigger only when the user asks for recurring checks. Always include a manual trigger too.
+- Use a map step when the user asks for per-item triage/rationale/classification. Put the per-item LLM step inside settings.do and add a small limit, e.g. limit: 25.
+- Use LLM inputs when the prompt consumes multiple prior outputs: inputs: { devices: "{{ load_devices.output }}", counts: "{{ by_state.output }}" }.
+- Use connector steps only when the user explicitly asks to send/post results to Teams. Then merge a descriptor.connectors array into the single top-level descriptor and use a connector step with capability post-channel-message version 1.
 - EVERY agent MUST include at least one step with format: llm. This is what makes it an agent rather than a deterministic query — the LLM writes the headline summary an admin reads. Do not gate it with "when:". The runtime preflights the provider and fails the run if one isn't connected, so the gate is unnecessary and misleading.
 - definition.result.summary MUST reference the LLM step's output, e.g.: {{ summarize.output.text | default("Summary unavailable.") }}. Do not put raw counts in the summary line — those belong in result.data.
 - Write-action kinds available: \`graph-write\` (the generic kind — any POST/PATCH/PUT/DELETE Graph endpoint, with typed-confirmation diff) and \`retire-managed-device\` (legacy alias for POST /deviceManagement/managedDevices/{id}/retire). Always prefer \`graph-write\` for new agents. For write agents, the LLM step should explain the planned actions in plain language and the write step's actionTemplate.label / actionTemplate.description should make every individual action self-explanatory. \`severity: destructive\` is the safe default unless the action is plainly reversible.
 - The confirmationPhrase must spell out the operation count and noun in CAPS, e.g. "DISABLE {{ actions | size }} GUEST ACCOUNTS" or "REVOKE {{ actions | size }} SESSIONS". This is what the admin types to approve the plan.
 - Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", ").
 - Always include a top-level "# yaml-language-server: $schema=../../schemas/agent-template.schema.json" comment.
+
+Reserved slugs you must not use:
+${reservedSlugBlock}
 
 Candidate Microsoft Graph read endpoints for this prompt (pick from these for graph steps — declare the listed scope):
 ${readBlock}${writeBlock}
@@ -3059,7 +4210,7 @@ descriptor:
   id: compliance-overview
   name: Compliance overview
   description: Counts Intune-managed devices by compliance state and writes a plain-language posture summary.
-  version: 1.0.0
+  version: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -3116,6 +4267,49 @@ definition:
       counts: "{{ by_state.output }}"
       llmModel: "{{ summarize.output.model }}"
 
+Pattern snippet — per-item map step with an inner LLM classifier:
+
+  - id: triage_items
+    format: map
+    label: Classify each risky item
+    settings:
+      source: "{{ load_items.output }}"
+      as: item
+      limit: 25
+      do:
+        - id: classify
+          format: llm
+          label: Classify this item
+          settings:
+            system: You are a Microsoft 365 administrator's assistant. Return concise JSON-like text.
+            prompt: |-
+              Classify this item as likely false positive, likely issue, or unclear.
+              Item: {{ item }}
+            temperature: 0.1
+            maxTokens: 180
+
+Pattern snippet — optional Teams connector delivery when explicitly requested:
+
+descriptor:
+  connectors:
+    - id: teams
+      minVersion: 1.0.0
+      required: false
+      capabilities:
+        - id: post-channel-message
+          version: 1
+skills:
+  - id: post_to_teams
+    format: connector
+    label: Post report to Teams
+    when: ctx.connectors.teams.available
+    settings:
+      connector: teams
+      capability: post-channel-message
+      version: 1
+      args:
+        markdown: "{{ summarize.output.text }}"
+
 Reference example — write agent using graph-write to disable inactive guest users:
 
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
@@ -3123,7 +4317,7 @@ descriptor:
   id: disable-inactive-guests
   name: Disable inactive guest accounts
   description: Disables guest accounts that have not signed in for 90+ days after typed diff confirmation.
-  version: 1.0.0
+  version: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -3196,6 +4390,28 @@ When the user's description is vague, pick sensible defaults and continue — do
 Output: a single YAML manifest. Nothing else.`;
 }
 
+function buildNl2AgentRepairPrompt(
+  originalDescription: string,
+  failedDraft: AgentDraft,
+): string {
+  return `Repair this OpenAdminOS manifest.yaml so it passes validation.
+
+Original user description:
+"""
+${originalDescription}
+"""
+
+Validation errors:
+${failedDraft.validationErrors.map((error) => `- ${error}`).join("\n")}
+
+YAML to repair:
+"""
+${failedDraft.yamlSource}
+"""
+
+Return ONLY the corrected YAML manifest. Do not include commentary, headings, or markdown fences.`;
+}
+
 function stripCodeFences(source: string): string {
   // The LLM sometimes wraps output in \`\`\`yaml fences despite the system
   // prompt. Strip a leading and trailing fence if present so the
@@ -3211,3 +4427,243 @@ function stripCodeFences(source: string): string {
   }
   return s.trim();
 }
+
+function sha256(source: string): string {
+  return createHash("sha256").update(source, "utf8").digest("hex");
+}
+
+function buildAgentProvenance(input: {
+  agent: RegistryAgentSummary;
+  installedAt: string;
+  updatedAt?: string;
+  manifestText?: string;
+  manifestSha256?: string;
+  source?: "registry" | "bundled" | "user";
+}): NonNullable<AgentSummary["provenance"]> {
+  const source =
+    input.source ??
+    (input.agent.manifestUrl
+      ? "registry"
+      : input.agent.registryPath?.includes("user-agents")
+        ? "user"
+        : "bundled");
+  return {
+    source,
+    ...(input.agent.manifestUrl ? { manifestUrl: input.agent.manifestUrl } : {}),
+    ...(input.agent.registryPath ? { registryPath: input.agent.registryPath } : {}),
+    ...(input.manifestSha256
+      ? { manifestSha256: input.manifestSha256 }
+      : input.manifestText
+        ? { manifestSha256: sha256(input.manifestText) }
+        : {}),
+    installedVersion: input.agent.version,
+    installedAt: input.installedAt,
+    ...(input.updatedAt ? { updatedAt: input.updatedAt } : {}),
+    ...(input.agent.manifestUrl
+      ? { registryRef: extractRegistryRef(input.agent.manifestUrl) }
+      : {}),
+    ...(input.agent.minAppVersion ? { minAppVersion: input.agent.minAppVersion } : {}),
+  };
+}
+
+function withAgentCompatibility<T extends { minAppVersion?: string; name?: string }>(
+  agent: T,
+  appVersion: string,
+): T & { compatibility: NonNullable<AgentSummary["compatibility"]> } {
+  const minAppVersion = agent.minAppVersion ?? "0.1.0";
+  const supported = compareSemver(appVersion, minAppVersion) >= 0;
+  return {
+    ...agent,
+    minAppVersion,
+    compatibility: {
+      supported,
+      appVersion,
+      minAppVersion,
+      ...(supported
+        ? {}
+        : {
+            reason: `${agent.name ?? "This agent"} requires OpenAdminOS ${minAppVersion} or newer. You are running ${appVersion}.`,
+          }),
+    },
+  };
+}
+
+function assertAgentCompatible(
+  agent: { name?: string; compatibility?: AgentSummary["compatibility"] },
+  action: "install" | "run" | "update" | "review",
+): void {
+  if (agent.compatibility?.supported !== false) return;
+  const verb =
+    action === "install"
+      ? "install"
+      : action === "run"
+        ? "run"
+        : action === "update"
+          ? "update"
+          : "review updates for";
+  throw new Error(
+    `Update OpenAdminOS to ${agent.compatibility.minAppVersion} before you ${verb} ${agent.name ?? "this agent"}. Current version: ${agent.compatibility.appVersion}.`,
+  );
+}
+
+function buildAgentUpdateReview(input: {
+  previous: AgentSummary;
+  target: RegistryAgentSummary;
+  parsedManifest: ReturnType<typeof parseAgentTemplate>;
+  manifestText: string;
+  manifestSha256: string;
+}): AgentUpdateReview {
+  const changes: AgentUpdateTrustChange[] = [];
+  const previousScopes = new Set(input.previous.scopes);
+  const nextScopes = new Set([
+    ...input.target.scopes,
+    ...collectTemplateScopes(input.parsedManifest.skills),
+  ]);
+  const addedScopes = [...nextScopes].filter((scope) => !previousScopes.has(scope)).sort();
+  if (addedScopes.length > 0) {
+    changes.push({
+      id: "graph-scopes-added",
+      label: "New Graph permissions",
+      severity: addedScopes.some(isHighRiskGraphScope) ? "danger" : "warn",
+      detail: `Adds ${addedScopes.length} Graph scope${addedScopes.length === 1 ? "" : "s"}: ${addedScopes.join(", ")}.`,
+      before: input.previous.scopes.join(", ") || "none",
+      after: [...nextScopes].sort().join(", ") || "none",
+    });
+  }
+
+  const nextWriteKinds = collectWriteKinds(input.parsedManifest.skills);
+  if (input.previous.mode !== "write" && input.target.mode === "write") {
+    changes.push({
+      id: "write-mode-added",
+      label: "Write actions enabled",
+      severity: "danger",
+      detail:
+        "This update changes the agent from read-only to write-capable. Runs will require diff confirmation before applying changes.",
+      before: input.previous.mode,
+      after: input.target.mode,
+    });
+  } else if (input.previous.mode === "write" && nextWriteKinds.length > 0) {
+    changes.push({
+      id: "write-actions-reviewed",
+      label: "Write action template changed",
+      severity: "warn",
+      detail: `Review the updated write action kind${nextWriteKinds.length === 1 ? "" : "s"}: ${nextWriteKinds.join(", ")}.`,
+      after: nextWriteKinds.join(", "),
+    });
+  }
+
+  const previousConnectors = new Set(
+    (input.previous.connectors ?? []).map((connector) => connector.id),
+  );
+  const nextConnectors = new Set(
+    (input.parsedManifest.descriptor.connectors ?? []).map((connector) => connector.id),
+  );
+  const addedConnectors = [...nextConnectors]
+    .filter((connector) => !previousConnectors.has(connector))
+    .sort();
+  if (addedConnectors.length > 0) {
+    changes.push({
+      id: "connector-egress-added",
+      label: "New connector egress",
+      severity: "danger",
+      detail: `Adds external connector access: ${addedConnectors.join(", ")}.`,
+      before: [...previousConnectors].sort().join(", ") || "none",
+      after: [...nextConnectors].sort().join(", ") || "none",
+    });
+  }
+
+  const previousMin = input.previous.provenance?.minAppVersion ?? "0.1.0";
+  const nextMin = input.target.minAppVersion ?? previousMin;
+  if (compareSemver(nextMin, previousMin) > 0) {
+    changes.push({
+      id: "min-app-version-raised",
+      label: "Minimum app version raised",
+      severity: "warn",
+      detail: `Requires OpenAdminOS ${nextMin} or newer.`,
+      before: previousMin,
+      after: nextMin,
+    });
+  }
+
+  if (input.previous.provenance?.manifestSha256 && input.previous.provenance.manifestSha256 !== input.manifestSha256) {
+    changes.push({
+      id: "manifest-hash-changed",
+      label: "Manifest digest changed",
+      severity: "info",
+      detail: `New SHA-256 digest ${input.manifestSha256.slice(0, 12)}…`,
+      before: input.previous.provenance.manifestSha256.slice(0, 12),
+      after: input.manifestSha256.slice(0, 12),
+    });
+  }
+
+  return {
+    slug: input.target.slug,
+    fromVersion: input.previous.version,
+    toVersion: input.target.version,
+    manifestUrl: input.target.manifestUrl ?? "",
+    manifestSha256: input.manifestSha256,
+    requiresConfirmation: changes.some(
+      (change) => change.severity === "warn" || change.severity === "danger",
+    ),
+    changes:
+      changes.length > 0
+        ? changes
+        : [
+            {
+              id: "metadata-only",
+              label: "Metadata-only update",
+              severity: "info",
+              detail:
+                "No new Graph scopes, write actions, connector egress, or app-version requirements detected.",
+            },
+          ],
+  };
+}
+
+function collectTemplateScopes(skills: AgentTemplate["skills"]): string[] {
+  const scopes = new Set<string>();
+  const visit = (steps: AgentTemplate["skills"]): void => {
+    for (const step of steps) {
+      const value = (step as { settings?: { scopes?: unknown; do?: unknown } }).settings?.scopes;
+      if (Array.isArray(value)) {
+        for (const scope of value) {
+          if (typeof scope === "string") scopes.add(scope);
+        }
+      }
+      const nested = (step as { settings?: { do?: unknown } }).settings?.do;
+      if (Array.isArray(nested)) visit(nested as AgentTemplate["skills"]);
+    }
+  };
+  visit(skills);
+  return [...scopes];
+}
+
+function collectWriteKinds(skills: AgentTemplate["skills"]): string[] {
+  const kinds = new Set<string>();
+  const visit = (steps: AgentTemplate["skills"]): void => {
+    for (const step of steps) {
+      if (step.format === "write") {
+        kinds.add(step.settings.kind);
+      }
+      const nested = (step as { settings?: { do?: unknown } }).settings?.do;
+      if (Array.isArray(nested)) visit(nested as AgentTemplate["skills"]);
+    }
+  };
+  visit(skills);
+  return [...kinds].sort();
+}
+
+function isHighRiskGraphScope(scope: string): boolean {
+  return /ReadWrite|Privileged|\.All$/i.test(scope) && !/Read\.All$/i.test(scope);
+}
+
+function extractRegistryRef(manifestUrl: string): string | undefined {
+  const match = manifestUrl.match(/githubusercontent\.com\/[^/]+\/[^/]+\/([^/]+)\//);
+  return match?.[1];
+}
+
+export const __agentDraftTestUtils = {
+  validateAgentDraftSource,
+  buildNl2AgentSystemPrompt,
+  buildAgentCommunitySubmissionReview,
+};

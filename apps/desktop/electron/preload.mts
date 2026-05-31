@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   HostPlatform,
   OpenAdminOSApi,
+  AgentCommunitySubmissionMetadata,
   PendingConnectorConfirmation,
   PendingConnectorDecision,
   ProviderId,
@@ -87,8 +88,10 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:install-agent", agentId),
   uninstallAgent: (slug: string) =>
     ipcRenderer.invoke("openadminos:uninstall-agent", slug),
-  updateAgent: (slug: string) =>
-    ipcRenderer.invoke("openadminos:update-agent", slug),
+  getAgentUpdateReview: (slug: string) =>
+    ipcRenderer.invoke("openadminos:get-agent-update-review", slug),
+  updateAgent: (slug: string, options?: { confirmTrustChanges?: boolean }) =>
+    ipcRenderer.invoke("openadminos:update-agent", slug, options),
   setActiveProvider: (id: ProviderId) =>
     ipcRenderer.invoke("openadminos:set-active-provider", id),
   setActiveModel: (providerId: ProviderId, model: string | null) =>
@@ -118,8 +121,38 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:update-agent-teams-delivery", slug, delivery),
   draftAgentManifest: (prompt: string) =>
     ipcRenderer.invoke("openadminos:draft-agent-manifest", prompt),
+  validateAgentDraft: (yamlSource: string, allowedSlug?: string) =>
+    ipcRenderer.invoke("openadminos:validate-agent-draft", yamlSource, allowedSlug),
+  preflightAgentDraft: (yamlSource: string, allowedSlug?: string) =>
+    ipcRenderer.invoke("openadminos:preflight-agent-draft", yamlSource, allowedSlug),
   saveAgentDraft: (yamlSource: string) =>
     ipcRenderer.invoke("openadminos:save-agent-draft", yamlSource),
+  updateUserAgentDraft: (slug: string, yamlSource: string) =>
+    ipcRenderer.invoke("openadminos:update-user-agent-draft", slug, yamlSource),
+  exportAgentDraftBundle: (yamlSource: string) =>
+    ipcRenderer.invoke("openadminos:export-agent-draft-bundle", yamlSource),
+  prepareAgentCommunitySubmission: (
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ) =>
+    ipcRenderer.invoke(
+      "openadminos:prepare-agent-community-submission",
+      yamlSource,
+      metadata,
+      allowedSlug,
+    ),
+  submitAgentCommunitySubmission: (
+    yamlSource: string,
+    metadata: AgentCommunitySubmissionMetadata,
+    allowedSlug?: string,
+  ) =>
+    ipcRenderer.invoke(
+      "openadminos:submit-agent-community-submission",
+      yamlSource,
+      metadata,
+      allowedSlug,
+    ),
   openExternal: (url: string) =>
     ipcRenderer.invoke("openadminos:open-external", url),
   saveTextFile: (args: SaveTextFileArgs) =>

@@ -20,6 +20,8 @@ export interface ProjectReport {
    * `schemas/agent-template.schema.json`.
    */
   schemas: { slug: string; manifestPath: string; results: CheckResult[] }[];
+  content: { slug: string; results: CheckResult[] }[];
+  registry: { results: CheckResult[] };
   /**
    * Validation results for `stats/agents.json`. Empty `results` array
    * means the file is absent (acceptable until phase 3 lands). One entry
@@ -89,6 +91,34 @@ export function formatReport(report: ProjectReport): string {
     }
   }
 
+  if (report.registry.results.length > 0) {
+    lines.push("");
+    const severity = summarize(report.registry.results);
+    lines.push(`${SYMBOL[severity]} registry: agents/index.json`);
+    for (const result of report.registry.results) {
+      lines.push(`  ${SYMBOL[result.severity]} ${result.name}: ${result.message}`);
+      if (result.details) {
+        for (const detail of result.details) {
+          lines.push(`      - ${detail}`);
+        }
+      }
+    }
+  }
+
+  for (const content of report.content) {
+    lines.push("");
+    const severity = summarize(content.results);
+    lines.push(`${SYMBOL[severity]} content: ${content.slug}`);
+    for (const result of content.results) {
+      lines.push(`  ${SYMBOL[result.severity]} ${result.name}: ${result.message}`);
+      if (result.details) {
+        for (const detail of result.details) {
+          lines.push(`      - ${detail}`);
+        }
+      }
+    }
+  }
+
   const totals = countTotals(report);
   lines.push("");
   lines.push(
@@ -137,6 +167,18 @@ function countTotals(report: ProjectReport): { pass: number; warn: number; fail:
     if (result.severity === "pass") pass++;
     else if (result.severity === "warn") warn++;
     else fail++;
+  }
+  for (const result of report.registry.results) {
+    if (result.severity === "pass") pass++;
+    else if (result.severity === "warn") warn++;
+    else fail++;
+  }
+  for (const content of report.content) {
+    for (const result of content.results) {
+      if (result.severity === "pass") pass++;
+      else if (result.severity === "warn") warn++;
+      else fail++;
+    }
   }
   return { pass, warn, fail };
 }

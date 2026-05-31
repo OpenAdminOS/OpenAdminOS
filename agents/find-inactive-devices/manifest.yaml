@@ -12,6 +12,7 @@ descriptor:
   name: Find inactive devices
   description: Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.
   version: 1.1.0
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos

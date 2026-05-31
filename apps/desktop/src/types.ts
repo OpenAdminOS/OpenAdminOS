@@ -31,6 +31,13 @@ export interface Agent {
   updateAvailable?: {
     version: string;
     manifestUrl: string;
+    minAppVersion?: string;
+  };
+  compatibility?: {
+    supported: boolean;
+    appVersion: string;
+    minAppVersion: string;
+    reason?: string;
   };
 }
 

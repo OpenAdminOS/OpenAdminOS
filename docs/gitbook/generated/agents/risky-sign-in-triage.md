@@ -21,7 +21,7 @@ Classifies recent Entra risky users by risk level, state, detail, and processing
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-05-28 · `8b9007b` |
+| Last changed | 2026-05-29 · `3a69fc6` |
 
 ## Tenant Data Access
 

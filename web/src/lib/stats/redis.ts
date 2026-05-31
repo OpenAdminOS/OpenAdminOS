@@ -22,6 +22,7 @@ export function getRedis(): Redis {
  *   oa:pending:installs:<slug>             integer     pending install delta
  *   oa:dedup:<installId>:<slug>            string      "1" + 1y TTL; installId is a yearly per-agent digest for current clients
  *   oa:rate:install:<ip>:<bucket>          integer     rate-limit counter (60s TTL)
+ *   oa:rate:agent-submit:<ip>:<bucket>     integer     rate-limit counter (1h TTL)
  *   oa:installs7d:<slug>                   zset        installId → unix-ms score
  *   oa:slugs                               string      JSON-encoded array, 1h TTL
  */
@@ -29,6 +30,7 @@ export const keys = {
   pendingInstalls: (slug: string) => `oa:pending:installs:${slug}`,
   dedup: (installId: string, slug: string) => `oa:dedup:${installId}:${slug}`,
   rate: (ip: string, bucket: number) => `oa:rate:install:${ip}:${bucket}`,
+  agentSubmissionRate: (ip: string, bucket: number) => `oa:rate:agent-submit:${ip}:${bucket}`,
   installs7d: (slug: string) => `oa:installs7d:${slug}`,
   knownSlugs: () => `oa:slugs`,
 } as const;

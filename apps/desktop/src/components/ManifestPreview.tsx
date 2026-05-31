@@ -31,6 +31,7 @@ export function ManifestPreview({
   settingsOverrides,
   showDescriptor = false,
   defaultPipelineOpen = false,
+  showRawSource = true,
 }: {
   preview: AgentManifestPreview;
   /**
@@ -53,6 +54,8 @@ export function ManifestPreview({
    * an extra click.
    */
   defaultPipelineOpen?: boolean;
+  /** Hide the raw-source disclosure when the caller already shows an editor. */
+  showRawSource?: boolean;
 }) {
   const { manifest, sourceText, registryPath } = preview;
   const scopes = collectScopesFromManifest(manifest);
@@ -63,13 +66,15 @@ export function ManifestPreview({
       <PipelineCard steps={manifest.skills} defaultOpen={defaultPipelineOpen} />
       <SettingsCard manifest={manifest} overrides={settingsOverrides} />
       <ResultCard manifest={manifest} />
-      <RawSourceCard
-        sourceText={sourceText}
-        registryPath={registryPath}
-        languageHint="yaml"
-        title="Raw manifest"
-        helperText="This is the exact YAML the runtime loaded. The pipeline above is derived from it — there is no hidden code path."
-      />
+      {showRawSource && (
+        <RawSourceCard
+          sourceText={sourceText}
+          registryPath={registryPath}
+          languageHint="yaml"
+          title="Raw manifest"
+          helperText="This is the exact YAML the runtime loaded. The pipeline above is derived from it — there is no hidden code path."
+        />
+      )}
     </div>
   );
 }

@@ -56,6 +56,21 @@ function EntraTierBadge({
   );
 }
 
+function CompatibilityBadge({
+  minAppVersion,
+  supported,
+}: {
+  minAppVersion?: string;
+  supported?: boolean;
+}) {
+  if (!minAppVersion) return null;
+  return (
+    <Pill tone={supported === false ? "warning" : "default"}>
+      {supported === false ? `Needs OpenAdminOS ${minAppVersion}` : `OpenAdminOS ${minAppVersion}+`}
+    </Pill>
+  );
+}
+
 export default function AgentHub() {
   const { state, registryAgents, installAgent, refreshRegistry } = useAppState();
   const navigate = useNavigate();
@@ -156,6 +171,11 @@ export default function AgentHub() {
 
   const installedCount = registryAgents.filter(isInstalled).length;
   const onInstall = async (agent: RegistryAgentSummary) => {
+    if (agent.compatibility?.supported === false) {
+      setManifestAgent(agent);
+      setConfirmInstall(false);
+      return;
+    }
     setInstallingAgentId(agent.id);
     try {
       await installAgent(agent.registryId);
@@ -281,7 +301,7 @@ export default function AgentHub() {
                     tenantTier={tenantTier}
                     onInstall={() => {
                       setManifestAgent(agent);
-                      setConfirmInstall(true);
+                      setConfirmInstall(agent.compatibility?.supported !== false);
                     }}
                     onOpen={() => onOpenAgent(agent)}
                     onViewDetails={() => {
@@ -377,6 +397,10 @@ function AgentInstallDetails({
               required={agent.requiresEntraTier ?? "free"}
               tenantTier={tenantTier}
             />
+            <CompatibilityBadge
+              minAppVersion={agent.compatibility?.minAppVersion ?? agent.minAppVersion}
+              supported={agent.compatibility?.supported}
+            />
           </div>
           <p className="mt-4 text-[14px] leading-relaxed text-[var(--color-text)]">
             {agent.description}
@@ -385,6 +409,10 @@ function AgentInstallDetails({
             {installed ? (
               <Button variant="primary" leadingIcon={<IconCheck size={12} />} onClick={onOpen}>
                 Open agent
+              </Button>
+            ) : agent.compatibility?.supported === false ? (
+              <Button variant="secondary" onClick={onRequestInstall}>
+                Update OpenAdminOS
               </Button>
             ) : (
               <Button variant="primary" onClick={onRequestInstall}>
@@ -444,7 +472,20 @@ function AgentInstallDetails({
         </div>
       )}
 
-      <div className="grid gap-3 md:grid-cols-3">
+      {!installed && agent.compatibility?.supported === false && (
+        <div className="rounded-lg bg-[var(--color-warning-soft)] p-4 ring-1 ring-[var(--color-warning)]/30">
+          <div className="text-[13px] font-medium text-[var(--color-text)]">
+            Update OpenAdminOS
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+            This agent requires OpenAdminOS {agent.compatibility.minAppVersion} or newer.
+            You are running {agent.compatibility.appVersion}. Install is blocked so the
+            app does not attempt to run unsupported agent syntax.
+          </p>
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-4">
         <DecisionFact
           label="Tenant impact"
           value={agent.mode === "write" ? "Can propose changes" : "Read-only"}
@@ -454,6 +495,19 @@ function AgentInstallDetails({
           label="License"
           value={(agent.requiresEntraTier ?? "free") === "free" ? "No premium tier declared" : `Entra ID ${(agent.requiresEntraTier ?? "free").toUpperCase()}`}
           detail="Checked before a run when tenant tier is known."
+        />
+        <DecisionFact
+          label="Compatibility"
+          value={
+            agent.compatibility?.supported === false
+              ? "Update required"
+              : `OpenAdminOS ${agent.compatibility?.minAppVersion ?? agent.minAppVersion ?? "0.1.0"}+`
+          }
+          detail={
+            agent.compatibility?.supported === false
+              ? `Requires ${agent.compatibility.minAppVersion}; current app is ${agent.compatibility.appVersion}.`
+              : "Compatible with this app version."
+          }
         />
         <DecisionFact
           label="Install state"
@@ -618,6 +672,10 @@ function HubAgentCard({
             required={agent.requiresEntraTier ?? "free"}
             tenantTier={tenantTier}
           />
+          <CompatibilityBadge
+            minAppVersion={agent.compatibility?.minAppVersion ?? agent.minAppVersion}
+            supported={agent.compatibility?.supported}
+          />
           <Pill>
             {agent.scopes.length} scope{agent.scopes.length === 1 ? "" : "s"}
           </Pill>
@@ -657,6 +715,17 @@ function HubAgentCard({
                 }}
               >
                 Open
+              </Button>
+            ) : agent.compatibility?.supported === false ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onViewDetails();
+                }}
+              >
+                Update app
               </Button>
             ) : (
               <Button

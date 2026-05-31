@@ -14,6 +14,7 @@ descriptor:
   name: OS update posture
   description: Reviews Intune OS version distribution, compliance, ownership, enrollment, and stale inventory signals so admins can prioritize update work.
   version: 1.1.0
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos

@@ -7,7 +7,7 @@
  * manifestUrls. Defaults to the canonical GitHub raw URL for this repo.
  */
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const agentsRoot = join(repoRoot, "agents");
 const outPath = join(agentsRoot, "index.json");
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
 function parseManifest(manifestPath) {
   const raw = parseYaml(readFileSync(manifestPath, "utf8"));
@@ -59,7 +60,7 @@ function parseManifest(manifestPath) {
       verified: descriptor.author?.verified ?? false,
     },
     scopes: [...scopes],
-    minAppVersion: descriptor.minAppVersion ?? "0.1.0",
+    minAppVersion: descriptor.minAppVersion ?? "",
   };
 }
 
@@ -81,6 +82,31 @@ const entries = readdirSync(agentsRoot)
   })
   .filter((e) => e.id.length > 0)
   .sort((a, b) => a.slug.localeCompare(b.slug));
+
+const errors = [];
+const seen = new Set();
+for (const entry of entries) {
+  if (seen.has(entry.slug)) errors.push(`duplicate slug: ${entry.slug}`);
+  seen.add(entry.slug);
+  if (!SEMVER_RE.test(entry.version)) {
+    errors.push(`${entry.slug}: descriptor.version must be semver, got "${entry.version}"`);
+  }
+  if (!SEMVER_RE.test(entry.minAppVersion)) {
+    errors.push(`${entry.slug}: descriptor.minAppVersion is required and must be semver, got "${entry.minAppVersion || "missing"}"`);
+  }
+  if (!entry.name || !entry.description) {
+    errors.push(`${entry.slug}: descriptor.name and descriptor.description are required`);
+  }
+  if (!existsSync(join(agentsRoot, entry.slug, "README.md"))) {
+    errors.push(`${entry.slug}: README.md is required`);
+  }
+}
+
+if (errors.length > 0) {
+  console.error("Registry index generation failed:");
+  for (const error of errors) console.error(`  - ${error}`);
+  process.exit(1);
+}
 
 // `generatedAt` is deliberately omitted. We tried a Date.now() value
 // and a CI verify-against-checked-in step, but the live timestamp

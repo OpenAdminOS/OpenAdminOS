@@ -219,6 +219,8 @@ export function toInstalledAgent(
     preferredModel: agent.preferredModel,
     registryId: agent.registryId,
     registryPath: agent.registryPath,
+    minAppVersion: agent.minAppVersion,
+    compatibility: agent.compatibility,
     graphOperations: agent.graphOperations,
     ...(agent.connectors && agent.connectors.length > 0
       ? { connectors: agent.connectors }

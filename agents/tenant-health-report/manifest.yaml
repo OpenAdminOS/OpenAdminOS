@@ -12,6 +12,7 @@ descriptor:
   name: Tenant health report
   description: Summarizes Intune tenant health from compliance, OS, ownership, and stale inventory signals for scheduled or manual review.
   version: 1.1.0
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos

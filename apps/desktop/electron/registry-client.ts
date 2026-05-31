@@ -101,26 +101,12 @@ function writeCache(userDataPath: string, index: RegistryIndex, sourceUrl: strin
   writeFileSync(cachePath(userDataPath), JSON.stringify(cached, null, 2) + "\n");
 }
 
-function satisfiesMinVersion(minAppVersion: string, appVersion: string): boolean {
-  const [mMaj = 0, mMin = 0] = minAppVersion.split(".").map(Number);
-  const [aMaj = 0, aMin = 0] = appVersion.split(".").map(Number);
-  if (aMaj !== mMaj) return aMaj > mMaj;
-  return aMin >= mMin;
-}
-
 export async function refreshRegistry(
   userDataPath: string,
   registrySource: string,
 ): Promise<RefreshResult> {
   const sourceUrl = registrySource.replace(/\/$/, "");
   const indexUrl = `${sourceUrl}/index.json`;
-  let appVersion = "0.0.0";
-  try {
-    const { app } = await import("electron");
-    appVersion = app.getVersion();
-  } catch {
-    // dev/test context without Electron
-  }
 
   let fetchedIndex: RegistryIndex | null = null;
   let fetchError: string | null = null;
@@ -148,18 +134,12 @@ export async function refreshRegistry(
 
   if (fetchedIndex) {
     writeCache(userDataPath, fetchedIndex, sourceUrl);
-    const filtered = fetchedIndex.agents.filter((e) =>
-      satisfiesMinVersion(e.minAppVersion, appVersion),
-    );
-    return { entries: filtered, fromCache: false, cachedAt: new Date().toISOString(), error: null };
+    return { entries: fetchedIndex.agents, fromCache: false, cachedAt: new Date().toISOString(), error: null };
   }
 
   const cached = readCache(userDataPath);
   if (cached) {
-    const filtered = cached.agents.filter((e) =>
-      satisfiesMinVersion(e.minAppVersion, appVersion),
-    );
-    return { entries: filtered, fromCache: true, cachedAt: cached.cachedAt, error: fetchError };
+    return { entries: cached.agents, fromCache: true, cachedAt: cached.cachedAt, error: fetchError };
   }
 
   return { entries: [], fromCache: false, cachedAt: null, error: fetchError };
@@ -168,14 +148,11 @@ export async function refreshRegistry(
 export function readCachedRegistry(
   userDataPath: string,
   _registrySource: string,
-  appVersion = "0.0.0",
+  _appVersion = "0.0.0",
 ): RefreshResult {
   const cached = readCache(userDataPath);
   if (cached) {
-    const filtered = cached.agents.filter((e) =>
-      satisfiesMinVersion(e.minAppVersion, appVersion),
-    );
-    return { entries: filtered, fromCache: true, cachedAt: cached.cachedAt, error: null };
+    return { entries: cached.agents, fromCache: true, cachedAt: cached.cachedAt, error: null };
   }
   return { entries: [], fromCache: false, cachedAt: null, error: null };
 }

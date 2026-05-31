@@ -1,3 +1,72 @@
+# v0.2.1 — Candidate backlog
+
+**Status: proposal.** Follow-up release after v0.2.0. The theme is making the agent ecosystem feel solid: "Build your own Agent" should be reliable enough for non-developer admins, and "Share with the community" should move a local agent into the public Agent Hub without weakening the registry trust model.
+
+## Priority 1 — Make "Build your own Agent" production-grade
+
+- [x] **Rename the surface to "Build your own Agent"** wherever the current UI says "New agent" / NL2Agent, if that is the product wording we want to ship.
+- [x] **Guided builder mode** — offer structured fields before the free-form prompt: target area, read/write intent, desired output, schedule intent, and Teams-delivery suggestion.
+- [x] **Prompt-to-manifest reliability pass (first pass)** — expanded the drafter guidance for schema v2 patterns: settings, scheduled triggers, `map`, multi-input LLM steps, generic `graph-write`, connector steps, OData query strings, Entra tier hints, and reserved slug avoidance.
+- [x] **Draft repair loop** — when generated YAML fails schema / Graph QA, feed the exact validation errors back to the LLM once or twice before showing the user a failed draft.
+- [x] **Manual YAML editor** — allow editing the generated manifest before save, with inline schema errors, Graph endpoint/scope errors, and an explicit "validate again" action.
+- [x] **Local test run before install** — run a preflight-only check against the active tenant: provider reachable, Graph scopes known, endpoints valid, connector requirements understood. For write agents, the check verifies the typed-confirmation gate and does not apply Graph changes.
+- [x] **Agent capability preview** — before Save & install, show a compact summary: Graph steps, required scopes, LLM usage, confirmation tier, provider residency, settings, connector targets, schedule eligibility, and editable version.
+- [x] **Better slug/version handling** — drafter now sees reserved slugs, user-authored examples default to `0.1.0`, validation detects slug collisions, collision errors suggest an available alternative, and the review pane exposes version editing.
+- [x] **Edit existing user-authored agents** — allow opening a local agent back in the builder, saving as a new version, and preserving install settings, schedule, delivery, and run history.
+- [x] **Export local agent bundle** — produce a deterministic local folder containing `manifest.yaml`, `README.md`, and `metadata.json` so the same artifact can be tested, shared privately, or submitted upstream.
+- [x] **Builder QA tests** — add builder-focused tests for reserved slug handling, connector declaration validation, and current drafter prompt coverage. Golden prompt snapshots can expand when the builder starts storing prompt examples.
+
+## Priority 2 — "Share with the community" path
+
+- [x] **Share action for user-authored agents** — visible only for local agents from Agent Detail and from the builder success state after Save & install.
+- [x] **Submission checklist** — requires description, maintainer display name, support URL or GitHub handle, license confirmation, changelog entry, and explicit privacy/egress notes before submission.
+- [x] **Generate upstream-ready files** — generates `manifest.yaml`, `README.md`, and `metadata.json` for the public review issue. Exact `agents/<slug>/` PR layout remains a later PR automation step.
+- [x] **GitHub issue intake first** — desktop submits validated payloads to the OpenAdminOS web API; the server uses its GitHub token to create a public `[New Agent]` issue for maintainer review. This avoids desktop GitHub auth and does not publish into Agent Hub.
+- [x] **Reviewed GitHub intake, not direct hub upload** — the app creates a public GitHub issue, not a Hub publish. The public Agent Hub only updates after a maintainer converts/accepts the submission through the normal repo review path.
+- [x] **Auth model for GitHub** — no desktop GitHub auth. The desktop app posts to the OpenAdminOS web API; the server uses its own GitHub token to create the issue. Duplicate open issues are reused and the endpoint is rate-limited.
+- [x] **Pre-submit QA gate** — runs local checks before issue creation: metadata completeness, manifest validation, Graph endpoint/scope validation, write confirmation requirements, connector declarations, LLM-step requirement, README generation, public-issue acknowledgement, and secret scan.
+- [x] **Security review flags** — marks high-risk Graph scopes, destructive writes, and external connector egress for maintainer review; secret-like values block submission.
+- [x] **Supply-chain stance** — community submissions are manifests, README, and metadata only for now; no arbitrary TypeScript execution from community submissions until sandboxing/signing is designed.
+- [x] **User copy** — be explicit that sharing creates a public GitHub issue. Tenant data, run history, prompts, provider settings, tokens, and secrets are never included.
+- [x] **Issue template integration** — generated issue body includes what the agent does, scopes, write actions, connectors, QA output, README, metadata, manifest YAML, and checklist answers.
+- [x] **Agent Hub review states** — after a successful issue submission, local agent detail shows "Submitted for review" with an Open issue link. The agent does not become public until it is merged and appears in `agents/index.json`.
+
+## Priority 3 — Registry trust and security hardening
+
+- [x] **Manifest provenance** — record source URL, registry ref, manifest SHA-256 when available, installed version, and installed time for every installed public agent.
+- [x] **Scope-diff confirmation on updates** — if an update adds Graph scopes, changes write actions, changes connector egress, or raises `minAppVersion`, require an explicit review before applying.
+- [x] **Registry CI hardening** — generated `agents/index.json` must only update after QA passes. CI fails on duplicate slugs, invalid semver, missing README, missing LLM step, undeclared scopes, content-safety failures, or stale generated index.
+- [x] **CODEOWNERS / maintainer review** — require review for `/agents/**`, schema changes, QA rule changes, and registry generation scripts.
+- [x] **Content safety for published agents** — lint README and manifest copy for secrets, tenant identifiers, personal data, and unsupported claims like guaranteed remediation.
+- [x] **Compatibility matrix** — every public agent declares `minAppVersion`; the app shows "Update OpenAdminOS" rather than trying to run unsupported DSL.
+- [x] **Enterprise fork story** — explicitly deferred. v0.2.1 community sharing targets only the public OpenAdminOS repo intake; private fork submission flows are out of scope.
+
+## Priority 4 — Quality of life candidates
+
+- [ ] **Agent builder docs** — in-app short guide plus README docs for authoring, validating, and submitting agents.
+- [ ] **Examples gallery** — prompt examples that generate useful read, write, and connector-backed agents.
+- [ ] **Better error messages from Graph QA** — turn low-level endpoint/scope failures into copy a tenant admin can act on.
+- [ ] **Screenshots for Agent Hub entries** — generated or user-supplied images in the submission bundle, rendered in Hub detail.
+- [ ] **Private share** — deferred beyond 0.2.1; public community submission is the only share target for this candidate.
+
+## Open questions
+
+- [ ] Should the app itself open GitHub PRs, or should it export a ready-to-commit folder and hand off to the browser/`gh`? Direct PR creation is smoother, but introduces GitHub auth surface.
+- [ ] Do we allow community TypeScript agents in 0.2.1, or limit community sharing to YAML Agent Templates until sandboxing/signing exists?
+- [ ] What minimum fixture coverage should be required for read agents that use endpoints we cannot safely exercise against a real tenant in CI?
+- [ ] Should public Agent Hub entries require maintainer verification before install counts and screenshots are shown?
+- [ ] What is the review SLA / maintainer ownership model for community PRs?
+
+## Acceptance criteria
+
+1. An admin can describe, validate, save, install, run, edit, and uninstall a local agent without touching the filesystem.
+2. Invalid generated agents get repaired automatically when possible; unrepaired failures show exact schema/Graph QA errors.
+3. A local write agent cannot be saved or run unless its write actions flow through the existing confirmation gate.
+4. "Share with the community" never uploads tenant data, prompts, run results, provider settings, or secrets.
+5. Sharing creates a reviewed GitHub PR or an equivalent upstream-ready export; it does not push directly to `main` or publish straight into Agent Hub.
+6. Registry CI rejects malformed, overbroad, or incomplete submissions before `agents/index.json` can expose them to users.
+7. Agent Hub only shows the shared agent after the PR is merged and the generated index includes it.
+
 # Drop synthetic mode entirely (in-progress, still 0.1.4)
 
 **Status: implemented; not yet shipped.** Going live. No demo tenants, no synthetic fixtures, no fallback fake data. Onboarding becomes a hard gate: connect a real Microsoft 365 tenant or stay on `/onboarding`. Adding further tenants later is direct MSAL sign-in from the existing TenantSwitcher / Settings entry points — no onboarding rerun. Aligns with CLAUDE.md constraint #3 ("No agent runs without an active tenant scope") and removes the trust ambiguity of pretending fake data is a usable state. Version stays on 0.1.4 — this lands as part of the cleanup pass already in flight.

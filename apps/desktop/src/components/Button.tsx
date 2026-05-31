@@ -39,7 +39,7 @@ export function Button({
   return (
     <button
       {...rest}
-      className={`inline-flex items-center justify-center font-medium transition-colors duration-150 ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center justify-center font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
     >
       {leadingIcon}
       {children}

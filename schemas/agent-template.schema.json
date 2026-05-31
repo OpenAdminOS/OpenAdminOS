@@ -36,6 +36,11 @@
           "pattern": "^\\d+\\.\\d+\\.\\d+(-[\\w.-]+)?$",
           "description": "Semantic version, e.g. 1.0.0 or 1.2.3-rc.1."
         },
+        "minAppVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[\\w.-]+)?$",
+          "description": "Minimum OpenAdminOS app version required to install and run this agent."
+        },
         "author": { "$ref": "#/$defs/author" },
         "category": {
           "type": "string",

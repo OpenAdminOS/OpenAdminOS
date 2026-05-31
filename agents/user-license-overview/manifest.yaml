@@ -4,6 +4,7 @@ descriptor:
   name: User license overview
   description: Reviews tenant user licensing hygiene by usage location, account state, and assigned-license presence.
   version: 1.1.0
+  minAppVersion: 0.1.0
   author:
     name: OpenAdminOS
     handle: openadminos
