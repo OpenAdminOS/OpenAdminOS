@@ -4,6 +4,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Changed
+
+- Marketing hero copy now frames OpenAdminOS around Microsoft 365 tenant administration instead of only Intune and Entra.
+
 ## [0.2.1] - 2026-05-29
 
 ### Added

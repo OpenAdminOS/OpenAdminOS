@@ -5,9 +5,9 @@ import { Geist } from "next/font/google";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://openadminos.com"),
-  title: "OpenAdminOS — Open-source Microsoft 365 agent control plane",
+  title: "OpenAdminOS — Local-first agents for Microsoft 365 tenants",
   description:
-    "The open-source control plane for Microsoft 365 agents. Run scoped agents against Intune and Entra, keep local runs local, and review every change before it touches your tenant.",
+    "A local-first desktop app for Microsoft 365 tenant administrators. Run AI agents against your tenant, keep local runs on your device, and review every change before it happens.",
 };
 
 export const viewport = {

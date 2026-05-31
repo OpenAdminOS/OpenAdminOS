@@ -168,12 +168,12 @@ export default async function HomePage() {
           </Link>
 
           <h1 className="max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
-            The open-source control plane for Microsoft 365 agents.
+            A local-first desktop app for Microsoft 365 tenant administrators.
           </h1>
 
           <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-white/60 sm:text-lg">
-            Run scoped agents against Intune and Entra, keep local runs local,
-            and review every change before it touches your tenant.
+            Run AI agents against your tenant, keep local runs on your device,
+            and review every change before it happens.
           </p>
 
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
