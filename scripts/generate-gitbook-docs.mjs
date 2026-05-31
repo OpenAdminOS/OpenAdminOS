@@ -354,7 +354,7 @@ function providerMatrixPage() {
 
 function summaryPage(agents) {
   const agentLinks = agents
-    .map((agent) => `  - [${agent.name}](generated/agents/${agent.slug}.md)`)
+    .map((agent) => `- [${agent.name}](generated/agents/${agent.slug}.md)`)
     .join("\n");
 
   return `# Summary
