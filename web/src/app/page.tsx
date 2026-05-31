@@ -55,53 +55,79 @@ async function getLatestRelease() {
 
 const TRUST_ITEMS = [
   {
-    label: "Ollama",
-    detail: "Local model · tenant data stays on this device",
+    label: "Local models",
+    detail: "Use Ollama today for private runs without per-token vendor costs.",
     command: "ollama serve",
   },
   {
-    label: "LM Studio",
-    detail: "Local server · no vendor API key stored",
+    label: "Model choice",
+    detail: "LM Studio is planned; hosted providers stay optional.",
     command: "localhost:1234",
   },
   {
     label: "Hosted providers",
-    detail: "OpenAI, Anthropic, or Azure OpenAI · labeled before every run",
+    detail: "OpenAI, Anthropic, or Azure OpenAI are labeled before every run.",
     command: "explicit egress",
   },
   {
-    label: "Microsoft Graph",
-    detail: "Every agent declares scopes before install",
-    command: "admin consent",
+    label: "Tenant boundary",
+    detail: "Local runs keep tenant data, prompts, and results on this device.",
+    command: "no tenant telemetry",
+  },
+];
+
+const USE_CASES = [
+  {
+    label: "Investigate",
+    detail:
+      "Correlate tenant signals across users, devices, sign-ins, policies, and audit logs.",
+  },
+  {
+    label: "Explain",
+    detail:
+      "Turn Conditional Access, Secure Score, and posture data into admin-readable reasoning.",
+  },
+  {
+    label: "Prioritize",
+    detail:
+      "Rank stale devices, risky accounts, policy gaps, and cleanup candidates by tenant context.",
+  },
+  {
+    label: "Prepare changes",
+    detail:
+      "Generate reviewed write plans with evidence before anything touches the tenant.",
   },
 ];
 
 const AGENTS = [
   {
-    name: "Intune stale device audit",
+    name: "Sign-in failure explainer",
     mode: "Read-only",
-    scopes: "DeviceManagementManagedDevices.Read.All",
-    description: "Find devices that have stopped checking in and explain why they matter.",
+    scopes: "Declared permissions",
+    description:
+      "Clusters failed sign-ins by user, app, policy status, device context, and location.",
   },
   {
-    name: "Risky sign-in triage",
+    name: "Secure Score prioritizer",
     mode: "Read-only",
-    scopes: "IdentityRiskEvent.Read.All",
-    description: "Summarize risky sign-ins with tenant-specific remediation notes.",
+    scopes: "Declared permissions",
+    description:
+      "Ranks security controls by effort, user impact, category, and max-score upside.",
   },
   {
     name: "Stale guest cleanup",
     mode: "Write",
-    scopes: "User.ReadWrite.All",
-    description: "Prepare a reviewed disable plan for guests that have gone inactive.",
+    scopes: "Approval required",
+    description:
+      "Builds a capped disable plan for inactive guests with per-account rationale.",
   },
 ];
 
 const PROOF_ITEMS = [
   ["MIT", "Commercial-friendly license"],
-  ["TypeScript", "Agents, runtime, desktop, and site"],
-  ["SQLite", "Run history stays local"],
-  ["No tenant telemetry", "No tenant content leaves by default"],
+  ["Open runtime", "Agents, desktop app, registry, and SDK"],
+  ["Forkable registry", "Point enterprises at their own curated agents"],
+  ["No tenant telemetry", "Tenant content does not leave by default"],
 ];
 
 export default async function HomePage() {
@@ -229,7 +255,7 @@ export default async function HomePage() {
         <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
           <Image
             src="/openadminos-app.png"
-            alt="OpenAdminOS app showing agent runs across Intune-managed devices"
+            alt="OpenAdminOS app showing Microsoft 365 agent runs"
             width={2400}
             height={1500}
             priority
@@ -238,18 +264,50 @@ export default async function HomePage() {
           />
         </section>
 
-        <section className="grid w-full max-w-7xl gap-5 py-20 md:grid-cols-[0.95fr_1.05fr] md:items-start">
+        <section className="w-full max-w-7xl py-20">
+          <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                Admin work
+              </p>
+              <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
+                Agents for the work scripts do not explain.
+              </h2>
+              <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
+                OpenAdminOS agents read Microsoft 365 tenant data, shape the
+                evidence, use the selected model for reasoning, and return work
+                an admin can inspect before acting.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {USE_CASES.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+                >
+                  <h3 className="text-sm font-semibold">{item.label}</h3>
+                  <p className="mt-2 text-sm leading-6 text-white/55">
+                    {item.detail}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid w-full max-w-7xl gap-5 border-t border-white/10 py-20 md:grid-cols-[0.95fr_1.05fr] md:items-start">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300/80">
               Local-first by default
             </p>
             <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-              Bring your own tenant. Bring your own model.
+              Run repeatable tenant work locally.
             </h2>
             <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
-              OpenAdminOS does not resell tokens or hide egress behind vague
-              copy. Local providers are marked local. Hosted providers are
-              marked hosted before a run starts.
+              Use local models for drafts, investigations, scheduled checks,
+              and agent runs without a per-token meter. If you choose a hosted
+              model, the app says so before tenant data is sent.
             </p>
           </div>
 
@@ -283,12 +341,12 @@ export default async function HomePage() {
                 Agent registry
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                Community agents with declared scopes.
+                Agents that investigate, explain, and prepare work.
               </h2>
               <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
-                Agents install from a GitHub-hosted registry. Each one declares
-                the Graph scopes it needs, whether it reads or writes, and what
-                kind of model it expects.
+                Agents install from an open registry and can be inspected before
+                use. Each one declares what it can access, whether it can
+                propose changes, and which model requirements it has.
               </p>
             </div>
 
@@ -296,7 +354,7 @@ export default async function HomePage() {
               <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40">
                 <span>Agent</span>
                 <span>Mode</span>
-                <span>Scope</span>
+                <span>Trust</span>
               </div>
               {AGENTS.map((agent) => (
                 <div
@@ -357,11 +415,12 @@ export default async function HomePage() {
                 Open source
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                If the trust model matters, fork the whole thing.
+                No vendor-owned agent runtime.
               </h2>
               <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
-                The runtime, app, bundled agents, and registry contract are open
-                from day one. Audit it, change it, ship your own agents.
+                The app, runtime, agents, and registry contract are open from
+                day one. Audit them, change them, or point OpenAdminOS at your
+                own curated registry.
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-black/35 p-4 font-mono text-sm text-white/60">
@@ -389,11 +448,12 @@ export default async function HomePage() {
 
         <section className="w-full max-w-4xl pb-20 pt-4 text-center">
           <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl">
-            Your Microsoft 365 agents deserve a review gate.
+            Run tenant agents on your terms.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-white/60 sm:text-base">
-            OpenAdminOS is free, open source, and built for admins who need the
-            model to help without giving it unchecked access to the tenant.
+            Use local models when privacy, repeatability, or cost matters. Use
+            hosted models when you choose to. Either way, OpenAdminOS keeps
+            tenant work inspectable and changes gated.
           </p>
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <a

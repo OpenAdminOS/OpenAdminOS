@@ -7,6 +7,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 
 - Marketing hero and README copy now frame OpenAdminOS around local-first AI agents for Microsoft 365 admins, including local model cost and approval-gate benefits.
+- Marketing landing page sections now lead with admin outcomes, local model cost control, open agent runtime, and review-gated tenant changes.
 
 ## [0.2.1] - 2026-05-29
 
