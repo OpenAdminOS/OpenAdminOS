@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-05-31T13:00:15.563Z",
+  "updatedAt": "2026-06-01T14:00:28.786Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 8,
@@ -30,8 +30,8 @@
       "installs7d": 6
     },
     "dormant-app-registrations": {
-      "installs": 5,
-      "installs7d": 4
+      "installs": 6,
+      "installs7d": 5
     },
     "risky-sign-in-triage": {
       "installs": 5,
