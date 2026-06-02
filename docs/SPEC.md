@@ -100,9 +100,10 @@ June 2026 Vercel Git Integration behavior, successful Next.js builds for
 subdirectory projects can fail during finalization while looking for
 repository-root `.next` files such as
 `.next/routes-manifest-deterministic.json` and
-`.next/server/prefetch-hints.json`. The marketing site `postbuild` script mirrors
-the generated `web/.next` build output to the repository-root `.next` path only
-when `VERCEL` is set.
+`.next/server/prefetch-hints.json`, plus traced runtime dependencies under
+repository-root `node_modules`. The marketing site `postbuild` script mirrors the
+generated `web/.next` build output to the repository-root `.next` path and links
+repository-root `node_modules` to `web/node_modules` only when `VERCEL` is set.
 
 ### LLM provider abstraction
 
