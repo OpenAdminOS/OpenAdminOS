@@ -95,6 +95,13 @@ canonical tags, Open Graph URLs, robots.txt, sitemaps, structured data, and
 `llms.txt` must use the deployed canonical host. User-facing brand copy may still
 refer to `openadminos.com` as the project domain.
 
+The Vercel project is configured with `web/` as its Root Directory. As of the
+June 2026 Vercel Git Integration behavior, successful Next.js builds for
+subdirectory projects can fail during finalization while looking for
+`.next/routes-manifest-deterministic.json` at the repository root. The marketing
+site `postbuild` script mirrors the generated `web/.next/routes-manifest.json`
+to that repository-root deterministic manifest path only when `VERCEL` is set.
+
 ### LLM provider abstraction
 
 A `LLMProvider` interface in `packages/llm/` with these methods at minimum:
