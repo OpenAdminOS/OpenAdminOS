@@ -6,7 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
-- Marketing Vercel builds now mirror Next manifest files to the repository root during Vercel builds so Git Integration finalization can deploy root-directory `web/` projects.
+- Marketing Vercel builds now mirror the Next build output to the repository root during Vercel builds so Git Integration finalization can deploy root-directory `web/` projects.
 - Marketing landing page now includes answer-first product copy, operating-mode comparison, Microsoft Graph permission context, and visible common questions for SEO/GEO coverage.
 - Marketing site SEO now uses canonical `www` URLs, route-level metadata, structured data, stable sitemap dates, `llms.txt`, and compressed social preview images.
 - SEO audit artifacts now use an ignored `.seo-cache/` workspace cache.

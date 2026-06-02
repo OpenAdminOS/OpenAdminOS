@@ -98,11 +98,11 @@ refer to `openadminos.com` as the project domain.
 The Vercel project is configured with `web/` as its Root Directory. As of the
 June 2026 Vercel Git Integration behavior, successful Next.js builds for
 subdirectory projects can fail during finalization while looking for
-repository-root `.next` manifest files such as
+repository-root `.next` files such as
 `.next/routes-manifest-deterministic.json` and
-`.next/server/pages-manifest.json`. The marketing site `postbuild` script mirrors
-the generated `web/.next` manifest files to the repository-root `.next` manifest
-paths only when `VERCEL` is set.
+`.next/server/prefetch-hints.json`. The marketing site `postbuild` script mirrors
+the generated `web/.next` build output to the repository-root `.next` path only
+when `VERCEL` is set.
 
 ### LLM provider abstraction
 
