@@ -177,7 +177,7 @@ const COMMON_QUESTIONS = [
   {
     question: "What is OpenAdminOS?",
     answer:
-      "OpenAdminOS is an open-source desktop app for Microsoft 365 administrators. It runs AI agent workflows against Intune, Entra, and Microsoft Graph data from the admin's machine, with local LLM providers available for tenant work that should stay on-device.",
+      "OpenAdminOS is a local-first agent runtime and open-source desktop app for Microsoft 365, Intune, and Entra administrators. It connects to a tenant through MSAL, reads tenant data through Microsoft Graph, and runs declared agent workflows from the admin's machine. Local LLM providers keep prompts and tenant context on-device; hosted providers remain optional and are labeled before data leaves the workstation.",
   },
   {
     question: "Does OpenAdminOS send Microsoft 365 tenant data to the cloud?",
@@ -403,35 +403,6 @@ export default async function HomePage() {
             sizes="(min-width: 1408px) 1408px, 100vw"
             className="h-auto w-full drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)]"
           />
-        </section>
-
-        <section className="w-full max-w-7xl py-16">
-          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-5 sm:p-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
-              Definition
-            </p>
-            <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-              OpenAdminOS is a local-first agent runtime for Microsoft 365
-              tenant administration.
-            </h2>
-            <p className="mt-4 max-w-4xl text-sm leading-6 text-white/62 sm:text-base">
-              OpenAdminOS is an open-source desktop app for Microsoft 365,
-              Intune, and Entra administrators. It connects to a tenant through
-              MSAL, reads tenant data through{" "}
-              <Link
-                href="https://learn.microsoft.com/en-us/graph/overview"
-                target="_blank"
-                rel="noreferrer"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
-              >
-                Microsoft Graph
-              </Link>
-              , and runs declared agent workflows from the admin&apos;s machine.
-              Local LLM providers keep prompts and tenant context on-device;
-              hosted providers remain optional and are labeled before data
-              leaves the workstation.
-            </p>
-          </div>
         </section>
 
         <section className="w-full max-w-7xl py-20">

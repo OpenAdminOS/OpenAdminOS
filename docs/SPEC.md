@@ -101,6 +101,8 @@ marketing site should expose a stable PNG favicon of at least 48x48 pixels, a
 OpenAdminOS` plus `alternateName: Open Admin OS` so Google has consistent site
 name inputs. The marketing robots.txt should explicitly allow major AI search
 crawlers while keeping API routes blocked.
+Definition-style GEO copy should live in normal visible page content such as
+the "What is OpenAdminOS?" FAQ, not in standalone SEO cards or hidden text.
 
 The Vercel project is configured with `web/` as its Root Directory. As of the
 June 2026 Vercel Git Integration behavior, successful Next.js builds for
