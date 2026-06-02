@@ -1,17 +1,50 @@
 import Link from "next/link";
 import { type Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "Terms of use — OpenAdminOS",
-  description:
-    "The terms that govern your use of the OpenAdminOS desktop app and openadminos.com.",
-};
+import {
+  JsonLd,
+  breadcrumbSchema,
+  organizationSchema,
+  pageMetadata,
+  softwareApplicationSchema,
+  webPageSchema,
+  websiteSchema,
+} from "../seo";
 
 const LAST_UPDATED = "2026-05-28";
+const TITLE = "Terms of use";
+const DESCRIPTION =
+  "Terms that govern use of the OpenAdminOS desktop app, website, open-source runtime, and community agent registry.";
+
+export const metadata: Metadata = pageMetadata({
+  title: TITLE,
+  description: DESCRIPTION,
+  path: "/terms",
+});
 
 export default function TermsPage() {
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      organizationSchema(),
+      websiteSchema(),
+      softwareApplicationSchema(),
+      webPageSchema({
+        path: "/terms",
+        name: TITLE,
+        description: DESCRIPTION,
+        dateModified: LAST_UPDATED,
+      }),
+      breadcrumbSchema([
+        { name: "Home", path: "/" },
+        { name: "Terms", path: "/terms" },
+      ]),
+    ],
+  };
+
   return (
     <div className="relative flex min-h-screen flex-col bg-[#0a0a0c] text-white">
+      <JsonLd data={structuredData} />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-[600px] bg-[radial-gradient(ellipse_at_top,rgba(140,140,255,0.10),transparent_70%)]"

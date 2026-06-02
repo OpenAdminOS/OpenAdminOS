@@ -1,7 +1,20 @@
 import Image from "next/image";
+import { type Metadata } from "next";
 import Link from "next/link";
 
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
+import {
+  GITHUB_URL,
+  HOME_DESCRIPTION,
+  HOME_TITLE,
+  JsonLd,
+  breadcrumbSchema,
+  organizationSchema,
+  pageMetadata,
+  softwareApplicationSchema,
+  webPageSchema,
+  websiteSchema,
+} from "./seo";
 
 const RELEASES_URL = "https://github.com/OpenAdminOS/OpenAdminOS/releases";
 const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
@@ -9,6 +22,13 @@ const LATEST_RELEASE_API_URL =
   "https://api.github.com/repos/OpenAdminOS/OpenAdminOS/releases/latest";
 
 export const revalidate = 900;
+
+export const metadata: Metadata = pageMetadata({
+  title: HOME_TITLE,
+  description: HOME_DESCRIPTION,
+  path: "/",
+  absoluteTitle: true,
+});
 
 interface GitHubReleaseAsset {
   browser_download_url?: string;
@@ -130,11 +150,96 @@ const PROOF_ITEMS = [
   ["No tenant telemetry", "Tenant content does not leave by default"],
 ];
 
+const COMPARISON_ROWS = [
+  {
+    axis: "Local models",
+    local: "Prompts and tenant context stay on the workstation.",
+    hosted: "Optional hosted providers are labeled before tenant context is sent.",
+  },
+  {
+    axis: "Read-only agents",
+    local: "Run investigations and reports without changing tenant state.",
+    hosted: "Use the same read-only contract, with hosted model egress disclosed.",
+  },
+  {
+    axis: "Write agents",
+    local: "Prepare a Graph change diff and wait for approval.",
+    hosted: "Still require the same diff and typed confirmation gates.",
+  },
+  {
+    axis: "Agent registry",
+    local: "Install from the public open registry or point to a private registry.",
+    hosted: "Registry choice does not change the write-confirmation contract.",
+  },
+];
+
+const COMMON_QUESTIONS = [
+  {
+    question: "What is OpenAdminOS?",
+    answer:
+      "OpenAdminOS is an open-source desktop app for Microsoft 365 administrators. It runs AI agent workflows against Intune, Entra, and Microsoft Graph data from the admin's machine, with local LLM providers available for tenant work that should stay on-device.",
+  },
+  {
+    question: "Does OpenAdminOS send Microsoft 365 tenant data to the cloud?",
+    answer:
+      "Not when a local provider is selected. With Ollama or another local provider, tenant data, prompts, and run results stay on the device. If an admin chooses a hosted provider such as OpenAI, Anthropic, or Azure OpenAI, the app labels that tenant context will be sent to that provider.",
+  },
+  {
+    question: "Which Microsoft 365 services does it work with?",
+    answer:
+      "The product is built around Microsoft Graph and initially focuses on Intune and Entra administration: devices, users, groups, sign-ins, Conditional Access, compliance posture, app assignments, audit logs, and related tenant signals.",
+  },
+  {
+    question: "What Microsoft Graph permissions do agents need?",
+    answer:
+      "Each agent declares its required Graph scopes in its manifest. OpenAdminOS shows those scopes before install and before consent, so admins can see what an agent can read or propose changing before it runs.",
+  },
+  {
+    question: "What happens before a write agent changes my tenant?",
+    answer:
+      "Write agents always pause at a diff confirmation screen. Destructive operations require typed confirmation. There is no trust-this-agent bypass and no skip toggle for write operations.",
+  },
+  {
+    question: "Can I use a private agent registry?",
+    answer:
+      "Yes. Enterprises can point OpenAdminOS at their own curated registry instead of using only the public community registry. Agents still use the same manifest, scope declaration, and write-confirmation rules.",
+  },
+  {
+    question: "Which LLM providers are supported?",
+    answer:
+      "Ollama is the local provider path available today. LM Studio is planned. Hosted providers such as OpenAI, Anthropic, and Azure OpenAI are optional and are treated as a different trust boundary in the UI.",
+  },
+  {
+    question: "Is OpenAdminOS affiliated with Microsoft?",
+    answer:
+      "No. OpenAdminOS is an independent open-source project. Microsoft 365, Intune, Entra, and Microsoft Graph are Microsoft trademarks and are referenced only to describe compatibility and administration targets.",
+  },
+];
+
 export default async function HomePage() {
   const latestRelease = await getLatestRelease();
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      organizationSchema(),
+      websiteSchema(),
+      softwareApplicationSchema({
+        version: latestRelease.version,
+        downloadUrl: latestRelease.macosDmgUrl,
+      }),
+      webPageSchema({
+        path: "/",
+        name: HOME_TITLE,
+        description: HOME_DESCRIPTION,
+        dateModified: "2026-06-02",
+      }),
+      breadcrumbSchema([{ name: "Home", path: "/" }]),
+    ],
+  };
 
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#070709] text-white">
+      <JsonLd data={structuredData} />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]"
@@ -158,11 +263,14 @@ export default async function HomePage() {
           OpenAdminOS
         </Link>
         <nav className="hidden items-center gap-6 text-sm text-white/55 sm:flex">
-          <Link href="#agents" className="transition hover:text-white">
-            Agents
+          <Link href="/registry" className="transition hover:text-white">
+            Registry
           </Link>
-          <Link href="#safety" className="transition hover:text-white">
-            Safety
+          <Link href="/trust-model" className="transition hover:text-white">
+            Trust model
+          </Link>
+          <Link href="/use-cases/intune" className="transition hover:text-white">
+            Intune
           </Link>
           <Link
             href="https://docs.openadminos.com/"
@@ -180,14 +288,39 @@ export default async function HomePage() {
           >
             GitHub
           </Link>
-          <a
-            href={latestRelease.macosDmgUrl}
+          <Link
+            href="/download"
             className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
           >
             Download
-          </a>
+          </Link>
         </nav>
       </header>
+
+      <div className="relative z-10 mx-auto flex w-full max-w-7xl gap-2 px-6 pb-4 sm:hidden">
+        <Link
+          href="https://docs.openadminos.com/"
+          target="_blank"
+          rel="noreferrer"
+          className="flex-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-center text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white"
+        >
+          Docs
+        </Link>
+        <Link
+          href="https://github.com/OpenAdminOS/OpenAdminOS"
+          target="_blank"
+          rel="noreferrer"
+          className="flex-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-center text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white"
+        >
+          GitHub
+        </Link>
+        <Link
+          href="/download"
+          className="flex-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-center text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white"
+        >
+          Download
+        </Link>
+      </div>
 
       <main className="relative z-10 flex flex-1 flex-col items-center px-6 sm:px-10">
         <section className="flex flex-col items-center pt-10 text-center sm:pt-14">
@@ -250,7 +383,7 @@ export default async function HomePage() {
           <p className="mt-3 text-[11.5px] text-white/40">
             Free and open-source. MIT licensed.{" "}
             <Link
-              href="https://github.com/OpenAdminOS/OpenAdminOS"
+              href={GITHUB_URL}
               target="_blank"
               rel="noreferrer"
               className="underline-offset-4 hover:text-white/70 hover:underline"
@@ -270,6 +403,35 @@ export default async function HomePage() {
             sizes="(min-width: 1408px) 1408px, 100vw"
             className="h-auto w-full drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)]"
           />
+        </section>
+
+        <section className="w-full max-w-7xl py-16">
+          <div className="rounded-lg border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+              Definition
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+              OpenAdminOS is a local-first agent runtime for Microsoft 365
+              tenant administration.
+            </h2>
+            <p className="mt-4 max-w-4xl text-sm leading-6 text-white/62 sm:text-base">
+              OpenAdminOS is an open-source desktop app for Microsoft 365,
+              Intune, and Entra administrators. It connects to a tenant through
+              MSAL, reads tenant data through{" "}
+              <Link
+                href="https://learn.microsoft.com/en-us/graph/overview"
+                target="_blank"
+                rel="noreferrer"
+                className="text-white underline underline-offset-4 transition hover:text-white/70"
+              >
+                Microsoft Graph
+              </Link>
+              , and runs declared agent workflows from the admin&apos;s machine.
+              Local LLM providers keep prompts and tenant context on-device;
+              hosted providers remain optional and are labeled before data
+              leaves the workstation.
+            </p>
+          </div>
         </section>
 
         <section className="w-full max-w-7xl py-20">
@@ -339,6 +501,41 @@ export default async function HomePage() {
           </div>
         </section>
 
+        <section className="w-full max-w-7xl border-t border-white/10 py-20">
+          <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                Operating modes
+              </p>
+              <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
+                The data boundary changes by mode.
+              </h2>
+              <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
+                Local and hosted model choices are not treated as cosmetic
+                settings. Read-only and write agents also have different
+                confirmation paths.
+              </p>
+            </div>
+            <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12]">
+              <div className="grid grid-cols-[0.75fr_1fr_1fr] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40">
+                <span>Mode</span>
+                <span>Local-first path</span>
+                <span>Hosted or write path</span>
+              </div>
+              {COMPARISON_ROWS.map((row) => (
+                <div
+                  key={row.axis}
+                  className="grid gap-3 border-b border-white/10 px-4 py-4 text-sm last:border-b-0 md:grid-cols-[0.75fr_1fr_1fr]"
+                >
+                  <h3 className="font-semibold text-white/90">{row.axis}</h3>
+                  <p className="leading-6 text-white/55">{row.local}</p>
+                  <p className="leading-6 text-white/55">{row.hosted}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section
           id="agents"
           className="w-full max-w-7xl border-y border-white/10 py-20"
@@ -356,6 +553,12 @@ export default async function HomePage() {
                 use. Each one declares what it can access, whether it can
                 propose changes, and which model requirements it has.
               </p>
+              <Link
+                href="/registry"
+                className="mt-5 inline-flex text-sm font-medium text-sky-200 underline-offset-4 transition hover:text-white hover:underline"
+              >
+                Read how the registry works
+              </Link>
             </div>
 
             <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12]">
@@ -395,6 +598,65 @@ export default async function HomePage() {
           </div>
         </section>
 
+        <section className="grid w-full max-w-7xl gap-6 border-t border-white/10 py-20 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">
+              Graph permissions
+            </p>
+            <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
+              Agents declare the Microsoft Graph scopes they need.
+            </h2>
+            <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
+              OpenAdminOS uses{" "}
+              <Link
+                href="https://learn.microsoft.com/en-us/entra/identity-platform/msal-overview"
+                target="_blank"
+                rel="noreferrer"
+                className="text-white underline underline-offset-4 transition hover:text-white/70"
+              >
+                MSAL
+              </Link>{" "}
+              for Microsoft identity sign-in and Microsoft Graph for tenant
+              data. Consent is tied to the scopes declared by the agents an admin
+              chooses to run.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <h3 className="text-sm font-semibold">Before install</h3>
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                The agent manifest lists required Graph scopes, read/write mode,
+                model requirements, settings, and connector egress before the
+                agent is installed.
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <h3 className="text-sm font-semibold">Before run</h3>
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                If the active tenant is missing, expired, or ambiguous, the run
+                cannot start. If a write plan is produced, the diff gate appears
+                before any tenant change.
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <h3 className="text-sm font-semibold">For private registries</h3>
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                Internal registries use the same scope declaration and
+                confirmation rules as public registry agents. The source changes;
+                the trust contract does not.
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+              <h3 className="text-sm font-semibold">For hosted models</h3>
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                Graph data selected for the prompt is labeled as egress before it
+                is sent to a hosted provider. Local providers keep that prompt on
+                the workstation.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section
           id="safety"
           className="grid w-full max-w-7xl gap-8 py-20 lg:grid-cols-[1fr_1fr] lg:items-center"
@@ -413,6 +675,12 @@ export default async function HomePage() {
               first, and destructive actions require typed confirmation. There
               is no trust-this-agent bypass.
             </p>
+            <Link
+              href="/trust-model"
+              className="mt-5 inline-flex text-sm font-medium text-amber-200 underline-offset-4 transition hover:text-white hover:underline"
+            >
+              Review the trust model
+            </Link>
           </div>
         </section>
 
@@ -454,6 +722,39 @@ export default async function HomePage() {
           </div>
         </section>
 
+        <section className="w-full max-w-7xl border-t border-white/10 py-20">
+          <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                Common questions
+              </p>
+              <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
+                Questions admins usually ask first.
+              </h2>
+              <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
+                These answers summarize the product boundary: desktop app,
+                Microsoft Graph, local-first model choice, declared agent
+                permissions, and write confirmation.
+              </p>
+            </div>
+            <div className="grid gap-3">
+              {COMMON_QUESTIONS.map((item) => (
+                <section
+                  key={item.question}
+                  className="rounded-lg border border-white/10 bg-white/[0.035] p-4"
+                >
+                  <h3 className="text-base font-semibold tracking-tight text-white/92">
+                    {item.question}
+                  </h3>
+                  <p className="mt-3 text-sm leading-6 text-white/58">
+                    {item.answer}
+                  </p>
+                </section>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section className="w-full max-w-4xl pb-20 pt-4 text-center">
           <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl">
             Run tenant agents on your terms.
@@ -471,7 +772,7 @@ export default async function HomePage() {
               Download for macOS
             </a>
             <Link
-              href="https://github.com/OpenAdminOS/OpenAdminOS"
+              href={GITHUB_URL}
               target="_blank"
               rel="noreferrer"
               className="rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/72 transition hover:border-white/20 hover:text-white"
@@ -498,6 +799,27 @@ export default async function HomePage() {
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
             Terms
+          </Link>
+          {" · "}
+          <Link
+            href="/registry"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Registry
+          </Link>
+          {" · "}
+          <Link
+            href="/trust-model"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Trust model
+          </Link>
+          {" · "}
+          <Link
+            href="/download"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Download
           </Link>
           {" · "}
           <Link

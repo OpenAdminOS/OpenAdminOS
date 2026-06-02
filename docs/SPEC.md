@@ -86,6 +86,15 @@ Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/
 
 The docs GitHub Action checks generated docs on pull requests and, after commits to `main`, opens a documentation update PR if generated output changed. It does not silently publish LLM-authored documentation to `main`.
 
+### Marketing website canonical host
+
+The product domain remains `openadminos.com`. The deployed marketing site
+currently canonicalizes to `https://www.openadminos.com` because the Vercel
+domain configuration redirects the apex host to `www`. Website metadata,
+canonical tags, Open Graph URLs, robots.txt, sitemaps, structured data, and
+`llms.txt` must use the deployed canonical host. User-facing brand copy may still
+refer to `openadminos.com` as the project domain.
+
 ### LLM provider abstraction
 
 A `LLMProvider` interface in `packages/llm/` with these methods at minimum:

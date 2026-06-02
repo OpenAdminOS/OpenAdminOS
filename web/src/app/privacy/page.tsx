@@ -1,17 +1,50 @@
 import Link from "next/link";
 import { type Metadata } from "next";
 
-export const metadata: Metadata = {
-  title: "Privacy policy — OpenAdminOS",
-  description:
-    "How OpenAdminOS handles your Microsoft 365 tenant data, authentication tokens, and LLM prompts. Local-first by default.",
-};
+import {
+  JsonLd,
+  breadcrumbSchema,
+  organizationSchema,
+  pageMetadata,
+  softwareApplicationSchema,
+  webPageSchema,
+  websiteSchema,
+} from "../seo";
 
 const LAST_UPDATED = "2026-05-28";
+const TITLE = "Privacy policy";
+const DESCRIPTION =
+  "How OpenAdminOS handles Microsoft 365 tenant data, authentication tokens, LLM prompts, and registry install counts.";
+
+export const metadata: Metadata = pageMetadata({
+  title: TITLE,
+  description: DESCRIPTION,
+  path: "/privacy",
+});
 
 export default function PrivacyPage() {
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      organizationSchema(),
+      websiteSchema(),
+      softwareApplicationSchema(),
+      webPageSchema({
+        path: "/privacy",
+        name: TITLE,
+        description: DESCRIPTION,
+        dateModified: LAST_UPDATED,
+      }),
+      breadcrumbSchema([
+        { name: "Home", path: "/" },
+        { name: "Privacy", path: "/privacy" },
+      ]),
+    ],
+  };
+
   return (
     <div className="relative flex min-h-screen flex-col bg-[#0a0a0c] text-white">
+      <JsonLd data={structuredData} />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-[600px] bg-[radial-gradient(ellipse_at_top,rgba(140,140,255,0.10),transparent_70%)]"

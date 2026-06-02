@@ -6,6 +6,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing landing page now includes answer-first product copy, operating-mode comparison, Microsoft Graph permission context, and visible common questions for SEO/GEO coverage.
+- Marketing site SEO now uses canonical `www` URLs, route-level metadata, structured data, stable sitemap dates, `llms.txt`, and compressed social preview images.
+- SEO audit artifacts now use an ignored `.seo-cache/` workspace cache.
 - Marketing hero and README copy now frame OpenAdminOS around local-first AI agents for Microsoft 365 admins, including local model cost and approval-gate benefits.
 - Marketing landing page sections now lead with admin outcomes, local model cost control, open agent runtime, and review-gated tenant changes.
 - Marketing navbar now links to the public documentation site.

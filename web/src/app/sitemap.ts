@@ -1,27 +1,21 @@
 import type { MetadataRoute } from "next";
 
-const SITE_URL = "https://openadminos.com";
+import { SITE_URL } from "./seo";
+
+const ROUTES = [
+  ["/", "2026-06-02"],
+  ["/download", "2026-06-02"],
+  ["/registry", "2026-06-02"],
+  ["/trust-model", "2026-06-02"],
+  ["/use-cases/intune", "2026-06-02"],
+  ["/llm-providers", "2026-06-02"],
+  ["/privacy", "2026-05-28"],
+  ["/terms", "2026-05-28"],
+] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const lastModified = new Date();
-  return [
-    {
-      url: `${SITE_URL}/`,
-      lastModified,
-      changeFrequency: "weekly",
-      priority: 1,
-    },
-    {
-      url: `${SITE_URL}/privacy`,
-      lastModified,
-      changeFrequency: "yearly",
-      priority: 0.3,
-    },
-    {
-      url: `${SITE_URL}/terms`,
-      lastModified,
-      changeFrequency: "yearly",
-      priority: 0.3,
-    },
-  ];
+  return ROUTES.map(([path, lastModified]) => ({
+    url: new URL(path, SITE_URL).toString(),
+    lastModified: new Date(lastModified),
+  }));
 }

@@ -1,0 +1,31 @@
+# OpenAdminOS
+
+OpenAdminOS is an open-source, local-first desktop platform for Microsoft 365,
+Intune, and Entra administrators to run agent workflows against their tenants.
+
+Primary website: https://www.openadminos.com/
+Source code: https://github.com/OpenAdminOS/OpenAdminOS
+Documentation: https://docs.openadminos.com/
+License: MIT
+
+## Key pages
+
+- Homepage: https://www.openadminos.com/
+- Download: https://www.openadminos.com/download
+- Agent registry: https://www.openadminos.com/registry
+- Trust model: https://www.openadminos.com/trust-model
+- Intune use cases: https://www.openadminos.com/use-cases/intune
+- LLM provider model: https://www.openadminos.com/llm-providers
+- Privacy policy: https://www.openadminos.com/privacy
+- Terms of use: https://www.openadminos.com/terms
+
+## Product facts
+
+- OpenAdminOS is a desktop app, not a web SaaS control plane.
+- Local LLM providers keep tenant data, prompts, and run results on the admin's
+  machine.
+- Hosted providers are optional and are labeled before tenant context is sent.
+- Write agents always pause for diff confirmation.
+- Destructive operations require typed confirmation.
+- Agents declare Microsoft Graph scopes, read/write mode, model requirements,
+  and connector egress in their manifests.
