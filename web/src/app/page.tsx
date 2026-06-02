@@ -709,18 +709,27 @@ export default async function HomePage() {
               </p>
             </div>
             <div className="grid gap-3">
-              {COMMON_QUESTIONS.map((item) => (
-                <section
+              {COMMON_QUESTIONS.map((item, index) => (
+                <details
                   key={item.question}
-                  className="rounded-lg border border-white/10 bg-white/[0.035] p-4"
+                  open={index === 0}
+                  className="group rounded-lg border border-white/10 bg-white/[0.035] transition hover:border-white/18"
                 >
-                  <h3 className="text-base font-semibold tracking-tight text-white/92">
-                    {item.question}
-                  </h3>
-                  <p className="mt-3 text-sm leading-6 text-white/58">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 text-left [&::-webkit-details-marker]:hidden">
+                    <span className="text-base font-semibold tracking-tight text-white/92">
+                      {item.question}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="grid size-7 shrink-0 place-items-center rounded-md border border-white/10 text-lg leading-none text-white/48 transition group-open:rotate-45 group-open:border-white/20 group-open:text-white/72"
+                    >
+                      +
+                    </span>
+                  </summary>
+                  <p className="px-4 pb-4 text-sm leading-6 text-white/58">
                     {item.answer}
                   </p>
-                </section>
+                </details>
               ))}
             </div>
           </div>

@@ -103,6 +103,9 @@ name inputs. The marketing robots.txt should explicitly allow major AI search
 crawlers while keeping API routes blocked.
 Definition-style GEO copy should live in normal visible page content such as
 the "What is OpenAdminOS?" FAQ, not in standalone SEO cards or hidden text.
+FAQ content may use native `<details>/<summary>` accordions when the answer
+text is server-rendered in the initial HTML and remains directly accessible to
+users. Keep the primary product definition expanded by default.
 
 The Vercel project is configured with `web/` as its Root Directory. As of the
 June 2026 Vercel Git Integration behavior, successful Next.js builds for

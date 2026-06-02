@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing FAQ items are now accessible native accordions, with the primary product definition expanded by default for SEO/GEO visibility.
 - Marketing landing page now folds the OpenAdminOS definition into the visible FAQ instead of a separate definition card.
 - Marketing search appearance now uses a crawlable 48px PNG favicon, 180px Apple touch icon, clearer secondary page titles, `WebSite.alternateName` schema, and explicit AI-search crawler access in robots.txt.
 - Marketing Vercel builds now mirror the Next build output and link root dependencies during Vercel builds so Git Integration finalization can deploy root-directory `web/` projects.
