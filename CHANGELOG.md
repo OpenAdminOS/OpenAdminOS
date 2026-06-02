@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing search appearance now uses a crawlable 48px PNG favicon, 180px Apple touch icon, clearer secondary page titles, `WebSite.alternateName` schema, and explicit AI-search crawler access in robots.txt.
 - Marketing Vercel builds now mirror the Next build output and link root dependencies during Vercel builds so Git Integration finalization can deploy root-directory `web/` projects.
 - Marketing landing page now includes answer-first product copy, operating-mode comparison, Microsoft Graph permission context, and visible common questions for SEO/GEO coverage.
 - Marketing site SEO now uses canonical `www` URLs, route-level metadata, structured data, stable sitemap dates, `llms.txt`, and compressed social preview images.

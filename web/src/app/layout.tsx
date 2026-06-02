@@ -52,8 +52,24 @@ export const metadata: Metadata = {
     images: [absoluteUrl(TWITTER_IMAGE_PATH)],
   },
   icons: {
-    icon: "/icon.svg",
-    apple: "/apple-icon.svg",
+    icon: [
+      {
+        url: "/favicon-48.png",
+        sizes: "48x48",
+        type: "image/png",
+      },
+      {
+        url: "/icon.svg",
+        type: "image/svg+xml",
+      },
+    ],
+    apple: [
+      {
+        url: "/apple-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
   },
   robots: {
     index: true,

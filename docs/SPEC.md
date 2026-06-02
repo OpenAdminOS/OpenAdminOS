@@ -95,6 +95,13 @@ canonical tags, Open Graph URLs, robots.txt, sitemaps, structured data, and
 `llms.txt` must use the deployed canonical host. User-facing brand copy may still
 refer to `openadminos.com` as the project domain.
 
+Search appearance assets must be crawlable from the production host. The
+marketing site should expose a stable PNG favicon of at least 48x48 pixels, a
+180x180 Apple touch icon, and `WebSite` structured data with `name:
+OpenAdminOS` plus `alternateName: Open Admin OS` so Google has consistent site
+name inputs. The marketing robots.txt should explicitly allow major AI search
+crawlers while keeping API routes blocked.
+
 The Vercel project is configured with `web/` as its Root Directory. As of the
 June 2026 Vercel Git Integration behavior, successful Next.js builds for
 subdirectory projects can fail during finalization while looking for

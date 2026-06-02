@@ -16,7 +16,7 @@ import {
 const RELEASES_URL = `${GITHUB_URL}/releases`;
 const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
 
-const TITLE = "Download";
+const TITLE = "Download for macOS and Windows";
 const DESCRIPTION =
   "Download OpenAdminOS for macOS, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
 

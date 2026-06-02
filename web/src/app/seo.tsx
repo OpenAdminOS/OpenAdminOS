@@ -79,8 +79,9 @@ export function organizationSchema() {
     "@type": "Organization",
     "@id": `${SITE_URL}/#organization`,
     name: SITE_NAME,
+    alternateName: "Open Admin OS",
     url: SITE_URL,
-    logo: absoluteUrl("/icon.svg"),
+    logo: absoluteUrl("/apple-icon.png"),
     sameAs: [GITHUB_URL, LINKEDIN_URL, DOCS_URL],
     contactPoint: {
       "@type": "ContactPoint",
@@ -95,6 +96,7 @@ export function websiteSchema() {
     "@type": "WebSite",
     "@id": `${SITE_URL}/#website`,
     name: SITE_NAME,
+    alternateName: "Open Admin OS",
     url: SITE_URL,
     publisher: { "@id": `${SITE_URL}/#organization` },
     inLanguage: "en",
