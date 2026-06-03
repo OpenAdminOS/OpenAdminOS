@@ -288,7 +288,7 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
         <FeatureCard
           icon={<IconCloud size={16} className="text-[var(--color-info)]" />}
           title="No API keys"
-          body="Ollama runs locally. OpenAI Codex reuses your Codex CLI login — no API keys to manage."
+          body="Local providers need no API key. OpenAI Codex reuses your Codex CLI login."
         />
       </div>
 
@@ -302,8 +302,8 @@ function Welcome({ onContinue }: { onContinue: () => void }) {
           Get started
         </Button>
         <span className="max-w-[420px] text-center text-[11.5px] text-[var(--color-text-muted)]">
-          You'll sign in to Microsoft once. If you don't already have Ollama
-          installed, plan a few extra minutes for a ~4 GB download.
+          You'll sign in to Microsoft once. If your selected local provider
+          is not ready, OpenAdminOS will show the recovery step.
         </span>
       </div>
     </div>
@@ -345,8 +345,8 @@ function PickLLM({
           never stores OpenAI API keys.
         </p>
         <p className="mt-1.5 max-w-[600px] text-[12px] leading-relaxed text-[var(--color-text-muted)]">
-          Choose Ollama for local-only runs or OpenAI Codex for hosted runs
-          through the local Codex CLI.
+          Choose Ollama or Apple Foundation for local-only runs, or OpenAI
+          Codex for hosted runs through the local Codex CLI.
         </p>
       </div>
 
@@ -361,7 +361,7 @@ function PickLLM({
           ) : (
             <TrustBanner variant="hosted" title="Hosted provider selected.">
               Prompts and tenant context will be sent to{" "}
-              {selectedProvider.name}. Switch to Ollama for local-only
+              {selectedProvider.name}. Switch to a local provider for local-only
               operation.
             </TrustBanner>
           )}
@@ -1034,7 +1034,13 @@ function ProviderNotReadyCard({
                 : "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25"
             }
           >
-            {warn ? <IconWarning size={14} /> : <IconCloud size={14} />}
+            {warn ? (
+              <IconWarning size={14} />
+            ) : provider.isLocal ? (
+              <IconHardDrive size={14} />
+            ) : (
+              <IconCloud size={14} />
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-[13.5px] font-medium text-[var(--color-text)]">
@@ -1043,7 +1049,7 @@ function ProviderNotReadyCard({
                 : `${provider.name} isn't installed yet.`}
             </div>
             <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-              Install or start the provider, then recheck.
+              {provider.detail ?? "Install or start the provider, then recheck."}
             </p>
             <div className="mt-3">
               <Button

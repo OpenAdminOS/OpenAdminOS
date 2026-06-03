@@ -31,6 +31,10 @@ import type {
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
 import {
+  createAppleFoundationLlm,
+  probeAppleFoundationLlm,
+} from "./llm-apple-foundation.js";
+import {
   parseAgentTemplate,
   agentTemplateToModule,
   agentTemplateToRegistrySummary,
@@ -53,6 +57,13 @@ export {
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";
 export { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
+export {
+  createAppleFoundationLlm,
+  createAppleFoundationProcessEnv,
+  probeAppleFoundationLlm,
+  type AppleFoundationProbeResult,
+  type AppleFoundationProviderOptions,
+} from "./llm-apple-foundation.js";
 export {
   createRegistryInstallCountPayload,
   type RegistryInstallCountPayload,

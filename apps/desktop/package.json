@@ -12,9 +12,10 @@
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
-    "dev": "npm run build:packages && npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "dev": "npm run build:apple-foundation-helper && npm run build:packages && npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dev:renderer": "vite",
-    "build": "npm run build:packages && tsc -b && npm run build:electron && vite build",
+    "build": "npm run build:apple-foundation-helper && npm run build:packages && tsc -b && npm run build:electron && vite build",
+    "build:apple-foundation-helper": "node ../../scripts/build-apple-foundation-helper.mjs",
     "build:packages": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/runtime",
     "build:electron": "tsc -p tsconfig.electron.json",
     "dist": "npm run build && electron-builder",
@@ -68,6 +69,10 @@
       {
         "from": "electron/assets/graph-index",
         "to": "graph-index"
+      },
+      {
+        "from": "electron/native",
+        "to": "native"
       }
     ],
     "publish": [
@@ -82,6 +87,9 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "notarize": true,
+      "binaries": [
+        "Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper"
+      ],
       "target": [
         { "target": "dmg", "arch": ["arm64"] },
         { "target": "pkg", "arch": ["arm64"] },

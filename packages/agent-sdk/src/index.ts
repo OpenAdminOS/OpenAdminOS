@@ -1,5 +1,6 @@
 export type ProviderId =
   | "ollama"
+  | "apple-foundation"
   | "lm-studio"
   | "anthropic"
   | "openai"
@@ -1684,6 +1685,16 @@ export const providerCatalog: readonly ProviderSummary[] = [
     isLocal: true,
     status: "available",
     detail: "Waiting for connection check",
+    models: [],
+  },
+  {
+    id: "apple-foundation",
+    name: "Apple Foundation",
+    description:
+      "Use Apple's on-device Foundation Models framework on compatible Macs.",
+    isLocal: true,
+    status: "available",
+    detail: "Waiting for Apple Intelligence availability check",
     models: [],
   },
   {

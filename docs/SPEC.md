@@ -151,8 +151,9 @@ interface LLMProvider {
 }
 ```
 
-Concrete providers, all required for v1:
+Concrete providers, required for v1 unless marked optional:
 - `OllamaProvider` (local, default)
+- `AppleFoundationProvider` (local, macOS-only optional provider)
 - `LMStudioProvider` (local)
 - `AnthropicProvider` (hosted)
 - `OpenAIProvider` (hosted)
@@ -182,6 +183,31 @@ IPv4-mapped loopback) or a Unix socket. If `OPENAGENTS_OLLAMA_URL` points at a
 LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
 provider summary flips to external/hosted-style trust messaging and Intune Chat
 requires hosted-provider confirmation before tenant context is sent.
+
+Apple Foundation support uses Apple's on-device Foundation Models framework
+through a small signed macOS helper binary bundled with the Electron app. The
+provider is local-only when the helper talks directly to
+`SystemLanguageModel.default`; it must not route prompts through Siri,
+Shortcuts cloud actions, ChatGPT, Private Cloud Compute, or any hosted Apple
+service. The provider is available only on compatible Macs with Apple
+Intelligence enabled and the on-device model downloaded. The helper is the
+only native exception to the TypeScript-only provider stack because the
+Foundation Models framework is not directly callable from Electron main.
+OpenAdminOS reports this provider as unavailable on Windows/Linux; Windows AI
+API support is a separate future provider. The helper is packaged under
+`Contents/Resources/native/apple-foundation-helper/` and listed in
+`electron-builder`'s `mac.binaries` so signed/notarized macOS builds sign the
+extra executable along with the app bundle.
+
+Apple Foundation is a small-context provider. The runtime probes and displays
+the model's context size and supported locales, rejects non-system model
+overrides, clamps response token requests to fit the available session budget,
+and surfaces token usage when macOS exposes exact token counting. Intune Chat
+uses an Apple-specific compact answer-pack profile: fewer cached rows per
+resource, fewer raw sample rows, and smaller response budgets while preserving
+deterministic counts/findings. If the prompt still exceeds the on-device
+context window, the provider fails with explicit recovery copy instead of a
+generic model error.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 

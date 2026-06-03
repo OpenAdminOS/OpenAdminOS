@@ -8,6 +8,8 @@ build/
 release/
 .next/
 *.tsbuildinfo
+packages/runtime/native/**/.build/
+apps/desktop/electron/native/apple-foundation-helper/openadminos-apple-foundation-helper
 
 # QA gate cache (msgraph skill clone)
 .qa-cache/

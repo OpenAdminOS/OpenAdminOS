@@ -770,13 +770,26 @@ export function buildAnswerPack(input: {
   hasWriteIntent: boolean;
   agentSuggestions: IntuneChatAgentSuggestion[];
   generatedAt?: string;
+  limits?: {
+    maxRowsReadPerResource?: number;
+    maxSampleRowsPerResource?: number;
+    maxFindingSampleRows?: number;
+    maxAgentSuggestions?: number;
+    profile?: string;
+  };
 }): string {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const maxRowsReadPerResource = input.limits?.maxRowsReadPerResource ?? 40;
+  const maxSampleRowsPerResource = input.limits?.maxSampleRowsPerResource ?? 20;
+  const maxFindingSampleRows = input.limits?.maxFindingSampleRows ?? 20;
+  const maxAgentSuggestions = input.limits?.maxAgentSuggestions;
   const resourceBlocks = input.cacheStatus
     .filter((status) => Object.prototype.hasOwnProperty.call(input.rows, status.resource))
     .map((status) => {
       const selectedRows = input.rows[status.resource] ?? [];
-      const sampleRows = selectedRows.slice(0, 20).map(compactGraphObject);
+      const sampleRows = selectedRows
+        .slice(0, maxSampleRowsPerResource)
+        .map(compactGraphObject);
       return {
         resource: status.resource,
         label: status.label,
@@ -802,15 +815,21 @@ export function buildAnswerPack(input: {
         entraTier: input.tenant.entraTier ?? "unknown",
       },
       writeIntentDetected: input.hasWriteIntent,
-      agentSuggestions: input.agentSuggestions,
+      agentSuggestions:
+        maxAgentSuggestions === undefined
+          ? input.agentSuggestions
+          : input.agentSuggestions.slice(0, maxAgentSuggestions),
       deterministicFindings: buildDeterministicFindings({
         question: input.question,
         generatedAt,
         rows: input.rows,
+        maxSampleRows: maxFindingSampleRows,
       }),
       compaction: {
-        maxRowsReadPerResource: 40,
-        maxSampleRowsPerResource: 20,
+        profile: input.limits?.profile ?? "default",
+        maxRowsReadPerResource,
+        maxSampleRowsPerResource,
+        maxFindingSampleRows,
         rule: "SQLite/Graph filtering selects bounded evidence first; deterministic filters may preselect rows before sampling. cachedRows may be larger than selectedRows, and omittedCachedRows is intentionally not sent as raw data.",
       },
       resources: resourceBlocks,
@@ -850,6 +869,7 @@ function buildDeterministicFindings(input: {
   question: string;
   generatedAt: string;
   rows: Record<GraphCacheResourceKind, unknown[]>;
+  maxSampleRows: number;
 }): Array<Record<string, unknown>> {
   const days = staleManagedDeviceSyncThresholdDays(input.question);
   if (days === undefined) return [];
@@ -874,7 +894,7 @@ function buildDeterministicFindings(input: {
       thresholdAt,
       evaluatedSelectedRows: managedDevices.length,
       matchingRows: staleDevices.length,
-      matchingSampleRows: staleDevices.slice(0, 20),
+      matchingSampleRows: staleDevices.slice(0, input.maxSampleRows),
       note:
         "For this stale-sync question, managedDevices rows were selected from SQLite by lastSyncDateTime before the model context was built.",
     },

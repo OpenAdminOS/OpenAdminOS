@@ -225,7 +225,9 @@ function ProviderRow({
   const canTest =
     implemented &&
     provider.status === "connected" &&
-    (provider.id === "openai" || provider.id === "ollama");
+    (provider.id === "openai" ||
+      provider.id === "ollama" ||
+      provider.id === "apple-foundation");
 
   const handleTest = async () => {
     setTesting(true);
@@ -435,6 +437,8 @@ function providerInstallGuideUrl(providerId: ProviderId): string | undefined {
   switch (providerId) {
     case "ollama":
       return "https://ollama.com/download";
+    case "apple-foundation":
+      return "https://support.apple.com/121115";
     case "lm-studio":
       return "https://lmstudio.ai";
     case "anthropic":

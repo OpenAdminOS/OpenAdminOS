@@ -8,6 +8,7 @@ import {
   createGraphAdapter,
   classifyOllamaEndpoint,
   createCodexLlm,
+  createAppleFoundationLlm,
   createMsalClient,
   createOllamaLlm,
   createRegistryInstallCountPayload,
@@ -27,6 +28,7 @@ import {
   noopLlm,
   parseAgentTemplate,
   probeCodexLlm,
+  probeAppleFoundationLlm,
   ManifestValidationError,
   removeAccount,
   resolveOllamaEndpoint,
@@ -683,6 +685,7 @@ export class AppStateStore {
     return Promise.all(
       providerCatalog.map(async (provider) => {
         if (provider.id === "ollama") return checkOllama(provider);
+        if (provider.id === "apple-foundation") return checkAppleFoundation(provider);
         if (provider.id === "openai") return checkCodex(provider);
         return provider;
       }),
@@ -991,6 +994,7 @@ export class AppStateStore {
     const providerId = provider?.id ?? persisted.activeProviderId;
     const selectedModel =
       persisted.activeModelByProviderId?.[providerId] ?? provider?.defaultModel;
+    const chatBudget = intuneChatProviderBudget(providerId);
     this.requireHostedChatConsent(input, tenant, provider, providerId);
     const planned = planChatContext(content);
     const now = new Date().toISOString();
@@ -1054,7 +1058,7 @@ export class AppStateStore {
       generatedAt: answerGeneratedAt,
       resources: planned.resources,
       searchTerms: planned.searchTerms,
-      limitPerResource: 40,
+      limitPerResource: chatBudget.limitPerResource,
     });
     const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
     const refreshedResources = new Set(
@@ -1087,13 +1091,14 @@ export class AppStateStore {
         hasWriteIntent: planned.hasWriteIntent,
         agentSuggestions,
         generatedAt: answerGeneratedAt,
+        limits: chatBudget.answerPackLimits,
       });
       try {
         const completion = await llm.complete({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
           prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
           temperature: 0.2,
-          maxTokens: 900,
+          maxTokens: chatBudget.maxTokens,
         });
         assistantContent = completion.text.trim();
         if (planned.hasWriteIntent) {
@@ -1162,6 +1167,7 @@ export class AppStateStore {
     const providerId = provider?.id ?? persisted.activeProviderId;
     const selectedModel =
       persisted.activeModelByProviderId?.[providerId] ?? provider?.defaultModel;
+    const chatBudget = intuneChatProviderBudget(providerId);
     this.requireHostedChatConsent(input, tenant, provider, providerId);
     const planned = planChatContext(content);
     const now = new Date().toISOString();
@@ -1378,7 +1384,7 @@ export class AppStateStore {
       generatedAt: answerGeneratedAt,
       resources: planned.resources,
       searchTerms: planned.searchTerms,
-      limitPerResource: 40,
+      limitPerResource: chatBudget.limitPerResource,
     });
     const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
     const refreshedResources = new Set(
@@ -1412,6 +1418,7 @@ export class AppStateStore {
         hasWriteIntent: planned.hasWriteIntent,
         agentSuggestions,
         generatedAt: answerGeneratedAt,
+        limits: chatBudget.answerPackLimits,
       });
       try {
         sendProgress({
@@ -1430,7 +1437,7 @@ export class AppStateStore {
           prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
           ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
-          maxTokens: 900,
+          maxTokens: chatBudget.maxTokens,
           signal: options.signal,
         })) {
           if (isCancelled()) {
@@ -3740,6 +3747,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       return createOllamaLlm(options);
     }
+    if (providerId === "apple-foundation") {
+      return createAppleFoundationLlm({ defaultModel });
+    }
     if (providerId === "openai") {
       return createCodexLlm({ defaultModel });
     }
@@ -4496,6 +4506,55 @@ async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> 
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function checkAppleFoundation(provider: ProviderSummary): Promise<ProviderSummary> {
+  const probe = await probeAppleFoundationLlm();
+  if (!probe.installed) {
+    return {
+      ...provider,
+      status: "not-installed",
+      detail:
+        probe.detail ??
+        "Apple Foundation helper is not available. Build OpenAdminOS on a compatible Mac.",
+      models: [],
+    };
+  }
+
+  if (!probe.ready) {
+    return {
+      ...provider,
+      status: "error",
+      detail:
+        probe.detail ??
+        "Apple Intelligence Foundation Models are not available on this Mac.",
+      models: probe.models,
+      defaultModel: probe.defaultModel,
+    };
+  }
+
+  return {
+    ...provider,
+    status: "connected",
+    detail: appleFoundationProbeDetail(probe),
+    models: probe.models,
+    defaultModel: probe.defaultModel,
+  };
+}
+
+function appleFoundationProbeDetail(
+  probe: Awaited<ReturnType<typeof probeAppleFoundationLlm>>,
+): string {
+  const parts = [
+    probe.detail ?? "Apple Intelligence Foundation Models available locally.",
+  ];
+  if (typeof probe.contextSize === "number") {
+    parts.push(`Context window: ${probe.contextSize.toLocaleString()} tokens`);
+  }
+  if (probe.supportedLanguages && probe.supportedLanguages.length > 0) {
+    parts.push(`${probe.supportedLanguages.length} supported locales`);
+  }
+  return parts.join(" · ");
 }
 
 function ollamaEndpointDetail(
@@ -6141,6 +6200,38 @@ function unwrapGraphCollectionPage(response: unknown): GraphCollectionPage {
     };
   }
   return { rows: response === undefined || response === null ? [] : [response] };
+}
+
+interface IntuneChatProviderBudget {
+  limitPerResource: number;
+  maxTokens: number;
+  answerPackLimits: NonNullable<Parameters<typeof buildAnswerPack>[0]["limits"]>;
+}
+
+function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProviderBudget {
+  if (providerId === "apple-foundation") {
+    return {
+      limitPerResource: 12,
+      maxTokens: 512,
+      answerPackLimits: {
+        profile: "apple-foundation-small-context",
+        maxRowsReadPerResource: 12,
+        maxSampleRowsPerResource: 6,
+        maxFindingSampleRows: 6,
+        maxAgentSuggestions: 2,
+      },
+    };
+  }
+  return {
+    limitPerResource: 40,
+    maxTokens: 900,
+    answerPackLimits: {
+      profile: "default",
+      maxRowsReadPerResource: 40,
+      maxSampleRowsPerResource: 20,
+      maxFindingSampleRows: 20,
+    },
+  };
 }
 
 function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
