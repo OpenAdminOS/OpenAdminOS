@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-03T12:00:42.961Z",
+  "updatedAt": "2026-06-03T16:00:08.158Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 9,
@@ -26,8 +26,8 @@
       "installs7d": 4
     },
     "conditional-access-explainer": {
-      "installs": 8,
-      "installs7d": 4
+      "installs": 9,
+      "installs7d": 5
     },
     "dormant-app-registrations": {
       "installs": 7,
@@ -42,8 +42,8 @@
       "installs7d": 3
     },
     "sign-in-failure-explainer": {
-      "installs": 5,
-      "installs7d": 2
+      "installs": 6,
+      "installs7d": 3
     },
     "stale-guest-cleanup": {
       "installs": 5,
