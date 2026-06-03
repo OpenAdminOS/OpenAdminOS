@@ -1,13 +1,13 @@
 {
-  "updatedAt": "2026-06-02T20:00:20.512Z",
+  "updatedAt": "2026-06-03T12:00:42.961Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 8,
-      "installs7d": 3
+      "installs": 9,
+      "installs7d": 4
     },
     "offboarding-agent": {
-      "installs": 5,
-      "installs7d": 1
+      "installs": 6,
+      "installs7d": 2
     },
     "compliance-overview": {
       "installs": 9,
@@ -18,8 +18,8 @@
       "installs7d": 2
     },
     "tenant-health-report": {
-      "installs": 5,
-      "installs7d": 3
+      "installs": 6,
+      "installs7d": 4
     },
     "user-license-overview": {
       "installs": 6,
