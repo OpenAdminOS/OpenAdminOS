@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
@@ -26,6 +26,7 @@ import {
   IconShield,
 } from "../components/icons";
 import { useAppState } from "../state";
+import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   AgentManifestPreview,
   AgentTeamsDelivery,
@@ -38,7 +39,11 @@ import type {
   RunRecord,
 } from "../shared/openAdminOS";
 
-export default function AgentDetail() {
+export default function AgentDetail({
+  startRunOnOpen = false,
+}: {
+  startRunOnOpen?: boolean;
+}) {
   const { slug } = useParams();
   const navigate = useNavigate();
   const {
@@ -64,10 +69,13 @@ export default function AgentDetail() {
   const [updateReview, setUpdateReview] = useState<AgentUpdateReview | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [uninstallOpen, setUninstallOpen] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
     { providerId?: ProviderId; model?: string } | null
   >(null);
+  const consumedStartRunOnOpen = useRef(false);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -76,10 +84,31 @@ export default function AgentDetail() {
     (provider) => provider.id === pendingProviderId,
   );
 
+  const handleUninstallAgent = async () => {
+    if (!agent || uninstalling) return;
+    setUninstalling(true);
+    try {
+      await uninstallAgent(agent.slug);
+      toast.success(`${agent.name} uninstalled.`);
+      setUninstallOpen(false);
+      navigate("/");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUninstalling(false);
+    }
+  };
+
   const queueRunPreflight = (choice?: { providerId?: ProviderId; model?: string }) => {
     setRunError(null);
     setPendingRunChoice(choice ?? {});
   };
+
+  useEffect(() => {
+    if (!startRunOnOpen || consumedStartRunOnOpen.current || !agent) return;
+    consumedStartRunOnOpen.current = true;
+    queueRunPreflight();
+  }, [agent, startRunOnOpen]);
 
   const reviewAndApplyUpdate = async () => {
     if (!agent) return;
@@ -234,7 +263,11 @@ export default function AgentDetail() {
             <ShareMenu
               contextLabel="agent"
               onCopyLink={() => {
-                void navigator.clipboard.writeText(`openadminos://agent/${agent.slug}`);
+                void copyTextToClipboard(`openadminos://agent/${agent.slug}`)
+                  .then(() => toast.success("Agent link copied."))
+                  .catch((error) =>
+                    toast.error(error instanceof Error ? error.message : String(error)),
+                  );
               }}
               copyLinkHint={`openadminos://agent/${agent.slug}`}
               onOpenInBrowser={() => {
@@ -321,22 +354,7 @@ export default function AgentDetail() {
             </Button>
             <Button
               variant="ghost"
-              onClick={() => {
-                const confirmed = window.confirm(
-                  `Remove ${agent.name}? Run history is kept. User-authored agents are deleted from disk.`,
-                );
-                if (!confirmed) return;
-                void uninstallAgent(agent.slug)
-                  .then(() => {
-                    toast.success(`${agent.name} uninstalled.`);
-                    navigate("/");
-                  })
-                  .catch((error) => {
-                    toast.error(
-                      error instanceof Error ? error.message : String(error),
-                    );
-                  });
-              }}
+              onClick={() => setUninstallOpen(true)}
             >
               Uninstall
             </Button>
@@ -672,6 +690,16 @@ export default function AgentDetail() {
           </div>
         )}
       </Modal>
+      <UninstallAgentModal
+        open={uninstallOpen}
+        agentName={agent.name}
+        userAuthored={preview?.isUserAuthored === true}
+        busy={uninstalling}
+        onClose={() => {
+          if (!uninstalling) setUninstallOpen(false);
+        }}
+        onConfirm={() => void handleUninstallAgent()}
+      />
       {agent && (
         <RunPreflightModal
           open={pendingRunChoice !== null}
@@ -693,6 +721,50 @@ export default function AgentDetail() {
         />
       )}
     </>
+  );
+}
+
+function UninstallAgentModal({
+  open,
+  agentName,
+  userAuthored,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  agentName: string;
+  userAuthored: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <ModalHeader
+        title="Uninstall agent"
+        subtitle={agentName}
+        badge={<Pill tone="danger">Local deletion</Pill>}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          This removes the installed agent from this device.
+          {userAuthored
+            ? " The local user-authored manifest folder is deleted from disk."
+            : " Registry agents can be installed again from Agent Hub."}{" "}
+          Run history is kept.
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={onConfirm}>
+            {busy ? "Uninstalling" : "Uninstall"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

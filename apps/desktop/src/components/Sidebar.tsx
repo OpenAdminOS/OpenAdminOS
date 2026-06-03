@@ -4,6 +4,7 @@ import {
   IconAgents,
   IconHub,
   IconActivity,
+  IconChat,
   IconConnectors,
   IconSettings,
   IconLogo,
@@ -103,6 +104,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       indent: true,
     },
     { to: "/hub", label: "Agent Hub", icon: <IconHub size={16} /> },
+    { to: "/chat", label: "Intune Chat", icon: <IconChat size={16} /> },
     { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },
     {
       to: "/activity",

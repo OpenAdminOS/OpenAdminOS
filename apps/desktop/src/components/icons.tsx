@@ -36,6 +36,14 @@ export const IconActivity = ({ size = 18, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconChat = ({ size = 18, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M4.5 5.5 H19.5 A1.8 1.8 0 0 1 21.3 7.3 V16.2 A1.8 1.8 0 0 1 19.5 18 H9.2 L4 21 V7.3 A1.8 1.8 0 0 1 5.8 5.5" />
+    <path d="M8 10 H16" />
+    <path d="M8 13.5 H13" />
+  </svg>
+);
+
 export const IconConnectors = ({ size = 18, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <circle cx="6" cy="12" r="2.5" />
@@ -256,4 +264,3 @@ export const IconSlack = ({ size = 14, ...p }: IconProps) => (
     <rect x="12.6" y="9" width="2.4" height="2.4" rx="1.2" />
   </svg>
 );
-

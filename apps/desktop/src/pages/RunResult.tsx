@@ -24,7 +24,9 @@ import { ActivityFeed } from "../components/ActivityFeed";
 import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { RunTelemetry } from "../components/RunTelemetry";
+import { useToast } from "../components/Toast";
 import { useAppState } from "../state";
+import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   RunRecord,
   RunStatus,
@@ -42,6 +44,7 @@ export default function RunResult() {
   const navigate = useNavigate();
   const { id } = useParams();
   const { state, startRun, confirmRun, rejectRun, cancelRun } = useAppState();
+  const toast = useToast();
   const run = state.runs.find((candidate) => candidate.id === id);
   const agent = run
     ? state.installedAgents.find((candidate) => candidate.slug === run.agentSlug)
@@ -162,7 +165,11 @@ export default function RunResult() {
               <span className="opacity-50">·</span>
               <button
                 onClick={() => {
-                  void navigator.clipboard.writeText(run.id);
+                  void copyTextToClipboard(run.id)
+                    .then(() => toast.success("Run ID copied."))
+                    .catch((error) =>
+                      toast.error(error instanceof Error ? error.message : String(error)),
+                    );
                 }}
                 title="Copy run id"
                 className="inline-flex items-center gap-1 font-mono transition-colors hover:text-[var(--color-text)]"
@@ -180,12 +187,16 @@ export default function RunResult() {
               size="md"
               leadingIcon={<IconCopy size={12} />}
               onClick={() => {
-                void navigator.clipboard.writeText(
+                void copyTextToClipboard(
                   runReportPlaintext(run, {
                     agentName: agent?.name,
                     tenantName: tenantDisplayName,
                   }),
-                );
+                )
+                  .then(() => toast.success("Run report copied."))
+                  .catch((error) =>
+                    toast.error(error instanceof Error ? error.message : String(error)),
+                  );
               }}
             >
               Copy report
@@ -207,7 +218,11 @@ export default function RunResult() {
             <ShareMenu
               contextLabel="run"
               onCopyLink={() => {
-                void navigator.clipboard.writeText(`openadminos://run/${run.id}`);
+                void copyTextToClipboard(`openadminos://run/${run.id}`)
+                  .then(() => toast.success("Run link copied."))
+                  .catch((error) =>
+                    toast.error(error instanceof Error ? error.message : String(error)),
+                  );
               }}
               copyLinkHint={`openadminos://run/${run.id}`}
               onExportMarkdown={() => {

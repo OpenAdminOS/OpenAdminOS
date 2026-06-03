@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Avatar } from "./Avatar";
-import { StatusDot } from "./Pill";
+import { Button } from "./Button";
+import { Modal, ModalHeader } from "./Modal";
+import { Pill, StatusDot } from "./Pill";
 import {
   IconCheck,
   IconChevronUpDown,
@@ -18,6 +20,10 @@ export function TenantSwitcher() {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pendingDisconnect, setPendingDisconnect] = useState<{
+    tenantId: string;
+    displayName: string;
+  } | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   const activeTenant = state.activeTenantId
@@ -67,15 +73,18 @@ export function TenantSwitcher() {
     }
   };
 
-  const handleDisconnect = async (tenantId: string, displayName: string) => {
-    const confirmed = window.confirm(
-      `Disconnect ${displayName}? Cached credentials will be removed from this machine. You can reconnect anytime.`,
-    );
-    if (!confirmed) return;
+  const requestDisconnect = (tenantId: string, displayName: string) => {
+    setPendingDisconnect({ tenantId, displayName });
+    setOpen(false);
+  };
+
+  const handleDisconnect = async () => {
+    if (!pendingDisconnect) return;
     setBusy(true);
     try {
-      await disconnectTenant(tenantId);
-      toast.success(`${displayName} disconnected.`);
+      await disconnectTenant(pendingDisconnect.tenantId);
+      toast.success(`${pendingDisconnect.displayName} disconnected.`);
+      setPendingDisconnect(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -84,7 +93,8 @@ export function TenantSwitcher() {
   };
 
   return (
-    <div ref={wrapperRef} className="relative mx-2.5 mt-1">
+    <>
+      <div ref={wrapperRef} className="relative mx-2.5 mt-1">
       <button
         onClick={() => setOpen((value) => !value)}
         className="flex w-full items-center gap-2.5 rounded-xl bg-[var(--color-surface)] px-2.5 py-2 text-left ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)]"
@@ -150,7 +160,7 @@ export function TenantSwitcher() {
                     </button>
                     <button
                       onClick={() =>
-                        void handleDisconnect(tenant.id, tenant.displayName)
+                        requestDisconnect(tenant.id, tenant.displayName)
                       }
                       disabled={busy}
                       title={`Disconnect ${tenant.displayName}`}
@@ -186,6 +196,55 @@ export function TenantSwitcher() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+      <DisconnectTenantModal
+        open={pendingDisconnect !== null}
+        displayName={pendingDisconnect?.displayName ?? ""}
+        busy={busy}
+        onClose={() => {
+          if (!busy) setPendingDisconnect(null);
+        }}
+        onConfirm={() => void handleDisconnect()}
+      />
+    </>
+  );
+}
+
+function DisconnectTenantModal({
+  open,
+  displayName,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  displayName: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <ModalHeader
+        title="Disconnect tenant"
+        subtitle={displayName}
+        badge={<Pill tone="danger">Local credentials</Pill>}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          Cached credentials for this tenant will be removed from this machine.
+          You can reconnect the tenant later.
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={onConfirm}>
+            {busy ? "Disconnecting" : "Disconnect"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

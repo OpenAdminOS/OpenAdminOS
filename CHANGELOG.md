@@ -4,6 +4,17 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+- v0.2.2 planning now scopes Intune Chat as a first-class tenant interaction surface, with Graph cache, agent-as-skill routing, and optional approved local self-training.
+- Intune Chat now has a SQLite-backed read-only tenant chat surface with Graph cache refresh, compact answer packs, agent-as-skill suggestions, and optional approved local self-training overlays.
+- Intune Chat Graph cache refresh now supports per-tenant scheduled refresh intervals, local next-run/failure state, OS scheduler integration, and compact Microsoft Graph audit-log selects validated through the Microsoft Graph MCP.
+- Intune Chat host tests now cover Graph cache refresh, answer-pack generation, local persistence, agent suggestions, and pending self-training suggestions.
+- Added `npm run smoke:intune-chat`, an Electron smoke test that exercises the tenant-connected chat UI through the real preload/IPC path with a local tenant fixture and a 10-prompt chat pass.
+- Added a researched 150-question Intune Chat bank covering common admin investigations, with tests that require every question to map to known local Graph cache resources.
+- Intune Chat planner tests now validate cache endpoints, delegated permissions, and selected fields against the bundled Graph PM indexes.
+- Added a v0.2.2 app review covering Intune Chat UX, Graph cache reliability, Electron security hardening, LLM provider trust, and live Graph spot-check results.
+
 ### Changed
 
 - Release tags now publish a macOS `.pkg` alongside the DMG/ZIP outputs, with marketing and docs exposing it as the managed deployment package.
@@ -27,6 +38,39 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Marketing hero and README copy now frame OpenAdminOS around local-first AI agents for Microsoft 365 admins, including local model cost and approval-gate benefits.
 - Marketing landing page sections now lead with admin outcomes, local model cost control, open agent runtime, and review-gated tenant changes.
 - Marketing navbar now links to the public documentation site.
+- Marketing header now shows Docs and GitHub actions on mobile.
+- Intune Chat now uses a minimal two-pane layout with chat history on the left and the conversation/composer in the center; cache and self-training controls moved to Settings.
+- Intune Chat now streams assistant output over Electron IPC and persists only the final completed or failed assistant message.
+- Intune Chat streaming now keeps preload listeners alive until terminal stream events so fast local-model responses do not strand assistant drafts.
+- Intune Chat answer packs now include bounded row-compaction metadata (`selectedRows`, `includedSampleRows`, and `omittedCachedRows`) so large tenants stay within local-model context limits.
+- Intune Chat Graph planning now covers apps, detected apps, MAM/app configuration, Autopilot/enrollment, remediations/scripts, Windows updates, endpoint security, assignment filters, scope tags, encryption, troubleshooting, audit, and Conditional Access resources.
+- Intune Chat now sends on Enter, keeps Shift+Enter for newlines, removes the duplicate composer focus border, offers collapsible chat history and copy prompt/response actions, and shows cache/model work as a progress checklist inside the active assistant response slot.
+- Intune Chat agent suggestions now use inline Details disclosures instead of generic "Ask first" follow-up prompts, and write-agent actions are labeled Review.
+- Intune Chat agent suggestions now suppress write agents for read-only investigation prompts, keeping actions like guest cleanup out of stale device sync questions unless the admin asks for a write.
+- Intune Chat agent suggestions now show matched prompt terms, routing evidence, and planned Graph sources, and write-agent routing rejects category-mismatched write suggestions.
+- Intune Chat answer packs now include a generation timestamp so time-bounded admin questions do not require the model to infer the current date.
+- Intune Chat Graph cache refresh now follows Graph pagination with page/cap metadata, and stale managed-device sync questions are filtered deterministically from SQLite before model generation.
+- Intune Chat now caches Autopilot events as a fallback source for enrollment/ESP questions when Windows Autopilot device identity reads fail service-side.
+- Intune Chat completed answers now expose source details with Graph path, selected fields, query parameters, row/page counts, cap state, freshness, cache/live status, and stored source errors.
+- Intune Chat now requires explicit first-send confirmation before a hosted provider receives tenant context, with a per-tenant/provider remember option stored on the device.
+- Intune Chat hosted-provider confirmation is now enforced by Electron main before chat persistence, Graph refresh, or hosted LLM prompt construction, and chat/cache IPC payloads now receive runtime validation.
+- Intune Chat new-conversation sends now show the prompt and progress checklist immediately, keep streaming reloads from wiping the progress bubble, and show the active draft in the chat history rail.
+- Intune Chat conversations can now be searched, pinned, renamed, and deleted locally through validated Electron IPC and product modals, with pinned conversations grouped in a collapsible sidebar section and right-click delete available on conversation rows.
+- Settings -> Intune Chat now shows local SQLite size, chat/cache/self-training counts, and explicit local-deletion modals for clearing all chat history or the active tenant's Graph cache.
+- Intune Chat now keeps a transient in-flight draft visible during new-conversation sends, exposes prompt edit/resend from user messages, and can export local Markdown transcripts with source metadata.
+- Intune Chat now exposes Stop during streaming responses, aborts cancellable provider work through the host stream controller, and persists a cancelled assistant entry without saving generated tail output.
+- Intune Chat assistant messages now expose Regenerate, which resubmits the preceding prompt through the normal chat pipeline with consent, cache refresh, progress, and Stop behavior intact.
+- Intune Chat no longer shows a global Refresh button in the chat header; prompt-scoped refresh runs during send, while manual and scheduled cache controls stay in Settings.
+- Desktop copy actions now use a shared clipboard helper backed by the bounded Electron main clipboard bridge, and local destructive actions such as tenant disconnect and agent uninstall use product modals instead of native browser confirmation dialogs.
+- The Intune Chat smoke now verifies first-run onboarding's connected-tenant path, workspace choice screen, Chat entry action, Stop, Regenerate, and the 10-prompt chat pass.
+- First-run onboarding now ends with a workspace choice: open Intune Chat as the recommended first action, browse Agent Hub for repeatable workflows, or optionally install a starter agent.
+- Desktop renderer security now runs with Electron sandboxing, a sandbox-compatible preload bridge, no remote font loads, system font stacks, and a restrictive Content Security Policy.
+- Renderer-only browser tabs now show a designed desktop-bridge-unavailable state instead of logging noisy no-tenant onboarding redirects.
+- LLM provider trust now sanitizes Codex CLI subprocess environments and treats non-loopback Ollama endpoints as external instead of local-only.
+- Registry source changes now validate and normalize source URLs, require confirmation for custom registries, bind cached indexes to their source URL, and expose a Settings Privacy modal for reviewing or changing the active source.
+- Privileged Electron IPC handlers now validate trusted sender frames and narrow connector, agent, run, tenant, draft, community submission, external URL, and save-file payloads before reaching host state.
+- Installed write-agent cards now route to the existing Agent Detail run preflight instead of an undefined confirmation route.
+- Tenant connection now requests the Graph PM-audited read scopes needed by the full Intune Chat cache surface, and the chat planner now uses the documented scopes for scripts, troubleshooting events, group reads, and encryption-state resources.
 
 ## [0.2.1] - 2026-05-29
 

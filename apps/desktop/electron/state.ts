@@ -6,6 +6,7 @@ import {
   acquireTokenSilent,
   compareSemver,
   createGraphAdapter,
+  classifyOllamaEndpoint,
   createCodexLlm,
   createMsalClient,
   createOllamaLlm,
@@ -28,6 +29,7 @@ import {
   probeCodexLlm,
   ManifestValidationError,
   removeAccount,
+  resolveOllamaEndpoint,
   runInteractiveFlow,
   setAgentUpdatesDir,
   tenantSatisfiesRequirement,
@@ -55,6 +57,25 @@ import type {
   TemplateSetting,
   TenantRecord,
   TenantSession,
+  GraphCacheRefreshResult,
+  GraphCacheRefreshResourceResult,
+  GraphCacheRefreshScheduleSettings,
+  GraphCacheResourceKind,
+  GraphCacheStatus,
+  IntuneChatConversation,
+  IntuneChatMessage,
+  IntuneChatProgressStep,
+  IntuneChatStreamStage,
+  IntuneChatStreamEvent,
+  LocalDataSummary,
+  RefreshGraphCacheOptions,
+  ResetSelfTrainingInput,
+  SetGraphCacheRefreshScheduleInput,
+  SelfTrainingSettings,
+  SelfTrainingSuggestion,
+  SelfTrainingSuggestionStatus,
+  SendIntuneChatMessageInput,
+  SendIntuneChatMessageResult,
 } from "@openadminos/agent-sdk";
 import {
   deriveTrustState,
@@ -80,8 +101,23 @@ import {
 import {
   DEFAULT_REGISTRY_SOURCE,
   refreshRegistry,
+  validateRegistrySource,
   type RegistryIndexEntry,
 } from "./registry-client.js";
+import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
+import {
+  GRAPH_CACHE_RESOURCES,
+  buildAnswerPack,
+  chatTitleForPrompt,
+  definitionForResource,
+  matchAgentsToQuestion,
+  pathForResource,
+  planChatContext,
+  requiredScopesForResources,
+  selfTrainingCandidateFromPrompt,
+  staleManagedDeviceSyncThresholdDays,
+  thresholdIsoDaysBefore,
+} from "./intune-chat/planner.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
@@ -127,6 +163,21 @@ interface PersistedState {
   /** User-overridable registry source URL. */
   registrySource?: string;
 }
+
+type GraphCacheRefreshProgressEvent =
+  | {
+      type: "resource-start";
+      resource: GraphCacheResourceKind;
+      label: string;
+      completed: number;
+      total: number;
+    }
+  | {
+      type: "resource-complete";
+      result: GraphCacheRefreshResourceResult;
+      completed: number;
+      total: number;
+    };
 
 interface OllamaTagsResponse {
   models?: Array<{
@@ -205,6 +256,33 @@ export interface AppStateStoreOptions {
   appVersion?: string;
   /** Writable userData directory used for the registry cache. */
   userDataPath?: string;
+  /**
+   * Test hook for host-level chat/cache smoke tests. Production code
+   * leaves this unset so Graph always flows through MSAL + Graph adapter.
+   */
+  graphFactory?(input: {
+    tenantId: string;
+    scopes: string[];
+    log: (
+      level: RunLogLevel,
+      message: string,
+      metadata?: Record<string, unknown>,
+    ) => void;
+  }): RunGraphApi;
+  /**
+   * Test hook for host-level chat/cache smoke tests. Production code
+   * leaves this unset so provider availability and trust messaging still
+   * come from the configured provider adapters.
+   */
+  llmFactory?(
+    providerId: ProviderId,
+    model: string | undefined,
+  ): Promise<RunLlmApi> | RunLlmApi;
+  /**
+   * Allows localhost/private registry sources for tests and explicit
+   * development workflows. Packaged builds must leave this false.
+   */
+  allowDevRegistrySource?: boolean;
 }
 
 export class AppStateStore {
@@ -217,6 +295,10 @@ export class AppStateStore {
   private readonly statsApiUrl: string;
   private readonly appVersion: string;
   private readonly userDataPath: string | undefined;
+  private readonly intelligenceStore: IntelligenceSqliteStore | undefined;
+  private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
+  private readonly llmFactory: AppStateStoreOptions["llmFactory"] | undefined;
+  private readonly allowDevRegistrySource: boolean;
   private msalClient: PublicClientApplication | undefined;
   // Soft-cancel set. While a run id is here, progress snapshots from
   // the runtime are dropped so the run stays in "cancelled" state. The
@@ -241,6 +323,10 @@ export class AppStateStore {
       this.statsApiUrl = "";
       this.appVersion = "0.0.0";
       this.userDataPath = undefined;
+      this.intelligenceStore = undefined;
+      this.graphFactory = undefined;
+      this.llmFactory = undefined;
+      this.allowDevRegistrySource = false;
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
@@ -253,6 +339,12 @@ export class AppStateStore {
           : DEFAULT_STATS_API_URL;
       this.appVersion = options.appVersion ?? "0.0.0";
       this.userDataPath = options.userDataPath;
+      this.intelligenceStore = options.userDataPath
+        ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"))
+        : undefined;
+      this.graphFactory = options.graphFactory;
+      this.llmFactory = options.llmFactory;
+      this.allowDevRegistrySource = options.allowDevRegistrySource === true;
     }
     // Point the runtime at the OTA-updated manifest tree (if userData is
     // configured). When an agent has been updated via `updateAgent`, the
@@ -264,6 +356,10 @@ export class AppStateStore {
     // human-readable target labels without an async disk read inside
     // a capability invocation. Updated on every `setConnectorConfig`.
     void this.primeConnectorConfigCache().catch(() => undefined);
+  }
+
+  close(): void {
+    this.intelligenceStore?.close();
   }
 
   private agentUpdatesRoot(): string | undefined {
@@ -296,7 +392,9 @@ export class AppStateStore {
     }
     const persisted = await this.read().catch(() => defaultState);
     const registrySource = persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE;
-    const result = await refreshRegistry(this.userDataPath, registrySource);
+    const result = await refreshRegistry(this.userDataPath, registrySource, {
+      allowDevSource: this.allowDevRegistrySource,
+    });
 
     const bothSourcesFailed = result.error !== null && !result.fromCache;
     if (bothSourcesFailed) {
@@ -316,10 +414,19 @@ export class AppStateStore {
 
   async setRegistrySource(
     url: string,
+    options: { confirmExternalSource?: boolean } = {},
   ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
+    const validation = validateRegistrySource(url, {
+      allowDevSource: this.allowDevRegistrySource,
+    });
+    if (validation.requiresTrustReview && options.confirmExternalSource !== true) {
+      throw new Error(
+        "Changing registry source away from the official OpenAdminOS registry requires trust review confirmation.",
+      );
+    }
     await this.serialize(async () => {
       const current = await this.read();
-      const next = { ...current, registrySource: url };
+      const next = { ...current, registrySource: validation.sourceUrl };
       await this.write(next);
     });
     // Trigger an immediate refresh against the new source so the
@@ -350,6 +457,128 @@ export class AppStateStore {
     };
     this.msalClient = createMsalClient({ storage: cacheStorage });
     return this.msalClient;
+  }
+
+  private requireIntelligenceStore(): IntelligenceSqliteStore {
+    if (!this.intelligenceStore) {
+      throw new Error("Intune Chat requires a configured userData directory.");
+    }
+    return this.intelligenceStore;
+  }
+
+  private resolveTenant(
+    persisted: PersistedState,
+    tenantId?: string,
+  ): TenantRecord {
+    const resolvedId = tenantId ?? persisted.activeTenantId;
+    const tenant = resolvedId
+      ? persisted.tenants.find((entry) => entry.id === resolvedId)
+      : undefined;
+    if (!tenant) {
+      throw new Error(
+        "No tenant connected. Connect a Microsoft 365 tenant before using Intune Chat.",
+      );
+    }
+    return tenant;
+  }
+
+  private async maybeCreateSelfTrainingSuggestionFromChat(input: {
+    tenantId: string;
+    question: string;
+    agentSuggestions: NonNullable<IntuneChatMessage["agentSuggestions"]>;
+  }): Promise<void> {
+    const store = this.requireIntelligenceStore();
+    const settings = store.getSelfTrainingSettings();
+    if (!settings.enabled) return;
+    const candidate = selfTrainingCandidateFromPrompt(input);
+    if (!candidate) return;
+    const now = new Date().toISOString();
+    const id = stableSuggestionId(input.tenantId, candidate.agentSlug, candidate.text);
+    store.recordLearningEvent({
+      id: `event_${randomUUID()}`,
+      tenantId: input.tenantId,
+      agentSlug: candidate.agentSlug,
+      eventType: "chat.preference-detected",
+      source: "chat",
+      payload: { question: input.question, candidate },
+      createdAt: now,
+    });
+    store.createSelfTrainingSuggestion({
+      id,
+      tenantId: input.tenantId,
+      agentSlug: candidate.agentSlug,
+      status: "pending",
+      text: candidate.text,
+      reason: candidate.reason,
+      source: "chat",
+      createdAt: now,
+    });
+  }
+
+  private async writeSelfTrainingFile(
+    tenantId: string,
+    agentSlug: string,
+  ): Promise<void> {
+    if (!this.userDataPath) return;
+    const store = this.requireIntelligenceStore();
+    const accepted = store.listAcceptedSelfTrainingSuggestions({ tenantId, agentSlug });
+    const tenantKey = hashTenantId(tenantId);
+    const dir = join(
+      this.userDataPath,
+      "agent-learning",
+      "tenants",
+      tenantKey,
+      "agents",
+      agentSlug,
+    );
+    await mkdir(dir, { recursive: true });
+    const updatedAt = new Date().toISOString();
+    const yaml = buildSelfTrainingYaml({
+      agentSlug,
+      tenantKey,
+      updatedAt,
+      suggestions: accepted,
+    });
+    await writeFile(join(dir, "self-training.yaml"), yaml, "utf8");
+  }
+
+  private selfTrainingPromptOverlay(tenantId: string, agentSlug: string): string | undefined {
+    if (!this.intelligenceStore) return undefined;
+    const settings = this.intelligenceStore.getSelfTrainingSettings();
+    if (!settings.enabled) return undefined;
+    const accepted = this.intelligenceStore.listAcceptedSelfTrainingSuggestions({
+      tenantId,
+      agentSlug,
+    });
+    if (accepted.length === 0) return undefined;
+    return [
+      "Approved local self-training instructions for this tenant and agent:",
+      ...accepted.map((entry, index) => `${index + 1}. ${entry.text}`),
+      "These instructions may guide reasoning and wording only. They do not change scopes, write mode, connector egress, or confirmation policy.",
+    ].join("\n");
+  }
+
+  private recordLearningEventSafely(input: {
+    tenantId?: string;
+    agentSlug?: string;
+    eventType: string;
+    source: string;
+    payload: unknown;
+  }): void {
+    if (!this.intelligenceStore || !input.tenantId) return;
+    try {
+      this.intelligenceStore.recordLearningEvent({
+        id: `event_${randomUUID()}`,
+        tenantId: input.tenantId,
+        agentSlug: input.agentSlug,
+        eventType: input.eventType,
+        source: input.source,
+        payload: input.payload,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.warn("[self-training] failed to record learning event", error);
+    }
   }
 
   private serialize<T>(task: () => Promise<T>): Promise<T> {
@@ -522,6 +751,889 @@ export class AppStateStore {
         message: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  async listIntuneChatConversations(): Promise<IntuneChatConversation[]> {
+    return this.requireIntelligenceStore().listConversations();
+  }
+
+  async searchIntuneChatConversations(query: string): Promise<IntuneChatConversation[]> {
+    return this.requireIntelligenceStore().searchConversations(query);
+  }
+
+  async renameIntuneChatConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<IntuneChatConversation> {
+    if (!conversationId.trim()) {
+      throw new Error("Conversation id is required.");
+    }
+    const normalizedTitle = normalizeChatConversationTitle(title);
+    return this.requireIntelligenceStore().renameConversation(
+      conversationId,
+      normalizedTitle,
+      new Date().toISOString(),
+    );
+  }
+
+  async setIntuneChatConversationPinned(
+    conversationId: string,
+    pinned: boolean,
+  ): Promise<IntuneChatConversation> {
+    if (!conversationId.trim()) {
+      throw new Error("Conversation id is required.");
+    }
+    return this.requireIntelligenceStore().setConversationPinned(
+      conversationId,
+      pinned,
+      new Date().toISOString(),
+    );
+  }
+
+  async deleteIntuneChatConversation(conversationId: string): Promise<void> {
+    if (!conversationId.trim()) {
+      throw new Error("Conversation id is required.");
+    }
+    this.requireIntelligenceStore().deleteConversation(conversationId);
+  }
+
+  async getIntuneChatMessages(conversationId: string): Promise<IntuneChatMessage[]> {
+    if (!conversationId.trim()) {
+      throw new Error("Conversation id is required.");
+    }
+    return this.requireIntelligenceStore().listMessages(conversationId);
+  }
+
+  async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
+    const persisted = await this.read();
+    const resolvedTenant = this.resolveTenant(persisted, tenantId);
+    const store = this.requireIntelligenceStore();
+    return {
+      tenantId: resolvedTenant.id,
+      resources: store.getGraphCacheStatus(
+        resolvedTenant.id,
+        [...GRAPH_CACHE_RESOURCES],
+      ),
+      schedule: store.getGraphCacheRefreshSchedule(resolvedTenant.id),
+    };
+  }
+
+  async getGraphCacheRefreshSchedule(
+    tenantId?: string,
+  ): Promise<GraphCacheRefreshScheduleSettings> {
+    const persisted = await this.read();
+    const resolvedTenant = this.resolveTenant(persisted, tenantId);
+    return this.requireIntelligenceStore().getGraphCacheRefreshSchedule(
+      resolvedTenant.id,
+    );
+  }
+
+  async setGraphCacheRefreshSchedule(
+    input: SetGraphCacheRefreshScheduleInput,
+  ): Promise<GraphCacheRefreshScheduleSettings> {
+    const persisted = await this.read();
+    const resolvedTenant = this.resolveTenant(persisted, input.tenantId);
+    const intervalMinutes =
+      typeof input.intervalMinutes === "number" && Number.isFinite(input.intervalMinutes)
+        ? input.intervalMinutes
+        : 360;
+    return this.requireIntelligenceStore().setGraphCacheRefreshSchedule({
+      tenantId: resolvedTenant.id,
+      enabled: input.enabled,
+      intervalMinutes,
+      now: new Date().toISOString(),
+    });
+  }
+
+  async getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary> {
+    const persisted = await this.read();
+    const resolvedTenant =
+      tenantId || persisted.activeTenantId
+        ? this.resolveTenant(persisted, tenantId)
+        : undefined;
+    return this.requireIntelligenceStore().getLocalDataSummary({
+      tenantId: resolvedTenant?.id,
+      definitions: resolvedTenant ? [...GRAPH_CACHE_RESOURCES] : undefined,
+    });
+  }
+
+  async clearIntuneChatHistory(): Promise<LocalDataSummary> {
+    this.requireIntelligenceStore().clearChatHistory();
+    return this.getLocalDataSummary();
+  }
+
+  async clearGraphCache(tenantId?: string): Promise<LocalDataSummary> {
+    const persisted = await this.read();
+    const resolvedTenant = this.resolveTenant(persisted, tenantId);
+    this.requireIntelligenceStore().clearGraphCache(resolvedTenant.id);
+    return this.getLocalDataSummary(resolvedTenant.id);
+  }
+
+  async refreshGraphCache(
+    options: RefreshGraphCacheOptions = {},
+  ): Promise<GraphCacheRefreshResult> {
+    return this.refreshGraphCacheInternal(options);
+  }
+
+  private async refreshGraphCacheInternal(
+    options: RefreshGraphCacheOptions = {},
+    onProgress?: (event: GraphCacheRefreshProgressEvent) => void,
+  ): Promise<GraphCacheRefreshResult> {
+    const store = this.requireIntelligenceStore();
+    const persisted = await this.read();
+    const tenant = this.resolveTenant(persisted, options.tenantId);
+    const resources = sanitizeGraphResources(options.resources);
+    const scopes = requiredScopesForResources(resources);
+    const startedAt = new Date().toISOString();
+    const log = (level: RunLogLevel, message: string, metadata?: Record<string, unknown>) => {
+      console.info("[intune-chat][graph]", level, message, metadata ?? "");
+    };
+    const graph = this.graphFactory
+      ? this.graphFactory({ tenantId: tenant.id, scopes, log })
+      : (await this.buildGraph(tenant.id, scopes)).createGraph(log);
+    const results: GraphCacheRefreshResult["resources"] = [];
+
+    for (const resource of resources) {
+      const definition = definitionForResource(resource);
+      const request = pathForResource(resource);
+      const refreshedAt = new Date().toISOString();
+      onProgress?.({
+        type: "resource-start",
+        resource,
+        label: definition.label,
+        completed: results.length,
+        total: resources.length,
+      });
+      try {
+        const query: Record<string, string> = { ...(request.query ?? {}) };
+        if (request.select && request.select.length > 0) {
+          query.$select = request.select.join(",");
+        }
+        const pageResult = await fetchGraphCachePages(graph, {
+          path: request.path,
+          query,
+          headers: request.headers,
+        });
+        store.replaceGraphResources({
+          tenantId: tenant.id,
+          resource,
+          label: definition.label,
+          scopeSet: definition.scopes,
+          rows: pageResult.rows,
+          pageCount: pageResult.pages,
+          pageLimitReached: pageResult.pageLimitReached,
+          refreshedAt,
+        });
+        results.push({
+          resource,
+          label: definition.label,
+          rows: pageResult.rows.length,
+          pages: pageResult.pages,
+          pageLimitReached: pageResult.pageLimitReached,
+          refreshedAt,
+          ok: true,
+        });
+        onProgress?.({
+          type: "resource-complete",
+          result: results.at(-1)!,
+          completed: results.length,
+          total: resources.length,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        store.recordGraphResourceError({
+          tenantId: tenant.id,
+          resource,
+          label: definition.label,
+          scopeSet: definition.scopes,
+          error: message,
+          now: refreshedAt,
+        });
+        results.push({
+          resource,
+          label: definition.label,
+          rows: 0,
+          refreshedAt,
+          ok: false,
+          error: message,
+        });
+        onProgress?.({
+          type: "resource-complete",
+          result: results.at(-1)!,
+          completed: results.length,
+          total: resources.length,
+        });
+      }
+    }
+
+    return {
+      tenantId: tenant.id,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      resources: results,
+    };
+  }
+
+  async sendIntuneChatMessage(
+    input: SendIntuneChatMessageInput,
+  ): Promise<SendIntuneChatMessageResult> {
+    const content = input.content.trim();
+    if (!content) {
+      throw new Error("Chat message must not be empty.");
+    }
+
+    const store = this.requireIntelligenceStore();
+    const persisted = await this.read();
+    const tenant = this.resolveTenant(persisted);
+    const providers = await this.listProviders();
+    const provider =
+      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
+    const providerId = provider?.id ?? persisted.activeProviderId;
+    const selectedModel =
+      persisted.activeModelByProviderId?.[providerId] ?? provider?.defaultModel;
+    this.requireHostedChatConsent(input, tenant, provider, providerId);
+    const planned = planChatContext(content);
+    const now = new Date().toISOString();
+
+    let conversation = input.conversationId
+      ? store.getConversation(input.conversationId)
+      : undefined;
+    if (!conversation) {
+      conversation = store.createConversation({
+        id: `chat_${randomUUID()}`,
+        title: chatTitleForPrompt(content),
+        tenantId: tenant.id,
+        now,
+      });
+    }
+
+    const userMessage: IntuneChatMessage = {
+      id: `msg_${randomUUID()}`,
+      conversationId: conversation.id,
+      role: "user",
+      content,
+      status: "completed",
+      createdAt: now,
+    };
+    store.insertMessage(userMessage);
+
+    let refreshResult: GraphCacheRefreshResult | undefined;
+    if (input.refreshIfStale !== false) {
+      const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+      const staleResources = planned.resources.filter((resource) => {
+        const status = before.find((entry) => entry.resource === resource);
+        if (!status || status.rows === 0 || !status.refreshedAt) return true;
+        return Date.now() - new Date(status.refreshedAt).getTime() > 6 * 60 * 60 * 1000;
+      });
+      if (staleResources.length > 0) {
+        refreshResult = await this.refreshGraphCache({
+          tenantId: tenant.id,
+          resources: staleResources,
+        });
+        store.insertToolCall({
+          id: `tool_${randomUUID()}`,
+          conversationId: conversation.id,
+          messageId: userMessage.id,
+          type: "graph-cache-refresh",
+          status: refreshResult.resources.some((resource) => resource.ok)
+            ? "completed"
+            : "failed",
+          createdAt: now,
+          completedAt: refreshResult.finishedAt,
+          input: { resources: staleResources },
+          output: refreshResult,
+        });
+      }
+    }
+
+    const cacheStatus = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+    const answerGeneratedAt = new Date().toISOString();
+    const rows = readPlannedChatRows(store, {
+      tenantId: tenant.id,
+      question: content,
+      generatedAt: answerGeneratedAt,
+      resources: planned.resources,
+      searchTerms: planned.searchTerms,
+      limitPerResource: 40,
+    });
+    const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
+    const refreshedResources = new Set(
+      refreshResult?.resources
+        .filter((resource) => resource.ok)
+        .map((resource) => resource.resource) ?? [],
+    );
+    const sources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: planned.resources,
+      refreshedResources,
+    });
+
+    const llm = await this.buildLlm(providerId, selectedModel);
+    let assistantContent: string;
+    let assistantStatus: IntuneChatMessage["status"] = "completed";
+    let assistantError: string | undefined;
+
+    if (!llm.available) {
+      assistantStatus = "failed";
+      assistantError =
+        "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
+      assistantContent = assistantError;
+    } else {
+      const answerPack = buildAnswerPack({
+        question: content,
+        tenant,
+        cacheStatus,
+        rows,
+        hasWriteIntent: planned.hasWriteIntent,
+        agentSuggestions,
+        generatedAt: answerGeneratedAt,
+      });
+      try {
+        const completion = await llm.complete({
+          system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
+          prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
+          temperature: 0.2,
+          maxTokens: 900,
+        });
+        assistantContent = completion.text.trim();
+        if (planned.hasWriteIntent) {
+          assistantContent = `${assistantContent}\n\nI cannot perform tenant changes directly from chat. Use an installed write agent so the existing plan and confirmation flow stays in force.`;
+        }
+        if (agentSuggestions.length > 0) {
+          assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
+        }
+      } catch (caught) {
+        assistantStatus = "failed";
+        assistantError = caught instanceof Error ? caught.message : String(caught);
+        assistantContent = `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+      }
+    }
+
+    const assistantMessage: IntuneChatMessage = {
+      id: `msg_${randomUUID()}`,
+      conversationId: conversation.id,
+      role: "assistant",
+      content: assistantContent,
+      status: assistantStatus,
+      createdAt: new Date().toISOString(),
+      providerId,
+      model: selectedModel,
+      sources,
+      agentSuggestions,
+      ...(assistantError ? { error: assistantError } : {}),
+    };
+    store.insertMessage(assistantMessage);
+    store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
+
+    await this.maybeCreateSelfTrainingSuggestionFromChat({
+      tenantId: tenant.id,
+      question: content,
+      agentSuggestions,
+    });
+
+    return {
+      conversation: store.getConversation(conversation.id) ?? conversation,
+      userMessage,
+      assistantMessage,
+      cacheStatus: {
+        tenantId: tenant.id,
+        resources: cacheStatus,
+        schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+      },
+    };
+  }
+
+  async streamIntuneChatMessage(
+    input: SendIntuneChatMessageInput,
+    onEvent: (event: IntuneChatStreamEvent) => void,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SendIntuneChatMessageResult> {
+    const content = input.content.trim();
+    if (!content) {
+      throw new Error("Chat message must not be empty.");
+    }
+
+    const store = this.requireIntelligenceStore();
+    const persisted = await this.read();
+    const tenant = this.resolveTenant(persisted);
+    const providers = await this.listProviders();
+    const provider =
+      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
+    const providerId = provider?.id ?? persisted.activeProviderId;
+    const selectedModel =
+      persisted.activeModelByProviderId?.[providerId] ?? provider?.defaultModel;
+    this.requireHostedChatConsent(input, tenant, provider, providerId);
+    const planned = planChatContext(content);
+    const now = new Date().toISOString();
+
+    let conversation = input.conversationId
+      ? store.getConversation(input.conversationId)
+      : undefined;
+    if (!conversation) {
+      conversation = store.createConversation({
+        id: `chat_${randomUUID()}`,
+        title: chatTitleForPrompt(content),
+        tenantId: tenant.id,
+        now,
+      });
+    }
+
+    const userMessage: IntuneChatMessage = {
+      id: `msg_${randomUUID()}`,
+      conversationId: conversation.id,
+      role: "user",
+      content,
+      status: "completed",
+      createdAt: now,
+    };
+    store.insertMessage(userMessage);
+
+    const assistantId = `msg_${randomUUID()}`;
+    const pendingAssistant: IntuneChatMessage = {
+      id: assistantId,
+      conversationId: conversation.id,
+      role: "assistant",
+      content: "",
+      status: "streaming",
+      createdAt: new Date().toISOString(),
+      providerId,
+      ...(selectedModel ? { model: selectedModel } : {}),
+    };
+    const initialCacheStatus: GraphCacheStatus = {
+      tenantId: tenant.id,
+      resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+      schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+    };
+    onEvent({
+      type: "started",
+      conversation,
+      userMessage,
+      assistantMessage: pendingAssistant,
+      cacheStatus: initialCacheStatus,
+    });
+    const isCancelled = () => options.signal?.aborted === true;
+    const finishCancelled = (): SendIntuneChatMessageResult => {
+      const cancelledAt = new Date().toISOString();
+      const currentCacheStatus = store.getGraphCacheStatus(tenant.id, [
+        ...GRAPH_CACHE_RESOURCES,
+      ]);
+      const assistantMessage: IntuneChatMessage = {
+        id: assistantId,
+        conversationId: conversation.id,
+        role: "assistant",
+        content: "Response stopped by user before a final answer was saved.",
+        status: "cancelled",
+        createdAt: cancelledAt,
+        providerId,
+        ...(selectedModel ? { model: selectedModel } : {}),
+        sources: buildIntuneChatSources({
+          cacheStatus: currentCacheStatus,
+          plannedResources: planned.resources,
+          refreshedResources: new Set(),
+        }),
+        error: "Stopped by user.",
+      };
+      store.insertMessage(assistantMessage);
+      store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
+      return {
+        conversation: store.getConversation(conversation.id) ?? conversation,
+        userMessage,
+        assistantMessage,
+        cacheStatus: {
+          tenantId: tenant.id,
+          resources: currentCacheStatus,
+          schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+        },
+      };
+    };
+
+    if (isCancelled()) {
+      const result = finishCancelled();
+      onEvent({ type: "cancelled", result });
+      return result;
+    }
+
+    let refreshResult: GraphCacheRefreshResult | undefined;
+    let progressRefreshResources: GraphCacheResourceKind[] = [];
+    let progressRefreshResults: GraphCacheRefreshResourceResult[] = [];
+    let progressActiveResource: GraphCacheResourceKind | undefined;
+    const sendProgress = (input: {
+      message: string;
+      stage: IntuneChatStreamStage;
+      cacheCheckStatus?: IntuneChatProgressStep["status"];
+      contextStatus?: IntuneChatProgressStep["status"];
+      modelStatus?: IntuneChatProgressStep["status"];
+      cacheStatus?: GraphCacheStatus;
+    }) => {
+      const progressSteps = buildChatProgressSteps({
+        refreshResources: progressRefreshResources,
+        refreshResults: progressRefreshResults,
+        activeResource: progressActiveResource,
+        cacheCheckStatus: input.cacheCheckStatus ?? "completed",
+        contextStatus: input.contextStatus ?? "pending",
+        modelStatus: input.modelStatus ?? "pending",
+      });
+      onEvent({
+        type: "status",
+        conversationId: conversation.id,
+        message: input.message,
+        stage: input.stage,
+        progressSteps,
+        progressPercent: estimateChatProgressPercent(progressSteps),
+        ...(input.cacheStatus ? { cacheStatus: input.cacheStatus } : {}),
+      });
+    };
+    sendProgress({
+      message: "Checking cached tenant data.",
+      stage: "checking-cache",
+      cacheCheckStatus: "active",
+    });
+
+    if (input.refreshIfStale !== false) {
+      const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+      const staleResources = planned.resources.filter((resource) => {
+        const status = before.find((entry) => entry.resource === resource);
+        if (!status || status.rows === 0 || !status.refreshedAt) return true;
+        return Date.now() - new Date(status.refreshedAt).getTime() > 6 * 60 * 60 * 1000;
+      });
+      progressRefreshResources = staleResources;
+      if (staleResources.length > 0) {
+        sendProgress({
+          message: `Refreshing ${staleResources.length} tenant data source${staleResources.length === 1 ? "" : "s"} before answering.`,
+          stage: "refreshing-cache",
+        });
+        refreshResult = await this.refreshGraphCacheInternal(
+          {
+            tenantId: tenant.id,
+            resources: staleResources,
+          },
+          (event) => {
+            if (event.type === "resource-start") {
+              progressActiveResource = event.resource;
+              sendProgress({
+                message: `Refreshing ${event.label}.`,
+                stage: "refreshing-cache",
+              });
+              return;
+            }
+            progressActiveResource = undefined;
+            progressRefreshResults = [...progressRefreshResults, event.result];
+            sendProgress({
+              message: event.result.ok
+                ? `Cached ${event.result.label}.`
+                : `Could not refresh ${event.result.label}.`,
+              stage: "refreshing-cache",
+            });
+          },
+        );
+        store.insertToolCall({
+          id: `tool_${randomUUID()}`,
+          conversationId: conversation.id,
+          messageId: userMessage.id,
+          type: "graph-cache-refresh",
+          status: refreshResult.resources.some((resource) => resource.ok)
+            ? "completed"
+            : "failed",
+          createdAt: now,
+          completedAt: refreshResult.finishedAt,
+          input: { resources: staleResources },
+          output: refreshResult,
+        });
+        sendProgress({
+          message: "Building answer context from local cache.",
+          stage: "building-context",
+          contextStatus: "active",
+          cacheStatus: {
+            tenantId: tenant.id,
+            resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+            schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+          },
+        });
+      } else {
+        sendProgress({
+          message: "Using cached tenant context.",
+          stage: "building-context",
+          contextStatus: "active",
+        });
+      }
+    }
+    if (isCancelled()) {
+      const result = finishCancelled();
+      sendProgress({
+        message: "Response stopped.",
+        stage: "failed",
+        contextStatus: "completed",
+        modelStatus: "failed",
+        cacheStatus: result.cacheStatus,
+      });
+      onEvent({ type: "cancelled", result });
+      return result;
+    }
+
+    const cacheStatus = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+    const answerGeneratedAt = new Date().toISOString();
+    const rows = readPlannedChatRows(store, {
+      tenantId: tenant.id,
+      question: content,
+      generatedAt: answerGeneratedAt,
+      resources: planned.resources,
+      searchTerms: planned.searchTerms,
+      limitPerResource: 40,
+    });
+    const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
+    const refreshedResources = new Set(
+      refreshResult?.resources
+        .filter((resource) => resource.ok)
+        .map((resource) => resource.resource) ?? [],
+    );
+    const sources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: planned.resources,
+      refreshedResources,
+    });
+
+    const llm = await this.buildLlm(providerId, selectedModel);
+    let assistantContent = "";
+    let assistantStatus: IntuneChatMessage["status"] = "completed";
+    let assistantError: string | undefined;
+    let responseModel = selectedModel;
+
+    if (!llm.available) {
+      assistantStatus = "failed";
+      assistantError =
+        "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
+      assistantContent = assistantError;
+    } else {
+      const answerPack = buildAnswerPack({
+        question: content,
+        tenant,
+        cacheStatus,
+        rows,
+        hasWriteIntent: planned.hasWriteIntent,
+        agentSuggestions,
+        generatedAt: answerGeneratedAt,
+      });
+      try {
+        sendProgress({
+          message: "Model response started.",
+          stage: "generating-answer",
+          contextStatus: "completed",
+          modelStatus: "active",
+          cacheStatus: {
+            tenantId: tenant.id,
+            resources: cacheStatus,
+            schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+          },
+        });
+        for await (const chunk of llm.stream({
+          system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
+          prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
+          ...(selectedModel ? { model: selectedModel } : {}),
+          temperature: 0.2,
+          maxTokens: 900,
+          signal: options.signal,
+        })) {
+          if (isCancelled()) {
+            break;
+          }
+          responseModel = chunk.model;
+          assistantContent = chunk.accumulated;
+          onEvent({
+            type: "delta",
+            conversationId: conversation.id,
+            assistantMessageId: assistantId,
+            delta: chunk.delta,
+            content: assistantContent,
+            providerId,
+            model: responseModel,
+          });
+        }
+        assistantContent = assistantContent.trim();
+        if (planned.hasWriteIntent) {
+          assistantContent = `${assistantContent}\n\nI cannot perform tenant changes directly from chat. Use an installed write agent so the existing plan and confirmation flow stays in force.`;
+        }
+        if (agentSuggestions.length > 0) {
+          assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
+        }
+        onEvent({
+          type: "delta",
+          conversationId: conversation.id,
+          assistantMessageId: assistantId,
+          delta: "",
+          content: assistantContent,
+          providerId,
+          model: responseModel,
+        });
+      } catch (caught) {
+        if (isCancelled()) {
+          const result = finishCancelled();
+          sendProgress({
+            message: "Response stopped.",
+            stage: "failed",
+            contextStatus: "completed",
+            modelStatus: "failed",
+            cacheStatus: result.cacheStatus,
+          });
+          onEvent({ type: "cancelled", result });
+          return result;
+        }
+        assistantStatus = "failed";
+        assistantError = caught instanceof Error ? caught.message : String(caught);
+        assistantContent = assistantContent.trim()
+          ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
+          : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+      }
+    }
+    if (isCancelled()) {
+      const result = finishCancelled();
+      sendProgress({
+        message: "Response stopped.",
+        stage: "failed",
+        contextStatus: "completed",
+        modelStatus: "failed",
+        cacheStatus: result.cacheStatus,
+      });
+      onEvent({ type: "cancelled", result });
+      return result;
+    }
+
+    const assistantMessage: IntuneChatMessage = {
+      id: assistantId,
+      conversationId: conversation.id,
+      role: "assistant",
+      content: assistantContent,
+      status: assistantStatus,
+      createdAt: new Date().toISOString(),
+      providerId,
+      ...(responseModel ? { model: responseModel } : {}),
+      sources,
+      agentSuggestions,
+      ...(assistantError ? { error: assistantError } : {}),
+    };
+    store.insertMessage(assistantMessage);
+    store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
+
+    await this.maybeCreateSelfTrainingSuggestionFromChat({
+      tenantId: tenant.id,
+      question: content,
+      agentSuggestions,
+    });
+
+    const result: SendIntuneChatMessageResult = {
+      conversation: store.getConversation(conversation.id) ?? conversation,
+      userMessage,
+      assistantMessage,
+      cacheStatus: {
+        tenantId: tenant.id,
+        resources: cacheStatus,
+        schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+      },
+    };
+
+    sendProgress({
+      message:
+        assistantStatus === "failed"
+          ? "Chat answer failed."
+          : "Chat answer ready.",
+      stage: assistantStatus === "failed" ? "failed" : "completed",
+      contextStatus: "completed",
+      modelStatus: assistantStatus === "failed" ? "failed" : "completed",
+      cacheStatus: result.cacheStatus,
+    });
+
+    if (assistantStatus === "failed") {
+      onEvent({
+        type: "failed",
+        result,
+        error: assistantError ?? "The selected LLM provider failed.",
+      });
+    } else {
+      onEvent({ type: "completed", result });
+    }
+    return result;
+  }
+
+  private requireHostedChatConsent(
+    input: SendIntuneChatMessageInput,
+    tenant: TenantRecord,
+    provider: ProviderSummary | undefined,
+    providerId: ProviderId,
+  ): void {
+    if (provider?.isLocal !== false) {
+      return;
+    }
+
+    const consent = input.hostedProviderConsent;
+    if (!consent) {
+      throw new Error(
+        "Hosted provider confirmation is required before Intune Chat can send tenant context to the selected provider.",
+      );
+    }
+
+    if (consent.tenantId !== tenant.id || consent.providerId !== providerId) {
+      throw new Error(
+        "Hosted provider confirmation does not match the active tenant and provider. Confirm the chat send again.",
+      );
+    }
+
+    const acknowledgedAt = Date.parse(consent.acknowledgedAt);
+    const now = Date.now();
+    if (
+      !Number.isFinite(acknowledgedAt) ||
+      now - acknowledgedAt > 5 * 60 * 1000 ||
+      acknowledgedAt - now > 60 * 1000
+    ) {
+      throw new Error(
+        "Hosted provider confirmation expired. Confirm the chat send again.",
+      );
+    }
+  }
+
+  async getSelfTrainingSettings(): Promise<SelfTrainingSettings> {
+    return this.requireIntelligenceStore().getSelfTrainingSettings();
+  }
+
+  async setSelfTrainingEnabled(enabled: boolean): Promise<SelfTrainingSettings> {
+    const now = new Date().toISOString();
+    return this.requireIntelligenceStore().setSelfTrainingEnabled(enabled, now);
+  }
+
+  async listSelfTrainingSuggestions(
+    status?: SelfTrainingSuggestionStatus,
+  ): Promise<SelfTrainingSuggestion[]> {
+    return this.requireIntelligenceStore().listSelfTrainingSuggestions(status);
+  }
+
+  async approveSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion> {
+    const suggestion = this.requireIntelligenceStore().decideSelfTrainingSuggestion(
+      id,
+      "accepted",
+      new Date().toISOString(),
+    );
+    await this.writeSelfTrainingFile(suggestion.tenantId, suggestion.agentSlug);
+    return suggestion;
+  }
+
+  async rejectSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion> {
+    return this.requireIntelligenceStore().decideSelfTrainingSuggestion(
+      id,
+      "rejected",
+      new Date().toISOString(),
+    );
+  }
+
+  async resetSelfTrainingSuggestions(
+    input: ResetSelfTrainingInput,
+  ): Promise<SelfTrainingSuggestion[]> {
+    const persisted = await this.read();
+    const tenantId = this.resolveTenant(persisted, input.tenantId).id;
+    const reset = this.requireIntelligenceStore().resetAcceptedSelfTrainingSuggestions({
+      tenantId,
+      agentSlug: input.agentSlug,
+      now: new Date().toISOString(),
+    });
+    await this.writeSelfTrainingFile(tenantId, input.agentSlug);
+    return reset;
   }
 
   async listConnectors(): Promise<ConnectorSummary[]> {
@@ -833,6 +1945,13 @@ export class AppStateStore {
         ...persisted,
         installedAgents: next,
       });
+      this.recordLearningEventSafely({
+        tenantId: persisted.activeTenantId,
+        agentSlug: next[idx]?.slug ?? slug,
+        eventType: "agent.settings-updated",
+        source: "settings",
+        payload: { settings: sanitized },
+      });
     });
 
     return this.getAppState();
@@ -979,6 +2098,44 @@ export class AppStateStore {
         await this.persistScheduledRunFailure(agent, schedule, error, nowMs);
         console.error(
           `[scheduler] agent "${agent.slug}" failed to start:`,
+          error,
+        );
+      }
+    }
+  }
+
+  async refreshDueGraphCaches(): Promise<void> {
+    if (!this.intelligenceStore) return;
+    const persisted = await this.read();
+    const nowMs = Date.now();
+
+    for (const tenant of persisted.tenants) {
+      if (!this.intelligenceStore.isGraphCacheRefreshDue(tenant.id, nowMs)) continue;
+      const startedAt = new Date(nowMs).toISOString();
+      try {
+        const result = await this.refreshGraphCache({ tenantId: tenant.id });
+        const failures = result.resources.filter((resource) => !resource.ok);
+        this.intelligenceStore.markGraphCacheRefreshScheduleRun({
+          tenantId: tenant.id,
+          startedAt,
+          success: failures.length === 0,
+          ...(failures.length > 0
+            ? {
+                error: failures
+                  .map((failure) => `${failure.label}: ${failure.error ?? "failed"}`)
+                  .join("; "),
+              }
+            : {}),
+        });
+      } catch (error) {
+        this.intelligenceStore.markGraphCacheRefreshScheduleRun({
+          tenantId: tenant.id,
+          startedAt,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        console.error(
+          `[intune-chat] scheduled Graph cache refresh failed for tenant ${tenant.id}:`,
           error,
         );
       }
@@ -1998,6 +3155,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return persisted.installedAgents.some((agent) => agent.schedule?.enabled === true);
   }
 
+  async hasEnabledBackgroundWork(): Promise<boolean> {
+    const persisted = await this.read();
+    if (persisted.installedAgents.some((agent) => agent.schedule?.enabled === true)) {
+      return true;
+    }
+    if (!this.intelligenceStore) return false;
+    return persisted.tenants.some(
+      (tenant) =>
+        this.intelligenceStore?.getGraphCacheRefreshSchedule(tenant.id).enabled === true,
+    );
+  }
+
   async getAgentSchedule(slug: string): Promise<AgentSchedule | undefined> {
     const persisted = await this.read();
     return persisted.installedAgents.find((agent) => agent.slug === slug)?.schedule;
@@ -2373,11 +3542,59 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       return { agent, providerId, model, queuedRun };
     });
 
+    if (options.source?.type === "intune-chat" && this.intelligenceStore) {
+      const now = new Date().toISOString();
+      const statusNote =
+        queued.agent.mode === "write"
+          ? "Write actions still require the normal confirmation flow."
+          : "Read-only agent run queued.";
+      const message: IntuneChatMessage = {
+        id: `msg_${randomUUID()}`,
+        conversationId: options.source.conversationId,
+        role: "assistant",
+        content: `${queued.agent.name} started from chat. Run ${queued.queuedRun.id} is ${queued.queuedRun.status}. ${statusNote}`,
+        status: "completed",
+        providerId: queued.providerId,
+        model: queued.model,
+        createdAt: now,
+      };
+      this.intelligenceStore.insertMessage(message);
+      this.intelligenceStore.insertToolCall({
+        id: `tool_${randomUUID()}`,
+        conversationId: options.source.conversationId,
+        messageId: message.id,
+        type: "agent-run",
+        status: "completed",
+        createdAt: now,
+        completedAt: now,
+        input: {
+          agentSlug,
+          originatingMessageId: options.source.messageId,
+        },
+        output: {
+          runId: queued.queuedRun.id,
+          runStatus: queued.queuedRun.status,
+        },
+      });
+      this.intelligenceStore.touchConversation(options.source.conversationId, undefined, now);
+    }
+
     void this.driveRun({
       run: queued.queuedRun,
       agent: queued.agent,
       providerId: queued.providerId,
       model: queued.model,
+    });
+    this.recordLearningEventSafely({
+      tenantId: queued.queuedRun.tenantId,
+      agentSlug: queued.agent.slug,
+      eventType: "agent.run-started",
+      source: "run",
+      payload: {
+        runId: queued.queuedRun.id,
+        trigger: queued.queuedRun.trigger,
+        mode: queued.agent.mode,
+      },
     });
     return queued.queuedRun;
   }
@@ -2443,6 +3660,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       model: transition.model,
       plan: transition.updated.plan!,
     });
+    this.recordLearningEventSafely({
+      tenantId: transition.updated.tenantId,
+      agentSlug: transition.agent.slug,
+      eventType: "agent.write-plan-confirmed",
+      source: "run",
+      payload: {
+        runId: transition.updated.id,
+        actionCount: transition.updated.plan?.actions.length ?? 0,
+      },
+    });
     return transition.updated;
   }
 
@@ -2473,6 +3700,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           existing.id === runId ? updated : existing,
         ),
       });
+      this.recordLearningEventSafely({
+        tenantId: updated.tenantId,
+        agentSlug: updated.agentSlug,
+        eventType: "agent.write-plan-rejected",
+        source: "run",
+        payload: {
+          runId: updated.id,
+          actionCount: updated.plan?.actions.length ?? 0,
+        },
+      });
       return updated;
     });
   }
@@ -2486,6 +3723,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     providerId: ProviderId,
     model: string | undefined,
   ): Promise<RunLlmApi> {
+    if (this.llmFactory) {
+      return await this.llmFactory(providerId, model);
+    }
     const providers = await this.listProviders();
     const provider = providers.find((entry) => entry.id === providerId);
     if (!provider || provider.status !== "connected") {
@@ -2582,8 +3822,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }): Promise<void> {
     try {
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
-      const llm = await this.buildLlm(input.providerId, input.model);
+      const baseLlm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId, input.agent.scopes);
+      const overlay = this.selfTrainingPromptOverlay(selection.tenantId, input.agent.slug);
+      const llm = overlay ? withSelfTrainingOverlay(baseLlm, overlay) : baseLlm;
       const stampedRun = this.stampTenant(input.run, selection.tenantId);
       await this.persistRunSnapshot(stampedRun);
       await driver({
@@ -2613,8 +3855,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     plan: NonNullable<RunRecord["plan"]>;
   }): Promise<void> {
     try {
-      const llm = await this.buildLlm(input.providerId, input.model);
+      const baseLlm = await this.buildLlm(input.providerId, input.model);
       const selection = await this.buildGraph(input.run.tenantId, input.agent.scopes);
+      const overlay = this.selfTrainingPromptOverlay(selection.tenantId, input.agent.slug);
+      const llm = overlay ? withSelfTrainingOverlay(baseLlm, overlay) : baseLlm;
       await executeApply({
         run: input.run,
         agent: input.agent,
@@ -2913,7 +4157,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         state.registryInstallCountsEnabled = parsed.registryInstallCountsEnabled;
       }
       if (typeof parsed.registrySource === "string" && parsed.registrySource.length > 0) {
-        state.registrySource = parsed.registrySource;
+        try {
+          state.registrySource = validateRegistrySource(parsed.registrySource, {
+            allowDevSource: this.allowDevRegistrySource,
+          }).sourceUrl;
+        } catch {
+          // Ignore invalid legacy state. New writes validate before persistence.
+        }
       }
       const rawActiveModels = (parsed as { activeModelByProviderId?: unknown })
         .activeModelByProviderId;
@@ -3187,7 +4437,16 @@ function stableStringify(value: unknown): string {
 async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
-  const endpoint = (process.env.OPENAGENTS_OLLAMA_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
+  const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
+  const endpointTrust = classifyOllamaEndpoint(endpoint);
+  const trustedProvider = endpointTrust.isLocal
+    ? provider
+    : {
+        ...provider,
+        description:
+          "Use an Ollama-compatible endpoint outside this device. Tenant prompts leave this device when active.",
+        isLocal: false,
+      };
 
   try {
     const response = await fetch(`${endpoint}/api/tags`, {
@@ -3196,9 +4455,12 @@ async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> 
 
     if (!response.ok) {
       return {
-        ...provider,
+        ...trustedProvider,
         status: "error",
-        detail: `Ollama responded with HTTP ${response.status}`,
+        detail: ollamaEndpointDetail(
+          endpointTrust,
+          `Ollama responded with HTTP ${response.status}`,
+        ),
         models: [],
       };
     }
@@ -3210,25 +4472,38 @@ async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> 
         .filter((name): name is string => Boolean(name)) ?? [];
 
     return {
-      ...provider,
+      ...trustedProvider,
       status: "connected",
-      detail:
+      detail: ollamaEndpointDetail(
+        endpointTrust,
         models.length > 0
           ? `Running on ${endpoint}`
           : "Ollama is running but no models are installed",
+      ),
       models,
       defaultModel: models[0],
     };
   } catch {
     return {
-      ...provider,
+      ...trustedProvider,
       status: "not-installed",
-      detail: `Ollama is not reachable on ${endpoint}`,
+      detail: ollamaEndpointDetail(
+        endpointTrust,
+        `Ollama is not reachable on ${endpoint}`,
+      ),
       models: [],
     };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function ollamaEndpointDetail(
+  endpointTrust: { isLocal: boolean },
+  detail: string,
+): string {
+  if (endpointTrust.isLocal) return detail;
+  return `${detail}. Endpoint is not loopback; prompts leave this device if this provider is active.`;
 }
 
 async function checkCodex(provider: ProviderSummary): Promise<ProviderSummary> {
@@ -4660,6 +5935,338 @@ function isHighRiskGraphScope(scope: string): boolean {
 function extractRegistryRef(manifestUrl: string): string | undefined {
   const match = manifestUrl.match(/githubusercontent\.com\/[^/]+\/[^/]+\/([^/]+)\//);
   return match?.[1];
+}
+
+function sanitizeGraphResources(
+  resources: GraphCacheResourceKind[] | undefined,
+): GraphCacheResourceKind[] {
+  const allowed = new Set(GRAPH_CACHE_RESOURCES.map((entry) => entry.resource));
+  const selected = (resources && resources.length > 0
+    ? resources
+    : GRAPH_CACHE_RESOURCES.map((entry) => entry.resource)
+  ).filter((resource): resource is GraphCacheResourceKind => allowed.has(resource));
+  return [...new Set(selected)];
+}
+
+function readPlannedChatRows(
+  store: IntelligenceSqliteStore,
+  input: {
+    tenantId: string;
+    question: string;
+    generatedAt: string;
+    resources: GraphCacheResourceKind[];
+    searchTerms: string[];
+    limitPerResource: number;
+  },
+): Record<GraphCacheResourceKind, unknown[]> {
+  const rows = store.readGraphRows({
+    tenantId: input.tenantId,
+    resources: input.resources,
+    searchTerms: input.searchTerms,
+    limitPerResource: input.limitPerResource,
+  });
+  const staleSyncDays = staleManagedDeviceSyncThresholdDays(input.question);
+  if (staleSyncDays !== undefined && input.resources.includes("managedDevices")) {
+    rows.managedDevices = store.readManagedDevicesLastSyncBefore({
+      tenantId: input.tenantId,
+      thresholdIso: thresholdIsoDaysBefore(input.generatedAt, staleSyncDays),
+      limit: input.limitPerResource,
+    });
+  }
+  return rows;
+}
+
+const GRAPH_CACHE_PAGE_LIMIT = 10;
+const GRAPH_CACHE_ROW_LIMIT = 1000;
+
+interface GraphCacheRequestPage {
+  path: string;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+}
+
+interface GraphCollectionPage {
+  rows: unknown[];
+  nextLink?: string;
+}
+
+async function fetchGraphCachePages(
+  graph: RunGraphApi,
+  request: GraphCacheRequestPage,
+): Promise<{ rows: unknown[]; pages: number; pageLimitReached: boolean }> {
+  const rows: unknown[] = [];
+  let pages = 0;
+  let nextRequest: GraphCacheRequestPage | undefined = request;
+  let pendingNextLink: string | undefined;
+
+  while (
+    nextRequest &&
+    pages < GRAPH_CACHE_PAGE_LIMIT &&
+    rows.length < GRAPH_CACHE_ROW_LIMIT
+  ) {
+    const response = await graph.request({
+      method: "GET",
+      path: nextRequest.path,
+      ...(nextRequest.query && Object.keys(nextRequest.query).length > 0
+        ? { query: nextRequest.query }
+        : {}),
+      ...(nextRequest.headers ? { headers: nextRequest.headers } : {}),
+    });
+    const page = unwrapGraphCollectionPage(response);
+    pages += 1;
+    const remainingRows = GRAPH_CACHE_ROW_LIMIT - rows.length;
+    rows.push(...page.rows.slice(0, remainingRows));
+    pendingNextLink = page.nextLink;
+    nextRequest = page.nextLink
+      ? graphCacheRequestFromNextLink(page.nextLink, request.headers)
+      : undefined;
+  }
+
+  return {
+    rows,
+    pages,
+    pageLimitReached: Boolean(pendingNextLink),
+  };
+}
+
+function graphCacheRequestFromNextLink(
+  nextLink: string,
+  headers: Record<string, string> | undefined,
+): GraphCacheRequestPage {
+  const url = new URL(nextLink, "https://graph.microsoft.com");
+  const path = url.pathname.replace(/^\/(?:beta|v1\.0)(?=\/)/, "");
+  const query: Record<string, string> = {};
+  for (const [key, value] of url.searchParams.entries()) {
+    query[key] = value;
+  }
+  return {
+    path,
+    ...(Object.keys(query).length > 0 ? { query } : {}),
+    ...(headers ? { headers } : {}),
+  };
+}
+
+function buildChatProgressSteps(input: {
+  refreshResources: GraphCacheResourceKind[];
+  refreshResults: GraphCacheRefreshResourceResult[];
+  activeResource?: GraphCacheResourceKind;
+  cacheCheckStatus: IntuneChatProgressStep["status"];
+  contextStatus: IntuneChatProgressStep["status"];
+  modelStatus: IntuneChatProgressStep["status"];
+}): IntuneChatProgressStep[] {
+  const resultsByResource = new Map(
+    input.refreshResults.map((result) => [result.resource, result]),
+  );
+  const steps: IntuneChatProgressStep[] = [
+    {
+      id: "cache-check",
+      label: "Check cached tenant data",
+      status: input.cacheCheckStatus,
+    },
+  ];
+
+  for (const resource of input.refreshResources) {
+    const result = resultsByResource.get(resource);
+    const definition = definitionForResource(resource);
+    steps.push({
+      id: `refresh-${resource}`,
+      label: `Refresh ${definition.label}`,
+      status: result
+        ? result.ok
+          ? "completed"
+          : "failed"
+        : input.activeResource === resource
+          ? "active"
+          : "pending",
+      ...(result
+        ? {
+            detail: result.ok
+              ? graphCacheRefreshDetail(result)
+              : result.error,
+          }
+        : {}),
+    });
+  }
+
+  steps.push(
+    {
+      id: "context-pack",
+      label: "Build answer context",
+      status: input.contextStatus,
+    },
+    {
+      id: "model-answer",
+      label: "Generate response",
+      status: input.modelStatus,
+    },
+  );
+  return steps;
+}
+
+function graphCacheRefreshDetail(result: GraphCacheRefreshResourceResult): string {
+  const rowLabel = `${result.rows.toLocaleString()} row${result.rows === 1 ? "" : "s"} cached`;
+  const pageLabel =
+    typeof result.pages === "number" && result.pages > 1
+      ? ` across ${result.pages.toLocaleString()} pages`
+      : "";
+  return result.pageLimitReached
+    ? `${rowLabel}${pageLabel} · capped`
+    : `${rowLabel}${pageLabel}`;
+}
+
+function estimateChatProgressPercent(steps: IntuneChatProgressStep[]): number {
+  if (steps.length === 0) return 0;
+  const score = steps.reduce((sum, step) => {
+    if (step.status === "completed" || step.status === "failed") return sum + 1;
+    if (step.status === "active") return sum + 0.45;
+    return sum;
+  }, 0);
+  return Math.max(5, Math.min(100, Math.round((score / steps.length) * 100)));
+}
+
+function unwrapGraphCollectionPage(response: unknown): GraphCollectionPage {
+  if (Array.isArray(response)) return { rows: response };
+  if (
+    typeof response === "object" &&
+    response !== null &&
+    Array.isArray((response as { value?: unknown }).value)
+  ) {
+    const record = response as { value: unknown[]; "@odata.nextLink"?: unknown };
+    return {
+      rows: record.value,
+      nextLink:
+        typeof record["@odata.nextLink"] === "string"
+          ? record["@odata.nextLink"]
+          : undefined,
+    };
+  }
+  return { rows: response === undefined || response === null ? [] : [response] };
+}
+
+function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
+  return [
+    "You are OpenAdminOS Intune Chat.",
+    "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
+    "If the context is missing, stale, partial, or has Graph errors, say that plainly.",
+    "Do not invent tenant state, counts, users, devices, policies, or remediation results.",
+    "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",
+    isLocalProvider
+      ? "The selected provider is local; keep wording consistent with local-only trust."
+      : "The selected provider is hosted; be explicit when tenant context is being used to produce the answer.",
+    "Use concise admin-facing prose. No hype, no exclamation marks.",
+  ].join("\n");
+}
+
+function withSelfTrainingOverlay(base: RunLlmApi, overlay: string): RunLlmApi {
+  const composeSystem = (system: string | undefined) =>
+    [system, overlay].filter((part): part is string => Boolean(part)).join("\n\n");
+  return {
+    get available() {
+      return base.available;
+    },
+    get defaultModel() {
+      return base.defaultModel;
+    },
+    complete: (options) =>
+      base.complete({
+        ...options,
+        system: composeSystem(options.system),
+      }),
+    async *stream(options) {
+      yield* base.stream({
+        ...options,
+        system: composeSystem(options.system),
+      });
+    },
+  };
+}
+
+function stableSuggestionId(tenantId: string, agentSlug: string, text: string): string {
+  return `suggestion_${createHash("sha256")
+    .update(`${tenantId}:${agentSlug}:${text}`)
+    .digest("hex")
+    .slice(0, 24)}`;
+}
+
+function buildIntuneChatSources(input: {
+  cacheStatus: GraphCacheStatus["resources"];
+  plannedResources: GraphCacheResourceKind[];
+  refreshedResources: Set<GraphCacheResourceKind>;
+}): NonNullable<IntuneChatMessage["sources"]> {
+  return input.cacheStatus
+    .filter((status) => input.plannedResources.includes(status.resource))
+    .map((status) => {
+      const request = pathForResource(status.resource);
+      return {
+        resource: status.resource,
+        label: status.label,
+        rows: status.rows,
+        pages: status.pages,
+        pageLimitReached: status.pageLimitReached,
+        refreshedAt: status.refreshedAt,
+        source: input.refreshedResources.has(status.resource)
+          ? "live" as const
+          : "cache" as const,
+        path: request.path,
+        ...(request.select ? { select: request.select } : {}),
+        ...(request.query ? { query: request.query } : {}),
+        ...(status.lastError ? { error: status.lastError } : {}),
+      };
+    });
+}
+
+function normalizeChatConversationTitle(title: string): string {
+  const normalized = chatTitleForPrompt(title);
+  if (!normalized.trim()) {
+    throw new Error("Conversation title is required.");
+  }
+  return normalized;
+}
+
+function hashTenantId(tenantId: string): string {
+  return createHash("sha256").update(tenantId).digest("hex").slice(0, 24);
+}
+
+function buildSelfTrainingYaml(input: {
+  agentSlug: string;
+  tenantKey: string;
+  updatedAt: string;
+  suggestions: SelfTrainingSuggestion[];
+}): string {
+  const lines = [
+    "schemaVersion: 1",
+    `agentSlug: ${quoteYaml(input.agentSlug)}`,
+    `tenantKey: ${quoteYaml(input.tenantKey)}`,
+    "enabled: true",
+    `updatedAt: ${quoteYaml(input.updatedAt)}`,
+    "",
+    "instructions:",
+  ];
+  if (input.suggestions.length === 0) {
+    lines.push("  []");
+  } else {
+    for (const suggestion of input.suggestions) {
+      lines.push(`  - id: ${quoteYaml(suggestion.id)}`);
+      lines.push("    status: active");
+      lines.push(`    source: ${quoteYaml(suggestion.source)}`);
+      lines.push(`    createdAt: ${quoteYaml(suggestion.createdAt)}`);
+      lines.push("    text: |-");
+      lines.push(...indentBlock(suggestion.text, 6));
+    }
+  }
+  lines.push("", "metadata:");
+  lines.push(`  acceptedSuggestions: ${input.suggestions.length}`);
+  lines.push("  note: Approved local self-training only. This file cannot add scopes, change mode, or bypass confirmation.");
+  return `${lines.join("\n")}\n`;
+}
+
+function quoteYaml(value: string): string {
+  return JSON.stringify(value);
+}
+
+function indentBlock(value: string, spaces: number): string[] {
+  const prefix = " ".repeat(spaces);
+  return value.split(/\r?\n/).map((line) => `${prefix}${line}`);
 }
 
 export const __agentDraftTestUtils = {

@@ -93,7 +93,7 @@ These are non-negotiable. If you find yourself about to violate one, stop and as
 - **MSAL:** `@azure/msal-node` for tenant auth, Graph API for everything else
 - **LLM abstraction:** A pluggable provider interface; concrete implementations for Ollama, LM Studio, Anthropic-via-Codex, OpenAI-via-Codex, Azure OpenAI. Where possible, piggyback on locally-installed vendor CLIs (Codex, Codex) to avoid storing API keys and to inherit the user's existing vendor auth.
 - **Agent registry:** GitHub-hosted (like Home Assistant integrations); each agent is a TypeScript module with a manifest declaring scopes, read/write mode, model requirements
-- **Local storage:** SQLite (via `better-sqlite3`) for run history, tenant configs, agent installations. OS keychain (`keytar`) for secrets.
+- **Local storage:** SQLite in the Electron main process for run history, tenant configs, agent installations, chat/cache state, and learning decisions. Use Electron's built-in `node:sqlite` unless a future native-module rebuild strategy is explicitly approved. OS keychain (`keytar`) for secrets.
 - **Code signing:** Windows EV cert + Apple Developer Program + notarization, driven by `electron-builder` (deferred but the build pipeline must accept signing as a step from day one)
 - **Auto-update:** `electron-updater` against signed GitHub releases
 

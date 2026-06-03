@@ -7,11 +7,13 @@ import {
   IconArrowRight,
   IconBadgeCheck,
   IconBolt,
+  IconChat,
   IconCheck,
   IconCloud,
   IconCopy,
   IconExternal,
   IconHardDrive,
+  IconHub,
   IconLogo,
   IconPlay,
   IconShield,
@@ -19,7 +21,9 @@ import {
 } from "../components/icons";
 import { Avatar } from "../components/Avatar";
 import { TitleBarInset } from "../components/AppShell";
+import { useToast } from "../components/Toast";
 import { useAppState } from "../state";
+import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   ProviderId,
   ProviderSummary,
@@ -30,7 +34,7 @@ import type {
 import { isProviderImplemented } from "../shared/providers";
 import { TrustBanner } from "../components/TrustBanner";
 
-const steps = ["Welcome", "Connect tenant", "Pick LLM", "First agent"] as const;
+const steps = ["Welcome", "Connect tenant", "Pick LLM", "Start workspace"] as const;
 type Step = (typeof steps)[number];
 
 export default function Onboarding() {
@@ -73,7 +77,7 @@ export default function Onboarding() {
     if (
       step !== "Connect tenant" &&
       step !== "Pick LLM" &&
-      step !== "First agent"
+      step !== "Start workspace"
     )
       return;
     const intervalId = window.setInterval(() => {
@@ -95,7 +99,7 @@ export default function Onboarding() {
         setWorking(false);
       }
     }
-    setStep("First agent");
+    setStep("Start workspace");
   };
 
   const handleConnectTenant = async () => {
@@ -233,8 +237,8 @@ export default function Onboarding() {
               working={working}
             />
           )}
-          {step === "First agent" && (
-            <PickAgent
+          {step === "Start workspace" && (
+            <StartWorkspace
               agents={registryAgents}
               selectedId={selectedAgentId}
               activeProvider={state.providers.find(
@@ -243,8 +247,9 @@ export default function Onboarding() {
               onRecheck={() => void refresh()}
               onSelect={setSelectedAgentId}
               onBack={() => setStep("Pick LLM")}
-              onContinue={() => void handleInstallAndFinish()}
-              onSkip={() => navigate("/")}
+              onOpenChat={() => navigate("/chat")}
+              onOpenHub={() => navigate("/hub")}
+              onInstallAndRun={() => void handleInstallAndFinish()}
               working={working}
             />
           )}
@@ -702,14 +707,15 @@ function StickyOnboardingFooter({ children }: { children: React.ReactNode }) {
   );
 }
 
-function PickAgent({
+function StartWorkspace({
   agents,
   selectedId,
   activeProvider,
   onSelect,
   onBack,
-  onContinue,
-  onSkip,
+  onOpenChat,
+  onOpenHub,
+  onInstallAndRun,
   onRecheck,
   working,
 }: {
@@ -718,8 +724,9 @@ function PickAgent({
   activeProvider: ProviderSummary | undefined;
   onSelect: (id: string) => void;
   onBack: () => void;
-  onContinue: () => void;
-  onSkip: () => void;
+  onOpenChat: () => void;
+  onOpenHub: () => void;
+  onInstallAndRun: () => void;
   onRecheck: () => void;
   working: boolean;
 }) {
@@ -733,11 +740,11 @@ function PickAgent({
     <div>
       <div className="mb-7">
         <h2 className="text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
-          Install your first agent
+          Choose where to start
         </h2>
         <p className="mt-1.5 max-w-[600px] text-[13.5px] leading-relaxed text-[var(--color-text-soft)]">
-          Pick an agent to install and run first. The full catalog stays
-          available in Agent Hub.
+          Ask open-ended tenant questions in Intune Chat, or install an
+          agent when you want a repeatable workflow.
         </p>
       </div>
 
@@ -747,97 +754,207 @@ function PickAgent({
         </div>
       )}
 
-      {featured.length === 0 ? (
-        <Card>
-          <div className="p-6 text-[13px] text-[var(--color-text-muted)]">
-            No agents are available yet. Refresh the catalog from Agent Hub
-            after setup.
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <Card
+          interactive={providerReady}
+          onClick={providerReady ? onOpenChat : undefined}
+          className={
+            providerReady
+              ? "ring-2 ring-[var(--color-accent)]/40 bg-[var(--color-surface-hover)]"
+              : "opacity-60"
+          }
+        >
+          <div className="flex min-h-[188px] flex-col p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25">
+                <IconChat size={19} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[14px] font-medium text-[var(--color-text)]">
+                    Ask Intune Chat
+                  </span>
+                  <Pill tone="accent">Recommended</Pill>
+                </div>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                  Use natural language for tenant inventory, compliance,
+                  Autopilot, apps, policies, audit events, and agent
+                  suggestions.
+                </p>
+              </div>
+            </div>
+            <div className="mt-auto pt-5">
+              <Button
+                variant="primary"
+                trailingIcon={<IconArrowRight size={13} />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenChat();
+                }}
+                disabled={!providerReady}
+              >
+                Open chat
+              </Button>
+            </div>
           </div>
         </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {featured.map((a) => {
-            const active = a.registryId === selectedId;
-            return (
-              <Card
-                key={a.registryId}
-                interactive
-                onClick={() => onSelect(a.registryId)}
-                className={
-                  active
-                    ? "ring-2 ring-[var(--color-accent)]/55 bg-[var(--color-surface-hover)]"
-                    : ""
-                }
-              >
-                <div className="flex min-h-[150px] items-start gap-4 p-5">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
-                    {a.mode === "write" ? (
-                      <IconBolt size={18} className="text-[var(--color-warning)]" />
-                    ) : (
-                      <IconShield size={18} className="text-[var(--color-text-soft)]" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[14px] font-medium text-[var(--color-text)]">
-                        {a.name}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
-                        {a.author.name}
-                        {a.author.verified && (
-                          <IconBadgeCheck
-                            size={11}
-                            className="text-[var(--color-accent)]"
-                          />
-                        )}
-                      </span>
-                      <Pill tone={a.mode === "write" ? "warning" : "default"}>
-                        {a.mode === "write" ? "Write" : "Read-only"}
-                      </Pill>
-                      <Pill className="capitalize">{a.category}</Pill>
-                    </div>
-                    <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-                      {a.description}
-                    </p>
-                    <div className="mt-3 text-[11px] text-[var(--color-text-muted)]">
-                      {a.scopes.length} scope{a.scopes.length === 1 ? "" : "s"} · v{a.version}
-                    </div>
-                  </div>
-                  <div
-                    className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ${
-                      active
-                        ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
-                        : "ring-[var(--color-border-strong)]"
-                    }`}
-                  >
-                    {active && <IconCheck size={12} className="text-[#1a120c]" />}
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
 
-      <div className="mt-8 flex items-center justify-between">
+        <Card interactive onClick={onOpenHub}>
+          <div className="flex min-h-[188px] flex-col p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
+                <IconHub size={19} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[14px] font-medium text-[var(--color-text)]">
+                    Browse Agent Hub
+                  </span>
+                  <Pill>Repeatable workflows</Pill>
+                </div>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                  Install read-only or write-mode agents with declared
+                  Graph scopes, local manifests, and confirmation steps
+                  for tenant changes.
+                </p>
+              </div>
+            </div>
+            <div className="mt-auto pt-5">
+              <Button
+                variant="secondary"
+                trailingIcon={<IconArrowRight size={13} />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenHub();
+                }}
+              >
+                Open Hub
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <div className="mt-8">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[14px] font-medium text-[var(--color-text)]">
+              Optional starter agent
+            </h3>
+            <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+              Pick one to install and run now, or start in Chat and come
+              back later.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            trailingIcon={<IconArrowRight size={12} />}
+            onClick={onOpenHub}
+          >
+            See all
+          </Button>
+        </div>
+
+        {featured.length === 0 ? (
+          <Card>
+            <div className="p-6 text-[13px] text-[var(--color-text-muted)]">
+              No agents are available yet. Intune Chat is ready once the
+              selected provider is reachable; Agent Hub can be refreshed
+              later from the sidebar.
+            </div>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {featured.map((a) => {
+              const active = a.registryId === selectedId;
+              return (
+                <Card
+                  key={a.registryId}
+                  interactive
+                  onClick={() => onSelect(a.registryId)}
+                  className={
+                    active
+                      ? "ring-2 ring-[var(--color-accent)]/55 bg-[var(--color-surface-hover)]"
+                      : ""
+                  }
+                >
+                  <div className="flex min-h-[150px] items-start gap-4 p-5">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]">
+                      {a.mode === "write" ? (
+                        <IconBolt size={18} className="text-[var(--color-warning)]" />
+                      ) : (
+                        <IconShield size={18} className="text-[var(--color-text-soft)]" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[14px] font-medium text-[var(--color-text)]">
+                          {a.name}
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+                          {a.author.name}
+                          {a.author.verified && (
+                            <IconBadgeCheck
+                              size={11}
+                              className="text-[var(--color-accent)]"
+                            />
+                          )}
+                        </span>
+                        <Pill tone={a.mode === "write" ? "warning" : "default"}>
+                          {a.mode === "write" ? "Write" : "Read-only"}
+                        </Pill>
+                        <Pill className="capitalize">{a.category}</Pill>
+                      </div>
+                      <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                        {a.description}
+                      </p>
+                      <div className="mt-3 text-[11px] text-[var(--color-text-muted)]">
+                        {a.scopes.length} scope{a.scopes.length === 1 ? "" : "s"} · v{a.version}
+                      </div>
+                    </div>
+                    <div
+                      className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ring-1 ${
+                        active
+                          ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
+                          : "ring-[var(--color-border-strong)]"
+                      }`}
+                    >
+                      {active && <IconCheck size={12} className="text-[#1a120c]" />}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <StickyOnboardingFooter>
         <Button variant="ghost" onClick={onBack}>
           Back
         </Button>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={onSkip} disabled={working}>
-            Skip for now
+          <Button variant="secondary" onClick={onOpenHub}>
+            Agent Hub
+          </Button>
+          <Button
+            variant="secondary"
+            leadingIcon={<IconPlay size={12} />}
+            onClick={onInstallAndRun}
+            disabled={working || featured.length === 0 || !providerReady}
+          >
+            {working ? "Installing…" : "Install selected"}
           </Button>
           <Button
             variant="primary"
-            size="lg"
-            leadingIcon={<IconPlay size={12} />}
-            onClick={onContinue}
-            disabled={working || featured.length === 0 || !providerReady}
+            trailingIcon={<IconArrowRight size={14} />}
+            onClick={onOpenChat}
+            disabled={!providerReady}
           >
-            {working ? "Installing…" : "Install and run"}
+            Open Intune Chat
           </Button>
         </div>
-      </div>
+      </StickyOnboardingFooter>
     </div>
   );
 }
@@ -987,9 +1104,9 @@ function OllamaInstallGuide({
             {warn ? "Ollama isn't running on this device." : "Let's install Ollama."}
           </div>
           <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-            Ollama is a free, open-source app that runs LLMs locally. Open
-            Agents needs it so your tenant data and prompts never leave this
-            machine. Three short steps:
+            Ollama is a free, open-source app that runs LLMs locally.
+            OpenAdminOS needs it so your tenant data and prompts never
+            leave this machine. Three short steps:
           </p>
         </div>
       </div>
@@ -1079,6 +1196,7 @@ function InstallStep({
 
 function CommandRow({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
+  const toast = useToast();
   return (
     <div className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
       <span className="font-mono text-[12px] text-[var(--color-text)]">
@@ -1086,9 +1204,14 @@ function CommandRow({ command }: { command: string }) {
       </span>
       <button
         onClick={() => {
-          void navigator.clipboard.writeText(command);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
+          void copyTextToClipboard(command)
+            .then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            })
+            .catch((error) =>
+              toast.error(error instanceof Error ? error.message : String(error)),
+            );
         }}
         className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
       >

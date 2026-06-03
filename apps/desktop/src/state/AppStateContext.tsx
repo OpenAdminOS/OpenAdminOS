@@ -36,6 +36,10 @@ interface AppStateContextValue {
   error: Error | null;
   refresh: () => Promise<void>;
   refreshRegistry: () => Promise<void>;
+  setRegistrySource: (
+    url: string,
+    options?: { confirmExternalSource?: boolean },
+  ) => Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   installAgent: (agentId: string) => Promise<void>;
   uninstallAgent: (slug: string) => Promise<void>;
   getAgentUpdateReview: (slug: string) => Promise<AgentUpdateReview>;
@@ -146,6 +150,34 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setError(toError(caughtError));
     }
   }, []);
+
+  const setRegistrySource = useCallback(
+    async (url: string, options?: { confirmExternalSource?: boolean }) => {
+      const api = getOpenAdminOSApi();
+
+      if (!api?.setRegistrySource) {
+        const fallbackError = new Error(
+          "Registry source changes are unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+
+      setError(null);
+      try {
+        const result = await api.setRegistrySource(url, options);
+        const nextState = await api.getAppState();
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+        return result;
+      } catch (caughtError) {
+        const registryError = toError(caughtError);
+        setError(registryError);
+        throw registryError;
+      }
+    },
+    [],
+  );
 
   const refresh = useCallback(async () => {
     const api = getOpenAdminOSApi();
@@ -791,6 +823,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       error,
       refresh,
       refreshRegistry,
+      setRegistrySource,
       installAgent,
       uninstallAgent,
       getAgentUpdateReview,
@@ -840,6 +873,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveModel,
       setActiveProvider,
       setRegistryInstallCountsEnabled,
+      setRegistrySource,
       setActiveTenant,
       startRun,
       state,

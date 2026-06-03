@@ -45,7 +45,13 @@ import {
   type ConnectorInvocationInfo,
 } from "./connectors.js";
 
-export { createOllamaLlm, noopLlm } from "./llm-ollama.js";
+export {
+  classifyOllamaEndpoint,
+  createOllamaLlm,
+  noopLlm,
+  resolveOllamaEndpoint,
+  type OllamaEndpointTrust,
+} from "./llm-ollama.js";
 export { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
 export {
   createRegistryInstallCountPayload,

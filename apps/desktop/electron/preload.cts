@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
 import type {
   HostPlatform,
   OpenAdminOSApi,
@@ -9,16 +9,19 @@ import type {
   SaveTextFileArgs,
   StartRunOptions,
   UpdateState,
+  IntuneChatStreamEvent,
 } from "@openadminos/agent-sdk";
 
-const platform: HostPlatform =
-  process.platform === "darwin"
-    ? "macos"
-    : process.platform === "win32"
-      ? "windows"
-      : process.platform === "linux"
-        ? "linux"
-        : "unknown";
+const platform: HostPlatform = detectPlatform();
+const activeIntuneChatStreamIds = new Set<string>();
+
+function detectPlatform(): HostPlatform {
+  const userAgent = navigator.userAgent.toLowerCase();
+  if (userAgent.includes("mac os")) return "macos";
+  if (userAgent.includes("windows")) return "windows";
+  if (userAgent.includes("linux")) return "linux";
+  return "unknown";
+}
 
 const api: OpenAdminOSApi = {
   platform,
@@ -27,6 +30,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-scheduler-launch-settings"),
   getReleaseDiagnostics: () =>
     ipcRenderer.invoke("openadminos:get-release-diagnostics"),
+  writeClipboardText: (text: string) =>
+    ipcRenderer.invoke("openadminos:write-clipboard-text", text),
   setSchedulerLaunchEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-scheduler-launch-enabled", enabled),
   listAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
@@ -34,13 +39,105 @@ const api: OpenAdminOSApi = {
   listRegistryAgents: () =>
     ipcRenderer.invoke("openadminos:list-registry-agents"),
   refreshRegistry: () => ipcRenderer.invoke("openadminos:refresh-registry"),
-  setRegistrySource: (url: string) =>
-    ipcRenderer.invoke("openadminos:set-registry-source", url),
+  setRegistrySource: (url: string, options?: { confirmExternalSource?: boolean }) =>
+    ipcRenderer.invoke("openadminos:set-registry-source", url, options),
   setRegistryInstallCountsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-registry-install-counts-enabled", enabled),
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
   testProvider: (providerId: ProviderId, model?: string) =>
     ipcRenderer.invoke("openadminos:test-provider", providerId, model),
+  listIntuneChatConversations: () =>
+    ipcRenderer.invoke("openadminos:list-intune-chat-conversations"),
+  searchIntuneChatConversations: (query: string) =>
+    ipcRenderer.invoke("openadminos:search-intune-chat-conversations", query),
+  renameIntuneChatConversation: (conversationId: string, title: string) =>
+    ipcRenderer.invoke(
+      "openadminos:rename-intune-chat-conversation",
+      conversationId,
+      title,
+    ),
+  setIntuneChatConversationPinned: (conversationId: string, pinned: boolean) =>
+    ipcRenderer.invoke(
+      "openadminos:set-intune-chat-conversation-pinned",
+      conversationId,
+      pinned,
+    ),
+  deleteIntuneChatConversation: (conversationId: string) =>
+    ipcRenderer.invoke("openadminos:delete-intune-chat-conversation", conversationId),
+  getIntuneChatMessages: (conversationId: string) =>
+    ipcRenderer.invoke("openadminos:get-intune-chat-messages", conversationId),
+  sendIntuneChatMessage: (input) =>
+    ipcRenderer.invoke("openadminos:send-intune-chat-message", input),
+  streamIntuneChatMessage: (input, onEvent) => {
+    const streamId = crypto.randomUUID();
+    let cleanedUp = false;
+    let terminalEventSeen = false;
+    activeIntuneChatStreamIds.add(streamId);
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      activeIntuneChatStreamIds.delete(streamId);
+      ipcRenderer.removeListener("openadminos:intune-chat-stream-event", handler);
+    };
+    const handler = (
+      _event: unknown,
+      payload: { streamId: string; event: IntuneChatStreamEvent },
+    ) => {
+      if (payload.streamId === streamId) {
+        onEvent(payload.event);
+        if (
+          payload.event.type === "completed" ||
+          payload.event.type === "failed" ||
+          payload.event.type === "cancelled"
+        ) {
+          terminalEventSeen = true;
+          window.setTimeout(cleanup, 0);
+        }
+      }
+    };
+    ipcRenderer.on("openadminos:intune-chat-stream-event", handler);
+    return ipcRenderer
+      .invoke("openadminos:stream-intune-chat-message", streamId, input)
+      .finally(() => {
+        if (!terminalEventSeen) {
+          window.setTimeout(cleanup, 1000);
+        }
+      });
+  },
+  cancelIntuneChatStream: async () => {
+    const streamIds = [...activeIntuneChatStreamIds];
+    await Promise.all(
+      streamIds.map((streamId) =>
+        ipcRenderer.invoke("openadminos:cancel-intune-chat-stream", streamId),
+      ),
+    );
+  },
+  refreshGraphCache: (options) =>
+    ipcRenderer.invoke("openadminos:refresh-graph-cache", options),
+  getGraphCacheStatus: (tenantId?: string) =>
+    ipcRenderer.invoke("openadminos:get-graph-cache-status", tenantId),
+  getGraphCacheRefreshSchedule: (tenantId?: string) =>
+    ipcRenderer.invoke("openadminos:get-graph-cache-refresh-schedule", tenantId),
+  setGraphCacheRefreshSchedule: (input) =>
+    ipcRenderer.invoke("openadminos:set-graph-cache-refresh-schedule", input),
+  getLocalDataSummary: (tenantId?: string) =>
+    ipcRenderer.invoke("openadminos:get-local-data-summary", tenantId),
+  clearIntuneChatHistory: () =>
+    ipcRenderer.invoke("openadminos:clear-intune-chat-history"),
+  clearGraphCache: (tenantId?: string) =>
+    ipcRenderer.invoke("openadminos:clear-graph-cache", tenantId),
+  getSelfTrainingSettings: () =>
+    ipcRenderer.invoke("openadminos:get-self-training-settings"),
+  setSelfTrainingEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-self-training-enabled", enabled),
+  listSelfTrainingSuggestions: (status) =>
+    ipcRenderer.invoke("openadminos:list-self-training-suggestions", status),
+  approveSelfTrainingSuggestion: (id: string) =>
+    ipcRenderer.invoke("openadminos:approve-self-training-suggestion", id),
+  rejectSelfTrainingSuggestion: (id: string) =>
+    ipcRenderer.invoke("openadminos:reject-self-training-suggestion", id),
+  resetSelfTrainingSuggestions: (input) =>
+    ipcRenderer.invoke("openadminos:reset-self-training-suggestions", input),
   listConnectors: () => ipcRenderer.invoke("openadminos:list-connectors"),
   testConnector: (id: string) =>
     ipcRenderer.invoke("openadminos:test-connector", id),

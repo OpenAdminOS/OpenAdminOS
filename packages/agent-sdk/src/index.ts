@@ -287,6 +287,16 @@ export interface StartRunOptions {
    * the app window is open.
    */
   trigger?: "manual" | "schedule";
+  /**
+   * Optional source metadata for runs started from another product surface.
+   * The runtime still treats these as normal manual runs; this only lets the
+   * host keep a local audit link back to the originating chat.
+   */
+  source?: {
+    type: "intune-chat";
+    conversationId: string;
+    messageId?: string;
+  };
 }
 
 /**
@@ -449,6 +459,307 @@ export interface AppState {
   schedulerStatus?: SchedulerStatus;
 }
 
+export type IntuneChatMessageRole = "user" | "assistant" | "tool";
+export type IntuneChatMessageStatus =
+  | "streaming"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface IntuneChatConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  tenantId?: string;
+  pinnedAt?: string;
+}
+
+export interface IntuneChatSource {
+  resource: GraphCacheResourceKind;
+  label: string;
+  rows: number;
+  pages?: number;
+  pageLimitReached?: boolean;
+  refreshedAt?: string;
+  source: "cache" | "live";
+  path?: string;
+  select?: string[];
+  query?: Record<string, string>;
+  error?: string;
+}
+
+export interface IntuneChatAgentSuggestion {
+  agentSlug: string;
+  agentName: string;
+  reason: string;
+  /** Prompt terms that matched this installed agent's name, slug, description, or category. */
+  matchedTerms?: string[];
+  /** Human-readable routing evidence, such as write intent or category alignment. */
+  matchedConcepts?: string[];
+  /** Planned Graph cache resources that made this agent relevant to the prompt. */
+  matchedResources?: GraphCacheResourceKind[];
+  confidence: number;
+  mode: AgentMode;
+  scopes: string[];
+}
+
+export interface IntuneChatMessage {
+  id: string;
+  conversationId: string;
+  role: IntuneChatMessageRole;
+  content: string;
+  createdAt: string;
+  status: IntuneChatMessageStatus;
+  providerId?: ProviderId;
+  model?: string;
+  sources?: IntuneChatSource[];
+  agentSuggestions?: IntuneChatAgentSuggestion[];
+  error?: string;
+}
+
+export interface IntuneChatToolCall {
+  id: string;
+  conversationId: string;
+  messageId?: string;
+  type: "graph-cache-refresh" | "agent-suggestion" | "agent-run" | "self-training-suggestion";
+  status: "pending" | "completed" | "failed";
+  createdAt: string;
+  completedAt?: string;
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+}
+
+export type GraphCacheResourceKind =
+  | "managedDevices"
+  | "entraDevices"
+  | "users"
+  | "groups"
+  | "deviceCompliancePolicies"
+  | "deviceConfigurations"
+  | "configurationPolicies"
+  | "signIns"
+  | "directoryAudits"
+  | "conditionalAccessPolicies"
+  | "mobileApps"
+  | "detectedApps"
+  | "managedAppPolicies"
+  | "iosManagedAppProtections"
+  | "androidManagedAppProtections"
+  | "mobileAppConfigurations"
+  | "deviceHealthScripts"
+  | "deviceManagementScripts"
+  | "windowsAutopilotDevices"
+  | "autopilotEvents"
+  | "windowsAutopilotProfiles"
+  | "deviceEnrollmentConfigurations"
+  | "windowsQualityUpdateProfiles"
+  | "windowsFeatureUpdateProfiles"
+  | "endpointSecurityIntents"
+  | "groupPolicyConfigurations"
+  | "assignmentFilters"
+  | "roleScopeTags"
+  | "managedDeviceOverview"
+  | "managedDeviceEncryptionStates"
+  | "troubleshootingEvents";
+
+export interface GraphCacheResourceStatus {
+  resource: GraphCacheResourceKind;
+  label: string;
+  rows: number;
+  pages?: number;
+  pageLimitReached?: boolean;
+  refreshedAt?: string;
+  scopeSet: string[];
+  lastError?: string;
+}
+
+export interface GraphCacheStatus {
+  tenantId?: string;
+  resources: GraphCacheResourceStatus[];
+  schedule?: GraphCacheRefreshScheduleSettings;
+}
+
+export interface RefreshGraphCacheOptions {
+  resources?: GraphCacheResourceKind[];
+  tenantId?: string;
+}
+
+export interface GraphCacheRefreshResourceResult {
+  resource: GraphCacheResourceKind;
+  label: string;
+  rows: number;
+  pages?: number;
+  pageLimitReached?: boolean;
+  refreshedAt?: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface GraphCacheRefreshResult {
+  tenantId: string;
+  startedAt: string;
+  finishedAt: string;
+  resources: GraphCacheRefreshResourceResult[];
+}
+
+export interface GraphCacheRefreshScheduleSettings {
+  enabled: boolean;
+  intervalMinutes: number;
+  updatedAt?: string;
+  lastRunAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  nextRunAt?: string;
+}
+
+export interface SetGraphCacheRefreshScheduleInput {
+  tenantId?: string;
+  enabled: boolean;
+  intervalMinutes?: number;
+}
+
+export interface LocalDataSummary {
+  sqliteBytes: number;
+  chatConversationCount: number;
+  chatMessageCount: number;
+  chatToolCallCount: number;
+  graphRowCount: number;
+  graphCacheStatusCount: number;
+  learningEventCount: number;
+  selfTrainingSuggestionCount: number;
+  activeTenantId?: string;
+  activeTenantGraphRowCount?: number;
+  activeTenantCacheResources?: GraphCacheResourceStatus[];
+}
+
+export interface HostedProviderChatConsent {
+  tenantId: string;
+  providerId: ProviderId;
+  acknowledgedAt: string;
+  remember?: boolean;
+}
+
+export interface SendIntuneChatMessageInput {
+  conversationId?: string;
+  content: string;
+  /**
+   * When true, the host refreshes missing/stale resources selected by
+   * the context planner before building the answer pack. Default true.
+   */
+  refreshIfStale?: boolean;
+  /**
+   * Required by the host when the active provider is hosted. The renderer
+   * sends a fresh acknowledgement after the user confirms or after a
+   * remembered local decision is applied for the active tenant/provider pair.
+   */
+  hostedProviderConsent?: HostedProviderChatConsent;
+}
+
+export interface SendIntuneChatMessageResult {
+  conversation: IntuneChatConversation;
+  userMessage: IntuneChatMessage;
+  assistantMessage: IntuneChatMessage;
+  cacheStatus: GraphCacheStatus;
+}
+
+export type IntuneChatProgressStepStatus =
+  | "pending"
+  | "active"
+  | "completed"
+  | "failed";
+
+export type IntuneChatStreamStage =
+  | "checking-cache"
+  | "refreshing-cache"
+  | "building-context"
+  | "generating-answer"
+  | "completed"
+  | "failed";
+
+export interface IntuneChatProgressStep {
+  id: string;
+  label: string;
+  status: IntuneChatProgressStepStatus;
+  detail?: string;
+}
+
+export type IntuneChatStreamEvent =
+  | {
+      type: "started";
+      conversation: IntuneChatConversation;
+      userMessage: IntuneChatMessage;
+      assistantMessage: IntuneChatMessage;
+      cacheStatus: GraphCacheStatus;
+    }
+  | {
+      type: "status";
+      conversationId: string;
+      message: string;
+      stage?: IntuneChatStreamStage;
+      progressPercent?: number;
+      progressSteps?: IntuneChatProgressStep[];
+      cacheStatus?: GraphCacheStatus;
+    }
+  | {
+      type: "delta";
+      conversationId: string;
+      assistantMessageId: string;
+      delta: string;
+      content: string;
+      providerId?: ProviderId;
+      model?: string;
+    }
+  | {
+      type: "completed";
+      result: SendIntuneChatMessageResult;
+    }
+  | {
+      type: "failed";
+      result: SendIntuneChatMessageResult;
+      error: string;
+    }
+  | {
+      type: "cancelled";
+      result: SendIntuneChatMessageResult;
+    };
+
+export interface SelfTrainingSettings {
+  enabled: boolean;
+  updatedAt?: string;
+}
+
+export type SelfTrainingSuggestionStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "reset";
+
+export interface SelfTrainingSuggestion {
+  id: string;
+  tenantId: string;
+  agentSlug: string;
+  status: SelfTrainingSuggestionStatus;
+  text: string;
+  reason: string;
+  source: "chat" | "run" | "settings";
+  createdAt: string;
+  decidedAt?: string;
+}
+
+export interface SelfTrainingInstruction {
+  id: string;
+  text: string;
+  source: SelfTrainingSuggestion["source"];
+  createdAt: string;
+}
+
+export interface ResetSelfTrainingInput {
+  tenantId?: string;
+  agentSlug: string;
+}
+
 /** The host OS, normalized for renderer use. */
 export type HostPlatform = "macos" | "windows" | "linux" | "unknown";
 export interface SchedulerLaunchSettings {
@@ -496,22 +807,61 @@ export interface OpenAdminOSApi {
   getAppState(): Promise<AppState>;
   getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
+  writeClipboardText(text: string): Promise<void>;
   setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;
   refreshRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   /**
    * Persist a new registry source URL and trigger an immediate refresh
-   * against it. Returns the same shape as `refreshRegistry()` so the
-   * renderer can react to fetch failures (e.g. typo'd URL).
+   * against it. Custom sources require a trust-review confirmation
+   * before the host persists them. Returns the same shape as
+   * `refreshRegistry()` so the renderer can react to fetch failures
+   * (e.g. typo'd URL).
    */
   setRegistrySource(
     url: string,
+    options?: { confirmExternalSource?: boolean },
   ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   setRegistryInstallCountsEnabled(enabled: boolean): Promise<AppState>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
+  listIntuneChatConversations(): Promise<IntuneChatConversation[]>;
+  searchIntuneChatConversations(query: string): Promise<IntuneChatConversation[]>;
+  renameIntuneChatConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<IntuneChatConversation>;
+  setIntuneChatConversationPinned(
+    conversationId: string,
+    pinned: boolean,
+  ): Promise<IntuneChatConversation>;
+  deleteIntuneChatConversation(conversationId: string): Promise<void>;
+  getIntuneChatMessages(conversationId: string): Promise<IntuneChatMessage[]>;
+  sendIntuneChatMessage(
+    input: SendIntuneChatMessageInput,
+  ): Promise<SendIntuneChatMessageResult>;
+  streamIntuneChatMessage(
+    input: SendIntuneChatMessageInput,
+    onEvent: (event: IntuneChatStreamEvent) => void,
+  ): Promise<SendIntuneChatMessageResult>;
+  cancelIntuneChatStream(): Promise<void>;
+  refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;
+  getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus>;
+  getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
+  setGraphCacheRefreshSchedule(
+    input: SetGraphCacheRefreshScheduleInput,
+  ): Promise<GraphCacheRefreshScheduleSettings>;
+  getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary>;
+  clearIntuneChatHistory(): Promise<LocalDataSummary>;
+  clearGraphCache(tenantId?: string): Promise<LocalDataSummary>;
+  getSelfTrainingSettings(): Promise<SelfTrainingSettings>;
+  setSelfTrainingEnabled(enabled: boolean): Promise<SelfTrainingSettings>;
+  listSelfTrainingSuggestions(status?: SelfTrainingSuggestionStatus): Promise<SelfTrainingSuggestion[]>;
+  approveSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion>;
+  rejectSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion>;
+  resetSelfTrainingSuggestions(input: ResetSelfTrainingInput): Promise<SelfTrainingSuggestion[]>;
   /**
    * Returns every connector registered in the host, with its
    * persisted config and last health-check outcome.
@@ -1174,6 +1524,11 @@ export interface LlmOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Optional cancellation signal supplied by the host for user-initiated
+   * stops. Providers should abort network/process work promptly when set.
+   */
+  signal?: AbortSignal;
 }
 
 export interface LlmTokenUsage {

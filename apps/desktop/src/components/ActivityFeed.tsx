@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Card } from "./Card";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { useToast } from "./Toast";
+import { copyTextToClipboard } from "../shared/clipboard";
 import {
   IconActivity,
   IconBolt,
@@ -332,6 +334,8 @@ function logLevelChipClass(level: RunLogLevel): string {
 
 function LogRow({ log }: { log: RunLogRecord }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const toast = useToast();
   const graphCall = extractGraphCall(log.metadata);
   const hasExpandableDetail =
     graphCall !== undefined ||
@@ -369,15 +373,22 @@ function LogRow({ log }: { log: RunLogRecord }) {
           )}
           <button
             onClick={() => {
-              void navigator.clipboard.writeText(
+              void copyTextToClipboard(
                 `${log.timestamp} ${log.level.toUpperCase()} ${log.message}`,
-              );
+              )
+                .then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                })
+                .catch((error) =>
+                  toast.error(error instanceof Error ? error.message : String(error)),
+                );
             }}
-            title="Copy log line"
-            aria-label="Copy log line"
+            title={copied ? "Copied log line" : "Copy log line"}
+            aria-label={copied ? "Copied log line" : "Copy log line"}
             className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] group-hover:opacity-100"
           >
-            <IconCopy size={11} />
+            {copied ? <IconCheck size={11} /> : <IconCopy size={11} />}
           </button>
         </div>
       </div>
