@@ -12,6 +12,7 @@ const MAX_ISSUE_BODY_LENGTH = 58_000;
 const SUPPORT_RATE_WINDOW_SECONDS = 60 * 60;
 const SUPPORT_RATE_MAX_PER_WINDOW = 5;
 const SUPPORT_DEDUP_TTL_SECONDS = 24 * 60 * 60;
+const SUPPORT_LABELS = ["support-report", "needs-triage"] as const;
 
 interface SupportIssuePayload {
   confirmPublic: true;
@@ -179,15 +180,16 @@ async function createSupportIssue(payload: ParsedSupportIssue) {
   const repo = requireEnv("OPENADMINOS_GITHUB_REPO");
   const octokit = new Octokit({ auth: token });
 
+  let issue;
   try {
     const response = await octokit.issues.create({
       owner,
       repo,
       title: payload.title,
       body: payload.body,
-      labels: ["support-report", "needs-triage"],
+      labels: [...SUPPORT_LABELS],
     });
-    return response.data;
+    issue = response.data;
   } catch (error) {
     if (isGithubValidationError(error)) {
       const response = await octokit.issues.create({
@@ -196,10 +198,41 @@ async function createSupportIssue(payload: ParsedSupportIssue) {
         title: payload.title,
         body: payload.body,
       });
-      return response.data;
+      issue = response.data;
+    } else {
+      throw error;
     }
-    throw error;
   }
+
+  const appliedLabels = new Set(issue.labels.map(labelName).filter(Boolean));
+  const missingLabels = SUPPORT_LABELS.filter((label) => !appliedLabels.has(label));
+  if (missingLabels.length > 0) {
+    try {
+      await octokit.issues.addLabels({
+        owner,
+        repo,
+        issue_number: issue.number,
+        labels: missingLabels,
+      });
+    } catch (error) {
+      console.warn(
+        "[support-issues] label application failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  return issue;
+}
+
+function labelName(
+  label:
+    | string
+    | {
+        name?: string;
+      },
+): string {
+  return typeof label === "string" ? label : label.name ?? "";
 }
 
 async function applySupportRateLimit(ip: string): Promise<boolean> {
