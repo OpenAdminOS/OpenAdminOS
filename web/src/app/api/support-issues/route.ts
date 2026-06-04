@@ -12,7 +12,6 @@ const MAX_ISSUE_BODY_LENGTH = 58_000;
 const SUPPORT_RATE_WINDOW_SECONDS = 60 * 60;
 const SUPPORT_RATE_MAX_PER_WINDOW = 5;
 const SUPPORT_DEDUP_TTL_SECONDS = 24 * 60 * 60;
-const SUPPORT_LABELS = ["support-report", "needs-triage"] as const;
 
 interface SupportIssuePayload {
   confirmPublic: true;
@@ -180,44 +179,13 @@ async function createSupportIssue(payload: ParsedSupportIssue) {
   const repo = requireEnv("OPENADMINOS_GITHUB_REPO");
   const octokit = new Octokit({ auth: token });
 
-  let issue;
-  try {
-    const response = await octokit.issues.create({
-      owner,
-      repo,
-      title: payload.title,
-      body: payload.body,
-    });
-    issue = response.data;
-  } catch (error) {
-    if (isGithubValidationError(error)) {
-      const response = await octokit.issues.create({
-        owner,
-        repo,
-        title: payload.title,
-        body: payload.body,
-      });
-      issue = response.data;
-    } else {
-      throw error;
-    }
-  }
-
-  try {
-    await octokit.issues.addLabels({
-      owner,
-      repo,
-      issue_number: issue.number,
-      labels: [...SUPPORT_LABELS],
-    });
-  } catch (error) {
-    console.warn(
-      "[support-issues] label application failed:",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
-  return issue;
+  const response = await octokit.issues.create({
+    owner,
+    repo,
+    title: payload.title,
+    body: payload.body,
+  });
+  return response.data;
 }
 
 async function applySupportRateLimit(ip: string): Promise<boolean> {
@@ -306,15 +274,6 @@ function sha256(value: string): string {
 
 function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}...`;
-}
-
-function isGithubValidationError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    error.status === 422
-  );
 }
 
 class HttpError extends Error {
