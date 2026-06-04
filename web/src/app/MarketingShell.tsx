@@ -1,7 +1,16 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { MobileNav, type MobileNavItem } from "./MobileNav";
 import { DOCS_URL, GITHUB_URL, LINKEDIN_URL } from "./seo";
+
+const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
+  { href: "/registry", label: "Registry" },
+  { href: "/trust-model", label: "Trust model" },
+  { href: "/use-cases/intune", label: "Intune" },
+  { href: DOCS_URL, label: "Documentation", external: true },
+  { href: "/download", label: "Download", primary: true },
+];
 
 export function MarketingShell({ children }: { children: ReactNode }) {
   return (
@@ -10,7 +19,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_72%)]"
       />
-      <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
+      <header className="relative z-30 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
@@ -24,30 +33,23 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           OpenAdminOS
         </Link>
         <nav className="hidden items-center gap-6 text-sm text-white/55 md:flex">
-          <Link href="/registry" className="transition hover:text-white">
-            Registry
-          </Link>
-          <Link href="/trust-model" className="transition hover:text-white">
-            Trust model
-          </Link>
-          <Link href="/use-cases/intune" className="transition hover:text-white">
-            Intune
-          </Link>
-          <Link
-            href={DOCS_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="transition hover:text-white"
-          >
-            Documentation
-          </Link>
-          <Link
-            href="/download"
-            className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
-          >
-            Download
-          </Link>
+          {MARKETING_NAV_ITEMS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              target={item.external ? "_blank" : undefined}
+              rel={item.external ? "noreferrer" : undefined}
+              className={
+                item.primary
+                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
+                  : "transition hover:text-white"
+              }
+            >
+              {item.label}
+            </Link>
+          ))}
         </nav>
+        <MobileNav items={MARKETING_NAV_ITEMS} />
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 px-6 pb-20 pt-10 sm:px-10">

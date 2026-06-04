@@ -3,7 +3,9 @@ import { type Metadata } from "next";
 import Link from "next/link";
 
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
+import { MobileNav, type MobileNavItem } from "./MobileNav";
 import {
+  DOCS_URL,
   GITHUB_URL,
   HOME_DESCRIPTION,
   HOME_TITLE,
@@ -29,6 +31,15 @@ export const metadata: Metadata = pageMetadata({
   path: "/",
   absoluteTitle: true,
 });
+
+const HOME_NAV_ITEMS: readonly MobileNavItem[] = [
+  { href: "/registry", label: "Registry" },
+  { href: "/trust-model", label: "Trust model" },
+  { href: "/use-cases/intune", label: "Intune" },
+  { href: DOCS_URL, label: "Documentation", external: true },
+  { href: GITHUB_URL, label: "GitHub", external: true },
+  { href: "/download", label: "Download", primary: true },
+];
 
 interface GitHubReleaseAsset {
   browser_download_url?: string;
@@ -249,7 +260,7 @@ export default async function HomePage() {
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"
       />
 
-      <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
+      <header className="relative z-30 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
@@ -262,65 +273,25 @@ export default async function HomePage() {
           />
           OpenAdminOS
         </Link>
-        <nav className="hidden items-center gap-6 text-sm text-white/55 sm:flex">
-          <Link href="/registry" className="transition hover:text-white">
-            Registry
-          </Link>
-          <Link href="/trust-model" className="transition hover:text-white">
-            Trust model
-          </Link>
-          <Link href="/use-cases/intune" className="transition hover:text-white">
-            Intune
-          </Link>
-          <Link
-            href="https://docs.openadminos.com/"
-            target="_blank"
-            rel="noreferrer"
-            className="transition hover:text-white"
-          >
-            Documentation
-          </Link>
-          <Link
-            href="https://github.com/OpenAdminOS/OpenAdminOS"
-            target="_blank"
-            rel="noreferrer"
-            className="transition hover:text-white"
-          >
-            GitHub
-          </Link>
-          <Link
-            href="/download"
-            className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
-          >
-            Download
-          </Link>
+        <nav className="hidden items-center gap-6 text-sm text-white/55 md:flex">
+          {HOME_NAV_ITEMS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              target={item.external ? "_blank" : undefined}
+              rel={item.external ? "noreferrer" : undefined}
+              className={
+                item.primary
+                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
+                  : "transition hover:text-white"
+              }
+            >
+              {item.label}
+            </Link>
+          ))}
         </nav>
+        <MobileNav items={HOME_NAV_ITEMS} />
       </header>
-
-      <div className="relative z-10 mx-auto flex w-full max-w-7xl gap-2 px-6 pb-4 sm:hidden">
-        <Link
-          href="https://docs.openadminos.com/"
-          target="_blank"
-          rel="noreferrer"
-          className="flex-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-center text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white"
-        >
-          Docs
-        </Link>
-        <Link
-          href="https://github.com/OpenAdminOS/OpenAdminOS"
-          target="_blank"
-          rel="noreferrer"
-          className="flex-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-center text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white"
-        >
-          GitHub
-        </Link>
-        <Link
-          href="/download"
-          className="flex-1 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-center text-xs font-medium text-white/70 transition hover:border-white/20 hover:text-white"
-        >
-          Download
-        </Link>
-      </div>
 
       <main className="relative z-10 flex flex-1 flex-col items-center px-6 sm:px-10">
         <section className="flex flex-col items-center pt-10 text-center sm:pt-14">

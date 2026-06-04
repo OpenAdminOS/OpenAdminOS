@@ -110,6 +110,9 @@ Weg 29, 22085 Hamburg, Germany, reachable at `support@openadminos.com`. The
 listed managing director is Ugur Koc. The register court/register number and VAT
 ID if issued still need confirmation before the provider identification is
 legally complete.
+Marketing headers use a compact mobile stack menu below the desktop breakpoint.
+The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
+outside click, Escape, or link activation.
 Definition-style GEO copy should live in normal visible page content such as
 the "What is OpenAdminOS?" FAQ, not in standalone SEO cards or hidden text.
 FAQ content may use native `<details>/<summary>` accordions when the answer
