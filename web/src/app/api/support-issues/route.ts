@@ -187,7 +187,6 @@ async function createSupportIssue(payload: ParsedSupportIssue) {
       repo,
       title: payload.title,
       body: payload.body,
-      labels: [...SUPPORT_LABELS],
     });
     issue = response.data;
   } catch (error) {
@@ -204,35 +203,21 @@ async function createSupportIssue(payload: ParsedSupportIssue) {
     }
   }
 
-  const appliedLabels = new Set(issue.labels.map(labelName).filter(Boolean));
-  const missingLabels = SUPPORT_LABELS.filter((label) => !appliedLabels.has(label));
-  if (missingLabels.length > 0) {
-    try {
-      await octokit.issues.addLabels({
-        owner,
-        repo,
-        issue_number: issue.number,
-        labels: missingLabels,
-      });
-    } catch (error) {
-      console.warn(
-        "[support-issues] label application failed:",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+  try {
+    await octokit.issues.addLabels({
+      owner,
+      repo,
+      issue_number: issue.number,
+      labels: [...SUPPORT_LABELS],
+    });
+  } catch (error) {
+    console.warn(
+      "[support-issues] label application failed:",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 
   return issue;
-}
-
-function labelName(
-  label:
-    | string
-    | {
-        name?: string;
-      },
-): string {
-  return typeof label === "string" ? label : label.name ?? "";
 }
 
 async function applySupportRateLimit(ip: string): Promise<boolean> {
