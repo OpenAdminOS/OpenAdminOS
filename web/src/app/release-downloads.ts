@@ -130,6 +130,14 @@ export async function getLatestReleaseDownloads() {
       "OpenAdminOS-mac-arm64.dmg",
       checksums,
     );
+    const macosPkg = toDownloadAsset(
+      findAsset(
+        assets,
+        (name) => name.endsWith(".pkg") && name.includes("arm64"),
+      ),
+      "OpenAdminOS-mac-arm64.pkg",
+      checksums,
+    );
 
     return {
       checksumUrl,
@@ -141,6 +149,8 @@ export async function getLatestReleaseDownloads() {
       linuxRpmUrl: linuxRpm.url,
       macosDmg,
       macosDmgUrl: macosDmg.url,
+      macosPkg,
+      macosPkgUrl: macosPkg.url,
       releaseNotesUrl: release.html_url ?? LATEST_RELEASE_URL,
       version: release.tag_name ?? "Latest release",
     };
@@ -161,6 +171,8 @@ export async function getLatestReleaseDownloads() {
       linuxRpmUrl: LATEST_RELEASE_URL,
       macosDmg: fallbackAsset,
       macosDmgUrl: LATEST_RELEASE_URL,
+      macosPkg: fallbackAsset,
+      macosPkgUrl: LATEST_RELEASE_URL,
       releaseNotesUrl: LATEST_RELEASE_URL,
       version: "Latest release",
     };

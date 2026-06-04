@@ -9,7 +9,7 @@ OpenAdminOS ships as a desktop app. The project does not publish an end-user CLI
 
 ## macOS
 
-Download the signed `.dmg` from the latest GitHub release, drag OpenAdminOS to Applications, and launch it from Applications.
+Download the signed `.dmg` from the latest GitHub release, drag OpenAdminOS to Applications, and launch it from Applications. Managed deployments can use the signed `.pkg` from the same release.
 
 ## Windows
 
@@ -17,7 +17,7 @@ Windows packaging is part of the release pipeline. The Windows signing and distr
 
 ## Linux
 
-Linux is best-effort. The primary supported platforms are macOS and Windows.
+Linux x64 packages are published as AppImage, `.deb`, and `.rpm`. Verify the SHA-256 hash from the release notes or `SHA256SUMS.txt` before installing.
 
 ## Requirements
 

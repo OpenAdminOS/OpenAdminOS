@@ -296,7 +296,7 @@ export default async function HomePage() {
                 Download for macOS
               </a>
               <p className="min-h-4 text-center text-[11px] leading-4 text-white/38">
-                DMG direct download.
+                DMG direct download. PKG on the download page.
               </p>
             </div>
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">

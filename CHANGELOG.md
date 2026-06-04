@@ -6,6 +6,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Release tags now publish a macOS `.pkg` alongside the DMG/ZIP outputs, with marketing and docs exposing it as the managed deployment package.
+- A one-off `v0.2.1` macOS PKG backfill workflow now builds the missing signed/notarized installer package and refreshes release checksums.
+- Release docs now include the CLI CSR path for generating the Developer ID Installer certificate used by macOS PKG signing.
 - Release tags now publish Linux x64 AppImage, `.deb`, and `.rpm` artifacts with SHA-256 checksums while keeping Windows build-only.
 - The v0.2.1 release was backfilled with Linux x64 AppImage, `.deb`, and `.rpm` artifacts built from the v0.2.1 tag.
 - Marketing download surfaces now expose Linux AppImage, `.deb`, and `.rpm` package links with SHA-256 verification while leaving Windows pending signing.

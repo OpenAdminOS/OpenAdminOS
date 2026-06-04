@@ -63,16 +63,35 @@ export default async function DownloadPage() {
       <section className="mt-12 grid gap-4 lg:grid-cols-[0.85fr_1.4fr_0.85fr]">
         <TextCard title="macOS">
           <p>
-            macOS builds are published through GitHub Releases. Review the
-            release notes before connecting a production tenant.
+            Use the DMG for a normal workstation install. Use the PKG when you
+            need a managed deployment package for MDM or fleet tooling.
           </p>
+
+          <div className="mt-5 grid gap-3">
+            <PackageDownload
+              actionLabel="Download DMG"
+              detail="Direct install for most users"
+              hash={latestRelease.macosDmg.sha256}
+              href={latestRelease.macosDmg.url}
+              label=".dmg"
+              primary
+            />
+            <PackageDownload
+              actionLabel="Download .pkg"
+              detail="Managed deployment"
+              hash={latestRelease.macosPkg.sha256}
+              href={latestRelease.macosPkg.url}
+              label=".pkg"
+            />
+          </div>
+
           <Link
-            href={latestRelease.macosDmgUrl}
+            href={latestRelease.checksumUrl}
             target="_blank"
             rel="noreferrer"
-            className="mt-5 inline-flex rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+            className="mt-4 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
           >
-            Download DMG
+            Open SHA256SUMS.txt
           </Link>
         </TextCard>
         <TextCard id="linux-packages" title="Linux x64">
@@ -88,6 +107,7 @@ export default async function DownloadPage() {
               detail="Most desktop distros"
               hash={latestRelease.linuxAppImage.sha256}
               href={latestRelease.linuxAppImage.url}
+              iconSrc="/linux.svg"
               label="AppImage"
               primary
             />
@@ -180,6 +200,7 @@ function PackageDownload({
   detail,
   hash,
   href,
+  iconSrc,
   label,
   primary = false,
 }: {
@@ -187,6 +208,7 @@ function PackageDownload({
   detail: string;
   hash: string | undefined;
   href: string;
+  iconSrc?: string;
   label: string;
   primary?: boolean;
 }) {
@@ -213,9 +235,9 @@ function PackageDownload({
               : "inline-flex shrink-0 items-center justify-center rounded-md border border-white/10 px-3 py-2 text-xs font-semibold text-white/70 transition hover:border-white/25 hover:text-white"
           }
         >
-          {primary ? (
+          {iconSrc ? (
             <img
-              src="/linux.svg"
+              src={iconSrc}
               alt=""
               aria-hidden
               width={16}

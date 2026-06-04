@@ -84,6 +84,7 @@
       "notarize": true,
       "target": [
         { "target": "dmg", "arch": ["arm64"] },
+        { "target": "pkg", "arch": ["arm64"] },
         { "target": "zip", "arch": ["arm64"] }
       ]
     },
@@ -109,6 +110,12 @@
           "path": "/Applications"
         }
       ]
+    },
+    "pkg": {
+      "installLocation": "/Applications",
+      "isRelocatable": false,
+      "isVersionChecked": true,
+      "hasStrictIdentifier": true
     },
     "win": {
       "target": [

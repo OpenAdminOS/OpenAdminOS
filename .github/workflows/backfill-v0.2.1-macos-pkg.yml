@@ -1,0 +1,193 @@
+name: Backfill v0.2.1 macOS PKG
+
+# One-off workflow for the v0.2.1 release. The v0.2.1 tag predates the
+# macOS PKG target, so this workflow checks out that tag, patches only
+# the local CI packaging config to build the missing PKG, then uploads
+# the signed/notarized package to the existing GitHub Release.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backfill-v0.2.1-macos-pkg
+  cancel-in-progress: false
+
+env:
+  BACKFILL_TAG: v0.2.1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-and-upload-pkg:
+    name: Build and upload v0.2.1 PKG
+    runs-on: macos-14
+    timeout-minutes: 35
+    env:
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_TEAM_ID: "D259ULY2B4"
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      CSC_INSTALLER_LINK: ${{ secrets.CSC_INSTALLER_LINK }}
+      CSC_INSTALLER_KEY_PASSWORD: ${{ secrets.CSC_INSTALLER_KEY_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_REPO: OpenAdminOS/OpenAdminOS
+    steps:
+      - name: Checkout v0.2.1
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BACKFILL_TAG }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_CONTENTS: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_CONTENTS" > "$key_path"
+          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+
+      - name: Verify signing secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            APPLE_API_KEY \
+            APPLE_API_KEY_ID \
+            APPLE_API_ISSUER \
+            CSC_LINK \
+            CSC_KEY_PASSWORD \
+            CSC_INSTALLER_LINK \
+            CSC_INSTALLER_KEY_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is required to backfill a signed/notarized PKG."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Patch v0.2.1 package config for PKG only
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = "apps/desktop/package.json";
+          const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+
+          pkg.build.mac = {
+            ...pkg.build.mac,
+            target: [{ target: "pkg", arch: ["arm64"] }],
+          };
+          pkg.build.pkg = {
+            installLocation: "/Applications",
+            isRelocatable: false,
+            isVersionChecked: true,
+            hasStrictIdentifier: true,
+          };
+
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+
+      - name: Build signed and notarized PKG
+        run: npm run dist -w @openadminos/desktop -- --mac --arm64 --publish never
+
+      - name: Verify PKG output
+        id: pkg
+        run: |
+          set -euo pipefail
+          pkg_path="$(find apps/desktop/release -maxdepth 1 -name '*.pkg' -print -quit)"
+          if [ -z "$pkg_path" ]; then
+            echo "::error::No PKG was produced."
+            exit 1
+          fi
+
+          pkgutil --check-signature "$pkg_path"
+          xcrun stapler validate "$pkg_path"
+          spctl -a -vv -t install "$pkg_path"
+
+          echo "path=$pkg_path" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$pkg_path")" >> "$GITHUB_OUTPUT"
+
+      - name: Download existing release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "$BACKFILL_TAG" \
+            --repo "$RELEASE_REPO" \
+            --dir release-assets \
+            --pattern '*'
+
+      - name: Regenerate release checksums
+        run: |
+          set -euo pipefail
+          cp "${{ steps.pkg.outputs.path }}" "release-assets/${{ steps.pkg.outputs.name }}"
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print \
+              | sed 's#^\./##' \
+              | sort \
+              | while IFS= read -r file; do
+                  shasum -a 256 "$file"
+                done > SHA256SUMS.txt
+          )
+          cat release-assets/SHA256SUMS.txt
+
+      - name: Upload PKG and refreshed checksums
+        run: |
+          set -euo pipefail
+          gh release upload "$BACKFILL_TAG" \
+            "${{ steps.pkg.outputs.path }}" \
+            release-assets/SHA256SUMS.txt \
+            --repo "$RELEASE_REPO" \
+            --clobber
+
+      - name: Refresh checksum section in release notes
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const fs = require("node:fs");
+
+          const tag = process.env.BACKFILL_TAG;
+          const repo = process.env.RELEASE_REPO;
+          const checksums = fs
+            .readFileSync("release-assets/SHA256SUMS.txt", "utf8")
+            .trimEnd();
+          const currentBody = execFileSync(
+            "gh",
+            ["release", "view", tag, "--repo", repo, "--json", "body", "--jq", ".body"],
+            { encoding: "utf8" },
+          );
+
+          const checksumSection = `### SHA256 checksums\n\n\`\`\`text\n${checksums}\n\`\`\``;
+          const checksumSectionPattern = /### SHA256 checksums\n\n```text\n[\s\S]*?```/;
+          const nextBody = checksumSectionPattern.test(currentBody)
+            ? currentBody.replace(checksumSectionPattern, checksumSection)
+            : `${currentBody.trimEnd()}\n\n${checksumSection}\n`;
+
+          fs.writeFileSync("release-body.md", nextBody);
+          NODE
+
+          gh release edit "$BACKFILL_TAG" \
+            --repo "$RELEASE_REPO" \
+            --notes-file release-body.md
+
+      - name: Upload workflow artifact for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: v0.2.1-macos-pkg
+          path: ${{ steps.pkg.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
