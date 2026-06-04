@@ -73,6 +73,13 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           </Link>
           {" · "}
           <Link
+            href="/legal-notice"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Legal notice
+          </Link>
+          {" · "}
+          <Link
             href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"

@@ -18,6 +18,7 @@ License: MIT
 - LLM provider model: https://www.openadminos.com/llm-providers
 - Privacy policy: https://www.openadminos.com/privacy
 - Terms of use: https://www.openadminos.com/terms
+- Legal notice: https://www.openadminos.com/legal-notice
 
 ## Product facts
 

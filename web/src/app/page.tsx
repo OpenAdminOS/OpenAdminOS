@@ -782,6 +782,13 @@ export default async function HomePage() {
           </Link>
           {" · "}
           <Link
+            href="/legal-notice"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Legal notice
+          </Link>
+          {" · "}
+          <Link
             href="/registry"
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >

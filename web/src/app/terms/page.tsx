@@ -3,6 +3,9 @@ import { type Metadata } from "next";
 
 import {
   JsonLd,
+  LEGAL_ENTITY_ADDRESS_LINES,
+  LEGAL_ENTITY_NAME,
+  SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
   pageMetadata,
@@ -11,7 +14,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-05-28";
+const LAST_UPDATED = "2026-06-04";
 const TITLE = "Terms of use";
 const DESCRIPTION =
   "Terms that govern use of the OpenAdminOS desktop app, website, open-source runtime, and community agent registry.";
@@ -77,10 +80,11 @@ export default function TermsPage() {
           <section>
             <h2 className="text-base font-semibold text-white">Summary</h2>
             <p className="mt-3">
-              OpenAdminOS is open-source software maintained by the OpenAdminOS
-              project under the MIT License. These terms govern your use of the
-              desktop app and the website at openadminos.com. By installing the
-              app or using the site, you agree to them.
+              OpenAdminOS is open-source software operated by{" "}
+              {LEGAL_ENTITY_NAME} and distributed under the MIT License. These
+              terms govern your use of the desktop app and the website at
+              openadminos.com. By installing the app or using the site, you
+              agree to them.
             </p>
           </section>
 
@@ -206,12 +210,29 @@ export default function TermsPage() {
               Contact
             </h2>
             <p className="mt-3">
-              Questions about these terms:{" "}
+              Questions about these terms or the website:{" "}
               <Link
-                href="mailto:support@openadminos.com"
+                href={`mailto:${SUPPORT_EMAIL}`}
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                support@openadminos.com
+                {SUPPORT_EMAIL}
+              </Link>
+              .
+            </p>
+            <address className="mt-4 not-italic text-white/65">
+              {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
+                <span key={line} className="block">
+                  {line}
+                </span>
+              ))}
+            </address>
+            <p className="mt-3">
+              Provider details are listed in the{" "}
+              <Link
+                href="/legal-notice"
+                className="text-white underline underline-offset-4 transition hover:text-white/70"
+              >
+                legal notice
               </Link>
               .
             </p>
@@ -231,6 +252,27 @@ export default function TermsPage() {
       <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-white/40">
           &copy; {new Date().getFullYear()} OpenAdminOS
+          {" · "}
+          <Link
+            href="/privacy"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Privacy
+          </Link>
+          {" · "}
+          <Link
+            href="/terms"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Terms
+          </Link>
+          {" · "}
+          <Link
+            href="/legal-notice"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Legal notice
+          </Link>
         </span>
       </footer>
     </div>

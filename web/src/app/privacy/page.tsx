@@ -3,6 +3,9 @@ import { type Metadata } from "next";
 
 import {
   JsonLd,
+  LEGAL_ENTITY_ADDRESS_LINES,
+  LEGAL_ENTITY_NAME,
+  SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
   pageMetadata,
@@ -11,7 +14,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-05-28";
+const LAST_UPDATED = "2026-06-04";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
   "How OpenAdminOS handles Microsoft 365 tenant data, authentication tokens, LLM prompts, and registry install counts.";
@@ -96,8 +99,8 @@ export default function PrivacyPage() {
               Who is responsible
             </h2>
             <p className="mt-3">
-              OpenAdminOS is an open-source project maintained by the
-              OpenAdminOS project. The source is at{" "}
+              OpenAdminOS is an open-source project operated by{" "}
+              {LEGAL_ENTITY_NAME}. The source is at{" "}
               <Link
                 href="https://github.com/OpenAdminOS/OpenAdminOS"
                 target="_blank"
@@ -106,12 +109,29 @@ export default function PrivacyPage() {
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
-              . You can reach the maintainer at{" "}
+              . You can reach support at{" "}
               <Link
-                href="mailto:support@openadminos.com"
+                href={`mailto:${SUPPORT_EMAIL}`}
                 className="text-white underline underline-offset-4 transition hover:text-white/70"
               >
-                support@openadminos.com
+                {SUPPORT_EMAIL}
+              </Link>
+              .
+            </p>
+            <address className="mt-4 not-italic text-white/65">
+              {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
+                <span key={line} className="block">
+                  {line}
+                </span>
+              ))}
+            </address>
+            <p className="mt-3">
+              The full provider disclosure is available in the{" "}
+              <Link
+                href="/legal-notice"
+                className="text-white underline underline-offset-4 transition hover:text-white/70"
+              >
+                legal notice
               </Link>
               .
             </p>
@@ -249,7 +269,7 @@ export default function PrivacyPage() {
               it deleted. Because the desktop app does not transmit tenant
               content to us, this in practice applies to support
               correspondence and the limited registry install count data described
-              above. Email support@openadminos.com and we will respond within
+              above. Email {SUPPORT_EMAIL} and we will respond within
               30 days.
             </p>
           </section>
@@ -280,6 +300,27 @@ export default function PrivacyPage() {
       <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-white/40">
           &copy; {new Date().getFullYear()} OpenAdminOS
+          {" · "}
+          <Link
+            href="/privacy"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Privacy
+          </Link>
+          {" · "}
+          <Link
+            href="/terms"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Terms
+          </Link>
+          {" · "}
+          <Link
+            href="/legal-notice"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Legal notice
+          </Link>
         </span>
       </footer>
     </div>

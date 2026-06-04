@@ -101,6 +101,15 @@ marketing site should expose a stable PNG favicon of at least 48x48 pixels, a
 OpenAdminOS` plus `alternateName: Open Admin OS` so Google has consistent site
 name inputs. The marketing robots.txt should explicitly allow major AI search
 crawlers while keeping API routes blocked.
+The marketing site exposes provider identification at `/legal-notice`, linked
+from the footer alongside privacy and terms. `/impressum` remains a redirect
+alias. The page title uses the international label "Legal notice" while the page
+copy explicitly identifies it as the Impressum / provider identification under
+§ 5 DDG. The legal operator is UgurLabs UG (haftungsbeschränkt), Winterhuder
+Weg 29, 22085 Hamburg, Germany, reachable at `support@openadminos.com`. The
+listed managing director is Ugur Koc. The register court/register number and VAT
+ID if issued still need confirmation before the provider identification is
+legally complete.
 Definition-style GEO copy should live in normal visible page content such as
 the "What is OpenAdminOS?" FAQ, not in standalone SEO cards or hidden text.
 FAQ content may use native `<details>/<summary>` accordions when the answer

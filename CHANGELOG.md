@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing privacy, terms, footer, schema, sitemap, and `llms.txt` now use `support@openadminos.com` and link a new `/legal-notice` provider-identification page for UgurLabs UG and managing director Ugur Koc, with `/impressum` kept as an alias.
 - Marketing FAQ items are now accessible native accordions, with the primary product definition expanded by default for SEO/GEO visibility.
 - Marketing landing page now folds the OpenAdminOS definition into the visible FAQ instead of a separate definition card.
 - Marketing search appearance now uses a crawlable 48px PNG favicon, 180px Apple touch icon, clearer secondary page titles, `WebSite.alternateName` schema, and explicit AI-search crawler access in robots.txt.

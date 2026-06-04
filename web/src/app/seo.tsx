@@ -5,6 +5,21 @@ export const SITE_URL = "https://www.openadminos.com";
 export const GITHUB_URL = "https://github.com/OpenAdminOS/OpenAdminOS";
 export const DOCS_URL = "https://docs.openadminos.com/";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/openadminos/";
+export const SUPPORT_EMAIL = "support@openadminos.com";
+export const LEGAL_ENTITY_NAME = "UgurLabs UG (haftungsbeschränkt)";
+export const MANAGING_DIRECTOR_NAME = "Ugur Koc";
+export const LEGAL_ENTITY_ADDRESS = {
+  streetAddress: "Winterhuder Weg 29",
+  postalCode: "22085",
+  addressLocality: "Hamburg",
+  addressCountry: "DE",
+} as const;
+export const LEGAL_ENTITY_ADDRESS_LINES = [
+  LEGAL_ENTITY_NAME,
+  LEGAL_ENTITY_ADDRESS.streetAddress,
+  `${LEGAL_ENTITY_ADDRESS.postalCode} ${LEGAL_ENTITY_ADDRESS.addressLocality}`,
+  "Germany",
+] as const;
 
 export const HOME_TITLE =
   "OpenAdminOS - Local-first AI agents for Microsoft 365 admins";
@@ -80,12 +95,22 @@ export function organizationSchema() {
     "@id": `${SITE_URL}/#organization`,
     name: SITE_NAME,
     alternateName: "Open Admin OS",
+    legalName: LEGAL_ENTITY_NAME,
+    employee: {
+      "@type": "Person",
+      name: MANAGING_DIRECTOR_NAME,
+      jobTitle: "Managing director",
+    },
     url: SITE_URL,
     logo: absoluteUrl("/apple-icon.png"),
     sameAs: [GITHUB_URL, LINKEDIN_URL, DOCS_URL],
+    address: {
+      "@type": "PostalAddress",
+      ...LEGAL_ENTITY_ADDRESS,
+    },
     contactPoint: {
       "@type": "ContactPoint",
-      email: "support@openadminos.com",
+      email: SUPPORT_EMAIL,
       contactType: "support",
     },
   };
