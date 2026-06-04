@@ -1,7 +1,7 @@
 name: Release
 
-# Builds platform-specific installers and uploads them to a draft GitHub
-# release.
+# Builds platform-specific installers and uploads publishable assets to a
+# GitHub release.
 #
 # Triggers:
 #   - Tag push matching v*.*.* (the canonical "cut a release" gesture)
@@ -13,11 +13,14 @@ name: Release
 #     until the Windows signing/distribution path is ready.
 #   - macOS (Apple Silicon for v0.1): notarized + signed .dmg + .zip
 #     plus latest-mac.yml for electron-updater auto-update.
+#   - Linux x64: unsigned preview AppImage, .deb, and .rpm packages,
+#     plus SHA256SUMS.txt generated from the release assets.
 #
 # Secrets required on the repo or org:
 #   macOS:  CSC_LINK, CSC_KEY_PASSWORD, APPLE_API_KEY,
 #           APPLE_API_KEY_ID, APPLE_API_ISSUER
-#   (Windows AppX is unsigned in CI and is not published.)
+#   (Windows AppX is unsigned in CI and is not published. Linux artifacts
+#   are unsigned preview packages and are published with SHA-256 checksums.)
 #
 # All `GITHUB_TOKEN` use comes from the auto-provided actions token.
 
@@ -140,9 +143,73 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  linux-x64:
+    name: Linux x64 — AppImage, deb, rpm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build AppImage + deb + rpm
+        run: npm run dist -w @openadminos/desktop -- --linux --x64 --publish never
+
+      - name: Verify Linux build output
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          appimages=(apps/desktop/release/*.AppImage)
+          debs=(apps/desktop/release/*.deb)
+          rpms=(apps/desktop/release/*.rpm)
+
+          if [ "${#appimages[@]}" -eq 0 ]; then
+            echo "::error::Linux build completed but no AppImage was produced." >&2
+            exit 1
+          fi
+
+          if [ "${#debs[@]}" -eq 0 ]; then
+            echo "::error::Linux build completed but no .deb was produced." >&2
+            exit 1
+          fi
+
+          if [ "${#rpms[@]}" -eq 0 ]; then
+            echo "::error::Linux build completed but no .rpm was produced." >&2
+            exit 1
+          fi
+
+          printf 'Built Linux artifacts:\n'
+          printf '  %s\n' "${appimages[@]}" "${debs[@]}" "${rpms[@]}"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.rpm
+            apps/desktop/release/latest-linux.yml
+          if-no-files-found: error
+          retention-days: 7
+
   publish-release:
     name: Publish release
-    needs: [windows-appx, macos-arm64]
+    needs: [windows-appx, macos-arm64, linux-x64]
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
@@ -156,6 +223,43 @@ jobs:
 
       - name: List artifacts
         run: ls -R artifacts
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find artifacts -type f \( \
+            -name '*.dmg' -o \
+            -name '*.zip' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' -o \
+            -name '*.rpm' -o \
+            -name 'latest-mac.yml' -o \
+            -name 'latest-linux.yml' \
+          \) -print0 | while IFS= read -r -d '' file; do
+            cp "$file" "release-assets/$(basename "$file")"
+          done
+
+          asset_count=$(find release-assets -type f | wc -l | tr -d ' ')
+          if [ "$asset_count" -eq 0 ]; then
+            echo "::error::No publishable release assets were downloaded." >&2
+            exit 1
+          fi
+
+          ls -la release-assets
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -printf '%f\0' \
+              | sort -z \
+              | xargs -0 sha256sum -- > SHA256SUMS.txt
+          )
+          cat release-assets/SHA256SUMS.txt
 
       - name: Extract release notes from CHANGELOG
         id: notes
@@ -190,12 +294,19 @@ jobs:
             echo "found=false" >> "$GITHUB_OUTPUT"
           else
             echo "found=true" >> "$GITHUB_OUTPUT"
-            {
-              echo 'body<<RELEASE_NOTES_EOF'
-              printf '%s\n' "$notes"
-              echo RELEASE_NOTES_EOF
-            } >> "$GITHUB_OUTPUT"
           fi
+
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            if [ -n "$notes" ]; then
+              printf '%s\n\n' "$notes"
+            fi
+            printf '### SHA256 checksums\n\n'
+            printf '```text\n'
+            cat release-assets/SHA256SUMS.txt
+            printf '```\n'
+            echo RELEASE_NOTES_EOF
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish release (with CHANGELOG body)
         if: ${{ steps.notes.outputs.found == 'true' }}
@@ -205,7 +316,7 @@ jobs:
           make_latest: true
           body: ${{ steps.notes.outputs.body }}
           files: |
-            artifacts/macos-arm64/*
+            release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -215,8 +326,9 @@ jobs:
         with:
           draft: false
           make_latest: true
+          body: ${{ steps.notes.outputs.body }}
           generate_release_notes: true
           files: |
-            artifacts/macos-arm64/*
+            release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

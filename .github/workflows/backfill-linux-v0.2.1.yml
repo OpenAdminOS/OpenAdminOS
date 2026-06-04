@@ -1,0 +1,169 @@
+name: Backfill Linux v0.2.1
+
+# One-off workflow for the already-published v0.2.1 release. It builds
+# Linux x64 artifacts from the v0.2.1 tag, patches only package metadata
+# needed by Linux package formats inside the CI workspace, uploads the
+# assets to the existing GitHub Release, and appends Linux checksums to
+# that release body.
+#
+# Windows remains build-only and unpublished in the normal release flow.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backfill-linux-v0.2.1
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_TAG: v0.2.1
+
+jobs:
+  linux-backfill:
+    name: Linux x64 backfill for v0.2.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout v0.2.1 source
+        uses: actions/checkout@v4
+        with:
+          ref: v0.2.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify target release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,url
+
+      - name: Install Linux packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+
+      - name: Patch Linux packaging metadata
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const root = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const desktopPath = "apps/desktop/package.json";
+          const desktop = JSON.parse(fs.readFileSync(desktopPath, "utf8"));
+
+          if (root.version !== "0.2.1" || desktop.version !== "0.2.1") {
+            throw new Error(`Expected v0.2.1 package versions, got root=${root.version}, desktop=${desktop.version}`);
+          }
+
+          desktop.description = "Open-source, local-first agents for Microsoft 365 admins.";
+          desktop.author = {
+            name: "OpenAdminOS",
+            email: "support@openadminos.com",
+          };
+          desktop.homepage = "https://www.openadminos.com";
+          desktop.license = "MIT";
+          desktop.build = desktop.build ?? {};
+          desktop.build.linux = {
+            ...(desktop.build.linux ?? {}),
+            target: ["AppImage", "deb", "rpm"],
+            category: "Utility",
+          };
+
+          fs.writeFileSync(desktopPath, `${JSON.stringify(desktop, null, 2)}\n`);
+          NODE
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Linux AppImage, deb, and rpm
+        run: npm run dist -w @openadminos/desktop -- --linux AppImage deb rpm --x64 --publish never
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          appimages=(apps/desktop/release/*.AppImage)
+          debs=(apps/desktop/release/*.deb)
+          rpms=(apps/desktop/release/*.rpm)
+
+          if [ "${#appimages[@]}" -eq 0 ]; then
+            echo "::error::Linux build completed but no AppImage was produced." >&2
+            exit 1
+          fi
+
+          if [ "${#debs[@]}" -eq 0 ]; then
+            echo "::error::Linux build completed but no .deb was produced." >&2
+            exit 1
+          fi
+
+          if [ "${#rpms[@]}" -eq 0 ]; then
+            echo "::error::Linux build completed but no .rpm was produced." >&2
+            exit 1
+          fi
+
+          mkdir -p release-assets
+          cp "${appimages[@]}" "${debs[@]}" "${rpms[@]}" release-assets/
+
+          latest_linux=(apps/desktop/release/latest-linux.yml)
+          if [ "${#latest_linux[@]}" -gt 0 ]; then
+            cp "${latest_linux[@]}" release-assets/
+          fi
+
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -printf '%f\0' \
+              | sort -z \
+              | xargs -0 sha256sum -- > SHA256SUMS.txt
+          )
+
+          ls -la release-assets
+          cat release-assets/SHA256SUMS.txt
+
+      - name: Upload Linux assets to v0.2.1 release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Append Linux checksums to release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > release-body.md
+
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const body = fs.readFileSync("release-body.md", "utf8");
+          const sums = fs.readFileSync("release-assets/SHA256SUMS.txt", "utf8").trimEnd();
+          const markerPattern = /\n?<!-- linux-backfill-v0\.2\.1:start -->[\s\S]*?<!-- linux-backfill-v0\.2\.1:end -->\n?/g;
+          const cleanBody = body.replace(markerPattern, "").trimEnd();
+          const section = `
+
+          <!-- linux-backfill-v0.2.1:start -->
+          ### Linux preview artifacts
+
+          Linux x64 preview packages were added after the original v0.2.1 release. These AppImage, .deb, and .rpm artifacts are unsigned; verify downloads with the checksums below.
+
+          \`\`\`text
+          ${sums}
+          \`\`\`
+          <!-- linux-backfill-v0.2.1:end -->
+          `;
+
+          fs.writeFileSync(
+            "release-body-updated.md",
+            `${cleanBody}${section.replace(/^ {10}/gm, "")}`,
+          );
+          NODE
+
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-body-updated.md

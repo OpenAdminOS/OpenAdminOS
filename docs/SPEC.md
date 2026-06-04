@@ -12,7 +12,7 @@ The product is local-first: by default, tenant data and LLM prompts never leave 
 
 ### Distribution surface
 
-- **Desktop app** (Electron, Windows + macOS + Linux, signed installers) — the only end-user surface
+- **Desktop app** (Electron; macOS signed/notarized, Linux x64 preview packages, Windows build-only until signing is ready) — the only end-user surface
 
 There is no separate CLI. Power users get the same GUI; contributor tooling (agent scaffold, dev/test commands) lives in repo scripts, not in a published `npx` binary.
 
@@ -553,6 +553,7 @@ or Microsoft Graph data.
 Required before public v1 release:
 - **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, CI may build AppX packages for validation, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr) + notarization. Without notarization, Gatekeeper blocks the app.
+- **Linux:** Release tags publish unsigned x64 preview artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu/Debian-family and RHEL/Fedora-compatible desktop preview coverage, not "any distro" support. Apt/rpm repository signing is deferred until OpenAdminOS operates package repositories. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.

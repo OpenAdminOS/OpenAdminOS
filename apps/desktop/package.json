@@ -2,6 +2,13 @@
   "name": "@openadminos/desktop",
   "private": true,
   "version": "0.2.1",
+  "description": "Open-source, local-first agents for Microsoft 365 admins.",
+  "author": {
+    "name": "OpenAdminOS",
+    "email": "support@openadminos.com"
+  },
+  "homepage": "https://www.openadminos.com",
+  "license": "MIT",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -120,7 +127,8 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
       "category": "Utility"
     }
