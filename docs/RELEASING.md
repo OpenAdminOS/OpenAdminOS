@@ -9,6 +9,8 @@ The release surface currently publishes macOS and Linux binaries:
 - **Windows → build validation only**. CI still creates the AppX package to keep the packaging path exercised, but it is not uploaded as a workflow artifact or attached to GitHub Releases until the signing/distribution path is ready.
 
 A single tag push builds all three platform jobs. CI publishes macOS and Linux release files; Windows stays runner-local.
+The macOS release job runs on GitHub's `macos-26` image because the bundled
+Apple Foundation helper is built against `FoundationModels.framework`.
 
 ---
 
@@ -73,6 +75,15 @@ The full flow is **two clicks in GitHub**. No local terminal needed.
    - `auto-tag.yml` fires on the `release: v*` commit landing on `main` → pushes the matching `vX.Y.Z` tag.
    - `release.yml` fires on the tag → builds macOS release files, Linux x64 packages, and the Windows AppX validation package.
    - The GitHub release receives macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
+
+### One-time branch packaging test
+
+Use this when validating release workflow changes before they land on `main`.
+Run the **Release** workflow manually from the Actions tab, choose the feature
+branch, and leave `build_windows` off unless you also need AppX validation. The
+manual branch run uploads macOS and Linux artifacts as workflow artifacts only;
+it does not create or publish a GitHub Release because publishing is still gated
+to `refs/tags/v*`.
 
 ### Manual fallback (if the workflow ever breaks)
 

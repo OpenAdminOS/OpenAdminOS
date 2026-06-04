@@ -197,7 +197,9 @@ OpenAdminOS reports this provider as unavailable on Windows/Linux; Windows AI
 API support is a separate future provider. The helper is packaged under
 `Contents/Resources/native/apple-foundation-helper/` and listed in
 `electron-builder`'s `mac.binaries` so signed/notarized macOS builds sign the
-extra executable along with the app bundle.
+extra executable along with the app bundle. Release packaging requires a
+macOS 26/Xcode 26 runner so `FoundationModels.framework` is available at helper
+build time.
 
 Apple Foundation is a small-context provider. The runtime probes and displays
 the model's context size and supported locales, rejects non-system model
