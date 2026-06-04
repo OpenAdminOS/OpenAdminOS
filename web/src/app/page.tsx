@@ -259,6 +259,12 @@ export default async function HomePage() {
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"
       />
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#070709]"
+      >
+        Skip to content
+      </a>
 
       <header className="relative z-30 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
         <Link
@@ -293,7 +299,11 @@ export default async function HomePage() {
         <MobileNav items={HOME_NAV_ITEMS} />
       </header>
 
-      <main className="relative z-10 flex flex-1 flex-col items-center px-6 sm:px-10">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="relative z-10 flex flex-1 flex-col items-center px-6 sm:px-10"
+      >
         <section className="flex flex-col items-center pt-10 text-center sm:pt-14">
           <Link
             href={latestRelease.releaseNotesUrl}
@@ -330,25 +340,30 @@ export default async function HomePage() {
               </svg>
               Download for macOS
             </a>
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              title="Windows build is unsigned right now; coming after Microsoft Store signing lands."
-              className="inline-flex cursor-not-allowed items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/40"
-            >
-              <svg
-                aria-hidden
-                viewBox="0 0 448 512"
-                className="h-4 w-4 fill-current"
+            <div className="flex flex-col items-center gap-1.5">
+              <div
+                aria-describedby="windows-download-status"
+                className="inline-flex cursor-default items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/40"
               >
-                <path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z" />
-              </svg>
-              Download for Windows
-              <span className="ml-1 text-[10px] font-normal uppercase tracking-wider text-white/30">
-                Soon
-              </span>
-            </button>
+                <svg
+                  aria-hidden
+                  viewBox="0 0 448 512"
+                  className="h-4 w-4 fill-current"
+                >
+                  <path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z" />
+                </svg>
+                Download for Windows
+                <span className="ml-1 text-[10px] font-normal uppercase tracking-wider text-white/30">
+                  Soon
+                </span>
+              </div>
+              <p
+                id="windows-download-status"
+                className="max-w-[17rem] text-center text-[11px] leading-4 text-white/35"
+              >
+                Windows build is pending signing.
+              </p>
+            </div>
           </div>
 
           <p className="mt-3 text-[11.5px] text-white/40">
@@ -459,7 +474,7 @@ export default async function HomePage() {
               </p>
             </div>
             <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12]">
-              <div className="grid grid-cols-[0.75fr_1fr_1fr] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40">
+              <div className="hidden grid-cols-[0.75fr_1fr_1fr] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40 md:grid">
                 <span>Mode</span>
                 <span>Local-first path</span>
                 <span>Hosted or write path</span>
@@ -470,8 +485,18 @@ export default async function HomePage() {
                   className="grid gap-3 border-b border-white/10 px-4 py-4 text-sm last:border-b-0 md:grid-cols-[0.75fr_1fr_1fr]"
                 >
                   <h3 className="font-semibold text-white/90">{row.axis}</h3>
-                  <p className="leading-6 text-white/55">{row.local}</p>
-                  <p className="leading-6 text-white/55">{row.hosted}</p>
+                  <p className="leading-6 text-white/55">
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
+                      Local-first path
+                    </span>
+                    {row.local}
+                  </p>
+                  <p className="leading-6 text-white/55">
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
+                      Hosted or write path
+                    </span>
+                    {row.hosted}
+                  </p>
                 </div>
               ))}
             </div>
@@ -504,7 +529,7 @@ export default async function HomePage() {
             </div>
 
             <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12]">
-              <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40">
+              <div className="hidden grid-cols-[minmax(0,1fr)_96px_minmax(260px,320px)] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40 md:grid">
                 <span>Agent</span>
                 <span>Mode</span>
                 <span>Trust</span>
@@ -522,18 +547,28 @@ export default async function HomePage() {
                       {agent.description}
                     </p>
                   </div>
-                  <span
-                    className={`h-fit rounded-md border px-2 py-1 text-xs font-medium ${
-                      agent.mode === "Write"
-                        ? "border-amber-300/25 bg-amber-300/10 text-amber-200"
-                        : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
-                    }`}
-                  >
-                    {agent.mode}
-                  </span>
-                  <code className="break-all font-mono text-xs leading-5 text-white/50">
-                    {agent.scopes}
-                  </code>
+                  <div>
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
+                      Mode
+                    </span>
+                    <span
+                      className={`inline-flex h-fit rounded-md border px-2 py-1 text-xs font-medium ${
+                        agent.mode === "Write"
+                          ? "border-amber-300/25 bg-amber-300/10 text-amber-200"
+                          : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
+                      }`}
+                    >
+                      {agent.mode}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
+                      Trust
+                    </span>
+                    <code className="break-all font-mono text-xs leading-5 text-white/50">
+                      {agent.scopes}
+                    </code>
+                  </div>
                 </div>
               ))}
             </div>

@@ -101,6 +101,9 @@ marketing site should expose a stable PNG favicon of at least 48x48 pixels, a
 OpenAdminOS` plus `alternateName: Open Admin OS` so Google has consistent site
 name inputs. The marketing robots.txt should explicitly allow major AI search
 crawlers while keeping API routes blocked.
+`SoftwareApplication` structured data must match the current downloadable
+platforms and must not advertise Windows availability until signed Windows
+builds are actually published.
 The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page

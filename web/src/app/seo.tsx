@@ -131,6 +131,8 @@ export function websiteSchema() {
 export function softwareApplicationSchema(input?: {
   version?: string;
   downloadUrl?: string;
+  operatingSystem?: string;
+  availability?: string;
 }) {
   return {
     "@type": "SoftwareApplication",
@@ -138,7 +140,7 @@ export function softwareApplicationSchema(input?: {
     name: SITE_NAME,
     applicationCategory: "BusinessApplication",
     applicationSubCategory: "Microsoft 365 administration",
-    operatingSystem: "macOS, Windows",
+    operatingSystem: input?.operatingSystem ?? "macOS",
     softwareVersion: input?.version,
     description: HOME_DESCRIPTION,
     isAccessibleForFree: true,
@@ -150,7 +152,7 @@ export function softwareApplicationSchema(input?: {
       "@type": "Offer",
       price: "0",
       priceCurrency: "USD",
-      availability: "https://schema.org/InStock",
+      availability: input?.availability ?? "https://schema.org/InStock",
     },
   };
 }

@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing landing page now aligns software schema, Windows availability copy, mobile comparison tables, and skip-link accessibility with the current release state.
 - Marketing headers now use a compact mobile stack menu aligned with the logo row instead of a separate row of top buttons.
 - Marketing privacy, terms, footer, schema, sitemap, and `llms.txt` now use `support@openadminos.com` and link a new `/legal-notice` provider-identification page for UgurLabs UG and managing director Ugur Koc, with `/impressum` kept as an alias.
 - Marketing FAQ items are now accessible native accordions, with the primary product definition expanded by default for SEO/GEO visibility.
