@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
+import { getLatestReleaseDownloads } from "./release-downloads";
 import {
   DOCS_URL,
   GITHUB_URL,
@@ -17,11 +18,6 @@ import {
   webPageSchema,
   websiteSchema,
 } from "./seo";
-
-const RELEASES_URL = "https://github.com/OpenAdminOS/OpenAdminOS/releases";
-const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
-const LATEST_RELEASE_API_URL =
-  "https://api.github.com/repos/OpenAdminOS/OpenAdminOS/releases/latest";
 
 export const revalidate = 900;
 
@@ -40,49 +36,6 @@ const HOME_NAV_ITEMS: readonly MobileNavItem[] = [
   { href: GITHUB_URL, label: "GitHub", external: true },
   { href: "/download", label: "Download", primary: true },
 ];
-
-interface GitHubReleaseAsset {
-  browser_download_url?: string;
-  name?: string;
-}
-
-interface GitHubLatestRelease {
-  assets?: GitHubReleaseAsset[];
-  html_url?: string;
-  tag_name?: string;
-}
-
-async function getLatestRelease() {
-  try {
-    const response = await fetch(LATEST_RELEASE_API_URL, {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-      next: { revalidate },
-    });
-
-    if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-
-    const release = (await response.json()) as GitHubLatestRelease;
-    const macosAsset = release.assets?.find((asset) => {
-      const name = asset.name?.toLowerCase() ?? "";
-      return name.endsWith(".dmg") && name.includes("arm64");
-    });
-
-    return {
-      macosDmgUrl: macosAsset?.browser_download_url ?? LATEST_RELEASE_URL,
-      releaseNotesUrl: release.html_url ?? LATEST_RELEASE_URL,
-      version: release.tag_name ?? "Latest release",
-    };
-  } catch {
-    return {
-      macosDmgUrl: LATEST_RELEASE_URL,
-      releaseNotesUrl: LATEST_RELEASE_URL,
-      version: "Latest release",
-    };
-  }
-}
 
 const TRUST_ITEMS = [
   {
@@ -228,7 +181,7 @@ const COMMON_QUESTIONS = [
 ];
 
 export default async function HomePage() {
-  const latestRelease = await getLatestRelease();
+  const latestRelease = await getLatestReleaseDownloads();
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -236,13 +189,14 @@ export default async function HomePage() {
       websiteSchema(),
       softwareApplicationSchema({
         version: latestRelease.version,
-        downloadUrl: latestRelease.macosDmgUrl,
+        downloadUrl: latestRelease.releaseNotesUrl,
+        operatingSystem: "macOS, Linux",
       }),
       webPageSchema({
         path: "/",
         name: HOME_TITLE,
         description: HOME_DESCRIPTION,
-        dateModified: "2026-06-02",
+        dateModified: "2026-06-04",
       }),
       breadcrumbSchema([{ name: "Home", path: "/" }]),
     ],
@@ -326,7 +280,7 @@ export default async function HomePage() {
             changes.
           </p>
 
-          <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
+          <div className="mt-8 flex flex-col items-center gap-3 lg:flex-row">
             <a
               href={latestRelease.macosDmgUrl}
               className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
@@ -340,6 +294,28 @@ export default async function HomePage() {
               </svg>
               Download for macOS
             </a>
+            <div className="flex flex-col items-center gap-1.5">
+              <a
+                href={latestRelease.linuxAppImageUrl}
+                className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
+              >
+                <img
+                  src="/linux.svg"
+                  alt=""
+                  aria-hidden
+                  width={16}
+                  height={16}
+                  className="h-4 w-4"
+                />
+                Download for Linux
+              </a>
+              <Link
+                href="/download#linux-packages"
+                className="text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline"
+              >
+                AppImage direct. DEB/RPM packages available.
+              </Link>
+            </div>
             <div className="flex flex-col items-center gap-1.5">
               <div
                 aria-describedby="windows-download-status"
@@ -751,12 +727,12 @@ export default async function HomePage() {
             tenant work inspectable and changes gated.
           </p>
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <a
-              href={latestRelease.macosDmgUrl}
+            <Link
+              href="/download"
               className="rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
             >
-              Download for macOS
-            </a>
+              View downloads
+            </Link>
             <Link
               href={GITHUB_URL}
               target="_blank"

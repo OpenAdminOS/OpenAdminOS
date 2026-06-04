@@ -12,7 +12,7 @@ The product is local-first: by default, tenant data and LLM prompts never leave 
 
 ### Distribution surface
 
-- **Desktop app** (Electron; macOS signed/notarized, Linux x64 preview packages, Windows build-only until signing is ready) — the only end-user surface
+- **Desktop app** (Electron; macOS signed/notarized, Linux x64 packages, Windows build-only until signing is ready) — the only end-user surface
 
 There is no separate CLI. Power users get the same GUI; contributor tooling (agent scaffold, dev/test commands) lives in repo scripts, not in a published `npx` binary.
 
@@ -103,7 +103,10 @@ name inputs. The marketing robots.txt should explicitly allow major AI search
 crawlers while keeping API routes blocked.
 `SoftwareApplication` structured data must match the current downloadable
 platforms and must not advertise Windows availability until signed Windows
-builds are actually published.
+builds are actually published. Marketing download surfaces present Linux as x64
+packages with AppImage for broad desktop use, `.deb` for
+Ubuntu/Debian-family systems, `.rpm` for Fedora/RHEL-compatible systems, and a
+visible `SHA256SUMS.txt` verification link.
 The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page
@@ -553,7 +556,7 @@ or Microsoft Graph data.
 Required before public v1 release:
 - **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, CI may build AppX packages for validation, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr) + notarization. Without notarization, Gatekeeper blocks the app.
-- **Linux:** Release tags publish unsigned x64 preview artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu/Debian-family and RHEL/Fedora-compatible desktop preview coverage, not "any distro" support. Apt/rpm repository signing is deferred until OpenAdminOS operates package repositories. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
+- **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu/Debian-family and RHEL/Fedora-compatible desktop coverage, not "any distro" support. Apt/rpm repository signing is deferred until OpenAdminOS operates package repositories. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.

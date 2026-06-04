@@ -6,8 +6,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
-- Release tags now publish Linux x64 AppImage, `.deb`, and `.rpm` preview artifacts with SHA-256 checksums while keeping Windows build-only.
+- Release tags now publish Linux x64 AppImage, `.deb`, and `.rpm` artifacts with SHA-256 checksums while keeping Windows build-only.
 - The v0.2.1 release was backfilled with Linux x64 AppImage, `.deb`, and `.rpm` artifacts built from the v0.2.1 tag.
+- Marketing download surfaces now expose Linux AppImage, `.deb`, and `.rpm` package links with SHA-256 verification while leaving Windows pending signing.
 - Marketing landing page now aligns software schema, Windows availability copy, mobile comparison tables, and skip-link accessibility with the current release state.
 - Marketing headers now use a compact mobile stack menu aligned with the logo row instead of a separate row of top buttons.
 - Marketing privacy, terms, footer, schema, sitemap, and `llms.txt` now use `support@openadminos.com` and link a new `/legal-notice` provider-identification page for UgurLabs UG and managing director Ugur Koc, with `/impressum` kept as an alias.

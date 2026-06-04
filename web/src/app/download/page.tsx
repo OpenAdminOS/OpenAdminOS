@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { MarketingShell, PageIntro, TextCard } from "../MarketingShell";
+import { getLatestReleaseDownloads } from "../release-downloads";
 import {
   GITHUB_URL,
   JsonLd,
@@ -13,12 +14,11 @@ import {
   websiteSchema,
 } from "../seo";
 
-const RELEASES_URL = `${GITHUB_URL}/releases`;
-const LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
+export const revalidate = 900;
 
-const TITLE = "Download for macOS and Windows";
+const TITLE = "Download for macOS and Linux";
 const DESCRIPTION =
-  "Download OpenAdminOS for macOS, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
+  "Download OpenAdminOS for macOS or Linux, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -26,18 +26,23 @@ export const metadata: Metadata = pageMetadata({
   path: "/download",
 });
 
-export default function DownloadPage() {
+export default async function DownloadPage() {
+  const latestRelease = await getLatestReleaseDownloads();
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
       organizationSchema(),
       websiteSchema(),
-      softwareApplicationSchema({ downloadUrl: LATEST_RELEASE_URL }),
+      softwareApplicationSchema({
+        downloadUrl: latestRelease.releaseNotesUrl,
+        operatingSystem: "macOS, Linux",
+        version: latestRelease.version,
+      }),
       webPageSchema({
         path: "/download",
         name: TITLE,
         description: DESCRIPTION,
-        dateModified: "2026-06-02",
+        dateModified: "2026-06-04",
       }),
       breadcrumbSchema([
         { name: "Home", path: "/" },
@@ -55,19 +60,62 @@ export default function DownloadPage() {
         description={DESCRIPTION}
       />
 
-      <section className="mt-12 grid gap-4 md:grid-cols-3">
+      <section className="mt-12 grid gap-4 lg:grid-cols-[0.85fr_1.4fr_0.85fr]">
         <TextCard title="macOS">
           <p>
             macOS builds are published through GitHub Releases. Review the
             release notes before connecting a production tenant.
           </p>
           <Link
-            href={LATEST_RELEASE_URL}
+            href={latestRelease.macosDmgUrl}
             target="_blank"
             rel="noreferrer"
             className="mt-5 inline-flex rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
           >
-            Latest macOS release
+            Download DMG
+          </Link>
+        </TextCard>
+        <TextCard id="linux-packages" title="Linux x64">
+          <p>
+            Pick the package format that matches your workstation. Linux
+            packages are unsigned, so verify downloads with the published
+            SHA-256 file.
+          </p>
+          <Link
+            href={latestRelease.linuxAppImageUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-5 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+          >
+            <img
+              src="/linux.svg"
+              alt=""
+              aria-hidden
+              width={16}
+              height={16}
+              className="h-4 w-4"
+            />
+            Download AppImage
+          </Link>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <PackageLink
+              href={latestRelease.linuxDebUrl}
+              label=".deb"
+              detail="Ubuntu, Debian"
+            />
+            <PackageLink
+              href={latestRelease.linuxRpmUrl}
+              label=".rpm"
+              detail="Fedora, RHEL"
+            />
+          </div>
+          <Link
+            href={latestRelease.checksumUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-4 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Verify with SHA256SUMS.txt
           </Link>
         </TextCard>
         <TextCard title="Windows">
@@ -76,6 +124,9 @@ export default function DownloadPage() {
             surface and write-confirmation rules are the same across platforms.
           </p>
         </TextCard>
+      </section>
+
+      <section className="mt-4">
         <TextCard title="Source">
           <p>
             The app, runtime, registry contract, and SDK are open-source under
@@ -121,5 +172,27 @@ export default function DownloadPage() {
         </div>
       </section>
     </MarketingShell>
+  );
+}
+
+function PackageLink({
+  detail,
+  href,
+  label,
+}: {
+  detail: string;
+  href: string;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="flex min-h-20 flex-col justify-between rounded-md border border-white/10 bg-white/[0.035] px-3 py-3 transition hover:border-white/25 hover:bg-white/[0.055]"
+    >
+      <span className="text-sm font-semibold text-white">{label}</span>
+      <span className="mt-2 text-xs leading-4 text-white/45">{detail}</span>
+    </Link>
   );
 }

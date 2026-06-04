@@ -134,14 +134,19 @@ export function PageIntro({
 }
 
 export function TextCard({
+  id,
   title,
   children,
 }: {
+  id?: string;
   title: string;
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.035] p-5">
+    <section
+      id={id}
+      className="rounded-lg border border-white/10 bg-white/[0.035] p-5"
+    >
       <h2 className="text-lg font-semibold tracking-tight text-white">
         {title}
       </h2>

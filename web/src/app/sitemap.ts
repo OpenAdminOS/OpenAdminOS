@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 import { SITE_URL } from "./seo";
 
 const ROUTES = [
-  ["/", "2026-06-02"],
-  ["/download", "2026-06-02"],
+  ["/", "2026-06-04"],
+  ["/download", "2026-06-04"],
   ["/registry", "2026-06-02"],
   ["/trust-model", "2026-06-02"],
   ["/use-cases/intune", "2026-06-02"],
