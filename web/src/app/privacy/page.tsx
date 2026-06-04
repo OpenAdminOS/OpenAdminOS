@@ -182,6 +182,17 @@ export default function PrivacyPage() {
                 counts are used only to publish aggregate registry stats.
               </li>
               <li>
+                <span className="text-white">Support issue reports.</span> If
+                you choose Report issue, review the form, and confirm public
+                submission, the app sends the report to the OpenAdminOS website
+                so the server can create a public GitHub issue. Optional
+                diagnostics are bounded and sanitized before submission. They do
+                not include tenant identifiers, prompts, Graph responses, run
+                results, raw logs, screenshots, local databases, tokens, or
+                provider credentials. The endpoint uses your IP address briefly
+                for rate limiting and stores a short-lived deduplication hash.
+              </li>
+              <li>
                 <span className="text-white">Auto-update.</span> The app can
                 check GitHub Releases for a new version and download the signed
                 installer. These checks send a standard HTTPS request to GitHub;
