@@ -280,24 +280,29 @@ export default async function HomePage() {
             changes.
           </p>
 
-          <div className="mt-8 flex flex-col items-center gap-3 lg:flex-row">
-            <a
-              href={latestRelease.macosDmgUrl}
-              className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
-            >
-              <svg
-                aria-hidden
-                viewBox="0 0 384 512"
-                className="h-4 w-4 fill-current"
+          <div className="mt-8 grid w-full max-w-3xl gap-3 md:grid-cols-3">
+            <div className="flex min-w-0 flex-col items-stretch gap-1.5">
+              <a
+                href={latestRelease.macosDmgUrl}
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
               >
-                <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zM256.6 105.8c30.3-36 27.6-68.8 26.7-80.6-26.8 1.6-57.8 18.3-75.5 38.8-19.5 22-31 49.2-28.5 80 29 2.2 55.5-12.7 77.3-38.2z" />
-              </svg>
-              Download for macOS
-            </a>
-            <div className="flex flex-col items-center gap-1.5">
+                <svg
+                  aria-hidden
+                  viewBox="0 0 384 512"
+                  className="h-4 w-4 fill-current"
+                >
+                  <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zM256.6 105.8c30.3-36 27.6-68.8 26.7-80.6-26.8 1.6-57.8 18.3-75.5 38.8-19.5 22-31 49.2-28.5 80 29 2.2 55.5-12.7 77.3-38.2z" />
+                </svg>
+                Download for macOS
+              </a>
+              <p className="min-h-4 text-center text-[11px] leading-4 text-white/38">
+                DMG direct download.
+              </p>
+            </div>
+            <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.linuxAppImageUrl}
-                className="inline-flex items-center gap-2 rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
               >
                 <img
                   src="/linux.svg"
@@ -311,15 +316,15 @@ export default async function HomePage() {
               </a>
               <Link
                 href="/download#linux-packages"
-                className="text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline"
+                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline"
               >
-                AppImage direct. DEB/RPM packages available.
+                AppImage direct. DEB/RPM available.
               </Link>
             </div>
-            <div className="flex flex-col items-center gap-1.5">
+            <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <div
                 aria-describedby="windows-download-status"
-                className="inline-flex cursor-default items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/40"
+                className="inline-flex h-11 w-full cursor-default items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-white/10 bg-white/[0.03] px-4 text-sm font-medium text-white/40"
               >
                 <svg
                   aria-hidden
@@ -335,9 +340,9 @@ export default async function HomePage() {
               </div>
               <p
                 id="windows-download-status"
-                className="max-w-[17rem] text-center text-[11px] leading-4 text-white/35"
+                className="min-h-4 text-center text-[11px] leading-4 text-white/35"
               >
-                Windows build is pending signing.
+                Pending signing.
               </p>
             </div>
           </div>

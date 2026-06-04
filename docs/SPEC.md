@@ -106,7 +106,8 @@ platforms and must not advertise Windows availability until signed Windows
 builds are actually published. Marketing download surfaces present Linux as x64
 packages with AppImage for broad desktop use, `.deb` for
 Ubuntu/Debian-family systems, `.rpm` for Fedora/RHEL-compatible systems, and a
-visible `SHA256SUMS.txt` verification link.
+visible inline SHA-256 hash for each Linux package plus a `SHA256SUMS.txt`
+verification link.
 The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page

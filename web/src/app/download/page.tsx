@@ -78,44 +78,44 @@ export default async function DownloadPage() {
         <TextCard id="linux-packages" title="Linux x64">
           <p>
             Pick the package format that matches your workstation. Linux
-            packages are unsigned, so verify downloads with the published
-            SHA-256 file.
+            packages are unsigned, so verify the SHA-256 hash before
+            installing.
           </p>
-          <Link
-            href={latestRelease.linuxAppImageUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-5 inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
-          >
-            <img
-              src="/linux.svg"
-              alt=""
-              aria-hidden
-              width={16}
-              height={16}
-              className="h-4 w-4"
+
+          <div className="mt-5 grid gap-3">
+            <PackageDownload
+              actionLabel="Download AppImage"
+              detail="Most desktop distros"
+              hash={latestRelease.linuxAppImage.sha256}
+              href={latestRelease.linuxAppImage.url}
+              label="AppImage"
+              primary
             />
-            Download AppImage
-          </Link>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <PackageLink
-              href={latestRelease.linuxDebUrl}
-              label=".deb"
-              detail="Ubuntu, Debian"
-            />
-            <PackageLink
-              href={latestRelease.linuxRpmUrl}
-              label=".rpm"
-              detail="Fedora, RHEL"
-            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <PackageDownload
+                actionLabel="Download .deb"
+                detail="Ubuntu, Debian"
+                hash={latestRelease.linuxDeb.sha256}
+                href={latestRelease.linuxDeb.url}
+                label=".deb"
+              />
+              <PackageDownload
+                actionLabel="Download .rpm"
+                detail="Fedora, RHEL"
+                hash={latestRelease.linuxRpm.sha256}
+                href={latestRelease.linuxRpm.url}
+                label=".rpm"
+              />
+            </div>
           </div>
+
           <Link
             href={latestRelease.checksumUrl}
             target="_blank"
             rel="noreferrer"
             className="mt-4 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
           >
-            Verify with SHA256SUMS.txt
+            Open SHA256SUMS.txt
           </Link>
         </TextCard>
         <TextCard title="Windows">
@@ -175,24 +175,77 @@ export default async function DownloadPage() {
   );
 }
 
-function PackageLink({
+function PackageDownload({
+  actionLabel,
   detail,
+  hash,
   href,
   label,
+  primary = false,
 }: {
+  actionLabel: string;
   detail: string;
+  hash: string | undefined;
   href: string;
   label: string;
+  primary?: boolean;
 }) {
   return (
-    <Link
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="flex min-h-20 flex-col justify-between rounded-md border border-white/10 bg-white/[0.035] px-3 py-3 transition hover:border-white/25 hover:bg-white/[0.055]"
+    <div
+      className={
+        primary
+          ? "min-w-0 rounded-md border border-white/15 bg-white/[0.055] p-3"
+          : "min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-3"
+      }
     >
-      <span className="text-sm font-semibold text-white">{label}</span>
-      <span className="mt-2 text-xs leading-4 text-white/45">{detail}</span>
-    </Link>
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-white">{label}</h3>
+          <p className="mt-1 text-xs leading-4 text-white/45">{detail}</p>
+        </div>
+        <Link
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className={
+            primary
+              ? "inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+              : "inline-flex shrink-0 items-center justify-center rounded-md border border-white/10 px-3 py-2 text-xs font-semibold text-white/70 transition hover:border-white/25 hover:text-white"
+          }
+        >
+          {primary ? (
+            <img
+              src="/linux.svg"
+              alt=""
+              aria-hidden
+              width={16}
+              height={16}
+              className="h-4 w-4"
+            />
+          ) : null}
+          {actionLabel}
+        </Link>
+      </div>
+      <ChecksumValue hash={hash} />
+    </div>
+  );
+}
+
+function ChecksumValue({ hash }: { hash: string | undefined }) {
+  return (
+    <div className="mt-3 min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+        SHA-256
+      </p>
+      <code
+        className={
+          hash
+            ? "mt-1 block max-w-full break-all rounded border border-white/10 bg-black/25 px-2 py-1.5 font-mono text-[10px] leading-4 text-white/65 [overflow-wrap:anywhere]"
+            : "mt-1 block max-w-full rounded border border-white/10 bg-black/20 px-2 py-1.5 text-[11px] leading-4 text-white/35"
+        }
+      >
+        {hash ?? "Checksum unavailable"}
+      </code>
+    </div>
   );
 }
