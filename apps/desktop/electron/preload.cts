@@ -7,6 +7,8 @@ import type {
   PendingConnectorDecision,
   ProviderId,
   SaveTextFileArgs,
+  SupportBundleInput,
+  SupportIssueSubmissionInput,
   StartRunOptions,
   UpdateState,
   IntuneChatStreamEvent,
@@ -30,6 +32,10 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-scheduler-launch-settings"),
   getReleaseDiagnostics: () =>
     ipcRenderer.invoke("openadminos:get-release-diagnostics"),
+  exportSupportBundle: (input: SupportBundleInput) =>
+    ipcRenderer.invoke("openadminos:export-support-bundle", input),
+  submitSupportIssue: (input: SupportIssueSubmissionInput) =>
+    ipcRenderer.invoke("openadminos:submit-support-issue", input),
   writeClipboardText: (text: string) =>
     ipcRenderer.invoke("openadminos:write-clipboard-text", text),
   setSchedulerLaunchEnabled: (enabled: boolean) =>

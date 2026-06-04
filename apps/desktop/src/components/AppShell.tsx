@@ -4,6 +4,7 @@ import { CommandPalette } from "./CommandPalette";
 import { ConnectorConfirmModal } from "./ConnectorConfirmModal";
 import { StatusStrip } from "./StatusStrip";
 import { UpdateBanner } from "./UpdateBanner";
+import { ReportIssueProvider } from "./ReportIssueModal";
 
 // Reserve space at the top of the window for the macOS traffic-light buttons
 // (titleBarStyle: "hiddenInset" leaves them floating over the renderer) and
@@ -36,22 +37,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
-      <TitleBarInset />
-      <UpdateBanner />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
-        <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-          {children}
-        </main>
+    <ReportIssueProvider>
+      <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+        <TitleBarInset />
+        <UpdateBanner />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
+          <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+            {children}
+          </main>
+        </div>
+        <StatusStrip />
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+        />
+        <ConnectorConfirmModal />
       </div>
-      <StatusStrip />
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-      />
-      <ConnectorConfirmModal />
-    </div>
+    </ReportIssueProvider>
   );
 }
 

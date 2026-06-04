@@ -5,6 +5,7 @@ import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
+import { useReportIssue } from "../components/ReportIssueModal";
 import {
   IconCheck,
   IconChat,
@@ -1711,6 +1712,7 @@ function RegistrySourceModal({
 function AboutSection() {
   const navigate = useNavigate();
   const { state } = useAppState();
+  const openReportIssue = useReportIssue();
   const [diagnostics, setDiagnostics] = useState<ReleaseDiagnostics | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -1767,12 +1769,26 @@ function AboutSection() {
         >
           What's new
         </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            openReportIssue({
+              source: "settings-about",
+              title: "OpenAdminOS issue",
+              description:
+                "I found an issue while using OpenAdminOS. Details are below.",
+            })
+          }
+        >
+          Create issue
+        </Button>
       </div>
 
       <div className="mt-8">
         <SectionTitle
           title="0.2 readiness"
-          subtitle="Local diagnostics for release checks and support. These values stay on this device."
+          subtitle="Local diagnostics for release checks and support. They only leave this device when included in a confirmed public issue."
         />
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <ReadinessRow

@@ -12,8 +12,10 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
+import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { AppStateStore } from "./state.js";
@@ -45,6 +47,9 @@ import type {
   SelfTrainingSuggestionStatus,
   SetGraphCacheRefreshScheduleInput,
   SendIntuneChatMessageInput,
+  SupportBundleInput,
+  SupportIssueSubmissionInput,
+  SupportIssueSubmissionResult,
   IntuneChatStreamEvent,
   StartRunOptions,
 } from "@openadminos/agent-sdk";
@@ -55,6 +60,7 @@ import {
 } from "./connector-confirm-bridge.js";
 import { listRegisteredConnectors } from "@openadminos/runtime";
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
+import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 
 // Set the app name BEFORE anything else that could touch the macOS
 // Keychain. Electron's safeStorage uses `app.getName()` to construct
@@ -84,12 +90,27 @@ const isBackgroundSchedulerLaunch = process.argv.includes(BACKGROUND_SCHEDULER_A
 const isIntuneChatSmokeLaunch =
   !app.isPackaged && process.env.OPENADMINOS_INTUNE_CHAT_SMOKE === "1";
 const intuneChatSmokeUserData = process.env.OPENADMINOS_INTUNE_CHAT_SMOKE_USER_DATA;
+const isReportIssueSmokeLaunch =
+  !app.isPackaged && process.env.OPENADMINOS_REPORT_ISSUE_SMOKE === "1";
+const reportIssueSmokeUserData = process.env.OPENADMINOS_REPORT_ISSUE_SMOKE_USER_DATA;
+const capturedExternalUrlFile = !app.isPackaged
+  ? process.env.OPENADMINOS_CAPTURE_EXTERNAL_URL
+  : undefined;
+const supportBundleExportFile = !app.isPackaged
+  ? process.env.OPENADMINOS_SUPPORT_BUNDLE_EXPORT_PATH
+  : undefined;
 const MACOS_SCHEDULER_LABEL = "com.openadminos.scheduler";
 const WINDOWS_SCHEDULER_TASK = "OpenAdminOS Scheduler";
 const providerIds = new Set(providerCatalog.map((provider) => provider.id));
 const graphCacheResourceKinds = new Set<string>(
   GRAPH_CACHE_RESOURCES.map((resource) => resource.resource),
 );
+const supportIssueSources = new Set([
+  "sidebar",
+  "run-failure",
+  "settings-about",
+  "native-menu",
+]);
 const intuneChatStreamControllers = new Map<string, AbortController>();
 const agentSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const agentCategories = new Set([
@@ -105,10 +126,17 @@ const selfTrainingSuggestionStatuses = new Set<SelfTrainingSuggestionStatus>([
   "rejected",
   "reset",
 ]);
+const DEFAULT_SUPPORT_API_URL = "https://openadminos.com";
 
-if (isIntuneChatSmokeLaunch && intuneChatSmokeUserData) {
-  mkdirSync(intuneChatSmokeUserData, { recursive: true });
-  app.setPath("userData", intuneChatSmokeUserData);
+const smokeUserData = isIntuneChatSmokeLaunch
+  ? intuneChatSmokeUserData
+  : isReportIssueSmokeLaunch
+    ? reportIssueSmokeUserData
+    : undefined;
+
+if (smokeUserData) {
+  mkdirSync(smokeUserData, { recursive: true });
+  app.setPath("userData", smokeUserData);
 }
 
 if (process.platform === "darwin" && isBackgroundSchedulerLaunch) {
@@ -260,6 +288,67 @@ function seedIntuneChatSmokeState(userDataDir: string): void {
   );
 }
 
+function seedReportIssueSmokeState(userDataDir: string): void {
+  if (!isReportIssueSmokeLaunch) return;
+  mkdirSync(userDataDir, { recursive: true });
+  const now = new Date().toISOString();
+  writeFileSync(
+    join(userDataDir, "state.json"),
+    JSON.stringify(
+      {
+        activeProviderId: "ollama",
+        activeModelByProviderId: { ollama: "report-smoke-model" },
+        installedAgents: [
+          {
+            id: "report-smoke-agent",
+            slug: "report-smoke-agent",
+            name: "Report smoke agent",
+            description: "Used only by the report issue smoke test.",
+            mode: "read",
+            category: "devices",
+            tier: "agent",
+            requiresEntraTier: "free",
+            scopes: ["DeviceManagementManagedDevices.Read.All"],
+            author: { name: "OpenAdminOS" },
+            version: "1.0.0",
+            installedAt: now,
+          },
+        ],
+        runs: [
+          {
+            id: "report-smoke-run",
+            agentSlug: "report-smoke-agent",
+            status: "failed",
+            queuedAt: now,
+            startedAt: now,
+            finishedAt: now,
+            providerId: "ollama",
+            trigger: "manual",
+            error: "Ollama not reachable for report smoke.",
+            steps: [],
+            logs: [],
+          },
+        ],
+        tenants: [
+          {
+            id: "report-smoke-tenant",
+            displayName: "Report Smoke Tenant",
+            username: "admin@report-smoke.invalid",
+            homeAccountId: "report-smoke-home-account",
+            addedAt: now,
+            entraTier: "p1",
+          },
+        ],
+        activeTenantId: "report-smoke-tenant",
+        registryInstallCountsEnabled: false,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+}
+
 function createIntuneChatSmokeGraph(): RunGraphApi {
   return {
     async listManagedDevices() {
@@ -354,6 +443,14 @@ function failIntuneChatSmoke(error: unknown): void {
   app.exit(1);
 }
 
+function failReportIssueSmoke(error: unknown): void {
+  console.error(
+    "[report-issue-smoke] failed",
+    error instanceof Error ? error.stack ?? error.message : error,
+  );
+  app.exit(1);
+}
+
 async function runIntuneChatSmoke(): Promise<void> {
   if (!isIntuneChatSmokeLaunch) return;
   const window = mainWindow;
@@ -365,6 +462,63 @@ async function runIntuneChatSmoke(): Promise<void> {
     true,
   );
   console.log("[intune-chat-smoke] passed", JSON.stringify(result));
+  app.exit(0);
+}
+
+async function runReportIssueSmoke(): Promise<void> {
+  if (!isReportIssueSmokeLaunch) return;
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) {
+    throw new Error("Report issue smoke window was not available.");
+  }
+  const result = await window.webContents.executeJavaScript(
+    `(${reportIssueSmokeScript.toString()})()`,
+    true,
+  );
+  if (!capturedExternalUrlFile) {
+    throw new Error("OPENADMINOS_CAPTURE_EXTERNAL_URL is required for report smoke.");
+  }
+  if (!supportBundleExportFile) {
+    throw new Error("OPENADMINOS_SUPPORT_BUNDLE_EXPORT_PATH is required for report smoke.");
+  }
+
+  const capturedUrl = readFileSync(capturedExternalUrlFile, "utf8");
+  if (capturedUrl.trim() !== "https://github.com/OpenAdminOS/OpenAdminOS/issues/12345") {
+    throw new Error(`Report smoke opened unexpected URL: ${capturedUrl}`);
+  }
+
+  const exported = JSON.parse(readFileSync(supportBundleExportFile, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const exportedText = JSON.stringify(exported);
+  for (const forbidden of [
+    "Report Smoke Tenant",
+    "admin@report-smoke.invalid",
+    "report-smoke-agent",
+    "report-smoke-run",
+  ]) {
+    if (exportedText.includes(forbidden)) {
+      throw new Error(`Report smoke leaked ${forbidden} into the diagnostics JSON.`);
+    }
+  }
+  const privacy = exported.privacy as Record<string, unknown> | undefined;
+  if (
+    privacy?.automaticUploadByOpenAdminOS !== false ||
+    privacy?.publicIssueSubmissionRequiresConfirmation !== true ||
+    privacy?.tenantIdentifiersIncluded !== false ||
+    privacy?.promptsIncluded !== false ||
+    privacy?.graphResponsesIncluded !== false ||
+    privacy?.runResultsIncluded !== false ||
+    privacy?.runLogsIncluded !== false
+  ) {
+    throw new Error("Report smoke diagnostics privacy flags were not false.");
+  }
+
+  console.log(
+    "[report-issue-smoke] passed",
+    JSON.stringify({ ...result, issueUrl: capturedUrl }),
+  );
   app.exit(0);
 }
 
@@ -732,6 +886,127 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   };
 }
 
+async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
+  const waitFor = async (
+    predicate: () => boolean,
+    label: string,
+    timeoutMs = 12000,
+  ) => {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(
+      `Timed out waiting for ${label}. Current page text: ${(document.body.textContent ?? "").slice(0, 1400)}`,
+    );
+  };
+  const bodyText = () => document.body.textContent ?? "";
+  const findButton = (label: string): HTMLButtonElement | undefined =>
+    Array.from(document.querySelectorAll("button")).find((button) =>
+      button.textContent?.trim().includes(label),
+    );
+  const clickButton = async (label: string) => {
+    await waitFor(() => {
+      const button = findButton(label);
+      return Boolean(button && !button.disabled);
+    }, `${label} button`);
+    findButton(label)?.click();
+  };
+  const setInput = async (value: string) => {
+    await waitFor(
+      () => Boolean(document.querySelector(".fixed input[type='text'], .fixed input:not([type])")),
+      "modal title input",
+    );
+    const input = document.querySelector(".fixed input[type='text'], .fixed input:not([type])");
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Report title input was not found.");
+    }
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(input, value);
+    input.focus();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => input.value === value, "report title value");
+  };
+  const setTextarea = async (index: number, value: string) => {
+    await waitFor(
+      () => document.querySelectorAll(".fixed textarea").length > index,
+      `modal textarea ${index}`,
+    );
+    const textarea = document.querySelectorAll(".fixed textarea")[index];
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error(`Report textarea ${index} was not found.`);
+    }
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(textarea, value);
+    textarea.focus();
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => textarea.value === value, `report textarea ${index} value`);
+  };
+  const clickCheckbox = async (index: number) => {
+    await waitFor(
+      () => document.querySelectorAll(".fixed input[type='checkbox']").length > index,
+      `modal checkbox ${index}`,
+    );
+    const checkbox = document.querySelectorAll(".fixed input[type='checkbox']")[index];
+    if (!(checkbox instanceof HTMLInputElement)) {
+      throw new Error(`Report checkbox ${index} was not found.`);
+    }
+    checkbox.click();
+    await waitFor(() => checkbox.checked, `modal checkbox ${index} checked`);
+  };
+
+  await waitFor(
+    () => bodyText().includes("Report issue") && bodyText().includes("Public GitHub issue"),
+    "sidebar report issue action",
+  );
+  await clickButton("Report issue");
+  await waitFor(
+    () =>
+      bodyText().includes("Submit a public GitHub issue") &&
+      bodyText().includes("This creates a public GitHub issue") &&
+      bodyText().includes("repo-scoped token"),
+    "report issue modal",
+  );
+  await setInput("Smoke report issue");
+  await setTextarea(0, "The report issue smoke flow should submit a public GitHub issue.");
+  await setTextarea(
+    1,
+    "1. Open the sidebar report action.\n2. Fill the modal.\n3. Confirm public issue creation.",
+  );
+  await setTextarea(
+    2,
+    "A public GitHub issue is created after explicit confirmation.",
+  );
+  await setTextarea(3, "The public issue was not created.");
+  await clickButton("Export diagnostics JSON");
+  await waitFor(
+    () => bodyText().includes("Diagnostics file exported locally"),
+    "diagnostics export notice",
+  );
+  await clickCheckbox(1);
+  await clickButton("Submit public issue");
+  await waitFor(
+    () =>
+      bodyText().includes("Public GitHub issue #12345 created") &&
+      bodyText().includes("Open issue"),
+    "public issue created notice",
+  );
+
+  return {
+    hasSidebarAction: bodyText().includes("Public GitHub issue"),
+    hasModalPrivacyCopy: bodyText().includes("This creates a public GitHub issue"),
+    hasPublicConfirmation: bodyText().includes("I understand this creates a public GitHub issue"),
+    hasCreatedIssueNotice: bodyText().includes("Public GitHub issue #12345 created"),
+  };
+}
+
 function isWindowsSchedulerTaskRegistered(): boolean {
   try {
     execFileSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK], {
@@ -838,6 +1113,371 @@ async function getReleaseDiagnostics(): Promise<ReleaseDiagnostics> {
     notificationPermission,
     scheduler: await getSchedulerLaunchSettings(),
   };
+}
+
+async function exportSupportBundle(
+  input: SupportBundleInput,
+): Promise<{ canceled: boolean; filePath?: string }> {
+  if (supportBundleExportFile) {
+    const bundle = await createSupportBundle(input);
+    await writeFile(supportBundleExportFile, JSON.stringify(bundle, null, 2), "utf8");
+    return { canceled: false, filePath: supportBundleExportFile };
+  }
+
+  const parent = mainWindow ?? undefined;
+  const defaultPath = `openadminos-diagnostics-${new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")}.json`;
+  const result = parent
+    ? await dialog.showSaveDialog(parent, {
+        title: "Export diagnostics",
+        defaultPath,
+        filters: [{ name: "JSON diagnostics", extensions: ["json"] }],
+      })
+    : await dialog.showSaveDialog({
+        title: "Export diagnostics",
+        defaultPath,
+        filters: [{ name: "JSON diagnostics", extensions: ["json"] }],
+      });
+  if (result.canceled || !result.filePath) {
+    return { canceled: true };
+  }
+
+  const bundle = await createSupportBundle(input);
+  await writeFile(result.filePath, JSON.stringify(bundle, null, 2), "utf8");
+  return { canceled: false, filePath: result.filePath };
+}
+
+async function submitSupportIssue(
+  input: SupportIssueSubmissionInput,
+): Promise<SupportIssueSubmissionResult> {
+  const baseUrl = supportApiBaseUrl();
+  if (!baseUrl) {
+    throw new Error("Support issue endpoint is not configured in this build.");
+  }
+
+  const diagnostics = input.includeDiagnostics
+    ? await createSupportBundle(input)
+    : undefined;
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/api/support-issues`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      confirmPublic: true,
+      issue: {
+        title: input.title,
+        description: input.description,
+        stepsToReproduce: input.stepsToReproduce,
+        expectedBehavior: input.expectedBehavior,
+        actualBehavior: input.actualBehavior,
+        source: input.source ?? "sidebar",
+        appVersion: app.getVersion(),
+      },
+      diagnostics,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  let parsed: unknown = null;
+  try {
+    parsed = await response.json();
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    const message =
+      parsed &&
+      typeof parsed === "object" &&
+      "error" in parsed &&
+      typeof parsed.error === "string"
+        ? parsed.error
+        : `Support issue submission failed with HTTP ${response.status}.`;
+    throw new Error(message);
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !("issueUrl" in parsed) ||
+    typeof parsed.issueUrl !== "string" ||
+    !("issueNumber" in parsed) ||
+    typeof parsed.issueNumber !== "number"
+  ) {
+    throw new Error("Support issue endpoint returned an invalid response.");
+  }
+
+  return {
+    issueUrl: parsed.issueUrl,
+    issueNumber: parsed.issueNumber,
+  };
+}
+
+function supportApiBaseUrl(): string {
+  if (typeof process.env.OPENAGENTS_STATS_API === "string") {
+    return process.env.OPENAGENTS_STATS_API;
+  }
+  return app.isPackaged ? DEFAULT_SUPPORT_API_URL : "";
+}
+
+async function createSupportBundle(input: SupportBundleInput) {
+  const state = await store.getAppState();
+  const releaseDiagnostics = await getReleaseDiagnostics();
+  const activeProvider = state.providers.find(
+    (provider) => provider.id === state.activeProviderId,
+  );
+  const runFailures = state.runs
+    .filter((run) => run.status === "failed")
+    .sort(
+      (a, b) =>
+        Date.parse(b.finishedAt ?? b.queuedAt) -
+        Date.parse(a.finishedAt ?? a.queuedAt),
+    )
+    .slice(0, 5);
+
+  return {
+    schemaVersion: 1,
+    createdAt: new Date().toISOString(),
+    notice:
+      "Generated locally by OpenAdminOS for support review. Exported files stay local; public issue submission sends this summary only after explicit confirmation.",
+    issueContext: {
+      source: input.source ?? "sidebar",
+      titleLength: input.title.length,
+      descriptionLength: input.description.length,
+      hasStepsToReproduce: Boolean(input.stepsToReproduce?.trim()),
+      hasExpectedBehavior: Boolean(input.expectedBehavior?.trim()),
+      hasActualBehavior: Boolean(input.actualBehavior?.trim()),
+      ...(input.agentSlug ? { agentSlugHash: diagnosticHash(input.agentSlug) } : {}),
+      ...(input.runId ? { runIdHash: diagnosticHash(input.runId) } : {}),
+    },
+    app: {
+      version: releaseDiagnostics.appVersion,
+      packaged: releaseDiagnostics.packaged,
+      signed: releaseDiagnostics.signed,
+      platform: releaseDiagnostics.platform,
+      processPlatform: process.platform,
+      processArch: process.arch,
+      osArch: osArch(),
+      osRelease: osRelease(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      v8: process.versions.v8,
+    },
+    privacy: {
+      tenantIdentifiersIncluded: false,
+      promptsIncluded: false,
+      graphResponsesIncluded: false,
+      runResultsIncluded: false,
+      runLogsIncluded: false,
+      screenshotsIncluded: false,
+      automaticUploadByOpenAdminOS: false,
+      publicIssueSubmissionRequiresConfirmation: true,
+    },
+    state: {
+      activeProvider: activeProvider
+        ? {
+            id: activeProvider.id,
+            isLocal: activeProvider.isLocal,
+            status: activeProvider.status,
+            modelCount: activeProvider.models.length,
+            hasDefaultModel: Boolean(activeProvider.defaultModel),
+            detailCategory: classifyDiagnosticText(activeProvider.detail),
+            detailHash: diagnosticHash(activeProvider.detail),
+          }
+        : null,
+      providers: state.providers.map((provider) => ({
+        id: provider.id,
+        isLocal: provider.isLocal,
+        status: provider.status,
+        modelCount: provider.models.length,
+        hasDefaultModel: Boolean(provider.defaultModel),
+        detailCategory: classifyDiagnosticText(provider.detail),
+        detailHash: diagnosticHash(provider.detail),
+      })),
+      tenants: {
+        connectedCount: state.tenants.length,
+        hasActiveTenant: Boolean(state.activeTenantId),
+      },
+      agents: {
+        installedCount: state.installedAgents.length,
+        registryCount: state.registryAgents.length,
+        scheduledCount: state.installedAgents.filter(
+          (agent) => agent.schedule?.enabled === true,
+        ).length,
+      },
+      registry: {
+        sourceKind:
+          state.registrySource === DEFAULT_REGISTRY_SOURCE ? "official" : "custom",
+        lastRefresh: state.lastRegistryRefresh,
+        refreshErrorCategory: classifyDiagnosticText(state.registryRefreshError),
+        refreshErrorHash: diagnosticHash(state.registryRefreshError),
+        installCountsEnabled: state.registryInstallCountsEnabled,
+      },
+      scheduler: {
+        supported: state.schedulerStatus?.supported ?? releaseDiagnostics.scheduler.supported,
+        enabled: releaseDiagnostics.scheduler.enabled,
+        requiresTenant: releaseDiagnostics.scheduler.requiresTenant,
+        activeScheduleCount:
+          state.schedulerStatus?.activeScheduleCount ??
+          releaseDiagnostics.scheduler.activeScheduleCount,
+        lastWakeAt:
+          state.schedulerStatus?.lastWakeAt ?? releaseDiagnostics.scheduler.lastWakeAt,
+        lastSuccessAt:
+          state.schedulerStatus?.lastSuccessAt ??
+          releaseDiagnostics.scheduler.lastSuccessAt,
+        nextDueAt:
+          state.schedulerStatus?.nextDueAt ?? releaseDiagnostics.scheduler.nextDueAt,
+        lastErrorCategory: classifyDiagnosticText(
+          state.schedulerStatus?.lastError ?? releaseDiagnostics.scheduler.lastError,
+        ),
+        lastErrorHash: diagnosticHash(
+          state.schedulerStatus?.lastError ?? releaseDiagnostics.scheduler.lastError,
+        ),
+      },
+      runs: summarizeRuns(state.runs),
+      recentFailures: runFailures.map((run) => ({
+        runIdHash: diagnosticHash(run.id),
+        agentSlugHash: diagnosticHash(run.agentSlug),
+        trigger: run.trigger ?? "manual",
+        providerId: run.providerId,
+        queuedAt: run.queuedAt,
+        finishedAt: run.finishedAt,
+        failedStepCount: run.steps.filter((step) => step.status === "failed").length,
+        errorLogCount: run.logs.filter((log) => log.level === "error").length,
+        errorCategory: classifyDiagnosticText(run.error),
+        errorHash: diagnosticHash(run.error),
+      })),
+      graphCache: await graphCacheDiagnostics(state.activeTenantId),
+    },
+    excluded:
+      [
+        "tenant ids, tenant names, tenant domains, account usernames, and UPNs",
+        "Microsoft Graph response bodies and cached rows",
+        "LLM prompts, LLM outputs, chat transcripts, run reports, and raw run logs",
+        "provider API keys, MSAL tokens, keychain values, local SQLite databases",
+        "screenshots and session replay",
+      ],
+  };
+}
+
+async function graphCacheDiagnostics(activeTenantId: string | undefined) {
+  if (!activeTenantId) {
+    return { available: false, reason: "no-active-tenant" };
+  }
+  try {
+    const cache = await store.getGraphCacheStatus(activeTenantId);
+    return {
+      available: true,
+      resourceCount: cache.resources.length,
+      schedule: cache.schedule
+        ? {
+            enabled: cache.schedule.enabled,
+            intervalMinutes: cache.schedule.intervalMinutes,
+            updatedAt: cache.schedule.updatedAt,
+            lastRunAt: cache.schedule.lastRunAt,
+            lastSuccessAt: cache.schedule.lastSuccessAt,
+            nextRunAt: cache.schedule.nextRunAt,
+            lastErrorCategory: classifyDiagnosticText(cache.schedule.lastError),
+            lastErrorHash: diagnosticHash(cache.schedule.lastError),
+          }
+        : undefined,
+      resources: cache.resources.map((resource) => ({
+        resource: resource.resource,
+        rows: resource.rows,
+        pages: resource.pages,
+        pageLimitReached: resource.pageLimitReached,
+        refreshedAt: resource.refreshedAt,
+        scopeCount: resource.scopeSet.length,
+        lastErrorCategory: classifyDiagnosticText(resource.lastError),
+        lastErrorHash: diagnosticHash(resource.lastError),
+      })),
+    };
+  } catch (error) {
+    return {
+      available: false,
+      reason: "status-unavailable",
+      errorCategory: classifyDiagnosticText(error),
+      errorHash: diagnosticHash(error),
+    };
+  }
+}
+
+function summarizeRuns(runs: RunRecord[]) {
+  const byStatus: Record<RunRecord["status"], number> = {
+    queued: 0,
+    running: 0,
+    "awaiting-confirmation": 0,
+    completed: 0,
+    failed: 0,
+    rejected: 0,
+    cancelled: 0,
+  };
+  const byTrigger: Record<"manual" | "schedule", number> = {
+    manual: 0,
+    schedule: 0,
+  };
+  let latestRunAt: string | undefined;
+
+  for (const run of runs) {
+    byStatus[run.status] += 1;
+    byTrigger[run.trigger ?? "manual"] += 1;
+    const stamp = run.finishedAt ?? run.startedAt ?? run.queuedAt;
+    if (!latestRunAt || Date.parse(stamp) > Date.parse(latestRunAt)) {
+      latestRunAt = stamp;
+    }
+  }
+
+  return {
+    total: runs.length,
+    byStatus,
+    byTrigger,
+    latestRunAt,
+  };
+}
+
+function classifyDiagnosticText(value: unknown): string | undefined {
+  const text = redactedDiagnosticText(value, 500).toLowerCase();
+  if (!text) return undefined;
+  if (/ollama/.test(text)) return "ollama";
+  if (/codex|openai/.test(text)) return "openai-codex";
+  if (/apple foundation|foundation model/.test(text)) return "apple-foundation";
+  if (/401|unauthor|expired|interaction_required|token/.test(text)) return "auth";
+  if (/403|forbidden|insufficient|scope|consent/.test(text)) return "permission";
+  if (/429|throttl|rate limit/.test(text)) return "rate-limit";
+  if (/timeout|timed out|abort/.test(text)) return "timeout";
+  if (/network|offline|econn|enotfound|fetch|dns/.test(text)) return "network";
+  if (/yaml|manifest|schema|invalid|parse/.test(text)) return "validation";
+  if (/scheduler|launchagent|task scheduler|launchctl/.test(text)) return "scheduler";
+  if (/registry|github|manifesturl/.test(text)) return "registry";
+  return "other";
+}
+
+function diagnosticHash(value: unknown): string | undefined {
+  const text = redactedDiagnosticText(value, 1_000);
+  if (!text) return undefined;
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+function redactedDiagnosticText(value: unknown, maxLength: number): string {
+  const raw =
+    value instanceof Error
+      ? value.message
+      : typeof value === "string"
+        ? value
+        : "";
+  if (!raw.trim()) return "";
+  const home = app.getPath("home");
+  return raw
+    .replaceAll(home, "~")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email]")
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[guid]")
+    .replace(/\b[A-Za-z0-9-]+\.onmicrosoft\.com\b/gi, "[tenant-domain]")
+    .replace(/https?:\/\/[^\s"'<>]+/gi, "[url]")
+    .replace(/\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b/g, "[domain]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
 }
 
 async function setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings> {
@@ -1002,6 +1642,10 @@ function openExternalUrl(url: string): void {
     const parsed = new URL(url);
 
     if (allowedExternalProtocols.has(parsed.protocol)) {
+      if (capturedExternalUrlFile) {
+        writeFileSync(capturedExternalUrlFile, parsed.toString(), "utf8");
+        return;
+      }
       void shell.openExternal(parsed.toString());
     }
   } catch {
@@ -1337,6 +1981,65 @@ function validateSaveTextFileArgs(value: unknown): SaveTextFileArgs {
     });
   }
   return args;
+}
+
+function validateSupportBundleInput(value: unknown): SupportBundleInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("support bundle input must be an object.");
+  }
+  const source = optionalBoundedString(value.source, "source", 64);
+  if (source !== undefined && !supportIssueSources.has(source)) {
+    throw new Error("support bundle source is not known.");
+  }
+  return {
+    title: requireBoundedString(value.title, "title", 160),
+    description: requireBoundedString(value.description, "description", 2_000),
+    stepsToReproduce: optionalSupportText(value.stepsToReproduce, "stepsToReproduce", 2_000),
+    expectedBehavior: optionalSupportText(value.expectedBehavior, "expectedBehavior", 1_200),
+    actualBehavior: optionalSupportText(value.actualBehavior, "actualBehavior", 1_200),
+    source: source as SupportBundleInput["source"],
+    runId: optionalBoundedString(value.runId, "runId", 160),
+    agentSlug:
+      value.agentSlug === undefined || value.agentSlug === null
+        ? undefined
+        : requireAgentSlug(value.agentSlug, "agentSlug"),
+  };
+}
+
+function validateSupportIssueSubmissionInput(
+  value: unknown,
+): SupportIssueSubmissionInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("support issue input must be an object.");
+  }
+  if (value.confirmPublic !== true) {
+    throw new Error("Public issue confirmation is required.");
+  }
+  if (typeof value.includeDiagnostics !== "boolean") {
+    throw new Error("includeDiagnostics must be a boolean.");
+  }
+  return {
+    ...validateSupportBundleInput(value),
+    confirmPublic: true,
+    includeDiagnostics: value.includeDiagnostics,
+  };
+}
+
+function optionalSupportText(
+  value: unknown,
+  name: string,
+  maxLength: number,
+): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be a string.`);
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > maxLength) {
+    throw new Error(`${name} is too long.`);
+  }
+  return trimmed;
 }
 
 function validateProviderId(value: unknown, name = "providerId"): ProviderId {
@@ -1694,10 +2397,16 @@ async function createWindow({ show = true }: { show?: boolean } = {}) {
     if (isIntuneChatSmokeLaunch) {
       void loadPromise.then(runIntuneChatSmoke).catch(failIntuneChatSmoke);
     }
+    if (isReportIssueSmokeLaunch) {
+      void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
+    }
   } else {
     const loadPromise = mainWindow.loadURL(devServerUrl);
     if (isIntuneChatSmokeLaunch) {
       void loadPromise.then(runIntuneChatSmoke).catch(failIntuneChatSmoke);
+    }
+    if (isReportIssueSmokeLaunch) {
+      void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
     }
   }
 }
@@ -1711,6 +2420,18 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:get-release-diagnostics",
     handleTrusted(() => getReleaseDiagnostics()),
+  );
+  ipcMain.handle(
+    "openadminos:export-support-bundle",
+    handleTrusted((_event, input: unknown) =>
+      exportSupportBundle(validateSupportBundleInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:submit-support-issue",
+    handleTrusted((_event, input: unknown) =>
+      submitSupportIssue(validateSupportIssueSubmissionInput(input)),
+    ),
   );
   ipcMain.handle(
     "openadminos:write-clipboard-text",
@@ -2171,7 +2892,7 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle("openadminos:open-external", handleTrusted((_event, url: unknown) => {
-    openExternalUrl(requireBoundedString(url, "url", 2_000));
+    openExternalUrl(requireBoundedString(url, "url", 12_000));
   }));
   ipcMain.handle("openadminos:get-update-state", handleTrusted(() => getUpdateState()));
   ipcMain.handle("openadminos:apply-update-now", handleTrusted(() => applyUpdateNow()));
@@ -2246,6 +2967,7 @@ if (!gotLock) {
     const userDataDir = app.getPath("userData");
     const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
     seedIntuneChatSmokeState(userDataDir);
+    seedReportIssueSmokeState(userDataDir);
 
     installConnectorConfirmBridge({
       getMainWindow: () => mainWindow,

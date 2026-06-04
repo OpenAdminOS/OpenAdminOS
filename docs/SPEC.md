@@ -593,6 +593,24 @@ stats endpoint may use IP addresses for short-lived rate limiting. These events
 must never include tenant identifiers, user identifiers, prompts, run results,
 or Microsoft Graph data.
 
+User-initiated support bundles are a separate explicit action, not telemetry.
+The sidebar `Report issue` entry, failure-state action, and Settings → About
+action open an in-app support form. OpenAdminOS may export a local diagnostics
+JSON file only after the admin chooses that option. After the admin checks an
+explicit public-issue confirmation and clicks submit, the desktop app posts a
+bounded support report to the OpenAdminOS web API; the server creates the public
+GitHub issue with a repo-scoped GitHub token that is never shipped to the
+desktop app. The endpoint owns the repo mapping, applies server-side
+redaction, enforces request-size limits, rate-limits by IP, and deduplicates
+matching recent reports. The optional diagnostics JSON is bounded to
+app/build/OS, provider status categories, registry/scheduler/cache health,
+aggregate run counts, and hashed error categories. It must not include tenant
+identifiers, account usernames, tenant domains, prompts, LLM output, Graph
+response bodies, run reports, raw run logs, SQLite databases, screenshots, MSAL
+tokens, provider credentials, or keychain values. No support report is
+submitted automatically after a crash or failure, and no screenshot/session
+replay capture is part of this flow.
+
 ### Intune Chat and local intelligence
 
 Intune Chat is the operating surface for exploratory tenant work. Agents remain
@@ -1093,6 +1111,7 @@ These must exist and work well before any public release.
 - Agents should not hard-code routine Teams posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to Teams, or both.
 - Manual agent runs open a preflight review before queueing. It shows the active tenant, provider residency, model, mode, and Graph scopes. It blocks when no tenant is active, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
 - Settings → About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
+- Support issue reporting is visible from the sidebar footer, failed-run remediation cards, and Settings → About. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
 - Run history with filters (agent, tenant, date, status)
 - Audit log export (JSON/CSV with cryptographic timestamps for compliance buyers)

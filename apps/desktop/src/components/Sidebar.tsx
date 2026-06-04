@@ -10,11 +10,13 @@ import {
   IconLogo,
   IconCommand,
   IconClock,
+  IconWarning,
 } from "./icons";
 import { StatusDot } from "./Pill";
 import { Sparkline } from "./Sparkline";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { useAppState } from "../state";
+import { useReportIssue } from "./ReportIssueModal";
 
 interface NavItem {
   to: string;
@@ -78,6 +80,7 @@ function NavRow({ item }: { item: NavItem }) {
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
+  const openReportIssue = useReportIssue();
   const active = state.providers.find((p) => p.id === state.activeProviderId);
   const activeRunCount = state.runs.filter(
     (run) =>
@@ -211,6 +214,23 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             {runsThisWeek === 0 ? "No runs recorded yet" : "Recent run activity"}
           </span>
         </div>
+      </div>
+
+      <div className="mt-auto px-2.5 pb-3 pt-4">
+        <button
+          onClick={() => openReportIssue({ source: "sidebar" })}
+          className="group flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-raised)] px-2.5 py-2 text-left text-[12px] font-medium text-[var(--color-text-soft)] transition-colors hover:border-[var(--color-warning)]/45 hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+        >
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-warning-soft)] text-[var(--color-warning)]">
+            <IconWarning size={13} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block">Report issue</span>
+            <span className="block truncate text-[10.5px] font-normal text-[var(--color-text-muted)]">
+              Public GitHub issue
+            </span>
+          </span>
+        </button>
       </div>
 
     </aside>

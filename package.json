@@ -13,6 +13,7 @@
     "qa": "npm run qa -w @openadminos/qa-graph",
     "test": "npm run test -w @openadminos/runtime && npm run test -w @openadminos/qa-graph && npm run test -w @openadminos/desktop",
     "smoke:intune-chat": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/smoke-intune-chat.mjs",
+    "smoke:report-issue": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/smoke-report-issue.mjs",
     "dist:desktop": "npm run dist -w @openadminos/desktop",
     "registry:index": "node scripts/generate-registry-index.mjs",
     "docs:generate": "npm run registry:index && node scripts/generate-gitbook-docs.mjs",

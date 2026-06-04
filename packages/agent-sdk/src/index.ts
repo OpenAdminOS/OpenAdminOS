@@ -798,6 +798,40 @@ export interface ReleaseDiagnostics {
   scheduler: SchedulerLaunchSettings;
 }
 
+export type SupportIssueSource =
+  | "sidebar"
+  | "run-failure"
+  | "settings-about"
+  | "native-menu";
+
+export interface SupportBundleInput {
+  title: string;
+  description: string;
+  stepsToReproduce?: string;
+  expectedBehavior?: string;
+  actualBehavior?: string;
+  source?: SupportIssueSource;
+  runId?: string;
+  agentSlug?: string;
+}
+
+export interface SupportBundleExportResult {
+  canceled: boolean;
+  filePath?: string;
+}
+
+export interface SupportIssueSubmissionInput extends SupportBundleInput {
+  /** Explicit acknowledgement that this creates a public GitHub issue. */
+  confirmPublic: true;
+  /** Include the sanitized diagnostics summary in the public issue body. */
+  includeDiagnostics: boolean;
+}
+
+export interface SupportIssueSubmissionResult {
+  issueUrl: string;
+  issueNumber: number;
+}
+
 export interface OpenAdminOSApi {
   /**
    * The host operating system, normalized to a small union for
@@ -808,6 +842,16 @@ export interface OpenAdminOSApi {
   getAppState(): Promise<AppState>;
   getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
+  /**
+   * Export a reviewed, sanitized diagnostics JSON file for manual
+   * attachment to a GitHub issue. This never uploads anything.
+   */
+  exportSupportBundle(input: SupportBundleInput): Promise<SupportBundleExportResult>;
+  /**
+   * Create a public GitHub support issue through the OpenAdminOS web
+   * endpoint. GitHub credentials stay server-side.
+   */
+  submitSupportIssue(input: SupportIssueSubmissionInput): Promise<SupportIssueSubmissionResult>;
   writeClipboardText(text: string): Promise<void>;
   setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;

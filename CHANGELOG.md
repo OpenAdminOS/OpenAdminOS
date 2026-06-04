@@ -15,6 +15,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Intune Chat planner tests now validate cache endpoints, delegated permissions, and selected fields against the bundled Graph PM indexes.
 - Added a v0.2.2 app review covering Intune Chat UX, Graph cache reliability, Electron security hardening, LLM provider trust, and live Graph spot-check results.
 - Added Apple Foundation as a macOS-only local LLM provider backed by Apple's on-device Foundation Models framework, with helper packaging, context-window budgeting, token usage, and compact Intune Chat answer packs.
+- Added a sidebar Report issue flow that creates a public GitHub issue only after explicit confirmation, sends sanitized diagnostics through the server-side support endpoint without exposing a GitHub token to the desktop app, still supports local diagnostics export, and ships with a focused Electron smoke test.
 
 ### Changed
 
