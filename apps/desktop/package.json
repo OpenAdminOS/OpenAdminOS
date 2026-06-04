@@ -130,6 +130,7 @@
         "deb",
         "rpm"
       ],
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
       "category": "Utility"
     }
   }

@@ -73,6 +73,7 @@ jobs:
           desktop.build.linux = {
             ...(desktop.build.linux ?? {}),
             target: ["AppImage", "deb", "rpm"],
+            artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
             category: "Utility",
           };
 
