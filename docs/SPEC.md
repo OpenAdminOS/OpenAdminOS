@@ -106,10 +106,10 @@ platforms and must not advertise Windows availability until signed Windows
 builds are actually published. Marketing download surfaces present macOS as a
 signed/notarized DMG for normal installs plus a signed/notarized PKG for managed
 deployment, and Linux as x64 packages with AppImage for broad desktop use,
-`.deb` for Ubuntu/Debian-family systems, `.rpm` for Fedora/RHEL-compatible
+`.deb` for Ubuntu and other Debian-family systems, `.rpm` for Fedora/RHEL-compatible
 systems, and a visible inline SHA-256 hash for each package plus a
-`SHA256SUMS.txt` verification link. Debian/Ubuntu-family installs also have a
-GitHub Pages-backed apt repository at
+`SHA256SUMS.txt` verification link. Ubuntu and other Debian-family installs also
+have a GitHub Pages-backed apt repository at
 `https://openadminos.github.io/OpenAdminOS/debian`, published from release CI
 and signed with the OpenAdminOS Linux archive key. `repo.openadminos.com` is the
 intended custom apt domain after DNS and GitHub Pages HTTPS are configured.
@@ -562,7 +562,7 @@ or Microsoft Graph data.
 Required before public v1 release:
 - **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, CI may build AppX packages for validation, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr), a Developer ID Application certificate for the app/DMG/ZIP, a Developer ID Installer certificate for the PKG, and notarization. Without notarization, Gatekeeper blocks the app.
-- **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu/Debian-family and RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://openadminos.github.io/OpenAdminOS/debian`; apt trust is repository-metadata signing, not per-file executable signing. `repo.openadminos.com` is reserved for the apt repository after DNS and GitHub Pages HTTPS are configured. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
+- **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu and other Debian-family systems, plus RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://openadminos.github.io/OpenAdminOS/debian`; apt trust is repository-metadata signing, not per-file executable signing. `repo.openadminos.com` is reserved for the apt repository after DNS and GitHub Pages HTTPS are configured. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.

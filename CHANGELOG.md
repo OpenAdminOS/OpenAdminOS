@@ -7,7 +7,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 
 - Marketing landing page macOS helper text now links to the macOS package options on the downloads page.
-- GitBook installation docs now include the live GitHub Pages apt repository commands for Ubuntu/Debian-family installs.
+- GitBook installation docs now include the live GitHub Pages apt repository commands for Ubuntu and other Debian-family installs.
 - Release tags now publish the Linux `.deb` into a signed GitHub Pages-backed apt repository, generated automatically from the release artifact.
 - Marketing downloads page now uses compact platform rows with separate macOS DMG and PKG links while the landing CTA remains the DMG.
 - Release tags now publish a macOS `.pkg` alongside the DMG/ZIP outputs, with marketing and docs exposing it as the managed deployment package.

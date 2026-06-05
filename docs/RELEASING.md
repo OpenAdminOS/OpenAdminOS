@@ -148,7 +148,7 @@ curl -fsSL https://openadminos.github.io/OpenAdminOS/debian/openadminos-archive-
 gpg --show-keys /tmp/openadminos-archive-keyring.pgp
 ```
 
-On a disposable Debian/Ubuntu machine:
+On a disposable Ubuntu or Debian-family machine:
 
 ```bash
 sudo install -d -m 0755 /usr/share/keyrings
@@ -182,7 +182,7 @@ Do not upload AppX files to GitHub Releases until the Windows signing/distributi
 - **Build AppX, don't publish it yet.** Keeping the AppX build in CI catches packaging regressions early. With no current Windows signing path, publishing the file would create an unusable release asset.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.
-- **GitHub Pages is enough for apt.** The Debian repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS without a package-hosting vendor.
+- **GitHub Pages is enough for apt.** The apt repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS without a package-hosting vendor.
 - **Apple Silicon only for v0.1.** macOS x64 + the per-arch manifest merge land in a follow-up when there's demand. Apple Silicon is the right default for new buyers; legacy Intel Macs are a smaller share each quarter.
 
 ## When to update this doc
