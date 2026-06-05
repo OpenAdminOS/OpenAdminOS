@@ -58,7 +58,7 @@ import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
 } from "./connector-confirm-bridge.js";
-import { listRegisteredConnectors } from "@openadminos/runtime";
+import { listRegisteredConnectors, probeMxcSandbox } from "@openadminos/runtime";
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
 import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 
@@ -1112,6 +1112,7 @@ async function getReleaseDiagnostics(): Promise<ReleaseDiagnostics> {
     notificationSupported: Notification.isSupported(),
     notificationPermission,
     scheduler: await getSchedulerLaunchSettings(),
+    sandbox: await probeMxcSandbox(),
   };
 }
 

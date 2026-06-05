@@ -1826,6 +1826,12 @@ function AboutSection() {
             detail={diagnostics?.scheduler.detail ?? "Scheduler state unavailable."}
           />
           <ReadinessRow
+            label="Agent sandbox"
+            value={formatSandboxValue(diagnostics?.sandbox)}
+            tone={sandboxTone(diagnostics?.sandbox)}
+            detail={formatSandboxDetail(diagnostics?.sandbox)}
+          />
+          <ReadinessRow
             label="Active tenant"
             value={activeTenant?.displayName ?? "None"}
             tone={activeTenant ? "success" : "danger"}
@@ -1898,6 +1904,37 @@ function ReadinessRow({
       </div>
     </div>
   );
+}
+
+function formatSandboxValue(
+  sandbox: ReleaseDiagnostics["sandbox"] | undefined,
+): string {
+  if (!sandbox) return "Unknown";
+  if (sandbox.status === "disabled") return "Disabled";
+  if (sandbox.status === "available") {
+    return sandbox.containment ? `MXC ${sandbox.containment}` : "MXC available";
+  }
+  if (sandbox.status === "unavailable") return "Unavailable";
+  return "Probe error";
+}
+
+function sandboxTone(
+  sandbox: ReleaseDiagnostics["sandbox"] | undefined,
+): "success" | "warning" | "danger" {
+  if (!sandbox) return "warning";
+  if (sandbox.status === "available") return "success";
+  if (sandbox.status === "error") return "danger";
+  return "warning";
+}
+
+function formatSandboxDetail(
+  sandbox: ReleaseDiagnostics["sandbox"] | undefined,
+): string {
+  if (!sandbox) return "Sandbox diagnostics unavailable.";
+  if (sandbox.status === "disabled") {
+    return `${sandbox.detail} YAML agents still use the manifest interpreter.`;
+  }
+  return sandbox.warning ? `${sandbox.detail} ${sandbox.warning}` : sandbox.detail;
 }
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {

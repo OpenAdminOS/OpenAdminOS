@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added an experimental MXC sandbox runner/probe behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, with sandbox diagnostics in Settings -> About and shared broker protocol types for future host-mediated agent execution.
 - Release tags now publish the Linux `.deb` into a signed GitHub Pages-backed apt repository at `repo.openadminos.com`, generated automatically from the release artifact.
 
 ### Changed
@@ -15,6 +16,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 ### Security
+
+- Documented that future sandboxed code must use the OpenAdminOS host broker for Graph, LLM, connector, and write-plan operations; MXC is optional public-preview isolation and not the sole trust boundary.
 
 ## [0.2.2] - 2026-06-05
 
