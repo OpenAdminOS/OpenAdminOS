@@ -29,8 +29,6 @@ export const metadata: Metadata = pageMetadata({
 });
 
 const HOME_NAV_ITEMS: readonly MobileNavItem[] = [
-  { href: "/registry", label: "Registry" },
-  { href: "/trust-model", label: "Trust model" },
   { href: "/blog", label: "Blog" },
   { href: DOCS_URL, label: "Documentation", external: true },
   { href: GITHUB_URL, label: "GitHub", external: true },

@@ -129,9 +129,10 @@ the "What is OpenAdminOS?" FAQ, not in standalone SEO cards or hidden text.
 FAQ content may use native `<details>/<summary>` accordions when the answer
 text is server-rendered in the initial HTML and remains directly accessible to
 users. Keep the primary product definition expanded by default.
-The marketing navbar links to `/blog` as the editorial SEO/GEO entry point.
-The Intune use-case page remains published and indexable even though it is no
-longer a primary navbar item, because it targets a durable admin search topic.
+The marketing navbar keeps a compact primary set: Blog, Documentation, GitHub,
+and Download. The Intune use-case page, registry page, and trust-model page
+remain published and indexable even though they are no longer primary navbar
+items, because they target durable admin search and product-evaluation topics.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
