@@ -7,6 +7,7 @@
 # Repository policy and release automation
 /.github/CODEOWNERS @ugurkocde
 /.github/workflows/** @ugurkocde
+/scripts/build-apt-repository.sh @ugurkocde
 
 # Public registry submissions and shipped agents
 /agents/** @ugurkocde

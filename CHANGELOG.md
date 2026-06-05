@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Release tags now publish the Linux `.deb` into a signed GitHub Pages-backed apt repository at `repo.openadminos.com`, generated automatically from the release artifact.
+
 ### Changed
 
 ### Removed
