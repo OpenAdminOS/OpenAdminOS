@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.2.2] - 2026-06-05
+
+### Added
+
 - v0.2.2 planning now scopes Intune Chat as a first-class tenant interaction surface, with Graph cache, agent-as-skill routing, and optional approved local self-training.
 - Intune Chat now has a SQLite-backed read-only tenant chat surface with Graph cache refresh, compact answer packs, agent-as-skill suggestions, and optional approved local self-training overlays.
 - Intune Chat Graph cache refresh now supports per-tenant scheduled refresh intervals, local next-run/failure state, OS scheduler integration, and compact Microsoft Graph audit-log selects validated through the Microsoft Graph MCP.
