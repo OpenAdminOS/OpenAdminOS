@@ -58,7 +58,7 @@ These match the Partner Center reservation for the `OpenAdminOS` Store name. Don
 
 ### Linux — apt repository
 
-The apt repository is a static GitHub Pages deployment at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
+The apt repository is a static GitHub Pages deployment currently served at `https://openadminos.github.io/OpenAdminOS/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required. The intended custom domain is `https://repo.openadminos.com/debian` after DNS and GitHub Pages HTTPS are configured.
 
 One-time GitHub setup:
 
@@ -82,7 +82,7 @@ Fingerprint: 19CE B561 9FD8 BD30 4FFA  F281 8ED8 4B68 EAE8 5363
 Expires: 2029-06-04
 ```
 
-The workflow exports the public key to `https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp`, generates `Packages` / `Packages.gz`, signs `Release` as both `InRelease` and `Release.gpg`, and deploys the static repository through first-party GitHub Pages actions.
+The workflow exports the public key to `https://openadminos.github.io/OpenAdminOS/debian/openadminos-archive-keyring.pgp`, generates `Packages` / `Packages.gz`, signs `Release` as both `InRelease` and `Release.gpg`, and deploys the static repository through first-party GitHub Pages actions.
 
 To republish an existing release into apt without rebuilding the app, run the
 **Release** workflow manually from `main` and set `backfill_apt_tag` to the
@@ -105,7 +105,7 @@ The full flow is **two clicks in GitHub**. No local terminal needed.
    - `auto-tag.yml` fires on the `release: v*` commit landing on `main` → pushes the matching `vX.Y.Z` tag.
    - `release.yml` fires on the tag → builds macOS release files, Linux x64 packages, and the Windows AppX validation package.
    - The GitHub release receives macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
-   - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.
+   - The apt repository is regenerated from the release `.deb` and deployed to GitHub Pages.
 
 ### Manual fallback (if the workflow ever breaks)
 
@@ -143,8 +143,8 @@ That's it. electron-updater on existing macOS installs picks up the new `latest-
 After a release, verify the repository metadata is reachable and signed:
 
 ```bash
-curl -fsSL https://repo.openadminos.com/debian/dists/stable/InRelease >/tmp/openadminos-InRelease
-curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp >/tmp/openadminos-archive-keyring.pgp
+curl -fsSL https://openadminos.github.io/OpenAdminOS/debian/dists/stable/InRelease >/tmp/openadminos-InRelease
+curl -fsSL https://openadminos.github.io/OpenAdminOS/debian/openadminos-archive-keyring.pgp >/tmp/openadminos-archive-keyring.pgp
 gpg --show-keys /tmp/openadminos-archive-keyring.pgp
 ```
 
@@ -152,9 +152,9 @@ On a disposable Debian/Ubuntu machine:
 
 ```bash
 sudo install -d -m 0755 /usr/share/keyrings
-curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp \
+curl -fsSL https://openadminos.github.io/OpenAdminOS/debian/openadminos-archive-keyring.pgp \
   | sudo tee /usr/share/keyrings/openadminos-archive-keyring.pgp >/dev/null
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openadminos-archive-keyring.pgp] https://repo.openadminos.com/debian stable main" \
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openadminos-archive-keyring.pgp] https://openadminos.github.io/OpenAdminOS/debian stable main" \
   | sudo tee /etc/apt/sources.list.d/openadminos.list
 sudo apt update
 apt-cache policy openadminos
@@ -182,7 +182,7 @@ Do not upload AppX files to GitHub Releases until the Windows signing/distributi
 - **Build AppX, don't publish it yet.** Keeping the AppX build in CI catches packaging regressions early. With no current Windows signing path, publishing the file would create an unusable release asset.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.
-- **GitHub Pages is enough for apt.** The Debian repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS under `repo.openadminos.com` without a package-hosting vendor.
+- **GitHub Pages is enough for apt.** The Debian repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS without a package-hosting vendor.
 - **Apple Silicon only for v0.1.** macOS x64 + the per-arch manifest merge land in a follow-up when there's demand. Apple Silicon is the right default for new buyers; legacy Intel Macs are a smaller share each quarter.
 
 ## When to update this doc
