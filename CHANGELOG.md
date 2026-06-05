@@ -7,6 +7,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 
 - Marketing landing page macOS helper text now links to the macOS package options on the downloads page.
+- Marketing and GitBook macOS PKG copy now names Intune alongside Jamf and Munki for managed rollout.
 - GitBook docs now cover v0.2.1 builder, community sharing, registry trust, and the exact macOS/Linux download posture.
 - GitBook installation docs now include the live GitHub Pages apt repository commands for Ubuntu and other Debian-family installs.
 - Release tags now publish the Linux `.deb` into a signed GitHub Pages-backed apt repository, generated automatically from the release artifact.

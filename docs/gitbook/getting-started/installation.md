@@ -11,7 +11,7 @@ OpenAdminOS ships as a desktop app. The project does not publish an end-user CLI
 
 Download the signed Apple Silicon `.dmg` from the [latest GitHub release](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest), drag OpenAdminOS to Applications, and launch it from Applications.
 
-Managed deployments can use the signed Apple Silicon `.pkg` from the same release. The `.pkg` is intended for MDM, Jamf, Munki, and other fleet rollout tools.
+Managed deployments can use the signed Apple Silicon `.pkg` from the same release. The `.pkg` is intended for Intune, Jamf, Munki, and other MDM rollout tools.
 
 ## Windows
 

@@ -42,7 +42,7 @@ export default async function DownloadPage() {
     {
       actionLabel: "Download .pkg",
       badge: "Managed",
-      detail: "Installer package for MDM, Jamf, Munki, or fleet rollout",
+      detail: "Installer package for Intune, Jamf, Munki, or MDM rollout",
       hash: latestRelease.macosPkg.sha256,
       href: latestRelease.macosPkg.url,
       label: ".pkg",
