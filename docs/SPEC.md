@@ -129,6 +129,21 @@ the "What is OpenAdminOS?" FAQ, not in standalone SEO cards or hidden text.
 FAQ content may use native `<details>/<summary>` accordions when the answer
 text is server-rendered in the initial HTML and remains directly accessible to
 users. Keep the primary product definition expanded by default.
+The marketing navbar links to `/blog` as the editorial SEO/GEO entry point.
+The Intune use-case page remains published and indexable even though it is no
+longer a primary navbar item, because it targets a durable admin search topic.
+Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
+the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
+use `BlogPosting` structured data, and answer real Microsoft 365 admin
+questions without generic AI-hype language. Markdown sections titled "Related
+reading" and "LinkedIn draft" are editorial notes and are not rendered on the
+public article page. Blog frontmatter may include `seo_title` when the on-page
+H1 should stay descriptive but the browser title should be shorter for search
+display. Public article pages show an "OpenAdminOS editorial" byline and author
+summary until a named author profile is intentionally added. Each public blog
+post has an article-specific 1200x630 preview image under `web/public/blog/og/`
+that is used in Open Graph metadata, Twitter metadata, JSON-LD, article headers,
+and blog index cards.
 
 The Vercel project is configured with `web/` as its Root Directory. As of the
 June 2026 Vercel Git Integration behavior, successful Next.js builds for

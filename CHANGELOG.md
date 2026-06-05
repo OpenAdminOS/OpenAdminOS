@@ -6,6 +6,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Published five Markdown-backed Microsoft 365 admin blog posts and refreshed the blog index/article reading experience.
+- Blog articles now have post-specific social preview images wired into Open Graph, Twitter metadata, schema, article headers, and blog cards.
+- Blog posts now use shorter SEO titles where needed, visible editorial bylines, and added mini-case sections for stronger SEO/GEO depth.
+- Marketing navbar now links to a new server-rendered blog with Microsoft 365 admin SEO/GEO articles while keeping the Intune use-case page indexable.
 - Marketing landing page macOS helper text now links to the macOS package options on the downloads page.
 - Marketing and GitBook macOS PKG copy now names Intune alongside Jamf and Munki for managed rollout.
 - GitBook docs now cover v0.2.1 builder, community sharing, registry trust, and the exact macOS/Linux download posture.

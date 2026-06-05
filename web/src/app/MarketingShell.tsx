@@ -7,7 +7,7 @@ import { DOCS_URL, GITHUB_URL, LINKEDIN_URL } from "./seo";
 const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
   { href: "/registry", label: "Registry" },
   { href: "/trust-model", label: "Trust model" },
-  { href: "/use-cases/intune", label: "Intune" },
+  { href: "/blog", label: "Blog" },
   { href: DOCS_URL, label: "Documentation", external: true },
   { href: "/download", label: "Download", primary: true },
 ];
