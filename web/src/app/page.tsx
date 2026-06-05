@@ -295,9 +295,12 @@ export default async function HomePage() {
                 </svg>
                 Download for macOS
               </a>
-              <p className="min-h-4 text-center text-[11px] leading-4 text-white/38">
+              <Link
+                href="/download#macos-packages"
+                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+              >
                 Downloads the DMG. PKG is available for managed rollout.
-              </p>
+              </Link>
             </div>
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
