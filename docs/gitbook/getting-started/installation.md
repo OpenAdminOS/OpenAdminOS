@@ -17,7 +17,25 @@ Windows packaging is part of the release pipeline. The Windows signing and distr
 
 ## Linux
 
-Linux x64 packages are published as AppImage, `.deb`, and `.rpm`. Verify the SHA-256 hash from the release notes or `SHA256SUMS.txt` before installing.
+Linux x64 packages are published as AppImage, `.deb`, and `.rpm`. Debian/Ubuntu-family systems can install from the signed apt repository:
+
+```bash
+sudo install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp \
+  | sudo tee /usr/share/keyrings/openadminos-archive-keyring.pgp >/dev/null
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openadminos-archive-keyring.pgp] https://repo.openadminos.com/debian stable main" \
+  | sudo tee /etc/apt/sources.list.d/openadminos.list
+sudo apt update
+sudo apt install openadminos
+```
+
+The OpenAdminOS Linux archive key fingerprint is:
+
+```text
+19CE B561 9FD8 BD30 4FFA  F281 8ED8 4B68 EAE8 5363
+```
+
+Direct AppImage, `.deb`, and `.rpm` downloads remain available from GitHub Releases. Verify direct downloads with the SHA-256 hash from the release notes or `SHA256SUMS.txt`.
 
 ## Requirements
 

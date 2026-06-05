@@ -5,10 +5,10 @@ This is the maintainer runbook for cutting a release. Day-to-day work doesn't to
 The release surface currently publishes macOS and Linux binaries:
 
 - **macOS → GitHub Releases + electron-updater** (signed + notarized `.dmg` and `.pkg` in CI; `.zip` is published for electron-updater).
-- **Linux → GitHub Releases** (unsigned x64 AppImage, `.deb`, and `.rpm` with SHA-256 checksums).
+- **Linux → GitHub Releases + apt** (unsigned x64 AppImage, `.deb`, and `.rpm` with SHA-256 checksums; the `.deb` is also published into a signed GitHub Pages-backed apt repository).
 - **Windows → build validation only**. CI still creates the AppX package to keep the packaging path exercised, but it is not uploaded as a workflow artifact or attached to GitHub Releases until the signing/distribution path is ready.
 
-A single tag push builds all three platform jobs. CI publishes macOS and Linux release files; Windows stays runner-local.
+A single tag push builds all three platform jobs. CI publishes macOS and Linux release files, refreshes the apt repository from the latest `.deb`, and keeps Windows runner-local.
 
 ---
 
@@ -56,6 +56,38 @@ The values in `apps/desktop/package.json` `build.appx` are the Partner Center-as
 
 These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them without updating the Windows distribution plan. The release workflow currently runs `electron-builder --win --publish never`, verifies that an `.appx` was produced under `apps/desktop/release/`, and leaves it on the runner.
 
+### Linux — apt repository
+
+The apt repository is a static GitHub Pages deployment at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
+
+One-time GitHub setup:
+
+1. In repository settings, set **Pages → Build and deployment → Source** to **GitHub Actions**.
+2. Configure the Pages custom domain as `repo.openadminos.com`.
+3. In DNS, point `repo.openadminos.com` at GitHub Pages for the `OpenAdminOS` organization.
+4. Enable HTTPS once GitHub has issued the Pages certificate.
+
+One-time signing setup:
+
+1. Create a dedicated OpenAdminOS Linux archive OpenPGP key. Use a long-lived RSA key for broad apt compatibility.
+2. Add the ASCII-armored private key as the `APT_GPG_PRIVATE_KEY` repository secret.
+3. If the key has a passphrase, add it as `APT_GPG_PASSPHRASE`.
+4. Record the public fingerprint in release notes/docs after the first successful deployment.
+
+Current archive key:
+
+```text
+OpenAdminOS Linux Archive <support@openadminos.com>
+Fingerprint: 19CE B561 9FD8 BD30 4FFA  F281 8ED8 4B68 EAE8 5363
+Expires: 2029-06-04
+```
+
+The workflow exports the public key to `https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp`, generates `Packages` / `Packages.gz`, signs `Release` as both `InRelease` and `Release.gpg`, and deploys the static repository through first-party GitHub Pages actions.
+
+To republish an existing release into apt without rebuilding the app, run the
+**Release** workflow manually from `main` and set `backfill_apt_tag` to the
+release tag, for example `v0.2.1`.
+
 ---
 
 ## Cutting a release
@@ -73,6 +105,7 @@ The full flow is **two clicks in GitHub**. No local terminal needed.
    - `auto-tag.yml` fires on the `release: v*` commit landing on `main` → pushes the matching `vX.Y.Z` tag.
    - `release.yml` fires on the tag → builds macOS release files, Linux x64 packages, and the Windows AppX validation package.
    - The GitHub release receives macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
+   - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.
 
 ### Manual fallback (if the workflow ever breaks)
 
@@ -105,6 +138,28 @@ gh pr create --title "release: v0.1.X" --body "Manual release prep."
 
 That's it. electron-updater on existing macOS installs picks up the new `latest-mac.yml` within 4 hours.
 
+### Linux — smoke-test the apt repository
+
+After a release, verify the repository metadata is reachable and signed:
+
+```bash
+curl -fsSL https://repo.openadminos.com/debian/dists/stable/InRelease >/tmp/openadminos-InRelease
+curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp >/tmp/openadminos-archive-keyring.pgp
+gpg --show-keys /tmp/openadminos-archive-keyring.pgp
+```
+
+On a disposable Debian/Ubuntu machine:
+
+```bash
+sudo install -d -m 0755 /usr/share/keyrings
+curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp \
+  | sudo tee /usr/share/keyrings/openadminos-archive-keyring.pgp >/dev/null
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openadminos-archive-keyring.pgp] https://repo.openadminos.com/debian stable main" \
+  | sudo tee /etc/apt/sources.list.d/openadminos.list
+sudo apt update
+apt-cache policy openadminos
+```
+
 ### v0.2.1 macOS PKG backfill
 
 The already-published `v0.2.1` release was backfilled with
@@ -127,6 +182,7 @@ Do not upload AppX files to GitHub Releases until the Windows signing/distributi
 - **Build AppX, don't publish it yet.** Keeping the AppX build in CI catches packaging regressions early. With no current Windows signing path, publishing the file would create an unusable release asset.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.
+- **GitHub Pages is enough for apt.** The Debian repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS under `repo.openadminos.com` without a package-hosting vendor.
 - **Apple Silicon only for v0.1.** macOS x64 + the per-arch manifest merge land in a follow-up when there's demand. Apple Silicon is the right default for new buyers; legacy Intel Macs are a smaller share each quarter.
 
 ## When to update this doc
