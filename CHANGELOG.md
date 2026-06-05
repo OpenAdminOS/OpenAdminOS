@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing downloads page now uses compact platform rows with separate macOS DMG and PKG links while the landing CTA remains the DMG.
 - Release tags now publish a macOS `.pkg` alongside the DMG/ZIP outputs, with marketing and docs exposing it as the managed deployment package.
 - A one-off `v0.2.1` macOS PKG backfill workflow now builds the missing signed/notarized installer package and refreshes release checksums.
 - The temporary `v0.2.1` macOS PKG backfill workflow was removed after the successful release update.

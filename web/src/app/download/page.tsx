@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { MarketingShell, PageIntro, TextCard } from "../MarketingShell";
+import { MarketingShell, PageIntro } from "../MarketingShell";
 import { getLatestReleaseDownloads } from "../release-downloads";
 import {
   GITHUB_URL,
@@ -28,6 +28,55 @@ export const metadata: Metadata = pageMetadata({
 
 export default async function DownloadPage() {
   const latestRelease = await getLatestReleaseDownloads();
+  const macosPackages = [
+    {
+      actionLabel: "Download .dmg",
+      badge: "Default",
+      detail: "Direct install for individual workstations",
+      hash: latestRelease.macosDmg.sha256,
+      href: latestRelease.macosDmg.url,
+      label: ".dmg",
+      meta: "Apple Silicon · signed and notarized",
+      primary: true,
+    },
+    {
+      actionLabel: "Download .pkg",
+      badge: "Managed",
+      detail: "Installer package for MDM, Jamf, Munki, or fleet rollout",
+      hash: latestRelease.macosPkg.sha256,
+      href: latestRelease.macosPkg.url,
+      label: ".pkg",
+      meta: "Apple Silicon · signed and notarized",
+    },
+  ];
+  const linuxPackages = [
+    {
+      actionLabel: "Download AppImage",
+      badge: "Portable",
+      detail: "Runs on most desktop distributions",
+      hash: latestRelease.linuxAppImage.sha256,
+      href: latestRelease.linuxAppImage.url,
+      label: "AppImage",
+      meta: "Linux x64 · unsigned",
+      primary: true,
+    },
+    {
+      actionLabel: "Download .deb",
+      detail: "Ubuntu and Debian-family systems",
+      hash: latestRelease.linuxDeb.sha256,
+      href: latestRelease.linuxDeb.url,
+      label: ".deb",
+      meta: "Linux x64 · unsigned",
+    },
+    {
+      actionLabel: "Download .rpm",
+      detail: "Fedora, RHEL, and compatible systems",
+      hash: latestRelease.linuxRpm.sha256,
+      href: latestRelease.linuxRpm.url,
+      label: ".rpm",
+      meta: "Linux x64 · unsigned",
+    },
+  ];
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -42,7 +91,7 @@ export default async function DownloadPage() {
         path: "/download",
         name: TITLE,
         description: DESCRIPTION,
-        dateModified: "2026-06-04",
+        dateModified: "2026-06-05",
       }),
       breadcrumbSchema([
         { name: "Home", path: "/" },
@@ -60,94 +109,72 @@ export default async function DownloadPage() {
         description={DESCRIPTION}
       />
 
-      <section className="mt-12 grid gap-4 lg:grid-cols-[0.85fr_1.4fr_0.85fr]">
-        <TextCard title="macOS">
-          <p>
-            Use the DMG for a normal workstation install. Use the PKG when you
-            need a managed deployment package for MDM or fleet tooling.
-          </p>
-
-          <div className="mt-5 grid gap-3">
-            <PackageDownload
-              actionLabel="Download DMG"
-              detail="Direct install for most users"
-              hash={latestRelease.macosDmg.sha256}
-              href={latestRelease.macosDmg.url}
-              label=".dmg"
-              primary
-            />
-            <PackageDownload
-              actionLabel="Download .pkg"
-              detail="Managed deployment"
-              hash={latestRelease.macosPkg.sha256}
-              href={latestRelease.macosPkg.url}
-              label=".pkg"
-            />
+      <section className="mt-10 border-y border-white/10">
+        <div className="flex flex-col gap-3 border-b border-white/10 py-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/38">
+              Current release
+            </p>
+            <p className="mt-1 font-mono text-sm text-white/70">
+              {latestRelease.version}
+            </p>
           </div>
-
-          <Link
-            href={latestRelease.checksumUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-4 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
-          >
-            Open SHA256SUMS.txt
-          </Link>
-        </TextCard>
-        <TextCard id="linux-packages" title="Linux x64">
-          <p>
-            Pick the package format that matches your workstation. Linux
-            packages are unsigned, so verify the SHA-256 hash before
-            installing.
-          </p>
-
-          <div className="mt-5 grid gap-3">
-            <PackageDownload
-              actionLabel="Download AppImage"
-              detail="Most desktop distros"
-              hash={latestRelease.linuxAppImage.sha256}
-              href={latestRelease.linuxAppImage.url}
-              iconSrc="/linux.svg"
-              label="AppImage"
-              primary
-            />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <PackageDownload
-                actionLabel="Download .deb"
-                detail="Ubuntu, Debian"
-                hash={latestRelease.linuxDeb.sha256}
-                href={latestRelease.linuxDeb.url}
-                label=".deb"
-              />
-              <PackageDownload
-                actionLabel="Download .rpm"
-                detail="Fedora, RHEL"
-                hash={latestRelease.linuxRpm.sha256}
-                href={latestRelease.linuxRpm.url}
-                label=".rpm"
-              />
-            </div>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <Link
+              href={latestRelease.releaseNotesUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center rounded-md border border-white/10 px-3 font-medium text-white/70 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+            >
+              Release notes
+            </Link>
+            <Link
+              href={latestRelease.checksumUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 items-center rounded-md border border-white/10 px-3 font-medium text-white/70 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+            >
+              SHA256SUMS.txt
+            </Link>
           </div>
+        </div>
 
-          <Link
-            href={latestRelease.checksumUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-4 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
-          >
-            Open SHA256SUMS.txt
-          </Link>
-        </TextCard>
-        <TextCard title="Windows">
-          <p>
+        <DownloadGroup
+          description="Use the DMG for a normal workstation install. Use the PKG when you need a managed deployment package."
+          id="macos-packages"
+          items={macosPackages}
+          title="macOS"
+        />
+        <DownloadGroup
+          description="Linux packages are unsigned preview builds. Verify the SHA-256 hash before installing."
+          id="linux-packages"
+          items={linuxPackages}
+          title="Linux x64"
+        />
+        <section className="grid gap-4 border-t border-white/10 py-6 md:grid-cols-[180px_1fr]">
+          <div>
+            <h2 className="text-base font-semibold text-white">Windows</h2>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/35">
+              Planned
+            </p>
+          </div>
+          <p className="max-w-2xl text-sm leading-6 text-white/55">
             Windows packaging is planned after signing is complete. The app
             surface and write-confirmation rules are the same across platforms.
           </p>
-        </TextCard>
+        </section>
       </section>
 
-      <section className="mt-4">
-        <TextCard title="Source">
+      <section className="mt-12 grid gap-8 border-t border-white/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+            Source
+          </p>
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight">
+            Inspect the code before connecting a tenant.
+          </h2>
+        </div>
+        <div className="text-sm leading-6 text-white/62">
           <p>
             The app, runtime, registry contract, and SDK are open-source under
             the MIT License.
@@ -156,11 +183,11 @@ export default async function DownloadPage() {
             href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"
-            className="mt-5 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="mt-5 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
           >
             Inspect the repository
           </Link>
-        </TextCard>
+        </div>
       </section>
 
       <section className="mt-12 grid gap-5 border-t border-white/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
@@ -185,7 +212,7 @@ export default async function DownloadPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="inline-flex font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
           >
             Read the trust model
           </Link>
@@ -195,77 +222,85 @@ export default async function DownloadPage() {
   );
 }
 
-function PackageDownload({
-  actionLabel,
-  detail,
-  hash,
-  href,
-  iconSrc,
-  label,
-  primary = false,
-}: {
+interface DownloadItem {
   actionLabel: string;
+  badge?: string;
   detail: string;
   hash: string | undefined;
   href: string;
-  iconSrc?: string;
   label: string;
+  meta: string;
   primary?: boolean;
+}
+
+function DownloadGroup({
+  description,
+  id,
+  items,
+  title,
+}: {
+  description: string;
+  id: string;
+  items: DownloadItem[];
+  title: string;
 }) {
   return (
-    <div
-      className={
-        primary
-          ? "min-w-0 rounded-md border border-white/15 bg-white/[0.055] p-3"
-          : "min-w-0 rounded-md border border-white/10 bg-white/[0.035] p-3"
-      }
+    <section
+      id={id}
+      className="grid gap-4 border-b border-white/10 py-6 last:border-b-0 md:grid-cols-[180px_1fr]"
     >
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-white">{label}</h3>
-          <p className="mt-1 text-xs leading-4 text-white/45">{detail}</p>
-        </div>
-        <Link
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          className={
-            primary
-              ? "inline-flex shrink-0 items-center justify-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
-              : "inline-flex shrink-0 items-center justify-center rounded-md border border-white/10 px-3 py-2 text-xs font-semibold text-white/70 transition hover:border-white/25 hover:text-white"
-          }
-        >
-          {iconSrc ? (
-            <img
-              src={iconSrc}
-              alt=""
-              aria-hidden
-              width={16}
-              height={16}
-              className="h-4 w-4"
-            />
-          ) : null}
-          {actionLabel}
-        </Link>
+      <div>
+        <h2 className="text-base font-semibold text-white">{title}</h2>
+        <p className="mt-2 text-sm leading-5 text-white/48">{description}</p>
       </div>
-      <ChecksumValue hash={hash} />
+      <div className="divide-y divide-white/10 border-y border-white/10">
+        {items.map((item) => (
+          <DownloadRow item={item} key={item.label} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DownloadRow({ item }: { item: DownloadItem }) {
+  return (
+    <div className="grid gap-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-white">{item.label}</h3>
+          {item.badge ? (
+            <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
+              {item.badge}
+            </span>
+          ) : null}
+          <span className="text-xs text-white/35">{item.meta}</span>
+        </div>
+        <p className="mt-1 text-sm leading-5 text-white/55">{item.detail}</p>
+        <ChecksumValue hash={item.hash} />
+      </div>
+      <Link
+        href={item.href}
+        target="_blank"
+        rel="noreferrer"
+        className={
+          item.primary
+            ? "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md bg-white px-3 text-sm font-semibold text-[#070709] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:w-44"
+            : "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md border border-white/10 px-3 text-sm font-semibold text-white/70 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:w-44"
+        }
+      >
+        {item.actionLabel}
+      </Link>
     </div>
   );
 }
 
 function ChecksumValue({ hash }: { hash: string | undefined }) {
   return (
-    <div className="mt-3 min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+    <div className="mt-3 grid min-w-0 gap-1 sm:grid-cols-[72px_1fr] sm:items-start">
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
         SHA-256
       </p>
-      <code
-        className={
-          hash
-            ? "mt-1 block max-w-full break-all rounded border border-white/10 bg-black/25 px-2 py-1.5 font-mono text-[10px] leading-4 text-white/65 [overflow-wrap:anywhere]"
-            : "mt-1 block max-w-full rounded border border-white/10 bg-black/20 px-2 py-1.5 text-[11px] leading-4 text-white/35"
-        }
-      >
+      <code className="block max-w-full break-all font-mono text-[10px] leading-4 text-white/58 [overflow-wrap:anywhere]">
         {hash ?? "Checksum unavailable"}
       </code>
     </div>

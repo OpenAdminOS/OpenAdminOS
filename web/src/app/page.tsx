@@ -196,7 +196,7 @@ export default async function HomePage() {
         path: "/",
         name: HOME_TITLE,
         description: HOME_DESCRIPTION,
-        dateModified: "2026-06-04",
+        dateModified: "2026-06-05",
       }),
       breadcrumbSchema([{ name: "Home", path: "/" }]),
     ],
@@ -284,7 +284,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.macosDmgUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
                 <svg
                   aria-hidden
@@ -296,13 +296,13 @@ export default async function HomePage() {
                 Download for macOS
               </a>
               <p className="min-h-4 text-center text-[11px] leading-4 text-white/38">
-                DMG direct download. PKG on the download page.
+                Downloads the DMG. PKG is available for managed rollout.
               </p>
             </div>
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.linuxAppImageUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
                 <img
                   src="/linux.svg"
@@ -316,7 +316,7 @@ export default async function HomePage() {
               </a>
               <Link
                 href="/download#linux-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline"
+                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
                 AppImage direct. DEB/RPM available.
               </Link>
