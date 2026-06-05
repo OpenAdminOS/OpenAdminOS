@@ -67,6 +67,22 @@ cat > "$output_dir/index.html" <<EOF
 </html>
 EOF
 
+cat > "$repo_root/index.html" <<EOF
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>OpenAdminOS apt repository</title>
+  </head>
+  <body>
+    <h1>OpenAdminOS apt repository</h1>
+    <p>APT source: <code>https://$domain/debian stable main</code></p>
+    <p>Release metadata: <a href="./dists/$suite/InRelease">dists/$suite/InRelease</a></p>
+    <p>Archive key: <a href="./openadminos-archive-keyring.pgp">openadminos-archive-keyring.pgp</a></p>
+  </body>
+</html>
+EOF
+
 if [ -n "$cname" ]; then
   printf '%s\n' "$cname" > "$output_dir/CNAME"
 fi
