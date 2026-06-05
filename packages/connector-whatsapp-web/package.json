@@ -21,7 +21,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@openadminos/agent-sdk": "0.2.2",
+    "@openadminos/agent-sdk": "0.2.3",
     "baileys": "7.0.0-rc13",
     "pino": "^10.1.0",
     "qrcode": "^1.5.4"

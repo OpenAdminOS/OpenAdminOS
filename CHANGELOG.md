@@ -7,6 +7,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Added
 
 - Added Plausible Analytics to the marketing website, with privacy and spec copy clarifying that analytics is limited to public website pages.
+- Added an experimental MXC sandbox runner/probe behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, with sandbox diagnostics in Settings -> About and shared broker protocol types for future host-mediated agent execution.
 
 ### Changed
 
@@ -19,6 +20,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Apt repository generation now indexes Electron Builder `.deb` filenames after validating package architecture from control metadata.
 
 ### Security
+
+- Documented that future sandboxed code must use the OpenAdminOS host broker for Graph, LLM, connector, and write-plan operations; MXC is optional public-preview isolation and not the sole trust boundary.
 
 ## [0.2.2] - 2026-06-05
 

@@ -1217,7 +1217,7 @@ These must exist and work well before any public release.
 
 - **Enterprise external connector: ServiceNow (`external` auth)** — proves the Connector abstraction generalizes to enterprise ticketing. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed after the Teams and WhatsApp Web connector surfaces stabilize.
 - Agent signing / verification (registry supply-chain integrity)
-- Sandbox / dry-run mode for read agents (preview Graph calls before executing)
+- Sandbox / dry-run mode for read agents (preview Graph calls before executing). v0.2.3 adds an experimental MXC probe/runner behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, but YAML Agent Templates remain the default execution model.
 - Cost budgets & rate limits (per-agent or per-day spend caps for hosted LLMs)
 - Localization framework (DE/NL/FR are the priority markets after EN)
 - Accessibility audit (WCAG AA contrast, keyboard nav, screen reader labels)
@@ -1225,6 +1225,14 @@ These must exist and work well before any public release.
 - Opt-in crash reporting (Sentry-equivalent for app crashes only)
 - Auto-update channel (`electron-updater` against signed releases; needed for security patching)
 - Offline / partial connectivity behavior (retry, cached state, resume on reconnect)
+
+### v0.2.3 experimental sandbox stance
+
+MXC support is intentionally an experimental host capability, not a shipped community-agent trust boundary. `@microsoft/mxc-sdk` is an optional dependency and the desktop only probes/runs it when `OPENADMINOS_EXPERIMENTAL_MXC=1` is set. Settings -> About reports the local sandbox state so support bundles can show whether the host has MXC available, disabled, unsupported, or failing probe.
+
+The sandbox boundary protects the local machine from future untrusted code execution. It does not replace OpenAdminOS' tenant safeguards. Sandboxed agent code must not receive MSAL tokens, keychain secrets, provider credentials, connector credentials, unrestricted filesystem access, direct network access, clipboard access, or UI automation. Any future sandboxed TypeScript agent must communicate with the trusted Electron main process over the sandbox broker protocol: `graph.request`, `llm.complete`, `connector.invoke`, `write.plan`, and `log`. The host validates every broker request against the installed manifest, active tenant, declared Graph scopes, provider residency rules, connector capability confirmation, and the existing typed write-confirmation gate before executing it.
+
+Default policy for MXC process runs is: read-only agent/runtime bundle, one per-run read-write temp directory, no outbound network, scrubbed environment, no window access, bounded stdout/stderr capture, and a per-run timeout. If MXC is disabled or unavailable, OpenAdminOS must fail closed for any future untrusted-code backend; it must not silently fall back to in-process execution. Until MXC exits public preview and OpenAdminOS has signing plus broker enforcement tests, community sharing remains YAML Agent Templates plus README/fixtures/metadata, not arbitrary TypeScript execution.
 
 ### Polish (v1.1+)
 

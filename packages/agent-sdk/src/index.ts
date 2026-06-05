@@ -859,6 +859,40 @@ export interface ReleaseDiagnostics {
   notificationSupported: boolean;
   notificationPermission: "granted" | "denied" | "default" | "unknown";
   scheduler: SchedulerLaunchSettings;
+  sandbox: SandboxDiagnostics;
+}
+
+export type SandboxDiagnosticStatus =
+  | "disabled"
+  | "available"
+  | "unavailable"
+  | "error";
+
+export type SandboxBackend = "mxc";
+
+export interface SandboxDiagnostics {
+  /**
+   * Backend selected for the experimental sandbox layer. MXC is the
+   * only supported backend in v0.2.3.
+   */
+  backend: SandboxBackend;
+  status: SandboxDiagnosticStatus;
+  /**
+   * True only when OPENADMINOS_EXPERIMENTAL_MXC=1 is present in the
+   * host process environment.
+   */
+  experimentalEnabled: boolean;
+  /** Whether the native MXC probe reports a usable backend on this host. */
+  supported: boolean;
+  /** Human-readable backend reported by MXC when available. */
+  containment?: string;
+  /** Short user-facing explanation for Settings and support bundles. */
+  detail: string;
+  /**
+   * MXC is still public preview. This warning is shown whenever the
+   * integration is present so it is not treated as the only boundary.
+   */
+  warning?: string;
 }
 
 export type SupportIssueSource =
@@ -1725,6 +1759,67 @@ export interface RunLlmApi {
   complete(options: LlmOptions): Promise<LlmCompletion>;
   stream(options: LlmOptions): AsyncIterable<LlmStreamChunk>;
 }
+
+export type SandboxBrokerRequest =
+  | SandboxGraphRequest
+  | SandboxLlmRequest
+  | SandboxConnectorRequest
+  | SandboxWritePlanRequest
+  | SandboxLogRequest;
+
+export interface SandboxGraphRequest {
+  id: string;
+  method: "graph.request";
+  params: GraphRequestInput;
+}
+
+export interface SandboxLlmRequest {
+  id: string;
+  method: "llm.complete";
+  params: LlmOptions;
+}
+
+export interface SandboxConnectorRequest {
+  id: string;
+  method: "connector.invoke";
+  params: {
+    connector: string;
+    capability: string;
+    args: Record<string, unknown>;
+  };
+}
+
+export interface SandboxWritePlanRequest {
+  id: string;
+  method: "write.plan";
+  params: WritePlan;
+}
+
+export interface SandboxLogRequest {
+  id: string;
+  method: "log";
+  params: {
+    level: RunLogLevel;
+    message: string;
+    metadata?: Record<string, unknown>;
+  };
+}
+
+export type SandboxBrokerResponse =
+  | {
+      id: string;
+      ok: true;
+      result?: unknown;
+    }
+  | {
+      id: string;
+      ok: false;
+      error: {
+        message: string;
+        code?: string;
+        detail?: unknown;
+      };
+    };
 
 export interface RunContextOptions {
   agent: AgentDefinition;

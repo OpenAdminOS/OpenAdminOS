@@ -102,6 +102,15 @@ export {
   extractRelevantLicenses,
   tenantSatisfiesRequirement,
 } from "./entra-tier.js";
+export {
+  OPENADMINOS_MXC_FLAG,
+  createMxcSandboxRunner,
+  isMxcSandboxEnabled,
+  probeMxcSandbox,
+  type SandboxRunInput,
+  type SandboxRunResult,
+  type SandboxRunner,
+} from "./sandbox.js";
 export { createTenantSession } from "./msal.js";
 export {
   disposeBuiltConnectors,
