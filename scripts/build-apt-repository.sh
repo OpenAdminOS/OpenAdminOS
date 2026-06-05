@@ -18,7 +18,7 @@ if [ -z "${APT_GPG_PRIVATE_KEY:-}" ]; then
   exit 1
 fi
 
-for command_name in dpkg-scanpackages apt-ftparchive gpg gzip; do
+for command_name in dpkg-deb dpkg-scanpackages apt-ftparchive gpg gzip; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "$command_name is required to build the apt repository." >&2
     exit 1
@@ -35,6 +35,12 @@ fi
 if [ "${#debs[@]}" -gt 1 ]; then
   echo "Expected one .deb package in $input_dir, found ${#debs[@]}." >&2
   printf '  %s\n' "${debs[@]}" >&2
+  exit 1
+fi
+
+package_arch="$(dpkg-deb --field "${debs[0]}" Architecture)"
+if [ "$package_arch" != "$arch" ]; then
+  echo "Expected .deb architecture '$arch', found '$package_arch'." >&2
   exit 1
 fi
 
@@ -68,7 +74,11 @@ touch "$output_dir/.nojekyll"
 
 (
   cd "$repo_root"
-  dpkg-scanpackages --arch "$arch" pool > "dists/$suite/$component/binary-$arch/Packages"
+  dpkg-scanpackages pool > "dists/$suite/$component/binary-$arch/Packages"
+  if [ ! -s "dists/$suite/$component/binary-$arch/Packages" ]; then
+    echo "Generated Packages index is empty." >&2
+    exit 1
+  fi
   gzip -n -k -f "dists/$suite/$component/binary-$arch/Packages"
 )
 
