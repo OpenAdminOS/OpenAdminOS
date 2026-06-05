@@ -10,8 +10,8 @@ arch="${APT_REPO_ARCH:-amd64}"
 origin="${APT_REPO_ORIGIN:-OpenAdminOS}"
 label="${APT_REPO_LABEL:-OpenAdminOS}"
 description="${APT_REPO_DESCRIPTION:-OpenAdminOS apt package repository}"
-domain="${APT_REPO_DOMAIN:-openadminos.github.io/OpenAdminOS}"
-cname="${APT_REPO_CNAME-}"
+domain="${APT_REPO_DOMAIN:-repo.openadminos.com}"
+cname="${APT_REPO_CNAME-repo.openadminos.com}"
 
 if [ -z "${APT_GPG_PRIVATE_KEY:-}" ]; then
   echo "APT_GPG_PRIVATE_KEY is required to sign the apt repository." >&2

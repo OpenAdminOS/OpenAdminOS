@@ -58,7 +58,7 @@ These match the Partner Center reservation for the `OpenAdminOS` Store name. Don
 
 ### Linux — apt repository
 
-The apt repository is a static GitHub Pages deployment currently served at `https://openadminos.github.io/OpenAdminOS/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required. The intended custom domain is `https://repo.openadminos.com/debian` after DNS and GitHub Pages HTTPS are configured. Until then, release CI intentionally publishes without a Pages `CNAME`.
+The apt repository is a static GitHub Pages deployment served at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
 
 One-time GitHub setup:
 
@@ -66,7 +66,6 @@ One-time GitHub setup:
 2. Configure the Pages custom domain as `repo.openadminos.com`.
 3. In DNS, point `repo.openadminos.com` at GitHub Pages for the `OpenAdminOS` organization.
 4. Enable HTTPS once GitHub has issued the Pages certificate.
-5. Switch the release workflow `APT_REPO_DOMAIN` and `APT_REPO_CNAME` values to `repo.openadminos.com`.
 
 One-time signing setup:
 
@@ -83,7 +82,7 @@ Fingerprint: 19CE B561 9FD8 BD30 4FFA  F281 8ED8 4B68 EAE8 5363
 Expires: 2029-06-04
 ```
 
-The workflow exports the public key to `https://openadminos.github.io/OpenAdminOS/debian/openadminos-archive-keyring.pgp`, generates `Packages` / `Packages.gz`, signs `Release` as both `InRelease` and `Release.gpg`, and deploys the static repository through first-party GitHub Pages actions.
+The workflow exports the public key to `https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp`, generates `Packages` / `Packages.gz`, signs `Release` as both `InRelease` and `Release.gpg`, and deploys the static repository through first-party GitHub Pages actions.
 
 To republish an existing release into apt without rebuilding the app, run the
 **Release** workflow manually from `main` and set `backfill_apt_tag` to the
@@ -144,8 +143,8 @@ That's it. electron-updater on existing macOS installs picks up the new `latest-
 After a release, verify the repository metadata is reachable and signed:
 
 ```bash
-curl -fsSL https://openadminos.github.io/OpenAdminOS/debian/dists/stable/InRelease >/tmp/openadminos-InRelease
-curl -fsSL https://openadminos.github.io/OpenAdminOS/debian/openadminos-archive-keyring.pgp >/tmp/openadminos-archive-keyring.pgp
+curl -fsSL https://repo.openadminos.com/debian/dists/stable/InRelease >/tmp/openadminos-InRelease
+curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp >/tmp/openadminos-archive-keyring.pgp
 gpg --show-keys /tmp/openadminos-archive-keyring.pgp
 ```
 
@@ -153,9 +152,9 @@ On a disposable Ubuntu or Debian-family machine:
 
 ```bash
 sudo install -d -m 0755 /usr/share/keyrings
-curl -fsSL https://openadminos.github.io/OpenAdminOS/debian/openadminos-archive-keyring.pgp \
+curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp \
   | sudo tee /usr/share/keyrings/openadminos-archive-keyring.pgp >/dev/null
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openadminos-archive-keyring.pgp] https://openadminos.github.io/OpenAdminOS/debian stable main" \
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/openadminos-archive-keyring.pgp] https://repo.openadminos.com/debian stable main" \
   | sudo tee /etc/apt/sources.list.d/openadminos.list
 sudo apt update
 apt-cache policy openadminos

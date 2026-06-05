@@ -386,10 +386,8 @@ jobs:
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
           APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
-          # Keep production releases on the live GitHub Pages URL until
-          # repo.openadminos.com DNS and GitHub Pages HTTPS are configured.
-          APT_REPO_DOMAIN: openadminos.github.io/OpenAdminOS
-          APT_REPO_CNAME: ""
+          APT_REPO_DOMAIN: repo.openadminos.com
+          APT_REPO_CNAME: repo.openadminos.com
         run: bash scripts/build-apt-repository.sh linux-artifacts apt-pages
 
       - name: Upload apt repository artifact
@@ -444,10 +442,8 @@ jobs:
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
           APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
-          # Use the default GitHub Pages project URL for backfill smoke tests.
-          # Production releases set APT_REPO_CNAME to repo.openadminos.com.
-          APT_REPO_DOMAIN: openadminos.github.io/OpenAdminOS
-          APT_REPO_CNAME: ""
+          APT_REPO_DOMAIN: repo.openadminos.com
+          APT_REPO_CNAME: repo.openadminos.com
         run: bash scripts/build-apt-repository.sh linux-artifacts apt-pages
 
       - name: Upload apt repository artifact
