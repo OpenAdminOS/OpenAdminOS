@@ -112,7 +112,8 @@ systems, and a visible inline SHA-256 hash for each package plus a
 have a GitHub Pages-backed apt repository at
 `https://openadminos.github.io/OpenAdminOS/debian`, published from release CI
 and signed with the OpenAdminOS Linux archive key. `repo.openadminos.com` is the
-intended custom apt domain after DNS and GitHub Pages HTTPS are configured.
+intended custom apt domain after DNS and GitHub Pages HTTPS are configured; until
+then release CI publishes the apt repository without a Pages `CNAME`.
 The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page

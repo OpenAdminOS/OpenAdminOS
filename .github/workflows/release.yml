@@ -386,8 +386,10 @@ jobs:
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
           APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
-          APT_REPO_DOMAIN: repo.openadminos.com
-          APT_REPO_CNAME: repo.openadminos.com
+          # Keep production releases on the live GitHub Pages URL until
+          # repo.openadminos.com DNS and GitHub Pages HTTPS are configured.
+          APT_REPO_DOMAIN: openadminos.github.io/OpenAdminOS
+          APT_REPO_CNAME: ""
         run: bash scripts/build-apt-repository.sh linux-artifacts apt-pages
 
       - name: Upload apt repository artifact

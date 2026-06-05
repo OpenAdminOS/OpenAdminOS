@@ -58,7 +58,7 @@ These match the Partner Center reservation for the `OpenAdminOS` Store name. Don
 
 ### Linux — apt repository
 
-The apt repository is a static GitHub Pages deployment currently served at `https://openadminos.github.io/OpenAdminOS/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required. The intended custom domain is `https://repo.openadminos.com/debian` after DNS and GitHub Pages HTTPS are configured.
+The apt repository is a static GitHub Pages deployment currently served at `https://openadminos.github.io/OpenAdminOS/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required. The intended custom domain is `https://repo.openadminos.com/debian` after DNS and GitHub Pages HTTPS are configured. Until then, release CI intentionally publishes without a Pages `CNAME`.
 
 One-time GitHub setup:
 
@@ -66,6 +66,7 @@ One-time GitHub setup:
 2. Configure the Pages custom domain as `repo.openadminos.com`.
 3. In DNS, point `repo.openadminos.com` at GitHub Pages for the `OpenAdminOS` organization.
 4. Enable HTTPS once GitHub has issued the Pages certificate.
+5. Switch the release workflow `APT_REPO_DOMAIN` and `APT_REPO_CNAME` values to `repo.openadminos.com`.
 
 One-time signing setup:
 
