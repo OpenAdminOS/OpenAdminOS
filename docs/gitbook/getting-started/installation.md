@@ -9,7 +9,9 @@ OpenAdminOS ships as a desktop app. The project does not publish an end-user CLI
 
 ## macOS
 
-Download the signed `.dmg` from the latest GitHub release, drag OpenAdminOS to Applications, and launch it from Applications. Managed deployments can use the signed `.pkg` from the same release.
+Download the signed Apple Silicon `.dmg` from the [latest GitHub release](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest), drag OpenAdminOS to Applications, and launch it from Applications.
+
+Managed deployments can use the signed Apple Silicon `.pkg` from the same release. The `.pkg` is intended for MDM, Jamf, Munki, and other fleet rollout tools.
 
 ## Windows
 
@@ -35,7 +37,7 @@ The OpenAdminOS Linux archive key fingerprint is:
 19CE B561 9FD8 BD30 4FFA  F281 8ED8 4B68 EAE8 5363
 ```
 
-Direct AppImage, `.deb`, and `.rpm` downloads remain available from GitHub Releases. Verify direct downloads with the SHA-256 hash from the release notes or `SHA256SUMS.txt`.
+Direct AppImage, `.deb`, and `.rpm` downloads remain available from [GitHub Releases](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest). These direct Linux artifacts are unsigned preview builds. Verify the SHA-256 hash from the release notes or `SHA256SUMS.txt` before installing.
 
 ## Requirements
 

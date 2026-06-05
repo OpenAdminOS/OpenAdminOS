@@ -18,3 +18,9 @@ The agent catalog is the fastest way to inspect what an agent can do before inst
 - **Required Entra tier** shows whether the tenant needs Entra ID Free, P1, or P2 features.
 
 Start with the agent catalog for the current list.
+
+## Authoring And Sharing
+
+Use Build your own Agent when you need a local agent that is not already in the catalog. The builder drafts a manifest, validates it, runs a preflight check, and saves it as a local user-authored agent.
+
+User-authored agents can be shared with the community through a reviewed GitHub issue. Sharing does not publish the agent to Agent Hub. Maintainers decide whether it becomes part of the public registry.

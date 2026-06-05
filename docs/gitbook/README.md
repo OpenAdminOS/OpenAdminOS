@@ -19,6 +19,8 @@ The app is local-first by default. Tenant data and prompts stay on the device wh
 
 ## Current Scope
 
-OpenAdminOS v0.2 focuses on Intune and Entra administrators. The current agent catalog includes investigators, advisors, dashboards, and cleanup agents built on Microsoft Graph.
+OpenAdminOS v0.2.1 focuses on Intune and Entra administrators. The current agent catalog includes investigators, advisors, dashboards, and cleanup agents built on Microsoft Graph.
+
+The current preview also includes Build your own Agent, a reviewed community sharing path, and registry trust checks for public agent updates.
 
 Use the agent catalog when you need the authoritative list of agents, scopes, and write behavior.

@@ -12,10 +12,13 @@
 - [Local-first guarantee](trust/local-first.md)
 - [Hosted providers](trust/hosted-providers.md)
 - [Write confirmation](trust/write-confirmation.md)
+- [Registry trust](trust/registry-trust.md)
 
 ## Agents
 
 - [Agent docs overview](agents/README.md)
+- [Build your own Agent](agents/build-your-own-agent.md)
+- [Share with community](agents/share-with-community.md)
 - [Agent catalog](generated/agent-catalog.md)
 - [Graph scope matrix](generated/reference/graph-scope-matrix.md)
 - [Write safety matrix](generated/reference/write-safety-matrix.md)
