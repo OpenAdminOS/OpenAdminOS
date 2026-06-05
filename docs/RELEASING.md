@@ -107,13 +107,14 @@ That's it. electron-updater on existing macOS installs picks up the new `latest-
 
 ### v0.2.1 macOS PKG backfill
 
-The `.github/workflows/backfill-v0.2.1-macos-pkg.yml` workflow exists only to
-add the missing macOS PKG to the already-published `v0.2.1` release. It checks
-out the immutable `v0.2.1` tag, patches the CI-local Electron Builder config to
-build only the arm64 PKG, signs/notarizes it with the Developer ID Application
-and Developer ID Installer secrets, uploads the PKG to the existing release, and
-refreshes `SHA256SUMS.txt` plus the checksum block in the release notes. Do not
-use it for normal releases.
+The already-published `v0.2.1` release was backfilled with
+`OpenAdminOS-0.2.1-arm64.pkg` on June 5, 2026. The one-off workflow checked out
+the immutable `v0.2.1` tag, patched only the CI-local Electron Builder config to
+build the arm64 PKG, signed/notarized it with the Developer ID Application and
+Developer ID Installer secrets, uploaded it to the existing release, and
+refreshed `SHA256SUMS.txt` plus the checksum block in the release notes. The
+temporary workflow was removed after the successful run; normal releases now use
+the standard `release.yml` path.
 
 ### Windows — no published package yet
 
