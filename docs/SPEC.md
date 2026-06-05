@@ -143,7 +143,11 @@ display. Public article pages show an "OpenAdminOS editorial" byline and author
 summary until a named author profile is intentionally added. Each public blog
 post has an article-specific 1200x630 preview image under `web/public/blog/og/`
 that is used in Open Graph metadata, Twitter metadata, JSON-LD, article headers,
-and blog index cards.
+and blog index cards. Because Vercel mirrors `web/.next` to the repository root
+for finalization, the blog loader must tolerate both `web/` and repo-root
+working directories, and the Vercel postbuild mirror must expose traced
+`web/content` Markdown files and missing website `node_modules` packages at
+repository-root paths.
 
 The Vercel project is configured with `web/` as its Root Directory. As of the
 June 2026 Vercel Git Integration behavior, successful Next.js builds for

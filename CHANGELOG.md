@@ -7,6 +7,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 
 - Published five Markdown-backed Microsoft 365 admin blog posts and refreshed the blog index/article reading experience.
+- Blog content path resolution now works from both the website root and repository root, and the Vercel build mirror exposes traced Markdown files and missing website packages for deployment finalization.
 - Blog articles now have post-specific social preview images wired into Open Graph, Twitter metadata, schema, article headers, and blog cards.
 - Blog posts now use shorter SEO titles where needed, visible editorial bylines, and added mini-case sections for stronger SEO/GEO depth.
 - Marketing navbar now links to a new server-rendered blog with Microsoft 365 admin SEO/GEO articles while keeping the Intune use-case page indexable.

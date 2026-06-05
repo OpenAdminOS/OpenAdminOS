@@ -68,7 +68,7 @@ interface BlogPostFrontmatter {
   secondary_keywords?: string[];
 }
 
-const BLOG_CONTENT_DIR = path.join(process.cwd(), "content", "blog");
+const BLOG_CONTENT_DIR = resolveBlogContentDir();
 const PUBLISHED_AT = "2026-06-05";
 const UPDATED_AT = "2026-06-05";
 const AUTHOR_NAME = "OpenAdminOS editorial";
@@ -215,6 +215,28 @@ function loadBlogPosts(): BlogPost[] {
     const bIndex = POST_ORDER.indexOf(b.slug as (typeof POST_ORDER)[number]);
     return normalizeOrderIndex(aIndex) - normalizeOrderIndex(bIndex);
   });
+}
+
+function resolveBlogContentDir() {
+  const candidates = [
+    path.join(process.cwd(), "content", "blog"),
+    path.join(process.cwd(), "web", "content", "blog"),
+  ];
+  const contentDir = candidates.find((candidate) => {
+    try {
+      return fs.statSync(candidate).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+
+  if (!contentDir) {
+    throw new Error(
+      `Blog content directory not found. Tried: ${candidates.join(", ")}`,
+    );
+  }
+
+  return contentDir;
 }
 
 function readBlogPost(filePath: string): BlogPost {
