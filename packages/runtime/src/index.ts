@@ -107,10 +107,17 @@ export {
   createMxcSandboxRunner,
   isMxcSandboxEnabled,
   probeMxcSandbox,
+  type SandboxBrokerEndpoint,
   type SandboxRunInput,
   type SandboxRunResult,
   type SandboxRunner,
 } from "./sandbox.js";
+export {
+  createSandboxBroker,
+  type SandboxBroker,
+  type SandboxBrokerAgentPolicy,
+  type SandboxBrokerInput,
+} from "./sandbox-broker.js";
 export { createTenantSession } from "./msal.js";
 export {
   disposeBuiltConnectors,

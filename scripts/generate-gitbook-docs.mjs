@@ -400,6 +400,7 @@ function summaryPage(agents) {
 - [Local-first guarantee](trust/local-first.md)
 - [Hosted providers](trust/hosted-providers.md)
 - [Write confirmation](trust/write-confirmation.md)
+- [Sandboxed code](trust/sandboxed-code.md)
 
 ## Agents
 
