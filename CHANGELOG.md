@@ -7,6 +7,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Added
 
 - Added Plausible Analytics to the marketing website, with privacy and spec copy clarifying that analytics is limited to public website pages.
+- Added a host-mediated MXC sandbox broker that validates Graph, LLM, connector, write-plan, and log requests over brokered stdio without passing tenant tokens or secrets into sandboxed code.
 - Added an experimental MXC sandbox runner/probe behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, with sandbox diagnostics in Settings -> About and shared broker protocol types for future host-mediated agent execution.
 
 ### Changed

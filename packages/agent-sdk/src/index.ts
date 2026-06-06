@@ -889,6 +889,11 @@ export interface SandboxDiagnostics {
   /** Short user-facing explanation for Settings and support bundles. */
   detail: string;
   /**
+   * Optional next step for admins. This must stay informational: OpenAdminOS
+   * does not elevate itself or run MXC host-prep tooling automatically.
+   */
+  remediation?: string;
+  /**
    * MXC is still public preview. This warning is shown whenever the
    * integration is present so it is not treated as the only boundary.
    */
@@ -1776,7 +1781,7 @@ export interface SandboxGraphRequest {
 export interface SandboxLlmRequest {
   id: string;
   method: "llm.complete";
-  params: LlmOptions;
+  params: Omit<LlmOptions, "signal">;
 }
 
 export interface SandboxConnectorRequest {

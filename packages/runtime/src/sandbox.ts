@@ -1,6 +1,12 @@
 import type { ChildProcess } from "node:child_process";
+import type { Writable } from "node:stream";
 
-import type { HostPlatform, SandboxDiagnostics } from "@openadminos/agent-sdk";
+import type {
+  HostPlatform,
+  SandboxBrokerRequest,
+  SandboxBrokerResponse,
+  SandboxDiagnostics,
+} from "@openadminos/agent-sdk";
 
 export const OPENADMINOS_MXC_FLAG = "OPENADMINOS_EXPERIMENTAL_MXC";
 const MXC_SCHEMA_VERSION = "0.6.0-alpha";
@@ -16,6 +22,7 @@ export interface SandboxRunInput {
   timeoutMs?: number;
   allowNetwork?: boolean;
   maxOutputBytes?: number;
+  broker?: SandboxBrokerEndpoint;
 }
 
 export interface SandboxRunResult {
@@ -29,6 +36,10 @@ export interface SandboxRunner {
   readonly id: "mxc";
   probe(): Promise<SandboxDiagnostics>;
   run(input: SandboxRunInput): Promise<SandboxRunResult>;
+}
+
+export interface SandboxBrokerEndpoint {
+  handle(request: SandboxBrokerRequest): Promise<SandboxBrokerResponse>;
 }
 
 interface MxcPlatformSupport {
@@ -84,6 +95,8 @@ export async function probeMxcSandbox(
       experimentalEnabled: false,
       supported: false,
       detail: `Set ${OPENADMINOS_MXC_FLAG}=1 to enable the experimental MXC sandbox probe.`,
+      remediation:
+        "Normal YAML agents keep running through the manifest interpreter. Sandboxed code remains disabled and fails closed.",
       warning: MXC_PREVIEW_WARNING,
     };
   }
@@ -98,6 +111,7 @@ export async function probeMxcSandbox(
       experimentalEnabled: true,
       supported: false,
       detail: `MXC SDK is not available: ${errorMessage(error)}`,
+      remediation: hostPrepRemediation(),
       warning: MXC_PREVIEW_WARNING,
     };
   }
@@ -116,6 +130,7 @@ export async function probeMxcSandbox(
       detail: supported
         ? `MXC reports sandbox support on ${normalizePlatformLabel(support.platform)}.`
         : support.reason ?? support.detail ?? "MXC is installed but no supported backend was detected.",
+      ...(!supported ? { remediation: hostPrepRemediation() } : {}),
       warning: MXC_PREVIEW_WARNING,
     };
   } catch (error) {
@@ -125,6 +140,8 @@ export async function probeMxcSandbox(
       experimentalEnabled: true,
       supported: false,
       detail: `MXC probe failed: ${errorMessage(error)}`,
+      remediation:
+        "Review the MXC diagnostic output and keep sandboxed code disabled until the probe succeeds.",
       warning: MXC_PREVIEW_WARNING,
     };
   }
@@ -189,6 +206,14 @@ async function runMxcSandbox(
     sanitizeSandboxEnv(input.env ?? env),
   );
 
+  if (input.broker) {
+    return await collectBrokeredChildProcess(
+      child,
+      input.broker,
+      input.maxOutputBytes ?? 512_000,
+    );
+  }
+
   return await collectChildProcess(child, input.maxOutputBytes ?? 512_000);
 }
 
@@ -241,6 +266,158 @@ function collectChildProcess(
   });
 }
 
+function collectBrokeredChildProcess(
+  child: ChildProcess,
+  broker: SandboxBrokerEndpoint,
+  maxOutputBytes: number,
+): Promise<SandboxRunResult> {
+  if (!child.stdin) {
+    return Promise.reject(
+      new Error("MXC sandbox broker requires a writable child stdin pipe."),
+    );
+  }
+
+  let stderr = "";
+  let stderrBytes = 0;
+  let protocolBuffer = "";
+  let protocolError: Error | undefined;
+  let pending = Promise.resolve();
+
+  child.stdout?.on("data", (chunk: Buffer | string) => {
+    if (protocolError) return;
+    protocolBuffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    if (Buffer.byteLength(protocolBuffer, "utf8") > maxOutputBytes) {
+      failBrokerProtocol(
+        child,
+        new Error("MXC sandbox broker protocol exceeded the output byte cap."),
+        (error) => {
+          protocolError = error;
+        },
+      );
+      return;
+    }
+
+    let newlineIndex = protocolBuffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = protocolBuffer.slice(0, newlineIndex).trim();
+      protocolBuffer = protocolBuffer.slice(newlineIndex + 1);
+      if (line.length > 0) {
+        pending = pending
+          .then(() => handleBrokerProtocolLine(child.stdin!, broker, line))
+          .catch((error: unknown) => {
+            failBrokerProtocol(child, error, (next) => {
+              protocolError = next;
+            });
+          });
+      }
+      newlineIndex = protocolBuffer.indexOf("\n");
+    }
+  });
+
+  child.stderr?.on("data", (chunk: Buffer | string) => {
+    const next = appendCapped(stderr, stderrBytes, chunk, maxOutputBytes);
+    stderr = next.text;
+    stderrBytes = next.bytes;
+  });
+
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (exitCode, signal) => {
+      if (protocolBuffer.trim().length > 0 && !protocolError) {
+        protocolError = new Error(
+          "MXC sandbox broker received an incomplete JSON line before process exit.",
+        );
+      }
+      pending
+        .then(() => {
+          if (protocolError) {
+            reject(protocolError);
+            return;
+          }
+          resolve({
+            exitCode,
+            signal,
+            stdout: "",
+            stderr,
+          });
+        })
+        .catch(reject);
+    });
+  });
+}
+
+async function handleBrokerProtocolLine(
+  stdin: Writable,
+  broker: SandboxBrokerEndpoint,
+  line: string,
+): Promise<void> {
+  const request = parseBrokerRequestLine(line);
+  const response = await broker.handle(request);
+  await writeBrokerResponse(stdin, response);
+}
+
+function parseBrokerRequestLine(line: string): SandboxBrokerRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch (error) {
+    throw new Error(`MXC sandbox broker received invalid JSON: ${errorMessage(error)}`);
+  }
+
+  if (!isRecord(parsed)) {
+    throw new Error("MXC sandbox broker request must be a JSON object.");
+  }
+  if (typeof parsed.id !== "string" || parsed.id.length === 0) {
+    throw new Error("MXC sandbox broker request requires a non-empty string id.");
+  }
+  if (typeof parsed.method !== "string" || parsed.method.length === 0) {
+    throw new Error("MXC sandbox broker request requires a non-empty string method.");
+  }
+  if (!isRecord(parsed.params)) {
+    throw new Error("MXC sandbox broker request requires an object params field.");
+  }
+  return parsed as unknown as SandboxBrokerRequest;
+}
+
+function writeBrokerResponse(
+  stdin: Writable,
+  response: SandboxBrokerResponse,
+): Promise<void> {
+  const line = `${JSON.stringify(response)}\n`;
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      stdin.off("error", onError);
+      stdin.off("drain", onDrain);
+    };
+
+    stdin.once("error", onError);
+    if (stdin.write(line, "utf8")) {
+      cleanup();
+      resolve();
+      return;
+    }
+    stdin.once("drain", onDrain);
+  });
+}
+
+function failBrokerProtocol(
+  child: ChildProcess,
+  error: unknown,
+  setError: (error: Error) => void,
+): void {
+  const next = error instanceof Error ? error : new Error(String(error));
+  setError(next);
+  child.kill();
+}
+
 function appendCapped(
   current: string,
   currentBytes: number,
@@ -261,6 +438,10 @@ function appendCapped(
     text: current + Buffer.from(text, "utf8").subarray(0, remaining).toString("utf8"),
     bytes: maxBytes,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function sanitizeSandboxEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -294,6 +475,19 @@ function normalizePlatformLabel(platform: string | undefined): HostPlatform {
   if (platform === "win32" || platform === "windows") return "windows";
   if (platform === "linux") return "linux";
   return "unknown";
+}
+
+function hostPrepRemediation(): string {
+  if (process.platform === "win32") {
+    return "Enterprise admins can prepare MXC hosts with wxc-host-prep.exe from the MXC SDK; OpenAdminOS does not elevate or run host-prep automatically.";
+  }
+  if (process.platform === "linux") {
+    return "Install the MXC SDK native binary plus Bubblewrap or LXC for the selected backend, then re-run the probe.";
+  }
+  if (process.platform === "darwin") {
+    return "Install an MXC build with the macOS seatbelt backend and keep the experimental flag set for preview testing.";
+  }
+  return "Install a supported MXC SDK/backend for this host before enabling sandboxed code.";
 }
 
 function errorMessage(error: unknown): string {

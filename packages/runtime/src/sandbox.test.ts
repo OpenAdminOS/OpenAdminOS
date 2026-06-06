@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { Writable } from "node:stream";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import assert from "node:assert/strict";
@@ -96,13 +97,72 @@ describe("MXC sandbox runner", () => {
     assert.deepEqual(filesystem?.readonlyPaths, ["/app/guest"]);
     assert.deepEqual(filesystem?.readwritePaths, ["/tmp/openadminos-run"]);
   });
+
+  it("brokers sandbox stdout protocol over child stdin", async () => {
+    const child = fakeChildProcess(
+      JSON.stringify({
+        id: "log-1",
+        method: "log",
+        params: {
+          level: "info",
+          message: "sandbox started",
+        },
+      }) + "\n",
+      "diagnostic only\n",
+    );
+    const stdinWrites: string[] = [];
+    child.stdin = new Writable({
+      write(chunk, _encoding, callback) {
+        stdinWrites.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
+        callback();
+      },
+    });
+
+    const runner = createMxcSandboxRunner({
+      env: {
+        [OPENADMINOS_MXC_FLAG]: "1",
+        PATH: "/usr/bin",
+      },
+      loadSdk: async () => ({
+        getPlatformSupport: () => ({ isSupported: true }),
+        createConfigFromPolicy: () => ({ process: {} }),
+        spawnSandboxFromConfig: () => child,
+      }),
+    });
+
+    const result = await runner.run({
+      commandLine: "node guest.js",
+      readonlyPaths: ["/app/guest"],
+      readwritePaths: ["/tmp/openadminos-run"],
+      broker: {
+        async handle(request) {
+          assert.equal(request.method, "log");
+          return { id: request.id, ok: true };
+        },
+      },
+    });
+
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "diagnostic only\n");
+    assert.deepEqual(stdinWrites.map((line) => JSON.parse(line)), [
+      { id: "log-1", ok: true },
+    ]);
+  });
 });
 
 function fakeChildProcess(stdoutText = "", stderrText = ""): ChildProcess {
   const emitter = new EventEmitter() as ChildProcess;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
-  Object.assign(emitter, { stdout, stderr });
+  Object.assign(emitter, {
+    stdout,
+    stderr,
+    killed: false,
+    kill: () => {
+      Object.assign(emitter, { killed: true });
+      return true;
+    },
+  });
 
   process.nextTick(() => {
     if (stdoutText.length > 0) stdout.write(stdoutText);

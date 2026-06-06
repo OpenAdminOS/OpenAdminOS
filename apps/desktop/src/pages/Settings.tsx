@@ -1925,7 +1925,7 @@ function ReadinessRow({
       <div className="mt-1 truncate text-[13.5px] font-medium text-[var(--color-text)]">
         {value}
       </div>
-      <div className="mt-1 line-clamp-2 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+      <div className="mt-1 line-clamp-3 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
         {detail}
       </div>
     </div>
@@ -1957,10 +1957,13 @@ function formatSandboxDetail(
   sandbox: ReleaseDiagnostics["sandbox"] | undefined,
 ): string {
   if (!sandbox) return "Sandbox diagnostics unavailable.";
+  const parts = [sandbox.detail];
   if (sandbox.status === "disabled") {
-    return `${sandbox.detail} YAML agents still use the manifest interpreter.`;
+    parts.push("YAML agents still use the manifest interpreter.");
   }
-  return sandbox.warning ? `${sandbox.detail} ${sandbox.warning}` : sandbox.detail;
+  if (sandbox.remediation) parts.push(sandbox.remediation);
+  if (sandbox.warning) parts.push(sandbox.warning);
+  return parts.join(" ");
 }
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {

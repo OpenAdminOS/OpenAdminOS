@@ -401,6 +401,7 @@ function summaryPage(agents) {
 - [Hosted providers](trust/hosted-providers.md)
 - [Write confirmation](trust/write-confirmation.md)
 - [Registry trust](trust/registry-trust.md)
+- [Sandboxed code](trust/sandboxed-code.md)
 
 ## Agents
 
