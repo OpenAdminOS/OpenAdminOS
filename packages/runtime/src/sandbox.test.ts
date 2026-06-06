@@ -27,6 +27,28 @@ describe("MXC sandbox runner", () => {
     assert.equal(diagnostics.experimentalEnabled, false);
   });
 
+  it("refuses to run and does not load MXC when disabled", async () => {
+    let loaded = false;
+    const runner = createMxcSandboxRunner({
+      env: {},
+      loadSdk: async () => {
+        loaded = true;
+        throw new Error("should not load");
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        runner.run({
+          commandLine: "node guest.js",
+          readonlyPaths: ["/app/guest"],
+          readwritePaths: ["/tmp/openadminos-run"],
+        }),
+      /MXC sandbox is disabled/,
+    );
+    assert.equal(loaded, false);
+  });
+
   it("reports SDK platform support when enabled", async () => {
     const diagnostics = await probeMxcSandbox({
       env: { [OPENADMINOS_MXC_FLAG]: "1" },
