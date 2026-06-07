@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added Plausible Analytics to the marketing website, with privacy and spec copy clarifying that analytics is limited to public website pages.
+
 ### Changed
 
 - Auto-tag release automation now detects the `release: vX.Y.Z` marker from the full merge commit message, so normal release PR merges can cut tags as well as squash merges.

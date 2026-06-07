@@ -160,6 +160,14 @@ repository-root `node_modules`. The marketing site `postbuild` script mirrors th
 generated `web/.next` build output to the repository-root `.next` path and links
 repository-root `node_modules` to `web/node_modules` only when `VERCEL` is set.
 
+The public marketing website uses Plausible Analytics from `plausible.io` for
+aggregate website usage measurement. This is limited to the `web/` marketing
+pages. The desktop app must not load Plausible or send tenant data, prompts,
+run results, analytics events, support diagnostics, tokens, provider credentials,
+or Microsoft Graph payloads through website analytics. Privacy copy must keep
+the website analytics boundary separate from the desktop app's no tenant telemetry
+guarantee.
+
 ### LLM provider abstraction
 
 A `LLMProvider` interface in `packages/llm/` with these methods at minimum:

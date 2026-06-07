@@ -2,6 +2,7 @@ import "~/styles/globals.css";
 
 import { type Metadata } from "next";
 import { Geist } from "next/font/google";
+import Script from "next/script";
 
 import {
   HOME_DESCRIPTION,
@@ -86,12 +87,27 @@ const geist = Geist({
   variable: "--font-geist-sans",
 });
 
+const PLAUSIBLE_SCRIPT_URL =
+  "https://plausible.io/js/pa-XFfGfDtFtmyoJlLIYR5dv.js";
+const PLAUSIBLE_INIT_SCRIPT = `window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
+plausible.init()`;
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${geist.variable}`}>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        {children}
+        <Script id="plausible-init" strategy="afterInteractive">
+          {PLAUSIBLE_INIT_SCRIPT}
+        </Script>
+        <Script
+          async
+          src={PLAUSIBLE_SCRIPT_URL}
+          strategy="afterInteractive"
+        />
+      </body>
     </html>
   );
 }

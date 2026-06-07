@@ -14,10 +14,10 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-06-04";
+const LAST_UPDATED = "2026-06-07";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
-  "How OpenAdminOS handles Microsoft 365 tenant data, authentication tokens, LLM prompts, and registry install counts.";
+  "How OpenAdminOS handles Microsoft 365 tenant data, authentication tokens, LLM prompts, registry install counts, and website analytics.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -251,9 +251,23 @@ export default function PrivacyPage() {
                 .
               </li>
               <li>
-                <span className="text-white">No third-party analytics.</span>{" "}
-                We do not use Google Analytics, advertising trackers, or
-                third-party cookies.
+                <span className="text-white">
+                  Privacy-friendly website analytics.
+                </span>{" "}
+                The public marketing website uses{" "}
+                <Link
+                  href="https://plausible.io/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-white underline underline-offset-4 transition hover:text-white/70"
+                >
+                  Plausible Analytics
+                </Link>{" "}
+                to understand aggregate page usage. We do not use Google
+                Analytics, advertising trackers, or third-party cookies.
+                Plausible is not used in the desktop app and never receives
+                tenant data, prompts, run results, tokens, provider credentials,
+                or support diagnostics from the app.
               </li>
             </ul>
           </section>
