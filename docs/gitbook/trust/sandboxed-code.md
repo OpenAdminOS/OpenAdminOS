@@ -9,14 +9,14 @@ OpenAdminOS currently runs normal agents as reviewed YAML Agent Templates. Those
 
 MXC is reserved for future arbitrary-code agents. That path fails closed when MXC is disabled, unavailable, or failing its probe. OpenAdminOS does not fall back to running untrusted code in the Electron process.
 
-Settings -> About shows the sandbox state:
+Settings -> About shows the sandbox state and, when the SDK reports them, the available MXC methods, Windows isolation tier, and host-prep warnings:
 
 - `Disabled` means `OPENADMINOS_EXPERIMENTAL_MXC=1` is not set. YAML agents still work.
 - `MXC available` means the SDK probe reported a usable backend on this host.
 - `Unavailable` means the SDK or host backend is missing or unsupported.
 - `Probe error` means the MXC probe threw an error and sandboxed code stays disabled.
 
-MXC protects the local machine from untrusted code. It is not the tenant trust boundary. Sandboxed code never receives MSAL tokens, keychain secrets, provider credentials, connector credentials, clipboard access, unrestricted filesystem access, or direct network access.
+MXC protects the local machine from untrusted code. It is not the tenant trust boundary. Microsoft's MXC repo currently describes the SDK as early preview and warns that generated policies can still be overly permissive, so OpenAdminOS keeps its own broker and tenant safeguards in front. Sandboxed code never receives MSAL tokens, keychain secrets, provider credentials, connector credentials, clipboard access, unrestricted filesystem access, or direct network access.
 
 Future sandboxed agents must talk to the trusted host through the sandbox broker:
 
@@ -28,4 +28,6 @@ Future sandboxed agents must talk to the trusted host through the sandbox broker
 
 The host validates every request against the installed manifest and active tenant. Graph writes are not allowed directly from sandboxed code. Write agents can only return a write plan; OpenAdminOS applies approved writes through the existing confirmation flow.
 
-Enterprise host preparation is owned by the administrator. On Windows, MXC may require `wxc-host-prep.exe` from the MXC SDK for AppContainer-tier preparation. OpenAdminOS reports this as remediation text, but it does not elevate itself or run host-prep automatically. Linux and macOS preparation is also external: install the SDK/native backend for the fleet, then check Settings -> About again.
+OpenAdminOS writes the MXC working directory into `config.process.cwd`, but the path must also be listed in the read-only or read-write filesystem policy. MXC does not treat `cwd` as a filesystem grant.
+
+Enterprise host preparation is owned by the administrator. On Windows, MXC may require `wxc-host-prep.exe` from the MXC SDK for AppContainer-tier preparation. Current host-prep subcommands are `prepare-system-drive` for the system-drive ACL and `prepare-null-device` for NUL device access; the null-device preparation may need to run once per boot. OpenAdminOS reports this as remediation text, but it does not elevate itself or run host-prep automatically. Linux and macOS preparation is also external: install the SDK/native backend for the fleet, then check Settings -> About again.

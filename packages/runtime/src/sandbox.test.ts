@@ -2,6 +2,7 @@ import { PassThrough } from "node:stream";
 import { Writable } from "node:stream";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import * as path from "node:path";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -55,8 +56,9 @@ describe("MXC sandbox runner", () => {
       loadSdk: async () => ({
         getPlatformSupport: () => ({
           isSupported: true,
-          defaultBackend: "processcontainer",
-          platform: "windows",
+          availableMethods: ["processcontainer"],
+          isolationTier: "base-container",
+          isolationWarnings: ["host-prep check passed"],
         }),
         createConfigFromPolicy: () => ({ process: {} }),
         spawnSandboxFromConfig: () => fakeChildProcess(),
@@ -66,7 +68,10 @@ describe("MXC sandbox runner", () => {
     assert.equal(diagnostics.status, "available");
     assert.equal(diagnostics.supported, true);
     assert.equal(diagnostics.containment, "processcontainer");
-    assert.match(diagnostics.detail, /windows/);
+    assert.deepEqual(diagnostics.availableMethods, ["processcontainer"]);
+    assert.equal(diagnostics.isolationTier, "base-container");
+    assert.match(diagnostics.detail, /processcontainer/);
+    assert.match(diagnostics.detail, /base-container/);
   });
 
   it("spawns with no network and a scrubbed environment by default", async () => {
@@ -74,6 +79,9 @@ describe("MXC sandbox runner", () => {
     let capturedConfig: { process?: { commandLine?: string } } | undefined;
     let capturedOptions: Record<string, unknown> | undefined;
     let capturedEnv: NodeJS.ProcessEnv | undefined;
+    let capturedContainment: string | undefined;
+    const readonlyPath = path.resolve("/app/guest");
+    const readwritePath = path.resolve("/tmp/openadminos-run");
 
     const runner = createMxcSandboxRunner({
       env: {
@@ -83,8 +91,9 @@ describe("MXC sandbox runner", () => {
       },
       loadSdk: async () => ({
         getPlatformSupport: () => ({ isSupported: true }),
-        createConfigFromPolicy: (policy) => {
+        createConfigFromPolicy: (policy, containment) => {
           capturedPolicy = policy;
+          capturedContainment = containment;
           return { process: {} };
         },
         spawnSandboxFromConfig: (config, options, _cwd, env) => {
@@ -98,15 +107,17 @@ describe("MXC sandbox runner", () => {
 
     const result = await runner.run({
       commandLine: "node guest.js",
-      readonlyPaths: ["/app/guest", "/app/guest"],
-      readwritePaths: ["/tmp/openadminos-run"],
+      readonlyPaths: [readonlyPath, readonlyPath],
+      readwritePaths: [readwritePath],
+      containment: "processcontainer",
       timeoutMs: 1000,
     });
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "hello\n");
+    assert.equal(capturedContainment, "processcontainer");
     assert.equal(capturedConfig?.process?.commandLine, "node guest.js");
-    assert.deepEqual(capturedOptions, { usePty: false, experimental: true });
+    assert.deepEqual(capturedOptions, { usePty: false });
     assert.equal(capturedEnv?.PATH, "/usr/bin");
     assert.equal(capturedEnv?.OPENAI_API_KEY, undefined);
 
@@ -116,8 +127,77 @@ describe("MXC sandbox runner", () => {
     const filesystem = capturedPolicy?.filesystem as
       | { readonlyPaths?: string[]; readwritePaths?: string[] }
       | undefined;
-    assert.deepEqual(filesystem?.readonlyPaths, ["/app/guest"]);
-    assert.deepEqual(filesystem?.readwritePaths, ["/tmp/openadminos-run"]);
+    assert.deepEqual(filesystem?.readonlyPaths, [readonlyPath]);
+    assert.deepEqual(filesystem?.readwritePaths, [readwritePath]);
+  });
+
+  it("sets the sandbox process cwd and requires filesystem policy coverage", async () => {
+    let capturedConfig: { process?: { commandLine?: string; cwd?: string } } | undefined;
+    const cwd = path.resolve("/tmp/openadminos-run/work");
+    const runner = createMxcSandboxRunner({
+      env: { [OPENADMINOS_MXC_FLAG]: "1" },
+      loadSdk: async () => ({
+        getPlatformSupport: () => ({ isSupported: true }),
+        createConfigFromPolicy: () => ({ process: {} }),
+        spawnSandboxFromConfig: (config) => {
+          capturedConfig = config;
+          return fakeChildProcess();
+        },
+      }),
+    });
+
+    await assert.rejects(
+      () =>
+        runner.run({
+          commandLine: "node guest.js",
+          readonlyPaths: [path.resolve("/app/guest")],
+          readwritePaths: [path.resolve("/tmp/openadminos-run")],
+          cwd: path.resolve("/outside"),
+        }),
+      /cwd must be covered/,
+    );
+
+    await runner.run({
+      commandLine: "node guest.js",
+      readonlyPaths: [path.resolve("/app/guest")],
+      readwritePaths: [path.resolve("/tmp/openadminos-run")],
+      cwd,
+    });
+
+    assert.equal(capturedConfig?.process?.cwd, cwd);
+  });
+
+  it("uses the SDK experimental flag only for experimental MXC backends", async () => {
+    const options: Record<string, unknown>[] = [];
+    const runner = createMxcSandboxRunner({
+      env: { [OPENADMINOS_MXC_FLAG]: "1" },
+      loadSdk: async () => ({
+        getPlatformSupport: () => ({ isSupported: true }),
+        createConfigFromPolicy: () => ({ process: {} }),
+        spawnSandboxFromConfig: (_config, spawnOptions) => {
+          options.push(spawnOptions ?? {});
+          return fakeChildProcess();
+        },
+      }),
+    });
+
+    await runner.run({
+      commandLine: "node guest.js",
+      readonlyPaths: [path.resolve("/app/guest")],
+      readwritePaths: [path.resolve("/tmp/openadminos-run")],
+      containment: "bubblewrap",
+    });
+    await runner.run({
+      commandLine: "node guest.js",
+      readonlyPaths: [path.resolve("/app/guest")],
+      readwritePaths: [path.resolve("/tmp/openadminos-run")],
+      containment: "microvm",
+    });
+
+    assert.deepEqual(options, [
+      { usePty: false },
+      { usePty: false, experimental: true },
+    ]);
   });
 
   it("brokers sandbox stdout protocol over child stdin", async () => {
