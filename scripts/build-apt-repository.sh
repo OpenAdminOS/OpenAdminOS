@@ -90,7 +90,10 @@ touch "$output_dir/.nojekyll"
 
 (
   cd "$repo_root"
-  dpkg-scanpackages --arch "$arch" pool > "dists/$suite/$component/binary-$arch/Packages"
+  # Do not pass --arch here: dpkg-scanpackages applies that filter to
+  # Debian-style filename suffixes, while Electron Builder names the
+  # asset "*-linux-amd64.deb". The control metadata was validated above.
+  dpkg-scanpackages pool > "dists/$suite/$component/binary-$arch/Packages"
   if [ ! -s "dists/$suite/$component/binary-$arch/Packages" ]; then
     echo "Generated Packages index is empty." >&2
     exit 1

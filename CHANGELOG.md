@@ -14,6 +14,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Apt repository generation now indexes Electron Builder `.deb` filenames after validating package architecture from control metadata.
+
 ### Security
 
 ## [0.2.2] - 2026-06-05

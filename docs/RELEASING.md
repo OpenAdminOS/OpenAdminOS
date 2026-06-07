@@ -61,6 +61,7 @@ These match the Partner Center reservation for the `OpenAdminOS` Store name. Don
 ### Linux — apt repository
 
 The apt repository is a static GitHub Pages deployment served at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
+The repository builder validates the `.deb` architecture from package control metadata, not from the release asset filename; Electron Builder names assets like `OpenAdminOS-X.Y.Z-linux-amd64.deb`, which is not the Debian `*_amd64.deb` suffix format.
 
 One-time GitHub setup:
 
