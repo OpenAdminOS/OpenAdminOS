@@ -21,6 +21,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Fixed connector notification settings so Teams and WhatsApp Web delivery rules/default targets autosave and runs use newly enabled delivery without a separate save button.
 - Fixed WhatsApp Web disconnect cleanup so stale default targets, per-agent custom targets, and queued WhatsApp deliveries are cleared when the linked session is removed.
 - Fixed WhatsApp Web session restore so saved linked-device auth reconnects automatically after reopening the app instead of waiting for a manual send/test action.
 - Fixed WhatsApp target mode switching so internal group JIDs are not carried into manual Number/JID fields.

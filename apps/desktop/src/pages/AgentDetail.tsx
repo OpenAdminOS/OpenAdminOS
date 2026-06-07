@@ -83,6 +83,8 @@ export default function AgentDetail({
     { providerId?: ProviderId; model?: string } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
+  const pendingDeliverySaves = useRef(new Set<Promise<void>>());
+  const [pendingDeliverySaveCount, setPendingDeliverySaveCount] = useState(0);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -115,6 +117,22 @@ export default function AgentDetail({
   const queueRunPreflight = (choice?: { providerId?: ProviderId; model?: string }) => {
     setRunError(null);
     setPendingRunChoice(choice ?? {});
+  };
+
+  const trackDeliverySave = (save: Promise<void>): Promise<void> => {
+    const tracked = save.finally(() => {
+      pendingDeliverySaves.current.delete(tracked);
+      setPendingDeliverySaveCount(pendingDeliverySaves.current.size);
+    });
+    pendingDeliverySaves.current.add(tracked);
+    setPendingDeliverySaveCount(pendingDeliverySaves.current.size);
+    return tracked;
+  };
+
+  const waitForDeliverySaves = async () => {
+    while (pendingDeliverySaves.current.size > 0) {
+      await Promise.allSettled([...pendingDeliverySaves.current]);
+    }
   };
 
   useEffect(() => {
@@ -159,6 +177,7 @@ export default function AgentDetail({
     if (!agent) return;
     setRunError(null);
     try {
+      await waitForDeliverySaves();
       const options =
         choice && (choice.providerId || choice.model)
           ? {
@@ -540,10 +559,7 @@ export default function AgentDetail({
               delivery={agent.delivery?.teams}
               onOpenConnectors={() => navigate("/connectors")}
               onChange={async (next) => {
-                await updateAgentTeamsDelivery(agent.slug, next);
-                toast.success(
-                  next?.enabled ? "Teams delivery saved." : "Teams delivery disabled.",
-                );
+                await trackDeliverySave(updateAgentTeamsDelivery(agent.slug, next));
               }}
             />
 
@@ -551,11 +567,8 @@ export default function AgentDetail({
               delivery={agent.delivery?.whatsappWeb}
               onOpenConnectors={() => navigate("/connectors")}
               onChange={async (next) => {
-                await updateAgentWhatsAppWebDelivery(agent.slug, next);
-                toast.success(
-                  next?.enabled
-                    ? "WhatsApp Web delivery saved."
-                    : "WhatsApp Web delivery disabled.",
+                await trackDeliverySave(
+                  updateAgentWhatsAppWebDelivery(agent.slug, next),
                 );
               }}
             />
@@ -735,6 +748,7 @@ export default function AgentDetail({
           providerIsLocal={pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
           model={pendingModel}
+          deliverySaving={pendingDeliverySaveCount > 0}
           onClose={() => setPendingRunChoice(null)}
           onConfirm={() => {
             void handleStartRun(pendingRunChoice ?? undefined);
@@ -804,6 +818,9 @@ function AgentTeamsDeliveryCard({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  const lastSavedKey = useRef(stableDeliveryKey(delivery ?? null));
   const [enabled, setEnabled] = useState(delivery?.enabled === true);
   const [useDefaultTarget, setUseDefaultTarget] = useState(
     delivery?.useDefaultTarget !== false,
@@ -909,46 +926,88 @@ function AgentTeamsDeliveryCard({
     typeof summary?.config.defaultTeamId === "string" &&
     typeof summary?.config.defaultChannelId === "string";
   const connected = summary?.status === "connected";
-  const canSave =
-    !saving &&
-    (!enabled ||
-      (useDefaultTarget ? hasDefaultTarget : Boolean(teamId && channelId)));
+  const selectedTeam = teams.find((team) => team.id === teamId);
+  const selectedChannel = channels.find((channel) => channel.id === channelId);
+  const desiredDelivery: AgentTeamsDelivery | null | undefined = !enabled
+    ? null
+    : useDefaultTarget
+      ? hasDefaultTarget
+        ? {
+            enabled: true,
+            useDefaultTarget: true,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+          }
+        : undefined
+      : teamId && channelId
+        ? {
+            enabled: true,
+            useDefaultTarget: false,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+            teamId,
+            channelId,
+            ...(selectedTeam ? { teamName: selectedTeam.displayName } : {}),
+            ...(selectedChannel ? { channelName: selectedChannel.displayName } : {}),
+          }
+        : undefined;
+  const desiredDeliveryKey =
+    desiredDelivery === undefined ? undefined : stableDeliveryKey(desiredDelivery);
 
-  const save = async () => {
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    if (desiredDeliveryKey === undefined) return;
+    if (desiredDeliveryKey === lastSavedKey.current) return;
+
+    let cancelled = false;
+    const nextDelivery = parseDeliveryKey<AgentTeamsDelivery>(desiredDeliveryKey);
     setSaving(true);
     setError(null);
-    try {
-      if (!enabled) {
-        await onChange(null);
-        return;
-      }
-      const selectedTeam = teams.find((team) => team.id === teamId);
-      const selectedChannel = channels.find((channel) => channel.id === channelId);
-      await onChange({
-        enabled: true,
-        useDefaultTarget,
-        includeManualRuns,
-        includeScheduledRuns,
-        notifyOnSuccess,
-        notifyOnFailure,
-        notifyOnChangeOnly,
-        ...(!useDefaultTarget
-          ? {
-              teamId,
-              channelId,
-              ...(selectedTeam ? { teamName: selectedTeam.displayName } : {}),
-              ...(selectedChannel
-                ? { channelName: selectedChannel.displayName }
-                : {}),
-            }
-          : {}),
+    void onChangeRef
+      .current(nextDelivery)
+      .then(() => {
+        if (cancelled) return;
+        lastSavedKey.current = desiredDeliveryKey;
+        setSavedAt(new Date().toISOString());
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSaving(false);
       });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desiredDeliveryKey]);
+
+  const deliveryStatus = !enabled
+    ? saving
+      ? "Disabling delivery…"
+      : savedAt
+        ? `Delivery disabled · saved ${formatRelative(savedAt)}`
+        : "Delivery off."
+    : desiredDeliveryKey === undefined
+      ? useDefaultTarget
+        ? "Choose a default channel or switch to a custom channel."
+        : "Choose a team and channel to save delivery."
+      : saving
+        ? "Saving delivery…"
+        : savedAt
+          ? `Saved ${formatRelative(savedAt)}`
+          : "Delivery saved.";
 
   return (
     <Card>
@@ -992,7 +1051,10 @@ function AgentTeamsDeliveryCard({
           <ToggleRow
             label="Send to Teams"
             checked={enabled}
-            onChange={setEnabled}
+            onChange={(checked) => {
+              setEnabled(checked);
+              if (checked && !hasDefaultTarget) setUseDefaultTarget(false);
+            }}
             disabled={!connected}
           />
 
@@ -1094,17 +1156,14 @@ function AgentTeamsDeliveryCard({
             {error}
           </div>
         )}
-        <div className="mt-4 flex justify-end">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!canSave}
-            onClick={() => {
-              void save();
-            }}
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-border-soft)] pt-3">
+          <span
+            role="status"
+            aria-live="polite"
+            className="text-[11px] text-[var(--color-text-muted)]"
           >
-            {saving ? "Saving…" : "Save delivery"}
-          </Button>
+            {deliveryStatus}
+          </span>
         </div>
       </div>
     </Card>
@@ -1127,6 +1186,9 @@ function AgentWhatsAppWebDeliveryCard({
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  const lastSavedKey = useRef(stableDeliveryKey(delivery ?? null));
   const [enabled, setEnabled] = useState(delivery?.enabled === true);
   const [useDefaultRecipient, setUseDefaultRecipient] = useState(
     delivery?.useDefaultRecipient !== false,
@@ -1244,43 +1306,88 @@ function AgentWhatsAppWebDeliveryCard({
     recipientLabel,
     groups,
   );
-  const canSave =
-    !saving &&
-    (!enabled ||
-      (useDefaultRecipient
-        ? hasDefaultRecipient
-        : customTarget.recipient.trim().length > 0));
+  const desiredDelivery: AgentWhatsAppWebDelivery | null | undefined = !enabled
+    ? null
+    : useDefaultRecipient
+      ? hasDefaultRecipient
+        ? {
+            enabled: true,
+            useDefaultRecipient: true,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+          }
+        : undefined
+      : customTarget.recipient.trim().length > 0
+        ? {
+            enabled: true,
+            useDefaultRecipient: false,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+            recipientType: customTarget.type,
+            recipient: customTarget.recipient,
+            recipientLabel: customTarget.label,
+          }
+        : undefined;
+  const desiredDeliveryKey =
+    desiredDelivery === undefined ? undefined : stableDeliveryKey(desiredDelivery);
 
-  const save = async () => {
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    if (desiredDeliveryKey === undefined) return;
+    if (desiredDeliveryKey === lastSavedKey.current) return;
+
+    let cancelled = false;
+    const nextDelivery =
+      parseDeliveryKey<AgentWhatsAppWebDelivery>(desiredDeliveryKey);
     setSaving(true);
     setError(null);
-    try {
-      if (!enabled) {
-        await onChange(null);
-        return;
-      }
-      await onChange({
-        enabled: true,
-        useDefaultRecipient,
-        includeManualRuns,
-        includeScheduledRuns,
-        notifyOnSuccess,
-        notifyOnFailure,
-        notifyOnChangeOnly,
-        ...(!useDefaultRecipient
-          ? {
-              recipientType: customTarget.type,
-              recipient: customTarget.recipient,
-              recipientLabel: customTarget.label,
-            }
-          : {}),
+    void onChangeRef
+      .current(nextDelivery)
+      .then(() => {
+        if (cancelled) return;
+        lastSavedKey.current = desiredDeliveryKey;
+        setSavedAt(new Date().toISOString());
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSaving(false);
       });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desiredDeliveryKey]);
+
+  const deliveryStatus = !enabled
+    ? saving
+      ? "Disabling delivery…"
+      : savedAt
+        ? `Delivery disabled · saved ${formatRelative(savedAt)}`
+        : connected
+          ? "Delivery off."
+          : "Not linked."
+    : desiredDeliveryKey === undefined
+      ? useDefaultRecipient
+        ? "Choose a default target or switch to a custom target."
+        : "Choose a WhatsApp target to save delivery."
+      : saving
+        ? "Saving delivery…"
+        : savedAt
+          ? `Saved ${formatRelative(savedAt)}`
+          : "Delivery saved.";
 
   return (
     <Card>
@@ -1539,19 +1646,13 @@ function AgentWhatsAppWebDeliveryCard({
           </div>
         )}
         <div className="mt-4 flex items-center justify-between gap-3">
-          <span className="text-[11px] text-[var(--color-text-muted)]">
-            {loading ? "Checking WhatsApp Web…" : connected ? "Linked session ready." : "Not linked."}
-          </span>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!canSave}
-            onClick={() => {
-              void save();
-            }}
+          <span
+            role="status"
+            aria-live="polite"
+            className="text-[11px] text-[var(--color-text-muted)]"
           >
-            {saving ? "Saving…" : "Save delivery"}
-          </Button>
+            {loading ? "Checking WhatsApp Web…" : deliveryStatus}
+          </span>
         </div>
       </div>
     </Card>
@@ -1620,6 +1721,31 @@ function buildAgentWhatsAppTarget(
     recipient: value,
     label: "WhatsApp recipient",
   };
+}
+
+function stableDeliveryKey(delivery: unknown): string {
+  return JSON.stringify(sortSerializable(delivery ?? null));
+}
+
+function parseDeliveryKey<T>(key: string): T | null {
+  return JSON.parse(key) as T | null;
+}
+
+function sortSerializable(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortSerializable);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => [
+        key,
+        sortSerializable((value as Record<string, unknown>)[key]),
+      ]),
+  );
 }
 
 function inferWhatsAppRecipientType(
@@ -1692,6 +1818,7 @@ function RunPreflightModal({
   providerIsLocal,
   requestedScopes,
   model,
+  deliverySaving,
   onClose,
   onConfirm,
 }: {
@@ -1702,12 +1829,13 @@ function RunPreflightModal({
   providerIsLocal: boolean;
   requestedScopes: RequestedScope[];
   model: string | undefined;
+  deliverySaving: boolean;
   onClose: () => void;
   onConfirm: () => void;
 }) {
   const requestedScopeNames = new Set(requestedScopes.map((scope) => scope.name));
   const mayNeedConsent = agent.scopes.some((scope) => !requestedScopeNames.has(scope));
-  const canStart = Boolean(activeTenantName);
+  const canStart = Boolean(activeTenantName) && !deliverySaving;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -1732,6 +1860,11 @@ function RunPreflightModal({
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             This agent declares scopes that may require Microsoft incremental
             consent the first time it runs for this tenant.
+          </div>
+        )}
+        {deliverySaving && (
+          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            Saving connector delivery changes before the run starts.
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2">
@@ -1778,7 +1911,7 @@ function RunPreflightModal({
             Cancel
           </Button>
           <Button variant="primary" disabled={!canStart} onClick={onConfirm}>
-            Start run
+            {deliverySaving ? "Saving delivery…" : "Start run"}
           </Button>
         </div>
       </div>
@@ -1928,6 +2061,19 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatRelative(iso: string): string {
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return iso;
+  const diff = Date.now() - then;
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function formatDuration(run: RunRecord) {

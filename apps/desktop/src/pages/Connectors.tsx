@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ReactElement,
   type ReactNode,
@@ -48,6 +49,12 @@ type WhatsAppTargetDraft = {
   type: WhatsAppWebRecipientType;
   recipient: string;
   label: string;
+};
+type TeamsDefaultDraft = {
+  teamId: string;
+  channelId: string;
+  teamName?: string;
+  channelName?: string;
 };
 
 export default function Connectors() {
@@ -544,6 +551,11 @@ function WhatsAppWebCard({
   const [savedAt, setSavedAt] = useState<string | undefined>(undefined);
   const [sentAt, setSentAt] = useState<string | undefined>(undefined);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const lastSavedTargetKey = useRef(
+    initialTarget.recipient.trim().length > 0
+      ? stableWhatsAppTargetKey(initialTarget)
+      : undefined,
+  );
 
   const loadStatus = useCallback(async () => {
     const api = window.openAdminOS;
@@ -629,29 +641,6 @@ function WhatsAppWebCard({
     }
   }, [onRefresh]);
 
-  const saveDefault = useCallback(async () => {
-    const api = window.openAdminOS;
-    if (!api) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      const target = buildWhatsAppTarget(targetType, recipient, recipientLabel, groups);
-      await api.setConnectorConfig("whatsapp-web", {
-        defaultRecipientType: target.type,
-        defaultRecipient: target.recipient,
-        defaultRecipientLabel: target.label,
-      });
-      setRecipient(target.recipient);
-      setRecipientLabel(target.label);
-      setSavedAt(new Date().toISOString());
-      await onRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }, [groups, onRefresh, recipient, recipientLabel, targetType]);
-
   const sendTest = useCallback(async () => {
     const api = window.openAdminOS;
     if (!api) return;
@@ -715,12 +704,54 @@ function WhatsAppWebCard({
     recipientLabel,
     groups,
   );
-  const dirty =
-    selectedTarget.type !== initialTarget.type ||
-    selectedTarget.recipient !== initialTarget.recipient ||
-    selectedTarget.label !== initialTarget.label;
   const hasTarget = selectedTarget.recipient.trim().length > 0;
+  const selectedTargetKey = hasTarget
+    ? stableWhatsAppTargetKey(selectedTarget)
+    : undefined;
+  const dirty = Boolean(
+    selectedTargetKey && selectedTargetKey !== lastSavedTargetKey.current,
+  );
   const canTest = connected && hasTarget && !sending;
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api || !connected || !selectedTargetKey) return;
+    if (selectedTargetKey === lastSavedTargetKey.current) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const target = parseWhatsAppTargetKey(selectedTargetKey);
+      setSaving(true);
+      setError(undefined);
+      void (async () => {
+        try {
+          await api.setConnectorConfig("whatsapp-web", {
+            defaultRecipientType: target.type,
+            defaultRecipient: target.recipient,
+            defaultRecipientLabel: target.label,
+          });
+          if (cancelled) return;
+          lastSavedTargetKey.current = selectedTargetKey;
+          setRecipient(target.recipient);
+          setRecipientLabel(target.label);
+          setSavedAt(new Date().toISOString());
+          await onRefresh();
+        } catch (err) {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        } finally {
+          if (!cancelled) setSaving(false);
+        }
+      })();
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [connected, onRefresh, selectedTargetKey]);
+
   const qrRefreshAt = status?.qrRefreshesAt
     ? Date.parse(status.qrRefreshesAt)
     : Number.NaN;
@@ -735,13 +766,17 @@ function WhatsAppWebCard({
           Math.max(0, ((nowMs - qrIssuedAt) / (qrRefreshAt - qrIssuedAt)) * 100),
         )
       : undefined;
-  const targetStatusText = sentAt
-    ? `Test sent ${formatRelative(sentAt)}`
-    : savedAt
-      ? `Saved ${formatRelative(savedAt)}`
-      : selectedTarget.recipient
-        ? `Default target: ${selectedTarget.label}`
-        : "No default target saved yet.";
+  const targetStatusText = saving
+    ? "Saving default target…"
+    : dirty
+      ? "Saving default target automatically."
+      : sentAt
+        ? `Test sent ${formatRelative(sentAt)}`
+        : savedAt
+          ? `Saved ${formatRelative(savedAt)}`
+          : selectedTarget.recipient
+            ? `Default target: ${selectedTarget.label}`
+            : "Choose a notification target.";
   const showWhatsAppSetup = !connected || Boolean(status?.qrDataUrl);
 
   return (
@@ -1083,7 +1118,7 @@ function WhatsAppWebCard({
             >
               <span
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                  dirty
+                  saving || dirty
                     ? "bg-[var(--color-warning)]"
                     : selectedTarget.recipient
                       ? "bg-[var(--color-success)]"
@@ -1091,19 +1126,10 @@ function WhatsAppWebCard({
                 }`}
               />
               <span className="truncate">
-                {dirty ? `${targetStatusText} · Unsaved` : targetStatusText}
+                {targetStatusText}
               </span>
             </span>
             <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => void saveDefault()}
-                disabled={saving || !hasTarget || !dirty}
-              >
-                {saving ? "Saving…" : "Save"}
-              </Button>
               <Button
                 type="button"
                 variant="primary"
@@ -1269,6 +1295,14 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
     typeof summary.config.defaultChannelId === "string"
       ? summary.config.defaultChannelId
       : "";
+  const initialTeamName =
+    typeof summary.config.defaultTeamName === "string"
+      ? summary.config.defaultTeamName
+      : undefined;
+  const initialChannelName =
+    typeof summary.config.defaultChannelName === "string"
+      ? summary.config.defaultChannelName
+      : undefined;
 
   const [teams, setTeams] = useState<ConnectorTeamRef[] | undefined>(undefined);
   const [channels, setChannels] = useState<ConnectorChannelRef[] | undefined>(
@@ -1281,6 +1315,16 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [savedAt, setSavedAt] = useState<string | undefined>(undefined);
+  const lastSavedDefaultKey = useRef<string | undefined>(
+    initialTeamId && initialChannelId
+      ? stableTeamsDefaultKey({
+          teamId: initialTeamId,
+          channelId: initialChannelId,
+          ...(initialTeamName ? { teamName: initialTeamName } : {}),
+          ...(initialChannelName ? { channelName: initialChannelName } : {}),
+        })
+      : undefined,
+  );
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -1313,29 +1357,80 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
       .finally(() => setLoadingChannels(false));
   }, [teamId]);
 
-  const handleSave = useCallback(async () => {
-    const api = window.openAdminOS;
-    if (!api) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      const teamName = teams?.find((t) => t.id === teamId)?.displayName;
-      const channelName = channels?.find((c) => c.id === channelId)?.displayName;
-      await api.setConnectorConfig("teams", {
-        defaultTeamId: teamId,
-        defaultChannelId: channelId,
-        ...(teamName ? { defaultTeamName: teamName } : {}),
-        ...(channelName ? { defaultChannelName: channelName } : {}),
-      });
-      setSavedAt(new Date().toISOString());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSaving(false);
-    }
-  }, [teamId, channelId, teams, channels]);
+  const selectedTeam = teams?.find((team) => team.id === teamId);
+  const selectedChannel = channels?.find((channel) => channel.id === channelId);
+  const selectedTeamName =
+    selectedTeam?.displayName ??
+    (teamId === initialTeamId ? initialTeamName : undefined);
+  const selectedChannelName =
+    selectedChannel?.displayName ??
+    (channelId === initialChannelId ? initialChannelName : undefined);
+  const selectedDefault: TeamsDefaultDraft | undefined =
+    teamId && channelId
+      ? {
+          teamId,
+          channelId,
+          ...(selectedTeamName ? { teamName: selectedTeamName } : {}),
+          ...(selectedChannelName ? { channelName: selectedChannelName } : {}),
+        }
+      : undefined;
+  const selectedDefaultKey = selectedDefault
+    ? stableTeamsDefaultKey(selectedDefault)
+    : undefined;
+  const dirty = Boolean(
+    selectedDefaultKey && selectedDefaultKey !== lastSavedDefaultKey.current,
+  );
 
-  const dirty = teamId !== initialTeamId || channelId !== initialChannelId;
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api || !selectedDefaultKey) return;
+    if (selectedDefaultKey === lastSavedDefaultKey.current) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const target = parseTeamsDefaultKey(selectedDefaultKey);
+      setSaving(true);
+      setError(undefined);
+      void api
+        .setConnectorConfig("teams", {
+          defaultTeamId: target.teamId,
+          defaultChannelId: target.channelId,
+          ...(target.teamName ? { defaultTeamName: target.teamName } : {}),
+          ...(target.channelName
+            ? { defaultChannelName: target.channelName }
+            : {}),
+        })
+        .then(() => {
+          if (cancelled) return;
+          lastSavedDefaultKey.current = selectedDefaultKey;
+          setSavedAt(new Date().toISOString());
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setSaving(false);
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [selectedDefaultKey]);
+
+  const defaultStatusText =
+    !teamId || !channelId
+      ? "Choose a team and channel."
+      : saving
+        ? "Saving default channel…"
+        : dirty
+          ? "Saving default channel automatically."
+          : savedAt
+            ? `Saved ${formatRelative(savedAt)}`
+            : "Default channel set.";
 
   return (
     <div className="mt-2 space-y-3">
@@ -1393,28 +1488,50 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
         <p className="text-[11.5px] text-[var(--color-danger)]">{error}</p>
       )}
       <div className="flex items-center justify-between">
-        <span className="text-[11px] text-[var(--color-text-muted)]">
-          {savedAt
-            ? `Saved ${formatRelative(savedAt)}`
-            : initialTeamId && initialChannelId
-              ? "Default channel set."
-              : "No default channel saved yet."}
-        </span>
-        <Button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={!dirty || !teamId || !channelId || saving}
-          variant="primary"
-          size="sm"
+        <span
+          role="status"
+          aria-live="polite"
+          className="text-[11px] text-[var(--color-text-muted)]"
         >
-          {saving ? "Saving…" : "Save default"}
-        </Button>
+          {defaultStatusText}
+        </span>
       </div>
     </div>
   );
 }
 
 // ─── WhatsApp target helpers ──────────────────────────────────────────────
+
+function stableWhatsAppTargetKey(target: WhatsAppTargetDraft): string {
+  return JSON.stringify({
+    type: target.type,
+    recipient: target.recipient,
+    label: target.label,
+  });
+}
+
+function parseWhatsAppTargetKey(key: string): WhatsAppTargetDraft {
+  return JSON.parse(key) as WhatsAppTargetDraft;
+}
+
+function stableTeamsDefaultKey(target: TeamsDefaultDraft): string {
+  return JSON.stringify({
+    teamId: target.teamId,
+    channelId: target.channelId,
+    teamName: target.teamName ?? "",
+    channelName: target.channelName ?? "",
+  });
+}
+
+function parseTeamsDefaultKey(key: string): TeamsDefaultDraft {
+  const parsed = JSON.parse(key) as TeamsDefaultDraft;
+  return {
+    teamId: parsed.teamId,
+    channelId: parsed.channelId,
+    ...(parsed.teamName ? { teamName: parsed.teamName } : {}),
+    ...(parsed.channelName ? { channelName: parsed.channelName } : {}),
+  };
+}
 
 function readWhatsAppTargetFromConfig(
   config: Record<string, unknown>,

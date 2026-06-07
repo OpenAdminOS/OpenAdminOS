@@ -162,6 +162,46 @@ describe("post-run WhatsApp delivery", () => {
     }
   });
 
+  it("uses My WhatsApp when no explicit default target was saved", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-implicit-self-"));
+    const statePath = join(dir, "state.json");
+    const sent: Array<{ to?: string; text: string }> = [];
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [
+        deliveryAgent({ enabled: true, useDefaultRecipient: true }),
+      ],
+      runs: [completedRun("run-implicit-self")],
+      tenants: [],
+      connectors: {
+        "whatsapp-web": {
+          config: {},
+        },
+      },
+      runDeliveryQueue: [queueItem("run-implicit-self")],
+    });
+    const store = createStore({
+      statePath,
+      sendMessage: async (args) => {
+        sent.push(args);
+        return { messageId: "wa-implicit-self" };
+      },
+    });
+
+    try {
+      await store.processPendingRunDeliveries();
+      const state = await readJson(statePath);
+      const run = (state.runs as RunRecord[])[0];
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0]?.to, "self");
+      assert.equal(state.runDeliveryQueue, undefined);
+      assert.equal(run?.steps.at(-1)?.status, "completed");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("records skipped delivery rules without sending", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-skip-"));
     const statePath = join(dir, "state.json");
