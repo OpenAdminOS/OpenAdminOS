@@ -49,10 +49,12 @@ import type {
   AgentUpdateReview,
   AgentUpdateTrustChange,
   ConnectorSummary,
+  ConnectorAuditEntry,
   RequestedScope,
   RunGraphApi,
   RunLlmApi,
   RunLogLevel,
+  RunStepStatus,
   ProviderTestResult,
   StartRunOptions,
   AgentTemplate,
@@ -82,16 +84,27 @@ import type {
 import {
   deriveTrustState,
   providerCatalog,
+  resolveProviderDefaultModel,
+  resolveRunModel,
   type AgentSchedule,
   type AgentSummary,
   type AgentTeamsDelivery,
+  type AgentWhatsAppWebDelivery,
   type AppState,
   type ProviderId,
   type ProviderSummary,
   type RegistryAgentSummary,
   type RunRecord,
+  type WhatsAppWebGroupRef,
+  type WhatsAppWebSendResult,
+  type WhatsAppWebStatus,
 } from "@openadminos/agent-sdk";
 import type { PublicClientApplication } from "@azure/msal-node";
+import {
+  WHATSAPP_WEB_CONNECTOR_ID,
+  getWhatsAppWebClient,
+  type WhatsAppWebClient,
+} from "@openadminos/connector-whatsapp-web";
 
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
@@ -162,8 +175,33 @@ interface PersistedState {
       lastTestMessage?: string;
     }
   >;
+  /**
+   * Durable, local queue for post-run connector delivery. Items are
+   * enqueued when a run first reaches a terminal state and retried on
+   * app startup / scheduler ticks if the previous process exited or a
+   * transient connector failure occurred.
+   */
+  runDeliveryQueue?: RunDeliveryQueueItem[];
   /** User-overridable registry source URL. */
   registrySource?: string;
+}
+
+type RunDeliveryConnectorId = "teams" | typeof WHATSAPP_WEB_CONNECTOR_ID;
+
+interface RunDeliveryQueueItem {
+  id: string;
+  runId: string;
+  connectorId: RunDeliveryConnectorId;
+  attempts: number;
+  createdAt: string;
+  nextAttemptAt: string;
+  lastAttemptAt?: string;
+  lastError?: string;
+}
+
+interface RunDeliveryResult {
+  retryable: boolean;
+  error?: string;
 }
 
 type GraphCacheRefreshProgressEvent =
@@ -181,6 +219,17 @@ type GraphCacheRefreshProgressEvent =
       total: number;
     };
 
+type WhatsAppWebClientLike = Pick<
+  WhatsAppWebClient,
+  | "getStatus"
+  | "restoreSession"
+  | "startLogin"
+  | "disconnect"
+  | "listGroups"
+  | "sendMessage"
+  | "dispose"
+>;
+
 interface OllamaTagsResponse {
   models?: Array<{
     name?: string;
@@ -197,6 +246,8 @@ const defaultState: PersistedState = {
 const providerIds = new Set<ProviderId>(
   providerCatalog.map((provider) => provider.id),
 );
+const RUN_DELIVERY_MAX_ATTEMPTS = 3;
+const RUN_DELIVERY_RETRY_DELAYS_MS = [30_000, 120_000, 300_000] as const;
 
 /**
  * Default stats aggregator URL. Constructor option `statsApiUrl` wins;
@@ -248,6 +299,12 @@ export interface AppStateStoreOptions {
    */
   onRunFinished?(run: RunRecord): void;
   /**
+   * Fired after host-side state changes that happen outside a direct
+   * renderer request/response cycle, such as asynchronous connector
+   * delivery activity appended after a terminal run snapshot.
+   */
+  onStateChanged?(info: { reason: string; runId?: string }): void;
+  /**
    * Base URL for the install-stats aggregator. Pass `""` to disable
    * the POST entirely (the recommended setting for dev builds so we
    * don't pollute production counters). Defaults to the official
@@ -281,6 +338,11 @@ export interface AppStateStoreOptions {
     model: string | undefined,
   ): Promise<RunLlmApi> | RunLlmApi;
   /**
+   * Test hook for WhatsApp delivery/session tests. Production leaves
+   * this unset so all WhatsApp Web calls use the Baileys client.
+   */
+  whatsAppWebClientFactory?(input: { authDir: string }): WhatsAppWebClientLike;
+  /**
    * Allows localhost/private registry sources for tests and explicit
    * development workflows. Packaged builds must leave this false.
    */
@@ -294,12 +356,18 @@ export class AppStateStore {
   private readonly openBrowser: (url: string) => Promise<void>;
   private readonly userAgentsDir: string | undefined;
   private readonly onRunFinished: ((run: RunRecord) => void) | undefined;
+  private readonly onStateChanged:
+    | ((info: { reason: string; runId?: string }) => void)
+    | undefined;
   private readonly statsApiUrl: string;
   private readonly appVersion: string;
   private readonly userDataPath: string | undefined;
   private readonly intelligenceStore: IntelligenceSqliteStore | undefined;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
   private readonly llmFactory: AppStateStoreOptions["llmFactory"] | undefined;
+  private readonly whatsAppWebClientFactory:
+    | AppStateStoreOptions["whatsAppWebClientFactory"]
+    | undefined;
   private readonly allowDevRegistrySource: boolean;
   private msalClient: PublicClientApplication | undefined;
   // Soft-cancel set. While a run id is here, progress snapshots from
@@ -307,6 +375,8 @@ export class AppStateStore {
   // background driver eventually returns; we don't (yet) plumb an
   // AbortSignal through the runtime to interrupt it mid-flight.
   private readonly cancelledRunIds = new Set<string>();
+  private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
+  private deliveryQueueProcessing: Promise<void> | undefined;
 
   // Registry cache — populated by initRegistry(), falls back to
   // filesystem agents until the first successful HTTP fetch.
@@ -322,12 +392,14 @@ export class AppStateStore {
       this.openBrowser = async () => undefined;
       this.userAgentsDir = undefined;
       this.onRunFinished = undefined;
+      this.onStateChanged = undefined;
       this.statsApiUrl = "";
       this.appVersion = "0.0.0";
       this.userDataPath = undefined;
       this.intelligenceStore = undefined;
       this.graphFactory = undefined;
       this.llmFactory = undefined;
+      this.whatsAppWebClientFactory = undefined;
       this.allowDevRegistrySource = false;
     } else {
       this.filePath = options.filePath;
@@ -335,6 +407,7 @@ export class AppStateStore {
       this.openBrowser = options.openBrowser ?? (async () => undefined);
       this.userAgentsDir = options.userAgentsDir;
       this.onRunFinished = options.onRunFinished;
+      this.onStateChanged = options.onStateChanged;
       this.statsApiUrl =
         typeof options.statsApiUrl === "string"
           ? options.statsApiUrl
@@ -346,6 +419,7 @@ export class AppStateStore {
         : undefined;
       this.graphFactory = options.graphFactory;
       this.llmFactory = options.llmFactory;
+      this.whatsAppWebClientFactory = options.whatsAppWebClientFactory;
       this.allowDevRegistrySource = options.allowDevRegistrySource === true;
     }
     // Point the runtime at the OTA-updated manifest tree (if userData is
@@ -361,11 +435,55 @@ export class AppStateStore {
   }
 
   close(): void {
+    this.whatsappWebClientInstance?.dispose();
     this.intelligenceStore?.close();
   }
 
   private agentUpdatesRoot(): string | undefined {
     return this.userDataPath ? join(this.userDataPath, "agent-updates") : undefined;
+  }
+
+  private whatsAppWebAuthDir(): string {
+    return join(
+      this.userDataPath ?? dirname(this.filePath),
+      "connectors",
+      WHATSAPP_WEB_CONNECTOR_ID,
+      "auth",
+    );
+  }
+
+  private whatsAppWebClient(): WhatsAppWebClientLike {
+    if (!this.whatsappWebClientInstance) {
+      const authDir = this.whatsAppWebAuthDir();
+      this.whatsappWebClientInstance = this.whatsAppWebClientFactory
+        ? this.whatsAppWebClientFactory({ authDir })
+        : getWhatsAppWebClient({ authDir });
+    }
+    return this.whatsappWebClientInstance;
+  }
+
+  private connectorRuntimeConfig(
+    connectorId: string,
+    config: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (connectorId !== WHATSAPP_WEB_CONNECTOR_ID) return config;
+    return {
+      ...config,
+      authDir: this.whatsAppWebAuthDir(),
+    };
+  }
+
+  private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
+    const client = this.getMsalClient();
+    const openBrowser = this.openBrowser;
+    return createTenantSession({
+      client,
+      tenantId: tenant.id,
+      username: tenant.username,
+      homeAccountId: tenant.homeAccountId,
+      acquireInteractive: async (scopes) =>
+        runInteractiveFlow({ client, scopes, openBrowser }),
+    });
   }
 
   /**
@@ -598,6 +716,10 @@ export class AppStateStore {
     const activeTenant = persisted.activeTenantId
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
       : undefined;
+    const activeModel = resolveProviderDefaultModel(
+      activeProvider,
+      persisted.activeModelByProviderId,
+    ).model;
 
     const registryAgents = this.listRegistryAgents();
     const installedAgents = this.decorateInstalledWithUpdateInfo(
@@ -612,7 +734,11 @@ export class AppStateStore {
       registryAgents,
       installedAgents,
       runs: persisted.runs,
-      trust: deriveTrustState({ provider: activeProvider, activeTenant }),
+      trust: deriveTrustState({
+        provider: activeProvider,
+        activeTenant,
+        model: activeModel,
+      }),
       tenants: persisted.tenants,
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
@@ -992,8 +1118,10 @@ export class AppStateStore {
     const provider =
       providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
     const providerId = provider?.id ?? persisted.activeProviderId;
-    const selectedModel =
-      persisted.activeModelByProviderId?.[providerId] ?? provider?.defaultModel;
+    const selectedModel = resolveProviderDefaultModel(
+      provider,
+      persisted.activeModelByProviderId,
+    ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
     this.requireHostedChatConsent(input, tenant, provider, providerId);
     const planned = planChatContext(content);
@@ -1165,8 +1293,10 @@ export class AppStateStore {
     const provider =
       providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
     const providerId = provider?.id ?? persisted.activeProviderId;
-    const selectedModel =
-      persisted.activeModelByProviderId?.[providerId] ?? provider?.defaultModel;
+    const selectedModel = resolveProviderDefaultModel(
+      provider,
+      persisted.activeModelByProviderId,
+    ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
     this.requireHostedChatConsent(input, tenant, provider, providerId);
     const planned = planChatContext(content);
@@ -1655,6 +1785,11 @@ export class AppStateStore {
       };
       if (entry?.lastTestedAt) summary.lastTestedAt = entry.lastTestedAt;
       if (entry?.lastTestMessage) summary.lastTestMessage = entry.lastTestMessage;
+      if (descriptor.id === WHATSAPP_WEB_CONNECTOR_ID) {
+        const live = this.whatsAppWebClient().getStatus();
+        summary.status = whatsappWebStatusToConnectorStatus(live);
+        summary.lastTestMessage = live.message;
+      }
       return summary;
     });
   }
@@ -1675,28 +1810,22 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
-    if (!tenant) {
+    if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         "No tenant connected. Connect a Microsoft 365 tenant before testing connectors.",
       );
     }
-    const client = this.getMsalClient();
-    const openBrowser = this.openBrowser;
-    const tenantSession = createTenantSession({
-      client,
-      tenantId: tenant.id,
-      username: tenant.username,
-      homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        runInteractiveFlow({ client, scopes, openBrowser }),
-    });
+    const tenantSession = tenant
+      ? this.createTenantSessionForRecord(tenant)
+      : createLocalOnlyTenantSession();
 
     const storedConfig =
       persisted.connectors?.[connectorId]?.config ?? {};
+    const runtimeConfig = this.connectorRuntimeConfig(connectorId, storedConfig);
 
     const buildContext = {
       tenant: tenantSession,
-      config: storedConfig,
+      config: runtimeConfig,
       secrets: noSecrets,
       log: () => undefined,
       idempotencyKeyFor: (stepId: string, iteration: number) =>
@@ -1709,7 +1838,11 @@ export class AppStateStore {
       const instance = await factory.build(buildContext);
       try {
         const health = await instance.healthCheck();
-        status = health.healthy ? "connected" : "error";
+        status = health.healthy
+          ? "connected"
+          : connectorId === WHATSAPP_WEB_CONNECTOR_ID
+            ? "needs-setup"
+            : "error";
         message = health.message;
       } finally {
         await instance.dispose().catch(() => undefined);
@@ -1783,7 +1916,13 @@ export class AppStateStore {
     const stored = persisted.connectors ?? {};
     const map: Record<string, Record<string, unknown>> = {};
     for (const [id, entry] of Object.entries(stored)) {
-      map[id] = entry.config ?? {};
+      map[id] = this.connectorRuntimeConfig(id, entry.config ?? {});
+    }
+    if (!map[WHATSAPP_WEB_CONNECTOR_ID]) {
+      map[WHATSAPP_WEB_CONNECTOR_ID] = this.connectorRuntimeConfig(
+        WHATSAPP_WEB_CONNECTOR_ID,
+        {},
+      );
     }
     return map;
   }
@@ -1848,22 +1987,18 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
-    if (!tenant) {
+    if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         "No tenant connected. Connect a Microsoft 365 tenant before invoking connectors.",
       );
     }
-    const client = this.getMsalClient();
-    const openBrowser = this.openBrowser;
-    const tenantSession = createTenantSession({
-      client,
-      tenantId: tenant.id,
-      username: tenant.username,
-      homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        runInteractiveFlow({ client, scopes, openBrowser }),
-    });
-    const config = persisted.connectors?.[connectorId]?.config ?? {};
+    const tenantSession = tenant
+      ? this.createTenantSessionForRecord(tenant)
+      : createLocalOnlyTenantSession();
+    const config = this.connectorRuntimeConfig(
+      connectorId,
+      persisted.connectors?.[connectorId]?.config ?? {},
+    );
     const instance = await factory.build({
       tenant: tenantSession,
       config,
@@ -1909,6 +2044,121 @@ export class AppStateStore {
       }
       return caps.listChannels(teamId);
     });
+  }
+
+  async getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> {
+    return this.whatsAppWebClient().restoreSession(1_500);
+  }
+
+  async startWhatsAppWebLogin(): Promise<WhatsAppWebStatus> {
+    const status = await this.whatsAppWebClient().startLogin();
+    await this.persistConnectorTestStatus(
+      WHATSAPP_WEB_CONNECTOR_ID,
+      whatsappWebStatusToConnectorStatus(status),
+      status.message,
+    );
+    return status;
+  }
+
+  async disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
+    const status = await this.whatsAppWebClient().disconnect();
+    await this.persistConnectorTestStatus(
+      WHATSAPP_WEB_CONNECTOR_ID,
+      whatsappWebStatusToConnectorStatus(status),
+      status.message,
+    );
+    await this.clearWhatsAppTargetsAfterDisconnect();
+    return status;
+  }
+
+  async listWhatsAppWebGroups(): Promise<WhatsAppWebGroupRef[]> {
+    return this.whatsAppWebClient().listGroups();
+  }
+
+  async sendWhatsAppWebTestMessage(to: string): Promise<WhatsAppWebSendResult> {
+    const result = await this.whatsAppWebClient().sendMessage({
+      to,
+      text: `OpenAdminOS test notification\n\nSent ${new Date().toISOString()}.`,
+    });
+    await this.persistConnectorTestStatus(
+      WHATSAPP_WEB_CONNECTOR_ID,
+      "connected",
+      "Test WhatsApp message sent.",
+    );
+    return { messageId: result.messageId };
+  }
+
+  private async persistConnectorTestStatus(
+    connectorId: string,
+    status: ConnectorSummary["status"],
+    message?: string,
+  ): Promise<void> {
+    const lastTestedAt = new Date().toISOString();
+    await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.connectors?.[connectorId];
+      await this.write({
+        ...current,
+        connectors: {
+          ...(current.connectors ?? {}),
+          [connectorId]: {
+            config: existing?.config ?? {},
+            status,
+            lastTestedAt,
+            ...(message !== undefined ? { lastTestMessage: message } : {}),
+          },
+        },
+      });
+    });
+  }
+
+  private async clearWhatsAppTargetsAfterDisconnect(): Promise<void> {
+    const defaultConfig = {
+      defaultRecipientType: "self",
+      defaultRecipient: "self",
+      defaultRecipientLabel: "My WhatsApp",
+    };
+    await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.connectors?.[WHATSAPP_WEB_CONNECTOR_ID];
+      const nextAgents = current.installedAgents.map((agent) => {
+        const delivery = agent.delivery?.whatsappWeb;
+        if (!delivery || delivery.useDefaultRecipient !== false) return agent;
+        const restDelivery: AgentWhatsAppWebDelivery = { ...delivery };
+        delete restDelivery.recipientType;
+        delete restDelivery.recipient;
+        delete restDelivery.recipientLabel;
+        return {
+          ...agent,
+          delivery: {
+            ...agent.delivery,
+            whatsappWeb: {
+              ...restDelivery,
+              useDefaultRecipient: true,
+            },
+          },
+        };
+      });
+      const nextState: PersistedState = {
+        ...current,
+        installedAgents: nextAgents,
+        connectors: {
+          ...(current.connectors ?? {}),
+          [WHATSAPP_WEB_CONNECTOR_ID]: {
+            ...existing,
+            config: defaultConfig,
+          },
+        },
+        runDeliveryQueue: (current.runDeliveryQueue ?? []).filter(
+          (item) => item.connectorId !== WHATSAPP_WEB_CONNECTOR_ID,
+        ),
+      };
+      if (nextState.runDeliveryQueue?.length === 0) {
+        delete nextState.runDeliveryQueue;
+      }
+      await this.write(nextState);
+    });
+    this.connectorConfigCache.set(WHATSAPP_WEB_CONNECTOR_ID, defaultConfig);
   }
 
   /**
@@ -2050,6 +2300,38 @@ export class AppStateStore {
         sanitized === null
           ? removeEmptyDelivery({ ...currentDelivery, teams: undefined })
           : removeEmptyDelivery({ ...currentDelivery, teams: sanitized });
+      nextAgents[idx] = {
+        ...existing,
+        ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
+      };
+      await this.write({ ...persisted, installedAgents: nextAgents });
+    });
+
+    return this.getAppState();
+  }
+
+  async updateAgentWhatsAppWebDelivery(
+    slug: string,
+    delivery: AgentWhatsAppWebDelivery | null,
+  ): Promise<AppState> {
+    const sanitized =
+      delivery === null ? null : sanitizeWhatsAppWebDelivery(delivery);
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentWhatsAppWebDelivery: agent "${slug}" is not installed.`);
+      }
+      const existing = persisted.installedAgents[idx];
+      const nextAgents = [...persisted.installedAgents];
+      const currentDelivery = existing.delivery ?? {};
+      const nextDelivery =
+        sanitized === null
+          ? removeEmptyDelivery({ ...currentDelivery, whatsappWeb: undefined })
+          : removeEmptyDelivery({ ...currentDelivery, whatsappWeb: sanitized });
       nextAgents[idx] = {
         ...existing,
         ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
@@ -3459,30 +3741,27 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       //   3. User's pinned activeModelByProviderId[providerId] if set
       //   4. Provider's first reported model (defaultModel)
       const knownModels = activeProvider?.models ?? [];
-      const userPinnedModel =
-        persisted.activeModelByProviderId?.[providerId] ?? undefined;
-      let model: string | undefined;
-      if (typeof options.model === "string" && options.model.length > 0) {
-        if (knownModels.length > 0 && !knownModels.includes(options.model)) {
+      const explicitModel =
+        typeof options.model === "string" && options.model.length > 0
+          ? options.model
+          : undefined;
+      if (explicitModel) {
+        if (knownModels.length > 0 && !knownModels.includes(explicitModel)) {
           const recovery =
             activeProvider?.id === "ollama"
-              ? ` Pull it with \`ollama pull ${options.model}\` and try again.`
+              ? ` Pull it with \`ollama pull ${explicitModel}\` and try again.`
               : " Pick one of the models reported by the provider and try again.";
           throw new Error(
-            `Model "${options.model}" is not available for ${activeProvider?.name ?? providerId}.${recovery}`,
+            `Model "${explicitModel}" is not available for ${activeProvider?.name ?? providerId}.${recovery}`,
           );
         }
-        model = options.model;
-      } else if (
-        agent.preferredModel &&
-        knownModels.includes(agent.preferredModel)
-      ) {
-        model = agent.preferredModel;
-      } else if (userPinnedModel && knownModels.includes(userPinnedModel)) {
-        model = userPinnedModel;
-      } else {
-        model = activeProvider?.defaultModel;
       }
+      const model = resolveRunModel({
+        provider: activeProvider,
+        activeModelByProviderId: persisted.activeModelByProviderId,
+        preferredModel: agent.preferredModel,
+        explicitModel,
+      }).model;
 
       // Preflight the LLM provider so a clearly-actionable error is
       // returned to the renderer synchronously instead of a queued
@@ -3655,7 +3934,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         providers.find((provider) => provider.id === persisted.activeProviderId) ??
         providers[0];
       const providerId = run.providerId ?? activeProvider?.id ?? persisted.activeProviderId;
-      const model = run.model ?? activeProvider?.defaultModel;
+      const model =
+        run.model ??
+        resolveProviderDefaultModel(
+          activeProvider,
+          persisted.activeModelByProviderId,
+        ).model;
 
       return { agent, providerId, model, updated };
     });
@@ -3939,8 +4223,157 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
     });
     if (deliveryCandidate) {
-      void this.deliverRunToTeams(deliveryCandidate);
+      await this.enqueueRunDeliveries(deliveryCandidate);
+      void this.processPendingRunDeliveries();
     }
+  }
+
+  async processPendingRunDeliveries(): Promise<void> {
+    if (this.deliveryQueueProcessing) return this.deliveryQueueProcessing;
+    this.deliveryQueueProcessing = this.processRunDeliveryQueue().finally(() => {
+      this.deliveryQueueProcessing = undefined;
+    });
+    return this.deliveryQueueProcessing;
+  }
+
+  private async enqueueRunDeliveries(run: RunRecord): Promise<void> {
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    if (!agent) return;
+    const connectorIds: RunDeliveryConnectorId[] = [];
+    if (agent.delivery?.teams?.enabled) connectorIds.push("teams");
+    if (agent.delivery?.whatsappWeb?.enabled) {
+      connectorIds.push(WHATSAPP_WEB_CONNECTOR_ID);
+    }
+    if (connectorIds.length === 0) return;
+
+    const now = new Date().toISOString();
+    await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.runDeliveryQueue ?? [];
+      const existingIds = new Set(existing.map((item) => item.id));
+      const additions = connectorIds
+        .map((connectorId): RunDeliveryQueueItem => ({
+          id: `${run.id}:${connectorId}`,
+          runId: run.id,
+          connectorId,
+          attempts: 0,
+          createdAt: now,
+          nextAttemptAt: now,
+        }))
+        .filter((item) => !existingIds.has(item.id));
+      if (additions.length === 0) return;
+      await this.write({
+        ...current,
+        runDeliveryQueue: [...existing, ...additions],
+      });
+    });
+  }
+
+  private async processRunDeliveryQueue(): Promise<void> {
+    for (;;) {
+      const item = await this.claimDueRunDelivery();
+      if (!item) return;
+      const result = await this.processRunDeliveryItem(item);
+      if (result.retryable && item.attempts < RUN_DELIVERY_MAX_ATTEMPTS) {
+        await this.rescheduleRunDelivery(item, result.error);
+      } else {
+        await this.removeRunDelivery(item.id);
+      }
+    }
+  }
+
+  private async claimDueRunDelivery(): Promise<RunDeliveryQueueItem | undefined> {
+    const now = new Date();
+    let claimed: RunDeliveryQueueItem | undefined;
+    await this.serialize(async () => {
+      const current = await this.read();
+      const queue = current.runDeliveryQueue ?? [];
+      const index = queue.findIndex((item) => {
+        if (item.attempts >= RUN_DELIVERY_MAX_ATTEMPTS) return false;
+        const dueAt = new Date(item.nextAttemptAt).getTime();
+        return !Number.isFinite(dueAt) || dueAt <= now.getTime();
+      });
+      if (index < 0) return;
+      const item = queue[index];
+      if (!item) return;
+      const attempts = item.attempts + 1;
+      const claimedItem: RunDeliveryQueueItem = {
+        ...item,
+        attempts,
+        lastAttemptAt: now.toISOString(),
+        nextAttemptAt: new Date(
+          now.getTime() + retryDelayForAttempt(attempts),
+        ).toISOString(),
+      };
+      const nextQueue = [...queue];
+      nextQueue[index] = claimedItem;
+      claimed = claimedItem;
+      await this.write({ ...current, runDeliveryQueue: nextQueue });
+    });
+    return claimed;
+  }
+
+  private async processRunDeliveryItem(
+    item: RunDeliveryQueueItem,
+  ): Promise<RunDeliveryResult> {
+    const persisted = await this.read();
+    const run = persisted.runs.find((candidate) => candidate.id === item.runId);
+    if (!run || !isTerminalRunStatus(run.status)) {
+      return { retryable: false };
+    }
+    try {
+      return item.connectorId === "teams"
+        ? await this.deliverRunToTeams(run)
+        : await this.deliverRunToWhatsAppWeb(run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.appendRunLog(
+        item.runId,
+        "warn",
+        `Run delivery failed: ${message}`,
+      );
+      return { retryable: true, error: message };
+    }
+  }
+
+  private async rescheduleRunDelivery(
+    item: RunDeliveryQueueItem,
+    error?: string,
+  ): Promise<void> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      const nextQueue = (current.runDeliveryQueue ?? []).map((queued) =>
+        queued.id === item.id
+          ? {
+              ...queued,
+              attempts: item.attempts,
+              nextAttemptAt: item.nextAttemptAt,
+              ...(item.lastAttemptAt ? { lastAttemptAt: item.lastAttemptAt } : {}),
+              ...(error ? { lastError: error } : {}),
+            }
+          : queued,
+      );
+      await this.write({ ...current, runDeliveryQueue: nextQueue });
+    });
+  }
+
+  private async removeRunDelivery(id: string): Promise<void> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      const nextQueue = (current.runDeliveryQueue ?? []).filter(
+        (item) => item.id !== id,
+      );
+      const nextState: PersistedState = { ...current };
+      if (nextQueue.length > 0) {
+        nextState.runDeliveryQueue = nextQueue;
+      } else {
+        delete nextState.runDeliveryQueue;
+      }
+      await this.write(nextState);
+    });
   }
 
   private withScheduleChangeState(run: RunRecord, runs: RunRecord[]): RunRecord {
@@ -3961,30 +4394,75 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
   }
 
-  private async deliverRunToTeams(run: RunRecord): Promise<void> {
+  private async deliverRunToTeams(run: RunRecord): Promise<RunDeliveryResult> {
     const persisted = await this.read();
     const agent = persisted.installedAgents.find(
       (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
     );
     const delivery = agent?.delivery?.teams;
-    if (!agent || !shouldDeliverRunToTeams(run, delivery)) return;
+    if (!agent || !delivery?.enabled) return { retryable: false };
+
+    const evaluation = evaluateRunDeliveryRule(run, delivery, "Microsoft Teams");
+    if (!evaluation.shouldSend) {
+      await this.appendRunStep(run.id, {
+        label: "Microsoft Teams notification not sent",
+        status: "skipped",
+        detail: evaluation.detail,
+      });
+      await this.appendRunLog(
+        run.id,
+        "info",
+        `Teams delivery skipped: ${evaluation.detail}`,
+        { connectorId: "teams" },
+      );
+      return { retryable: false };
+    }
 
     const tenantId = run.tenantId ?? persisted.activeTenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
+    const baseConfig = persisted.connectors?.teams?.config ?? {};
+    const targetLabel = teamsDeliveryTargetLabel(delivery, baseConfig);
+    const stepId = await this.appendRunStep(run.id, {
+      label: "Send run report to Microsoft Teams",
+      status: "running",
+      detail: `${evaluation.detail} Target: ${targetLabel}.`,
+    });
+
     if (!tenant) {
-      await this.appendRunLog(run.id, "warn", "Teams delivery skipped: no tenant session available.");
-      return;
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No tenant session was available for Microsoft Teams delivery.",
+      );
+      await this.appendRunLog(run.id, "warn", "Teams delivery failed: no tenant session available.", {
+        connectorId: "teams",
+      });
+      return {
+        retryable: false,
+        error: "No tenant session was available for Microsoft Teams delivery.",
+      };
     }
 
     const factory = findConnectorFactory("teams");
     if (!factory) {
-      await this.appendRunLog(run.id, "warn", "Teams delivery skipped: Teams connector is not registered.");
-      return;
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "Microsoft Teams connector is not registered.",
+      );
+      await this.appendRunLog(run.id, "warn", "Teams delivery failed: Teams connector is not registered.", {
+        connectorId: "teams",
+      });
+      return {
+        retryable: false,
+        error: "Microsoft Teams connector is not registered.",
+      };
     }
 
-    const baseConfig = persisted.connectors?.teams?.config ?? {};
     const config =
       delivery?.useDefaultTarget === false
         ? {
@@ -4007,16 +4485,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         runInteractiveFlow({ client, scopes, openBrowser }),
     });
 
-    const instance = await factory.build({
-      tenant: tenantSession,
-      config,
-      secrets: noSecrets,
-      log: () => undefined,
-      idempotencyKeyFor: (stepId, iteration) =>
-        `${run.id}:teams-delivery:${stepId}:${iteration}`,
-    });
-
+    let instance: Awaited<ReturnType<typeof factory.build>> | undefined;
     try {
+      instance = await factory.build({
+        tenant: tenantSession,
+        config,
+        secrets: noSecrets,
+        log: () => undefined,
+        idempotencyKeyFor: (stepId, iteration) =>
+          `${run.id}:teams-delivery:${stepId}:${iteration}`,
+      });
       const capabilities = instance.capabilities as {
         postChannelMessage?: (args: {
           teamId?: string;
@@ -4027,27 +4505,201 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (typeof capabilities.postChannelMessage !== "function") {
         throw new Error("Teams connector does not expose postChannelMessage.");
       }
-      await capabilities.postChannelMessage({
+      const markdown = formatTeamsDeliveryMessage(run, agent, tenant);
+      const auditStartedAt = Date.now();
+      const result = await capabilities.postChannelMessage({
         ...(delivery?.useDefaultTarget === false && delivery.teamId
           ? { teamId: delivery.teamId }
           : {}),
         ...(delivery?.useDefaultTarget === false && delivery.channelId
           ? { channelId: delivery.channelId }
           : {}),
-        markdown: formatTeamsDeliveryMessage(run, agent, tenant),
+        markdown,
       });
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: "teams",
+        capability: "post-channel-message@1",
+        idempotencyKey: `${run.id}:${stepId}:post-channel-message:0`,
+        egressTarget: targetLabel,
+        args: { target: targetLabel, markdown },
+        status: "success",
+        startedAt: auditStartedAt,
+        result,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "completed",
+        `Run report sent to ${targetLabel}.`,
+      );
       await this.appendRunLog(run.id, "info", "Run report delivered to Microsoft Teams.", {
         connectorId: "teams",
+        connectorAudit: audit as unknown as Record<string, unknown>,
       });
+      return { retryable: false };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: "teams",
+        capability: "post-channel-message@1",
+        idempotencyKey: `${run.id}:${stepId}:post-channel-message:0`,
+        egressTarget: targetLabel,
+        args: { target: targetLabel },
+        status: "failure",
+        startedAt: Date.now(),
+        error,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        `Microsoft Teams delivery failed: ${message}`,
+      );
       await this.appendRunLog(
         run.id,
         "warn",
-        `Teams delivery failed: ${error instanceof Error ? error.message : String(error)}`,
-        { connectorId: "teams" },
+        `Teams delivery failed: ${message}`,
+        {
+          connectorId: "teams",
+          connectorAudit: audit as unknown as Record<string, unknown>,
+        },
       );
+      return { retryable: true, error: message };
     } finally {
-      await instance.dispose().catch(() => undefined);
+      await instance?.dispose().catch(() => undefined);
+    }
+  }
+
+  private async deliverRunToWhatsAppWeb(run: RunRecord): Promise<RunDeliveryResult> {
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    const delivery = agent?.delivery?.whatsappWeb;
+    if (!agent || !delivery?.enabled) return { retryable: false };
+
+    const evaluation = evaluateRunDeliveryRule(run, delivery, "WhatsApp");
+    if (!evaluation.shouldSend) {
+      await this.appendRunStep(run.id, {
+        label: "WhatsApp notification not sent",
+        status: "skipped",
+        detail: evaluation.detail,
+      });
+      await this.appendRunLog(
+        run.id,
+        "info",
+        `WhatsApp delivery skipped: ${evaluation.detail}`,
+        { connectorId: WHATSAPP_WEB_CONNECTOR_ID },
+      );
+      return { retryable: false };
+    }
+
+    const config = persisted.connectors?.[WHATSAPP_WEB_CONNECTOR_ID]?.config ?? {};
+    const recipient =
+      delivery.useDefaultRecipient === false
+        ? delivery.recipient
+        : resolveWhatsAppDefaultRecipient(config);
+    const targetLabel = whatsAppDeliveryTargetLabel(delivery, config);
+    const stepId = await this.appendRunStep(run.id, {
+      label: "Send run report to WhatsApp",
+      status: "running",
+      detail: `${evaluation.detail} Target: ${targetLabel}.`,
+    });
+
+    if (!recipient) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No WhatsApp notification target is configured.",
+      );
+      await this.appendRunLog(
+        run.id,
+        "warn",
+        "WhatsApp delivery failed: no target configured.",
+        { connectorId: WHATSAPP_WEB_CONNECTOR_ID },
+      );
+      return {
+        retryable: false,
+        error: "No WhatsApp notification target is configured.",
+      };
+    }
+
+    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    const tenant = tenantId
+      ? persisted.tenants.find((candidate) => candidate.id === tenantId)
+      : undefined;
+
+    try {
+      const text = formatWhatsAppDeliveryMessage(run, agent, tenant);
+      const auditStartedAt = Date.now();
+      const result = await this.whatsAppWebClient().sendMessage({
+        to: recipient,
+        text,
+      });
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: WHATSAPP_WEB_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey: `${run.id}:${stepId}:send-message:0`,
+        egressTarget: `${WHATSAPP_WEB_CONNECTOR_ID}:to=redacted`,
+        args: { to: "redacted", text },
+        status: "success",
+        startedAt: auditStartedAt,
+        result,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "completed",
+        `Run report sent to ${targetLabel}.`,
+      );
+      await this.appendRunLog(
+        run.id,
+        "info",
+        "Run report delivered to WhatsApp Web.",
+        {
+          connectorId: WHATSAPP_WEB_CONNECTOR_ID,
+          messageId: result.messageId,
+          connectorAudit: audit as unknown as Record<string, unknown>,
+        },
+      );
+      return { retryable: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: WHATSAPP_WEB_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey: `${run.id}:${stepId}:send-message:0`,
+        egressTarget: `${WHATSAPP_WEB_CONNECTOR_ID}:to=redacted`,
+        args: { to: "redacted" },
+        status: "failure",
+        startedAt: Date.now(),
+        error,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        `WhatsApp delivery failed: ${message}`,
+      );
+      await this.appendRunLog(
+        run.id,
+        "warn",
+        `WhatsApp delivery failed: ${message}`,
+        {
+          connectorId: WHATSAPP_WEB_CONNECTOR_ID,
+          connectorAudit: audit as unknown as Record<string, unknown>,
+        },
+      );
+      return { retryable: true, error: message };
     }
   }
 
@@ -4080,6 +4732,86 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       );
       await this.write({ ...persisted, runs: nextRuns });
     });
+    this.emitStateChanged("run-log-appended", runId);
+  }
+
+  private async appendRunStep(
+    runId: string,
+    input: {
+      label: string;
+      status: RunStepStatus;
+      detail?: string;
+    },
+  ): Promise<string> {
+    const stepId = `step_delivery_${randomUUID().slice(0, 8)}`;
+    const timestamp = new Date().toISOString();
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const nextRuns = persisted.runs.map((run) =>
+        run.id === runId
+          ? {
+              ...run,
+              steps: [
+                ...run.steps,
+                {
+                  id: stepId,
+                  runId,
+                  label: input.label,
+                  status: input.status,
+                  ...(input.detail ? { detail: input.detail } : {}),
+                  startedAt: timestamp,
+                  ...(input.status === "running" ? {} : { finishedAt: timestamp }),
+                },
+              ],
+            }
+          : run,
+      );
+      await this.write({ ...persisted, runs: nextRuns });
+    });
+    this.emitStateChanged("run-step-appended", runId);
+    return stepId;
+  }
+
+  private async finishRunStep(
+    runId: string,
+    stepId: string,
+    status: Extract<RunStepStatus, "completed" | "failed" | "skipped">,
+    detail?: string,
+  ): Promise<void> {
+    const finishedAt = new Date().toISOString();
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const nextRuns = persisted.runs.map((run) =>
+        run.id === runId
+          ? {
+              ...run,
+              steps: run.steps.map((step) =>
+                step.id === stepId
+                  ? {
+                      ...step,
+                      status,
+                      finishedAt,
+                      ...(detail ? { detail } : {}),
+                    }
+                  : step,
+              ),
+            }
+          : run,
+      );
+      await this.write({ ...persisted, runs: nextRuns });
+    });
+    this.emitStateChanged("run-step-updated", runId);
+  }
+
+  private emitStateChanged(reason: string, runId?: string): void {
+    try {
+      this.onStateChanged?.({
+        reason,
+        ...(runId ? { runId } : {}),
+      });
+    } catch (error) {
+      console.error("[state] onStateChanged listener failed", error);
+    }
   }
 
   /**
@@ -4224,6 +4956,55 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           state.connectors = sanitized;
         }
       }
+      const rawDeliveryQueue = (parsed as { runDeliveryQueue?: unknown })
+        .runDeliveryQueue;
+      if (Array.isArray(rawDeliveryQueue)) {
+        const sanitizedQueue = rawDeliveryQueue
+          .map((entry): RunDeliveryQueueItem | undefined => {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+              return undefined;
+            }
+            const obj = entry as Record<string, unknown>;
+            const connectorId =
+              obj.connectorId === "teams" ||
+              obj.connectorId === WHATSAPP_WEB_CONNECTOR_ID
+                ? obj.connectorId
+                : undefined;
+            if (
+              typeof obj.id !== "string" ||
+              typeof obj.runId !== "string" ||
+              !connectorId ||
+              typeof obj.createdAt !== "string" ||
+              typeof obj.nextAttemptAt !== "string"
+            ) {
+              return undefined;
+            }
+            const attempts =
+              typeof obj.attempts === "number" &&
+              Number.isFinite(obj.attempts) &&
+              obj.attempts >= 0
+                ? Math.floor(obj.attempts)
+                : 0;
+            return {
+              id: obj.id,
+              runId: obj.runId,
+              connectorId,
+              attempts,
+              createdAt: obj.createdAt,
+              nextAttemptAt: obj.nextAttemptAt,
+              ...(typeof obj.lastAttemptAt === "string"
+                ? { lastAttemptAt: obj.lastAttemptAt }
+                : {}),
+              ...(typeof obj.lastError === "string"
+                ? { lastError: obj.lastError }
+                : {}),
+            };
+          })
+          .filter((entry): entry is RunDeliveryQueueItem => entry !== undefined);
+        if (sanitizedQueue.length > 0) {
+          state.runDeliveryQueue = sanitizedQueue;
+        }
+      }
       this.lastReadSnapshot = state;
       return state;
     }
@@ -4332,6 +5113,17 @@ function isTerminalRunStatus(status: RunRecord["status"]): boolean {
   );
 }
 
+function retryDelayForAttempt(attempts: number): number {
+  const fallback =
+    RUN_DELIVERY_RETRY_DELAYS_MS[RUN_DELIVERY_RETRY_DELAYS_MS.length - 1] ??
+    300_000;
+  return (
+    RUN_DELIVERY_RETRY_DELAYS_MS[
+      Math.min(Math.max(attempts - 1, 0), RUN_DELIVERY_RETRY_DELAYS_MS.length - 1)
+    ] ?? fallback
+  );
+}
+
 function sanitizeTeamsDelivery(delivery: AgentTeamsDelivery): AgentTeamsDelivery {
   if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
     throw new Error("updateAgentTeamsDelivery: delivery must be an object or null.");
@@ -4360,29 +5152,264 @@ function sanitizeTeamsDelivery(delivery: AgentTeamsDelivery): AgentTeamsDelivery
   return sanitized;
 }
 
+function sanitizeWhatsAppWebDelivery(
+  delivery: AgentWhatsAppWebDelivery,
+): AgentWhatsAppWebDelivery {
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+    throw new Error(
+      "updateAgentWhatsAppWebDelivery: delivery must be an object or null.",
+    );
+  }
+  const useDefaultRecipient = delivery.useDefaultRecipient !== false;
+  const sanitized: AgentWhatsAppWebDelivery = {
+    enabled: delivery.enabled === true,
+    useDefaultRecipient,
+    includeManualRuns: delivery.includeManualRuns ?? true,
+    includeScheduledRuns: delivery.includeScheduledRuns ?? true,
+    notifyOnSuccess: delivery.notifyOnSuccess ?? true,
+    notifyOnFailure: delivery.notifyOnFailure ?? false,
+    notifyOnChangeOnly: delivery.notifyOnChangeOnly ?? false,
+  };
+  if (!useDefaultRecipient) {
+    const recipient = delivery.recipient?.trim();
+    if (!recipient) {
+      throw new Error(
+        "updateAgentWhatsAppWebDelivery: recipient is required when not using the default WhatsApp recipient.",
+      );
+    }
+    sanitized.recipient = recipient;
+    const type = sanitizeWhatsAppRecipientType(delivery.recipientType, recipient);
+    if (type) sanitized.recipientType = type;
+    const label = delivery.recipientLabel?.trim();
+    sanitized.recipientLabel =
+      label && label !== recipient
+        ? label
+        : type === "self"
+          ? "My WhatsApp"
+          : type === "group"
+            ? "WhatsApp group"
+            : "WhatsApp recipient";
+  }
+  return sanitized;
+}
+
+function resolveWhatsAppDefaultRecipient(config: Record<string, unknown>): string {
+  const type =
+    typeof config.defaultRecipientType === "string"
+      ? config.defaultRecipientType
+      : undefined;
+  if (type === "self") return "self";
+  const recipient =
+    typeof config.defaultRecipient === "string"
+      ? config.defaultRecipient.trim()
+      : "";
+  return recipient || "self";
+}
+
+function sanitizeWhatsAppRecipientType(
+  type: unknown,
+  recipient: string,
+): AgentWhatsAppWebDelivery["recipientType"] {
+  if (type === "self" || type === "group" || type === "manual") return type;
+  if (recipient === "self") return "self";
+  if (recipient.endsWith("@g.us")) return "group";
+  return "manual";
+}
+
 function removeEmptyDelivery(
   delivery: NonNullable<AgentSummary["delivery"]>,
 ): AgentSummary["delivery"] {
-  return delivery.teams ? delivery : undefined;
+  return delivery.teams || delivery.whatsappWeb ? delivery : undefined;
 }
 
-function shouldDeliverRunToTeams(
+interface DeliveryRuleSettings {
+  includeManualRuns?: boolean;
+  includeScheduledRuns?: boolean;
+  notifyOnSuccess?: boolean;
+  notifyOnFailure?: boolean;
+  notifyOnChangeOnly?: boolean;
+}
+
+interface DeliveryRuleEvaluation {
+  shouldSend: boolean;
+  detail: string;
+}
+
+function evaluateRunDeliveryRule(
   run: RunRecord,
-  delivery: AgentTeamsDelivery | undefined,
-): delivery is AgentTeamsDelivery {
-  if (!delivery?.enabled) return false;
-  if (run.status !== "completed" && run.status !== "failed") return false;
+  delivery: DeliveryRuleSettings,
+  connectorName: string,
+): DeliveryRuleEvaluation {
+  const triggerLabel = run.trigger === "schedule" ? "scheduled" : "manual";
+  if (run.status !== "completed" && run.status !== "failed") {
+    return {
+      shouldSend: false,
+      detail: `${connectorName} delivery only runs after completed or failed runs.`,
+    };
+  }
   if (run.trigger === "schedule") {
-    if (delivery.includeScheduledRuns === false) return false;
+    if (delivery.includeScheduledRuns === false) {
+      return {
+        shouldSend: false,
+        detail: `${connectorName} delivery is disabled for scheduled runs.`,
+      };
+    }
     if (delivery.notifyOnChangeOnly === true && run.changeState === "unchanged") {
-      return false;
+      return {
+        shouldSend: false,
+        detail: `${connectorName} delivery is configured only when scheduled findings change; this run was unchanged.`,
+      };
     }
   } else if (delivery.includeManualRuns === false) {
-    return false;
+    return {
+      shouldSend: false,
+      detail: `${connectorName} delivery is disabled for manual runs.`,
+    };
   }
-  if (run.status === "completed" && delivery.notifyOnSuccess === false) return false;
-  if (run.status === "failed" && delivery.notifyOnFailure !== true) return false;
-  return true;
+  if (run.status === "completed" && delivery.notifyOnSuccess === false) {
+    return {
+      shouldSend: false,
+      detail:
+        delivery.notifyOnFailure === true
+          ? `${connectorName} delivery is configured for failed runs only; this run completed.`
+          : `${connectorName} delivery is not configured for completed runs.`,
+    };
+  }
+  if (run.status === "failed" && delivery.notifyOnFailure !== true) {
+    return {
+      shouldSend: false,
+      detail:
+        delivery.notifyOnSuccess !== false
+          ? `${connectorName} delivery is configured for completed runs only; this run failed.`
+          : `${connectorName} delivery is not configured for failed runs.`,
+    };
+  }
+  return {
+    shouldSend: true,
+    detail: `${connectorName} delivery rule matched this ${triggerLabel} ${run.status} run.`,
+  };
+}
+
+function teamsDeliveryTargetLabel(
+  delivery: AgentTeamsDelivery,
+  config: Record<string, unknown>,
+): string {
+  if (delivery.useDefaultTarget === false) {
+    return formatTeamsTargetLabel(delivery.teamName, delivery.channelName);
+  }
+  return formatTeamsTargetLabel(
+    readConfigLabel(config, "defaultTeamName"),
+    readConfigLabel(config, "defaultChannelName"),
+  );
+}
+
+function formatTeamsTargetLabel(
+  teamName: string | undefined,
+  channelName: string | undefined,
+): string {
+  if (teamName && channelName) return `${teamName} -> #${channelName}`;
+  if (channelName) return `#${channelName}`;
+  if (teamName) return teamName;
+  return "configured Teams channel";
+}
+
+function whatsAppDeliveryTargetLabel(
+  delivery: AgentWhatsAppWebDelivery,
+  config: Record<string, unknown>,
+): string {
+  if (delivery.useDefaultRecipient === false) {
+    return delivery.recipientLabel?.trim() || "WhatsApp recipient";
+  }
+  const label = readConfigLabel(config, "defaultRecipientLabel");
+  if (label) return label;
+  const type = readConfigLabel(config, "defaultRecipientType");
+  const recipient = readConfigLabel(config, "defaultRecipient");
+  if (type === "self" || !recipient) return "My WhatsApp";
+  if (type === "group" || recipient.endsWith("@g.us")) return "WhatsApp group";
+  return "WhatsApp recipient";
+}
+
+function readConfigLabel(
+  config: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = config[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+function createDeliveryAuditEntry(input: {
+  runId: string;
+  stepId: string;
+  connector: string;
+  capability: string;
+  idempotencyKey: string;
+  egressTarget: string;
+  args: unknown;
+  status: ConnectorAuditEntry["status"];
+  startedAt: number;
+  result?: unknown;
+  error?: unknown;
+}): ConnectorAuditEntry {
+  const refs = extractConnectorRefs(input.result);
+  const errorMessage =
+    input.error instanceof Error
+      ? input.error.message
+      : input.error !== undefined
+        ? String(input.error)
+        : undefined;
+  return {
+    runId: input.runId,
+    stepId: input.stepId,
+    connector: input.connector,
+    capability: input.capability,
+    kind: "notify",
+    idempotencyKey: input.idempotencyKey,
+    egressTarget: input.egressTarget,
+    argsDigest: digestDeliveryArgs(input.args),
+    status: input.status,
+    durationMs: Math.max(0, Date.now() - input.startedAt),
+    ...(refs.externalId ? { externalId: refs.externalId } : {}),
+    ...(refs.externalUrl ? { externalUrl: refs.externalUrl } : {}),
+    ...(input.status === "failure" ? { errorClass: "Error" } : {}),
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}
+
+function digestDeliveryArgs(args: unknown): string {
+  try {
+    return createHash("sha256")
+      .update(JSON.stringify(args) ?? "null")
+      .digest("hex")
+      .slice(0, 16);
+  } catch {
+    return "unhashable";
+  }
+}
+
+function extractConnectorRefs(result: unknown): {
+  externalId?: string;
+  externalUrl?: string;
+} {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return {};
+  const obj = result as Record<string, unknown>;
+  const externalId =
+    typeof obj.messageId === "string"
+      ? obj.messageId
+      : typeof obj.id === "string"
+        ? obj.id
+        : undefined;
+  const externalUrl =
+    typeof obj.webUrl === "string"
+      ? obj.webUrl
+      : typeof obj.url === "string"
+        ? obj.url
+        : undefined;
+  return {
+    ...(externalId ? { externalId } : {}),
+    ...(externalUrl ? { externalUrl } : {}),
+  };
 }
 
 function formatTeamsDeliveryMessage(
@@ -4420,6 +5447,71 @@ function formatTeamsDeliveryMessage(
     }
   }
   return lines.join("\n");
+}
+
+function formatWhatsAppDeliveryMessage(
+  run: RunRecord,
+  agent: AgentSummary,
+  tenant: TenantRecord | undefined,
+): string {
+  const status = run.status === "completed" ? "Completed" : "Failed";
+  const lines = [
+    "*OpenAdminOS run report*",
+    "",
+    `Agent: ${agent.name}`,
+    `Status: ${status}`,
+    `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
+    `Queued: ${run.queuedAt}`,
+  ];
+  if (run.changeState) {
+    lines.push(`Finding state: ${run.changeState}`);
+  }
+  if (run.providerId) {
+    lines.push(`Model: ${run.providerId}${run.model ? ` · ${run.model}` : ""}`);
+  }
+  if (run.error) {
+    lines.push("", "*Error*", truncateForDelivery(run.error, 1200));
+  }
+  if (run.summary) {
+    lines.push("", "*Summary*", truncateForDelivery(run.summary, 2400));
+  }
+  if (run.steps.length > 0) {
+    lines.push("", "*Pipeline*");
+    for (const step of run.steps.slice(0, 12)) {
+      lines.push(`- ${step.status}: ${step.label}`);
+    }
+    if (run.steps.length > 12) {
+      lines.push(`- ${run.steps.length - 12} more steps`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function truncateForDelivery(value: string, maxLength: number): string {
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function whatsappWebStatusToConnectorStatus(
+  status: WhatsAppWebStatus,
+): ConnectorSummary["status"] {
+  if (status.state === "connected") return "connected";
+  if (status.state === "error") return "error";
+  return "needs-setup";
+}
+
+function createLocalOnlyTenantSession(): TenantSession {
+  return {
+    tenantId: "local-device",
+    username: "local-device",
+    async acquireTokenForScopes(_scopes: string[]): Promise<string> {
+      throw new Error(
+        "This connector is not running with an active Microsoft 365 tenant session.",
+      );
+    },
+  };
 }
 
 function fingerprintRunOutput(run: RunRecord): string {

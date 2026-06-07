@@ -17,7 +17,11 @@ import {
   IconTrend,
 } from "../components/icons";
 import type { Agent } from "../types";
-import type { AgentSummary } from "../shared/openAdminOS";
+import {
+  deriveTrustState,
+  resolveProviderDefaultModel,
+  type AgentSummary,
+} from "../shared/openAdminOS";
 import { useAppState } from "../state";
 
 export default function AgentsHome() {
@@ -60,8 +64,20 @@ export default function AgentsHome() {
   const activeProvider = state.providers.find(
     (provider) => provider.id === state.activeProviderId,
   );
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    : undefined;
+  const activeModel = resolveProviderDefaultModel(
+    activeProvider,
+    state.activeModelByProviderId,
+  ).model;
+  const activeTrust = deriveTrustState({
+    provider: activeProvider,
+    activeTenant,
+    model: activeModel,
+  });
   const displayAgents = state.installedAgents.map((agent) =>
-    toDisplayAgent(agent, state.runs, activeProvider?.defaultModel),
+    toDisplayAgent(agent, state.runs, activeModel),
   );
 
   const filtered = displayAgents.filter(
@@ -75,7 +91,7 @@ export default function AgentsHome() {
   // The trust label already encodes "{provider} · tenant {name}" — don't
   // append the provider name again or duplicate the tenant in a sibling
   // span. One pill, no echo.
-  const providerLabel = state.trust.label;
+  const providerLabel = activeTrust.label;
 
   return (
     <>
@@ -85,7 +101,7 @@ export default function AgentsHome() {
           <span className="inline-flex items-center gap-2">
             <span>{state.installedAgents.length} installed</span>
             <span className="opacity-50">·</span>
-            <Pill tone={state.trust.isLocal ? "success" : "warning"}>
+            <Pill tone={activeTrust.isLocal ? "success" : "warning"}>
               <IconHardDrive size={10} /> {providerLabel}
             </Pill>
           </span>
@@ -246,11 +262,11 @@ export default function AgentsHome() {
                     className="text-[var(--color-success)]"
                   />
                   <span className="text-[12.5px] font-medium text-[var(--color-text)]">
-                    {state.trust.label}
+                    {activeTrust.label}
                   </span>
                 </div>
                 <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
-                  {state.trust.detail}
+                  {activeTrust.detail}
                 </p>
                 <button
                   onClick={() => navigate("/settings")}

@@ -21,17 +21,18 @@ import {
   IconStar,
 } from "../components/icons";
 import { useAppState } from "../state";
-import type {
-  GraphCacheStatus,
-  GraphCacheResourceKind,
-  IntuneChatAgentSuggestion,
-  IntuneChatConversation,
-  IntuneChatMessage,
-  IntuneChatProgressStep,
-  IntuneChatSource,
-  IntuneChatStreamEvent,
-  ProviderId,
-  SendIntuneChatMessageInput,
+import {
+  resolveProviderDefaultModel,
+  type GraphCacheStatus,
+  type GraphCacheResourceKind,
+  type IntuneChatAgentSuggestion,
+  type IntuneChatConversation,
+  type IntuneChatMessage,
+  type IntuneChatProgressStep,
+  type IntuneChatSource,
+  type IntuneChatStreamEvent,
+  type ProviderId,
+  type SendIntuneChatMessageInput,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
 
@@ -161,9 +162,10 @@ export default function IntuneChat() {
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
-  const activeModel = provider
-    ? state.activeModelByProviderId?.[provider.id] ?? provider.defaultModel
-    : undefined;
+  const activeModel = resolveProviderDefaultModel(
+    provider,
+    state.activeModelByProviderId,
+  ).model;
 
   const loadShell = async (
     preferredActiveConversationId?: string | null,

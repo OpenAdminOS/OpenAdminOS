@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@openadminos/agent-sdk": "0.2.2",
+    "@openadminos/connector-whatsapp-web": "0.2.2",
     "@openadminos/runtime": "0.2.2",
     "electron-updater": "^6.6.2",
     "react": "^19.0.0",

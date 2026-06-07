@@ -413,9 +413,9 @@ The release is done when **all** of these hold:
 
 ---
 
-# v0.1 — Private preview showcase
+# v0.1 — Public preview foundation
 
-**Status: complete.** Tagged as v0.1.0. Signed installers + hosted LLM providers land in v0.2.
+**Status: complete.** Tagged as v0.1.0. This was the first public-preview foundation milestone; later public-preview releases now carry the active roadmap.
 
 The goal of v0.1 was to ship the platform thesis end-to-end against synthetic + real Graph data, so prospective users can evaluate the trust story, the agent template DSL, and the path from "describe what you want" to "agent running on your tenant." Every promise the marketing page makes about local-first, transparency, and human-in-the-loop has a corresponding feature in the desktop app.
 

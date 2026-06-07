@@ -19,6 +19,7 @@ import {
   type AgentUpdateReview,
   type AgentSchedule,
   type AgentTeamsDelivery,
+  type AgentWhatsAppWebDelivery,
   type AppState,
   type OpenAdminOSApi,
   type ProviderId,
@@ -69,6 +70,10 @@ interface AppStateContextValue {
   updateAgentTeamsDelivery: (
     slug: string,
     delivery: AgentTeamsDelivery | null,
+  ) => Promise<void>;
+  updateAgentWhatsAppWebDelivery: (
+    slug: string,
+    delivery: AgentWhatsAppWebDelivery | null,
   ) => Promise<void>;
   draftAgentManifest: (prompt: string) => Promise<AgentDraft>;
   validateAgentDraft: (yamlSource: string, allowedSlug?: string) => Promise<AgentDraft>;
@@ -547,6 +552,30 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     [],
   );
 
+  const updateAgentWhatsAppWebDelivery = useCallback(
+    async (slug: string, delivery: AgentWhatsAppWebDelivery | null) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating WhatsApp Web delivery is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentWhatsAppWebDelivery(slug, delivery);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const deliveryError = toError(caughtError);
+        setError(deliveryError);
+        throw deliveryError;
+      }
+    },
+    [],
+  );
+
   const draftAgentManifest = useCallback(async (prompt: string) => {
     const api = getOpenAdminOSApi();
     if (!api) {
@@ -815,6 +844,14 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     });
   }, [refresh]);
 
+  useEffect(() => {
+    const api = getOpenAdminOSApi();
+    if (!api?.onAppStateChanged) return;
+    return api.onAppStateChanged(() => {
+      void refresh();
+    });
+  }, [refresh]);
+
   const value = useMemo<AppStateContextValue>(
     () => ({
       state,
@@ -842,6 +879,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgentSettings,
       updateAgentSchedule,
       updateAgentTeamsDelivery,
+      updateAgentWhatsAppWebDelivery,
       draftAgentManifest,
       validateAgentDraft,
       preflightAgentDraft,
@@ -883,6 +921,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgentSchedule,
       updateAgentSettings,
       updateAgentTeamsDelivery,
+      updateAgentWhatsAppWebDelivery,
       updateUserAgentDraft,
       validateAgentDraft,
     ],

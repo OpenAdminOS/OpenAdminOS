@@ -34,6 +34,7 @@ import type {
   AgentCommunitySubmissionMetadata,
   AgentSchedule,
   AgentTeamsDelivery,
+  AgentWhatsAppWebDelivery,
   PendingConnectorDecision,
   ProviderId,
   RefreshGraphCacheOptions,
@@ -1921,6 +1922,53 @@ function validateAgentTeamsDelivery(value: unknown): AgentTeamsDelivery | null {
   return delivery;
 }
 
+function validateAgentWhatsAppWebDelivery(
+  value: unknown,
+): AgentWhatsAppWebDelivery | null {
+  if (value === null) return null;
+  if (!isPlainRecord(value)) {
+    throw new Error("agent WhatsApp Web delivery must be an object or null.");
+  }
+  const delivery: AgentWhatsAppWebDelivery = {
+    enabled: value.enabled === true,
+  };
+  for (const key of [
+    "useDefaultRecipient",
+    "includeManualRuns",
+    "includeScheduledRuns",
+    "notifyOnSuccess",
+    "notifyOnFailure",
+    "notifyOnChangeOnly",
+  ] as const) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== "boolean") {
+        throw new Error(`agent WhatsApp Web delivery ${key} must be a boolean.`);
+      }
+      delivery[key] = value[key];
+    }
+  }
+  for (const key of ["recipient", "recipientLabel"] as const) {
+    if (value[key] !== undefined) {
+      delivery[key] = requireBoundedString(
+        value[key],
+        `agent WhatsApp Web delivery ${key}`,
+        256,
+      );
+    }
+  }
+  if (value.recipientType !== undefined) {
+    if (
+      value.recipientType !== "self" &&
+      value.recipientType !== "group" &&
+      value.recipientType !== "manual"
+    ) {
+      throw new Error("agent WhatsApp Web delivery recipientType is invalid.");
+    }
+    delivery.recipientType = value.recipientType;
+  }
+  return delivery;
+}
+
 function validateCommunitySubmissionMetadata(
   value: unknown,
 ): AgentCommunitySubmissionMetadata {
@@ -2688,6 +2736,30 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:get-whatsapp-web-status",
+    handleTrusted(() => store.getWhatsAppWebStatus()),
+  );
+  ipcMain.handle(
+    "openadminos:start-whatsapp-web-login",
+    handleTrusted(() => store.startWhatsAppWebLogin()),
+  );
+  ipcMain.handle(
+    "openadminos:disconnect-whatsapp-web",
+    handleTrusted(() => store.disconnectWhatsAppWeb()),
+  );
+  ipcMain.handle(
+    "openadminos:list-whatsapp-web-groups",
+    handleTrusted(() => store.listWhatsAppWebGroups()),
+  );
+  ipcMain.handle(
+    "openadminos:send-whatsapp-web-test-message",
+    handleTrusted((_event, to: unknown) =>
+      store.sendWhatsAppWebTestMessage(
+        requireBoundedString(to, "WhatsApp recipient", 256),
+      ),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:respond-to-connector-confirm",
     handleTrusted((_event, requestId: unknown, decision: unknown) => {
       respondConnectorConfirm(
@@ -2807,6 +2879,15 @@ function registerIpcHandlers() {
       store.updateAgentTeamsDelivery(
         requireAgentSlug(slug, "slug"),
         validateAgentTeamsDelivery(delivery),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:update-agent-whatsapp-web-delivery",
+    handleTrusted((_event, slug: unknown, delivery: unknown) =>
+      store.updateAgentWhatsAppWebDelivery(
+        requireAgentSlug(slug, "slug"),
+        validateAgentWhatsAppWebDelivery(delivery),
       ),
     ),
   );
@@ -2996,6 +3077,9 @@ if (!gotLock) {
       onRunFinished: (run) => {
         void maybeShowRunNotification(run);
       },
+      onStateChanged: (info) => {
+        mainWindow?.webContents.send("openadminos:app-state-changed", info);
+      },
       ...(isIntuneChatSmokeLaunch
         ? {
             graphFactory: () => createIntuneChatSmokeGraph(),
@@ -3004,6 +3088,7 @@ if (!gotLock) {
         : {}),
     });
     registerIpcHandlers();
+    void store.processPendingRunDeliveries();
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
     if (isBackgroundSchedulerLaunch && app.dock) {
@@ -3031,6 +3116,7 @@ if (!gotLock) {
     setInterval(() => {
       void store.fireDueSchedules();
       void store.refreshDueGraphCaches();
+      void store.processPendingRunDeliveries();
     }, SCHEDULER_TICK_MS);
 
     // Periodic registry refresh: every 6 hours, silently re-fetch the

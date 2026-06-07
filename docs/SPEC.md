@@ -174,6 +174,12 @@ boundary, but tenant prompts still leave the device because the selected model
 is hosted.
 The model picker is populated from Codex's local `models_cache.json`, with
 `config.toml` supplying the default model when present.
+Selecting a model under an inactive provider also makes that provider active
+for future runs; model pinning must not leave the visible active provider on a
+different provider. Overview surfaces such as Agents, StatusStrip, Settings,
+and Intune Chat show the active provider plus the selected default model for
+that provider. Queued run surfaces show the provider and model pinned on that
+run, even if global defaults later change.
 Provider settings include an explicit smoke test action for connected providers;
 the test runs a tiny completion and reports the model and response time. This is
 intentionally visible because hosted/local provider trust is a core product
@@ -259,9 +265,9 @@ Agents may declare optional or required `connectors:` — see Connector abstract
 
 ### Connector abstraction
 
-Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
+Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, WhatsApp number, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
 
-**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk` in the [Unreleased] section. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. The runtime injection and the first connector — **Microsoft Teams** — land in the next release alongside the Connectors sidebar entry, the channel-picker setup UI, and the preview-and-send confirmation modal.
+**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk` in the [Unreleased] section. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. Runtime injection, the Connectors sidebar entry, Microsoft Teams, and WhatsApp Web are implemented in [Unreleased].
 
 The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships — retrofitting them after agents start consuming the API is what makes ecosystems brittle.
 
@@ -271,7 +277,7 @@ Three classes, each with a distinct trust posture:
 
 - `graph-delegated` — piggybacks on the active tenant's MSAL token; adds Graph scopes (Teams, Outlook, SharePoint, Planner). No new credentials, no second consent dance. Data stays inside the customer's M365 tenant boundary.
 - `graph-application` — app-only consent via Resource-Specific Consent or per-resource installation. Deferred past v1.0; the interface accommodates it so we don't have to break agents to add it later.
-- `external` — owns credentials in the OS keychain (ServiceNow, Jira, Slack). Data leaves the tenant boundary; trust messaging must say so explicitly. External connectors implement a uniform OAuth/credential flow surface so the setup UI is connector-agnostic.
+- `external` — owns credentials in the OS keychain or a local auth session (WhatsApp Web, ServiceNow, Jira, Slack). Data leaves the tenant boundary; trust messaging must say so explicitly. External connectors implement a uniform setup surface where practical, but device-paired flows such as WhatsApp Web can expose a connector-specific QR step.
 
 #### Capability kinds → confirmation tiers
 
@@ -280,7 +286,7 @@ Every capability declares a `kind` that maps to a confirmation tier. Mixing conn
 | Kind          | Side effect                       | Confirmation                                     | Examples                                  |
 |---------------|-----------------------------------|--------------------------------------------------|-------------------------------------------|
 | `read`        | None                              | None                                             | `listTeams`, `listChannels`               |
-| `notify`      | Additive (creates a new artifact) | **Preview & send** modal — rendered output + target, one-click confirm | `post-channel-message`, `create-incident` |
+| `notify`      | Additive (creates a new artifact) | **Preview & send** modal — rendered output + target, one-click confirm | `post-channel-message`, `send-message`, `create-incident` |
 | `mutating`    | Modifies an existing artifact     | Diff modal — before/after, one-click confirm     | `edit-message`, `update-incident-status`  |
 | `destructive` | Removes an artifact               | Typed-phrase confirmation, same gate as destructive Graph ops | `delete-message`, `close-incident`        |
 
@@ -480,7 +486,7 @@ The host (in `packages/runtime`) discovers connectors via a static import map fo
 #### UI surface
 
 - New sidebar entry **Connectors** between Agent Hub and Activity.
-- Connectors page: card per registered connector with status pill (`connected` / `needs setup` / `needs scope` / `error`), capability list (one row per `id@version` with kind tag), trust label. Per-connector detail page handles setup (Teams channel picker, ServiceNow instance URL + credentials) generated from `configSchema`.
+- Connectors page: operational summary first, then live connector configuration panels with status pill (`connected` / `needs setup` / `needs scope` / `error`) and task-first setup controls. Teams shows the default channel picker; WhatsApp Web shows QR linking only when setup is needed, hides phone steps after a session is linked, and keeps default target selection/test sending visible. Capabilities, required scopes, trust-boundary text, routing-rule details, and future connector backlog entries live in compact disclosures so connected connectors stay visually lightweight.
 - Per-agent install: when the manifest declares connectors, install adds a connector-setup step before the agent appears installed. The step itemizes egress targets and capability kinds so the user knows what they're authorizing.
 - Run status: when a run uses connectors, the status-strip trust cell expands to list each egress target. Capability invocations stream into the run timeline with the kind-appropriate confirmation modal.
 - Error states: every `ConnectorError` subclass has a designed remediation tile in §06 — `auth expired → reauth`, `missing scope → re-consent`, `rate limited → retry in Xs`, `not configured → open Connectors page`.
@@ -546,10 +552,61 @@ Decisions locked for the first release:
 - **Teams scopes folded into the MSAL consent screen.** Granted once at tenant connect. Admins who declined initial consent see `status: 'needs-scope'` and a single re-consent button — no separate auth flow.
 - **`post-*-message` is `kind: notify`.** Users see a "Send to Teams?" preview modal with the rendered markdown and the target channel — one-click confirm, not typed phrase. Typed-phrase confirmation is reserved for destructive Graph operations; debasing it for routine notifications dulls its trust signal.
 - **`configSchema` covers default channel/chat selection.** Per-install setting; agents can override at invocation time.
+- **Run activity includes delivery.** When per-agent Teams delivery is enabled, terminal runs append a post-run activity step showing whether the delivery rule matched the run, whether the report was sent, failed, or skipped, and the user-facing channel label.
 
-#### Why Teams first, ServiceNow second
+#### WhatsApp Web connector (second to ship)
 
-Teams proves the contract generalizes across capabilities while keeping the trust surface unchanged from today. ServiceNow is the canonical second connector — `external` auth, instance URL configuration, keychain-stored credentials, "data leaves your tenant" trust messaging. Designing both into the abstraction from the start, shipping Teams first, validates the contract before paying for a new trust surface.
+The WhatsApp Web connector is deliberately narrow. OpenAdminOS uses it for outbound run notifications only: the user links a local WhatsApp Web session by scanning a QR code, selects a default notification target, and agents can send terminal run reports to that target. The connector does not read incoming messages, auto-reply, monitor chats, download media, or expose WhatsApp as an agent control channel.
+
+```yaml
+descriptor:
+  id: whatsapp-web
+  name: WhatsApp Web
+  version: 1.0.0
+  authSource: external
+  scopes: []
+  capabilities:
+    - id: send-message
+      version: 1
+      kind: notify
+      scopes: []
+  trust:
+    label: "WhatsApp Web · local session"
+    detail: "Sends through a WhatsApp Web session linked on this device. Message content leaves Microsoft 365 and is delivered by WhatsApp."
+    staysInTenant: false
+```
+
+Capability surface:
+
+```ts
+interface WhatsAppWebConnectorCapabilities {
+  sendMessage(args: {
+    to?: string;  // "self", international phone number, or WhatsApp JID; omitted means connector default
+    text: string; // plain text only
+  }): Promise<{ messageId: string; to: string; targetType: "self" | "group" | "manual" }>;
+}
+```
+
+Implementation decisions:
+- **Baileys local Web session.** No WhatsApp Business API, no hosted relay, no server-side token storage. Auth files live under the Electron `userData` connector directory and can be removed from the Connectors page.
+- **Saved sessions restore automatically.** When Baileys auth state exists on disk, the desktop app opens a WhatsApp Web socket in the background on status checks and app reopen. A linked session can stay connected across restarts unless the user removes the linked device from WhatsApp, WhatsApp expires the session, or the local auth directory is deleted; in those cases the connector returns to the QR setup flow.
+- **Conservative Baileys socket behavior.** The runtime uses Baileys' cacheable signal key store, conservative socket timings (`keepAliveIntervalMs: 25s`, `connectTimeoutMs: 60s`, `defaultQueryTimeoutMs: 60s`), `markOnlineOnConnect: false`, `syncFullHistory: false`, and a desktop browser identity.
+- **QR image handoff is versioned.** Relayed or stale QR images can fail with "Check your connection and try again." The desktop stores a QR version and only publishes the data URL that matches the latest QR string.
+- **QR refresh is automatic.** While the QR is visible, the runtime rotates the pairing socket before the displayed code becomes stale and exposes a countdown so the renderer can explain when the next code will appear. Manual refresh remains available for immediate recovery.
+- **Raw pairing tokens stay in the main process.** The renderer receives a QR image data URL, issue time, and refresh countdown, but not the raw WhatsApp pairing string.
+- **Phone-side setup is explicit.** The connector card lists the WhatsApp mobile steps directly beside the QR: open WhatsApp, go to Settings, tap the QR symbol, choose Scan, then approve the new-computer prompt. Linked Devices -> Link a Device is shown as the alternate path for clients that expose that flow instead.
+- **Recipient selection is target-first, not number-first.** A linked session defaults to `My WhatsApp`; the user's own phone/JID is resolved inside the main process at send time and is never displayed. Admins can switch the default target to a WhatsApp group fetched from the linked local session, or use a manual paste/drop fallback for international numbers, `wa.me` links, contact text, and raw JIDs.
+- **Group metadata is local and narrow.** The group picker reads participating group id, subject, participant count, and announce flag from Baileys only after the session is linked. The app stores only the selected target id/type/label needed for delivery settings. Group JIDs (`@g.us`) are treated as internal target ids and should not be carried into manual Number/JID inputs when switching target modes.
+- **Disconnect clears stale targets.** Removing the linked WhatsApp session resets the connector default target to `My WhatsApp`, moves per-agent WhatsApp delivery rules back to the connector default target, and drops pending WhatsApp delivery queue items that can no longer be sent safely.
+- **Post-pairing restart is normal.** Baileys can close with status `515` ("restart required") or `408` after the phone accepts a pairing. The connector treats those as reconnect states, opens a fresh socket, and shows the user a reconnecting state instead of a terminal error.
+- **Success requires a remote message id.** Run delivery is logged as sent only after Baileys returns a message id from `sendMessage`.
+- **Run activity includes delivery.** When per-agent WhatsApp delivery is enabled, terminal runs append a post-run activity step showing whether the delivery rule matched the run, whether the report was sent, failed, or skipped, and the user-facing target label. Raw recipient values are not shown.
+- **Recipient values stay out of logs and audit labels.** The raw WhatsApp number/JID or selected group JID is used only for local configuration and the main-process send call. Connector status, renderer confirmation payloads, run logs, connector test status, and audit egress targets use generic or user-facing WhatsApp target labels. Per-run connector audit metadata stores a redacted egress target plus a digest of the send arguments, not the raw target.
+- **Libsignal console noise is suppressed narrowly.** Baileys/libsignal emits session lifecycle messages through `console.info`, outside pino. The runtime suppresses only the known session prefixes so key material does not appear in desktop logs.
+
+#### Why Teams first, WhatsApp Web second, ServiceNow later
+
+Teams proves the contract generalizes across capabilities while keeping the trust surface unchanged from today. WhatsApp Web proves the `external` class with a local, device-paired session and no enterprise API access. ServiceNow remains the canonical enterprise external connector — instance URL configuration, keychain-stored credentials, and "data leaves your tenant" trust messaging — but it no longer has to be the second connector.
 
 ### Registry model
 
@@ -1020,9 +1077,9 @@ macOS notification caveat: Electron 42 uses Apple's `UNNotification` framework. 
 
 ---
 
-## 5a. v0.1 — Private preview showcase
+## 5a. v0.1 — Public preview foundation
 
-The first shippable milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest — not to be production-deployable against real tenants.
+The first public-preview milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest while establishing the public preview path toward real-tenant deployment.
 
 ### What v0.1 includes
 
@@ -1107,13 +1164,15 @@ These must exist and work well before any public release.
 7. **Registry browse** — Search, filter (author, mode, model requirements), install, signing/verification status, screenshots, changelog.
 8. **Multi-tenant switcher done properly** — Search, color-coding, "currently scoped to" badges, scope guard against running an agent on the wrong tenant.
 9. **Teams connector (graph-delegated)** — first connector to validate the abstraction. Channel + chat picker, post-message capabilities, Teams scopes folded into the MSAL consent flow, trust messaging integrated with the status strip. See §2 Connector abstraction.
+10. **WhatsApp Web connector (external local session)** — second connector to validate QR-based local setup and non-Graph egress. QR linking, default/test target selection, outbound-only run notifications, no incoming-message access, Baileys reconnect handling, and explicit "delivered by WhatsApp" trust messaging. See §2 Connector abstraction.
 
 ### Important (in v1.0, doesn't have to be perfect)
 
 - Scheduled runs are available for installed agents. The UI creates the per-agent recurrence; once at least one Microsoft tenant is connected, OpenAdminOS can register a per-user OS scheduler so due runs continue while the UI is closed. macOS uses `~/Library/LaunchAgents/com.openadminos.scheduler.plist`; Windows uses Task Scheduler. Jobs still run as the signed OpenAdminOS app for the logged-in user, use the persisted MSAL token cache, write results to local history, and do not run when the machine is off or no user session exists. The Schedules view prioritizes active schedules, next run, last run, and recent scheduled activity. OS registration and scheduler errors are shown as compact remediation notices only when the user needs to act.
-- Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; the Teams connector is the first egress target wired through this surface. Agents can save a Teams delivery rule that posts terminal run reports to either the connector default channel or a per-agent channel, with manual/scheduled, success/failure, and changed-only controls. Saved delivery rules are explicit approval to post without another prompt. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
-- Agents should not hard-code routine Teams posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to Teams, or both.
+- Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; Teams and WhatsApp Web are the first egress targets wired through this surface. Agents can save delivery rules that post terminal run reports to either the connector default target or a per-agent target, with manual/scheduled, success/failure, and changed-only controls. Saved delivery rules are explicit approval to post without another prompt. Connector delivery appends post-run activity steps so the run timeline shows sent, failed, or skipped delivery outcomes after the agent result is created. Connector delivery is queued locally when a run reaches a terminal state, retried with bounded backoff for transient failures, and processed again on app reopen or scheduler ticks. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
+- Agents should not hard-code routine Teams or WhatsApp posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to Teams, to WhatsApp, or to multiple targets.
 - Manual agent runs open a preflight review before queueing. It shows the active tenant, provider residency, model, mode, and Graph scopes. It blocks when no tenant is active, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
+- Provider trust messaging is scoped to the surface: overview/settings/chat/status surfaces use the current active tenant/provider/default model, while queued run reports use the run's pinned tenant, provider, and model rather than the current global tenant/provider selection.
 - Settings → About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
 - Support issue reporting is visible from the sidebar footer, failed-run remediation cards, and Settings → About. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
@@ -1126,7 +1185,7 @@ These must exist and work well before any public release.
 
 ### Designed before launch (not strict blockers)
 
-- **Second connector: ServiceNow (`external` auth)** — proves the Connector abstraction generalizes across trust boundaries. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed alongside Teams; ships post-v1.0.
+- **Enterprise external connector: ServiceNow (`external` auth)** — proves the Connector abstraction generalizes to enterprise ticketing. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed after the Teams and WhatsApp Web connector surfaces stabilize.
 - Agent signing / verification (registry supply-chain integrity)
 - Sandbox / dry-run mode for read agents (preview Graph calls before executing)
 - Cost budgets & rate limits (per-agent or per-day spend caps for hosted LLMs)

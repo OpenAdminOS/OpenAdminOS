@@ -133,6 +133,7 @@ function PipelineRow({ step, isLast }: { step: RunStepRecord; isLast: boolean })
   const isCompleted = step.status === "completed";
   const isFailed = step.status === "failed";
   const isPending = step.status === "pending";
+  const isSkipped = step.status === "skipped";
   const isCancelled = step.status === "cancelled";
   const duration = stepDuration(step);
 
@@ -155,11 +156,11 @@ function PipelineRow({ step, isLast }: { step: RunStepRecord; isLast: boolean })
           {isRunning && (
             <span className="absolute inset-0 rounded-full border-2 border-transparent border-t-[var(--color-warning)] animate-spin" />
           )}
-          {isCancelled && (
+          {(isCancelled || isSkipped) && (
             <span className="block h-px w-2.5 bg-current" />
           )}
           {(isPending ||
-            (!isCompleted && !isRunning && !isFailed && !isCancelled)) && (
+            (!isCompleted && !isRunning && !isFailed && !isSkipped && !isCancelled)) && (
             <span className="h-1.5 w-1.5 rounded-full bg-current" />
           )}
         </span>
@@ -175,7 +176,7 @@ function PipelineRow({ step, isLast }: { step: RunStepRecord; isLast: boolean })
               ? "text-[var(--color-warning)]"
               : isFailed
                 ? "text-[var(--color-danger)]"
-                : isPending || isCancelled
+                : isPending || isSkipped || isCancelled
                   ? "text-[var(--color-text-muted)]"
                   : "text-[var(--color-text)]"
           }`}

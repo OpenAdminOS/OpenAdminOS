@@ -117,6 +117,31 @@ export const IconShield = ({ size = 16, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconUser = ({ size = 16, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <circle cx="12" cy="8" r="3.5" />
+    <path d="M5.5 20 a6.5 6.5 0 0 1 13 0" />
+  </svg>
+);
+
+export const IconUsers = ({ size = 16, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <circle cx="9" cy="8" r="3" />
+    <path d="M3.8 19 a5.2 5.2 0 0 1 10.4 0" />
+    <path d="M15.5 10.5 a2.7 2.7 0 1 0 -1.4 -5" />
+    <path d="M16.5 19 a4.8 4.8 0 0 0 -3 -4.4" />
+  </svg>
+);
+
+export const IconHash = ({ size = 16, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M9 3 L7 21" />
+    <path d="M17 3 L15 21" />
+    <path d="M4 9 H20" />
+    <path d="M3 15 H19" />
+  </svg>
+);
+
 export const IconLock = ({ size = 16, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <rect x="5" y="11" width="14" height="9" rx="2" />

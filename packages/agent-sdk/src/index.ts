@@ -215,6 +215,7 @@ export interface AgentSchedule {
 
 export interface AgentDeliverySettings {
   teams?: AgentTeamsDelivery;
+  whatsappWeb?: AgentWhatsAppWebDelivery;
 }
 
 export interface AgentTeamsDelivery {
@@ -233,6 +234,55 @@ export interface AgentTeamsDelivery {
   notifyOnSuccess?: boolean;
   notifyOnFailure?: boolean;
   notifyOnChangeOnly?: boolean;
+}
+
+export interface AgentWhatsAppWebDelivery {
+  enabled: boolean;
+  /**
+   * When true, the connector's global default target is used. When
+   * false, `recipient` identifies this agent's notification target.
+   */
+  useDefaultRecipient?: boolean;
+  recipientType?: WhatsAppWebRecipientType;
+  recipient?: string;
+  recipientLabel?: string;
+  includeManualRuns?: boolean;
+  includeScheduledRuns?: boolean;
+  notifyOnSuccess?: boolean;
+  notifyOnFailure?: boolean;
+  notifyOnChangeOnly?: boolean;
+}
+
+export type WhatsAppWebConnectionState =
+  | "not-linked"
+  | "connecting"
+  | "qr"
+  | "connected"
+  | "reconnecting"
+  | "logged-out"
+  | "error";
+
+export interface WhatsAppWebStatus {
+  state: WhatsAppWebConnectionState;
+  message: string;
+  qrDataUrl?: string;
+  qrIssuedAt?: string;
+  qrRefreshesAt?: string;
+  lastConnectedAt?: string;
+  lastError?: string;
+}
+
+export interface WhatsAppWebSendResult {
+  messageId: string;
+}
+
+export type WhatsAppWebRecipientType = "self" | "group" | "manual";
+
+export interface WhatsAppWebGroupRef {
+  id: string;
+  subject: string;
+  participantCount?: number;
+  announce?: boolean;
 }
 
 export interface RegistryAgentSummary extends AgentContract {
@@ -361,6 +411,7 @@ export type RunStepStatus =
   | "running"
   | "completed"
   | "failed"
+  | "skipped"
   | "cancelled";
 
 export interface RunStepThinking {
@@ -431,6 +482,18 @@ export interface TrustState {
   detail: string;
   isLocal: boolean;
   tenantDisplayName?: string;
+}
+
+export type ProviderModelSource =
+  | "explicit"
+  | "agent-preferred"
+  | "user-default"
+  | "provider-default"
+  | "unavailable";
+
+export interface ResolvedProviderModel {
+  model?: string;
+  source: ProviderModelSource;
 }
 
 export interface AppState {
@@ -944,6 +1007,35 @@ export interface OpenAdminOSApi {
     teamId: string,
   ): Promise<ConnectorChannelRef[]>;
   /**
+   * Reads the local WhatsApp Web session state without starting a new
+   * login. Used by the Connectors page to render linked / QR / error
+   * states without background side effects.
+   */
+  getWhatsAppWebStatus(): Promise<WhatsAppWebStatus>;
+  /**
+   * Starts or resumes the local WhatsApp Web linking flow and returns
+   * the current state. When a QR code is available, `qrDataUrl` is a
+   * renderer-safe PNG data URL.
+   */
+  startWhatsAppWebLogin(): Promise<WhatsAppWebStatus>;
+  /**
+   * Logs this device out of WhatsApp Web and removes the local Baileys
+   * auth state stored under Electron userData.
+   */
+  disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus>;
+  /**
+   * Lists WhatsApp groups the linked account participates in. This is
+   * local WhatsApp metadata from the paired session and is used only
+   * for target selection.
+   */
+  listWhatsAppWebGroups(): Promise<WhatsAppWebGroupRef[]>;
+  /**
+   * Sends a plain text test notification through the linked WhatsApp
+   * Web session. The call resolves only when WhatsApp returns a
+   * message id.
+   */
+  sendWhatsAppWebTestMessage(to: string): Promise<WhatsAppWebSendResult>;
+  /**
    * Subscribe to confirmation requests fired by the runtime when a
    * `notify`/`mutating`/`destructive` connector capability is about
    * to execute. The renderer is expected to show a confirmation
@@ -961,6 +1053,15 @@ export interface OpenAdminOSApi {
    */
   onRegistryRefreshed(
     listener: (info: { trigger: "startup" | "interval" | "focus"; cachedAt: string | null }) => void,
+  ): () => void;
+  /**
+   * Subscribe to host-side state mutations that occur after a normal
+   * renderer action has already resolved, such as asynchronous
+   * connector delivery logs appended after a run reaches a terminal
+   * state.
+   */
+  onAppStateChanged?(
+    listener: (info: { reason: string; runId?: string }) => void,
   ): () => void;
   /**
    * Resolves the pending confirmation identified by `requestId` with
@@ -1051,6 +1152,15 @@ export interface OpenAdminOSApi {
   updateAgentTeamsDelivery(
     slug: string,
     delivery: AgentTeamsDelivery | null,
+  ): Promise<AppState>;
+  /**
+   * Persist per-agent WhatsApp Web delivery. Pass null to remove the
+   * route. Delivery posts terminal run reports through the locally
+   * linked WhatsApp Web session.
+   */
+  updateAgentWhatsAppWebDelivery(
+    slug: string,
+    delivery: AgentWhatsAppWebDelivery | null,
   ): Promise<AppState>;
   /**
    * Generate a draft `manifest.yaml` from a natural-language description
@@ -1786,6 +1896,47 @@ export const providerCatalog: readonly ProviderSummary[] = [
 export interface DeriveTrustStateInput {
   provider: ProviderSummary | undefined;
   activeTenant?: TenantRecord | undefined;
+  model?: string | undefined;
+}
+
+export function resolveProviderDefaultModel(
+  provider: ProviderSummary | undefined,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>> | undefined,
+): ResolvedProviderModel {
+  if (!provider) return { source: "unavailable" };
+  const reportedModels = provider.models ?? [];
+  const userPinned = activeModelByProviderId?.[provider.id];
+  if (userPinned && reportedModels.includes(userPinned)) {
+    return { model: userPinned, source: "user-default" };
+  }
+  const providerDefault = provider.defaultModel ?? reportedModels[0];
+  if (providerDefault) {
+    return { model: providerDefault, source: "provider-default" };
+  }
+  return { source: "unavailable" };
+}
+
+export function resolveRunModel(input: {
+  provider: ProviderSummary | undefined;
+  activeModelByProviderId?: Partial<Record<ProviderId, string>> | undefined;
+  preferredModel?: string | undefined;
+  explicitModel?: string | undefined;
+}): ResolvedProviderModel {
+  const reportedModels = input.provider?.models ?? [];
+  const explicitModel = input.explicitModel?.trim();
+  if (
+    explicitModel &&
+    (reportedModels.length === 0 || reportedModels.includes(explicitModel))
+  ) {
+    return { model: explicitModel, source: "explicit" };
+  }
+
+  const preferredModel = input.preferredModel?.trim();
+  if (preferredModel && reportedModels.includes(preferredModel)) {
+    return { model: preferredModel, source: "agent-preferred" };
+  }
+
+  return resolveProviderDefaultModel(input.provider, input.activeModelByProviderId);
 }
 
 export function deriveTrustState(
@@ -1802,10 +1953,15 @@ export function deriveTrustState(
   const activeTenant = isInputObject
     ? (providerOrInput as DeriveTrustStateInput).activeTenant
     : legacyTenant;
+  const model = isInputObject
+    ? (providerOrInput as DeriveTrustStateInput).model
+    : undefined;
 
   const tenantSegment = activeTenant
     ? `tenant ${activeTenant.displayName}`
     : "no tenant";
+  const modelSegment = model ? ` · ${model}` : "";
+  const modelDetail = model ? ` (${model})` : "";
 
   if (!provider) {
     const base: TrustState = {
@@ -1819,10 +1975,10 @@ export function deriveTrustState(
 
   if (provider.isLocal) {
     const detail = activeTenant
-      ? `Tenant data stays on this device. Prompts use ${provider.name} locally.`
-      : `Prompts use ${provider.name} locally.`;
+      ? `Tenant data stays on this device. Prompts use ${provider.name}${modelDetail} locally.`
+      : `Prompts use ${provider.name}${modelDetail} locally.`;
     const base: TrustState = {
-      label: `Local ${provider.name} · ${tenantSegment}`,
+      label: `Local ${provider.name}${modelSegment} · ${tenantSegment}`,
       detail,
       isLocal: true,
     };
@@ -1831,10 +1987,10 @@ export function deriveTrustState(
   }
 
   const detail = activeTenant
-    ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}.`
-    : `Prompts are sent to ${provider.name}.`;
+    ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}${modelDetail}.`
+    : `Prompts are sent to ${provider.name}${modelDetail}.`;
   const base: TrustState = {
-    label: `Hosted ${provider.name} · ${tenantSegment}`,
+    label: `Hosted ${provider.name}${modelSegment} · ${tenantSegment}`,
     detail,
     isLocal: false,
   };

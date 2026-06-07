@@ -153,6 +153,16 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:list-connector-teams", id),
   listConnectorChannels: (id: string, teamId: string) =>
     ipcRenderer.invoke("openadminos:list-connector-channels", id, teamId),
+  getWhatsAppWebStatus: () =>
+    ipcRenderer.invoke("openadminos:get-whatsapp-web-status"),
+  startWhatsAppWebLogin: () =>
+    ipcRenderer.invoke("openadminos:start-whatsapp-web-login"),
+  disconnectWhatsAppWeb: () =>
+    ipcRenderer.invoke("openadminos:disconnect-whatsapp-web"),
+  listWhatsAppWebGroups: () =>
+    ipcRenderer.invoke("openadminos:list-whatsapp-web-groups"),
+  sendWhatsAppWebTestMessage: (to: string) =>
+    ipcRenderer.invoke("openadminos:send-whatsapp-web-test-message", to),
   onConnectorConfirmRequest: (
     listener: (request: PendingConnectorConfirmation) => void,
   ): (() => void) => {
@@ -176,6 +186,18 @@ const api: OpenAdminOSApi = {
     ipcRenderer.on("openadminos:registry-refreshed", handler);
     return () => {
       ipcRenderer.removeListener("openadminos:registry-refreshed", handler);
+    };
+  },
+  onAppStateChanged: (
+    listener: (info: { reason: string; runId?: string }) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: unknown,
+      payload: { reason: string; runId?: string },
+    ) => listener(payload);
+    ipcRenderer.on("openadminos:app-state-changed", handler);
+    return () => {
+      ipcRenderer.removeListener("openadminos:app-state-changed", handler);
     };
   },
   respondToConnectorConfirm: (
@@ -222,6 +244,12 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:update-agent-schedule", slug, schedule),
   updateAgentTeamsDelivery: (slug, delivery) =>
     ipcRenderer.invoke("openadminos:update-agent-teams-delivery", slug, delivery),
+  updateAgentWhatsAppWebDelivery: (slug, delivery) =>
+    ipcRenderer.invoke(
+      "openadminos:update-agent-whatsapp-web-delivery",
+      slug,
+      delivery,
+    ),
   draftAgentManifest: (prompt: string) =>
     ipcRenderer.invoke("openadminos:draft-agent-manifest", prompt),
   validateAgentDraft: (yamlSource: string, allowedSlug?: string) =>

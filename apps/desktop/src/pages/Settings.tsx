@@ -20,18 +20,19 @@ import {
   IconShield,
   IconWarning,
 } from "../components/icons";
-import type {
-  GraphCacheStatus,
-  LocalDataSummary,
-  ProviderId,
-  ProviderTestResult,
-  ProviderSummary,
-  ReleaseDiagnostics,
-  SchedulerLaunchSettings,
-  SelfTrainingSettings,
-  SelfTrainingSuggestion,
-  TenantRecord,
-  TrustState,
+import {
+  resolveProviderDefaultModel,
+  type GraphCacheStatus,
+  type LocalDataSummary,
+  type ProviderId,
+  type ProviderTestResult,
+  type ProviderSummary,
+  type ReleaseDiagnostics,
+  type SchedulerLaunchSettings,
+  type SelfTrainingSettings,
+  type SelfTrainingSuggestion,
+  type TenantRecord,
+  type TrustState,
 } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
@@ -219,10 +220,10 @@ function ProviderRow({
   const installedModels = provider.models ?? [];
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
-  const effectiveModel =
-    activeModel && installedModels.includes(activeModel)
-      ? activeModel
-      : provider.defaultModel ?? installedModels[0];
+  const effectiveModel = resolveProviderDefaultModel(
+    provider,
+    activeModel ? { [provider.id]: activeModel } : undefined,
+  ).model;
   const canTest =
     implemented &&
     provider.status === "connected" &&
@@ -309,7 +310,7 @@ function ProviderRow({
           {provider.id === "openai" && implemented && (
             <div className="mt-3 grid gap-2 rounded-md bg-[var(--color-bg-raised)] p-3 text-[11px] ring-1 ring-[var(--color-border-soft)] sm:grid-cols-3">
               <ProviderFact label="Codex auth" value={provider.status === "connected" ? "Detected" : "Check required"} />
-              <ProviderFact label="Default model" value={provider.defaultModel ?? "Provider default"} />
+              <ProviderFact label="Default model" value={effectiveModel ?? "Provider default"} />
               <ProviderFact label="Models" value={`${installedModels.length} available`} />
             </div>
           )}
@@ -324,17 +325,26 @@ function ProviderRow({
               <div className="flex flex-wrap gap-1.5">
                 {installedModels.map((m) => {
                   const selected = m === effectiveModel;
+                  const modelTitle = !isActive
+                    ? `Use ${m} and set ${provider.name} active for runs`
+                    : selected
+                      ? "Currently active model · click to revert to provider default"
+                      : `Use ${m} for runs against this provider`;
                   return (
                     <button
                       key={m}
                       onClick={() => {
-                        void onSetActiveModel(provider.id, selected ? null : m);
+                        void (async () => {
+                          if (!isActive) {
+                            await onSetActiveProvider(provider.id);
+                          }
+                          await onSetActiveModel(
+                            provider.id,
+                            selected && isActive ? null : m,
+                          );
+                        })();
                       }}
-                      title={
-                        selected
-                          ? "Currently active model · click to revert to provider default"
-                          : `Use ${m} for runs against this provider`
-                      }
+                      title={modelTitle}
                       className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[10.5px] transition-colors ${
                         selected
                           ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
@@ -1722,6 +1732,18 @@ function AboutSection() {
   );
   const codexProvider = state.providers.find((provider) => provider.id === "openai");
   const ollamaProvider = state.providers.find((provider) => provider.id === "ollama");
+  const activeModel = resolveProviderDefaultModel(
+    activeProvider,
+    state.activeModelByProviderId,
+  ).model;
+  const codexModel = resolveProviderDefaultModel(
+    codexProvider,
+    state.activeModelByProviderId,
+  ).model;
+  const ollamaModel = resolveProviderDefaultModel(
+    ollamaProvider,
+    state.activeModelByProviderId,
+  ).model;
 
   useEffect(() => {
     window.openAdminOS
@@ -1833,7 +1855,11 @@ function AboutSection() {
           />
           <ReadinessRow
             label="Active LLM"
-            value={activeProvider?.name ?? state.activeProviderId}
+            value={
+              activeProvider
+                ? `${activeProvider.name}${activeModel ? ` · ${activeModel}` : ""}`
+                : state.activeProviderId
+            }
             tone={activeProvider?.status === "connected" ? "success" : "warning"}
             detail={state.trust.label}
           />
@@ -1841,13 +1867,13 @@ function AboutSection() {
             label="OpenAI Codex"
             value={codexProvider?.status === "connected" ? "Detected" : "Not connected"}
             tone={codexProvider?.status === "connected" ? "success" : "warning"}
-            detail={codexProvider?.defaultModel ?? codexProvider?.detail ?? "Codex CLI not detected."}
+            detail={codexModel ?? codexProvider?.detail ?? "Codex CLI not detected."}
           />
           <ReadinessRow
             label="Ollama"
             value={ollamaProvider?.status === "connected" ? "Detected" : "Not connected"}
             tone={ollamaProvider?.status === "connected" ? "success" : "warning"}
-            detail={ollamaProvider?.defaultModel ?? ollamaProvider?.detail ?? "Ollama is not running."}
+            detail={ollamaModel ?? ollamaProvider?.detail ?? "Ollama is not running."}
           />
           <ReadinessRow
             label="Registry"
