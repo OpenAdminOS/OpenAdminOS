@@ -27,7 +27,7 @@ env:
 
 jobs:
   tag:
-    if: ${{ contains(github.event.head_commit.message, 'release: v') }}
+    if: "${{ contains(github.event.head_commit.message, 'release: v') }}"
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
