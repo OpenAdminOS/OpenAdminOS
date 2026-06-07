@@ -6,6 +6,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added outbound-only Outlook, Slack, Discord, and Signal connectors with connector setup UI, encrypted write-only Slack/Discord secrets, per-agent delivery toggles, queued post-run notification delivery, and focused connector/runtime tests.
+- Added GitBook connector documentation covering setup flow, delivery rules, and setup requirements for Teams, Outlook, WhatsApp Web, Slack, Discord, and Signal.
+
 ### Changed
 
 ### Removed

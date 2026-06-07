@@ -221,10 +221,22 @@ export interface AgentSchedule {
 export interface AgentDeliverySettings {
   teams?: AgentTeamsDelivery;
   whatsappWeb?: AgentWhatsAppWebDelivery;
+  outlook?: AgentOutlookDelivery;
+  slack?: AgentSlackDelivery;
+  discord?: AgentDiscordDelivery;
+  signal?: AgentSignalDelivery;
 }
 
-export interface AgentTeamsDelivery {
+export interface AgentNotificationDeliveryBase {
   enabled: boolean;
+  includeManualRuns?: boolean;
+  includeScheduledRuns?: boolean;
+  notifyOnSuccess?: boolean;
+  notifyOnFailure?: boolean;
+  notifyOnChangeOnly?: boolean;
+}
+
+export interface AgentTeamsDelivery extends AgentNotificationDeliveryBase {
   /**
    * When true, the connector's global default channel is used. When
    * false, `teamId` and `channelId` identify this agent's target.
@@ -234,15 +246,9 @@ export interface AgentTeamsDelivery {
   channelId?: string;
   teamName?: string;
   channelName?: string;
-  includeManualRuns?: boolean;
-  includeScheduledRuns?: boolean;
-  notifyOnSuccess?: boolean;
-  notifyOnFailure?: boolean;
-  notifyOnChangeOnly?: boolean;
 }
 
-export interface AgentWhatsAppWebDelivery {
-  enabled: boolean;
+export interface AgentWhatsAppWebDelivery extends AgentNotificationDeliveryBase {
   /**
    * When true, the connector's global default target is used. When
    * false, `recipient` identifies this agent's notification target.
@@ -251,11 +257,47 @@ export interface AgentWhatsAppWebDelivery {
   recipientType?: WhatsAppWebRecipientType;
   recipient?: string;
   recipientLabel?: string;
-  includeManualRuns?: boolean;
-  includeScheduledRuns?: boolean;
-  notifyOnSuccess?: boolean;
-  notifyOnFailure?: boolean;
-  notifyOnChangeOnly?: boolean;
+}
+
+export interface AgentOutlookDelivery extends AgentNotificationDeliveryBase {
+  /**
+   * When true, the connector's global default recipients are used. When
+   * false, `recipients` identifies this agent's email target list.
+   */
+  useDefaultRecipients?: boolean;
+  recipients?: string[];
+  recipientLabel?: string;
+}
+
+export interface AgentSlackDelivery extends AgentNotificationDeliveryBase {
+  /**
+   * When true, the connector's global default channel is used. When
+   * false, `channel` identifies this agent's Slack target.
+   */
+  useDefaultChannel?: boolean;
+  channel?: string;
+  channelLabel?: string;
+}
+
+export interface AgentDiscordDelivery extends AgentNotificationDeliveryBase {
+  /**
+   * When true, the connector's global default webhook is used. When
+   * false, this agent may override only thread/label metadata; webhook
+   * secrets remain connector-level.
+   */
+  useDefaultWebhook?: boolean;
+  threadId?: string;
+  targetLabel?: string;
+}
+
+export interface AgentSignalDelivery extends AgentNotificationDeliveryBase {
+  /**
+   * When true, the connector's global default recipient is used. When
+   * false, `recipient` identifies this agent's Signal target.
+   */
+  useDefaultRecipient?: boolean;
+  recipient?: string;
+  recipientLabel?: string;
 }
 
 export type WhatsAppWebConnectionState =
@@ -1160,6 +1202,16 @@ export interface OpenAdminOSApi {
     config: Record<string, unknown>,
   ): Promise<ConnectorSummary>;
   /**
+   * Persist or clear a connector secret in host-managed secure storage.
+   * Secret values are write-only from the renderer's perspective; they
+   * are never included in `ConnectorSummary.config`.
+   */
+  setConnectorSecret(
+    id: string,
+    key: string,
+    value: string | null,
+  ): Promise<ConnectorSummary>;
+  /**
    * Reads the list of teams the signed-in admin has joined, via the
    * Teams connector's `list-teams` capability. Used by the Connectors
    * page channel picker.
@@ -1328,6 +1380,39 @@ export interface OpenAdminOSApi {
   updateAgentWhatsAppWebDelivery(
     slug: string,
     delivery: AgentWhatsAppWebDelivery | null,
+  ): Promise<AppState>;
+  /**
+   * Persist per-agent Outlook delivery. Pass null to remove the route.
+   * Delivery sends terminal run reports through Microsoft Graph Mail.Send.
+   */
+  updateAgentOutlookDelivery(
+    slug: string,
+    delivery: AgentOutlookDelivery | null,
+  ): Promise<AppState>;
+  /**
+   * Persist per-agent Slack delivery. Pass null to remove the route.
+   * Delivery posts terminal run reports through the configured bot token.
+   */
+  updateAgentSlackDelivery(
+    slug: string,
+    delivery: AgentSlackDelivery | null,
+  ): Promise<AppState>;
+  /**
+   * Persist per-agent Discord delivery. Pass null to remove the route.
+   * Delivery posts terminal run reports through the configured webhook.
+   */
+  updateAgentDiscordDelivery(
+    slug: string,
+    delivery: AgentDiscordDelivery | null,
+  ): Promise<AppState>;
+  /**
+   * Persist per-agent Signal delivery. Pass null to remove the route.
+   * Delivery sends terminal run reports through local signal-cli or its
+   * local REST bridge.
+   */
+  updateAgentSignalDelivery(
+    slug: string,
+    delivery: AgentSignalDelivery | null,
   ): Promise<AppState>;
   /**
    * Generate a draft `manifest.yaml` from a natural-language description

@@ -17,7 +17,11 @@ import {
   type AgentCommunitySubmissionResult,
   type AgentDraftPreflightResult,
   type AgentUpdateReview,
+  type AgentDiscordDelivery,
+  type AgentOutlookDelivery,
   type AgentSchedule,
+  type AgentSignalDelivery,
+  type AgentSlackDelivery,
   type AgentTeamsDelivery,
   type AgentWhatsAppWebDelivery,
   type AppState,
@@ -74,6 +78,22 @@ interface AppStateContextValue {
   updateAgentWhatsAppWebDelivery: (
     slug: string,
     delivery: AgentWhatsAppWebDelivery | null,
+  ) => Promise<void>;
+  updateAgentOutlookDelivery: (
+    slug: string,
+    delivery: AgentOutlookDelivery | null,
+  ) => Promise<void>;
+  updateAgentSlackDelivery: (
+    slug: string,
+    delivery: AgentSlackDelivery | null,
+  ) => Promise<void>;
+  updateAgentDiscordDelivery: (
+    slug: string,
+    delivery: AgentDiscordDelivery | null,
+  ) => Promise<void>;
+  updateAgentSignalDelivery: (
+    slug: string,
+    delivery: AgentSignalDelivery | null,
   ) => Promise<void>;
   draftAgentManifest: (prompt: string) => Promise<AgentDraft>;
   validateAgentDraft: (yamlSource: string, allowedSlug?: string) => Promise<AgentDraft>;
@@ -576,6 +596,102 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     [],
   );
 
+  const updateAgentOutlookDelivery = useCallback(
+    async (slug: string, delivery: AgentOutlookDelivery | null) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating Outlook delivery is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentOutlookDelivery(slug, delivery);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const deliveryError = toError(caughtError);
+        setError(deliveryError);
+        throw deliveryError;
+      }
+    },
+    [],
+  );
+
+  const updateAgentSlackDelivery = useCallback(
+    async (slug: string, delivery: AgentSlackDelivery | null) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating Slack delivery is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentSlackDelivery(slug, delivery);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const deliveryError = toError(caughtError);
+        setError(deliveryError);
+        throw deliveryError;
+      }
+    },
+    [],
+  );
+
+  const updateAgentDiscordDelivery = useCallback(
+    async (slug: string, delivery: AgentDiscordDelivery | null) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating Discord delivery is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentDiscordDelivery(slug, delivery);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const deliveryError = toError(caughtError);
+        setError(deliveryError);
+        throw deliveryError;
+      }
+    },
+    [],
+  );
+
+  const updateAgentSignalDelivery = useCallback(
+    async (slug: string, delivery: AgentSignalDelivery | null) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        const fallbackError = new Error(
+          "Updating Signal delivery is unavailable in browser development.",
+        );
+        setError(fallbackError);
+        throw fallbackError;
+      }
+      setError(null);
+      try {
+        const nextState = await api.updateAgentSignalDelivery(slug, delivery);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const deliveryError = toError(caughtError);
+        setError(deliveryError);
+        throw deliveryError;
+      }
+    },
+    [],
+  );
+
   const draftAgentManifest = useCallback(async (prompt: string) => {
     const api = getOpenAdminOSApi();
     if (!api) {
@@ -880,6 +996,10 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgentSchedule,
       updateAgentTeamsDelivery,
       updateAgentWhatsAppWebDelivery,
+      updateAgentOutlookDelivery,
+      updateAgentSlackDelivery,
+      updateAgentDiscordDelivery,
+      updateAgentSignalDelivery,
       draftAgentManifest,
       validateAgentDraft,
       preflightAgentDraft,
@@ -920,6 +1040,10 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgent,
       updateAgentSchedule,
       updateAgentSettings,
+      updateAgentDiscordDelivery,
+      updateAgentOutlookDelivery,
+      updateAgentSignalDelivery,
+      updateAgentSlackDelivery,
       updateAgentTeamsDelivery,
       updateAgentWhatsAppWebDelivery,
       updateUserAgentDraft,
