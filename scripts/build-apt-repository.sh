@@ -9,7 +9,7 @@ component="${APT_REPO_COMPONENT:-main}"
 arch="${APT_REPO_ARCH:-amd64}"
 origin="${APT_REPO_ORIGIN:-OpenAdminOS}"
 label="${APT_REPO_LABEL:-OpenAdminOS}"
-description="${APT_REPO_DESCRIPTION:-OpenAdminOS Debian package repository}"
+description="${APT_REPO_DESCRIPTION:-OpenAdminOS apt package repository}"
 domain="${APT_REPO_DOMAIN:-repo.openadminos.com}"
 cname="${APT_REPO_CNAME-repo.openadminos.com}"
 
@@ -18,7 +18,7 @@ if [ -z "${APT_GPG_PRIVATE_KEY:-}" ]; then
   exit 1
 fi
 
-for command_name in dpkg-scanpackages apt-ftparchive gpg gzip; do
+for command_name in dpkg-deb dpkg-scanpackages apt-ftparchive gpg gzip; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "$command_name is required to build the apt repository." >&2
     exit 1
@@ -35,6 +35,12 @@ fi
 if [ "${#debs[@]}" -gt 1 ]; then
   echo "Expected one .deb package in $input_dir, found ${#debs[@]}." >&2
   printf '  %s\n' "${debs[@]}" >&2
+  exit 1
+fi
+
+package_arch="$(dpkg-deb --field "${debs[0]}" Architecture)"
+if [ "$package_arch" != "$arch" ]; then
+  echo "Expected .deb architecture '$arch', found '$package_arch'." >&2
   exit 1
 fi
 
@@ -61,6 +67,22 @@ cat > "$output_dir/index.html" <<EOF
 </html>
 EOF
 
+cat > "$repo_root/index.html" <<EOF
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>OpenAdminOS apt repository</title>
+  </head>
+  <body>
+    <h1>OpenAdminOS apt repository</h1>
+    <p>APT source: <code>https://$domain/debian stable main</code></p>
+    <p>Release metadata: <a href="./dists/$suite/InRelease">dists/$suite/InRelease</a></p>
+    <p>Archive key: <a href="./openadminos-archive-keyring.pgp">openadminos-archive-keyring.pgp</a></p>
+  </body>
+</html>
+EOF
+
 if [ -n "$cname" ]; then
   printf '%s\n' "$cname" > "$output_dir/CNAME"
 fi
@@ -69,6 +91,10 @@ touch "$output_dir/.nojekyll"
 (
   cd "$repo_root"
   dpkg-scanpackages --arch "$arch" pool > "dists/$suite/$component/binary-$arch/Packages"
+  if [ ! -s "dists/$suite/$component/binary-$arch/Packages" ]; then
+    echo "Generated Packages index is empty." >&2
+    exit 1
+  fi
   gzip -n -k -f "dists/$suite/$component/binary-$arch/Packages"
 )
 

@@ -60,7 +60,7 @@ These match the Partner Center reservation for the `OpenAdminOS` Store name. Don
 
 ### Linux — apt repository
 
-The apt repository is a static GitHub Pages deployment at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
+The apt repository is a static GitHub Pages deployment served at `https://repo.openadminos.com/debian`. It is regenerated from the release `.deb` on every `v*` tag. No package repository vendor, storage bucket, or checked-in package index is required.
 
 One-time GitHub setup:
 
@@ -87,8 +87,8 @@ Expires: 2029-06-04
 The workflow exports the public key to `https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp`, generates `Packages` / `Packages.gz`, signs `Release` as both `InRelease` and `Release.gpg`, and deploys the static repository through first-party GitHub Pages actions.
 
 To republish an existing release into apt without rebuilding the app, run the
-**Release** workflow manually from a branch that contains the apt publishing
-logic and set `backfill_apt_tag` to the release tag, for example `v0.2.1`.
+**Release** workflow manually from `main` and set `backfill_apt_tag` to the
+release tag, for example `v0.2.1`.
 
 ---
 
@@ -159,7 +159,7 @@ curl -fsSL https://repo.openadminos.com/debian/openadminos-archive-keyring.pgp >
 gpg --show-keys /tmp/openadminos-archive-keyring.pgp
 ```
 
-On a disposable Debian/Ubuntu machine:
+On a disposable Ubuntu or Debian-family machine:
 
 ```bash
 sudo install -d -m 0755 /usr/share/keyrings
@@ -173,13 +173,14 @@ apt-cache policy openadminos
 
 ### v0.2.1 macOS PKG backfill
 
-The `.github/workflows/backfill-v0.2.1-macos-pkg.yml` workflow exists only to
-add the missing macOS PKG to the already-published `v0.2.1` release. It checks
-out the immutable `v0.2.1` tag, patches the CI-local Electron Builder config to
-build only the arm64 PKG, signs/notarizes it with the Developer ID Application
-and Developer ID Installer secrets, uploads the PKG to the existing release, and
-refreshes `SHA256SUMS.txt` plus the checksum block in the release notes. Do not
-use it for normal releases.
+The already-published `v0.2.1` release was backfilled with
+`OpenAdminOS-0.2.1-arm64.pkg` on June 5, 2026. The one-off workflow checked out
+the immutable `v0.2.1` tag, patched only the CI-local Electron Builder config to
+build the arm64 PKG, signed/notarized it with the Developer ID Application and
+Developer ID Installer secrets, uploaded it to the existing release, and
+refreshed `SHA256SUMS.txt` plus the checksum block in the release notes. The
+temporary workflow was removed after the successful run; normal releases now use
+the standard `release.yml` path.
 
 ### Windows — no published package yet
 
@@ -192,7 +193,7 @@ Do not upload AppX files to GitHub Releases until the Windows signing/distributi
 - **Build AppX, don't publish it yet.** Keeping the AppX build in CI catches packaging regressions early. With no current Windows signing path, publishing the file would create an unusable release asset.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.
-- **GitHub Pages is enough for apt.** The Debian repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS under `repo.openadminos.com` without a package-hosting vendor.
+- **GitHub Pages is enough for apt.** The apt repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS under `repo.openadminos.com` without a package-hosting vendor.
 - **Apple Silicon only for v0.1.** macOS x64 + the per-arch manifest merge land in a follow-up when there's demand. Apple Silicon is the right default for new buyers; legacy Intel Macs are a smaller share each quarter.
 
 ## When to update this doc

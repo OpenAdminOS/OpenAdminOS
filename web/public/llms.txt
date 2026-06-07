@@ -14,11 +14,20 @@ License: MIT
 - Download: https://www.openadminos.com/download
 - Agent registry: https://www.openadminos.com/registry
 - Trust model: https://www.openadminos.com/trust-model
+- Blog: https://www.openadminos.com/blog
 - Intune use cases: https://www.openadminos.com/use-cases/intune
 - LLM provider model: https://www.openadminos.com/llm-providers
 - Privacy policy: https://www.openadminos.com/privacy
 - Terms of use: https://www.openadminos.com/terms
 - Legal notice: https://www.openadminos.com/legal-notice
+
+## Blog posts
+
+- What is an AI agent for Microsoft 365 admins?: https://www.openadminos.com/blog/what-is-an-ai-agent-for-microsoft-365-admins
+- PowerShell vs Logic Apps vs AI agents: https://www.openadminos.com/blog/powershell-vs-logic-apps-vs-ai-agents
+- Microsoft Graph and AI agents: https://www.openadminos.com/blog/microsoft-graph-and-ai-agents
+- Why run Microsoft 365 AI agents on your own device?: https://www.openadminos.com/blog/why-run-microsoft-365-ai-agents-on-your-own-device
+- How to build your own Microsoft 365 admin agent: https://www.openadminos.com/blog/how-to-build-your-own-microsoft-365-admin-agent
 
 ## Product facts
 

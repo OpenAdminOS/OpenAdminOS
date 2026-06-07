@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-04T23:00:14.762Z",
+  "updatedAt": "2026-06-06T01:00:23.161Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 10,
@@ -10,40 +10,40 @@
       "installs7d": 2
     },
     "compliance-overview": {
-      "installs": 10,
-      "installs7d": 3
+      "installs": 11,
+      "installs7d": 2
     },
     "os-update-posture": {
       "installs": 6,
       "installs7d": 3
     },
     "tenant-health-report": {
-      "installs": 6,
-      "installs7d": 2
-    },
-    "user-license-overview": {
-      "installs": 6,
-      "installs7d": 3
-    },
-    "conditional-access-explainer": {
-      "installs": 9,
-      "installs7d": 3
-    },
-    "dormant-app-registrations": {
       "installs": 7,
       "installs7d": 3
     },
+    "user-license-overview": {
+      "installs": 7,
+      "installs7d": 3
+    },
+    "conditional-access-explainer": {
+      "installs": 10,
+      "installs7d": 4
+    },
+    "dormant-app-registrations": {
+      "installs": 8,
+      "installs7d": 4
+    },
     "risky-sign-in-triage": {
       "installs": 5,
-      "installs7d": 2
+      "installs7d": 1
     },
     "secure-score-prioritizer": {
       "installs": 6,
-      "installs7d": 3
+      "installs7d": 2
     },
     "sign-in-failure-explainer": {
       "installs": 6,
-      "installs7d": 3
+      "installs7d": 2
     },
     "stale-guest-cleanup": {
       "installs": 5,
@@ -51,7 +51,7 @@
     },
     "tenant-change-audit": {
       "installs": 5,
-      "installs7d": 2
+      "installs7d": 1
     }
   }
 }

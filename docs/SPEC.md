@@ -106,11 +106,12 @@ platforms and must not advertise Windows availability until signed Windows
 builds are actually published. Marketing download surfaces present macOS as a
 signed/notarized DMG for normal installs plus a signed/notarized PKG for managed
 deployment, and Linux as x64 packages with AppImage for broad desktop use,
-`.deb` for Ubuntu/Debian-family systems, `.rpm` for Fedora/RHEL-compatible
+`.deb` for Ubuntu and other Debian-family systems, `.rpm` for Fedora/RHEL-compatible
 systems, and a visible inline SHA-256 hash for each package plus a
-`SHA256SUMS.txt` verification link. Debian/Ubuntu-family installs also have a
-GitHub Pages-backed apt repository at `https://repo.openadminos.com/debian`,
-published from release CI and signed with the OpenAdminOS Linux archive key.
+`SHA256SUMS.txt` verification link. Ubuntu and other Debian-family installs also
+have a GitHub Pages-backed apt repository at
+`https://repo.openadminos.com/debian`, published from release CI and signed with
+the OpenAdminOS Linux archive key.
 The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page
@@ -128,6 +129,26 @@ the "What is OpenAdminOS?" FAQ, not in standalone SEO cards or hidden text.
 FAQ content may use native `<details>/<summary>` accordions when the answer
 text is server-rendered in the initial HTML and remains directly accessible to
 users. Keep the primary product definition expanded by default.
+The marketing navbar keeps a compact primary set: Blog, Documentation, GitHub,
+and Download. The Intune use-case page, registry page, and trust-model page
+remain published and indexable even though they are no longer primary navbar
+items, because they target durable admin search and product-evaluation topics.
+Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
+the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
+use `BlogPosting` structured data, and answer real Microsoft 365 admin
+questions without generic AI-hype language. Markdown sections titled "Related
+reading" and "LinkedIn draft" are editorial notes and are not rendered on the
+public article page. Blog frontmatter may include `seo_title` when the on-page
+H1 should stay descriptive but the browser title should be shorter for search
+display. Public article pages show an "OpenAdminOS editorial" byline and author
+summary until a named author profile is intentionally added. Each public blog
+post has an article-specific 1200x630 preview image under `web/public/blog/og/`
+that is used in Open Graph metadata, Twitter metadata, JSON-LD, article headers,
+and blog index cards. Because Vercel mirrors `web/.next` to the repository root
+for finalization, the blog loader must tolerate both `web/` and repo-root
+working directories, and the Vercel postbuild mirror must expose traced
+`web/content` Markdown files and missing website `node_modules` packages at
+repository-root paths.
 
 The Vercel project is configured with `web/` as its Root Directory. As of the
 June 2026 Vercel Git Integration behavior, successful Next.js builds for
@@ -267,7 +288,7 @@ Agents may declare optional or required `connectors:` — see Connector abstract
 
 Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, WhatsApp number, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
 
-**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk` in the [Unreleased] section. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. Runtime injection, the Connectors sidebar entry, Microsoft Teams, and WhatsApp Web are implemented in [Unreleased].
+**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk`. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. Runtime injection, the Connectors sidebar entry, Microsoft Teams, and WhatsApp Web are implemented for v0.2.2.
 
 The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships — retrofitting them after agents start consuming the API is what makes ecosystems brittle.
 
@@ -979,7 +1000,7 @@ Electron window.
 Required before public v1 release:
 - **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, CI may build AppX packages for validation, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr), a Developer ID Application certificate for the app/DMG/ZIP, a Developer ID Installer certificate for the PKG, and notarization. Without notarization, Gatekeeper blocks the app.
-- **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu/Debian-family and RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://repo.openadminos.com/debian`; apt trust is repository-metadata signing, not per-file executable signing. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
+- **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu and other Debian-family systems, plus RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://repo.openadminos.com/debian`; apt trust is repository-metadata signing, not per-file executable signing. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.

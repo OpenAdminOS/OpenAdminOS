@@ -6,35 +6,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Added a local retry queue for post-run Teams and WhatsApp Web delivery, with connector audit metadata and focused tests for delivery success, skipped rules, retries, and disconnect cleanup.
-- Added a WhatsApp Web connector with QR linking, automatic QR refresh, phone-side setup guidance, default/test target selection for My WhatsApp, groups, and manual recipients, Baileys reconnect handling, redacted recipient logging, and per-agent outbound run notifications.
-- Release tags now publish the Linux `.deb` into a signed GitHub Pages-backed apt repository at `repo.openadminos.com`, generated automatically from the release artifact.
-
 ### Changed
-
-- Redesigned the Connectors page around an operational summary, clearer live connector panels, and a quieter connector backlog.
-- Simplified the Connectors page connected-state flow by moving permissions, capability, routing-rule, trust-boundary, and backlog details into compact disclosures while keeping setup and notification targets visible.
-- Connector delivery now appears as post-run activity steps for Teams and WhatsApp Web, including sent, failed, and rule-skipped outcomes.
-- Updated the spec, roadmap, and operating instructions to mark OpenAdminOS as public preview.
 
 ### Removed
 
 ### Fixed
 
-- Fixed connector notification settings so Teams and WhatsApp Web delivery rules/default targets autosave and runs use newly enabled delivery without a separate save button.
-- Fixed WhatsApp Web disconnect cleanup so stale default targets, per-agent custom targets, and queued WhatsApp deliveries are cleared when the linked session is removed.
-- Fixed WhatsApp Web session restore so saved linked-device auth reconnects automatically after reopening the app instead of waiting for a manual send/test action.
-- Fixed WhatsApp target mode switching so internal group JIDs are not carried into manual Number/JID fields.
-- Fixed provider selection/trust messaging so selecting a model under an inactive provider activates it, overview surfaces show the active provider's selected default model, and run surfaces show the run-pinned provider/model context.
-
 ### Security
-
-- WhatsApp Web QR setup now keeps the raw pairing token out of renderer-facing connector status.
 
 ## [0.2.2] - 2026-06-05
 
 ### Added
 
+- Added a local retry queue for post-run Teams and WhatsApp Web delivery, with connector audit metadata and focused tests for delivery success, skipped rules, retries, and disconnect cleanup.
+- Added a WhatsApp Web connector with QR linking, automatic QR refresh, phone-side setup guidance, default/test target selection for My WhatsApp, groups, and manual recipients, Baileys reconnect handling, redacted recipient logging, and per-agent outbound run notifications.
 - v0.2.2 planning now scopes Intune Chat as a first-class tenant interaction surface, with Graph cache, agent-as-skill routing, and optional approved local self-training.
 - Intune Chat now has a SQLite-backed read-only tenant chat surface with Graph cache refresh, compact answer packs, agent-as-skill suggestions, and optional approved local self-training overlays.
 - Intune Chat Graph cache refresh now supports per-tenant scheduled refresh intervals, local next-run/failure state, OS scheduler integration, and compact Microsoft Graph audit-log selects validated through the Microsoft Graph MCP.
@@ -48,8 +33,26 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Marketing navbar now keeps only Blog, Documentation, GitHub, and the Download button as primary links.
+- Published five Markdown-backed Microsoft 365 admin blog posts and refreshed the blog index/article reading experience.
+- Blog content path resolution now works from both the website root and repository root, and the Vercel build mirror exposes traced Markdown files and missing website packages for deployment finalization.
+- Blog articles now have post-specific social preview images wired into Open Graph, Twitter metadata, schema, article headers, and blog cards.
+- Blog posts now use shorter SEO titles where needed, visible editorial bylines, and added mini-case sections for stronger SEO/GEO depth.
+- Marketing navbar now links to a new server-rendered blog with Microsoft 365 admin SEO/GEO articles while keeping the Intune use-case page indexable.
+- Marketing landing page macOS helper text now links to the macOS package options on the downloads page.
+- Marketing and GitBook macOS PKG copy now names Intune alongside Jamf and Munki for managed rollout.
+- GitBook docs now cover v0.2.1 builder, community sharing, registry trust, and the exact macOS/Linux download posture.
+- GitBook installation docs now include the `repo.openadminos.com` apt repository commands for Ubuntu and other Debian-family installs.
+- Release CI now publishes the apt repository under the `repo.openadminos.com` custom GitHub Pages domain.
+- Release tags now publish the Linux `.deb` into a signed GitHub Pages-backed apt repository, generated automatically from the release artifact.
+- Redesigned the Connectors page around an operational summary, clearer live connector panels, and a quieter connector backlog.
+- Simplified the Connectors page connected-state flow by moving permissions, capability, routing-rule, trust-boundary, and backlog details into compact disclosures while keeping setup and notification targets visible.
+- Connector delivery now appears as post-run activity steps for Teams and WhatsApp Web, including sent, failed, and rule-skipped outcomes.
+- Updated the spec, roadmap, and operating instructions to mark OpenAdminOS as public preview.
+- Marketing downloads page now uses compact platform rows with separate macOS DMG and PKG links while the landing CTA remains the DMG.
 - Release tags now publish a macOS `.pkg` alongside the DMG/ZIP outputs, with marketing and docs exposing it as the managed deployment package.
 - A one-off `v0.2.1` macOS PKG backfill workflow now builds the missing signed/notarized installer package and refreshes release checksums.
+- The temporary `v0.2.1` macOS PKG backfill workflow was removed after the successful release update.
 - Release docs now include the CLI CSR path for generating the Developer ID Installer certificate used by macOS PKG signing.
 - Release tags now publish Linux x64 AppImage, `.deb`, and `.rpm` artifacts with SHA-256 checksums while keeping Windows build-only.
 - The v0.2.1 release was backfilled with Linux x64 AppImage, `.deb`, and `.rpm` artifacts built from the v0.2.1 tag.
@@ -103,6 +106,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Privileged Electron IPC handlers now validate trusted sender frames and narrow connector, agent, run, tenant, draft, community submission, external URL, and save-file payloads before reaching host state.
 - Installed write-agent cards now route to the existing Agent Detail run preflight instead of an undefined confirmation route.
 - Tenant connection now requests the Graph PM-audited read scopes needed by the full Intune Chat cache surface, and the chat planner now uses the documented scopes for scripts, troubleshooting events, group reads, and encryption-state resources.
+
+### Fixed
+
+- Fixed connector notification settings so Teams and WhatsApp Web delivery rules/default targets autosave and runs use newly enabled delivery without a separate save button.
+- Fixed WhatsApp Web disconnect cleanup so stale default targets, per-agent custom targets, and queued WhatsApp deliveries are cleared when the linked session is removed.
+- Fixed WhatsApp Web session restore so saved linked-device auth reconnects automatically after reopening the app instead of waiting for a manual send/test action.
+- Fixed WhatsApp target mode switching so internal group JIDs are not carried into manual Number/JID fields.
+- Fixed provider selection/trust messaging so selecting a model under an inactive provider activates it, overview surfaces show the active provider's selected default model, and run surfaces show the run-pinned provider/model context.
+
+### Security
+
+- WhatsApp Web QR setup now keeps the raw pairing token out of renderer-facing connector status.
 
 ## [0.2.1] - 2026-05-29
 
