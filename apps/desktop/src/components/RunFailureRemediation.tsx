@@ -1,5 +1,7 @@
 import { Card } from "./Card";
 import { IconWarning } from "./icons";
+import { Button } from "./Button";
+import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
 
 interface Suggestion {
@@ -52,6 +54,7 @@ const SUGGESTIONS: Suggestion[] = [
 ];
 
 export function RunFailureRemediation({ run }: { run: RunRecord }) {
+  const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
   const matched = SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
 
@@ -72,9 +75,9 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
               No matching playbook
             </div>
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-              Inspect the Logs tab for the stack trace. If this is reproducible, file
-              an issue at <span className="font-mono">github.com/OpenAdminOS/OpenAdminOS/issues</span> with
-              the run id, agent slug, and error message.
+              Inspect the Logs tab locally. If this is reproducible, use Report
+              this failure to submit a public GitHub issue after reviewing what
+              is safe to make public.
             </p>
           </div>
         ) : (
@@ -97,6 +100,27 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
             ))}
           </div>
         )}
+        <div className="mt-5 flex justify-end border-t border-[var(--color-border-soft)] pt-4">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() =>
+              openReportIssue({
+                source: "run-failure",
+                title: "Run failed",
+                description:
+                  "An agent run failed during execution. I can reproduce it with the steps below.",
+                expectedBehavior:
+                  "The run should complete or show recovery guidance I can act on.",
+                actualBehavior: "The run ended in the failed state.",
+                runId: run.id,
+                agentSlug: run.agentSlug,
+              })
+            }
+          >
+            Report this failure
+          </Button>
+        </div>
       </div>
     </Card>
   );

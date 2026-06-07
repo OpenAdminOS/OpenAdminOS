@@ -39,11 +39,19 @@ export function Button({
   return (
     <button
       {...rest}
-      className={`inline-flex items-center justify-center font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
     >
-      {leadingIcon}
+      {leadingIcon ? (
+        <span aria-hidden="true" className="inline-flex shrink-0">
+          {leadingIcon}
+        </span>
+      ) : null}
       {children}
-      {trailingIcon}
+      {trailingIcon ? (
+        <span aria-hidden="true" className="inline-flex shrink-0">
+          {trailingIcon}
+        </span>
+      ) : null}
     </button>
   );
 }

@@ -37,6 +37,39 @@ interface CodexModelsCache {
 }
 
 const DEFAULT_TIMEOUT_MS = 180_000;
+const CODEX_ENV_ALLOWLIST = new Set([
+  "ALL_PROXY",
+  "all_proxy",
+  "COMSPEC",
+  "HOME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "LOGNAME",
+  "NODE_EXTRA_CA_CERTS",
+  "NO_PROXY",
+  "no_proxy",
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "SystemRoot",
+  "TEMP",
+  "TERM",
+  "TMP",
+  "TMPDIR",
+  "USER",
+  "USERNAME",
+  "USERPROFILE",
+  "WINDIR",
+]);
 
 export function createCodexLlm(options: CodexProviderOptions = {}): RunLlmApi {
   const homePath = expandHome(options.homePath ?? process.env.CODEX_HOME ?? "~/.codex");
@@ -76,6 +109,7 @@ export function createCodexLlm(options: CodexProviderOptions = {}): RunLlmApi {
           model,
           prompt: formatPrompt(opts),
           timeoutMs,
+          signal: opts.signal,
         });
       } finally {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
@@ -130,6 +164,30 @@ export async function probeCodexLlm(
     ...(modelMetadata.defaultModel ? { defaultModel: modelMetadata.defaultModel } : {}),
     detail: version ? `Codex CLI ${version}` : "Codex CLI is installed and authenticated.",
   };
+}
+
+export function createCodexProcessEnv(input: {
+  source?: NodeJS.ProcessEnv;
+  overrides?: NodeJS.ProcessEnv;
+} = {}): NodeJS.ProcessEnv {
+  const source = input.source ?? process.env;
+  const env: NodeJS.ProcessEnv = {};
+
+  for (const key of CODEX_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (typeof value === "string" && value.length > 0) {
+      env[key] = value;
+    }
+  }
+
+  for (const [key, value] of Object.entries(input.overrides ?? {})) {
+    if (key !== "CODEX_HOME" && !CODEX_ENV_ALLOWLIST.has(key)) continue;
+    if (typeof value === "string" && value.length > 0) {
+      env[key] = value;
+    }
+  }
+
+  return env;
 }
 
 async function resolveCodexBinary(preferredBinaryPath?: string): Promise<string> {
@@ -243,6 +301,7 @@ async function* runCodexExecStream(input: {
   model?: string;
   prompt: string;
   timeoutMs: number;
+  signal?: AbortSignal;
 }): AsyncIterable<LlmStreamChunk> {
   const args = [
     "exec",
@@ -260,7 +319,7 @@ async function* runCodexExecStream(input: {
   ];
   const child = spawn(input.binaryPath, args, {
     cwd: input.cwd,
-    env: { ...process.env, CODEX_HOME: input.homePath },
+    env: createCodexProcessEnv({ overrides: { CODEX_HOME: input.homePath } }),
     shell: process.platform === "win32",
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -270,6 +329,16 @@ async function* runCodexExecStream(input: {
   let accumulated = "";
   let yielded = false;
   let settled = false;
+  const abortFromCaller = () => {
+    if (!settled) {
+      child.kill("SIGKILL");
+    }
+  };
+  if (input.signal?.aborted) {
+    abortFromCaller();
+  } else {
+    input.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
   const model = input.model ?? "codex-default";
   const closePromise = new Promise<number | null>((resolveResult, rejectResult) => {
     child.on("error", rejectResult);
@@ -325,8 +394,12 @@ async function* runCodexExecStream(input: {
   const exitCode = await closePromise;
   settled = true;
   clearTimeout(timer);
+  input.signal?.removeEventListener("abort", abortFromCaller);
 
   if (exitCode !== 0) {
+    if (input.signal?.aborted) {
+      throw new Error("Codex CLI request stopped by user.");
+    }
     const detail = stderr || stdout;
     throw new Error(
       detail
@@ -397,7 +470,7 @@ async function runProcess(input: {
   return new Promise((resolveResult) => {
     const child = spawn(input.binaryPath, input.args, {
       cwd: input.cwd,
-      env: { ...process.env, ...input.env },
+      env: createCodexProcessEnv({ overrides: input.env }),
       shell: process.platform === "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });

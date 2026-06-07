@@ -15,14 +15,18 @@ export function RunTelemetry({
 }) {
   const completedSteps = run.steps.filter((step) => step.status === "completed").length;
   const failedSteps = run.steps.filter((step) => step.status === "failed").length;
+  const skippedSteps = run.steps.filter((step) => step.status === "skipped").length;
   const totalSteps = run.steps.length;
-  const stepLabel = totalSteps > 0 ? `${completedSteps}/${totalSteps}` : "—";
+  const settledSteps = completedSteps + skippedSteps;
+  const stepLabel = totalSteps > 0 ? `${settledSteps}/${totalSteps}` : "—";
   const stepCaption =
     totalSteps === 0
       ? "no steps yet"
       : failedSteps > 0
         ? `${failedSteps} failed`
-        : completedSteps === totalSteps
+        : skippedSteps > 0 && settledSteps === totalSteps
+          ? `${skippedSteps} skipped`
+          : settledSteps === totalSteps
           ? "all complete"
           : isLive
             ? "in progress"

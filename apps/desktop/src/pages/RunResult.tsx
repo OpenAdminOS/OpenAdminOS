@@ -24,13 +24,16 @@ import { ActivityFeed } from "../components/ActivityFeed";
 import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { RunTelemetry } from "../components/RunTelemetry";
+import { useToast } from "../components/Toast";
 import { useAppState } from "../state";
-import type {
-  RunRecord,
-  RunStatus,
-  TenantRecord,
-  WriteAction,
-  WritePlan,
+import { copyTextToClipboard } from "../shared/clipboard";
+import {
+  deriveTrustState,
+  type RunRecord,
+  type RunStatus,
+  type TenantRecord,
+  type WriteAction,
+  type WritePlan,
 } from "../shared/openAdminOS";
 import {
   runReportJson,
@@ -42,18 +45,25 @@ export default function RunResult() {
   const navigate = useNavigate();
   const { id } = useParams();
   const { state, startRun, confirmRun, rejectRun, cancelRun } = useAppState();
+  const toast = useToast();
   const run = state.runs.find((candidate) => candidate.id === id);
   const agent = run
     ? state.installedAgents.find((candidate) => candidate.slug === run.agentSlug)
     : undefined;
   const isLive = run?.status === "queued" || run?.status === "running";
   const isAwaiting = run?.status === "awaiting-confirmation";
-  const tenantDisplayName = run?.tenantId
-    ? state.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName
+  const runTenant = run?.tenantId
+    ? state.tenants.find((tenant) => tenant.id === run.tenantId)
     : undefined;
+  const tenantDisplayName = runTenant?.displayName;
   const runProvider = run?.providerId
     ? state.providers.find((provider) => provider.id === run.providerId)
     : undefined;
+  const runTrust = deriveTrustState({
+    provider: runProvider,
+    activeTenant: runTenant,
+    model: run?.model,
+  });
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -162,7 +172,11 @@ export default function RunResult() {
               <span className="opacity-50">·</span>
               <button
                 onClick={() => {
-                  void navigator.clipboard.writeText(run.id);
+                  void copyTextToClipboard(run.id)
+                    .then(() => toast.success("Run ID copied."))
+                    .catch((error) =>
+                      toast.error(error instanceof Error ? error.message : String(error)),
+                    );
                 }}
                 title="Copy run id"
                 className="inline-flex items-center gap-1 font-mono transition-colors hover:text-[var(--color-text)]"
@@ -180,12 +194,16 @@ export default function RunResult() {
               size="md"
               leadingIcon={<IconCopy size={12} />}
               onClick={() => {
-                void navigator.clipboard.writeText(
+                void copyTextToClipboard(
                   runReportPlaintext(run, {
                     agentName: agent?.name,
                     tenantName: tenantDisplayName,
                   }),
-                );
+                )
+                  .then(() => toast.success("Run report copied."))
+                  .catch((error) =>
+                    toast.error(error instanceof Error ? error.message : String(error)),
+                  );
               }}
             >
               Copy report
@@ -207,7 +225,11 @@ export default function RunResult() {
             <ShareMenu
               contextLabel="run"
               onCopyLink={() => {
-                void navigator.clipboard.writeText(`openadminos://run/${run.id}`);
+                void copyTextToClipboard(`openadminos://run/${run.id}`)
+                  .then(() => toast.success("Run link copied."))
+                  .catch((error) =>
+                    toast.error(error instanceof Error ? error.message : String(error)),
+                  );
               }}
               copyLinkHint={`openadminos://run/${run.id}`}
               onExportMarkdown={() => {
@@ -275,8 +297,8 @@ export default function RunResult() {
         <OutcomeCard
           run={run}
           agent={agent}
-          trustLabel={state.trust.label}
-          trustDetail={state.trust.detail}
+          trustLabel={runTrust.label}
+          trustDetail={runTrust.detail}
           providerName={runProvider?.name ?? run.providerId}
           providerIsLocal={runProvider?.isLocal}
           tenantName={tenantDisplayName}
@@ -310,12 +332,12 @@ export default function RunResult() {
         <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
           <span
             className={
-              state.trust.isLocal
+              runProvider?.isLocal
                 ? "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
-                : "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-info)]"
+                : "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]"
             }
           />
-          <span>{state.trust.detail}</span>
+          <span>{runTrust.detail}</span>
         </div>
       </PageBody>
     </>

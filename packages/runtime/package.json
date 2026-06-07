@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/runtime",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -15,14 +15,15 @@
     "dist"
   ],
   "scripts": {
-    "build": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && tsc -p tsconfig.json --noEmit",
+    "build": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
-    "@openadminos/agent-sdk": "0.2.1",
-    "@openadminos/connector-teams": "0.2.1",
+    "@openadminos/agent-sdk": "0.2.2",
+    "@openadminos/connector-teams": "0.2.2",
+    "@openadminos/connector-whatsapp-web": "0.2.2",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {

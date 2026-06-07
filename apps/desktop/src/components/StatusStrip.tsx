@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { useAppState } from "../state";
+import { resolveProviderDefaultModel } from "../shared/openAdminOS";
 import { IconCloud, IconHardDrive } from "./icons";
 
 export function StatusStrip() {
@@ -7,6 +8,10 @@ export function StatusStrip() {
   const activeProvider = state.providers.find(
     (provider) => provider.id === state.activeProviderId,
   );
+  const activeModel = resolveProviderDefaultModel(
+    activeProvider,
+    state.activeModelByProviderId,
+  ).model;
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -52,7 +57,7 @@ export function StatusStrip() {
           />
           <span className="text-[var(--color-text-soft)]">
             {activeProvider?.name ?? "no provider"}
-            {activeProvider?.defaultModel ? ` · ${activeProvider.defaultModel}` : ""}
+            {activeModel ? ` · ${activeModel}` : ""}
           </span>
         </span>
       </div>

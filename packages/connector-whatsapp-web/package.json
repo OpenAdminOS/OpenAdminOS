@@ -1,0 +1,38 @@
+{
+  "name": "@openadminos/connector-whatsapp-web",
+  "version": "0.2.2",
+  "private": true,
+  "type": "module",
+  "description": "WhatsApp Web connector for OpenAdminOS. Sends outbound notification messages through a locally linked WhatsApp Web session.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build -w @openadminos/agent-sdk && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/agent-sdk && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@openadminos/agent-sdk": "0.2.2",
+    "baileys": "7.0.0-rc13",
+    "pino": "^10.1.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "@types/qrcode": "^1.5.6",
+    "typescript": "~6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "sideEffects": false
+}

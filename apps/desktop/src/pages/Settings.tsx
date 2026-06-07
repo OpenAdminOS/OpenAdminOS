@@ -1,27 +1,38 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
 import { Button } from "../components/Button";
+import { Modal, ModalHeader } from "../components/Modal";
+import { useReportIssue } from "../components/ReportIssueModal";
 import {
   IconCheck,
+  IconChat,
   IconClock,
   IconClose,
   IconCloud,
+  IconExternal,
   IconHardDrive,
   IconLock,
   IconPlus,
+  IconRefresh,
   IconShield,
+  IconWarning,
 } from "../components/icons";
-import type {
-  ProviderId,
-  ProviderTestResult,
-  ProviderSummary,
-  ReleaseDiagnostics,
-  SchedulerLaunchSettings,
-  TenantRecord,
-  TrustState,
+import {
+  resolveProviderDefaultModel,
+  type GraphCacheStatus,
+  type LocalDataSummary,
+  type ProviderId,
+  type ProviderTestResult,
+  type ProviderSummary,
+  type ReleaseDiagnostics,
+  type SchedulerLaunchSettings,
+  type SelfTrainingSettings,
+  type SelfTrainingSuggestion,
+  type TenantRecord,
+  type TrustState,
 } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
@@ -29,12 +40,16 @@ import { useAppState } from "../state";
 const sections = [
   { id: "providers", label: "LLM Providers" },
   { id: "tenants", label: "Tenants" },
+  { id: "chat", label: "Intune Chat" },
   { id: "general", label: "General" },
   { id: "privacy", label: "Privacy" },
   { id: "about", label: "About" },
 ] as const;
 
 type SectionId = (typeof sections)[number]["id"];
+
+const OFFICIAL_REGISTRY_SOURCE =
+  "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
 export default function Settings() {
   const [section, setSection] = useState<SectionId>("providers");
@@ -45,6 +60,7 @@ export default function Settings() {
     connectTenant,
     setActiveTenant,
     disconnectTenant,
+    setRegistrySource,
     setRegistryInstallCountsEnabled,
   } = useAppState();
   const [tenantBusy, setTenantBusy] = useState(false);
@@ -102,11 +118,16 @@ export default function Settings() {
               onDisconnect={disconnectTenant}
             />
           )}
+          {section === "chat" && <ChatSettingsSection />}
           {section === "general" && <GeneralSection />}
           {section === "privacy" && (
             <PrivacySection
               trust={state.trust}
+              registrySource={state.registrySource}
+              registryRefreshError={state.registryRefreshError}
+              lastRegistryRefresh={state.lastRegistryRefresh}
               registryInstallCountsEnabled={state.registryInstallCountsEnabled}
+              onSetRegistrySource={setRegistrySource}
               onSetRegistryInstallCountsEnabled={setRegistryInstallCountsEnabled}
             />
           )}
@@ -199,14 +220,16 @@ function ProviderRow({
   const installedModels = provider.models ?? [];
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
-  const effectiveModel =
-    activeModel && installedModels.includes(activeModel)
-      ? activeModel
-      : provider.defaultModel ?? installedModels[0];
+  const effectiveModel = resolveProviderDefaultModel(
+    provider,
+    activeModel ? { [provider.id]: activeModel } : undefined,
+  ).model;
   const canTest =
     implemented &&
     provider.status === "connected" &&
-    (provider.id === "openai" || provider.id === "ollama");
+    (provider.id === "openai" ||
+      provider.id === "ollama" ||
+      provider.id === "apple-foundation");
 
   const handleTest = async () => {
     setTesting(true);
@@ -287,7 +310,7 @@ function ProviderRow({
           {provider.id === "openai" && implemented && (
             <div className="mt-3 grid gap-2 rounded-md bg-[var(--color-bg-raised)] p-3 text-[11px] ring-1 ring-[var(--color-border-soft)] sm:grid-cols-3">
               <ProviderFact label="Codex auth" value={provider.status === "connected" ? "Detected" : "Check required"} />
-              <ProviderFact label="Default model" value={provider.defaultModel ?? "Provider default"} />
+              <ProviderFact label="Default model" value={effectiveModel ?? "Provider default"} />
               <ProviderFact label="Models" value={`${installedModels.length} available`} />
             </div>
           )}
@@ -302,17 +325,26 @@ function ProviderRow({
               <div className="flex flex-wrap gap-1.5">
                 {installedModels.map((m) => {
                   const selected = m === effectiveModel;
+                  const modelTitle = !isActive
+                    ? `Use ${m} and set ${provider.name} active for runs`
+                    : selected
+                      ? "Currently active model · click to revert to provider default"
+                      : `Use ${m} for runs against this provider`;
                   return (
                     <button
                       key={m}
                       onClick={() => {
-                        void onSetActiveModel(provider.id, selected ? null : m);
+                        void (async () => {
+                          if (!isActive) {
+                            await onSetActiveProvider(provider.id);
+                          }
+                          await onSetActiveModel(
+                            provider.id,
+                            selected && isActive ? null : m,
+                          );
+                        })();
                       }}
-                      title={
-                        selected
-                          ? "Currently active model · click to revert to provider default"
-                          : `Use ${m} for runs against this provider`
-                      }
+                      title={modelTitle}
                       className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[10.5px] transition-colors ${
                         selected
                           ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
@@ -416,6 +448,8 @@ function providerInstallGuideUrl(providerId: ProviderId): string | undefined {
   switch (providerId) {
     case "ollama":
       return "https://ollama.com/download";
+    case "apple-foundation":
+      return "https://support.apple.com/121115";
     case "lm-studio":
       return "https://lmstudio.ai";
     case "anthropic":
@@ -588,6 +622,588 @@ function TenantRow({
   );
 }
 
+function ChatSettingsSection() {
+  const { state } = useAppState();
+  const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
+  const [localDataSummary, setLocalDataSummary] =
+    useState<LocalDataSummary | null>(null);
+  const [learningSettings, setLearningSettings] =
+    useState<SelfTrainingSettings>({ enabled: false });
+  const [suggestions, setSuggestions] = useState<SelfTrainingSuggestion[]>([]);
+  const [refreshingCache, setRefreshingCache] = useState(false);
+  const [clearingLocalData, setClearingLocalData] =
+    useState<"chat" | "graph" | null>(null);
+  const [clearTarget, setClearTarget] = useState<"chat" | "graph" | null>(null);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleInterval, setScheduleInterval] = useState(360);
+  const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    : undefined;
+
+  const pendingSuggestions = suggestions.filter(
+    (suggestion) =>
+      suggestion.status === "pending" &&
+      (!activeTenant || suggestion.tenantId === activeTenant.id),
+  );
+  const activeLearning = suggestions.filter(
+    (suggestion) =>
+      suggestion.status === "accepted" &&
+      (!activeTenant || suggestion.tenantId === activeTenant.id),
+  );
+  const activeLearningAgents = Array.from(
+    activeLearning.reduce((map, suggestion) => {
+      map.set(suggestion.agentSlug, (map.get(suggestion.agentSlug) ?? 0) + 1);
+      return map;
+    }, new Map<string, number>()),
+  );
+  const decidedSuggestions = suggestions.filter(
+    (suggestion) =>
+      suggestion.status !== "pending" &&
+      (!activeTenant || suggestion.tenantId === activeTenant.id),
+  );
+
+  const loadChatSettings = async () => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    const [nextCache, nextLearning, nextSuggestions, nextLocalData] = await Promise.all([
+      api.getGraphCacheStatus().catch(() => null),
+      api.getSelfTrainingSettings(),
+      api.listSelfTrainingSuggestions(),
+      api.getLocalDataSummary().catch(() => null),
+    ]);
+    setCacheStatus(nextCache);
+    setLearningSettings(nextLearning);
+    setSuggestions(nextSuggestions);
+    setLocalDataSummary(nextLocalData);
+    if (nextCache?.schedule?.intervalMinutes) {
+      setScheduleInterval(nextCache.schedule.intervalMinutes);
+    }
+  };
+
+  useEffect(() => {
+    void loadChatSettings().catch((caught) =>
+      setError(caught instanceof Error ? caught.message : String(caught)),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.activeTenantId]);
+
+  const handleRefreshCache = async () => {
+    const api = window.openAdminOS;
+    if (!api || refreshingCache) return;
+    setRefreshingCache(true);
+    setError(null);
+    try {
+      await api.refreshGraphCache();
+      setCacheStatus(await api.getGraphCacheStatus());
+      setLocalDataSummary(await api.getLocalDataSummary());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setRefreshingCache(false);
+    }
+  };
+
+  const handleClearLocalData = async () => {
+    const api = window.openAdminOS;
+    if (!api || !clearTarget || clearingLocalData) return;
+    setClearingLocalData(clearTarget);
+    setError(null);
+    try {
+      if (clearTarget === "chat") {
+        setLocalDataSummary(await api.clearIntuneChatHistory());
+      } else {
+        setLocalDataSummary(await api.clearGraphCache(activeTenant?.id));
+        setCacheStatus(await api.getGraphCacheStatus(activeTenant?.id));
+      }
+      setClearTarget(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setClearingLocalData(null);
+    }
+  };
+
+  const handleScheduleChange = async (enabled: boolean, intervalMinutes = scheduleInterval) => {
+    const api = window.openAdminOS;
+    if (!api || !activeTenant || scheduleBusy) return;
+    setScheduleBusy(true);
+    setError(null);
+    try {
+      await api.setGraphCacheRefreshSchedule({
+        tenantId: activeTenant.id,
+        enabled,
+        intervalMinutes,
+      });
+      setCacheStatus(await api.getGraphCacheStatus(activeTenant.id));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setScheduleBusy(false);
+    }
+  };
+
+  const handleToggleLearning = async () => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    setError(null);
+    try {
+      const next = await api.setSelfTrainingEnabled(!learningSettings.enabled);
+      setLearningSettings(next);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const handleSuggestionDecision = async (
+    suggestion: SelfTrainingSuggestion,
+    decision: "accept" | "reject",
+  ) => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    setError(null);
+    try {
+      if (decision === "accept") {
+        await api.approveSelfTrainingSuggestion(suggestion.id);
+      } else {
+        await api.rejectSelfTrainingSuggestion(suggestion.id);
+      }
+      setSuggestions(await api.listSelfTrainingSuggestions());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const handleResetLearning = async (agentSlug: string) => {
+    const api = window.openAdminOS;
+    if (!api || !activeTenant) return;
+    setError(null);
+    try {
+      await api.resetSelfTrainingSuggestions({
+        tenantId: activeTenant.id,
+        agentSlug,
+      });
+      setSuggestions(await api.listSelfTrainingSuggestions());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const refreshedResources = cacheStatus?.resources.filter((resource) => resource.refreshedAt) ?? [];
+  const latestRefresh = refreshedResources
+    .map((resource) => resource.refreshedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+  const activeTenantCacheRows =
+    localDataSummary?.activeTenantGraphRowCount ??
+    cacheStatus?.resources.reduce((total, resource) => total + resource.rows, 0) ??
+    0;
+  const chatHistoryLabel = localDataSummary
+    ? `${localDataSummary.chatConversationCount.toLocaleString()} conversations · ${localDataSummary.chatMessageCount.toLocaleString()} messages`
+    : "Loading";
+  const graphCacheLabel = activeTenant
+    ? `${activeTenantCacheRows.toLocaleString()} rows for ${activeTenant.displayName}`
+    : "No active tenant";
+
+  return (
+    <div className="max-w-[820px]">
+      <div className="flex items-start justify-between gap-6">
+        <SectionTitle
+          title="Intune Chat"
+          subtitle="Chat stays simple. Cache refresh, scheduled updates, and local self-training approvals live here."
+        />
+        <Button
+          size="sm"
+          variant="secondary"
+          leadingIcon={<IconChat size={13} />}
+          onClick={() => navigate("/chat")}
+        >
+          Open chat
+        </Button>
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          {error}
+        </div>
+      )}
+
+      <div className="mt-6 flex flex-col gap-3">
+        <SettingRow
+          label="Tenant cache"
+          description={
+            latestRefresh
+              ? `Latest refresh ${formatDateTime(latestRefresh)}. Chat uses compact answer packs from these local cache rows.`
+              : "No tenant cache yet. Chat will refresh the resources it needs before answering."
+          }
+          control={
+            <Button
+              size="sm"
+              variant="secondary"
+              leadingIcon={<IconRefresh size={12} />}
+              disabled={refreshingCache || !activeTenant}
+              onClick={() => void handleRefreshCache()}
+            >
+              {refreshingCache ? "Refreshing" : "Refresh now"}
+            </Button>
+          }
+        />
+
+        <Card>
+          <div className="p-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-medium text-[var(--color-text)]">
+                  Cached resources
+                </div>
+                <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
+                  Row counts and last refresh state for the active tenant.
+                </div>
+              </div>
+              <Pill tone="default">{cacheStatus?.resources.length ?? 0} sources</Pill>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              {(cacheStatus?.resources ?? []).map((resource) => (
+                <div
+                  key={resource.resource}
+                  className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-[12px] text-[var(--color-text)]">
+                      {resource.label}
+                    </span>
+                    <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                      {resource.rows}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                    {resource.lastError
+                      ? resource.lastError
+                      : resource.refreshedAt
+                        ? formatDateTime(resource.refreshedAt)
+                        : "Not refreshed"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-medium text-[var(--color-text)]">
+                  Local data
+                </div>
+                <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
+                  Intune Chat stores conversations, cache rows, and learning decisions in local SQLite.
+                </div>
+              </div>
+              <Pill tone="success">
+                <IconHardDrive size={10} /> On device
+              </Pill>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <LocalDataMetric
+                label="SQLite store"
+                value={
+                  localDataSummary
+                    ? formatBytes(localDataSummary.sqliteBytes)
+                    : "Loading"
+                }
+              />
+              <LocalDataMetric label="Chat history" value={chatHistoryLabel} />
+              <LocalDataMetric label="Active tenant cache" value={graphCacheLabel} />
+              <LocalDataMetric
+                label="Self-training"
+                value={
+                  localDataSummary
+                    ? `${localDataSummary.selfTrainingSuggestionCount.toLocaleString()} suggestions · ${localDataSummary.learningEventCount.toLocaleString()} events`
+                    : "Loading"
+                }
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={
+                  clearingLocalData !== null ||
+                  !localDataSummary ||
+                  localDataSummary.chatConversationCount === 0
+                }
+                onClick={() => setClearTarget("chat")}
+              >
+                Clear chat history
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={
+                  clearingLocalData !== null ||
+                  !activeTenant ||
+                  activeTenantCacheRows === 0
+                }
+                onClick={() => setClearTarget("graph")}
+              >
+                Clear active tenant cache
+              </Button>
+            </div>
+            <div className="mt-3 text-[11px] leading-5 text-[var(--color-text-muted)]">
+              Clearing data never disconnects tenants, removes provider settings, or changes agent run history.
+            </div>
+          </div>
+        </Card>
+
+        <SettingRow
+          label="Periodic cache refresh"
+          description="Refreshes the active tenant cache through the local scheduler while the user is signed in."
+          control={
+            <div className="flex items-center gap-2">
+              <select
+                value={scheduleInterval}
+                disabled={scheduleBusy || !activeTenant}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setScheduleInterval(next);
+                  if (cacheStatus?.schedule?.enabled) {
+                    void handleScheduleChange(true, next);
+                  }
+                }}
+                className="h-7 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+              >
+                <option value={60}>Every hour</option>
+                <option value={360}>Every 6 hours</option>
+                <option value={720}>Every 12 hours</option>
+                <option value={1440}>Every 24 hours</option>
+              </select>
+              <Button
+                size="sm"
+                variant={cacheStatus?.schedule?.enabled ? "secondary" : "primary"}
+                disabled={scheduleBusy || !activeTenant}
+                onClick={() =>
+                  void handleScheduleChange(!(cacheStatus?.schedule?.enabled ?? false))
+                }
+              >
+                {scheduleBusy
+                  ? "Saving"
+                  : cacheStatus?.schedule?.enabled
+                    ? "Disable"
+                    : "Enable"}
+              </Button>
+            </div>
+          }
+        />
+        {cacheStatus?.schedule?.nextRunAt && (
+          <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+            Next cache refresh {formatDateTime(cacheStatus.schedule.nextRunAt)}
+          </div>
+        )}
+        {cacheStatus?.schedule?.lastError && (
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {cacheStatus.schedule.lastError}
+          </div>
+        )}
+
+        <SettingRow
+          label="Local self-training"
+          description="Approved suggestions write local agent overlay files. They cannot add scopes, change mode, alter connector egress, or bypass confirmation."
+          control={
+            <Button
+              size="sm"
+              variant={learningSettings.enabled ? "primary" : "secondary"}
+              leadingIcon={<IconShield size={12} />}
+              onClick={() => void handleToggleLearning()}
+            >
+              {learningSettings.enabled ? "Enabled" : "Enable"}
+            </Button>
+          }
+        />
+
+        <Card>
+          <div className="p-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[13px] font-medium text-[var(--color-text)]">
+                  Self-training suggestions
+                </div>
+                <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
+                  Nothing becomes active until accepted here.
+                </div>
+              </div>
+              <Pill tone={pendingSuggestions.length > 0 ? "warning" : "default"}>
+                {pendingSuggestions.length} pending
+              </Pill>
+            </div>
+            <div className="flex flex-col gap-2">
+              {pendingSuggestions.length === 0 ? (
+                <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+                  No pending suggestions.
+                </div>
+              ) : (
+                pendingSuggestions.map((suggestion) => (
+                  <div
+                    key={suggestion.id}
+                    className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]"
+                  >
+                    <div className="text-[12px] font-medium text-[var(--color-text)]">
+                      {suggestion.agentSlug}
+                    </div>
+                    <div className="mt-1 text-[12px] leading-5 text-[var(--color-text-soft)]">
+                      {suggestion.text}
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => void handleSuggestionDecision(suggestion, "accept")}
+                      >
+                        Accept
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void handleSuggestionDecision(suggestion, "reject")}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {activeLearningAgents.length > 0 && (
+              <div className="mt-5">
+                <div className="mb-2 text-[11px] font-medium uppercase text-[var(--color-text-muted)]">
+                  Active overlays
+                </div>
+                <div className="flex flex-col gap-2">
+                  {activeLearningAgents.map(([agentSlug, count]) => (
+                    <div
+                      key={agentSlug}
+                      className="flex items-center justify-between gap-2 rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-[12px] text-[var(--color-text)]">
+                          {agentSlug}
+                        </div>
+                        <div className="text-[10.5px] text-[var(--color-text-muted)]">
+                          {count} approved {count === 1 ? "instruction" : "instructions"}
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void handleResetLearning(agentSlug)}
+                      >
+                        Reset
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {decidedSuggestions.length > 0 && (
+              <div className="mt-5">
+                <div className="mb-2 text-[11px] font-medium uppercase text-[var(--color-text-muted)]">
+                  Recent decisions
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {decidedSuggestions.slice(0, 5).map((suggestion) => (
+                    <div
+                      key={suggestion.id}
+                      className="flex items-center justify-between gap-2 text-[11px]"
+                    >
+                      <span className="truncate text-[var(--color-text-soft)]">
+                        {suggestion.agentSlug}
+                      </span>
+                      <Pill tone={suggestion.status === "accepted" ? "success" : "default"}>
+                        {suggestion.status}
+                      </Pill>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+      <ClearLocalDataModal
+        target={clearTarget}
+        activeTenantName={activeTenant?.displayName}
+        busy={clearTarget !== null && clearingLocalData === clearTarget}
+        onClose={() => setClearTarget(null)}
+        onConfirm={() => void handleClearLocalData()}
+      />
+    </div>
+  );
+}
+
+function LocalDataMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+      <div className="text-[10.5px] font-medium uppercase text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <div className="mt-1 truncate text-[12px] text-[var(--color-text)]">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ClearLocalDataModal({
+  target,
+  activeTenantName,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  target: "chat" | "graph" | null;
+  activeTenantName?: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const title =
+    target === "chat" ? "Clear chat history" : "Clear active tenant cache";
+  const detail =
+    target === "chat"
+      ? "This removes all local Intune Chat conversations, messages, and chat tool-call records. It does not clear Graph cache rows, disconnect tenants, or alter agent run history."
+      : `This removes cached Graph rows and cache status for ${activeTenantName ?? "the active tenant"}. The next chat that needs tenant context will refresh the required resources again.`;
+
+  return (
+    <Modal open={target !== null} onClose={onClose} size="md">
+      <ModalHeader
+        title={title}
+        subtitle="Local SQLite cleanup"
+        badge={<Pill tone="danger">Local deletion</Pill>}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          {detail}
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={onConfirm}>
+            {busy ? "Clearing" : "Clear"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function GeneralSection() {
   const { state } = useAppState();
   const [schedulerLaunch, setSchedulerLaunch] =
@@ -741,15 +1357,28 @@ function GeneralSection() {
 
 function PrivacySection({
   trust,
+  registrySource,
+  registryRefreshError,
+  lastRegistryRefresh,
   registryInstallCountsEnabled,
+  onSetRegistrySource,
   onSetRegistryInstallCountsEnabled,
 }: {
   trust: TrustState;
+  registrySource: string;
+  registryRefreshError: string | null;
+  lastRegistryRefresh: string | null;
   registryInstallCountsEnabled: boolean;
+  onSetRegistrySource: (
+    url: string,
+    options?: { confirmExternalSource?: boolean },
+  ) => Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   onSetRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
 }) {
   const [savingInstallCounts, setSavingInstallCounts] = useState(false);
   const [installCountsError, setInstallCountsError] = useState<string | null>(null);
+  const [registryModalOpen, setRegistryModalOpen] = useState(false);
+  const isOfficialRegistry = isOfficialRegistrySource(registrySource);
 
   const toggleRegistryInstallCounts = async () => {
     setSavingInstallCounts(true);
@@ -807,6 +1436,36 @@ function PrivacySection({
           </div>
         )}
         <SettingRow
+          label="Agent registry source"
+          description={
+            registryRefreshError
+              ? `Using cache or bundled agents after the last refresh failed. Source: ${formatRegistrySource(registrySource)}.`
+              : lastRegistryRefresh
+                ? `Last refreshed ${formatRelative(lastRegistryRefresh)} from ${formatRegistrySource(registrySource)}.`
+                : `No registry refresh recorded yet. Source: ${formatRegistrySource(registrySource)}.`
+          }
+          control={
+            <div className="flex items-center gap-2">
+              <Pill tone={isOfficialRegistry ? "success" : "warning"}>
+                <StatusDot tone={isOfficialRegistry ? "success" : "warning"} />
+                {isOfficialRegistry ? "Official" : "Custom"}
+              </Pill>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setRegistryModalOpen(true)}
+              >
+                Change
+              </Button>
+            </div>
+          }
+        />
+        {registryRefreshError && (
+          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30">
+            {registryRefreshError}
+          </div>
+        )}
+        <SettingRow
           label="Crash reporting"
           description="No crash reports are sent. Errors stay local."
           control={
@@ -855,13 +1514,215 @@ function PrivacySection({
           {trust.detail}
         </p>
       </div>
+      <RegistrySourceModal
+        open={registryModalOpen}
+        currentSource={registrySource}
+        onClose={() => setRegistryModalOpen(false)}
+        onSave={onSetRegistrySource}
+      />
     </div>
+  );
+}
+
+function RegistrySourceModal({
+  open,
+  currentSource,
+  onClose,
+  onSave,
+}: {
+  open: boolean;
+  currentSource: string;
+  onClose: () => void;
+  onSave: (
+    url: string,
+    options?: { confirmExternalSource?: boolean },
+  ) => Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
+}) {
+  const [draft, setDraft] = useState(currentSource);
+  const [confirmed, setConfirmed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setDraft(currentSource);
+    setConfirmed(false);
+    setError(null);
+    setNotice(null);
+  }, [open]);
+
+  const trimmedDraft = draft.trim();
+  const customSource = trimmedDraft.length > 0 && !isOfficialRegistrySource(trimmedDraft);
+  const changed =
+    normalizeRegistrySourceForComparison(trimmedDraft) !==
+    normalizeRegistrySourceForComparison(currentSource);
+  const canSave = trimmedDraft.length > 0 && changed && (!customSource || confirmed) && !saving;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!canSave) return;
+
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await onSave(trimmedDraft, {
+        confirmExternalSource: customSource,
+      });
+      if (result.error) {
+        setNotice(
+          `Source saved, but the refresh did not complete: ${result.error}`,
+        );
+      } else if (result.fromCache) {
+        setNotice("Source saved. OpenAdminOS is using the cached registry index.");
+      } else {
+        onClose();
+      }
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <ModalHeader
+        title="Agent registry source"
+        subtitle="Choose where OpenAdminOS reads agent metadata and updates."
+        onClose={onClose}
+        badge={
+          <Pill tone={customSource ? "warning" : "success"}>
+            <StatusDot tone={customSource ? "warning" : "success"} />
+            {customSource ? "Custom source" : "Official source"}
+          </Pill>
+        }
+      />
+      <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-5 p-6">
+        <div>
+          <label
+            htmlFor="registry-source"
+            className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+          >
+            Registry URL
+          </label>
+          <input
+            id="registry-source"
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setConfirmed(false);
+              setError(null);
+              setNotice(null);
+            }}
+            spellCheck={false}
+            className="mt-2 w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            placeholder={OFFICIAL_REGISTRY_SOURCE}
+          />
+          <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+            Point to the agent directory. The host app fetches `index.json` from this
+            location after validation.
+          </p>
+        </div>
+
+        <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+          <div className="flex items-start gap-2">
+            <IconShield size={14} className="mt-0.5 text-[var(--color-text-muted)]" />
+            <div>
+              <div className="text-[12px] font-medium text-[var(--color-text)]">
+                What changes when this changes
+              </div>
+              <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                Tenant data does not go to the registry. The source controls which
+                agent manifests, versions, Graph scopes, and update metadata the app
+                shows to the admin.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {customSource && (
+          <div className="rounded-lg bg-[var(--color-warning-soft)] p-3 ring-1 ring-[var(--color-warning)]/30">
+            <div className="flex items-start gap-2">
+              <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+              <div>
+                <div className="text-[12px] font-medium text-[var(--color-warning)]">
+                  Review this source before using it
+                </div>
+                <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                  Custom registries can advertise agents with different Graph scopes,
+                  write actions, connector egress, and update requirements. Install
+                  and update flows still run their normal trust review.
+                </p>
+              </div>
+            </div>
+            <label className="mt-3 flex cursor-pointer items-start gap-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(event) => setConfirmed(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-[var(--color-border-strong)] bg-[var(--color-bg-raised)] accent-[var(--color-accent)]"
+              />
+              <span>
+                I trust this registry source and understand it changes the agent
+                catalog OpenAdminOS will read from.
+              </span>
+            </label>
+          </div>
+        )}
+
+        <div className="rounded-lg bg-[var(--color-surface)] p-3 text-[12px] leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+          Host validation requires HTTPS, rejects credentials, query strings,
+          fragments, and `index.json` paths, and only allows private or localhost
+          sources when the explicit dev registry override is enabled.
+        </div>
+
+        {error && (
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30">
+            {notice}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border-soft)] pt-4">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setDraft(OFFICIAL_REGISTRY_SOURCE);
+              setConfirmed(false);
+              setError(null);
+              setNotice(null);
+            }}
+          >
+            <IconExternal size={13} />
+            Use official
+          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={!canSave}>
+              <IconRefresh size={13} />
+              {saving ? "Saving..." : "Save source"}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 function AboutSection() {
   const navigate = useNavigate();
   const { state } = useAppState();
+  const openReportIssue = useReportIssue();
   const [diagnostics, setDiagnostics] = useState<ReleaseDiagnostics | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -871,6 +1732,18 @@ function AboutSection() {
   );
   const codexProvider = state.providers.find((provider) => provider.id === "openai");
   const ollamaProvider = state.providers.find((provider) => provider.id === "ollama");
+  const activeModel = resolveProviderDefaultModel(
+    activeProvider,
+    state.activeModelByProviderId,
+  ).model;
+  const codexModel = resolveProviderDefaultModel(
+    codexProvider,
+    state.activeModelByProviderId,
+  ).model;
+  const ollamaModel = resolveProviderDefaultModel(
+    ollamaProvider,
+    state.activeModelByProviderId,
+  ).model;
 
   useEffect(() => {
     window.openAdminOS
@@ -918,12 +1791,26 @@ function AboutSection() {
         >
           What's new
         </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() =>
+            openReportIssue({
+              source: "settings-about",
+              title: "OpenAdminOS issue",
+              description:
+                "I found an issue while using OpenAdminOS. Details are below.",
+            })
+          }
+        >
+          Create issue
+        </Button>
       </div>
 
       <div className="mt-8">
         <SectionTitle
           title="0.2 readiness"
-          subtitle="Local diagnostics for release checks and support. These values stay on this device."
+          subtitle="Local diagnostics for release checks and support. They only leave this device when included in a confirmed public issue."
         />
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <ReadinessRow
@@ -968,7 +1855,11 @@ function AboutSection() {
           />
           <ReadinessRow
             label="Active LLM"
-            value={activeProvider?.name ?? state.activeProviderId}
+            value={
+              activeProvider
+                ? `${activeProvider.name}${activeModel ? ` · ${activeModel}` : ""}`
+                : state.activeProviderId
+            }
             tone={activeProvider?.status === "connected" ? "success" : "warning"}
             detail={state.trust.label}
           />
@@ -976,13 +1867,13 @@ function AboutSection() {
             label="OpenAI Codex"
             value={codexProvider?.status === "connected" ? "Detected" : "Not connected"}
             tone={codexProvider?.status === "connected" ? "success" : "warning"}
-            detail={codexProvider?.defaultModel ?? codexProvider?.detail ?? "Codex CLI not detected."}
+            detail={codexModel ?? codexProvider?.detail ?? "Codex CLI not detected."}
           />
           <ReadinessRow
             label="Ollama"
             value={ollamaProvider?.status === "connected" ? "Detected" : "Not connected"}
             tone={ollamaProvider?.status === "connected" ? "success" : "warning"}
-            detail={ollamaProvider?.defaultModel ?? ollamaProvider?.detail ?? "Ollama is not running."}
+            detail={ollamaModel ?? ollamaProvider?.detail ?? "Ollama is not running."}
           />
           <ReadinessRow
             label="Registry"
@@ -990,8 +1881,8 @@ function AboutSection() {
             tone={state.registryRefreshError ? "warning" : "success"}
             detail={
               state.lastRegistryRefresh
-                ? `Last refreshed ${formatRelative(state.lastRegistryRefresh)}.`
-                : "No registry refresh recorded yet."
+                ? `Last refreshed ${formatRelative(state.lastRegistryRefresh)} from ${formatRegistrySource(state.registrySource)}.`
+                : `No registry refresh recorded yet. Source: ${formatRegistrySource(state.registrySource)}.`
             }
           />
           <ReadinessRow
@@ -1098,6 +1989,47 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"] as const;
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const maximumFractionDigits = unitIndex === 0 ? 0 : 1;
+  return `${value.toLocaleString(undefined, { maximumFractionDigits })} ${units[unitIndex]}`;
+}
+
+function isOfficialRegistrySource(source: string): boolean {
+  return (
+    normalizeRegistrySourceForComparison(source) ===
+    normalizeRegistrySourceForComparison(OFFICIAL_REGISTRY_SOURCE)
+  );
+}
+
+function normalizeRegistrySourceForComparison(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    const path = url.pathname.replace(/\/+$/, "");
+    return `${url.protocol}//${url.host}${path}`;
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
+}
+
+function formatRegistrySource(source: string): string {
+  try {
+    const url = new URL(source);
+    return `${url.host}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return source;
+  }
+}
+
 function formatFuture(iso: string): string {
   const ms = new Date(iso).getTime() - Date.now();
   if (Number.isNaN(ms)) return "-";
@@ -1106,4 +2038,15 @@ function formatFuture(iso: string): string {
   if (ms < 60 * 60 * 1000) return `${Math.ceil(ms / 60_000)}m`;
   if (ms < 24 * 60 * 60 * 1000) return `${Math.ceil(ms / (60 * 60_000))}h`;
   return new Date(iso).toLocaleDateString();
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }

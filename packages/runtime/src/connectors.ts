@@ -20,6 +20,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { teamsConnector } from "@openadminos/connector-teams";
+import { whatsappWebConnector } from "@openadminos/connector-whatsapp-web";
 
 /**
  * Static connector registry. Importing `@openadminos/connector-teams`
@@ -28,7 +29,10 @@ import { teamsConnector } from "@openadminos/connector-teams";
  * consumers see the typed `ctx.connectors.teams` shape.
  */
 const REGISTERED_CONNECTORS: ReadonlyMap<string, ConnectorFactory<unknown>> =
-  new Map<string, ConnectorFactory<unknown>>([["teams", teamsConnector]]);
+  new Map<string, ConnectorFactory<unknown>>([
+    ["teams", teamsConnector],
+    ["whatsapp-web", whatsappWebConnector],
+  ]);
 
 export function listRegisteredConnectors(): ConnectorDescriptor[] {
   return Array.from(REGISTERED_CONNECTORS.values()).map((f) => f.descriptor);
@@ -505,6 +509,13 @@ function describeEgressTarget(connectorId: string, args: unknown[]): string {
     }
     if (chatId) {
       return `${connectorId}:chat=${chatId}`;
+    }
+    const to = typeof obj.to === "string" ? obj.to : undefined;
+    if (to) {
+      if (connectorId === "whatsapp-web") {
+        return `${connectorId}:to=redacted`;
+      }
+      return `${connectorId}:to=${to}`;
     }
   }
   return connectorId;

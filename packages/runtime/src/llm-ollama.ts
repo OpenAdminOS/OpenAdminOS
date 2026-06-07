@@ -34,10 +34,16 @@ interface OllamaChatChunk {
 }
 
 const DEFAULT_OLLAMA_TIMEOUT_MS = 180_000;
+const DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434";
+
+export interface OllamaEndpointTrust {
+  endpoint: string;
+  isLocal: boolean;
+  reason: string;
+}
 
 export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi {
-  const endpoint =
-    options.endpoint ?? process.env.OPENAGENTS_OLLAMA_URL ?? "http://127.0.0.1:11434";
+  const endpoint = resolveOllamaEndpoint(options.endpoint);
   const defaultModel = options.defaultModel;
   const timeoutMs =
     options.timeoutMs ??
@@ -71,6 +77,12 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const abortFromCaller = () => controller.abort();
+      if (opts.signal?.aborted) {
+        controller.abort();
+      } else {
+        opts.signal?.addEventListener("abort", abortFromCaller, { once: true });
+      }
       const url = `${endpoint.replace(/\/$/, "")}/api/chat`;
 
       const messages: { role: string; content: string }[] = [];
@@ -112,7 +124,11 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         });
       } catch (error) {
         clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", abortFromCaller);
         if (error instanceof Error && error.name === "AbortError") {
+          if (opts.signal?.aborted) {
+            throw new Error("Ollama request stopped by user.");
+          }
           throw new Error(`Ollama timed out after ${timeoutMs}ms at ${url}.`);
         }
         throw new Error(`Ollama not reachable at ${url}: ${describe(error)}`);
@@ -120,6 +136,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       if (!response.ok) {
         clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", abortFromCaller);
         const detail = await response.text().catch(() => "");
         if (response.status === 404 && detail.toLowerCase().includes("model")) {
           throw new Error(
@@ -131,6 +148,7 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 
       if (!response.body) {
         clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", abortFromCaller);
         throw new Error("Ollama response had no body to stream.");
       }
 
@@ -216,10 +234,108 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
         }
       } finally {
         clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", abortFromCaller);
         reader.releaseLock();
       }
     },
   };
+}
+
+export function resolveOllamaEndpoint(endpoint?: string): string {
+  return (endpoint ?? process.env.OPENAGENTS_OLLAMA_URL ?? DEFAULT_OLLAMA_ENDPOINT).trim();
+}
+
+export function classifyOllamaEndpoint(endpoint: string): OllamaEndpointTrust {
+  const trimmed = endpoint.trim();
+  if (!trimmed) {
+    return {
+      endpoint: trimmed,
+      isLocal: false,
+      reason: "Ollama endpoint is empty.",
+    };
+  }
+
+  if (/^(unix|http\+unix):/i.test(trimmed)) {
+    return {
+      endpoint: trimmed,
+      isLocal: true,
+      reason: "Ollama endpoint uses a local Unix socket.",
+    };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return {
+      endpoint: trimmed,
+      isLocal: false,
+      reason: "Ollama endpoint is not a valid URL.",
+    };
+  }
+
+  const host = normalizeHost(parsed.hostname);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return {
+      endpoint: trimmed,
+      isLocal: false,
+      reason: `Ollama endpoint uses unsupported protocol ${parsed.protocol}`,
+    };
+  }
+
+  if (host === "localhost" || host === "localhost.") {
+    return {
+      endpoint: trimmed,
+      isLocal: true,
+      reason: "Ollama endpoint uses localhost.",
+    };
+  }
+
+  if (isIpv4Loopback(host) || isIpv6Loopback(host)) {
+    return {
+      endpoint: trimmed,
+      isLocal: true,
+      reason: "Ollama endpoint uses a loopback address.",
+    };
+  }
+
+  return {
+    endpoint: trimmed,
+    isLocal: false,
+    reason: `Ollama endpoint host ${host || "(empty)"} is not loopback.`,
+  };
+}
+
+function normalizeHost(host: string): string {
+  return host.trim().replace(/^\[/, "").replace(/\]$/, "").toLowerCase();
+}
+
+function isIpv4Loopback(host: string): boolean {
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  const octets = parts.map((part) => {
+    if (!/^\d+$/.test(part)) return Number.NaN;
+    return Number.parseInt(part, 10);
+  });
+  return octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) && octets[0] === 127;
+}
+
+function isIpv6Loopback(host: string): boolean {
+  if (host === "::1" || host === "0:0:0:0:0:0:0:1") return true;
+  const dottedMapped = host.match(/^::ffff:(127(?:\.\d{1,3}){3})$/);
+  if (dottedMapped) return isIpv4Loopback(dottedMapped[1] ?? "");
+  const hexMapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (!hexMapped) return false;
+  const high = Number.parseInt(hexMapped[1] ?? "", 16);
+  const low = Number.parseInt(hexMapped[2] ?? "", 16);
+  if (!Number.isInteger(high) || !Number.isInteger(low)) return false;
+  const ipv4 = [
+    (high >> 8) & 255,
+    high & 255,
+    (low >> 8) & 255,
+    low & 255,
+  ].join(".");
+  return isIpv4Loopback(ipv4);
 }
 
 export const noopLlm: RunLlmApi = {

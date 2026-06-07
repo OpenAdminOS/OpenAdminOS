@@ -38,9 +38,8 @@ export function installConnectorConfirmBridge(input: {
  *
  * Constructs the payload with two enrichments over the raw invocation
  * info:
- *   - `bodyPreviewHtml`: the markdown body rendered using the
- *     connector's own renderer so the modal shows the message as it
- *     will appear in the destination, not as raw `**bold**` source.
+ *   - `bodyPreview`: the message body rendered or forwarded as a
+ *     safe preview so the modal shows what will be sent.
  *   - `targetLabel`: a human-readable destination ("Ugur Koc Lab →
  *     #General") resolved from the saved connector config + args,
  *     replacing the opaque "teams:team=…;channel=…" engineer string.
@@ -65,7 +64,7 @@ export async function requestConnectorConfirmation(
     connectorId: info.connectorId,
     connectorName: connectorNameLookup(info.connectorId),
     capability: info.capability,
-    args: info.args,
+    args: redactConfirmationArgs(info.connectorId, info.args),
     egressTarget: info.egressTarget,
     idempotencyKey: info.idempotencyKey,
     ...(bodyPreview !== undefined ? { bodyPreview } : {}),
@@ -109,6 +108,7 @@ function extractBodyPreview(args: unknown): string | undefined {
   const obj = args as Record<string, unknown>;
   if (typeof obj.markdown === "string") return obj.markdown;
   if (typeof obj.body === "string") return obj.body;
+  if (typeof obj.text === "string") return obj.text;
   return undefined;
 }
 
@@ -117,13 +117,26 @@ function resolveTargetLabel(
   args: unknown,
   config: Record<string, unknown>,
 ): string | undefined {
-  if (connectorId !== "teams") return undefined;
   const argObj =
     args && typeof args === "object" && !Array.isArray(args)
       ? (args as Record<string, unknown>)
       : Array.isArray(args) && args[0] && typeof args[0] === "object"
         ? (args[0] as Record<string, unknown>)
         : undefined;
+
+  if (connectorId === "whatsapp-web") {
+    const rawRecipient =
+      readString(argObj?.to) ?? readString(config.defaultRecipient);
+    const label = readString(config.defaultRecipientLabel);
+    if (rawRecipient === "self" || readString(config.defaultRecipientType) === "self") {
+      return label ?? "My WhatsApp";
+    }
+    if (label && label !== rawRecipient) return label;
+    if (rawRecipient?.endsWith("@g.us")) return "WhatsApp group";
+    return "WhatsApp recipient";
+  }
+
+  if (connectorId !== "teams") return undefined;
 
   const teamName = readString(config.defaultTeamName);
   const channelName = readString(config.defaultChannelName);
@@ -146,4 +159,17 @@ function resolveTargetLabel(
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function redactConfirmationArgs(connectorId: string, args: unknown): unknown {
+  if (connectorId !== "whatsapp-web") return args;
+  if (Array.isArray(args)) {
+    return args.map((item) => redactConfirmationArgs(connectorId, item));
+  }
+  if (!args || typeof args !== "object") return args;
+  const redacted = { ...(args as Record<string, unknown>) };
+  if (typeof redacted.to === "string") {
+    redacted.to = "redacted";
+  }
+  return redacted;
 }

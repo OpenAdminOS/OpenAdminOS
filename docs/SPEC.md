@@ -66,7 +66,7 @@ openadminos/
 
 We previously planned for Tauri (smaller binaries, native webview). After analyzing the real constraints, we flipped to Electron. Reasoning:
 
-- **Developer velocity is the primary constraint.** Pure TS/Node end-to-end. No Rust toolchain, no two-language IPC bridge. MSAL Node, `better-sqlite3`, `keytar`, `electron-updater` all work natively in the main process.
+- **Developer velocity is the primary constraint.** Pure TS/Node end-to-end. No Rust toolchain, no two-language IPC bridge. MSAL Node, Electron's built-in `node:sqlite`, OS keychain storage, and `electron-updater` all work in the main process. `better-sqlite3` was avoided for the v0.2.2 chat/cache layer because it did not rebuild cleanly against Electron 42's Node/V8 ABI in local verification.
 - **Open-source contributor pool.** Community contributions (agents and UI) come from JS/TS devs. Tauri's Rust shell raises the bar for any contributor who wants to fix more than an agent.
 - **UI fidelity.** Chromium everywhere = identical rendering on Win/Mac/Linux. The design language (dense, dark, custom scrollbars, GPU-accelerated transitions) is more reliable on Chromium than on platform-native webviews.
 - **Proven path for this category.** Claude Desktop, VS Code, Linear, Slack, Figma, 1Password — all Electron. The "Electron is bloated" critique mattered more on 8GB-RAM machines than on modern admin workstations.
@@ -174,8 +174,9 @@ interface LLMProvider {
 }
 ```
 
-Concrete providers, all required for v1:
+Concrete providers, required for v1 unless marked optional:
 - `OllamaProvider` (local, default)
+- `AppleFoundationProvider` (local, macOS-only optional provider)
 - `LMStudioProvider` (local)
 - `AnthropicProvider` (hosted)
 - `OpenAIProvider` (hosted)
@@ -185,16 +186,59 @@ Current implementation note: OpenAI support is delivered through the user's
 locally installed Codex CLI (`codex`) rather than a stored OpenAI API key.
 OpenAdminOS probes the CLI and `~/.codex/auth.json`, then invokes
 `codex exec --ephemeral --skip-git-repo-check -s read-only` for agent LLM
-steps. It does not force a model by default; Codex uses the user's configured
-account-supported default unless a run later pins an explicit model. This
-preserves the "no vendor API keys in OpenAdminOS" trust boundary, but tenant
-prompts still leave the device because the selected model is hosted.
+steps from a temporary directory with a minimal allowlisted environment: path,
+home, proxy, certificate, temp, locale, and `CODEX_HOME`. It does not pass the
+desktop process environment wholesale. Codex does not force a model by default;
+it uses the user's configured account-supported default unless a run later pins
+an explicit model. This preserves the "no vendor API keys in OpenAdminOS" trust
+boundary, but tenant prompts still leave the device because the selected model
+is hosted.
 The model picker is populated from Codex's local `models_cache.json`, with
 `config.toml` supplying the default model when present.
+Selecting a model under an inactive provider also makes that provider active
+for future runs; model pinning must not leave the visible active provider on a
+different provider. Overview surfaces such as Agents, StatusStrip, Settings,
+and Intune Chat show the active provider plus the selected default model for
+that provider. Queued run surfaces show the provider and model pinned on that
+run, even if global defaults later change.
 Provider settings include an explicit smoke test action for connected providers;
 the test runs a tiny completion and reports the model and response time. This is
 intentionally visible because hosted/local provider trust is a core product
 decision, not hidden plumbing.
+
+Local-provider trust is endpoint-sensitive. Ollama is local only when the
+configured endpoint is loopback (`localhost`, `127.0.0.0/8`, IPv6 loopback, or
+IPv4-mapped loopback) or a Unix socket. If `OPENAGENTS_OLLAMA_URL` points at a
+LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
+provider summary flips to external/hosted-style trust messaging and Intune Chat
+requires hosted-provider confirmation before tenant context is sent.
+
+Apple Foundation support uses Apple's on-device Foundation Models framework
+through a small signed macOS helper binary bundled with the Electron app. The
+provider is local-only when the helper talks directly to
+`SystemLanguageModel.default`; it must not route prompts through Siri,
+Shortcuts cloud actions, ChatGPT, Private Cloud Compute, or any hosted Apple
+service. The provider is available only on compatible Macs with Apple
+Intelligence enabled and the on-device model downloaded. The helper is the
+only native exception to the TypeScript-only provider stack because the
+Foundation Models framework is not directly callable from Electron main.
+OpenAdminOS reports this provider as unavailable on Windows/Linux; Windows AI
+API support is a separate future provider. The helper is packaged under
+`Contents/Resources/native/apple-foundation-helper/` and listed in
+`electron-builder`'s `mac.binaries` so signed/notarized macOS builds sign the
+extra executable along with the app bundle. Release packaging requires a
+macOS 26/Xcode 26 runner so `FoundationModels.framework` is available at helper
+build time.
+
+Apple Foundation is a small-context provider. The runtime probes and displays
+the model's context size and supported locales, rejects non-system model
+overrides, clamps response token requests to fit the available session budget,
+and surfaces token usage when macOS exposes exact token counting. Intune Chat
+uses an Apple-specific compact answer-pack profile: fewer cached rows per
+resource, fewer raw sample rows, and smaller response budgets while preserving
+deterministic counts/findings. If the prompt still exceeds the on-device
+context window, the provider fails with explicit recovery copy instead of a
+generic model error.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
@@ -242,9 +286,9 @@ Agents may declare optional or required `connectors:` — see Connector abstract
 
 ### Connector abstraction
 
-Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
+Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, WhatsApp number, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
 
-**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk` in the [Unreleased] section. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. The runtime injection and the first connector — **Microsoft Teams** — land in the next release alongside the Connectors sidebar entry, the channel-picker setup UI, and the preview-and-send confirmation modal.
+**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk`. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. Runtime injection, the Connectors sidebar entry, Microsoft Teams, and WhatsApp Web are implemented for v0.2.2.
 
 The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships — retrofitting them after agents start consuming the API is what makes ecosystems brittle.
 
@@ -254,7 +298,7 @@ Three classes, each with a distinct trust posture:
 
 - `graph-delegated` — piggybacks on the active tenant's MSAL token; adds Graph scopes (Teams, Outlook, SharePoint, Planner). No new credentials, no second consent dance. Data stays inside the customer's M365 tenant boundary.
 - `graph-application` — app-only consent via Resource-Specific Consent or per-resource installation. Deferred past v1.0; the interface accommodates it so we don't have to break agents to add it later.
-- `external` — owns credentials in the OS keychain (ServiceNow, Jira, Slack). Data leaves the tenant boundary; trust messaging must say so explicitly. External connectors implement a uniform OAuth/credential flow surface so the setup UI is connector-agnostic.
+- `external` — owns credentials in the OS keychain or a local auth session (WhatsApp Web, ServiceNow, Jira, Slack). Data leaves the tenant boundary; trust messaging must say so explicitly. External connectors implement a uniform setup surface where practical, but device-paired flows such as WhatsApp Web can expose a connector-specific QR step.
 
 #### Capability kinds → confirmation tiers
 
@@ -263,7 +307,7 @@ Every capability declares a `kind` that maps to a confirmation tier. Mixing conn
 | Kind          | Side effect                       | Confirmation                                     | Examples                                  |
 |---------------|-----------------------------------|--------------------------------------------------|-------------------------------------------|
 | `read`        | None                              | None                                             | `listTeams`, `listChannels`               |
-| `notify`      | Additive (creates a new artifact) | **Preview & send** modal — rendered output + target, one-click confirm | `post-channel-message`, `create-incident` |
+| `notify`      | Additive (creates a new artifact) | **Preview & send** modal — rendered output + target, one-click confirm | `post-channel-message`, `send-message`, `create-incident` |
 | `mutating`    | Modifies an existing artifact     | Diff modal — before/after, one-click confirm     | `edit-message`, `update-incident-status`  |
 | `destructive` | Removes an artifact               | Typed-phrase confirmation, same gate as destructive Graph ops | `delete-message`, `close-incident`        |
 
@@ -463,7 +507,7 @@ The host (in `packages/runtime`) discovers connectors via a static import map fo
 #### UI surface
 
 - New sidebar entry **Connectors** between Agent Hub and Activity.
-- Connectors page: card per registered connector with status pill (`connected` / `needs setup` / `needs scope` / `error`), capability list (one row per `id@version` with kind tag), trust label. Per-connector detail page handles setup (Teams channel picker, ServiceNow instance URL + credentials) generated from `configSchema`.
+- Connectors page: operational summary first, then live connector configuration panels with status pill (`connected` / `needs setup` / `needs scope` / `error`) and task-first setup controls. Teams shows the default channel picker; WhatsApp Web shows QR linking only when setup is needed, hides phone steps after a session is linked, and keeps default target selection/test sending visible. Default connector targets autosave as soon as a valid target is selected; there is no separate save button. Capabilities, required scopes, trust-boundary text, routing-rule details, and future connector backlog entries live in compact disclosures so connected connectors stay visually lightweight.
 - Per-agent install: when the manifest declares connectors, install adds a connector-setup step before the agent appears installed. The step itemizes egress targets and capability kinds so the user knows what they're authorizing.
 - Run status: when a run uses connectors, the status-strip trust cell expands to list each egress target. Capability invocations stream into the run timeline with the kind-appropriate confirmation modal.
 - Error states: every `ConnectorError` subclass has a designed remediation tile in §06 — `auth expired → reauth`, `missing scope → re-consent`, `rate limited → retry in Xs`, `not configured → open Connectors page`.
@@ -529,10 +573,61 @@ Decisions locked for the first release:
 - **Teams scopes folded into the MSAL consent screen.** Granted once at tenant connect. Admins who declined initial consent see `status: 'needs-scope'` and a single re-consent button — no separate auth flow.
 - **`post-*-message` is `kind: notify`.** Users see a "Send to Teams?" preview modal with the rendered markdown and the target channel — one-click confirm, not typed phrase. Typed-phrase confirmation is reserved for destructive Graph operations; debasing it for routine notifications dulls its trust signal.
 - **`configSchema` covers default channel/chat selection.** Per-install setting; agents can override at invocation time.
+- **Run activity includes delivery.** When per-agent Teams delivery is enabled, terminal runs append a post-run activity step showing whether the delivery rule matched the run, whether the report was sent, failed, or skipped, and the user-facing channel label.
 
-#### Why Teams first, ServiceNow second
+#### WhatsApp Web connector (second to ship)
 
-Teams proves the contract generalizes across capabilities while keeping the trust surface unchanged from today. ServiceNow is the canonical second connector — `external` auth, instance URL configuration, keychain-stored credentials, "data leaves your tenant" trust messaging. Designing both into the abstraction from the start, shipping Teams first, validates the contract before paying for a new trust surface.
+The WhatsApp Web connector is deliberately narrow. OpenAdminOS uses it for outbound run notifications only: the user links a local WhatsApp Web session by scanning a QR code, selects a default notification target, and agents can send terminal run reports to that target. The connector does not read incoming messages, auto-reply, monitor chats, download media, or expose WhatsApp as an agent control channel.
+
+```yaml
+descriptor:
+  id: whatsapp-web
+  name: WhatsApp Web
+  version: 1.0.0
+  authSource: external
+  scopes: []
+  capabilities:
+    - id: send-message
+      version: 1
+      kind: notify
+      scopes: []
+  trust:
+    label: "WhatsApp Web · local session"
+    detail: "Sends through a WhatsApp Web session linked on this device. Message content leaves Microsoft 365 and is delivered by WhatsApp."
+    staysInTenant: false
+```
+
+Capability surface:
+
+```ts
+interface WhatsAppWebConnectorCapabilities {
+  sendMessage(args: {
+    to?: string;  // "self", international phone number, or WhatsApp JID; omitted means connector default
+    text: string; // plain text only
+  }): Promise<{ messageId: string; to: string; targetType: "self" | "group" | "manual" }>;
+}
+```
+
+Implementation decisions:
+- **Baileys local Web session.** No WhatsApp Business API, no hosted relay, no server-side token storage. Auth files live under the Electron `userData` connector directory and can be removed from the Connectors page.
+- **Saved sessions restore automatically.** When Baileys auth state exists on disk, the desktop app opens a WhatsApp Web socket in the background on status checks and app reopen. A linked session can stay connected across restarts unless the user removes the linked device from WhatsApp, WhatsApp expires the session, or the local auth directory is deleted; in those cases the connector returns to the QR setup flow.
+- **Conservative Baileys socket behavior.** The runtime uses Baileys' cacheable signal key store, conservative socket timings (`keepAliveIntervalMs: 25s`, `connectTimeoutMs: 60s`, `defaultQueryTimeoutMs: 60s`), `markOnlineOnConnect: false`, `syncFullHistory: false`, and a desktop browser identity.
+- **QR image handoff is versioned.** Relayed or stale QR images can fail with "Check your connection and try again." The desktop stores a QR version and only publishes the data URL that matches the latest QR string.
+- **QR refresh is automatic.** While the QR is visible, the runtime rotates the pairing socket before the displayed code becomes stale and exposes a countdown so the renderer can explain when the next code will appear. Manual refresh remains available for immediate recovery.
+- **Raw pairing tokens stay in the main process.** The renderer receives a QR image data URL, issue time, and refresh countdown, but not the raw WhatsApp pairing string.
+- **Phone-side setup is explicit.** The connector card lists the WhatsApp mobile steps directly beside the QR: open WhatsApp, go to Settings, tap the QR symbol, choose Scan, then approve the new-computer prompt. Linked Devices -> Link a Device is shown as the alternate path for clients that expose that flow instead.
+- **Recipient selection is target-first, not number-first.** A linked session defaults to `My WhatsApp`; the user's own phone/JID is resolved inside the main process at send time and is never displayed. Admins can switch the default target to a WhatsApp group fetched from the linked local session, or use a manual paste/drop fallback for international numbers, `wa.me` links, contact text, and raw JIDs.
+- **Group metadata is local and narrow.** The group picker reads participating group id, subject, participant count, and announce flag from Baileys only after the session is linked. The app stores only the selected target id/type/label needed for delivery settings. Group JIDs (`@g.us`) are treated as internal target ids and should not be carried into manual Number/JID inputs when switching target modes.
+- **Disconnect clears stale targets.** Removing the linked WhatsApp session resets the connector default target to `My WhatsApp`, moves per-agent WhatsApp delivery rules back to the connector default target, and drops pending WhatsApp delivery queue items that can no longer be sent safely.
+- **Post-pairing restart is normal.** Baileys can close with status `515` ("restart required") or `408` after the phone accepts a pairing. The connector treats those as reconnect states, opens a fresh socket, and shows the user a reconnecting state instead of a terminal error.
+- **Success requires a remote message id.** Run delivery is logged as sent only after Baileys returns a message id from `sendMessage`.
+- **Run activity includes delivery.** When per-agent WhatsApp delivery is enabled, terminal runs append a post-run activity step showing whether the delivery rule matched the run, whether the report was sent, failed, or skipped, and the user-facing target label. Raw recipient values are not shown.
+- **Recipient values stay out of logs and audit labels.** The raw WhatsApp number/JID or selected group JID is used only for local configuration and the main-process send call. Connector status, renderer confirmation payloads, run logs, connector test status, and audit egress targets use generic or user-facing WhatsApp target labels. Per-run connector audit metadata stores a redacted egress target plus a digest of the send arguments, not the raw target.
+- **Libsignal console noise is suppressed narrowly.** Baileys/libsignal emits session lifecycle messages through `console.info`, outside pino. The runtime suppresses only the known session prefixes so key material does not appear in desktop logs.
+
+#### Why Teams first, WhatsApp Web second, ServiceNow later
+
+Teams proves the contract generalizes across capabilities while keeping the trust surface unchanged from today. WhatsApp Web proves the `external` class with a local, device-paired session and no enterprise API access. ServiceNow remains the canonical enterprise external connector — instance URL configuration, keychain-stored credentials, and "data leaves your tenant" trust messaging — but it no longer has to be the second connector.
 
 ### Registry model
 
@@ -545,13 +640,15 @@ Distribution semantics:
 - **Source of truth:** `https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/`
 - **Index:** `agents/index.json` is generated by CI from `agents/*/manifest.yaml` after the agent QA gate (schema, scopes, endpoints, fixture coverage) passes. Broken agents never reach users.
 - **Per-agent install:** fetch manifest → write to userData → version-pin. The same Agent Hub install flow as today, just fetching from HTTP instead of reading the binary.
-- **Forkable:** Settings exposes a "Registry source" field. Enterprises can fork this repo, curate `/agents/`, and point the app at their fork. Cheap to implement, big trust win.
+- **Forkable:** Settings exposes a "Registry source" field under Privacy. Enterprises can fork this repo, curate `/agents/`, and point the app at their fork. Custom sources open a trust-review modal and require explicit acknowledgement before persistence.
 - **App↔manifest version coupling:** each `index.json` entry carries `minAppVersion`. The app hides agents it can't run with a "Update OpenAdminOS to use this agent" note. This is how the DSL can evolve without orphaning users on older app versions.
 
 Cache lifecycle:
 
 - Onboarding already requires network (MSAL, provider probe), so the first index fetch piggybacks on that flow — no offline-first complexity for first-run.
 - On every subsequent launch (online): refresh `index.json` in the background. Compare to cached per-agent versions, surface per-agent update badges.
+- Registry source URLs must use HTTPS, must not include credentials, query strings, fragments, or an `index.json` suffix, and are normalized before persistence. Localhost/private registry sources are blocked unless an explicit dev-only override is enabled (`OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE=1` in an unpackaged app).
+- Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source, so a failed custom source cannot silently fall back to agents fetched from another source.
 - Failed refresh is silent — keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
 - App works fully offline against the cached set after the first successful fetch.
 
@@ -561,11 +658,13 @@ This is modeled on **Home Assistant integrations** (https://developers.home-assi
 
 ### Local storage
 
-SQLite via `better-sqlite3` for:
+SQLite via Electron's built-in `node:sqlite` for:
 - Tenant configurations (encrypted via OS keychain for tokens)
 - Installed agent registry
 - Run history (full structured logs)
 - LLM provider configurations (with hosted-provider API keys in OS keychain)
+- Intune Chat conversations, tool calls, Graph cache snapshots, and per-tenant cache refresh schedules
+- Optional local self-training events and approved suggestions
 
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
 error-reporting telemetry. Packaged production builds may send a minimal public
@@ -575,6 +674,326 @@ local install ID. Users can disable registry install counts in Settings. The
 stats endpoint may use IP addresses for short-lived rate limiting. These events
 must never include tenant identifiers, user identifiers, prompts, run results,
 or Microsoft Graph data.
+
+User-initiated support bundles are a separate explicit action, not telemetry.
+The sidebar `Report issue` entry, failure-state action, and Settings → About
+action open an in-app support form. OpenAdminOS may export a local diagnostics
+JSON file only after the admin chooses that option. After the admin checks an
+explicit public-issue confirmation and clicks submit, the desktop app posts a
+bounded support report to the OpenAdminOS web API; the server creates the public
+GitHub issue with a repo-scoped GitHub token that is never shipped to the
+desktop app. The endpoint owns the repo mapping, applies server-side
+redaction, enforces request-size limits, rate-limits by IP, and deduplicates
+matching recent reports. The optional diagnostics JSON is bounded to
+app/build/OS, provider status categories, registry/scheduler/cache health,
+aggregate run counts, and hashed error categories. It must not include tenant
+identifiers, account usernames, tenant domains, prompts, LLM output, Graph
+response bodies, run reports, raw run logs, SQLite databases, screenshots, MSAL
+tokens, provider credentials, or keychain values. No support report is
+submitted automatically after a crash or failure, and no screenshot/session
+replay capture is part of this flow.
+
+### Intune Chat and local intelligence
+
+Intune Chat is the operating surface for exploratory tenant work. Agents remain
+repeatable, reviewed workflows; chat is where an admin asks broad natural-language
+questions, inspects tenant state, and routes repeatable work into installed agents
+as skills.
+
+The chat surface is read-only by default. It can query cached or live Microsoft
+Graph data and ask the active LLM provider to explain the result, but it must not
+perform Graph writes or connector side effects directly. If the user asks for work
+that maps to an installed write agent, chat offers to run that agent and the normal
+preflight, scope review, write-plan, and confirmation flow applies. No chat path
+can bypass the write-agent confirmation contract.
+
+Chat responses stream from the Electron main process to the renderer over a
+dedicated IPC event channel. The renderer shows the assistant draft as model
+deltas arrive, while the host persists only the final completed, failed, or
+cancelled assistant message. The preload stream listener must remain registered
+until the terminal `completed`, `failed`, or `cancelled` stream event; cleaning
+it up when the IPC invoke promise resolves can drop tail events from very fast
+local model streams. This keeps the UI responsive without storing partial tenant
+answers as durable history. The composer exposes Stop while a chat answer is
+running. Stop aborts provider work through the host-owned stream controller
+where the provider supports cancellation, discards generated tail output, and
+persists a clear cancelled assistant entry instead of a partial answer.
+
+The composer follows normal chat ergonomics: Enter sends the message, while
+Shift+Enter inserts a newline. The focused composer shows one visible accent
+border only. Long-running chat work is not hidden behind a static text pill:
+cache checks, live Graph refreshes, answer-pack preparation, and model generation
+emit visible progress steps with loading, success, and failure states. Progress
+renders in the assistant response slot for the active prompt, not pinned near the
+composer, so it transitions naturally into the streamed answer. New conversation
+sends must optimistically mount the user's prompt and the progress card before
+the host returns a persisted conversation id; the chat history rail shows an
+active "New conversation" draft row until the conversation is persisted. The
+renderer keeps a transient in-flight draft so background history/cache reloads
+cannot leave a send in "Thinking" without a visible prompt and progress card.
+Live Graph refreshes triggered by chat write successful rows back into the same
+local SQLite cache used by manual and scheduled refresh.
+
+Chat does not run without an active tenant. The status strip shows the active
+tenant, provider, model, and data freshness. When the selected provider is local,
+Graph data, prompts, chat history, answer packs, and optional self-training data
+stay on the device. When a hosted provider is selected, the chat UI must state
+that retrieved tenant context will be sent to that provider before the answer is
+generated. The first hosted-provider chat send for a tenant/provider pair must
+pause for explicit confirmation before the host builds and sends the answer
+prompt. The confirmation names the tenant, provider, model, what leaves the
+device, what stays local, and includes a per-device "remember this decision"
+option. The renderer must send a fresh acknowledgement for each hosted-provider
+chat request, either from the just-confirmed modal or from a remembered local
+decision. Electron main validates that acknowledgement against the active tenant
+and provider before creating chat messages, refreshing Graph cache resources, or
+building the hosted LLM prompt.
+
+The chat page should behave like a focused chat product, not an operations
+dashboard: history on the left, the active conversation and composer in the
+center, and only compact tenant/provider/freshness cues in the chat header.
+The chat header should not expose a global cache Refresh action; prompt-scoped
+refresh already happens during send, and broad cache maintenance belongs in
+Settings. Graph cache details, manual/periodic refresh controls, and
+self-training approval/reset workflows live in Settings -> Intune Chat so normal
+chat use stays uncluttered.
+The history rail can collapse to a narrow icon/index strip when the admin wants
+more reading width, and each message exposes a compact copy action for prompts
+and responses. User prompts can also be loaded back into the composer for
+revision/resend, assistant responses can be regenerated from the preceding
+prompt through the normal chat send pipeline, and running generations can be
+stopped without leaving the interface stuck in an in-progress state. Stop is a
+host-visible cancellation: Electron main aborts the active chat stream, providers
+that support aborts terminate their network/process work, and the host persists a
+`cancelled` assistant record without generated answer text.
+Conversation management is local-first as well: admins can search conversation
+titles and message text, pin important investigations, rename conversations,
+export a local Markdown transcript with source metadata, and delete
+conversations from the local SQLite store. Deleting a conversation removes local
+messages and chat tool-call records only; it does not disconnect the tenant,
+clear Graph cache, or alter agent run history. Pinned conversations are grouped
+at the top of the chat history rail under a collapsible Pinned section, separate
+from Recent conversations. Conversation rows expose a right-click context menu
+for local deletion while still using the same product confirmation modal as the
+header Delete action.
+Settings -> Intune Chat also exposes a local data summary for the SQLite store:
+database size, chat conversation/message/tool-call counts, active-tenant Graph
+cache rows, and self-training event/suggestion counts. Clearing all chat history
+uses an explicit product modal and removes only local conversations, messages,
+and chat tool-call records.
+
+Claude-style Projects are a useful reference, but the OpenAdminOS version should
+be tenant-scoped investigative workspaces rather than generic project folders:
+pinned Graph evidence, relevant agent runs, notes, approved local instructions,
+and source freshness for a specific tenant problem. This is deferred beyond the
+first v0.2.2 chat pass. TODO(ugur): decide the public naming and route shape for
+these workspaces before implementation.
+
+#### Graph cache
+
+The cache is a local SQLite-backed mirror of selected read-only Graph resources.
+It exists to make chat fast, auditable, and context-window-safe; it is not cloud
+sync and it is not telemetry. Each cached row records tenant id, resource kind,
+Graph object id when available, snapshot id, raw JSON, normalized searchable
+columns, scope set, and refresh time.
+
+The first question-driven planner covers the resource areas behind the researched
+top 150 Intune admin questions in `docs/research/intune-chat-question-bank.md`.
+The bank is built from Microsoft Graph resource coverage and current admin
+community demand around app assignment, Autopilot ESP, compliance "Not
+Evaluated", remediations, Windows Update, policy conflicts, audit, and stale
+device investigations. Tests assert that every banked question plans all declared
+cache resources, so the prompt examples and planner cannot drift silently.
+
+Initial cache targets:
+
+- `/deviceManagement/managedDevices`
+- `/devices`
+- `/users`
+- `/groups`
+- `/deviceManagement/deviceCompliancePolicies`
+- `/deviceManagement/deviceConfigurations`
+- `/deviceManagement/configurationPolicies`
+- `/deviceAppManagement/mobileApps`
+- `/deviceManagement/detectedApps`
+- `/deviceAppManagement/managedAppPolicies`
+- `/deviceAppManagement/iosManagedAppProtections`
+- `/deviceAppManagement/androidManagedAppProtections`
+- `/deviceAppManagement/mobileAppConfigurations`
+- `/deviceManagement/deviceHealthScripts`
+- `/deviceManagement/deviceManagementScripts`
+- `/deviceManagement/windowsAutopilotDeviceIdentities`
+- `/deviceManagement/autopilotEvents`
+- `/deviceManagement/windowsAutopilotDeploymentProfiles`
+- `/deviceManagement/deviceEnrollmentConfigurations`
+- `/deviceManagement/windowsQualityUpdateProfiles`
+- `/deviceManagement/windowsFeatureUpdateProfiles`
+- `/deviceManagement/intents`
+- `/deviceManagement/groupPolicyConfigurations`
+- `/deviceManagement/assignmentFilters`
+- `/deviceManagement/roleScopeTags`
+- `/deviceManagement/managedDeviceOverview`
+- `/deviceManagement/managedDeviceEncryptionStates`
+- `/deviceManagement/troubleshootingEvents`
+- `/auditLogs/signIns`
+- `/auditLogs/directoryAudits`
+- `/identity/conditionalAccess/policies`
+
+Initial tenant connection requests the Graph PM-audited read scopes needed for
+these cache targets, including Intune configuration, apps, service config,
+scripts, RBAC scope tags, Entra devices, and group membership reads. Existing
+tenants connected before this consent expansion may still need to reconnect or
+approve incremental Microsoft consent. Refresh failures are stored per resource
+and surfaced in chat sources/settings instead of blocking unrelated cached
+resources. Completed assistant messages include a source-details disclosure for
+each used Graph resource with cache/live status, row count, page count, cap
+status, refresh time, Graph path, selected fields, query parameters, and safe
+error text where available.
+Autopilot event data is included as a separate source because live tenant checks
+can return Intune service-side 500s for `/deviceManagement/windowsAutopilotDeviceIdentities`
+even when the correct service-config read scope is present. Chat should surface
+the identity source error while still using Autopilot events, troubleshooting
+events, and enrollment configuration data when available.
+
+Refresh modes are explicit: chat refreshes prompt-relevant resources as part of
+answering, while Settings -> Intune Chat lets admins manually refresh the active
+tenant cache or enable a per-tenant periodic refresh interval. Scheduled refresh
+uses the same local app/OS scheduler surface as agent schedules while the user is
+signed in; it writes success/failure state to SQLite and never uploads cache
+contents.
+Collection refresh follows Microsoft Graph `@odata.nextLink` pagination up to a
+bounded page/row cap. Cache status records row count, page count, and whether the
+cap was reached, so chat can disclose partial source coverage instead of treating
+the first Graph page as tenant-wide evidence.
+Settings -> Intune Chat can clear the active tenant's cached Graph rows and cache
+status through an explicit local-deletion modal. Clearing cache does not
+disconnect the tenant, change provider settings, remove chat history, or alter
+agent run history; the next chat refreshes required resources again.
+Every chat answer that uses cached data must disclose the resource freshness.
+Stale data is acceptable when the user chooses to use it; silently treating
+stale cache as current data is not.
+
+Audit-log cache pulls must be field-selected rather than raw unbounded rows.
+The v0.2.2 cache uses compact `$select` lists for sign-ins and directory audits,
+validated against Microsoft Graph beta through the Microsoft Graph MCP, so local
+SQLite growth stays bounded before the answer-pack compaction step.
+
+Verification for the chat surface includes `npm run smoke:intune-chat`. The smoke
+test launches Electron in a dev-only fixture mode, seeds a local tenant, drives
+the real preload/IPC chat path through a 10-prompt pass, verifies a grounded
+answer, Stop, Regenerate, agent suggestion, collapsible history rail, copy
+response action, accepts a local self-training suggestion, and confirms scheduled
+cache refresh UI state.
+This fixture does not replace a final live-tenant pilot run, but it guards the
+desktop path without requiring tenant credentials in CI or local automation.
+
+#### Context-window strategy
+
+The model never receives an unbounded tenant dump. Chat first plans the data it
+needs, queries SQLite and/or Graph deterministically, then sends a compact answer
+pack to the LLM. SQL and Graph do the filtering, joins, sorting, counts, and top-N
+sampling. The LLM explains the prepared evidence, calls out missing or stale data,
+and avoids inventing tenant state.
+Answer packs include the generation timestamp so time-bounded questions such as
+"devices not synced in the last 7 days" do not force the model to infer the
+current date. Common precise predicates should run deterministically before the
+LLM sees the answer pack. For v0.2.2, stale managed-device sync questions parse
+the day threshold, compute the cutoff from `generatedAt`, read matching
+`managedDevices` rows from SQLite by `lastSyncDateTime`, sort oldest first, and
+include the threshold/match metadata in the answer pack.
+
+For large result sets the answer pack includes aggregate counts, grouped
+breakdowns, and representative rows. v0.2.2 reads at most 40 rows per planned
+resource from SQLite/Graph and includes at most 20 compact sample rows per
+resource in the model prompt, with `selectedRows`, `includedSampleRows`, and
+`omittedCachedRows` metadata so the model can disclose bounded evidence rather
+than pretending it saw the full cache. Long policy or audit text may be
+summarized in chunks before a final summary. Local embeddings can be added later
+for free-text policy retrieval, but the first implementation should work without
+embedding infrastructure.
+
+#### Agents as skills
+
+Installed agents expose routing metadata derived from their manifests: name,
+description, category, mode, scopes, settings, model requirements, examples, and
+write/destructive status. When chat detects that a prompt maps to an installed
+agent, it should recommend that agent instead of improvising a workflow. The user
+chooses whether to run it or inspect why it was suggested, including required
+scopes. Chat should not add a generic "ask first" turn from an agent suggestion;
+if more context is needed, the details disclosure should state the concrete
+reason, matched prompt terms, matched concepts, planned sources, mode, scopes,
+and confirmation behavior. Write-agent suggestions require explicit write intent
+and category alignment when the prompt clearly names a category.
+
+Agent runs started from chat are recorded as chat tool calls that link back to the
+run id. The agent runtime remains the source of truth for execution, confirmation,
+and audit records.
+
+#### Optional local self-training
+
+Self-training is an optional local feature, disabled by default. The product copy
+must be explicit: it does not train the model, upload tenant data, rewrite public
+manifests, add scopes, change read/write mode, alter connector egress, or bypass
+confirmation. It stores admin-approved local instructions that can influence
+future prompt/context composition.
+
+The desktop host, not the agent, writes approved learning state under:
+
+```text
+<userData>/
+  openadminos.db
+  agent-learning/
+    tenants/
+      <tenantIdHash>/
+        agents/
+          <agentSlug>/
+            self-training.yaml
+```
+
+Chat and agent runs can produce learning events: accepted agent routes, rejected
+write plans, confirmed write plans, repeated corrections in chat, and relevant
+agent setting changes. SQLite stores those events, pending suggestions, decisions,
+and reset history. The admin must approve a suggestion before it becomes active.
+Future agent LLM steps receive approved self-training entries from
+`self-training.yaml` as a local overlay on top of the reviewed manifest prompt.
+Resetting learned behavior for an agent marks accepted suggestions as reset,
+rewrites that agent's `self-training.yaml`, and preserves the SQLite decision
+history.
+
+### Desktop renderer security
+
+The Electron renderer runs with `contextIsolation: true`, `nodeIntegration:
+false`, and `sandbox: true`. The preload is emitted as CommonJS so Electron's
+sandboxed preload can expose the narrow `window.openAdminOS` bridge without
+granting renderer Node access. All privileged work stays in Electron main.
+Every `ipcMain.handle()` callback must validate the sender frame against the
+loaded app origin before performing privileged work. Renderer-provided payloads
+must be narrowed at runtime with bounded strings, booleans, known enums, and
+plain JSON object size caps before reaching the store; TypeScript annotations in
+the preload are not sufficient security validation.
+
+The desktop HTML must not load remote fonts or decorative remote assets. The
+app uses system font stacks and a restrictive Content Security Policy: scripts,
+styles, images, and fonts are self/data/blob-limited as needed; renderer
+connections are limited to the app/dev server and loopback local-provider
+endpoints. The host classifies local-provider endpoints conservatively before
+claiming local-only trust. Microsoft Graph, login, registry, and hosted-provider
+traffic should flow through the main process unless a renderer-owned external
+endpoint is explicitly approved and documented.
+
+Desktop copy actions should use the bounded Electron clipboard bridge exposed by
+preload instead of relying on sandboxed renderer clipboard permissions. Browser
+clipboard fallbacks are acceptable only for renderer-only development.
+Local destructive actions such as uninstalling an agent, disconnecting a tenant,
+or clearing local data should use product modal components with explicit impact
+copy and success/failure feedback. Native browser dialogs (`alert`, `confirm`,
+`prompt`) are not acceptable for shipped desktop UX because they bypass the
+design system and hide recovery context.
+If the renderer is opened without the Electron desktop bridge, non-onboarding
+routes should show a designed bridge-unavailable diagnostic state instead of
+silently redirecting to onboarding or logging noisy console warnings. That state
+is for renderer-only development; tenant-connected testing belongs in the
+Electron window.
 
 ### Code signing
 
@@ -619,11 +1038,11 @@ The build pipeline must accept signing as a step from day one — even if signin
 
 ### Typography
 
-- **UI:** Geist (with system fallbacks)
-- **Code, IDs, telemetry, run IDs, JSON:** JetBrains Mono
+- **UI:** system UI stack (`ui-sans-serif`, `system-ui`, `-apple-system`, `Segoe UI`, sans-serif)
+- **Code, IDs, telemetry, run IDs, JSON:** system monospace stack (`ui-monospace`, `SF Mono`, `Menlo`, `Consolas`, monospace)
 - Base size: 13px (denser than typical web — admins want information density)
 - Line-height: 1.5
-- Letter-spacing: -0.005em on UI text
+- Letter-spacing: 0
 
 ### Density principle
 
@@ -679,9 +1098,9 @@ macOS notification caveat: Electron 42 uses Apple's `UNNotification` framework. 
 
 ---
 
-## 5a. v0.1 — Private preview showcase
+## 5a. v0.1 — Public preview foundation
 
-The first shippable milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest — not to be production-deployable against real tenants.
+The first public-preview milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest while establishing the public preview path toward real-tenant deployment.
 
 ### What v0.1 includes
 
@@ -757,7 +1176,7 @@ Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent 
 
 These must exist and work well before any public release.
 
-1. **First-run onboarding** — 3 steps: tenant connection → LLM provider → first agent. <90 seconds from installer to first successful run.
+1. **First-run onboarding** — 3 steps: tenant connection → LLM provider → workspace start. The final setup screen offers Intune Chat as the primary first action and Agent Hub as the repeatable-workflow path; installing a first agent is optional, not required before chat has value. <90 seconds from installer to first grounded chat answer or first successful agent run.
 2. **MSAL consent flow** — Lawyer-grade transparency about Graph scopes requested. Read scopes only by default; write scopes requested per-agent at install time.
 3. **LLM provider configuration** — All 5 providers, test connection, model dropdowns populated by querying the provider, per-agent overrides.
 4. **Diff confirmation for write agents** — Side-by-side before/after, scope summary, typed confirmation for destructive actions.
@@ -766,14 +1185,17 @@ These must exist and work well before any public release.
 7. **Registry browse** — Search, filter (author, mode, model requirements), install, signing/verification status, screenshots, changelog.
 8. **Multi-tenant switcher done properly** — Search, color-coding, "currently scoped to" badges, scope guard against running an agent on the wrong tenant.
 9. **Teams connector (graph-delegated)** — first connector to validate the abstraction. Channel + chat picker, post-message capabilities, Teams scopes folded into the MSAL consent flow, trust messaging integrated with the status strip. See §2 Connector abstraction.
+10. **WhatsApp Web connector (external local session)** — second connector to validate QR-based local setup and non-Graph egress. QR linking, default/test target selection, outbound-only run notifications, no incoming-message access, Baileys reconnect handling, and explicit "delivered by WhatsApp" trust messaging. See §2 Connector abstraction.
 
 ### Important (in v1.0, doesn't have to be perfect)
 
 - Scheduled runs are available for installed agents. The UI creates the per-agent recurrence; once at least one Microsoft tenant is connected, OpenAdminOS can register a per-user OS scheduler so due runs continue while the UI is closed. macOS uses `~/Library/LaunchAgents/com.openadminos.scheduler.plist`; Windows uses Task Scheduler. Jobs still run as the signed OpenAdminOS app for the logged-in user, use the persisted MSAL token cache, write results to local history, and do not run when the machine is off or no user session exists. The Schedules view prioritizes active schedules, next run, last run, and recent scheduled activity. OS registration and scheduler errors are shown as compact remediation notices only when the user needs to act.
-- Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; the Teams connector is the first egress target wired through this surface. Agents can save a Teams delivery rule that posts terminal run reports to either the connector default channel or a per-agent channel, with manual/scheduled, success/failure, and changed-only controls. Saved delivery rules are explicit approval to post without another prompt. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
-- Agents should not hard-code routine Teams posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to Teams, or both.
+- Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; Teams and WhatsApp Web are the first egress targets wired through this surface. Agents can save delivery rules that post terminal run reports to either the connector default target or a per-agent target, with manual/scheduled, success/failure, and changed-only controls. Per-agent delivery rules autosave when the admin enables a connector, changes a target, or changes delivery checkboxes; starting a run waits for any in-flight delivery save so the run uses the latest rule. Saved delivery rules are explicit approval to post without another prompt. Connector delivery appends post-run activity steps so the run timeline shows sent, failed, or skipped delivery outcomes after the agent result is created. Connector delivery is queued locally when a run reaches a terminal state, retried with bounded backoff for transient failures, and processed again on app reopen or scheduler ticks. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
+- Agents should not hard-code routine Teams or WhatsApp posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to Teams, to WhatsApp, or to multiple targets.
 - Manual agent runs open a preflight review before queueing. It shows the active tenant, provider residency, model, mode, and Graph scopes. It blocks when no tenant is active, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
+- Provider trust messaging is scoped to the surface: overview/settings/chat/status surfaces use the current active tenant/provider/default model, while queued run reports use the run's pinned tenant, provider, and model rather than the current global tenant/provider selection.
 - Settings → About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
+- Support issue reporting is visible from the sidebar footer, failed-run remediation cards, and Settings → About. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
 - Run history with filters (agent, tenant, date, status)
 - Audit log export (JSON/CSV with cryptographic timestamps for compliance buyers)
@@ -784,7 +1206,7 @@ These must exist and work well before any public release.
 
 ### Designed before launch (not strict blockers)
 
-- **Second connector: ServiceNow (`external` auth)** — proves the Connector abstraction generalizes across trust boundaries. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed alongside Teams; ships post-v1.0.
+- **Enterprise external connector: ServiceNow (`external` auth)** — proves the Connector abstraction generalizes to enterprise ticketing. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed after the Teams and WhatsApp Web connector surfaces stabilize.
 - Agent signing / verification (registry supply-chain integrity)
 - Sandbox / dry-run mode for read agents (preview Graph calls before executing)
 - Cost budgets & rate limits (per-agent or per-day spend caps for hosted LLMs)

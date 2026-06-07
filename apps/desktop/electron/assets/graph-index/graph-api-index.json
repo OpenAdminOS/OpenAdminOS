@@ -1,7 +1,7 @@
 {
   "version": "beta",
-  "generated": "2026-05-19T08:54:49Z",
-  "count": 28700,
+  "generated": "2026-06-01T11:03:20Z",
+  "count": 28732,
   "endpoints": [
     {
       "path": "/accessReviewDecisions",
@@ -1207,7 +1207,7 @@
       "path": "/admin/exchange/mailboxes/{mailbox-id}/exportItems",
       "method": "POST",
       "summary": "Invoke action exportItems",
-      "description": "Export Exchange mailboxItem objects in full fidelity. This API exports each item as an opaque stream. The data stream isn't intended for parsing, but can be used to import an item back into an Exchange mailbox. For more information, see: Overview of the mailbox import and export APIs in Microsoft...",
+      "description": "Export Exchange mailboxItem objects in full fidelity. This API exports each item as an opaque stream. The data stream isn't intended for parsing, but can be used to import an item back into an Exchange mailbox. For more information, see Overview of the mailbox import and export APIs in Microsoft ...",
       "resource": "admin"
     },
     {
@@ -1227,7 +1227,7 @@
       "path": "/admin/exchange/mailboxes/{mailbox-id}/folders/delta()",
       "method": "GET",
       "summary": "Invoke function delta",
-      "description": "Get a set of mailboxFolder objects that have been added, deleted, or removed from the user's mailbox. A delta function call for folders in a mailbox is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes...",
+      "description": "Get a set of mailboxFolder objects that were added, deleted, or removed from the user's mailbox. A delta function call for folders in a mailbox is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes in t...",
       "resource": "admin"
     },
     {
@@ -1254,7 +1254,7 @@
       "path": "/admin/exchange/mailboxes/{mailbox-id}/folders/{mailboxFolder-id}/childFolders/delta()",
       "method": "GET",
       "summary": "Invoke function delta",
-      "description": "Get a set of mailboxFolder objects that have been added, deleted, or removed from the user's mailbox. A delta function call for folders in a mailbox is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes...",
+      "description": "Get a set of mailboxFolder objects that were added, deleted, or removed from the user's mailbox. A delta function call for folders in a mailbox is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes in t...",
       "resource": "admin"
     },
     {
@@ -1281,7 +1281,7 @@
       "path": "/admin/exchange/mailboxes/{mailbox-id}/folders/{mailboxFolder-id}/childFolders/{mailboxFolder-id1}/items/delta()",
       "method": "GET",
       "summary": "Invoke function delta",
-      "description": "Get a set of mailboxItem objects that have been added, deleted, or updated in a specified mailboxFolder. A delta function call for items in a folder is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes...",
+      "description": "Get a set of mailboxItem objects that were added, deleted, or updated in a specified mailboxFolder. A delta function call for items in a folder is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes in t...",
       "resource": "admin"
     },
     {
@@ -1308,7 +1308,7 @@
       "path": "/admin/exchange/mailboxes/{mailbox-id}/folders/{mailboxFolder-id}/items/delta()",
       "method": "GET",
       "summary": "Invoke function delta",
-      "description": "Get a set of mailboxItem objects that have been added, deleted, or updated in a specified mailboxFolder. A delta function call for items in a folder is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes...",
+      "description": "Get a set of mailboxItem objects that were added, deleted, or updated in a specified mailboxFolder. A delta function call for items in a folder is similar to a GET request, except that by appropriately applying state tokens in one or more of these calls, you can query for incremental changes in t...",
       "resource": "admin"
     },
     {
@@ -1611,15 +1611,14 @@
     {
       "path": "/admin/people/photoUpdateSettings",
       "method": "DELETE",
-      "summary": "Delete photoUpdateSettings",
-      "description": "Delete a photoUpdateSettings object.",
+      "summary": "Delete navigation property photoUpdateSettings for admin",
       "resource": "admin"
     },
     {
       "path": "/admin/people/photoUpdateSettings",
       "method": "GET",
-      "summary": "Get photoUpdateSettings",
-      "description": "Read the properties and relationships of a photoUpdateSettings object.",
+      "summary": "List photoUpdateSettings",
+      "description": "Get the properties of a photoUpdateSettings object.",
       "resource": "admin"
     },
     {
@@ -35659,6 +35658,7 @@
       "path": "/deviceManagement/virtualEndpoint/bulkActions/{cloudPcBulkAction-id}/retry",
       "method": "POST",
       "summary": "Invoke action retry",
+      "description": "Retry a cloudPcBulkAction object with selected Cloud PCs.",
       "resource": "devicemanagement"
     },
     {
@@ -94836,7 +94836,7 @@
     {
       "path": "/identityGovernance/lifecycleWorkflows/workflows/{workflow-id}/runs/{run-id}/taskProcessingResults",
       "method": "GET",
-      "summary": "List taskProcessingResults",
+      "summary": "List taskProcessingResults (from a run)",
       "description": "Get the taskProcessingResult resources for a run.",
       "resource": "identitygovernance"
     },
@@ -94982,7 +94982,7 @@
     {
       "path": "/identityGovernance/lifecycleWorkflows/workflows/{workflow-id}/runs/{run-id}/userProcessingResults/{userProcessingResult-id}/taskProcessingResults",
       "method": "GET",
-      "summary": "List taskProcessingResults",
+      "summary": "List taskProcessingResults (for a user)",
       "description": "Get the task processing result from a userProcessingResult either directly or through a run.",
       "resource": "identitygovernance"
     },
@@ -95341,7 +95341,7 @@
     {
       "path": "/identityGovernance/lifecycleWorkflows/workflows/{workflow-id}/userProcessingResults/{userProcessingResult-id}/taskProcessingResults",
       "method": "GET",
-      "summary": "List taskProcessingResults",
+      "summary": "List taskProcessingResults (for a user)",
       "description": "Get the task processing result from a userProcessingResult either directly or through a run.",
       "resource": "identitygovernance"
     },
@@ -115459,13 +115459,13 @@
       "resource": "networkaccess"
     },
     {
-      "path": "/networkAccess/reports/microsoft.graph.networkaccess.destinationReport(startDateTime={startDateTime},endDateTime={endDateTime})",
+      "path": "/networkAccess/reports/microsoft.graph.networkaccess.destinationReport(startDateTime={startDateTime},endDateTime={endDateTime},aiAgentId='@aiAgentId',aiAgentName='@aiAgentName')",
       "method": "GET",
       "summary": "Invoke function destinationReport",
       "resource": "networkaccess"
     },
     {
-      "path": "/networkAccess/reports/microsoft.graph.networkaccess.deviceReport(startDateTime={startDateTime},endDateTime={endDateTime},discoveredApplicationSegmentId='@discoveredApplicationSegmentId',applicationId='@applicationId')",
+      "path": "/networkAccess/reports/microsoft.graph.networkaccess.deviceReport(startDateTime={startDateTime},endDateTime={endDateTime},discoveredApplicationSegmentId='@discoveredApplicationSegmentId',applicationId='@applicationId',aiAgentId='@aiAgentId',aiAgentName='@aiAgentName',cloudApplicationName='@cloudApplicationName')",
       "method": "GET",
       "summary": "Invoke function deviceReport",
       "resource": "networkaccess"
@@ -115548,7 +115548,7 @@
       "resource": "networkaccess"
     },
     {
-      "path": "/networkAccess/reports/microsoft.graph.networkaccess.userReport(startDateTime={startDateTime},endDateTime={endDateTime},discoveredApplicationSegmentId='@discoveredApplicationSegmentId',applicationId='@applicationId')",
+      "path": "/networkAccess/reports/microsoft.graph.networkaccess.userReport(startDateTime={startDateTime},endDateTime={endDateTime},discoveredApplicationSegmentId='@discoveredApplicationSegmentId',applicationId='@applicationId',aiAgentId='@aiAgentId',aiAgentName='@aiAgentName',cloudApplicationName='@cloudApplicationName')",
       "method": "GET",
       "summary": "Invoke function userReport",
       "resource": "networkaccess"
@@ -150145,6 +150145,18 @@
       "resource": "solutions"
     },
     {
+      "path": "/solutions/migrations/crossTenantMigrationJobs(displayName='{displayName}')/migrate",
+      "method": "POST",
+      "summary": "Invoke action migrate",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/migrations/crossTenantMigrationJobs(displayName='{displayName}')/validate",
+      "method": "POST",
+      "summary": "Invoke action validate",
+      "resource": "solutions"
+    },
+    {
       "path": "/solutions/migrations/crossTenantMigrationJobs/$count",
       "method": "GET",
       "summary": "Get the number of the resource",
@@ -150182,6 +150194,12 @@
       "method": "POST",
       "summary": "Invoke action cancel",
       "description": "Cancel a crossTenantMigrationJob. All tasks within the job that were in a Sync state are canceled. If the job can't be canceled, a 409 Conflict response is returned and the migrations continue. This response happens when a migration is already in progress or is in a terminal state.",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/migrations/crossTenantMigrationJobs/{crossTenantMigrationJob-id}/migrate",
+      "method": "POST",
+      "summary": "Invoke action migrate",
       "resource": "solutions"
     },
     {
@@ -150227,6 +150245,12 @@
       "method": "POST",
       "summary": "Invoke action cancel",
       "description": "Cancel a specific crossTenantMigrationTask for a User within a CrossTenantMigrationJob. If the User migration can't be canceled or is in a terminal state, a 409 CONFLICT response code is returned, and the migration continues.",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/migrations/crossTenantMigrationJobs/{crossTenantMigrationJob-id}/validate",
+      "method": "POST",
+      "summary": "Invoke action validate",
       "resource": "solutions"
     },
     {
@@ -150844,6 +150868,179 @@
       "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/presenters/{virtualEventPresenter-id}/sessions/{virtualEventSession-id}",
       "method": "GET",
       "summary": "Get sessions from solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration",
+      "method": "DELETE",
+      "summary": "Delete navigation property registrationConfiguration for solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration",
+      "method": "GET",
+      "summary": "Get registrationConfiguration from solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration",
+      "method": "PATCH",
+      "summary": "Update the navigation property registrationConfiguration in solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration/questions",
+      "method": "GET",
+      "summary": "Get questions from solutions",
+      "description": "Registration questions.",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration/questions",
+      "method": "POST",
+      "summary": "Create new navigation property to questions for solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration/questions/$count",
+      "method": "GET",
+      "summary": "Get the number of the resource",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration/questions/{virtualEventRegistrationQuestionBase-id}",
+      "method": "DELETE",
+      "summary": "Delete navigation property questions for solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration/questions/{virtualEventRegistrationQuestionBase-id}",
+      "method": "GET",
+      "summary": "Get questions from solutions",
+      "description": "Registration questions.",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrationConfiguration/questions/{virtualEventRegistrationQuestionBase-id}",
+      "method": "PATCH",
+      "summary": "Update the navigation property questions in solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations",
+      "method": "GET",
+      "summary": "Get registrations from solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations",
+      "method": "POST",
+      "summary": "Create new navigation property to registrations for solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(email='{email}')",
+      "method": "DELETE",
+      "summary": "Delete navigation property registrations for solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(email='{email}')",
+      "method": "GET",
+      "summary": "Get registrations from solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(email='{email}')",
+      "method": "PATCH",
+      "summary": "Update the navigation property registrations in solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(email='{email}')/cancel",
+      "method": "POST",
+      "summary": "Invoke action cancel",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(userId='{userId}')",
+      "method": "DELETE",
+      "summary": "Delete navigation property registrations for solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(userId='{userId}')",
+      "method": "GET",
+      "summary": "Get registrations from solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(userId='{userId}')",
+      "method": "PATCH",
+      "summary": "Update the navigation property registrations in solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations(userId='{userId}')/cancel",
+      "method": "POST",
+      "summary": "Invoke action cancel",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/$count",
+      "method": "GET",
+      "summary": "Get the number of the resource",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}",
+      "method": "DELETE",
+      "summary": "Delete navigation property registrations for solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}",
+      "method": "GET",
+      "summary": "Get registrations from solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}",
+      "method": "PATCH",
+      "summary": "Update the navigation property registrations in solutions",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}/cancel",
+      "method": "POST",
+      "summary": "Invoke action cancel",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}/sessions",
+      "method": "GET",
+      "summary": "Get sessions from solutions",
+      "description": "Sessions for a registration.",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}/sessions(joinWebUrl='{joinWebUrl}')",
+      "method": "GET",
+      "summary": "Get sessions from solutions",
+      "description": "Sessions for a registration.",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}/sessions/$count",
+      "method": "GET",
+      "summary": "Get the number of the resource",
+      "resource": "solutions"
+    },
+    {
+      "path": "/solutions/virtualEvents/townhalls/{virtualEventTownhall-id}/registrations/{virtualEventRegistration-id}/sessions/{virtualEventSession-id}",
+      "method": "GET",
+      "summary": "Get sessions from solutions",
+      "description": "Sessions for a registration.",
       "resource": "solutions"
     },
     {

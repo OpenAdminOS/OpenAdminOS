@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
@@ -26,19 +26,30 @@ import {
   IconShield,
 } from "../components/icons";
 import { useAppState } from "../state";
-import type {
-  AgentManifestPreview,
-  AgentTeamsDelivery,
-  AgentUpdateReview,
-  ConnectorChannelRef,
-  ConnectorSummary,
-  ConnectorTeamRef,
-  ProviderId,
-  RequestedScope,
-  RunRecord,
+import { copyTextToClipboard } from "../shared/clipboard";
+import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
+import {
+  resolveRunModel,
+  type AgentManifestPreview,
+  type AgentTeamsDelivery,
+  type AgentWhatsAppWebDelivery,
+  type AgentUpdateReview,
+  type ConnectorChannelRef,
+  type ConnectorSummary,
+  type ConnectorTeamRef,
+  type ProviderId,
+  type ProviderSummary,
+  type RequestedScope,
+  type RunRecord,
+  type WhatsAppWebGroupRef,
+  type WhatsAppWebRecipientType,
 } from "../shared/openAdminOS";
 
-export default function AgentDetail() {
+export default function AgentDetail({
+  startRunOnOpen = false,
+}: {
+  startRunOnOpen?: boolean;
+}) {
   const { slug } = useParams();
   const navigate = useNavigate();
   const {
@@ -50,6 +61,7 @@ export default function AgentDetail() {
     updateAgent,
     updateAgentSchedule,
     updateAgentTeamsDelivery,
+    updateAgentWhatsAppWebDelivery,
     exportAgentDraftBundle,
   } = useAppState();
   const toast = useToast();
@@ -64,10 +76,15 @@ export default function AgentDetail() {
   const [updateReview, setUpdateReview] = useState<AgentUpdateReview | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [uninstallOpen, setUninstallOpen] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
     { providerId?: ProviderId; model?: string } | null
   >(null);
+  const consumedStartRunOnOpen = useRef(false);
+  const pendingDeliverySaves = useRef(new Set<Promise<void>>());
+  const [pendingDeliverySaveCount, setPendingDeliverySaveCount] = useState(0);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -75,11 +92,54 @@ export default function AgentDetail() {
   const pendingProvider = state.providers.find(
     (provider) => provider.id === pendingProviderId,
   );
+  const pendingModel = resolveRunModel({
+    provider: pendingProvider,
+    activeModelByProviderId: state.activeModelByProviderId,
+    preferredModel: agent?.preferredModel,
+    explicitModel: pendingRunChoice?.model,
+  }).model;
+
+  const handleUninstallAgent = async () => {
+    if (!agent || uninstalling) return;
+    setUninstalling(true);
+    try {
+      await uninstallAgent(agent.slug);
+      toast.success(`${agent.name} uninstalled.`);
+      setUninstallOpen(false);
+      navigate("/");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUninstalling(false);
+    }
+  };
 
   const queueRunPreflight = (choice?: { providerId?: ProviderId; model?: string }) => {
     setRunError(null);
     setPendingRunChoice(choice ?? {});
   };
+
+  const trackDeliverySave = (save: Promise<void>): Promise<void> => {
+    const tracked = save.finally(() => {
+      pendingDeliverySaves.current.delete(tracked);
+      setPendingDeliverySaveCount(pendingDeliverySaves.current.size);
+    });
+    pendingDeliverySaves.current.add(tracked);
+    setPendingDeliverySaveCount(pendingDeliverySaves.current.size);
+    return tracked;
+  };
+
+  const waitForDeliverySaves = async () => {
+    while (pendingDeliverySaves.current.size > 0) {
+      await Promise.allSettled([...pendingDeliverySaves.current]);
+    }
+  };
+
+  useEffect(() => {
+    if (!startRunOnOpen || consumedStartRunOnOpen.current || !agent) return;
+    consumedStartRunOnOpen.current = true;
+    queueRunPreflight();
+  }, [agent, startRunOnOpen]);
 
   const reviewAndApplyUpdate = async () => {
     if (!agent) return;
@@ -117,6 +177,7 @@ export default function AgentDetail() {
     if (!agent) return;
     setRunError(null);
     try {
+      await waitForDeliverySaves();
       const options =
         choice && (choice.providerId || choice.model)
           ? {
@@ -234,7 +295,11 @@ export default function AgentDetail() {
             <ShareMenu
               contextLabel="agent"
               onCopyLink={() => {
-                void navigator.clipboard.writeText(`openadminos://agent/${agent.slug}`);
+                void copyTextToClipboard(`openadminos://agent/${agent.slug}`)
+                  .then(() => toast.success("Agent link copied."))
+                  .catch((error) =>
+                    toast.error(error instanceof Error ? error.message : String(error)),
+                  );
               }}
               copyLinkHint={`openadminos://agent/${agent.slug}`}
               onOpenInBrowser={() => {
@@ -321,22 +386,7 @@ export default function AgentDetail() {
             </Button>
             <Button
               variant="ghost"
-              onClick={() => {
-                const confirmed = window.confirm(
-                  `Remove ${agent.name}? Run history is kept. User-authored agents are deleted from disk.`,
-                );
-                if (!confirmed) return;
-                void uninstallAgent(agent.slug)
-                  .then(() => {
-                    toast.success(`${agent.name} uninstalled.`);
-                    navigate("/");
-                  })
-                  .catch((error) => {
-                    toast.error(
-                      error instanceof Error ? error.message : String(error),
-                    );
-                  });
-              }}
+              onClick={() => setUninstallOpen(true)}
             >
               Uninstall
             </Button>
@@ -509,9 +559,16 @@ export default function AgentDetail() {
               delivery={agent.delivery?.teams}
               onOpenConnectors={() => navigate("/connectors")}
               onChange={async (next) => {
-                await updateAgentTeamsDelivery(agent.slug, next);
-                toast.success(
-                  next?.enabled ? "Teams delivery saved." : "Teams delivery disabled.",
+                await trackDeliverySave(updateAgentTeamsDelivery(agent.slug, next));
+              }}
+            />
+
+            <AgentWhatsAppWebDeliveryCard
+              delivery={agent.delivery?.whatsappWeb}
+              onOpenConnectors={() => navigate("/connectors")}
+              onChange={async (next) => {
+                await trackDeliverySave(
+                  updateAgentWhatsAppWebDelivery(agent.slug, next),
                 );
               }}
             />
@@ -672,6 +729,16 @@ export default function AgentDetail() {
           </div>
         )}
       </Modal>
+      <UninstallAgentModal
+        open={uninstallOpen}
+        agentName={agent.name}
+        userAuthored={preview?.isUserAuthored === true}
+        busy={uninstalling}
+        onClose={() => {
+          if (!uninstalling) setUninstallOpen(false);
+        }}
+        onConfirm={() => void handleUninstallAgent()}
+      />
       {agent && (
         <RunPreflightModal
           open={pendingRunChoice !== null}
@@ -680,12 +747,8 @@ export default function AgentDetail() {
           providerName={pendingProvider?.name ?? pendingProviderId}
           providerIsLocal={pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
-          model={
-            pendingRunChoice?.model ??
-            state.activeModelByProviderId?.[pendingProviderId] ??
-            agent.preferredModel ??
-            pendingProvider?.defaultModel
-          }
+          model={pendingModel}
+          deliverySaving={pendingDeliverySaveCount > 0}
           onClose={() => setPendingRunChoice(null)}
           onConfirm={() => {
             void handleStartRun(pendingRunChoice ?? undefined);
@@ -693,6 +756,50 @@ export default function AgentDetail() {
         />
       )}
     </>
+  );
+}
+
+function UninstallAgentModal({
+  open,
+  agentName,
+  userAuthored,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  agentName: string;
+  userAuthored: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <ModalHeader
+        title="Uninstall agent"
+        subtitle={agentName}
+        badge={<Pill tone="danger">Local deletion</Pill>}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          This removes the installed agent from this device.
+          {userAuthored
+            ? " The local user-authored manifest folder is deleted from disk."
+            : " Registry agents can be installed again from Agent Hub."}{" "}
+          Run history is kept.
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" disabled={busy} onClick={onConfirm}>
+            {busy ? "Uninstalling" : "Uninstall"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -711,6 +818,9 @@ function AgentTeamsDeliveryCard({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  const lastSavedKey = useRef(stableDeliveryKey(delivery ?? null));
   const [enabled, setEnabled] = useState(delivery?.enabled === true);
   const [useDefaultTarget, setUseDefaultTarget] = useState(
     delivery?.useDefaultTarget !== false,
@@ -816,46 +926,88 @@ function AgentTeamsDeliveryCard({
     typeof summary?.config.defaultTeamId === "string" &&
     typeof summary?.config.defaultChannelId === "string";
   const connected = summary?.status === "connected";
-  const canSave =
-    !saving &&
-    (!enabled ||
-      (useDefaultTarget ? hasDefaultTarget : Boolean(teamId && channelId)));
+  const selectedTeam = teams.find((team) => team.id === teamId);
+  const selectedChannel = channels.find((channel) => channel.id === channelId);
+  const desiredDelivery: AgentTeamsDelivery | null | undefined = !enabled
+    ? null
+    : useDefaultTarget
+      ? hasDefaultTarget
+        ? {
+            enabled: true,
+            useDefaultTarget: true,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+          }
+        : undefined
+      : teamId && channelId
+        ? {
+            enabled: true,
+            useDefaultTarget: false,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+            teamId,
+            channelId,
+            ...(selectedTeam ? { teamName: selectedTeam.displayName } : {}),
+            ...(selectedChannel ? { channelName: selectedChannel.displayName } : {}),
+          }
+        : undefined;
+  const desiredDeliveryKey =
+    desiredDelivery === undefined ? undefined : stableDeliveryKey(desiredDelivery);
 
-  const save = async () => {
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    if (desiredDeliveryKey === undefined) return;
+    if (desiredDeliveryKey === lastSavedKey.current) return;
+
+    let cancelled = false;
+    const nextDelivery = parseDeliveryKey<AgentTeamsDelivery>(desiredDeliveryKey);
     setSaving(true);
     setError(null);
-    try {
-      if (!enabled) {
-        await onChange(null);
-        return;
-      }
-      const selectedTeam = teams.find((team) => team.id === teamId);
-      const selectedChannel = channels.find((channel) => channel.id === channelId);
-      await onChange({
-        enabled: true,
-        useDefaultTarget,
-        includeManualRuns,
-        includeScheduledRuns,
-        notifyOnSuccess,
-        notifyOnFailure,
-        notifyOnChangeOnly,
-        ...(!useDefaultTarget
-          ? {
-              teamId,
-              channelId,
-              ...(selectedTeam ? { teamName: selectedTeam.displayName } : {}),
-              ...(selectedChannel
-                ? { channelName: selectedChannel.displayName }
-                : {}),
-            }
-          : {}),
+    void onChangeRef
+      .current(nextDelivery)
+      .then(() => {
+        if (cancelled) return;
+        lastSavedKey.current = desiredDeliveryKey;
+        setSavedAt(new Date().toISOString());
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSaving(false);
       });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setSaving(false);
-    }
-  };
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desiredDeliveryKey]);
+
+  const deliveryStatus = !enabled
+    ? saving
+      ? "Disabling delivery…"
+      : savedAt
+        ? `Delivery disabled · saved ${formatRelative(savedAt)}`
+        : "Delivery off."
+    : desiredDeliveryKey === undefined
+      ? useDefaultTarget
+        ? "Choose a default channel or switch to a custom channel."
+        : "Choose a team and channel to save delivery."
+      : saving
+        ? "Saving delivery…"
+        : savedAt
+          ? `Saved ${formatRelative(savedAt)}`
+          : "Delivery saved.";
 
   return (
     <Card>
@@ -899,7 +1051,10 @@ function AgentTeamsDeliveryCard({
           <ToggleRow
             label="Send to Teams"
             checked={enabled}
-            onChange={setEnabled}
+            onChange={(checked) => {
+              setEnabled(checked);
+              if (checked && !hasDefaultTarget) setUseDefaultTarget(false);
+            }}
             disabled={!connected}
           />
 
@@ -1001,21 +1156,606 @@ function AgentTeamsDeliveryCard({
             {error}
           </div>
         )}
-        <div className="mt-4 flex justify-end">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!canSave}
-            onClick={() => {
-              void save();
-            }}
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-border-soft)] pt-3">
+          <span
+            role="status"
+            aria-live="polite"
+            className="text-[11px] text-[var(--color-text-muted)]"
           >
-            {saving ? "Saving…" : "Save delivery"}
-          </Button>
+            {deliveryStatus}
+          </span>
         </div>
       </div>
     </Card>
   );
+}
+
+function AgentWhatsAppWebDeliveryCard({
+  delivery,
+  onChange,
+  onOpenConnectors,
+}: {
+  delivery: AgentWhatsAppWebDelivery | undefined;
+  onChange: (delivery: AgentWhatsAppWebDelivery | null) => Promise<void>;
+  onOpenConnectors: () => void;
+}) {
+  const [summary, setSummary] = useState<ConnectorSummary | null>(null);
+  const [groups, setGroups] = useState<WhatsAppWebGroupRef[]>([]);
+  const [statusState, setStatusState] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  const lastSavedKey = useRef(stableDeliveryKey(delivery ?? null));
+  const [enabled, setEnabled] = useState(delivery?.enabled === true);
+  const [useDefaultRecipient, setUseDefaultRecipient] = useState(
+    delivery?.useDefaultRecipient !== false,
+  );
+  const [recipientType, setRecipientType] = useState<WhatsAppWebRecipientType>(
+    inferWhatsAppRecipientType(delivery?.recipientType, delivery?.recipient),
+  );
+  const [recipient, setRecipient] = useState(delivery?.recipient ?? "");
+  const [recipientLabel, setRecipientLabel] = useState(
+    delivery?.recipientLabel ?? "WhatsApp recipient",
+  );
+  const [dropActive, setDropActive] = useState(false);
+  const [includeManualRuns, setIncludeManualRuns] = useState(
+    delivery?.includeManualRuns ?? true,
+  );
+  const [includeScheduledRuns, setIncludeScheduledRuns] = useState(
+    delivery?.includeScheduledRuns ?? true,
+  );
+  const [notifyOnSuccess, setNotifyOnSuccess] = useState(
+    delivery?.notifyOnSuccess ?? true,
+  );
+  const [notifyOnFailure, setNotifyOnFailure] = useState(
+    delivery?.notifyOnFailure ?? false,
+  );
+  const [notifyOnChangeOnly, setNotifyOnChangeOnly] = useState(
+    delivery?.notifyOnChangeOnly ?? false,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      window.openAdminOS?.listConnectors(),
+      window.openAdminOS?.getWhatsAppWebStatus(),
+    ])
+      .then(([connectors, status]) => {
+        if (cancelled) return;
+        setSummary(
+          connectors?.find((connector) => connector.descriptor.id === "whatsapp-web") ??
+            null,
+        );
+        setStatusState(status?.state ?? null);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      useDefaultRecipient ||
+      !enabled ||
+      recipientType !== "group" ||
+      statusState !== "connected" ||
+      groups.length > 0
+    ) {
+      return;
+    }
+    let cancelled = false;
+    setLoadingGroups(true);
+    setError(null);
+    window.openAdminOS
+      ?.listWhatsAppWebGroups()
+      .then((list) => {
+        if (!cancelled) setGroups(list);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGroups(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    groups.length,
+    recipientType,
+    statusState,
+    useDefaultRecipient,
+  ]);
+
+  const loadGroups = async () => {
+    setLoadingGroups(true);
+    setError(null);
+    try {
+      setGroups((await window.openAdminOS?.listWhatsAppWebGroups()) ?? []);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  const defaultTarget = summary
+    ? readWhatsAppTargetFromConnectorConfig(summary.config)
+    : null;
+  const connected = statusState === "connected";
+  const hasDefaultRecipient = Boolean(defaultTarget?.recipient);
+  const customTarget = buildAgentWhatsAppTarget(
+    recipientType,
+    recipient,
+    recipientLabel,
+    groups,
+  );
+  const desiredDelivery: AgentWhatsAppWebDelivery | null | undefined = !enabled
+    ? null
+    : useDefaultRecipient
+      ? hasDefaultRecipient
+        ? {
+            enabled: true,
+            useDefaultRecipient: true,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+          }
+        : undefined
+      : customTarget.recipient.trim().length > 0
+        ? {
+            enabled: true,
+            useDefaultRecipient: false,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+            recipientType: customTarget.type,
+            recipient: customTarget.recipient,
+            recipientLabel: customTarget.label,
+          }
+        : undefined;
+  const desiredDeliveryKey =
+    desiredDelivery === undefined ? undefined : stableDeliveryKey(desiredDelivery);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    if (desiredDeliveryKey === undefined) return;
+    if (desiredDeliveryKey === lastSavedKey.current) return;
+
+    let cancelled = false;
+    const nextDelivery =
+      parseDeliveryKey<AgentWhatsAppWebDelivery>(desiredDeliveryKey);
+    setSaving(true);
+    setError(null);
+    void onChangeRef
+      .current(nextDelivery)
+      .then(() => {
+        if (cancelled) return;
+        lastSavedKey.current = desiredDeliveryKey;
+        setSavedAt(new Date().toISOString());
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSaving(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desiredDeliveryKey]);
+
+  const deliveryStatus = !enabled
+    ? saving
+      ? "Disabling delivery…"
+      : savedAt
+        ? `Delivery disabled · saved ${formatRelative(savedAt)}`
+        : connected
+          ? "Delivery off."
+          : "Not linked."
+    : desiredDeliveryKey === undefined
+      ? useDefaultRecipient
+        ? "Choose a default target or switch to a custom target."
+        : "Choose a WhatsApp target to save delivery."
+      : saving
+        ? "Saving delivery…"
+        : savedAt
+          ? `Saved ${formatRelative(savedAt)}`
+          : "Delivery saved.";
+
+  return (
+    <Card>
+      <div className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <SectionLabel>Delivery</SectionLabel>
+          <Pill tone={enabled ? "success" : "default"}>
+            {enabled ? "WhatsApp on" : "Manual only"}
+          </Pill>
+        </div>
+        <div className="mt-3 flex items-start gap-3 rounded-md bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+          <IconConnectors
+            size={18}
+            className={enabled ? "text-[var(--color-success)]" : "text-[var(--color-text-soft)]"}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-[var(--color-text)]">
+              WhatsApp Web
+            </div>
+            <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              Send terminal run reports through the linked local WhatsApp
+              session. Saved delivery rules post without another prompt.
+            </div>
+          </div>
+        </div>
+
+        {!connected && (
+          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+            Link WhatsApp Web before enabling delivery.
+            <button
+              type="button"
+              className="ml-1 font-medium underline"
+              onClick={onOpenConnectors}
+            >
+              Open Connectors
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4 space-y-3">
+          <ToggleRow
+            label="Send to WhatsApp"
+            checked={enabled}
+            onChange={setEnabled}
+            disabled={!connected}
+          />
+
+          {enabled && (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <ChoiceButton
+                  active={useDefaultRecipient}
+                  label="Default target"
+                  detail={defaultTarget?.label ?? "Connector default"}
+                  onClick={() => setUseDefaultRecipient(true)}
+                />
+                <ChoiceButton
+                  active={!useDefaultRecipient}
+                  label="Custom target"
+                  detail="Per-agent target"
+                  onClick={() => setUseDefaultRecipient(false)}
+                />
+              </div>
+
+              {!useDefaultRecipient && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <ChoiceButton
+                      active={recipientType === "self"}
+                      label="Me"
+                      detail="Linked account"
+                      onClick={() => {
+                        setRecipientType("self");
+                        setRecipient("self");
+                        setRecipientLabel("My WhatsApp");
+                      }}
+                    />
+                    <ChoiceButton
+                      active={recipientType === "group"}
+                      label="Group"
+                      detail="Pick locally"
+                      onClick={() => {
+                        const currentRecipient = recipient.trim();
+                        setRecipientType("group");
+                        setRecipient(
+                          currentRecipient.endsWith("@g.us") ? currentRecipient : "",
+                        );
+                        setRecipientLabel(
+                          currentRecipient.endsWith("@g.us")
+                            ? recipientLabel || "WhatsApp group"
+                            : "WhatsApp group",
+                        );
+                      }}
+                    />
+                    <ChoiceButton
+                      active={recipientType === "manual"}
+                      label="Number/JID"
+                      detail="Paste or drop"
+                      onClick={() => {
+                        const currentRecipient = recipient.trim();
+                        setRecipientType("manual");
+                        setRecipient(
+                          recipientType === "manual" &&
+                            currentRecipient !== "self" &&
+                            !currentRecipient.endsWith("@g.us")
+                            ? currentRecipient
+                            : "",
+                        );
+                        setRecipientLabel("WhatsApp recipient");
+                      }}
+                    />
+                  </div>
+
+                  {recipientType === "self" && (
+                    <div className="rounded-md bg-[var(--color-success-soft)]/15 px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-success-soft)]">
+                      Sends to the linked WhatsApp account. The account number is
+                      resolved locally when the run report is sent.
+                    </div>
+                  )}
+
+                  {recipientType === "group" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11.5px] text-[var(--color-text-soft)]">
+                          WhatsApp group
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void loadGroups();
+                          }}
+                          disabled={!connected || loadingGroups}
+                          className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-text-soft)] hover:bg-[var(--color-bg-raised)] disabled:opacity-50"
+                        >
+                          {loadingGroups ? "Loading…" : "Refresh groups"}
+                        </button>
+                      </div>
+                      <select
+                        value={recipient}
+                        disabled={!connected || loadingGroups}
+                        onChange={(event) => {
+                          const group = groups.find(
+                            (entry) => entry.id === event.target.value,
+                          );
+                          setRecipient(event.target.value);
+                          setRecipientLabel(group?.subject ?? "WhatsApp group");
+                        }}
+                        className="w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-[12px] text-[var(--color-text)] disabled:opacity-60"
+                      >
+                        <option value="">
+                          {!connected
+                            ? "Link WhatsApp Web first"
+                            : loadingGroups
+                              ? "Loading groups…"
+                              : "Select group"}
+                        </option>
+                        {recipient &&
+                          !groups.some((group) => group.id === recipient) && (
+                            <option value={recipient}>
+                              {recipientLabel || "Saved group"}
+                            </option>
+                          )}
+                        {groups.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.subject}
+                            {group.participantCount !== undefined
+                              ? ` (${group.participantCount})`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {recipientType === "manual" && (
+                    <div
+                      className={`rounded-md border border-dashed px-3 py-2 transition-colors ${
+                        dropActive
+                          ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]/25"
+                          : "border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/40"
+                      }`}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDropActive(true);
+                      }}
+                      onDragLeave={() => setDropActive(false)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        setDropActive(false);
+                        const parsed = extractWhatsAppRecipientInput(
+                          event.dataTransfer.getData("text"),
+                        );
+                        if (!parsed) return;
+                        setRecipient(parsed);
+                        setRecipientLabel("WhatsApp recipient");
+                      }}
+                    >
+                      <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
+                        <span>Number, wa.me link, or raw JID</span>
+                        <input
+                          value={recipient}
+                          onChange={(event) => {
+                            setRecipient(event.target.value);
+                            setRecipientLabel("WhatsApp recipient");
+                          }}
+                          placeholder="+15551234567"
+                          inputMode="tel"
+                          className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-[12px] text-[var(--color-text)]"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="grid gap-2">
+                <ToggleRow
+                  label="Manual runs"
+                  checked={includeManualRuns}
+                  onChange={setIncludeManualRuns}
+                />
+                <ToggleRow
+                  label="Scheduled runs"
+                  checked={includeScheduledRuns}
+                  onChange={setIncludeScheduledRuns}
+                />
+                <ToggleRow
+                  label="Completed runs"
+                  checked={notifyOnSuccess}
+                  onChange={setNotifyOnSuccess}
+                />
+                <ToggleRow
+                  label="Failed runs"
+                  checked={notifyOnFailure}
+                  onChange={setNotifyOnFailure}
+                />
+                <ToggleRow
+                  label="Only when scheduled findings changed"
+                  checked={notifyOnChangeOnly}
+                  onChange={setNotifyOnChangeOnly}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        {enabled && useDefaultRecipient && !hasDefaultRecipient && (
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+            Set a default WhatsApp target on the Connectors page, or choose a
+            custom target for this agent.
+          </div>
+        )}
+        {error && (
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+            {error}
+          </div>
+        )}
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <span
+            role="status"
+            aria-live="polite"
+            className="text-[11px] text-[var(--color-text-muted)]"
+          >
+            {loading ? "Checking WhatsApp Web…" : deliveryStatus}
+          </span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function readWhatsAppTargetFromConnectorConfig(
+  config: Record<string, unknown>,
+): {
+  type: WhatsAppWebRecipientType;
+  recipient: string;
+  label: string;
+} {
+  const type = inferWhatsAppRecipientType(
+    typeof config.defaultRecipientType === "string"
+      ? config.defaultRecipientType
+      : undefined,
+    typeof config.defaultRecipient === "string"
+      ? config.defaultRecipient
+      : undefined,
+  );
+  const recipient =
+    typeof config.defaultRecipient === "string"
+      ? config.defaultRecipient.trim()
+      : "";
+  const label =
+    typeof config.defaultRecipientLabel === "string" &&
+    config.defaultRecipientLabel.trim()
+      ? config.defaultRecipientLabel.trim()
+      : undefined;
+
+  if (type === "self" || recipient === "self" || !recipient) {
+    return { type: "self", recipient: "self", label: label ?? "My WhatsApp" };
+  }
+  if (type === "group") {
+    return { type, recipient, label: label ?? "WhatsApp group" };
+  }
+  return { type, recipient, label: label ?? "WhatsApp recipient" };
+}
+
+function buildAgentWhatsAppTarget(
+  type: WhatsAppWebRecipientType,
+  recipient: string,
+  label: string,
+  groups: WhatsAppWebGroupRef[],
+): {
+  type: WhatsAppWebRecipientType;
+  recipient: string;
+  label: string;
+} {
+  if (type === "self") {
+    return { type, recipient: "self", label: "My WhatsApp" };
+  }
+  const value = recipient.trim();
+  if (type === "group") {
+    const group = groups.find((entry) => entry.id === value);
+    const fallbackLabel = label.trim() || "WhatsApp group";
+    return {
+      type,
+      recipient: value,
+      label: group?.subject ?? fallbackLabel,
+    };
+  }
+  return {
+    type,
+    recipient: value,
+    label: "WhatsApp recipient",
+  };
+}
+
+function stableDeliveryKey(delivery: unknown): string {
+  return JSON.stringify(sortSerializable(delivery ?? null));
+}
+
+function parseDeliveryKey<T>(key: string): T | null {
+  return JSON.parse(key) as T | null;
+}
+
+function sortSerializable(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortSerializable);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => [
+        key,
+        sortSerializable((value as Record<string, unknown>)[key]),
+      ]),
+  );
+}
+
+function inferWhatsAppRecipientType(
+  type: unknown,
+  recipient: string | undefined,
+): WhatsAppWebRecipientType {
+  if (type === "self" || type === "group" || type === "manual") return type;
+  if (!recipient || recipient === "self") return "self";
+  if (recipient.endsWith("@g.us")) return "group";
+  return "manual";
 }
 
 function ToggleRow({
@@ -1078,6 +1818,7 @@ function RunPreflightModal({
   providerIsLocal,
   requestedScopes,
   model,
+  deliverySaving,
   onClose,
   onConfirm,
 }: {
@@ -1088,12 +1829,13 @@ function RunPreflightModal({
   providerIsLocal: boolean;
   requestedScopes: RequestedScope[];
   model: string | undefined;
+  deliverySaving: boolean;
   onClose: () => void;
   onConfirm: () => void;
 }) {
   const requestedScopeNames = new Set(requestedScopes.map((scope) => scope.name));
   const mayNeedConsent = agent.scopes.some((scope) => !requestedScopeNames.has(scope));
-  const canStart = Boolean(activeTenantName);
+  const canStart = Boolean(activeTenantName) && !deliverySaving;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -1118,6 +1860,11 @@ function RunPreflightModal({
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             This agent declares scopes that may require Microsoft incremental
             consent the first time it runs for this tenant.
+          </div>
+        )}
+        {deliverySaving && (
+          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            Saving connector delivery changes before the run starts.
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2">
@@ -1164,7 +1911,7 @@ function RunPreflightModal({
             Cancel
           </Button>
           <Button variant="primary" disabled={!canStart} onClick={onConfirm}>
-            Start run
+            {deliverySaving ? "Saving delivery…" : "Start run"}
           </Button>
         </div>
       </div>
@@ -1215,30 +1962,23 @@ function ModelCardBody({
   activeModelByProviderId,
 }: {
   agent: { preferredModel?: string };
-  providers: { id: ProviderId; name: string; isLocal: boolean; models?: string[]; defaultModel?: string }[];
+  providers: ProviderSummary[];
   activeProviderId: ProviderId;
   activeModelByProviderId?: Partial<Record<ProviderId, string>>;
 }) {
   const provider = providers.find((p) => p.id === activeProviderId);
   const installed = provider?.models ?? [];
-  const userPinned = activeModelByProviderId?.[activeProviderId];
   const preferred = agent.preferredModel;
-
-  let resolved: string | undefined;
-  let source: string;
-  if (preferred && installed.includes(preferred)) {
-    resolved = preferred;
-    source = `Agent prefers this model (manifest)`;
-  } else if (userPinned && installed.includes(userPinned)) {
-    resolved = userPinned;
-    source = `Your default for ${provider?.name ?? activeProviderId}`;
-  } else if (provider?.defaultModel) {
-    resolved = provider.defaultModel;
-    source = `Provider default · ${provider.name}`;
-  } else {
-    resolved = undefined;
-    source = "No model installed for the active provider";
-  }
+  const resolvedModel = resolveRunModel({
+    provider,
+    activeModelByProviderId,
+    preferredModel: preferred,
+  });
+  const resolved = resolvedModel.model;
+  const source = modelSourceLabel(
+    resolvedModel.source,
+    provider?.name ?? activeProviderId,
+  );
 
   const preferredButMissing =
     preferred && !installed.includes(preferred) && installed.length > 0;
@@ -1273,6 +2013,17 @@ function ModelCardBody({
       </div>
     </>
   );
+}
+
+function modelSourceLabel(
+  source: ReturnType<typeof resolveRunModel>["source"],
+  providerName: string,
+): string {
+  if (source === "agent-preferred") return "Agent prefers this model (manifest)";
+  if (source === "user-default") return `Your default for ${providerName}`;
+  if (source === "provider-default") return `Provider default · ${providerName}`;
+  if (source === "explicit") return "Selected for this run";
+  return "No model installed for the active provider";
 }
 
 function FallbackScopesCard({ scopes }: { scopes: string[] }) {
@@ -1310,6 +2061,19 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatRelative(iso: string): string {
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return iso;
+  const diff = Date.now() - then;
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function formatDuration(run: RunRecord) {

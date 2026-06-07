@@ -1,5 +1,6 @@
 export type ProviderId =
   | "ollama"
+  | "apple-foundation"
   | "lm-studio"
   | "anthropic"
   | "openai"
@@ -214,6 +215,7 @@ export interface AgentSchedule {
 
 export interface AgentDeliverySettings {
   teams?: AgentTeamsDelivery;
+  whatsappWeb?: AgentWhatsAppWebDelivery;
 }
 
 export interface AgentTeamsDelivery {
@@ -232,6 +234,55 @@ export interface AgentTeamsDelivery {
   notifyOnSuccess?: boolean;
   notifyOnFailure?: boolean;
   notifyOnChangeOnly?: boolean;
+}
+
+export interface AgentWhatsAppWebDelivery {
+  enabled: boolean;
+  /**
+   * When true, the connector's global default target is used. When
+   * false, `recipient` identifies this agent's notification target.
+   */
+  useDefaultRecipient?: boolean;
+  recipientType?: WhatsAppWebRecipientType;
+  recipient?: string;
+  recipientLabel?: string;
+  includeManualRuns?: boolean;
+  includeScheduledRuns?: boolean;
+  notifyOnSuccess?: boolean;
+  notifyOnFailure?: boolean;
+  notifyOnChangeOnly?: boolean;
+}
+
+export type WhatsAppWebConnectionState =
+  | "not-linked"
+  | "connecting"
+  | "qr"
+  | "connected"
+  | "reconnecting"
+  | "logged-out"
+  | "error";
+
+export interface WhatsAppWebStatus {
+  state: WhatsAppWebConnectionState;
+  message: string;
+  qrDataUrl?: string;
+  qrIssuedAt?: string;
+  qrRefreshesAt?: string;
+  lastConnectedAt?: string;
+  lastError?: string;
+}
+
+export interface WhatsAppWebSendResult {
+  messageId: string;
+}
+
+export type WhatsAppWebRecipientType = "self" | "group" | "manual";
+
+export interface WhatsAppWebGroupRef {
+  id: string;
+  subject: string;
+  participantCount?: number;
+  announce?: boolean;
 }
 
 export interface RegistryAgentSummary extends AgentContract {
@@ -287,6 +338,16 @@ export interface StartRunOptions {
    * the app window is open.
    */
   trigger?: "manual" | "schedule";
+  /**
+   * Optional source metadata for runs started from another product surface.
+   * The runtime still treats these as normal manual runs; this only lets the
+   * host keep a local audit link back to the originating chat.
+   */
+  source?: {
+    type: "intune-chat";
+    conversationId: string;
+    messageId?: string;
+  };
 }
 
 /**
@@ -350,6 +411,7 @@ export type RunStepStatus =
   | "running"
   | "completed"
   | "failed"
+  | "skipped"
   | "cancelled";
 
 export interface RunStepThinking {
@@ -422,6 +484,18 @@ export interface TrustState {
   tenantDisplayName?: string;
 }
 
+export type ProviderModelSource =
+  | "explicit"
+  | "agent-preferred"
+  | "user-default"
+  | "provider-default"
+  | "unavailable";
+
+export interface ResolvedProviderModel {
+  model?: string;
+  source: ProviderModelSource;
+}
+
 export interface AppState {
   appVersion: string;
   activeProviderId: ProviderId;
@@ -447,6 +521,307 @@ export interface AppState {
   /** Whether packaged builds report aggregate public registry install counts. */
   registryInstallCountsEnabled: boolean;
   schedulerStatus?: SchedulerStatus;
+}
+
+export type IntuneChatMessageRole = "user" | "assistant" | "tool";
+export type IntuneChatMessageStatus =
+  | "streaming"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface IntuneChatConversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  tenantId?: string;
+  pinnedAt?: string;
+}
+
+export interface IntuneChatSource {
+  resource: GraphCacheResourceKind;
+  label: string;
+  rows: number;
+  pages?: number;
+  pageLimitReached?: boolean;
+  refreshedAt?: string;
+  source: "cache" | "live";
+  path?: string;
+  select?: string[];
+  query?: Record<string, string>;
+  error?: string;
+}
+
+export interface IntuneChatAgentSuggestion {
+  agentSlug: string;
+  agentName: string;
+  reason: string;
+  /** Prompt terms that matched this installed agent's name, slug, description, or category. */
+  matchedTerms?: string[];
+  /** Human-readable routing evidence, such as write intent or category alignment. */
+  matchedConcepts?: string[];
+  /** Planned Graph cache resources that made this agent relevant to the prompt. */
+  matchedResources?: GraphCacheResourceKind[];
+  confidence: number;
+  mode: AgentMode;
+  scopes: string[];
+}
+
+export interface IntuneChatMessage {
+  id: string;
+  conversationId: string;
+  role: IntuneChatMessageRole;
+  content: string;
+  createdAt: string;
+  status: IntuneChatMessageStatus;
+  providerId?: ProviderId;
+  model?: string;
+  sources?: IntuneChatSource[];
+  agentSuggestions?: IntuneChatAgentSuggestion[];
+  error?: string;
+}
+
+export interface IntuneChatToolCall {
+  id: string;
+  conversationId: string;
+  messageId?: string;
+  type: "graph-cache-refresh" | "agent-suggestion" | "agent-run" | "self-training-suggestion";
+  status: "pending" | "completed" | "failed";
+  createdAt: string;
+  completedAt?: string;
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+}
+
+export type GraphCacheResourceKind =
+  | "managedDevices"
+  | "entraDevices"
+  | "users"
+  | "groups"
+  | "deviceCompliancePolicies"
+  | "deviceConfigurations"
+  | "configurationPolicies"
+  | "signIns"
+  | "directoryAudits"
+  | "conditionalAccessPolicies"
+  | "mobileApps"
+  | "detectedApps"
+  | "managedAppPolicies"
+  | "iosManagedAppProtections"
+  | "androidManagedAppProtections"
+  | "mobileAppConfigurations"
+  | "deviceHealthScripts"
+  | "deviceManagementScripts"
+  | "windowsAutopilotDevices"
+  | "autopilotEvents"
+  | "windowsAutopilotProfiles"
+  | "deviceEnrollmentConfigurations"
+  | "windowsQualityUpdateProfiles"
+  | "windowsFeatureUpdateProfiles"
+  | "endpointSecurityIntents"
+  | "groupPolicyConfigurations"
+  | "assignmentFilters"
+  | "roleScopeTags"
+  | "managedDeviceOverview"
+  | "managedDeviceEncryptionStates"
+  | "troubleshootingEvents";
+
+export interface GraphCacheResourceStatus {
+  resource: GraphCacheResourceKind;
+  label: string;
+  rows: number;
+  pages?: number;
+  pageLimitReached?: boolean;
+  refreshedAt?: string;
+  scopeSet: string[];
+  lastError?: string;
+}
+
+export interface GraphCacheStatus {
+  tenantId?: string;
+  resources: GraphCacheResourceStatus[];
+  schedule?: GraphCacheRefreshScheduleSettings;
+}
+
+export interface RefreshGraphCacheOptions {
+  resources?: GraphCacheResourceKind[];
+  tenantId?: string;
+}
+
+export interface GraphCacheRefreshResourceResult {
+  resource: GraphCacheResourceKind;
+  label: string;
+  rows: number;
+  pages?: number;
+  pageLimitReached?: boolean;
+  refreshedAt?: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface GraphCacheRefreshResult {
+  tenantId: string;
+  startedAt: string;
+  finishedAt: string;
+  resources: GraphCacheRefreshResourceResult[];
+}
+
+export interface GraphCacheRefreshScheduleSettings {
+  enabled: boolean;
+  intervalMinutes: number;
+  updatedAt?: string;
+  lastRunAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  nextRunAt?: string;
+}
+
+export interface SetGraphCacheRefreshScheduleInput {
+  tenantId?: string;
+  enabled: boolean;
+  intervalMinutes?: number;
+}
+
+export interface LocalDataSummary {
+  sqliteBytes: number;
+  chatConversationCount: number;
+  chatMessageCount: number;
+  chatToolCallCount: number;
+  graphRowCount: number;
+  graphCacheStatusCount: number;
+  learningEventCount: number;
+  selfTrainingSuggestionCount: number;
+  activeTenantId?: string;
+  activeTenantGraphRowCount?: number;
+  activeTenantCacheResources?: GraphCacheResourceStatus[];
+}
+
+export interface HostedProviderChatConsent {
+  tenantId: string;
+  providerId: ProviderId;
+  acknowledgedAt: string;
+  remember?: boolean;
+}
+
+export interface SendIntuneChatMessageInput {
+  conversationId?: string;
+  content: string;
+  /**
+   * When true, the host refreshes missing/stale resources selected by
+   * the context planner before building the answer pack. Default true.
+   */
+  refreshIfStale?: boolean;
+  /**
+   * Required by the host when the active provider is hosted. The renderer
+   * sends a fresh acknowledgement after the user confirms or after a
+   * remembered local decision is applied for the active tenant/provider pair.
+   */
+  hostedProviderConsent?: HostedProviderChatConsent;
+}
+
+export interface SendIntuneChatMessageResult {
+  conversation: IntuneChatConversation;
+  userMessage: IntuneChatMessage;
+  assistantMessage: IntuneChatMessage;
+  cacheStatus: GraphCacheStatus;
+}
+
+export type IntuneChatProgressStepStatus =
+  | "pending"
+  | "active"
+  | "completed"
+  | "failed";
+
+export type IntuneChatStreamStage =
+  | "checking-cache"
+  | "refreshing-cache"
+  | "building-context"
+  | "generating-answer"
+  | "completed"
+  | "failed";
+
+export interface IntuneChatProgressStep {
+  id: string;
+  label: string;
+  status: IntuneChatProgressStepStatus;
+  detail?: string;
+}
+
+export type IntuneChatStreamEvent =
+  | {
+      type: "started";
+      conversation: IntuneChatConversation;
+      userMessage: IntuneChatMessage;
+      assistantMessage: IntuneChatMessage;
+      cacheStatus: GraphCacheStatus;
+    }
+  | {
+      type: "status";
+      conversationId: string;
+      message: string;
+      stage?: IntuneChatStreamStage;
+      progressPercent?: number;
+      progressSteps?: IntuneChatProgressStep[];
+      cacheStatus?: GraphCacheStatus;
+    }
+  | {
+      type: "delta";
+      conversationId: string;
+      assistantMessageId: string;
+      delta: string;
+      content: string;
+      providerId?: ProviderId;
+      model?: string;
+    }
+  | {
+      type: "completed";
+      result: SendIntuneChatMessageResult;
+    }
+  | {
+      type: "failed";
+      result: SendIntuneChatMessageResult;
+      error: string;
+    }
+  | {
+      type: "cancelled";
+      result: SendIntuneChatMessageResult;
+    };
+
+export interface SelfTrainingSettings {
+  enabled: boolean;
+  updatedAt?: string;
+}
+
+export type SelfTrainingSuggestionStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "reset";
+
+export interface SelfTrainingSuggestion {
+  id: string;
+  tenantId: string;
+  agentSlug: string;
+  status: SelfTrainingSuggestionStatus;
+  text: string;
+  reason: string;
+  source: "chat" | "run" | "settings";
+  createdAt: string;
+  decidedAt?: string;
+}
+
+export interface SelfTrainingInstruction {
+  id: string;
+  text: string;
+  source: SelfTrainingSuggestion["source"];
+  createdAt: string;
+}
+
+export interface ResetSelfTrainingInput {
+  tenantId?: string;
+  agentSlug: string;
 }
 
 /** The host OS, normalized for renderer use. */
@@ -486,6 +861,40 @@ export interface ReleaseDiagnostics {
   scheduler: SchedulerLaunchSettings;
 }
 
+export type SupportIssueSource =
+  | "sidebar"
+  | "run-failure"
+  | "settings-about"
+  | "native-menu";
+
+export interface SupportBundleInput {
+  title: string;
+  description: string;
+  stepsToReproduce?: string;
+  expectedBehavior?: string;
+  actualBehavior?: string;
+  source?: SupportIssueSource;
+  runId?: string;
+  agentSlug?: string;
+}
+
+export interface SupportBundleExportResult {
+  canceled: boolean;
+  filePath?: string;
+}
+
+export interface SupportIssueSubmissionInput extends SupportBundleInput {
+  /** Explicit acknowledgement that this creates a public GitHub issue. */
+  confirmPublic: true;
+  /** Include the sanitized diagnostics summary in the public issue body. */
+  includeDiagnostics: boolean;
+}
+
+export interface SupportIssueSubmissionResult {
+  issueUrl: string;
+  issueNumber: number;
+}
+
 export interface OpenAdminOSApi {
   /**
    * The host operating system, normalized to a small union for
@@ -496,22 +905,71 @@ export interface OpenAdminOSApi {
   getAppState(): Promise<AppState>;
   getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
+  /**
+   * Export a reviewed, sanitized diagnostics JSON file for manual
+   * attachment to a GitHub issue. This never uploads anything.
+   */
+  exportSupportBundle(input: SupportBundleInput): Promise<SupportBundleExportResult>;
+  /**
+   * Create a public GitHub support issue through the OpenAdminOS web
+   * endpoint. GitHub credentials stay server-side.
+   */
+  submitSupportIssue(input: SupportIssueSubmissionInput): Promise<SupportIssueSubmissionResult>;
+  writeClipboardText(text: string): Promise<void>;
   setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;
   refreshRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   /**
    * Persist a new registry source URL and trigger an immediate refresh
-   * against it. Returns the same shape as `refreshRegistry()` so the
-   * renderer can react to fetch failures (e.g. typo'd URL).
+   * against it. Custom sources require a trust-review confirmation
+   * before the host persists them. Returns the same shape as
+   * `refreshRegistry()` so the renderer can react to fetch failures
+   * (e.g. typo'd URL).
    */
   setRegistrySource(
     url: string,
+    options?: { confirmExternalSource?: boolean },
   ): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   setRegistryInstallCountsEnabled(enabled: boolean): Promise<AppState>;
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
+  listIntuneChatConversations(): Promise<IntuneChatConversation[]>;
+  searchIntuneChatConversations(query: string): Promise<IntuneChatConversation[]>;
+  renameIntuneChatConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<IntuneChatConversation>;
+  setIntuneChatConversationPinned(
+    conversationId: string,
+    pinned: boolean,
+  ): Promise<IntuneChatConversation>;
+  deleteIntuneChatConversation(conversationId: string): Promise<void>;
+  getIntuneChatMessages(conversationId: string): Promise<IntuneChatMessage[]>;
+  sendIntuneChatMessage(
+    input: SendIntuneChatMessageInput,
+  ): Promise<SendIntuneChatMessageResult>;
+  streamIntuneChatMessage(
+    input: SendIntuneChatMessageInput,
+    onEvent: (event: IntuneChatStreamEvent) => void,
+  ): Promise<SendIntuneChatMessageResult>;
+  cancelIntuneChatStream(): Promise<void>;
+  refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;
+  getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus>;
+  getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
+  setGraphCacheRefreshSchedule(
+    input: SetGraphCacheRefreshScheduleInput,
+  ): Promise<GraphCacheRefreshScheduleSettings>;
+  getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary>;
+  clearIntuneChatHistory(): Promise<LocalDataSummary>;
+  clearGraphCache(tenantId?: string): Promise<LocalDataSummary>;
+  getSelfTrainingSettings(): Promise<SelfTrainingSettings>;
+  setSelfTrainingEnabled(enabled: boolean): Promise<SelfTrainingSettings>;
+  listSelfTrainingSuggestions(status?: SelfTrainingSuggestionStatus): Promise<SelfTrainingSuggestion[]>;
+  approveSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion>;
+  rejectSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion>;
+  resetSelfTrainingSuggestions(input: ResetSelfTrainingInput): Promise<SelfTrainingSuggestion[]>;
   /**
    * Returns every connector registered in the host, with its
    * persisted config and last health-check outcome.
@@ -549,6 +1007,35 @@ export interface OpenAdminOSApi {
     teamId: string,
   ): Promise<ConnectorChannelRef[]>;
   /**
+   * Reads the local WhatsApp Web session state without starting a new
+   * login. Used by the Connectors page to render linked / QR / error
+   * states without background side effects.
+   */
+  getWhatsAppWebStatus(): Promise<WhatsAppWebStatus>;
+  /**
+   * Starts or resumes the local WhatsApp Web linking flow and returns
+   * the current state. When a QR code is available, `qrDataUrl` is a
+   * renderer-safe PNG data URL.
+   */
+  startWhatsAppWebLogin(): Promise<WhatsAppWebStatus>;
+  /**
+   * Logs this device out of WhatsApp Web and removes the local Baileys
+   * auth state stored under Electron userData.
+   */
+  disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus>;
+  /**
+   * Lists WhatsApp groups the linked account participates in. This is
+   * local WhatsApp metadata from the paired session and is used only
+   * for target selection.
+   */
+  listWhatsAppWebGroups(): Promise<WhatsAppWebGroupRef[]>;
+  /**
+   * Sends a plain text test notification through the linked WhatsApp
+   * Web session. The call resolves only when WhatsApp returns a
+   * message id.
+   */
+  sendWhatsAppWebTestMessage(to: string): Promise<WhatsAppWebSendResult>;
+  /**
    * Subscribe to confirmation requests fired by the runtime when a
    * `notify`/`mutating`/`destructive` connector capability is about
    * to execute. The renderer is expected to show a confirmation
@@ -566,6 +1053,15 @@ export interface OpenAdminOSApi {
    */
   onRegistryRefreshed(
     listener: (info: { trigger: "startup" | "interval" | "focus"; cachedAt: string | null }) => void,
+  ): () => void;
+  /**
+   * Subscribe to host-side state mutations that occur after a normal
+   * renderer action has already resolved, such as asynchronous
+   * connector delivery logs appended after a run reaches a terminal
+   * state.
+   */
+  onAppStateChanged?(
+    listener: (info: { reason: string; runId?: string }) => void,
   ): () => void;
   /**
    * Resolves the pending confirmation identified by `requestId` with
@@ -656,6 +1152,15 @@ export interface OpenAdminOSApi {
   updateAgentTeamsDelivery(
     slug: string,
     delivery: AgentTeamsDelivery | null,
+  ): Promise<AppState>;
+  /**
+   * Persist per-agent WhatsApp Web delivery. Pass null to remove the
+   * route. Delivery posts terminal run reports through the locally
+   * linked WhatsApp Web session.
+   */
+  updateAgentWhatsAppWebDelivery(
+    slug: string,
+    delivery: AgentWhatsAppWebDelivery | null,
   ): Promise<AppState>;
   /**
    * Generate a draft `manifest.yaml` from a natural-language description
@@ -1174,6 +1679,11 @@ export interface LlmOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Optional cancellation signal supplied by the host for user-initiated
+   * stops. Providers should abort network/process work promptly when set.
+   */
+  signal?: AbortSignal;
 }
 
 export interface LlmTokenUsage {
@@ -1332,6 +1842,16 @@ export const providerCatalog: readonly ProviderSummary[] = [
     models: [],
   },
   {
+    id: "apple-foundation",
+    name: "Apple Foundation",
+    description:
+      "Use Apple's on-device Foundation Models framework on compatible Macs.",
+    isLocal: true,
+    status: "available",
+    detail: "Waiting for Apple Intelligence availability check",
+    models: [],
+  },
+  {
     id: "lm-studio",
     name: "LM Studio",
     description:
@@ -1376,6 +1896,47 @@ export const providerCatalog: readonly ProviderSummary[] = [
 export interface DeriveTrustStateInput {
   provider: ProviderSummary | undefined;
   activeTenant?: TenantRecord | undefined;
+  model?: string | undefined;
+}
+
+export function resolveProviderDefaultModel(
+  provider: ProviderSummary | undefined,
+  activeModelByProviderId?: Partial<Record<ProviderId, string>> | undefined,
+): ResolvedProviderModel {
+  if (!provider) return { source: "unavailable" };
+  const reportedModels = provider.models ?? [];
+  const userPinned = activeModelByProviderId?.[provider.id];
+  if (userPinned && reportedModels.includes(userPinned)) {
+    return { model: userPinned, source: "user-default" };
+  }
+  const providerDefault = provider.defaultModel ?? reportedModels[0];
+  if (providerDefault) {
+    return { model: providerDefault, source: "provider-default" };
+  }
+  return { source: "unavailable" };
+}
+
+export function resolveRunModel(input: {
+  provider: ProviderSummary | undefined;
+  activeModelByProviderId?: Partial<Record<ProviderId, string>> | undefined;
+  preferredModel?: string | undefined;
+  explicitModel?: string | undefined;
+}): ResolvedProviderModel {
+  const reportedModels = input.provider?.models ?? [];
+  const explicitModel = input.explicitModel?.trim();
+  if (
+    explicitModel &&
+    (reportedModels.length === 0 || reportedModels.includes(explicitModel))
+  ) {
+    return { model: explicitModel, source: "explicit" };
+  }
+
+  const preferredModel = input.preferredModel?.trim();
+  if (preferredModel && reportedModels.includes(preferredModel)) {
+    return { model: preferredModel, source: "agent-preferred" };
+  }
+
+  return resolveProviderDefaultModel(input.provider, input.activeModelByProviderId);
 }
 
 export function deriveTrustState(
@@ -1392,10 +1953,15 @@ export function deriveTrustState(
   const activeTenant = isInputObject
     ? (providerOrInput as DeriveTrustStateInput).activeTenant
     : legacyTenant;
+  const model = isInputObject
+    ? (providerOrInput as DeriveTrustStateInput).model
+    : undefined;
 
   const tenantSegment = activeTenant
     ? `tenant ${activeTenant.displayName}`
     : "no tenant";
+  const modelSegment = model ? ` · ${model}` : "";
+  const modelDetail = model ? ` (${model})` : "";
 
   if (!provider) {
     const base: TrustState = {
@@ -1409,10 +1975,10 @@ export function deriveTrustState(
 
   if (provider.isLocal) {
     const detail = activeTenant
-      ? `Tenant data stays on this device. Prompts use ${provider.name} locally.`
-      : `Prompts use ${provider.name} locally.`;
+      ? `Tenant data stays on this device. Prompts use ${provider.name}${modelDetail} locally.`
+      : `Prompts use ${provider.name}${modelDetail} locally.`;
     const base: TrustState = {
-      label: `Local ${provider.name} · ${tenantSegment}`,
+      label: `Local ${provider.name}${modelSegment} · ${tenantSegment}`,
       detail,
       isLocal: true,
     };
@@ -1421,10 +1987,10 @@ export function deriveTrustState(
   }
 
   const detail = activeTenant
-    ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}.`
-    : `Prompts are sent to ${provider.name}.`;
+    ? `Tenant data is read from Microsoft Graph. Prompts are sent to ${provider.name}${modelDetail}.`
+    : `Prompts are sent to ${provider.name}${modelDetail}.`;
   const base: TrustState = {
-    label: `Hosted ${provider.name} · ${tenantSegment}`,
+    label: `Hosted ${provider.name}${modelSegment} · ${tenantSegment}`,
     detail,
     isLocal: false,
   };

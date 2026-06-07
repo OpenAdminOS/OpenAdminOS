@@ -1,3 +1,82 @@
+# v0.2.2 — Intune Chat + local intelligence foundation
+
+**Status: implemented and smoke-verified; live-tenant pilot run recommended before release.** Follow-up release after v0.2.1. The theme is making OpenAdminOS feel like an operating surface, not only an agent launcher: admins can ask natural-language questions against their own tenant, route repeatable work into installed agents as skills, and optionally approve local self-training suggestions that adapt those agents to their environment.
+
+## Product stance
+
+- **Intune Chat is a first-class surface.** It should sit beside Agents in the primary navigation and feel like the default place to investigate a tenant.
+- **Agents become skills.** Installed agents expose routing metadata so chat can suggest "This matches Offboarding agent" instead of trying to improvise a repeatable workflow.
+- **Natural language is broad, execution is constrained.** Chat can answer freely from tenant data, but no Graph write or connector side effect happens without the existing confirmation gates.
+- **Local-first remains literal.** With a local provider, Graph data, prompts, chat history, cache entries, and self-training suggestions stay on the device. Hosted providers must show honest trust messaging before tenant context is sent.
+- **Self-training is opt-in and approved.** Chat and agent runs can propose improvements, but OpenAdminOS only writes `self-training.yaml` after the admin approves the suggestion.
+
+## Priority 1 — Persistence and cache foundation
+
+- [x] **SQLite store introduction** — add a `node:sqlite` store in the Electron main process and create `openadminos.db` under `userData`. Keep existing `state.json` for current app state during the first pass; do not rewrite all persistence at once. `better-sqlite3` was tested and rejected for this pass because it failed to rebuild against Electron 42's Node/V8 ABI.
+- [x] **Schema migrations** — versioned migrations for chat conversations, chat messages, chat tool calls, Graph snapshots, Graph resource rows, learning events, and learning suggestions.
+- [x] **Graph cache service** — cache selected read-only Graph resources by tenant, resource kind, snapshot id, Graph id, raw JSON, normalized search columns, scope set, and `refreshedAt`.
+- [x] **Manual refresh controls** — Settings exposes "Refresh tenant data now" with active tenant, scopes, provider trust, last refresh, and failures; chat keeps only a compact refresh action and freshness indicator.
+- [x] **Periodic refresh controls** — Settings exposes a per-tenant scheduled refresh toggle with interval selection, next-run state, last failure, and OS scheduler integration.
+- [x] **Cache freshness model** — every answer carries "using data refreshed at ..." and stale data is disclosed rather than silently treated as current.
+
+## Priority 2 — Intune Chat surface
+
+- [x] **Chat route and layout** — add a primary navigation item for Intune Chat with a minimal two-pane layout: collapsible chat history on the left, conversation/composer in the center, and only compact tenant/provider/freshness indicators in the header.
+- [x] **Read-only chat service** — persist conversations/messages locally and generate answers through the active LLM provider.
+- [x] **Streaming chat responses** — stream LLM deltas from Electron main to the renderer through a scoped IPC event channel; persist only the final completed or failed assistant message.
+- [x] **Platform system prompt** — use an OpenAdminOS chat prompt that requires active tenant context, answers only from retrieved Graph/cache context, refuses unsupported writes, and discloses stale or missing data.
+- [x] **Intent router** — classify each prompt as answer-from-data, route-to-agent, clarify, blocked-write, or unsupported.
+- [x] **Graph context planner** — choose Graph/cache sources for the question. Coverage now includes device inventory, Entra devices, users, groups, compliance, configuration/settings catalog, apps, detected apps, MAM/app config, Autopilot/enrollment, remediations/scripts, Windows Update, endpoint security, assignment filters, scope tags, encryption, troubleshooting, sign-ins, directory audit, and Conditional Access policies.
+- [x] **MCP endpoint review** — validate chat cache Graph endpoints and compact audit-log `$select` lists against Microsoft Graph beta through the Microsoft MCP before treating the endpoint set as releasable.
+- [x] **Graph PM cache validation** — assert every Intune Chat cache endpoint, delegated permission, and selected field against the bundled Graph PM indexes; tenant connection now requests the read scopes needed by the full chat cache surface.
+- [x] **Answer-pack builder** — use deterministic SQL/Graph filtering, joins, counts, sorting, and top-N sampling before sending compact context to the LLM. Do not dump whole tenant inventories into model context.
+- [x] **Source/freshness rendering** — answers show which resources were used, when they were refreshed, and whether data came from cache or live Graph.
+- [x] **Chat interaction polish** — Enter sends messages, Shift+Enter inserts newlines, the composer has a single focused accent border, message bubbles expose copy prompt/response actions, and cache/model work renders as a progress checklist inside the active assistant response slot instead of a static loading pill.
+- [x] **150-question coverage bank** — keep `docs/research/intune-chat-question-bank.md` as the researched admin-demand fixture and assert every listed question maps to known cache resources.
+
+## Future UX follow-ups
+
+- [ ] **Tenant investigation workspaces** — adapt the useful parts of Claude-style Projects into tenant-scoped investigative workspaces with pinned Graph evidence, linked agent runs, notes, approved local instructions, and freshness metadata. TODO(ugur): decide final public naming and route shape before implementation.
+- [ ] **Reusable output panes** — evaluate artifact-like side panes for large generated outputs such as policy comparison reports, remediation plans, and exportable summaries, without sharing tenant data outside the selected provider trust boundary.
+
+## Priority 3 — Agent-as-skill routing
+
+- [x] **Agent routing descriptor** — derive `name`, `description`, category, mode, scopes, settings, example prompts, and write/destructive status from installed manifests.
+- [x] **Agent match scoring** — detect when a prompt maps better to an installed agent than ad-hoc chat. Prefer explicit agent suggestions over silent routing.
+- [x] **Run-agent affordance** — chat can offer "Run" for read agents, "Review" for write agents, and "Details" for why the agent matched plus required scopes; write agents still enter the existing plan/confirmation flow.
+- [x] **Agent run context in chat** — when chat starts an agent, persist a tool-call record linking the conversation to the run id and show the run status inline.
+
+## Priority 4 — Optional local self-training
+
+- [x] **Global opt-in** — self-training is disabled by default. Enabling it explains that it does not train the model, upload tenant data, or rewrite public manifests.
+- [x] **Per-agent self-training file** — approved learned instructions are written under `userData/agent-learning/tenants/<tenantIdHash>/agents/<agentSlug>/self-training.yaml`.
+- [x] **Learning event capture** — record chat routes, accepted agent suggestions, rejected write plans, confirmed write plans, repeated chat corrections, and relevant agent setting changes.
+- [x] **Reflection suggestions** — propose local improvements from chat/run history, with tenant identifiers and raw Graph objects excluded from the suggestion text.
+- [x] **Admin approval UI** — every suggestion is pending until accepted. Accepted entries are active, rejected entries are auditable, and users can reset learned behavior per agent/tenant.
+- [x] **Prompt composition** — future agent LLM steps receive approved local self-training instructions as an overlay on top of the reviewed manifest prompt. The overlay cannot add scopes, change mode, alter connector egress, or bypass confirmation.
+
+## Priority 5 — Large context handling
+
+- [x] **Query before prompt** — SQL/Graph does the heavy filtering; the LLM receives compact answer packs only.
+- [x] **Top-N and aggregation rules** — define caps for rows, columns, and raw JSON included in a prompt, with deterministic summaries for omitted rows. v0.2.2 reads at most 40 rows per resource and includes at most 20 compact sample rows per resource in the answer pack.
+- [x] **Deterministic compaction** — for large policy sets or long text fields, include bounded samples, grouped breakdowns, and omitted-row summaries before the LLM sees the answer pack.
+- [x] **Embeddings deferred** — local embeddings for long free-text policy search are allowed later, but v0.2.2 should work with deterministic search and SQL first.
+
+## Acceptance criteria
+
+1. An admin can open Intune Chat, ask a read-only question about the active tenant, and receive an answer grounded in cached or freshly fetched Graph data.
+2. The answer shows tenant, provider residency, data freshness, and source resources.
+3. The assistant response streams in the chat view as the selected provider emits deltas.
+4. Chat refuses or redirects write requests instead of performing side effects directly.
+5. Chat suggests an installed agent when the prompt maps to a repeatable agent workflow.
+6. Starting an agent from chat preserves the existing preflight, scope review, and write confirmation behavior.
+7. Graph cache refresh can be triggered manually and records failures with clear recovery copy.
+8. Graph cache refresh can be scheduled per tenant and records next run, latest success, and latest failure locally.
+9. The researched 150-question bank is covered by planner tests and only maps to known Graph cache endpoints.
+10. Self-training is disabled by default and cannot affect any run until the admin explicitly enables it and approves a suggestion.
+11. Approved `self-training.yaml` entries influence only prompt/context composition, never scopes, mode, connector egress, or confirmation policy.
+12. `npm run smoke:intune-chat` launches Electron with a local tenant fixture, sends a chat prompt through the real preload/IPC path, verifies a grounded answer, agent suggestion, accepted self-training overlay, and scheduled refresh state.
+
 # v0.2.1 — Candidate backlog
 
 **Status: proposal.** Follow-up release after v0.2.0. The theme is making the agent ecosystem feel solid: "Build your own Agent" should be reliable enough for non-developer admins, and "Share with the community" should move a local agent into the public Agent Hub without weakening the registry trust model.
@@ -334,9 +413,9 @@ The release is done when **all** of these hold:
 
 ---
 
-# v0.1 — Private preview showcase
+# v0.1 — Public preview foundation
 
-**Status: complete.** Tagged as v0.1.0. Signed installers + hosted LLM providers land in v0.2.
+**Status: complete.** Tagged as v0.1.0. This was the first public-preview foundation milestone; later public-preview releases now carry the active roadmap.
 
 The goal of v0.1 was to ship the platform thesis end-to-end against synthetic + real Graph data, so prospective users can evaluate the trust story, the agent template DSL, and the path from "describe what you want" to "agent running on your tenant." Every promise the marketing page makes about local-first, transparency, and human-in-the-loop has a corresponding feature in the desktop app.
 

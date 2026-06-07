@@ -4,6 +4,33 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.2.2] - 2026-06-05
+
+### Added
+
+- Added a local retry queue for post-run Teams and WhatsApp Web delivery, with connector audit metadata and focused tests for delivery success, skipped rules, retries, and disconnect cleanup.
+- Added a WhatsApp Web connector with QR linking, automatic QR refresh, phone-side setup guidance, default/test target selection for My WhatsApp, groups, and manual recipients, Baileys reconnect handling, redacted recipient logging, and per-agent outbound run notifications.
+- v0.2.2 planning now scopes Intune Chat as a first-class tenant interaction surface, with Graph cache, agent-as-skill routing, and optional approved local self-training.
+- Intune Chat now has a SQLite-backed read-only tenant chat surface with Graph cache refresh, compact answer packs, agent-as-skill suggestions, and optional approved local self-training overlays.
+- Intune Chat Graph cache refresh now supports per-tenant scheduled refresh intervals, local next-run/failure state, OS scheduler integration, and compact Microsoft Graph audit-log selects validated through the Microsoft Graph MCP.
+- Intune Chat host tests now cover Graph cache refresh, answer-pack generation, local persistence, agent suggestions, and pending self-training suggestions.
+- Added `npm run smoke:intune-chat`, an Electron smoke test that exercises the tenant-connected chat UI through the real preload/IPC path with a local tenant fixture and a 10-prompt chat pass.
+- Added a researched 150-question Intune Chat bank covering common admin investigations, with tests that require every question to map to known local Graph cache resources.
+- Intune Chat planner tests now validate cache endpoints, delegated permissions, and selected fields against the bundled Graph PM indexes.
+- Added a v0.2.2 app review covering Intune Chat UX, Graph cache reliability, Electron security hardening, LLM provider trust, and live Graph spot-check results.
+- Added Apple Foundation as a macOS-only local LLM provider backed by Apple's on-device Foundation Models framework, with helper packaging, context-window budgeting, token usage, and compact Intune Chat answer packs.
+- Added a sidebar Report issue flow that creates a public GitHub issue only after explicit confirmation, sends sanitized diagnostics through the server-side support endpoint without exposing a GitHub token to the desktop app, still supports local diagnostics export, and ships with a focused Electron smoke test.
+
 ### Changed
 
 - Marketing navbar now keeps only Blog, Documentation, GitHub, and the Download button as primary links.
@@ -18,6 +45,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - GitBook installation docs now include the `repo.openadminos.com` apt repository commands for Ubuntu and other Debian-family installs.
 - Release CI now publishes the apt repository under the `repo.openadminos.com` custom GitHub Pages domain.
 - Release tags now publish the Linux `.deb` into a signed GitHub Pages-backed apt repository, generated automatically from the release artifact.
+- Redesigned the Connectors page around an operational summary, clearer live connector panels, and a quieter connector backlog.
+- Simplified the Connectors page connected-state flow by moving permissions, capability, routing-rule, trust-boundary, and backlog details into compact disclosures while keeping setup and notification targets visible.
+- Connector delivery now appears as post-run activity steps for Teams and WhatsApp Web, including sent, failed, and rule-skipped outcomes.
+- Updated the spec, roadmap, and operating instructions to mark OpenAdminOS as public preview.
 - Marketing downloads page now uses compact platform rows with separate macOS DMG and PKG links while the landing CTA remains the DMG.
 - Release tags now publish a macOS `.pkg` alongside the DMG/ZIP outputs, with marketing and docs exposing it as the managed deployment package.
 - A one-off `v0.2.1` macOS PKG backfill workflow now builds the missing signed/notarized installer package and refreshes release checksums.
@@ -38,9 +69,55 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Marketing landing page now includes answer-first product copy, operating-mode comparison, Microsoft Graph permission context, and visible common questions for SEO/GEO coverage.
 - Marketing site SEO now uses canonical `www` URLs, route-level metadata, structured data, stable sitemap dates, `llms.txt`, and compressed social preview images.
 - SEO audit artifacts now use an ignored `.seo-cache/` workspace cache.
+- macOS release packaging now builds the Apple Foundation helper on macOS 26, signs it inside the Electron app bundle, and verifies it is present before uploading DMG artifacts.
 - Marketing hero and README copy now frame OpenAdminOS around local-first AI agents for Microsoft 365 admins, including local model cost and approval-gate benefits.
 - Marketing landing page sections now lead with admin outcomes, local model cost control, open agent runtime, and review-gated tenant changes.
 - Marketing navbar now links to the public documentation site.
+- Marketing header now shows Docs and GitHub actions on mobile.
+- Intune Chat now uses a minimal two-pane layout with chat history on the left and the conversation/composer in the center; cache and self-training controls moved to Settings.
+- Intune Chat now streams assistant output over Electron IPC and persists only the final completed or failed assistant message.
+- Intune Chat streaming now keeps preload listeners alive until terminal stream events so fast local-model responses do not strand assistant drafts.
+- Intune Chat answer packs now include bounded row-compaction metadata (`selectedRows`, `includedSampleRows`, and `omittedCachedRows`) so large tenants stay within local-model context limits.
+- Intune Chat Graph planning now covers apps, detected apps, MAM/app configuration, Autopilot/enrollment, remediations/scripts, Windows updates, endpoint security, assignment filters, scope tags, encryption, troubleshooting, audit, and Conditional Access resources.
+- Intune Chat now sends on Enter, keeps Shift+Enter for newlines, removes the duplicate composer focus border, offers collapsible chat history and copy prompt/response actions, and shows cache/model work as a progress checklist inside the active assistant response slot.
+- Intune Chat agent suggestions now use inline Details disclosures instead of generic "Ask first" follow-up prompts, and write-agent actions are labeled Review.
+- Intune Chat agent suggestions now suppress write agents for read-only investigation prompts, keeping actions like guest cleanup out of stale device sync questions unless the admin asks for a write.
+- Intune Chat agent suggestions now show matched prompt terms, routing evidence, and planned Graph sources, and write-agent routing rejects category-mismatched write suggestions.
+- Intune Chat answer packs now include a generation timestamp so time-bounded admin questions do not require the model to infer the current date.
+- Intune Chat Graph cache refresh now follows Graph pagination with page/cap metadata, and stale managed-device sync questions are filtered deterministically from SQLite before model generation.
+- Intune Chat now caches Autopilot events as a fallback source for enrollment/ESP questions when Windows Autopilot device identity reads fail service-side.
+- Intune Chat completed answers now expose source details with Graph path, selected fields, query parameters, row/page counts, cap state, freshness, cache/live status, and stored source errors.
+- Intune Chat now requires explicit first-send confirmation before a hosted provider receives tenant context, with a per-tenant/provider remember option stored on the device.
+- Intune Chat hosted-provider confirmation is now enforced by Electron main before chat persistence, Graph refresh, or hosted LLM prompt construction, and chat/cache IPC payloads now receive runtime validation.
+- Intune Chat new-conversation sends now show the prompt and progress checklist immediately, keep streaming reloads from wiping the progress bubble, and show the active draft in the chat history rail.
+- Intune Chat conversations can now be searched, pinned, renamed, and deleted locally through validated Electron IPC and product modals, with pinned conversations grouped in a collapsible sidebar section and right-click delete available on conversation rows.
+- Settings -> Intune Chat now shows local SQLite size, chat/cache/self-training counts, and explicit local-deletion modals for clearing all chat history or the active tenant's Graph cache.
+- Intune Chat now keeps a transient in-flight draft visible during new-conversation sends, exposes prompt edit/resend from user messages, and can export local Markdown transcripts with source metadata.
+- Intune Chat now exposes Stop during streaming responses, aborts cancellable provider work through the host stream controller, and persists a cancelled assistant entry without saving generated tail output.
+- Intune Chat assistant messages now expose Regenerate, which resubmits the preceding prompt through the normal chat pipeline with consent, cache refresh, progress, and Stop behavior intact.
+- Intune Chat no longer shows a global Refresh button in the chat header; prompt-scoped refresh runs during send, while manual and scheduled cache controls stay in Settings.
+- Desktop copy actions now use a shared clipboard helper backed by the bounded Electron main clipboard bridge, and local destructive actions such as tenant disconnect and agent uninstall use product modals instead of native browser confirmation dialogs.
+- The Intune Chat smoke now verifies first-run onboarding's connected-tenant path, workspace choice screen, Chat entry action, Stop, Regenerate, and the 10-prompt chat pass.
+- First-run onboarding now ends with a workspace choice: open Intune Chat as the recommended first action, browse Agent Hub for repeatable workflows, or optionally install a starter agent.
+- Desktop renderer security now runs with Electron sandboxing, a sandbox-compatible preload bridge, no remote font loads, system font stacks, and a restrictive Content Security Policy.
+- Renderer-only browser tabs now show a designed desktop-bridge-unavailable state instead of logging noisy no-tenant onboarding redirects.
+- LLM provider trust now sanitizes Codex CLI subprocess environments and treats non-loopback Ollama endpoints as external instead of local-only.
+- Registry source changes now validate and normalize source URLs, require confirmation for custom registries, bind cached indexes to their source URL, and expose a Settings Privacy modal for reviewing or changing the active source.
+- Privileged Electron IPC handlers now validate trusted sender frames and narrow connector, agent, run, tenant, draft, community submission, external URL, and save-file payloads before reaching host state.
+- Installed write-agent cards now route to the existing Agent Detail run preflight instead of an undefined confirmation route.
+- Tenant connection now requests the Graph PM-audited read scopes needed by the full Intune Chat cache surface, and the chat planner now uses the documented scopes for scripts, troubleshooting events, group reads, and encryption-state resources.
+
+### Fixed
+
+- Fixed connector notification settings so Teams and WhatsApp Web delivery rules/default targets autosave and runs use newly enabled delivery without a separate save button.
+- Fixed WhatsApp Web disconnect cleanup so stale default targets, per-agent custom targets, and queued WhatsApp deliveries are cleared when the linked session is removed.
+- Fixed WhatsApp Web session restore so saved linked-device auth reconnects automatically after reopening the app instead of waiting for a manual send/test action.
+- Fixed WhatsApp target mode switching so internal group JIDs are not carried into manual Number/JID fields.
+- Fixed provider selection/trust messaging so selecting a model under an inactive provider activates it, overview surfaces show the active provider's selected default model, and run surfaces show the run-pinned provider/model context.
+
+### Security
+
+- WhatsApp Web QR setup now keeps the raw pairing token out of renderer-facing connector status.
 
 ## [0.2.1] - 2026-05-29
 
@@ -418,7 +495,7 @@ Signed-binaries follow-up to v0.1.0. The platform is unchanged; this release add
 
 ## [0.1.0] - 2026-05-16
 
-First public release. Private preview showcase. Tenant-data-local-by-default desktop platform for Microsoft 365 admins. Four bundled reference agents, two authoring paths (YAML by hand or NL2Agent draft), full transparency UI over both, gated real Graph writes, static schema + Graph QA gate.
+First public release. Public preview foundation. Tenant-data-local-by-default desktop platform for Microsoft 365 admins. Four bundled reference agents, two authoring paths (YAML by hand or NL2Agent draft), full transparency UI over both, gated real Graph writes, static schema + Graph QA gate.
 
 Versioned packages: root `0.1.0`, `@openadminos/agent-sdk@0.1.0`, `@openadminos/runtime@0.1.0`, `@openadminos/qa-graph@0.1.0`, `@openadminos/desktop@0.1.0`.
 
@@ -431,7 +508,7 @@ Versioned packages: root `0.1.0`, `@openadminos/agent-sdk@0.1.0`, `@openadminos/
 - Install-time settings for Agent Templates. AgentDetail's "Configure" button now opens a modal that renders one input per declared `definition.settings[]` entry (integer / string / boolean). Values are validated client-side and re-validated on the host (type-coercion plus unknown-key dropping) before persisting onto `AgentSummary.settings`. At run time the interpreter merges the persisted overrides on top of YAML defaults via `ctx.settings`. Manifest Preview's "Configurable settings" card surfaces both `default:` and `current:` chips for transparency. Smoke-verified end-to-end: overriding retire-inactive-devices' `retireDays` from 180 → 90 grows the plan from 4 to 8 devices and re-renders the confirmation phrase as `RETIRE 8 DEVICES`.
 - `write` step format in Agent Templates. Write-mode agents now declare a `write` skill with `kind`, `source`, `confirmationPhrase`, and `actionTemplate` (rendered once per source item). The interpreter pauses on plan, builds a `WritePlan`, and dispatches each approved action to a registered handler (`retire-managed-device` for v0.1). `retire-inactive-devices` migrated from TypeScript to `manifest.yaml`; behaviour against synthetic Graph fixtures is identical (4 candidates, phrase `RETIRE 4 DEVICES`, per-device retire calls on apply). Manifest preview UI renders the write step with its kind, source, confirmation phrase, action template, and required scopes — every promise of transparency now applies uniformly across read and write agents.
 - Initial project handoff: SPEC.md, CLAUDE.md, design mockups, contributor docs.
-- v0.1 (private preview showcase) scope locked in SPEC.md §5a with phased plan in `tasks/todo.md`.
+- v0.1 public-preview foundation scope locked in SPEC.md §5a with phased plan in `tasks/todo.md`.
 - Onboarding now installs a built-in registry agent through Electron IPC and routes into a live `/runs/:id`.
 - `/runs/:id` shows a streaming/live state (pulsing indicator, running-step pulse, live elapsed) while a run is queued or running.
 - Agent execution contract in `@openadminos/agent-sdk`: `RunContext`, `AgentModule`, `ManagedDeviceRecord`, `RunGraphApi`. Each built-in agent now lives as a TS workspace package under `agents/<slug>/`.
