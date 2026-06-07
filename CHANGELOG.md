@@ -12,13 +12,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- MXC sandbox diagnostics now include SDK-reported backend methods, Windows isolation tier, and probe warnings when available, with remediation copy aligned to the current `wxc-host-prep` subcommands.
+
 ### Removed
 
 ### Fixed
 
+- MXC sandbox runs now set `config.process.cwd`, require that cwd to be covered by the filesystem policy, and only pass the SDK `experimental` spawn flag for MXC backends that require it.
+
 ### Security
 
 - Documented that future sandboxed code must use the OpenAdminOS host broker for Graph, LLM, connector, and write-plan operations; MXC is optional public-preview isolation and not the sole trust boundary.
+- Documented Microsoft's current MXC preview warning that SDK-generated policies may still be overly permissive, so OpenAdminOS keeps broker validation and tenant safeguards as independent boundaries.
 
 ## [0.2.2] - 2026-06-05
 

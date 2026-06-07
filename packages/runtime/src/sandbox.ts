@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import * as path from "node:path";
 import type { Writable } from "node:stream";
 
 import type {
@@ -11,12 +12,28 @@ import type {
 export const OPENADMINOS_MXC_FLAG = "OPENADMINOS_EXPERIMENTAL_MXC";
 const MXC_SCHEMA_VERSION = "0.6.0-alpha";
 const MXC_PREVIEW_WARNING =
-  "MXC is public preview and is not treated as OpenAdminOS's only security boundary.";
+  "MXC is public preview. Microsoft documents current SDK-generated policies " +
+  "as early-preview and potentially overly permissive, so OpenAdminOS does not " +
+  "treat MXC as its only security boundary.";
+
+export type MxcContainment =
+  | "process"
+  | "vm"
+  | "microvm"
+  | "processcontainer"
+  | "windows_sandbox"
+  | "wslc"
+  | "lxc"
+  | "hyperlight"
+  | "seatbelt"
+  | "isolation_session"
+  | "bubblewrap";
 
 export interface SandboxRunInput {
   commandLine: string;
   readonlyPaths: string[];
   readwritePaths: string[];
+  containment?: MxcContainment;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
@@ -47,6 +64,10 @@ interface MxcPlatformSupport {
   supported?: boolean;
   reason?: string;
   detail?: string;
+  availableMethods?: string[];
+  isolationTier?: string;
+  isolationWarnings?: string[];
+  uiCapabilities?: Record<string, boolean>;
   defaultBackend?: string;
   backend?: string;
   containment?: string;
@@ -56,14 +77,18 @@ interface MxcPlatformSupport {
 interface MxcContainerConfig {
   process?: {
     commandLine?: string;
+    cwd?: string;
+    timeout?: number;
+    env?: string[];
   };
+  containment?: string;
 }
 
 interface MxcSdk {
   getPlatformSupport(): MxcPlatformSupport;
   createConfigFromPolicy(
     policy: Record<string, unknown>,
-    containment?: "process" | "vm" | "microvm",
+    containment?: MxcContainment,
   ): MxcContainerConfig;
   spawnSandboxFromConfig(
     config: MxcContainerConfig,
@@ -119,18 +144,36 @@ export async function probeMxcSandbox(
   try {
     const support = sdk.getPlatformSupport();
     const supported = support.isSupported ?? support.supported ?? false;
+    const availableMethods = normalizeStringArray(support.availableMethods);
     const containment =
-      support.defaultBackend ?? support.backend ?? support.containment;
+      support.defaultBackend ??
+      support.backend ??
+      support.containment ??
+      (availableMethods.length > 0 ? availableMethods.join(", ") : undefined);
+    const isolationWarnings = normalizeStringArray(support.isolationWarnings);
     return {
       backend: "mxc",
       status: supported ? "available" : "unavailable",
       experimentalEnabled: true,
       supported,
       ...(containment ? { containment } : {}),
+      ...(availableMethods.length > 0 ? { availableMethods } : {}),
+      ...(support.isolationTier ? { isolationTier: support.isolationTier } : {}),
+      ...(isolationWarnings.length > 0 ? { isolationWarnings } : {}),
+      ...(support.uiCapabilities ? { uiCapabilities: support.uiCapabilities } : {}),
       detail: supported
-        ? `MXC reports sandbox support on ${normalizePlatformLabel(support.platform)}.`
-        : support.reason ?? support.detail ?? "MXC is installed but no supported backend was detected.",
-      ...(!supported ? { remediation: hostPrepRemediation() } : {}),
+        ? formatSupportedDetail(
+            normalizePlatformLabel(support.platform ?? process.platform),
+            availableMethods,
+            support.isolationTier,
+            isolationWarnings,
+          )
+        : support.reason ??
+          support.detail ??
+          "MXC is installed but no supported backend was detected.",
+      ...(!supported || isolationWarnings.length > 0
+        ? { remediation: hostPrepRemediation(isolationWarnings) }
+        : {}),
       warning: MXC_PREVIEW_WARNING,
     };
   } catch (error) {
@@ -170,37 +213,54 @@ async function runMxcSandbox(
   if (!input.commandLine.trim()) {
     throw new Error("MXC sandbox commandLine must be non-empty.");
   }
-  if (input.readwritePaths.length === 0) {
+  const readonlyPaths = normalizePolicyPaths(input.readonlyPaths);
+  const readwritePaths = normalizePolicyPaths(input.readwritePaths);
+  if (readwritePaths.length === 0) {
     throw new Error("MXC sandbox requires at least one scoped read-write path.");
+  }
+  if (
+    input.cwd &&
+    !isPathWithinPolicy(input.cwd, [...readonlyPaths, ...readwritePaths])
+  ) {
+    throw new Error(
+      "MXC sandbox cwd must be covered by readonlyPaths or readwritePaths; cwd does not grant filesystem access.",
+    );
   }
 
   const sdk = await loadMxcSdk(options.loadSdk);
+  const containment = input.containment ?? "process";
   const config = sdk.createConfigFromPolicy(
     {
       version: MXC_SCHEMA_VERSION,
       filesystem: {
-        readonlyPaths: dedupePaths(input.readonlyPaths),
-        readwritePaths: dedupePaths(input.readwritePaths),
+        readonlyPaths,
+        readwritePaths,
+        clearPolicyOnExit: true,
       },
       network: {
         allowOutbound: input.allowNetwork === true,
       },
       ui: {
         allowWindows: false,
+        clipboard: "none",
+        allowInputInjection: false,
       },
       timeoutMs: input.timeoutMs ?? 30_000,
     },
-    "process",
+    containment,
   );
 
   if (!config.process) config.process = {};
   config.process.commandLine = input.commandLine;
+  if (input.cwd) {
+    config.process.cwd = input.cwd;
+  }
 
   const child = sdk.spawnSandboxFromConfig(
     config,
     {
       usePty: false,
-      experimental: true,
+      ...(requiresMxcExperimentalSpawn(containment) ? { experimental: true } : {}),
     },
     input.cwd,
     sanitizeSandboxEnv(input.env ?? env),
@@ -466,8 +526,83 @@ function sanitizeSandboxEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return clean;
 }
 
-function dedupePaths(paths: string[]): string[] {
-  return [...new Set(paths.filter((path) => path.trim().length > 0))];
+function normalizePolicyPaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of paths) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) continue;
+    const resolved = path.resolve(trimmed);
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (!seen.has(key)) {
+      seen.add(key);
+      normalized.push(resolved);
+    }
+  }
+  return normalized;
+}
+
+function isPathWithinPolicy(target: string, policyPaths: string[]): boolean {
+  const resolvedTarget = path.resolve(target);
+  return policyPaths.some((policyPath) => pathContains(policyPath, resolvedTarget));
+}
+
+function pathContains(parent: string, child: string): boolean {
+  const resolvedParent = path.resolve(parent);
+  const resolvedChild = path.resolve(child);
+  if (process.platform === "win32") {
+    const parentLower = resolvedParent.toLowerCase();
+    const childLower = resolvedChild.toLowerCase();
+    const relative = path.relative(parentLower, childLower);
+    return (
+      relative === "" ||
+      (!relative.startsWith("..") && !path.isAbsolute(relative))
+    );
+  }
+  const relative = path.relative(resolvedParent, resolvedChild);
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+}
+
+function requiresMxcExperimentalSpawn(containment: MxcContainment): boolean {
+  if (
+    containment === "microvm" ||
+    containment === "vm" ||
+    containment === "windows_sandbox" ||
+    containment === "wslc" ||
+    containment === "hyperlight" ||
+    containment === "seatbelt" ||
+    containment === "isolation_session"
+  ) {
+    return true;
+  }
+  return containment === "process" && process.platform === "darwin";
+}
+
+function normalizeStringArray(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return values.filter((value): value is string => typeof value === "string");
+}
+
+function formatSupportedDetail(
+  platform: HostPlatform,
+  methods: string[],
+  isolationTier: string | undefined,
+  warnings: string[],
+): string {
+  const parts = [`MXC reports sandbox support on ${platform}.`];
+  if (methods.length > 0) {
+    parts.push(`Available methods: ${methods.join(", ")}.`);
+  }
+  if (isolationTier) {
+    parts.push(`Windows isolation tier: ${isolationTier}.`);
+  }
+  if (warnings.length > 0) {
+    parts.push(`Probe warnings: ${warnings.join(" ")}`);
+  }
+  return parts.join(" ");
 }
 
 function normalizePlatformLabel(platform: string | undefined): HostPlatform {
@@ -477,15 +612,25 @@ function normalizePlatformLabel(platform: string | undefined): HostPlatform {
   return "unknown";
 }
 
-function hostPrepRemediation(): string {
+function hostPrepRemediation(isolationWarnings: string[] = []): string {
   if (process.platform === "win32") {
-    return "Enterprise admins can prepare MXC hosts with wxc-host-prep.exe from the MXC SDK; OpenAdminOS does not elevate or run host-prep automatically.";
+    const warningSuffix =
+      isolationWarnings.length > 0
+        ? ` Probe warning: ${isolationWarnings.join(" ")}`
+        : "";
+    return (
+      "Enterprise admins can prepare MXC hosts with wxc-host-prep.exe from " +
+      "the MXC SDK: run prepare-system-drive once when AppContainer " +
+      "system-drive ACLs are missing, and prepare-null-device once per boot " +
+      "when NUL device access is missing. OpenAdminOS does not elevate or run " +
+      `host-prep automatically.${warningSuffix}`
+    );
   }
   if (process.platform === "linux") {
-    return "Install the MXC SDK native binary plus Bubblewrap or LXC for the selected backend, then re-run the probe.";
+    return "Install the optional @microsoft/mxc-sdk package plus Bubblewrap or the LXC toolset for the selected backend, then re-run the probe.";
   }
   if (process.platform === "darwin") {
-    return "Install an MXC build with the macOS seatbelt backend and keep the experimental flag set for preview testing.";
+    return "Install an MXC SDK build that includes mxc-exec-mac for this architecture; macOS uses the experimental seatbelt backend while OpenAdminOS' MXC feature flag is enabled.";
   }
   return "Install a supported MXC SDK/backend for this host before enabling sandboxed code.";
 }

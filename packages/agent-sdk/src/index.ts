@@ -823,6 +823,17 @@ export interface SandboxDiagnostics {
   supported: boolean;
   /** Human-readable backend reported by MXC when available. */
   containment?: string;
+  /** Concrete MXC backends the SDK reports as available on this host. */
+  availableMethods?: string[];
+  /** Windows isolation tier reported by `wxc-exec --probe`, when available. */
+  isolationTier?: string;
+  /** Host-prep or tier-degradation warnings reported by the MXC probe. */
+  isolationWarnings?: string[];
+  /**
+   * Platform UI restriction facts reported by MXC. Currently populated by
+   * Windows probe data when the SDK can inspect it.
+   */
+  uiCapabilities?: Record<string, boolean>;
   /** Short user-facing explanation for Settings and support bundles. */
   detail: string;
   /**
