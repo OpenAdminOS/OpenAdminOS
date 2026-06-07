@@ -102,9 +102,9 @@ The full flow is **two clicks in GitHub**. No local terminal needed.
    - On run: the workflow bumps every workspace `package.json`, rolls `CHANGELOG.md` so the `[Unreleased]` section becomes a dated `[X.Y.Z]` section, regenerates `package-lock.json`, and opens a `release: vX.Y.Z` PR.
 2. **Review and merge the release PR.**
    - Skim the CHANGELOG roll (the most important review surface — make sure no entries are stuck under Unreleased that should have been edited).
-   - Merge (squash). The squash-merge commit subject is `release: vX.Y.Z (#NN)`.
+   - Merge the release PR. Squash merges put `release: vX.Y.Z (#NN)` in the commit subject; normal merge commits are also supported as long as the commit body contains a `release: vX.Y.Z` line.
 3. **The rest is automatic.**
-   - `auto-tag.yml` fires on the `release: v*` commit landing on `main` → pushes the matching `vX.Y.Z` tag.
+   - `auto-tag.yml` fires when the merge commit message contains a `release: v*` marker → pushes the matching `vX.Y.Z` tag.
    - `release.yml` fires on the tag → builds macOS release files, Linux x64 packages, and the Windows AppX validation package.
    - The GitHub release receives macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
    - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.

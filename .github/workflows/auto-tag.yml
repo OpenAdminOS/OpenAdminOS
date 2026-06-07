@@ -1,12 +1,13 @@
 name: Auto-tag release commits
 
-# When a "release: vX.Y.Z" commit lands on main (typically via the
+# When a "release: vX.Y.Z" marker lands on main (typically via the
 # release-prep PR), this workflow extracts the version from the commit
-# subject and pushes the matching tag. The push triggers release.yml,
+# message and pushes the matching tag. The push triggers release.yml,
 # which builds and uploads the signed artifacts to a draft GitHub
-# release.
+# release. Squash merges put the marker in the subject; normal merge
+# commits can put the release PR title in the commit body.
 #
-# Gated on the commit-subject regex so day-to-day merges don't tag.
+# Gated on the release marker so day-to-day merges don't tag.
 
 on:
   push:
@@ -26,7 +27,7 @@ env:
 
 jobs:
   tag:
-    if: 'startsWith(github.event.head_commit.message, ''release: v'')'
+    if: ${{ contains(github.event.head_commit.message, 'release: v') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -41,9 +42,15 @@ jobs:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          # The squash-merge commit subject is "release: vX.Y.Z (#NN)".
-          # Strip everything after the version, then strip the prefix.
-          version="$(printf '%s\n' "$COMMIT_MESSAGE" | head -n1 \
+          # Squash-merge commit subject: "release: vX.Y.Z (#NN)".
+          # Normal merge commit body: "release: vX.Y.Z".
+          release_line="$(printf '%s\n' "$COMMIT_MESSAGE" \
+            | grep -m1 -E '^release: v[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?([[:space:]].*)?$' || true)"
+          if [ -z "$release_line" ]; then
+            echo "::error::Commit message contains 'release: v' but no valid release marker line: $COMMIT_MESSAGE" >&2
+            exit 1
+          fi
+          version="$(printf '%s\n' "$release_line" \
             | sed -E 's/^release: v([0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?).*$/\1/')"
           if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
             echo "::error::Could not parse version from commit message: $COMMIT_MESSAGE" >&2
@@ -52,19 +59,24 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag doesn't already exist
+        id: existing
         env:
           TAG: v${{ steps.tag.outputs.version }}
         run: |
           if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             echo "::warning::Tag $TAG already exists locally — skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
             echo "::warning::Tag $TAG already exists on origin — skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "exists=false" >> "$GITHUB_OUTPUT"
 
       - name: Push tag
+        if: ${{ steps.existing.outputs.exists != 'true' }}
         env:
           TAG: v${{ steps.tag.outputs.version }}
         run: |
@@ -76,6 +88,7 @@ jobs:
           echo "Pushed $TAG."
 
       - name: Dispatch release workflow
+        if: ${{ steps.existing.outputs.exists != 'true' }}
         # The tag push above does NOT trigger release.yml on its own —
         # GitHub deliberately suppresses workflow chaining when one
         # workflow's GITHUB_TOKEN is the actor that pushed (anti-loop

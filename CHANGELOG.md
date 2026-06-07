@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Auto-tag release automation now detects the `release: vX.Y.Z` marker from the full merge commit message, so normal release PR merges can cut tags as well as squash merges.
+
 ### Removed
 
 ### Fixed

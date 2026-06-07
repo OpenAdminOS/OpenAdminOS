@@ -1004,6 +1004,7 @@ Required before public v1 release:
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.
+Release automation treats `release: vX.Y.Z` as the canonical marker and parses it from the full merge commit message, so both squash merges and normal merge commits can cut the corresponding tag.
 
 ---
 
