@@ -32,6 +32,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-scheduler-launch-settings"),
   getReleaseDiagnostics: () =>
     ipcRenderer.invoke("openadminos:get-release-diagnostics"),
+  getSandboxSettings: () =>
+    ipcRenderer.invoke("openadminos:get-sandbox-settings"),
   exportSupportBundle: (input: SupportBundleInput) =>
     ipcRenderer.invoke("openadminos:export-support-bundle", input),
   submitSupportIssue: (input: SupportIssueSubmissionInput) =>
@@ -40,6 +42,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:write-clipboard-text", text),
   setSchedulerLaunchEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-scheduler-launch-enabled", enabled),
+  setSandboxedCodeEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-sandboxed-code-enabled", enabled),
   listAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
   listInstalledAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
   listRegistryAgents: () =>

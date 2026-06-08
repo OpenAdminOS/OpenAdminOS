@@ -5,6 +5,7 @@ import type {
   AgentCategory,
   AgentConnectorRequirement,
   AgentMode,
+  AgentExecution,
   AgentModule,
   AgentTier,
   RequiredEntraTier,
@@ -52,6 +53,10 @@ export function parseAgentTemplate(source: string): AgentTemplate {
   const descriptor = requireObject(data, "descriptor");
   const skills = requireArray(data, "skills");
   const definition = requireObject(data, "definition");
+  const execution =
+    data.execution === undefined
+      ? undefined
+      : validateExecution(data.execution, "execution");
 
   for (const field of ["id", "name", "description", "version", "category", "mode"] as const) {
     if (typeof descriptor[field] !== "string" || (descriptor[field] as string).length === 0) {
@@ -132,6 +137,7 @@ export function parseAgentTemplate(source: string): AgentTemplate {
 
   return {
     descriptor: descriptor as AgentTemplate["descriptor"],
+    ...(execution ? { execution } : {}),
     skills: validated,
     definition: definition as AgentTemplate["definition"],
   };
@@ -186,6 +192,109 @@ function validateSkill(skill: Record<string, unknown>, path: string): TemplateSt
         `unknown format: ${JSON.stringify(skill.format)}`,
       );
   }
+}
+
+function validateExecution(value: unknown, path: string): AgentExecution {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ManifestValidationError(path, "must be an object");
+  }
+  const execution = value as Record<string, unknown>;
+  const kind = execution.kind;
+  if (kind === "template") {
+    assertOnlyKnownKeys(execution, ["kind"], path);
+    return { kind: "template" };
+  }
+  if (kind !== "script") {
+    throw new ManifestValidationError(
+      `${path}.kind`,
+      `expected "template" or "script", got ${JSON.stringify(kind)}`,
+    );
+  }
+  assertOnlyKnownKeys(
+    execution,
+    ["kind", "sandbox", "entrypoint", "containment", "timeoutMs"],
+    path,
+  );
+  if (execution.sandbox !== "mxc") {
+    throw new ManifestValidationError(
+      `${path}.sandbox`,
+      `expected "mxc", got ${JSON.stringify(execution.sandbox)}`,
+    );
+  }
+  if (
+    typeof execution.entrypoint !== "string" ||
+    execution.entrypoint.length === 0 ||
+    execution.entrypoint.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(execution.entrypoint) ||
+    execution.entrypoint.split(/[\\/]/).includes("..")
+  ) {
+    throw new ManifestValidationError(
+      `${path}.entrypoint`,
+      "must be a relative path inside the agent directory",
+    );
+  }
+  if (
+    execution.containment !== undefined &&
+    !isKnownExecutionContainment(execution.containment)
+  ) {
+    throw new ManifestValidationError(
+      `${path}.containment`,
+      `unknown MXC containment backend ${JSON.stringify(execution.containment)}`,
+    );
+  }
+  if (
+    execution.timeoutMs !== undefined &&
+    (typeof execution.timeoutMs !== "number" ||
+      execution.timeoutMs < 1 ||
+      !Number.isInteger(execution.timeoutMs))
+  ) {
+    throw new ManifestValidationError(`${path}.timeoutMs`, "must be a positive integer");
+  }
+  return {
+    kind: "script",
+    sandbox: "mxc",
+    entrypoint: execution.entrypoint,
+    ...(execution.containment
+      ? {
+          containment: execution.containment as Extract<
+            AgentExecution,
+            { kind: "script" }
+          >["containment"],
+        }
+      : {}),
+    ...(typeof execution.timeoutMs === "number"
+      ? { timeoutMs: execution.timeoutMs }
+      : {}),
+  } as AgentExecution;
+}
+
+function assertOnlyKnownKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  path: string,
+): void {
+  const allowed = new Set(keys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new ManifestValidationError(`${path}.${key}`, "unknown field");
+    }
+  }
+}
+
+function isKnownExecutionContainment(value: unknown): boolean {
+  return (
+    value === "process" ||
+    value === "vm" ||
+    value === "microvm" ||
+    value === "processcontainer" ||
+    value === "windows_sandbox" ||
+    value === "wslc" ||
+    value === "lxc" ||
+    value === "hyperlight" ||
+    value === "seatbelt" ||
+    value === "isolation_session" ||
+    value === "bubblewrap"
+  );
 }
 
 function validateMapStepSettings(
@@ -1389,6 +1498,11 @@ function cleanLlmText(raw: string): string {
 // ─── Adapter so the runtime can treat a manifest as an AgentModule ───────
 
 export function agentTemplateToModule(manifest: AgentTemplate): AgentModule {
+  if (manifest.execution?.kind === "script") {
+    throw new Error(
+      `Agent "${manifest.descriptor.id}" declares script execution and must be loaded through loadAgentModule().`,
+    );
+  }
   if (manifest.descriptor.mode === "write") {
     return buildWriteAgentModule(manifest);
   }
@@ -1410,6 +1524,7 @@ function commonMetadata(manifest: AgentTemplate) {
     version: descriptor.version,
     minAppVersion: descriptor.minAppVersion,
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
+    ...(manifest.execution ? { execution: manifest.execution } : {}),
   };
 }
 
@@ -1497,6 +1612,7 @@ export function agentTemplateToRegistrySummary(
   version: string;
   minAppVersion?: string;
   preferredModel?: string;
+  execution?: AgentExecution;
   graphOperations: GraphOperation[];
   connectors?: AgentConnectorRequirement[];
 } {
@@ -1516,6 +1632,7 @@ export function agentTemplateToRegistrySummary(
     version: descriptor.version,
     minAppVersion: descriptor.minAppVersion,
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
+    ...(manifest.execution ? { execution: manifest.execution } : {}),
     graphOperations: collectGraphOperations(manifest),
     ...(descriptor.connectors && descriptor.connectors.length > 0
       ? { connectors: descriptor.connectors }

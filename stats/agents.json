@@ -5,6 +5,10 @@
       "installs": 10,
       "installs7d": 3
     },
+    "intune-device-posture-auditor": {
+      "installs": 0,
+      "installs7d": 0
+    },
     "offboarding-agent": {
       "installs": 6,
       "installs7d": 2

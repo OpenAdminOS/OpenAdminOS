@@ -24,6 +24,7 @@
 - [Conditional Access explainer](generated/agents/conditional-access-explainer.md)
 - [Dormant app registrations](generated/agents/dormant-app-registrations.md)
 - [Find inactive devices](generated/agents/find-inactive-devices.md)
+- [Intune Device Posture Auditor](generated/agents/intune-device-posture-auditor.md)
 - [Offboarding agent](generated/agents/offboarding-agent.md)
 - [OS update posture](generated/agents/os-update-posture.md)
 - [Risky user triage](generated/agents/risky-sign-in-triage.md)

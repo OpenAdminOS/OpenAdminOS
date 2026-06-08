@@ -166,6 +166,7 @@ function collectManifestDetails(manifest) {
     : [];
 
   return {
+    execution: manifest?.execution ?? { kind: "template" },
     graphCalls,
     scopes: [...scopes].sort(),
     writeActions,
@@ -203,10 +204,19 @@ function agentPage(agent) {
     `| Author | ${mdEscape(agent.author?.name ?? "unknown")}${agent.author?.verified ? " · verified" : ""} |`,
     `| Last changed | ${changed.date} · \`${changed.hash}\` |`,
     "",
-    "## Tenant Data Access",
-    "",
   ];
 
+  lines.push("## Execution", "");
+  if (details.execution?.kind === "script") {
+    lines.push(
+      `This agent runs \`${mdEscape(details.execution.entrypoint)}\` inside the experimental \`${mdEscape(details.execution.sandbox)}\` sandbox. The Graph and LLM steps below are broker permissions, not host-interpreted pipeline steps.`,
+      "",
+    );
+  } else {
+    lines.push("This agent runs through the host-side Agent Template interpreter.", "");
+  }
+
+  lines.push("## Tenant Data Access", "");
   if (details.graphCalls.length === 0) {
     lines.push("No Graph read calls are declared in the manifest.", "");
   } else {
