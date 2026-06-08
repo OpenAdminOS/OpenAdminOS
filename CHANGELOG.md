@@ -6,6 +6,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added the first macOS menu bar companion implementation: Electron Tray lifecycle, `#/companion` popover route, shared companion snapshot IPC, read-only Intune Chat prompting through the existing stream path, upcoming schedules, recent activity, and due read-schedule quick actions.
+- Added macOS menu bar companion launch controls in Settings and the tray context menu, backed by shared companion launch IPC, release diagnostics, and Electron's Login Item API.
+- Added a generated macOS `OpenAdminOS Menu Bar Helper.app` login item bundle to the desktop build, copied into `Contents/Library/LoginItems` and verified in the release workflow.
+- Added a root `vision.md` product vision for a macOS-only OpenAdminOS menu bar companion with shared Intune Chat, schedule, cache, and runtime architecture.
 - Added the Intune Device Posture Auditor as the first built-in MXC-backed script agent, with a strict `execution.kind: script` manifest contract, brokered Graph/LLM access, and generated Agent Hub docs.
 - Added a host-mediated MXC sandbox broker that validates Graph, LLM, connector, write-plan, and log requests over brokered stdio/file IPC without passing tenant tokens or secrets into sandboxed code.
 - Added an experimental MXC sandbox runner/probe behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, with sandbox diagnostics in Settings -> About and shared broker protocol types for future host-mediated agent execution.
@@ -14,6 +18,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Simplified the macOS menu bar companion into an Ask-first popover with compact cache/schedule actions, activity shown only when useful, a smaller idle window, the OpenAdminOS app icon as the status item, and route-level renderer code splitting to remove the large initial chunk warning.
 - MXC sandbox diagnostics now include SDK-reported backend methods, Windows isolation tier, and probe warnings when available, with remediation copy aligned to the current `wxc-host-prep` subcommands.
 
 ### Removed

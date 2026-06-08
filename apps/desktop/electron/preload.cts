@@ -27,23 +27,33 @@ function detectPlatform(): HostPlatform {
 
 const api: OpenAdminOSApi = {
   platform,
+  getCompanionSnapshot: () =>
+    ipcRenderer.invoke("openadminos:get-companion-snapshot"),
+  getCompanionLaunchSettings: () =>
+    ipcRenderer.invoke("openadminos:get-companion-launch-settings"),
   getAppState: () => ipcRenderer.invoke("openadminos:get-app-state"),
   getSchedulerLaunchSettings: () =>
     ipcRenderer.invoke("openadminos:get-scheduler-launch-settings"),
-  getReleaseDiagnostics: () =>
-    ipcRenderer.invoke("openadminos:get-release-diagnostics"),
   getSandboxSettings: () =>
     ipcRenderer.invoke("openadminos:get-sandbox-settings"),
+  getReleaseDiagnostics: () =>
+    ipcRenderer.invoke("openadminos:get-release-diagnostics"),
   exportSupportBundle: (input: SupportBundleInput) =>
     ipcRenderer.invoke("openadminos:export-support-bundle", input),
   submitSupportIssue: (input: SupportIssueSubmissionInput) =>
     ipcRenderer.invoke("openadminos:submit-support-issue", input),
   writeClipboardText: (text: string) =>
     ipcRenderer.invoke("openadminos:write-clipboard-text", text),
-  setSchedulerLaunchEnabled: (enabled: boolean) =>
-    ipcRenderer.invoke("openadminos:set-scheduler-launch-enabled", enabled),
+  openMainWindow: (route?: string) =>
+    ipcRenderer.invoke("openadminos:open-main-window", route),
+  runDueReadSchedules: () =>
+    ipcRenderer.invoke("openadminos:run-due-read-schedules"),
+  setCompanionLaunchEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-companion-launch-enabled", enabled),
   setSandboxedCodeEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-sandboxed-code-enabled", enabled),
+  setSchedulerLaunchEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-scheduler-launch-enabled", enabled),
   listAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
   listInstalledAgents: () => ipcRenderer.invoke("openadminos:list-agents"),
   listRegistryAgents: () =>

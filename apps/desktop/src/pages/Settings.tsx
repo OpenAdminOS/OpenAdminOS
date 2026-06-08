@@ -21,6 +21,7 @@ import {
   IconWarning,
 } from "../components/icons";
 import type {
+  CompanionLaunchSettings,
   GraphCacheStatus,
   LocalDataSummary,
   ProviderId,
@@ -1199,11 +1200,15 @@ function GeneralSection() {
   const { state } = useAppState();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
+  const [companionLaunch, setCompanionLaunch] =
+    useState<CompanionLaunchSettings | null>(null);
   const [sandboxSettings, setSandboxSettings] =
     useState<SandboxSettings | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
+  const [companionBusy, setCompanionBusy] = useState(false);
   const [sandboxBusy, setSandboxBusy] = useState(false);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
+  const [companionError, setCompanionError] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -1224,6 +1229,16 @@ function GeneralSection() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setSchedulerError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getCompanionLaunchSettings()
+      .then((settings) => {
+        if (!cancelled) setCompanionLaunch(settings);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setCompanionError(error instanceof Error ? error.message : String(error));
         }
       });
     api
@@ -1257,6 +1272,22 @@ function GeneralSection() {
     }
   };
 
+  const toggleCompanionLaunch = async () => {
+    if (!companionLaunch?.supported) return;
+    setCompanionBusy(true);
+    setCompanionError(null);
+    try {
+      const next = await window.openAdminOS?.setCompanionLaunchEnabled(
+        !companionLaunch.enabled,
+      );
+      if (next) setCompanionLaunch(next);
+    } catch (error) {
+      setCompanionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCompanionBusy(false);
+    }
+  };
+
   const toggleSandboxedCode = async () => {
     setSandboxBusy(true);
     setSandboxError(null);
@@ -1279,6 +1310,38 @@ function GeneralSection() {
         subtitle="Defaults that apply across the app."
       />
       <div className="mt-6 flex flex-col gap-3">
+        <SettingRow
+          label="Menu bar companion"
+          description={
+            companionLaunch?.supported
+              ? companionLaunch.status === "requires-approval"
+                ? `${companionLaunch.detail} The companion uses the same local store, active tenant, provider, schedules, and Intune Chat path as the full app.`
+                : `${companionLaunch.detail} It opens as a compact macOS status item and routes setup, hosted-provider confirmation, and write review back to the full app.`
+              : (companionLaunch?.detail ?? "The menu bar companion is available on macOS only.")
+          }
+          control={
+            <button
+              onClick={() => void toggleCompanionLaunch()}
+              disabled={!companionLaunch?.supported || companionBusy}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                companionLaunch?.enabled
+                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25"
+                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+              } ${!companionLaunch?.supported || companionBusy ? "cursor-not-allowed opacity-60" : "hover:bg-[var(--color-surface-hover)]"}`}
+              title={companionLaunch?.detail}
+            >
+              <IconShield size={10} />
+              {companionBusy
+                ? "Saving..."
+                : companionLaunchLabel(companionLaunch)}
+            </button>
+          }
+        />
+        {companionError && (
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {companionError}
+          </div>
+        )}
         <SettingRow
           label="Experimental sandboxed code"
           description={
@@ -1892,6 +1955,12 @@ function AboutSection() {
             detail={diagnostics?.scheduler.detail ?? "Scheduler state unavailable."}
           />
           <ReadinessRow
+            label="Menu bar"
+            value={companionLaunchLabel(diagnostics?.companion)}
+            tone={companionLaunchTone(diagnostics?.companion)}
+            detail={diagnostics?.companion.detail ?? "Menu bar companion diagnostics unavailable."}
+          />
+          <ReadinessRow
             label="Agent sandbox"
             value={formatSandboxValue(diagnostics?.sandbox)}
             tone={sandboxTone(diagnostics?.sandbox)}
@@ -1970,6 +2039,23 @@ function ReadinessRow({
       </div>
     </div>
   );
+}
+
+function companionLaunchLabel(
+  companion: CompanionLaunchSettings | null | undefined,
+): string {
+  if (!companion) return "Unknown";
+  if (!companion.supported) return "macOS only";
+  if (companion.status === "requires-approval") return "Approval needed";
+  return companion.enabled ? "Launch at login" : "Manual";
+}
+
+function companionLaunchTone(
+  companion: CompanionLaunchSettings | null | undefined,
+): "success" | "warning" | "danger" {
+  if (!companion?.supported) return "warning";
+  if (companion.status === "requires-approval") return "warning";
+  return companion.enabled ? "success" : "warning";
 }
 
 function formatSandboxValue(

@@ -5,10 +5,14 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   Notification,
   session,
   shell,
+  screen,
+  Tray,
   type IpcMainInvokeEvent,
+  type LoginItemSettingsOptions,
   type MenuItemConstructorOptions,
 } from "electron";
 import { execFileSync } from "node:child_process";
@@ -32,8 +36,11 @@ import {
 } from "./window-state.js";
 import type {
   AgentCommunitySubmissionMetadata,
+  CompanionLaunchSettings,
   AgentSchedule,
   AgentTeamsDelivery,
+  CompanionRunDueReadSchedulesResult,
+  CompanionSnapshot,
   PendingConnectorDecision,
   ProviderId,
   RefreshGraphCacheOptions,
@@ -91,7 +98,10 @@ const currentDir = dirname(currentFile);
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:5173";
 const allowedExternalProtocols = new Set(["http:", "https:", "mailto:"]);
 const BACKGROUND_SCHEDULER_ARG = "--background-scheduler";
+const MENU_BAR_ARG = "--menu-bar";
 const isBackgroundSchedulerLaunch = process.argv.includes(BACKGROUND_SCHEDULER_ARG);
+const isMenuBarLaunch = process.argv.includes(MENU_BAR_ARG);
+const isMacosLoginItemLaunch = wasOpenedByMacosLoginItem();
 const isIntuneChatSmokeLaunch =
   !app.isPackaged && process.env.OPENADMINOS_INTUNE_CHAT_SMOKE === "1";
 const intuneChatSmokeUserData = process.env.OPENADMINOS_INTUNE_CHAT_SMOKE_USER_DATA;
@@ -104,7 +114,13 @@ const capturedExternalUrlFile = !app.isPackaged
 const supportBundleExportFile = !app.isPackaged
   ? process.env.OPENADMINOS_SUPPORT_BUNDLE_EXPORT_PATH
   : undefined;
+const debugStartup = process.env.OPENADMINOS_DEBUG_STARTUP === "1";
+const devUserDataDir = !app.isPackaged
+  ? process.env.OPENADMINOS_USER_DATA_DIR
+  : undefined;
 const MACOS_SCHEDULER_LABEL = "com.openadminos.scheduler";
+const MACOS_COMPANION_LOGIN_ITEM_ID = "com.openadminos.desktop.menubar-helper";
+const MACOS_COMPANION_HELPER_APP = "OpenAdminOS Menu Bar Helper.app";
 const WINDOWS_SCHEDULER_TASK = "OpenAdminOS Scheduler";
 const providerIds = new Set(providerCatalog.map((provider) => provider.id));
 const graphCacheResourceKinds = new Set<string>(
@@ -132,6 +148,8 @@ const selfTrainingSuggestionStatuses = new Set<SelfTrainingSuggestionStatus>([
   "reset",
 ]);
 const DEFAULT_SUPPORT_API_URL = "https://openadminos.com";
+const COMPANION_WINDOW_WIDTH = 390;
+const COMPANION_WINDOW_HEIGHT = 520;
 const launchSandboxedCodeDefault = process.env[OPENADMINOS_MXC_FLAG] === "1";
 
 const smokeUserData = isIntuneChatSmokeLaunch
@@ -140,18 +158,25 @@ const smokeUserData = isIntuneChatSmokeLaunch
     ? reportIssueSmokeUserData
     : undefined;
 
-if (smokeUserData) {
-  mkdirSync(smokeUserData, { recursive: true });
-  app.setPath("userData", smokeUserData);
+const overrideUserData = smokeUserData ?? devUserDataDir;
+
+if (overrideUserData) {
+  mkdirSync(overrideUserData, { recursive: true });
+  app.setPath("userData", overrideUserData);
 }
 
-if (process.platform === "darwin" && isBackgroundSchedulerLaunch) {
+if (
+  process.platform === "darwin" &&
+  (isBackgroundSchedulerLaunch || isMenuBarLaunch || isMacosLoginItemLaunch)
+) {
   // Apply before `whenReady()` so a LaunchAgent scheduler wake does not
   // briefly flash OpenAdminOS in the Dock while the hidden process starts.
   app.setActivationPolicy("accessory");
 }
 
 let mainWindow: BrowserWindow | null = null;
+let companionWindow: BrowserWindow | null = null;
+let menuBarTray: Tray | null = null;
 let store: AppStateStore;
 const activeNotifications = new Set<Notification>();
 // Wall-clock timestamp of the most recent background registry refresh
@@ -159,6 +184,33 @@ const activeNotifications = new Set<Notification>();
 // doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
 // this — the user explicitly asked for a fresh fetch.
 let lastBackgroundRefreshAt = 0;
+
+function debugStartupLog(message: string, detail?: unknown): void {
+  if (!debugStartup) return;
+  if (detail === undefined) {
+    console.error(`[openadminos-startup] ${message}`);
+  } else {
+    console.error(`[openadminos-startup] ${message}`, detail);
+  }
+}
+
+if (debugStartup) {
+  process.on("uncaughtException", (error) => {
+    console.error("[openadminos-startup] uncaughtException", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[openadminos-startup] unhandledRejection", reason);
+  });
+}
+
+function wasOpenedByMacosLoginItem(): boolean {
+  if (process.platform !== "darwin") return false;
+  try {
+    return app.getLoginItemSettings().wasOpenedAtLogin;
+  } catch {
+    return false;
+  }
+}
 
 function showDockForInteractiveSession(): void {
   if (process.platform === "darwin") {
@@ -1097,6 +1149,99 @@ async function getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings> {
   }
 }
 
+function macosCompanionHelperBundlePath(): string {
+  return join(
+    dirname(process.execPath),
+    "..",
+    "Library",
+    "LoginItems",
+    MACOS_COMPANION_HELPER_APP,
+  );
+}
+
+function hasPackagedCompanionHelper(): boolean {
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  return existsSync(
+    join(
+      macosCompanionHelperBundlePath(),
+      "Contents",
+      "Info.plist",
+    ),
+  );
+}
+
+function companionLoginItemOptions(): LoginItemSettingsOptions | undefined {
+  if (!hasPackagedCompanionHelper()) return undefined;
+  return {
+    type: "loginItemService",
+    serviceName: MACOS_COMPANION_LOGIN_ITEM_ID,
+  };
+}
+
+function getCompanionLaunchSettings(): CompanionLaunchSettings {
+  if (process.platform !== "darwin") {
+    return {
+      supported: false,
+      enabled: false,
+      detail: "The menu bar companion is bundled for macOS only.",
+    };
+  }
+
+  try {
+    const helperBundled = hasPackagedCompanionHelper();
+    const options = companionLoginItemOptions();
+    const settings = options
+      ? app.getLoginItemSettings(options)
+      : app.getLoginItemSettings();
+    const enabled =
+      settings.openAtLogin ||
+      settings.status === "enabled" ||
+      settings.status === "requires-approval";
+    return {
+      supported: true,
+      enabled,
+      status: settings.status,
+      helperBundled,
+      startedAtLogin: settings.wasOpenedAtLogin,
+      detail:
+        settings.status === "requires-approval"
+          ? "macOS has registered OpenAdminOS but still requires approval in Login Items before it can start automatically."
+          : helperBundled
+            ? enabled
+              ? "OpenAdminOS Menu Bar Helper starts at login and opens the signed app in menu bar mode."
+              : "OpenAdminOS can register the bundled menu bar helper as a macOS Login Item."
+            : enabled
+              ? "OpenAdminOS starts at login and keeps the menu bar companion available without opening the main window."
+              : "OpenAdminOS can start at login and keep the menu bar companion available from the signed app package.",
+    };
+  } catch (error) {
+    return {
+      supported: false,
+      enabled: false,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function setCompanionLaunchEnabled(enabled: boolean): CompanionLaunchSettings {
+  if (process.platform !== "darwin") {
+    throw new Error("The menu bar companion is available on macOS only.");
+  }
+  const options = companionLoginItemOptions();
+  app.setLoginItemSettings(
+    options
+      ? {
+          openAtLogin: enabled,
+          ...options,
+        }
+      : {
+          openAtLogin: enabled,
+        },
+  );
+  if (enabled) createMenuBarCompanion();
+  return getCompanionLaunchSettings();
+}
+
 async function getReleaseDiagnostics(): Promise<ReleaseDiagnostics> {
   const platform =
     process.platform === "darwin"
@@ -1119,6 +1264,7 @@ async function getReleaseDiagnostics(): Promise<ReleaseDiagnostics> {
     notificationSupported: Notification.isSupported(),
     notificationPermission,
     scheduler: await getSchedulerLaunchSettings(),
+    companion: getCompanionLaunchSettings(),
     sandbox: sandboxSettings.diagnostics,
   };
 }
@@ -1144,6 +1290,251 @@ function applySandboxedCodeEnabled(enabled: boolean): void {
   } else {
     delete process.env[OPENADMINOS_MXC_FLAG];
   }
+}
+
+async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
+  const state = await store.getAppState();
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId) ?? null
+    : null;
+  const activeProvider =
+    state.providers.find((provider) => provider.id === state.activeProviderId) ?? null;
+  const activeModel = activeProvider
+    ? state.activeModelByProviderId?.[activeProvider.id] ?? activeProvider.defaultModel
+    : undefined;
+  const scheduler = await getSchedulerLaunchSettings();
+  const cacheStatus = activeTenant
+    ? await store.getGraphCacheStatus(activeTenant.id).catch(() => null)
+    : null;
+  const refreshedAt = cacheStatus?.resources
+    .map((resource) => resource.refreshedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  const cacheErrors = cacheStatus?.resources
+    .map((resource) => resource.lastError)
+    .filter((value): value is string => Boolean(value));
+  const nowMs = Date.now();
+  const inFlight = state.runs
+    .filter((run) =>
+      run.status === "queued" ||
+      run.status === "running" ||
+      run.status === "awaiting-confirmation"
+    )
+    .slice(0, 5)
+    .map((run) => ({
+      id: run.id,
+      kind: "run" as const,
+      label: agentNameForRun(state.installedAgents, run),
+      status: run.status,
+      route: `/runs/${run.id}`,
+    }));
+  const upcomingSchedules = state.installedAgents
+    .filter((agent) => agent.schedule?.enabled === true)
+    .map((agent) => {
+      const latest = latestScheduledRunForAgent(state.runs, agent.slug);
+      return {
+        agentSlug: agent.slug,
+        agentName: agent.name,
+        mode: agent.mode,
+        nextRunAt: new Date(nextRunTimeForSchedule(agent.schedule, nowMs)).toISOString(),
+        intervalSeconds: agent.schedule?.intervalSeconds ?? 3600,
+        ...(latest?.status ? { lastStatus: latest.status } : {}),
+        ...(latest?.changeState ? { changeState: latest.changeState } : {}),
+        route: `/agents/${agent.slug}`,
+      };
+    })
+    .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))
+    .slice(0, 5);
+  const recentActivity = state.runs
+    .slice(0, 6)
+    .map((run) => ({
+      id: run.id,
+      label: agentNameForRun(state.installedAgents, run),
+      status: run.status,
+      queuedAt: run.queuedAt,
+      ...(run.summary ? { summary: run.summary } : run.error ? { summary: run.error } : {}),
+      route: `/runs/${run.id}`,
+    }));
+  const attention: CompanionSnapshot["attention"] = [];
+
+  if (!activeTenant) {
+    attention.push({
+      id: "tenant-required",
+      severity: "warning",
+      title: "Tenant required",
+      body: "Connect a Microsoft 365 tenant before asking chat or running schedules.",
+      actionRoute: "/onboarding",
+    });
+  }
+  if (activeProvider && activeProvider.status === "error") {
+    attention.push({
+      id: "provider-error",
+      severity: "danger",
+      title: `${activeProvider.name} unavailable`,
+      body: activeProvider.detail ?? "Open provider settings and test the connection.",
+      actionRoute: "/settings",
+    });
+  }
+  if (activeProvider && activeProvider.status === "not-installed") {
+    attention.push({
+      id: "provider-not-installed",
+      severity: "warning",
+      title: `${activeProvider.name} not ready`,
+      body: activeProvider.detail ?? "Configure a provider before asking Intune Chat.",
+      actionRoute: "/settings",
+    });
+  }
+  if (scheduler.lastError) {
+    attention.push({
+      id: "scheduler-error",
+      severity: "danger",
+      title: "Scheduler needs attention",
+      body: scheduler.lastError,
+      actionRoute: "/settings",
+    });
+  }
+  const pendingWrite = state.runs.find((run) => run.status === "awaiting-confirmation");
+  if (pendingWrite) {
+    attention.push({
+      id: `pending-write-${pendingWrite.id}`,
+      severity: "warning",
+      title: "Write confirmation waiting",
+      body: `${agentNameForRun(state.installedAgents, pendingWrite)} is paused for review.`,
+      actionRoute: `/runs/${pendingWrite.id}`,
+    });
+  }
+  const latestFailure = state.runs.find((run) => run.status === "failed");
+  if (latestFailure) {
+    attention.push({
+      id: `failed-run-${latestFailure.id}`,
+      severity: "danger",
+      title: "Latest run failed",
+      body: latestFailure.error ?? `${agentNameForRun(state.installedAgents, latestFailure)} failed.`,
+      actionRoute: `/runs/${latestFailure.id}`,
+    });
+  }
+  if (cacheErrors?.[0]) {
+    attention.push({
+      id: "cache-error",
+      severity: "warning",
+      title: "Cache refresh issue",
+      body: cacheErrors[0],
+      actionRoute: "/settings",
+    });
+  }
+
+  return {
+    activeTenant: activeTenant
+      ? { id: activeTenant.id, displayName: activeTenant.displayName }
+      : null,
+    provider: activeProvider
+      ? {
+          id: activeProvider.id,
+          label: activeProvider.name,
+          isLocal: activeProvider.isLocal,
+          trustLabel: state.trust.label,
+          ...(activeModel ? { model: activeModel } : {}),
+          status: activeProvider.status,
+        }
+      : null,
+    cache: {
+      ...(refreshedAt ? { latestRefreshAt: refreshedAt } : {}),
+      stale: !refreshedAt || nowMs - Date.parse(refreshedAt) > 24 * 60 * 60 * 1000,
+      refreshing: false,
+      ...(cacheErrors?.[0] ? { lastError: cacheErrors[0] } : {}),
+    },
+    scheduler,
+    companion: getCompanionLaunchSettings(),
+    inFlight,
+    upcomingSchedules,
+    recentActivity,
+    attention: attention.slice(0, 5),
+  };
+}
+
+async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult> {
+  const state = await store.getAppState();
+  const nowMs = Date.now();
+  const result: CompanionRunDueReadSchedulesResult = {
+    queued: 0,
+    skippedWrite: 0,
+    skippedInFlight: 0,
+    skippedNotDue: 0,
+    errors: [],
+  };
+
+  for (const agent of state.installedAgents) {
+    const schedule = agent.schedule;
+    if (!schedule?.enabled) continue;
+    if (agent.mode === "write") {
+      result.skippedWrite += 1;
+      continue;
+    }
+    const dueAt = nextRunTimeForSchedule(schedule, nowMs);
+    if (dueAt > nowMs) {
+      result.skippedNotDue += 1;
+      continue;
+    }
+    const inFlight = state.runs.some(
+      (run) =>
+        run.agentSlug === agent.slug &&
+        (run.status === "queued" ||
+          run.status === "running" ||
+          run.status === "awaiting-confirmation"),
+    );
+    if (inFlight) {
+      result.skippedInFlight += 1;
+      continue;
+    }
+
+    try {
+      await store.startRun(agent.slug, { trigger: "schedule" });
+      await store.updateAgentSchedule(agent.slug, {
+        enabled: true,
+        intervalSeconds: schedule.intervalSeconds,
+        notifyOnSuccess: schedule.notifyOnSuccess,
+        notifyOnFailure: schedule.notifyOnFailure,
+        notifyOnChangeOnly: schedule.notifyOnChangeOnly,
+        lastScheduledRunAt: new Date(nowMs).toISOString(),
+      });
+      result.queued += 1;
+    } catch (error) {
+      result.errors.push({
+        agentSlug: agent.slug,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return result;
+}
+
+function nextRunTimeForSchedule(
+  schedule: AgentSchedule | undefined,
+  nowMs = Date.now(),
+): number {
+  if (!schedule?.enabled) return Number.POSITIVE_INFINITY;
+  const lastFired = schedule.lastScheduledRunAt
+    ? new Date(schedule.lastScheduledRunAt).getTime()
+    : 0;
+  if (lastFired <= 0) return nowMs;
+  return lastFired + schedule.intervalSeconds * 1000;
+}
+
+function latestScheduledRunForAgent(
+  runs: RunRecord[],
+  agentSlug: string,
+): RunRecord | undefined {
+  return runs
+    .filter((run) => run.agentSlug === agentSlug && run.trigger === "schedule")
+    .sort((a, b) => Date.parse(b.queuedAt) - Date.parse(a.queuedAt))[0];
+}
+
+function agentNameForRun(
+  agents: Array<{ slug: string; name: string }>,
+  run: RunRecord,
+): string {
+  return agents.find((agent) => agent.slug === run.agentSlug)?.name ?? run.agentSlug;
 }
 
 async function exportSupportBundle(
@@ -1365,6 +1756,13 @@ async function createSupportBundle(input: SupportBundleInput) {
         lastErrorHash: diagnosticHash(
           state.schedulerStatus?.lastError ?? releaseDiagnostics.scheduler.lastError,
         ),
+      },
+      companion: {
+        supported: releaseDiagnostics.companion.supported,
+        enabled: releaseDiagnostics.companion.enabled,
+        status: releaseDiagnostics.companion.status,
+        helperBundled: releaseDiagnostics.companion.helperBundled,
+        startedAtLogin: releaseDiagnostics.companion.startedAtLogin,
       },
       runs: summarizeRuns(state.runs),
       recentFailures: runFailures.map((run) => ({
@@ -2245,6 +2643,19 @@ function navigate(path: string): void {
   mainWindow.webContents.send("openadminos:navigate", path);
 }
 
+async function openMainWindow(route?: string): Promise<void> {
+  showDockForInteractiveSession();
+  const safeRoute = routeHash(route);
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    await createWindow({ show: true, route: safeRoute });
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  if (safeRoute) navigate(safeRoute);
+}
+
 function buildAppMenu(): Menu {
   const isMac = process.platform === "darwin";
 
@@ -2257,7 +2668,9 @@ function buildAppMenu(): Menu {
           {
             label: "Settings…",
             accelerator: "Cmd+,",
-            click: () => navigate("/settings"),
+            click: () => {
+              void openMainWindow("/settings");
+            },
           },
           { type: "separator" },
           { role: "services" },
@@ -2290,27 +2703,46 @@ function buildAppMenu(): Menu {
       {
         label: "Agents",
         accelerator: "CmdOrCtrl+1",
-        click: () => navigate("/"),
+        click: () => {
+          void openMainWindow("/");
+        },
       },
       {
         label: "Agent Hub",
         accelerator: "CmdOrCtrl+2",
-        click: () => navigate("/hub"),
+        click: () => {
+          void openMainWindow("/hub");
+        },
       },
       {
         label: "Intune Chat",
         accelerator: "CmdOrCtrl+3",
-        click: () => navigate("/chat"),
+        click: () => {
+          void openMainWindow("/chat");
+        },
       },
       {
         label: "Activity",
         accelerator: "CmdOrCtrl+4",
-        click: () => navigate("/activity"),
+        click: () => {
+          void openMainWindow("/activity");
+        },
       },
       {
         label: "Settings",
         accelerator: "CmdOrCtrl+,",
-        click: () => navigate("/settings"),
+        click: () => {
+          void openMainWindow("/settings");
+        },
+      },
+      {
+        label: "Menu Bar Companion",
+        accelerator: "CmdOrCtrl+Shift+M",
+        enabled: process.platform === "darwin",
+        click: () => {
+          createMenuBarCompanion();
+          void toggleCompanionWindow();
+        },
       },
       { type: "separator" },
       { role: "reload" },
@@ -2371,7 +2803,12 @@ function buildAppMenu(): Menu {
   return Menu.buildFromTemplate([appMenu, editMenu, viewMenu, windowMenu, helpMenu]);
 }
 
-async function createWindow({ show = true }: { show?: boolean } = {}) {
+function routeHash(route?: string): string | undefined {
+  if (!route) return undefined;
+  return route.startsWith("/") ? route : `/${route}`;
+}
+
+async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
     ...(typeof persisted.x === "number" ? { x: persisted.x } : {}),
@@ -2424,7 +2861,9 @@ async function createWindow({ show = true }: { show?: boolean } = {}) {
   });
 
   if (app.isPackaged) {
-    const loadPromise = mainWindow.loadFile(join(app.getAppPath(), "dist/index.html"));
+    const loadPromise = mainWindow.loadFile(join(app.getAppPath(), "dist/index.html"), {
+      ...(routeHash(route) ? { hash: routeHash(route) } : {}),
+    });
     if (isIntuneChatSmokeLaunch) {
       void loadPromise.then(runIntuneChatSmoke).catch(failIntuneChatSmoke);
     }
@@ -2432,7 +2871,10 @@ async function createWindow({ show = true }: { show?: boolean } = {}) {
       void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
     }
   } else {
-    const loadPromise = mainWindow.loadURL(devServerUrl);
+    const initialRoute = routeHash(route);
+    const loadPromise = mainWindow.loadURL(
+      initialRoute ? `${devServerUrl}/#${initialRoute}` : devServerUrl,
+    );
     if (isIntuneChatSmokeLaunch) {
       void loadPromise.then(runIntuneChatSmoke).catch(failIntuneChatSmoke);
     }
@@ -2440,9 +2882,186 @@ async function createWindow({ show = true }: { show?: boolean } = {}) {
       void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
     }
   }
+
+  return mainWindow;
+}
+
+async function createCompanionWindow(): Promise<BrowserWindow> {
+  if (companionWindow && !companionWindow.isDestroyed()) {
+    return companionWindow;
+  }
+
+  companionWindow = new BrowserWindow({
+    width: COMPANION_WINDOW_WIDTH,
+    height: COMPANION_WINDOW_HEIGHT,
+    minWidth: 360,
+    minHeight: 520,
+    maxWidth: 460,
+    maxHeight: 720,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    title: "OpenAdminOS Menu Bar",
+    backgroundColor: "#1c1917",
+    vibrancy: process.platform === "darwin" ? "menu" : undefined,
+    visualEffectState: "active",
+    webPreferences: {
+      preload: join(currentDir, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      devTools: !app.isPackaged,
+      webviewTag: false,
+    },
+  });
+
+  companionWindow.on("blur", () => {
+    companionWindow?.hide();
+  });
+  companionWindow.on("closed", () => {
+    companionWindow = null;
+  });
+  companionWindow.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalUrl(url);
+    return { action: "deny" };
+  });
+  companionWindow.webContents.on("will-navigate", (event, url) => {
+    if (isAllowedAppNavigation(url)) return;
+    event.preventDefault();
+    openExternalUrl(url);
+  });
+
+  if (app.isPackaged) {
+    await companionWindow.loadFile(join(app.getAppPath(), "dist/index.html"), {
+      hash: "/companion",
+    });
+  } else {
+    await companionWindow.loadURL(`${devServerUrl}/#/companion`);
+  }
+
+  return companionWindow;
+}
+
+function createMenuBarIcon() {
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, "app-icon.png")
+    : join(app.getAppPath(), "build/icon.png");
+  const image = nativeImage.createFromPath(iconPath);
+  const resized = image.resize({ width: 20, height: 20, quality: "best" });
+  resized.setTemplateImage(false);
+  return resized;
+}
+
+function positionCompanionWindow(window: BrowserWindow): void {
+  const trayBounds = menuBarTray?.getBounds();
+  const currentBounds = window.getBounds();
+  if (!trayBounds) return;
+  const display = screen.getDisplayNearestPoint({
+    x: Math.round(trayBounds.x + trayBounds.width / 2),
+    y: Math.round(trayBounds.y + trayBounds.height / 2),
+  });
+  const padding = 8;
+  const width = currentBounds.width;
+  const height = currentBounds.height;
+  const minX = display.workArea.x + padding;
+  const maxX = display.workArea.x + display.workArea.width - width - padding;
+  const x = Math.min(
+    Math.max(Math.round(trayBounds.x + trayBounds.width / 2 - width / 2), minX),
+    maxX,
+  );
+  const belowY = Math.round(trayBounds.y + trayBounds.height + 8);
+  const wouldOverflow = belowY + height > display.workArea.y + display.workArea.height;
+  const y = wouldOverflow
+    ? Math.max(display.workArea.y + padding, trayBounds.y - height - 8)
+    : belowY;
+  window.setPosition(x, y, false);
+}
+
+async function toggleCompanionWindow(): Promise<void> {
+  const window = await createCompanionWindow();
+  if (window.isVisible()) {
+    window.hide();
+    return;
+  }
+  positionCompanionWindow(window);
+  window.show();
+  window.focus();
+}
+
+function createMenuBarCompanion(): void {
+  if (process.platform !== "darwin" || menuBarTray) return;
+  menuBarTray = new Tray(createMenuBarIcon());
+  menuBarTray.setToolTip("OpenAdminOS - click for the menu bar companion");
+  menuBarTray.on("click", () => {
+    void toggleCompanionWindow();
+  });
+  menuBarTray.on("double-click", () => {
+    void openMainWindow("/chat");
+  });
+  menuBarTray.on("right-click", () => {
+    const companionLaunch = getCompanionLaunchSettings();
+    menuBarTray?.popUpContextMenu(
+      Menu.buildFromTemplate([
+        {
+          label: "Show Companion",
+          click: () => {
+            void toggleCompanionWindow();
+          },
+        },
+        {
+          label: "Open OpenAdminOS",
+          click: () => {
+            void openMainWindow("/chat");
+          },
+        },
+        {
+          label: "Schedules",
+          click: () => {
+            void openMainWindow("/agents/schedules");
+          },
+        },
+        {
+          label: "Settings",
+          click: () => {
+            void openMainWindow("/settings");
+          },
+        },
+        { type: "separator" },
+        {
+          label: "Launch at Login",
+          type: "checkbox",
+          enabled: companionLaunch.supported,
+          checked: companionLaunch.enabled,
+          click: (menuItem) => {
+            setCompanionLaunchEnabled(menuItem.checked);
+          },
+        },
+        { type: "separator" },
+        {
+          label: "Quit OpenAdminOS",
+          click: () => {
+            app.quit();
+          },
+        },
+      ]),
+    );
+  });
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle(
+    "openadminos:get-companion-snapshot",
+    handleTrusted(() => getCompanionSnapshot()),
+  );
+  ipcMain.handle(
+    "openadminos:get-companion-launch-settings",
+    handleTrusted(() => getCompanionLaunchSettings()),
+  );
   ipcMain.handle("openadminos:get-app-state", handleTrusted(() => store.getAppState()));
   ipcMain.handle(
     "openadminos:get-scheduler-launch-settings",
@@ -2472,6 +3091,25 @@ function registerIpcHandlers() {
     "openadminos:write-clipboard-text",
     handleTrusted((_event, text: unknown) => {
       clipboard.writeText(requireBoundedString(text, "clipboard text", 200_000));
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:open-main-window",
+    handleTrusted((_event, route?: unknown) =>
+      openMainWindow(optionalBoundedString(route, "route", 500)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:run-due-read-schedules",
+    handleTrusted(() => runDueReadSchedules()),
+  );
+  ipcMain.handle(
+    "openadminos:set-companion-launch-enabled",
+    handleTrusted((_event, enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("companion launch enabled must be a boolean.");
+      }
+      return setCompanionLaunchEnabled(enabled);
     }),
   );
   ipcMain.handle(
@@ -2969,14 +3607,27 @@ function registerIpcHandlers() {
 }
 
 const gotLock = app.requestSingleInstanceLock();
+debugStartupLog("single instance lock", {
+  gotLock,
+  argv: process.argv,
+  isBackgroundSchedulerLaunch,
+  isMenuBarLaunch,
+  isMacosLoginItemLaunch,
+});
 
 if (!gotLock) {
+  debugStartupLog("quitting because single instance lock was not acquired");
   app.quit();
 } else {
   app.on("second-instance", (_event, argv) => {
     if (argv.includes(BACKGROUND_SCHEDULER_ARG)) {
       void store?.fireDueSchedules();
       void store?.refreshDueGraphCaches();
+      return;
+    }
+    if (argv.includes(MENU_BAR_ARG)) {
+      createMenuBarCompanion();
+      void toggleCompanionWindow();
       return;
     }
 
@@ -2995,6 +3646,7 @@ if (!gotLock) {
   });
 
   void app.whenReady().then(async () => {
+    debugStartupLog("app ready");
     // In dev the app runs from the unsigned `electron` binary, so macOS
     // shows the default Electron logo in the dock. Override it with the
     // production icon so the dev window looks like the shipped app.
@@ -3050,13 +3702,34 @@ if (!gotLock) {
     });
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
+    debugStartupLog("registered ipc handlers");
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
-    if (isBackgroundSchedulerLaunch && app.dock) {
+    const companionOnlyLaunch =
+      isMenuBarLaunch || isMacosLoginItemLaunch || wasOpenedByMacosLoginItem();
+    debugStartupLog("launch mode", {
+      companionOnlyLaunch,
+      isBackgroundSchedulerLaunch,
+      isMenuBarLaunch,
+      isMacosLoginItemLaunch,
+    });
+    if ((isBackgroundSchedulerLaunch || companionOnlyLaunch) && app.dock) {
       app.dock.hide();
     }
+    if (process.platform === "darwin" && !isBackgroundSchedulerLaunch) {
+      createMenuBarCompanion();
+      debugStartupLog("created menu bar companion", {
+        hasTray: Boolean(menuBarTray),
+      });
+    }
     if (!isBackgroundSchedulerLaunch) {
-      void createWindow({ show: true });
+      if (companionOnlyLaunch) {
+        void createCompanionWindow();
+        debugStartupLog("created hidden companion window");
+      } else {
+        void createWindow({ show: true });
+        debugStartupLog("created main window");
+      }
     }
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
@@ -3099,10 +3772,10 @@ if (!gotLock) {
     });
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
+      if (!mainWindow || mainWindow.isDestroyed()) {
         showDockForInteractiveSession();
         void createWindow({ show: true });
-      } else if (mainWindow && !mainWindow.isDestroyed()) {
+      } else {
         showDockForInteractiveSession();
         mainWindow.show();
         mainWindow.focus();

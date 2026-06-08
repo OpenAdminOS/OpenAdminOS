@@ -14,7 +14,8 @@
   "scripts": {
     "dev": "npm run build:apple-foundation-helper && npm run build:packages && npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
     "dev:renderer": "vite",
-    "build": "npm run build:apple-foundation-helper && npm run build:packages && tsc -b && npm run build:electron && vite build",
+    "build": "npm run build:menu-bar-helper && npm run build:apple-foundation-helper && npm run build:packages && tsc -b && npm run build:electron && vite build",
+    "build:menu-bar-helper": "node ../../scripts/build-menu-bar-helper.mjs",
     "build:apple-foundation-helper": "node ../../scripts/build-apple-foundation-helper.mjs",
     "build:packages": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/runtime",
     "build:electron": "tsc -p tsconfig.electron.json",
@@ -73,6 +74,10 @@
       {
         "from": "electron/native",
         "to": "native"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "app-icon.png"
       }
     ],
     "publish": [
@@ -88,7 +93,14 @@
       "gatekeeperAssess": false,
       "notarize": true,
       "binaries": [
-        "Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper"
+        "Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper",
+        "Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app/Contents/MacOS/OpenAdminOS Menu Bar Helper"
+      ],
+      "extraFiles": [
+        {
+          "from": "build/menu-bar-helper/OpenAdminOS Menu Bar Helper.app",
+          "to": "Library/LoginItems/OpenAdminOS Menu Bar Helper.app"
+        }
       ],
       "target": [
         { "target": "dmg", "arch": ["arm64"] },

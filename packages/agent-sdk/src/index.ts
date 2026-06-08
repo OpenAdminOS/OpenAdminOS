@@ -793,6 +793,101 @@ export interface SchedulerLaunchSettings {
 
 export type SchedulerStatus = SchedulerLaunchSettings;
 
+export type CompanionLaunchStatus =
+  | "not-registered"
+  | "enabled"
+  | "requires-approval"
+  | "not-found";
+
+export interface CompanionLaunchSettings {
+  /** The menu bar companion is shipped only on macOS. */
+  supported: boolean;
+  /** Whether OpenAdminOS is configured to start at login for the menu bar companion. */
+  enabled: boolean;
+  /** macOS login item status when available. */
+  status?: CompanionLaunchStatus;
+  /** True when the packaged app contains the nested login item helper bundle. */
+  helperBundled?: boolean;
+  /** True when this process was opened by the OS login item. */
+  startedAtLogin?: boolean;
+  /** Human-readable caveat or next step for Settings and diagnostics. */
+  detail?: string;
+}
+
+export interface CompanionAttentionItem {
+  id: string;
+  severity: "info" | "warning" | "danger";
+  title: string;
+  body: string;
+  actionRoute?: string;
+}
+
+export interface CompanionInFlightItem {
+  id: string;
+  kind: "run" | "chat" | "cache-refresh";
+  label: string;
+  status: string;
+  route?: string;
+}
+
+export interface CompanionScheduleItem {
+  agentSlug: string;
+  agentName: string;
+  mode: AgentMode;
+  nextRunAt: string;
+  intervalSeconds: number;
+  lastStatus?: RunStatus;
+  changeState?: RunRecord["changeState"];
+  route: string;
+}
+
+export interface CompanionRecentActivityItem {
+  id: string;
+  label: string;
+  status: RunStatus;
+  queuedAt: string;
+  summary?: string;
+  route: string;
+}
+
+export interface CompanionSnapshot {
+  activeTenant: {
+    id: string;
+    displayName: string;
+  } | null;
+  provider: {
+    id: ProviderId;
+    label: string;
+    isLocal: boolean;
+    trustLabel: string;
+    model?: string;
+    status: ProviderStatus;
+  } | null;
+  cache: {
+    latestRefreshAt?: string;
+    stale: boolean;
+    refreshing: boolean;
+    lastError?: string;
+  };
+  scheduler: SchedulerLaunchSettings;
+  companion: CompanionLaunchSettings;
+  inFlight: CompanionInFlightItem[];
+  upcomingSchedules: CompanionScheduleItem[];
+  recentActivity: CompanionRecentActivityItem[];
+  attention: CompanionAttentionItem[];
+}
+
+export interface CompanionRunDueReadSchedulesResult {
+  queued: number;
+  skippedWrite: number;
+  skippedInFlight: number;
+  skippedNotDue: number;
+  errors: Array<{
+    agentSlug: string;
+    message: string;
+  }>;
+}
+
 export interface ReleaseDiagnostics {
   appVersion: string;
   packaged: boolean;
@@ -801,6 +896,7 @@ export interface ReleaseDiagnostics {
   notificationSupported: boolean;
   notificationPermission: "granted" | "denied" | "default" | "unknown";
   scheduler: SchedulerLaunchSettings;
+  companion: CompanionLaunchSettings;
   sandbox: SandboxDiagnostics;
 }
 
@@ -903,6 +999,8 @@ export interface OpenAdminOSApi {
    * shortcut hints, etc.). Resolved at preload time; never changes.
    */
   platform: HostPlatform;
+  getCompanionSnapshot(): Promise<CompanionSnapshot>;
+  getCompanionLaunchSettings(): Promise<CompanionLaunchSettings>;
   getAppState(): Promise<AppState>;
   getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings>;
   getSandboxSettings(): Promise<SandboxSettings>;
@@ -918,6 +1016,9 @@ export interface OpenAdminOSApi {
    */
   submitSupportIssue(input: SupportIssueSubmissionInput): Promise<SupportIssueSubmissionResult>;
   writeClipboardText(text: string): Promise<void>;
+  openMainWindow(route?: string): Promise<void>;
+  runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult>;
+  setCompanionLaunchEnabled(enabled: boolean): Promise<CompanionLaunchSettings>;
   setSandboxedCodeEnabled(enabled: boolean): Promise<SandboxSettings>;
   setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;

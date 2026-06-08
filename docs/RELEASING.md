@@ -9,6 +9,18 @@ The release surface currently publishes macOS and Linux binaries:
 - **Windows → build validation only**. CI still creates the AppX package to keep the packaging path exercised, but it is not uploaded as a workflow artifact or attached to GitHub Releases until the signing/distribution path is ready.
 
 A single tag push builds all three platform jobs. CI publishes macOS and Linux release files, refreshes the apt repository from the latest `.deb`, and keeps Windows runner-local.
+
+The macOS job also verifies the two bundled native helpers inside the packaged
+app before uploading artifacts:
+
+- Apple Foundation helper:
+  `OpenAdminOS.app/Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper`
+- Menu bar login helper:
+  `OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app`,
+  including `Contents/Resources/OpenAdminOS.icns` and
+  `CFBundleIconFile=OpenAdminOS`.
+- Menu bar status item icon resource:
+  `OpenAdminOS.app/Contents/Resources/app-icon.png`.
 The macOS release job runs on GitHub's `macos-26` image because the bundled
 Apple Foundation helper is built against `FoundationModels.framework`.
 
