@@ -182,6 +182,43 @@ jobs:
             codesign --verify --strict --verbose=2 "$helper"
           fi
 
+      - name: Verify menu bar login helper was packaged
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_icon="$(find apps/desktop/release -path '*/OpenAdminOS.app/Contents/Resources/app-icon.png' -type f -print -quit)"
+          if [ -z "$app_icon" ]; then
+            echo "::error::OpenAdminOS app icon resource for the menu bar status item was not found."
+            find apps/desktop/release -maxdepth 6 -type f | sort
+            exit 1
+          fi
+          file "$app_icon"
+          helper_app="$(find apps/desktop/release -path '*/OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app' -type d -print -quit)"
+          if [ -z "$helper_app" ]; then
+            echo "::error::Menu bar login helper was not found in the packaged app bundle."
+            find apps/desktop/release -maxdepth 7 -type d | sort
+            exit 1
+          fi
+          executable="$helper_app/Contents/MacOS/OpenAdminOS Menu Bar Helper"
+          plist="$helper_app/Contents/Info.plist"
+          if [ ! -x "$executable" ]; then
+            echo "::error::Menu bar login helper exists but is not executable: $executable"
+            exit 1
+          fi
+          plutil -extract CFBundleIdentifier raw "$plist" | grep -qx 'com.openadminos.desktop.menubar-helper'
+          plutil -extract CFBundleIconFile raw "$plist" | grep -qx 'OpenAdminOS'
+          plutil -extract LSUIElement raw "$plist" | grep -qx 'true'
+          icon="$helper_app/Contents/Resources/OpenAdminOS.icns"
+          if [ ! -f "$icon" ]; then
+            echo "::error::Menu bar login helper icon was not found: $icon"
+            exit 1
+          fi
+          file "$icon"
+          file "$executable"
+          if [ -n "${CSC_LINK:-}" ]; then
+            codesign --verify --strict --verbose=2 "$helper_app"
+          fi
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:

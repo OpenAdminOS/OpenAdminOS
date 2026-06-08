@@ -1,25 +1,28 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
 import { AppShell, TitleBarInset } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
 import { useAppState } from "./state";
-import AgentsHome from "./pages/AgentsHome";
-import AgentDetail from "./pages/AgentDetail";
-import AgentHub from "./pages/AgentHub";
-import Activity from "./pages/Activity";
-import IntuneChat from "./pages/IntuneChat";
-import Connectors from "./pages/Connectors";
-import Settings from "./pages/Settings";
-import Onboarding from "./pages/Onboarding";
-import RunResult from "./pages/RunResult";
-import Schedules from "./pages/Schedules";
+
+const AgentsHome = lazy(() => import("./pages/AgentsHome"));
+const AgentDetail = lazy(() => import("./pages/AgentDetail"));
+const AgentHub = lazy(() => import("./pages/AgentHub"));
+const Activity = lazy(() => import("./pages/Activity"));
+const IntuneChat = lazy(() => import("./pages/IntuneChat"));
+const Connectors = lazy(() => import("./pages/Connectors"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Onboarding = lazy(() => import("./pages/Onboarding"));
+const RunResult = lazy(() => import("./pages/RunResult"));
+const Schedules = lazy(() => import("./pages/Schedules"));
+const MenuBarCompanion = lazy(() => import("./pages/MenuBarCompanion"));
 
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const { state, loading } = useAppState();
   const noShell = location.pathname.startsWith("/onboarding");
+  const isCompanion = location.pathname.startsWith("/companion");
   const hasDesktopBridge = Boolean(window.openAdminOS);
 
   useEffect(() => {
@@ -37,6 +40,16 @@ export default function App() {
     };
   }, [navigate]);
 
+  if (isCompanion) {
+    return (
+      <Suspense fallback={<RouteFallback compact />}>
+        <Routes>
+          <Route path="/companion" element={<MenuBarCompanion />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
   if (!hasDesktopBridge && !noShell) {
     return <DesktopBridgeUnavailable onOpenOnboarding={() => navigate("/onboarding")} />;
   }
@@ -50,27 +63,42 @@ export default function App() {
 
   if (noShell) {
     return (
-      <Routes>
-        <Route path="/onboarding" element={<Onboarding />} />
-      </Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/onboarding" element={<Onboarding />} />
+        </Routes>
+      </Suspense>
     );
   }
 
   return (
     <AppShell>
-      <Routes>
-        <Route path="/" element={<AgentsHome />} />
-        <Route path="/agents/schedules" element={<Schedules />} />
-        <Route path="/agents/:slug/confirm" element={<AgentDetail startRunOnOpen />} />
-        <Route path="/agents/:slug" element={<AgentDetail />} />
-        <Route path="/hub" element={<AgentHub />} />
-        <Route path="/chat" element={<IntuneChat />} />
-        <Route path="/connectors" element={<Connectors />} />
-        <Route path="/activity" element={<Activity />} />
-        <Route path="/runs/:id" element={<RunResult />} />
-        <Route path="/settings" element={<Settings />} />
-      </Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<AgentsHome />} />
+          <Route path="/agents/schedules" element={<Schedules />} />
+          <Route path="/agents/:slug/confirm" element={<AgentDetail startRunOnOpen />} />
+          <Route path="/agents/:slug" element={<AgentDetail />} />
+          <Route path="/hub" element={<AgentHub />} />
+          <Route path="/chat" element={<IntuneChat />} />
+          <Route path="/connectors" element={<Connectors />} />
+          <Route path="/activity" element={<Activity />} />
+          <Route path="/runs/:id" element={<RunResult />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </Suspense>
     </AppShell>
+  );
+}
+
+function RouteFallback({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)] text-[var(--color-text-muted)]">
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="h-3 w-3 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-accent)]" />
+        <span>{compact ? "Opening" : "Loading"}</span>
+      </div>
+    </div>
   );
 }
 
