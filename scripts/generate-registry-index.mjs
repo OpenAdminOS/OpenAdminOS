@@ -61,6 +61,7 @@ function parseManifest(manifestPath) {
     },
     scopes: [...scopes],
     minAppVersion: descriptor.minAppVersion ?? "",
+    ...(raw?.execution ? { execution: raw.execution } : {}),
   };
 }
 

@@ -23,6 +23,10 @@ Classifies recent Entra risky users by risk level, state, detail, and processing
 | Author | OpenAdminOS · verified |
 | Last changed | 2026-05-29 · `3a69fc6` |
 
+## Execution
+
+This agent runs through the host-side Agent Template interpreter.
+
 ## Tenant Data Access
 
 | Step | Graph call | Scopes |

@@ -8,6 +8,7 @@
   "required": ["descriptor", "skills", "definition"],
   "properties": {
     "descriptor": { "$ref": "#/$defs/descriptor" },
+    "execution": { "$ref": "#/$defs/execution" },
     "skills": {
       "type": "array",
       "minItems": 1,
@@ -127,6 +128,65 @@
         { "$ref": "#/$defs/mapSkill" },
         { "$ref": "#/$defs/writeSkill" },
         { "$ref": "#/$defs/connectorSkill" }
+      ]
+    },
+
+    "execution": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "const": "template",
+              "description": "Default execution mode. The host interprets the declarative skills pipeline directly."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "sandbox", "entrypoint"],
+          "properties": {
+            "kind": {
+              "const": "script",
+              "description": "Preview execution mode for code-backed agents. The declarative skills remain the broker permission manifest."
+            },
+            "sandbox": {
+              "const": "mxc",
+              "description": "Script agents must run through the experimental MXC sandbox runner."
+            },
+            "entrypoint": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(^|[\\\\/])\\.\\.([\\\\/]|$)).+$",
+              "description": "Relative path to the script entrypoint inside the agent directory."
+            },
+            "containment": {
+              "type": "string",
+              "enum": [
+                "process",
+                "vm",
+                "microvm",
+                "processcontainer",
+                "windows_sandbox",
+                "wslc",
+                "lxc",
+                "hyperlight",
+                "seatbelt",
+                "isolation_session",
+                "bubblewrap"
+              ],
+              "description": "Optional MXC containment preference. Omit to let the runtime use the process intent."
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Per-run sandbox timeout in milliseconds."
+            }
+          }
+        }
       ]
     },
 

@@ -7,8 +7,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Added
 
 - Added Plausible Analytics to the marketing website, with privacy and spec copy clarifying that analytics is limited to public website pages.
-- Added a host-mediated MXC sandbox broker that validates Graph, LLM, connector, write-plan, and log requests over brokered stdio without passing tenant tokens or secrets into sandboxed code.
+- Added the Intune Device Posture Auditor as the first built-in MXC-backed script agent, with a strict `execution.kind: script` manifest contract, brokered Graph/LLM access, and generated Agent Hub docs.
+- Added a host-mediated MXC sandbox broker that validates Graph, LLM, connector, write-plan, and log requests over brokered stdio/file IPC without passing tenant tokens or secrets into sandboxed code.
 - Added an experimental MXC sandbox runner/probe behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, with sandbox diagnostics in Settings -> About and shared broker protocol types for future host-mediated agent execution.
+- Added a Settings -> General toggle for experimental sandboxed code, persisted off by default and limited to built-in MXC-backed preview agents.
 
 ### Changed
 
@@ -21,6 +23,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Apt repository generation now indexes Electron Builder `.deb` filenames after validating package architecture from control metadata.
 - MXC sandbox runs now set `config.process.cwd`, require that cwd to be covered by the filesystem policy, and only pass the SDK `experimental` spawn flag for MXC backends that require it.
+- MXC script agents now broker over per-run file IPC, with the Intune Device Posture Auditor verified on macOS Seatbelt using both Node and Electron-as-Node.
 
 ### Security
 

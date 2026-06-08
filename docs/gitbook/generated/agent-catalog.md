@@ -16,6 +16,7 @@ Last updated: 2026-05-29 · `3a69fc6`.
 | [Conditional Access explainer](agents/conditional-access-explainer.md) | `read` | `agent` | `policies` | `p1` | `Policy.Read.All` |
 | [Dormant app registrations](agents/dormant-app-registrations.md) | `read` | `agent` | `apps` | `free` | `Application.Read.All` |
 | [Find inactive devices](agents/find-inactive-devices.md) | `read` | `agent` | `devices` | `free` | `DeviceManagementManagedDevices.Read.All` |
+| [Intune Device Posture Auditor](agents/intune-device-posture-auditor.md) | `read` | `agent` | `devices` | `free` | `DeviceManagementManagedDevices.Read.All` |
 | [Offboarding agent](agents/offboarding-agent.md) | `write` | `agent` | `devices` | `free` | `DeviceManagementManagedDevices.Read.All`<br>`Device.Read.All`<br>`DeviceManagementManagedDevices.PrivilegedOperations.All` |
 | [OS update posture](agents/os-update-posture.md) | `read` | `dashboard` | `updates` | `free` | `DeviceManagementManagedDevices.Read.All` |
 | [Risky user triage](agents/risky-sign-in-triage.md) | `read` | `agent` | `policies` | `p2` | `IdentityRiskyUser.Read.All` |

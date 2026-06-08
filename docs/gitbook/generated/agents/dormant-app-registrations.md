@@ -23,6 +23,10 @@ Reviews app registrations for stale experiments, risky exposure, credentials, an
 | Author | OpenAdminOS · verified |
 | Last changed | 2026-05-29 · `3a69fc6` |
 
+## Execution
+
+This agent runs through the host-side Agent Template interpreter.
+
 ## Tenant Data Access
 
 | Step | Graph call | Scopes |

@@ -86,6 +86,34 @@
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/find-inactive-devices/manifest.yaml"
     },
     {
+      "id": "intune-device-posture-auditor",
+      "slug": "intune-device-posture-auditor",
+      "name": "Intune Device Posture Auditor",
+      "description": "Runs a read-only MXC-sandboxed audit of Intune managed-device posture, stale sync, compliance, ownership, enrollment, and duplicate-name signals.",
+      "version": "0.1.0",
+      "mode": "read",
+      "category": "devices",
+      "tier": "agent",
+      "requiresEntraTier": "free",
+      "author": {
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
+        "verified": true
+      },
+      "scopes": [
+        "DeviceManagementManagedDevices.Read.All"
+      ],
+      "minAppVersion": "0.2.3",
+      "execution": {
+        "kind": "script",
+        "sandbox": "mxc",
+        "entrypoint": "agent.mjs",
+        "containment": "process",
+        "timeoutMs": 45000
+      },
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/intune-device-posture-auditor/manifest.yaml"
+    },
+    {
       "id": "offboarding-agent",
       "slug": "offboarding-agent",
       "name": "Offboarding agent",

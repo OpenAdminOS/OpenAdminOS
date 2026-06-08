@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+#
+# Preview code-backed agent. The skills below declare broker permissions;
+# execution runs agent.mjs inside MXC instead of using the template interpreter.
+
+descriptor:
+  id: intune-device-posture-auditor
+  name: Intune Device Posture Auditor
+  description: Runs a read-only MXC-sandboxed audit of Intune managed-device posture, stale sync, compliance, ownership, enrollment, and duplicate-name signals.
+  version: 0.1.0
+  minAppVersion: 0.2.3
+  author:
+    name: OpenAdminOS
+    handle: openadminos
+    verified: true
+  category: devices
+  tier: agent
+  requiresEntraTier: free
+  mode: read
+  preferredModel: llama3.1:8b
+
+execution:
+  kind: script
+  sandbox: mxc
+  entrypoint: agent.mjs
+  containment: process
+  timeoutMs: 45000
+
+# These steps are the permission manifest for the sandbox broker. The runtime
+# does not execute them directly when `execution.kind: script` is present.
+skills:
+  - id: load_managed_devices
+    format: graph
+    label: Load managed device posture inputs
+    detail: Allows the sandboxed script to read managedDevices from the active tenant.
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select:
+        - id
+        - deviceName
+        - userPrincipalName
+        - operatingSystem
+        - osVersion
+        - complianceState
+        - lastSyncDateTime
+        - enrolledDateTime
+        - managedDeviceOwnerType
+        - deviceEnrollmentType
+        - managementState
+      query:
+        $top: "999"
+      scopes:
+        - DeviceManagementManagedDevices.Read.All
+
+  - id: summarize_posture
+    format: llm
+    label: Summarize posture findings
+    detail: Allows the sandboxed script to ask the active LLM for a concise admin-facing summary.
+    settings:
+      system: >-
+        You are an Intune device posture auditor. Be concise, factual, and
+        conservative. Use only the supplied figures. Do not recommend
+        destructive cleanup from this read-only report.
+      prompt: >-
+        The sandboxed auditor will provide compact device posture metrics and
+        sample rows at run time, then request a short summary.
+      temperature: 0.2
+      maxTokens: 420
+
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+
+  result:
+    summary: The MXC sandboxed script writes the final device posture report.

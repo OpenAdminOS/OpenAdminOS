@@ -39,6 +39,7 @@ import {
   agentTemplateToModule,
   agentTemplateToRegistrySummary,
 } from "./agent-template.js";
+import { scriptAgentTemplateToModule } from "./script-agent.js";
 import {
   disposeBuiltConnectors,
   noSecrets,
@@ -77,6 +78,10 @@ export {
   runAgentTemplateApply,
   agentTemplateToModule,
 } from "./agent-template.js";
+export {
+  scriptAgentTemplateToModule,
+  type ScriptAgentModuleOptions,
+} from "./script-agent.js";
 export { renderTemplate, renderDeep } from "./template-engine.js";
 export {
   acquireTokenSilent,
@@ -250,6 +255,7 @@ export function toInstalledAgent(
     author: agent.author,
     version: agent.version,
     preferredModel: agent.preferredModel,
+    execution: agent.execution,
     registryId: agent.registryId,
     registryPath: agent.registryPath,
     minAppVersion: agent.minAppVersion,
@@ -928,6 +934,9 @@ export async function loadAgentModule(
     );
   }
   const manifest = parseAgentTemplate(readFileSync(yamlPath, "utf8"));
+  if (manifest.execution?.kind === "script") {
+    return scriptAgentTemplateToModule(manifest, agentDir);
+  }
   return agentTemplateToModule(manifest);
 }
 
@@ -1166,5 +1175,6 @@ function toAgentDefinition(agent: AgentSummary): RunContext["agent"] {
     author: agent.author,
     version: agent.version,
     preferredModel: agent.preferredModel,
+    execution: agent.execution,
   };
 }

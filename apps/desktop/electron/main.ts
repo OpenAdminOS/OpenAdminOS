@@ -43,6 +43,7 @@ import type {
   RunGraphApi,
   RunLlmApi,
   RunRecord,
+  SandboxSettings,
   SaveTextFileArgs,
   SchedulerLaunchSettings,
   SelfTrainingSuggestionStatus,
@@ -59,7 +60,11 @@ import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
 } from "./connector-confirm-bridge.js";
-import { listRegisteredConnectors, probeMxcSandbox } from "@openadminos/runtime";
+import {
+  OPENADMINOS_MXC_FLAG,
+  listRegisteredConnectors,
+  probeMxcSandbox,
+} from "@openadminos/runtime";
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
 import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 
@@ -128,6 +133,7 @@ const selfTrainingSuggestionStatuses = new Set<SelfTrainingSuggestionStatus>([
   "reset",
 ]);
 const DEFAULT_SUPPORT_API_URL = "https://openadminos.com";
+const launchSandboxedCodeDefault = process.env[OPENADMINOS_MXC_FLAG] === "1";
 
 const smokeUserData = isIntuneChatSmokeLaunch
   ? intuneChatSmokeUserData
@@ -1105,6 +1111,7 @@ async function getReleaseDiagnostics(): Promise<ReleaseDiagnostics> {
     process.platform === "darwin" || process.platform === "win32"
       ? "granted"
       : "unknown";
+  const sandboxSettings = await getSandboxSettings();
   return {
     appVersion: app.getVersion(),
     packaged: app.isPackaged,
@@ -1113,8 +1120,31 @@ async function getReleaseDiagnostics(): Promise<ReleaseDiagnostics> {
     notificationSupported: Notification.isSupported(),
     notificationPermission,
     scheduler: await getSchedulerLaunchSettings(),
-    sandbox: await probeMxcSandbox(),
+    sandbox: sandboxSettings.diagnostics,
   };
+}
+
+async function getSandboxSettings(): Promise<SandboxSettings> {
+  const enabled = await store.getSandboxedCodeEnabled();
+  applySandboxedCodeEnabled(enabled);
+  return {
+    enabled,
+    diagnostics: await probeMxcSandbox(),
+  };
+}
+
+async function setSandboxedCodeEnabled(enabled: boolean): Promise<SandboxSettings> {
+  await store.setSandboxedCodeEnabled(enabled);
+  applySandboxedCodeEnabled(enabled);
+  return getSandboxSettings();
+}
+
+function applySandboxedCodeEnabled(enabled: boolean): void {
+  if (enabled) {
+    process.env[OPENADMINOS_MXC_FLAG] = "1";
+  } else {
+    delete process.env[OPENADMINOS_MXC_FLAG];
+  }
 }
 
 async function exportSupportBundle(
@@ -2467,6 +2497,10 @@ function registerIpcHandlers() {
     handleTrusted(() => getSchedulerLaunchSettings()),
   );
   ipcMain.handle(
+    "openadminos:get-sandbox-settings",
+    handleTrusted(() => getSandboxSettings()),
+  );
+  ipcMain.handle(
     "openadminos:get-release-diagnostics",
     handleTrusted(() => getReleaseDiagnostics()),
   );
@@ -2495,6 +2529,15 @@ function registerIpcHandlers() {
         throw new Error("scheduler enabled must be a boolean.");
       }
       return setSchedulerLaunchEnabled(enabled);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:set-sandboxed-code-enabled",
+    handleTrusted((_event, enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("sandboxed code enabled must be a boolean.");
+      }
+      return setSandboxedCodeEnabled(enabled);
     }),
   );
   ipcMain.handle("openadminos:list-agents", handleTrusted(() => store.listAgents()));
@@ -3032,7 +3075,7 @@ if (!gotLock) {
     mainWindow.focus();
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // In dev the app runs from the unsigned `electron` binary, so macOS
     // shows the default Electron logo in the dock. Override it with the
     // production icon so the dev window looks like the shipped app.
@@ -3072,6 +3115,7 @@ if (!gotLock) {
       appVersion: app.getVersion(),
       allowDevRegistrySource:
         !app.isPackaged && process.env.OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE === "1",
+      sandboxedCodeDefault: launchSandboxedCodeDefault,
       openBrowser: async (url: string) => {
         await shell.openExternal(url);
       },
@@ -3088,6 +3132,7 @@ if (!gotLock) {
           }
         : {}),
     });
+    applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
     void store.processPendingRunDeliveries();
     installSecurityGuards();

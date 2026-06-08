@@ -28,6 +28,7 @@ import {
   type ProviderTestResult,
   type ProviderSummary,
   type ReleaseDiagnostics,
+  type SandboxSettings,
   type SchedulerLaunchSettings,
   type SelfTrainingSettings,
   type SelfTrainingSuggestion,
@@ -1208,8 +1209,12 @@ function GeneralSection() {
   const { state } = useAppState();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
+  const [sandboxSettings, setSandboxSettings] =
+    useState<SandboxSettings | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
+  const [sandboxBusy, setSandboxBusy] = useState(false);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -1219,14 +1224,26 @@ function GeneralSection() {
 
   useEffect(() => {
     let cancelled = false;
-    window.openAdminOS
-      ?.getSchedulerLaunchSettings()
+    const api = window.openAdminOS;
+    if (!api) return;
+    api
+      .getSchedulerLaunchSettings()
       .then((settings) => {
         if (!cancelled) setSchedulerLaunch(settings);
       })
       .catch((error: unknown) => {
         if (!cancelled) {
           setSchedulerError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getSandboxSettings()
+      .then((settings) => {
+        if (!cancelled) setSandboxSettings(settings);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setSandboxError(error instanceof Error ? error.message : String(error));
         }
       });
     return () => {
@@ -1250,6 +1267,21 @@ function GeneralSection() {
     }
   };
 
+  const toggleSandboxedCode = async () => {
+    setSandboxBusy(true);
+    setSandboxError(null);
+    try {
+      const next = await window.openAdminOS?.setSandboxedCodeEnabled(
+        !sandboxSettings?.enabled,
+      );
+      if (next) setSandboxSettings(next);
+    } catch (error) {
+      setSandboxError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSandboxBusy(false);
+    }
+  };
+
   return (
     <div className="max-w-[720px]">
       <SectionTitle
@@ -1257,6 +1289,40 @@ function GeneralSection() {
         subtitle="Defaults that apply across the app."
       />
       <div className="mt-6 flex flex-col gap-3">
+        <SettingRow
+          label="Experimental sandboxed code"
+          description={
+            sandboxSettings?.enabled
+              ? `${formatSandboxValue(sandboxSettings.diagnostics)}. Only code-backed preview agents use MXC; YAML agents keep using the manifest interpreter.`
+              : "Off by default. Enables MXC only for built-in code-backed preview agents such as Intune Device Posture Auditor."
+          }
+          control={
+            <button
+              onClick={() => void toggleSandboxedCode()}
+              disabled={sandboxBusy}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                sandboxSettings?.enabled
+                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25"
+                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+              } ${sandboxBusy ? "cursor-not-allowed opacity-60" : "hover:bg-[var(--color-surface-hover)]"}`}
+              title={sandboxSettings?.diagnostics.detail}
+            >
+              <IconShield size={10} />
+              {sandboxBusy
+                ? "Saving..."
+                : sandboxSettings?.enabled
+                  ? sandboxSettings.diagnostics.status === "available"
+                    ? "Enabled"
+                    : "Enabled, unavailable"
+                  : "Disabled"}
+            </button>
+          }
+        />
+        {sandboxError && (
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {sandboxError}
+          </div>
+        )}
         <SettingRow
           label="OS scheduler"
           description={

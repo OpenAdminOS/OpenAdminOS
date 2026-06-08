@@ -161,6 +161,12 @@ interface PersistedState {
    */
   registryInstallCountsEnabled?: boolean;
   /**
+   * Enables experimental MXC-backed code execution for preview script
+   * agents. Undefined means "no saved preference yet" so the host may
+   * honor a launch-time developer env override.
+   */
+  sandboxedCodeEnabled?: boolean;
+  /**
    * Per-connector persisted state. Keyed by connector id. Stores the
    * user-supplied config (validated against the connector's
    * `configSchema`) plus the last health-check outcome so the
@@ -279,6 +285,7 @@ function entryToRegistrySummary(
     author: entry.author,
     manifestUrl: entry.manifestUrl,
     minAppVersion: entry.minAppVersion,
+    execution: entry.execution,
   }, appVersion);
 }
 
@@ -313,6 +320,8 @@ export interface AppStateStoreOptions {
   statsApiUrl?: string;
   /** Version string POSTed alongside install events, e.g. `0.1.5`. */
   appVersion?: string;
+  /** Initial MXC setting used when state.json has no saved preference. */
+  sandboxedCodeDefault?: boolean;
   /** Writable userData directory used for the registry cache. */
   userDataPath?: string;
   /**
@@ -361,6 +370,7 @@ export class AppStateStore {
     | undefined;
   private readonly statsApiUrl: string;
   private readonly appVersion: string;
+  private readonly sandboxedCodeDefault: boolean;
   private readonly userDataPath: string | undefined;
   private readonly intelligenceStore: IntelligenceSqliteStore | undefined;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
@@ -395,6 +405,7 @@ export class AppStateStore {
       this.onStateChanged = undefined;
       this.statsApiUrl = "";
       this.appVersion = "0.0.0";
+      this.sandboxedCodeDefault = false;
       this.userDataPath = undefined;
       this.intelligenceStore = undefined;
       this.graphFactory = undefined;
@@ -413,6 +424,7 @@ export class AppStateStore {
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
       this.appVersion = options.appVersion ?? "0.0.0";
+      this.sandboxedCodeDefault = options.sandboxedCodeDefault === true;
       this.userDataPath = options.userDataPath;
       this.intelligenceStore = options.userDataPath
         ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"))
@@ -567,6 +579,22 @@ export class AppStateStore {
       await this.write(next);
     });
     return this.getAppState();
+  }
+
+  async getSandboxedCodeEnabled(): Promise<boolean> {
+    const persisted = await this.read();
+    return persisted.sandboxedCodeEnabled ?? this.sandboxedCodeDefault;
+  }
+
+  async setSandboxedCodeEnabled(enabled: boolean): Promise<boolean> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      await this.write({
+        ...current,
+        sandboxedCodeEnabled: enabled,
+      });
+    });
+    return enabled;
   }
 
   private getMsalClient(): PublicClientApplication {
@@ -4897,6 +4925,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       if (typeof parsed.registryInstallCountsEnabled === "boolean") {
         state.registryInstallCountsEnabled = parsed.registryInstallCountsEnabled;
+      }
+      if (typeof parsed.sandboxedCodeEnabled === "boolean") {
+        state.sandboxedCodeEnabled = parsed.sandboxedCodeEnabled;
       }
       if (typeof parsed.registrySource === "string" && parsed.registrySource.length > 0) {
         try {

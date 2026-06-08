@@ -15,7 +15,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 
-import type { AgentTier, RequiredEntraTier } from "@openadminos/agent-sdk";
+import type {
+  AgentExecution,
+  AgentTier,
+  RequiredEntraTier,
+} from "@openadminos/agent-sdk";
 
 export const DEFAULT_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
@@ -50,6 +54,7 @@ export interface RegistryIndexEntry {
     verified: boolean;
   };
   scopes: string[];
+  execution?: AgentExecution;
   minAppVersion: string;
   manifestUrl: string;
 }

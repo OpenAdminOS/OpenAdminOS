@@ -97,6 +97,11 @@ export interface AgentContract {
   author: AgentAuthor;
   version: string;
   preferredModel?: string;
+  /**
+   * Optional execution override for preview code-backed agents. Omitted means
+   * the host uses the normal declarative Agent Template interpreter.
+   */
+  execution?: AgentExecution;
   graphOperations?: GraphOperation[];
   /**
    * Egress dependencies declared by this agent. Validated against the
@@ -911,6 +916,15 @@ export interface SandboxDiagnostics {
   warning?: string;
 }
 
+export interface SandboxSettings {
+  /**
+   * User preference for experimental code-backed agent execution. Off by
+   * default; normal YAML Agent Templates do not depend on this setting.
+   */
+  enabled: boolean;
+  diagnostics: SandboxDiagnostics;
+}
+
 export type SupportIssueSource =
   | "sidebar"
   | "run-failure"
@@ -954,6 +968,7 @@ export interface OpenAdminOSApi {
   platform: HostPlatform;
   getAppState(): Promise<AppState>;
   getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings>;
+  getSandboxSettings(): Promise<SandboxSettings>;
   getReleaseDiagnostics(): Promise<ReleaseDiagnostics>;
   /**
    * Export a reviewed, sanitized diagnostics JSON file for manual
@@ -966,6 +981,7 @@ export interface OpenAdminOSApi {
    */
   submitSupportIssue(input: SupportIssueSubmissionInput): Promise<SupportIssueSubmissionResult>;
   writeClipboardText(text: string): Promise<void>;
+  setSandboxedCodeEnabled(enabled: boolean): Promise<SandboxSettings>;
   setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings>;
   listRegistryAgents(): Promise<RegistryAgentSummary[]>;
   refreshRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
@@ -1610,6 +1626,27 @@ export type TemplateStep =
   | WriteStep
   | ConnectorStep;
 
+export type AgentExecution =
+  | { kind: "template" }
+  | {
+      kind: "script";
+      sandbox: "mxc";
+      entrypoint: string;
+      containment?:
+        | "process"
+        | "vm"
+        | "microvm"
+        | "processcontainer"
+        | "windows_sandbox"
+        | "wslc"
+        | "lxc"
+        | "hyperlight"
+        | "seatbelt"
+        | "isolation_session"
+        | "bubblewrap";
+      timeoutMs?: number;
+    };
+
 export type TemplateTriggerKind = "manual" | "scheduled";
 
 export interface TemplateTrigger {
@@ -1670,6 +1707,7 @@ export interface AgentTemplate {
      */
     connectors?: AgentConnectorRequirement[];
   };
+  execution?: AgentExecution;
   skills: TemplateStep[];
   definition: {
     settings?: TemplateSetting[];

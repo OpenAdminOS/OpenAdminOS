@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 import type { Writable } from "node:stream";
 
@@ -342,6 +343,7 @@ function collectBrokeredChildProcess(
   let protocolBuffer = "";
   let protocolError: Error | undefined;
   let pending = Promise.resolve();
+  const echoedResponseIds = new Set<string>();
 
   child.stdout?.on("data", (chunk: Buffer | string) => {
     if (protocolError) return;
@@ -363,7 +365,14 @@ function collectBrokeredChildProcess(
       protocolBuffer = protocolBuffer.slice(newlineIndex + 1);
       if (line.length > 0) {
         pending = pending
-          .then(() => handleBrokerProtocolLine(child.stdin!, broker, line))
+          .then(() =>
+            handleBrokerProtocolLine(
+              child.stdin!,
+              broker,
+              line,
+              echoedResponseIds,
+            ),
+          )
           .catch((error: unknown) => {
             failBrokerProtocol(child, error, (next) => {
               protocolError = next;
@@ -410,13 +419,18 @@ async function handleBrokerProtocolLine(
   stdin: Writable,
   broker: SandboxBrokerEndpoint,
   line: string,
+  echoedResponseIds: Set<string>,
 ): Promise<void> {
-  const request = parseBrokerRequestLine(line);
+  const request = parseBrokerRequestLine(line, echoedResponseIds);
+  if (!request) return;
   const response = await broker.handle(request);
-  await writeBrokerResponse(stdin, response);
+  await writeBrokerResponse(stdin, response, echoedResponseIds);
 }
 
-function parseBrokerRequestLine(line: string): SandboxBrokerRequest {
+function parseBrokerRequestLine(
+  line: string,
+  echoedResponseIds: Set<string>,
+): SandboxBrokerRequest | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -426,6 +440,14 @@ function parseBrokerRequestLine(line: string): SandboxBrokerRequest {
 
   if (!isRecord(parsed)) {
     throw new Error("MXC sandbox broker request must be a JSON object.");
+  }
+  if (
+    typeof parsed.id === "string" &&
+    typeof parsed.ok === "boolean" &&
+    typeof parsed.method !== "string" &&
+    echoedResponseIds.delete(parsed.id)
+  ) {
+    return null;
   }
   if (typeof parsed.id !== "string" || parsed.id.length === 0) {
     throw new Error("MXC sandbox broker request requires a non-empty string id.");
@@ -442,8 +464,10 @@ function parseBrokerRequestLine(line: string): SandboxBrokerRequest {
 function writeBrokerResponse(
   stdin: Writable,
   response: SandboxBrokerResponse,
+  echoedResponseIds: Set<string>,
 ): Promise<void> {
   const line = `${JSON.stringify(response)}\n`;
+  echoedResponseIds.add(response.id);
   return new Promise((resolve, reject) => {
     const onError = (error: Error) => {
       cleanup();
@@ -515,6 +539,8 @@ function sanitizeSandboxEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     "HOME",
     "USERPROFILE",
     "LOCALAPPDATA",
+    "ELECTRON_RUN_AS_NODE",
+    "OPENADMINOS_BROKER_DIR",
   ];
   const clean: NodeJS.ProcessEnv = {};
   for (const key of allowedKeys) {
@@ -532,7 +558,7 @@ function normalizePolicyPaths(paths: string[]): string[] {
   for (const entry of paths) {
     const trimmed = entry.trim();
     if (trimmed.length === 0) continue;
-    const resolved = path.resolve(trimmed);
+    const resolved = realpathIfPresent(path.resolve(trimmed));
     const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
     if (!seen.has(key)) {
       seen.add(key);
@@ -542,14 +568,22 @@ function normalizePolicyPaths(paths: string[]): string[] {
   return normalized;
 }
 
+function realpathIfPresent(value: string): string {
+  try {
+    return existsSync(value) ? realpathSync(value) : value;
+  } catch {
+    return value;
+  }
+}
+
 function isPathWithinPolicy(target: string, policyPaths: string[]): boolean {
-  const resolvedTarget = path.resolve(target);
+  const resolvedTarget = realpathIfPresent(path.resolve(target));
   return policyPaths.some((policyPath) => pathContains(policyPath, resolvedTarget));
 }
 
 function pathContains(parent: string, child: string): boolean {
-  const resolvedParent = path.resolve(parent);
-  const resolvedChild = path.resolve(child);
+  const resolvedParent = realpathIfPresent(path.resolve(parent));
+  const resolvedChild = realpathIfPresent(path.resolve(child));
   if (process.platform === "win32") {
     const parentLower = resolvedParent.toLowerCase();
     const childLower = resolvedChild.toLowerCase();
