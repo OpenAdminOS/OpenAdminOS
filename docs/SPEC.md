@@ -99,8 +99,13 @@ Search appearance assets must be crawlable from the production host. The
 marketing site should expose a stable PNG favicon of at least 48x48 pixels, a
 180x180 Apple touch icon, and `WebSite` structured data with `name:
 OpenAdminOS` plus `alternateName: Open Admin OS` so Google has consistent site
-name inputs. The marketing robots.txt should explicitly allow major AI search
-crawlers while keeping API routes blocked.
+name inputs. `Organization.url` and `WebSite.url` should use the canonical
+homepage URL with a trailing slash, and the apex host should permanently
+redirect to `https://www.openadminos.com/`. The evergreen homepage should avoid
+`dateModified` structured data unless a user-visible "last updated" date is
+intentionally shown, so Google is less likely to frame the homepage as a recent
+article-style result. The marketing robots.txt should explicitly allow major AI
+search crawlers while keeping API routes blocked.
 `SoftwareApplication` structured data must match the current downloadable
 platforms and must not advertise Windows availability until signed Windows
 builds are actually published. Marketing download surfaces present macOS as a

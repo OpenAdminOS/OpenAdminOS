@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 export const SITE_NAME = "OpenAdminOS";
 export const SITE_URL = "https://www.openadminos.com";
+export const SITE_HOME_URL = `${SITE_URL}/`;
 export const GITHUB_URL = "https://github.com/OpenAdminOS/OpenAdminOS";
 export const DOCS_URL = "https://docs.openadminos.com/";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/openadminos/";
@@ -101,7 +102,7 @@ export function organizationSchema() {
       name: MANAGING_DIRECTOR_NAME,
       jobTitle: "Managing director",
     },
-    url: SITE_URL,
+    url: SITE_HOME_URL,
     logo: absoluteUrl("/apple-icon.png"),
     sameAs: [GITHUB_URL, LINKEDIN_URL, DOCS_URL],
     address: {
@@ -122,7 +123,7 @@ export function websiteSchema() {
     "@id": `${SITE_URL}/#website`,
     name: SITE_NAME,
     alternateName: "Open Admin OS",
-    url: SITE_URL,
+    url: SITE_HOME_URL,
     publisher: { "@id": `${SITE_URL}/#organization` },
     inLanguage: "en",
   };
@@ -161,7 +162,7 @@ export function webPageSchema(input: {
   path: string;
   name: string;
   description: string;
-  dateModified: string;
+  dateModified?: string;
 }) {
   const url = absoluteUrl(input.path);
 
@@ -173,7 +174,7 @@ export function webPageSchema(input: {
     description: input.description,
     isPartOf: { "@id": `${SITE_URL}/#website` },
     about: { "@id": `${SITE_URL}/#software` },
-    dateModified: input.dateModified,
+    ...(input.dateModified ? { dateModified: input.dateModified } : {}),
     inLanguage: "en",
   };
 }

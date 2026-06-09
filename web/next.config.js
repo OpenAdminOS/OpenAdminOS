@@ -12,6 +12,16 @@ const webRoot = dirname(fileURLToPath(import.meta.url));
 const config = {
   outputFileTracingRoot: webRoot,
   poweredByHeader: false,
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "openadminos.com" }],
+        destination: "https://www.openadminos.com/:path*",
+        permanent: true,
+      },
+    ];
+  },
   turbopack: {
     root: webRoot,
   },

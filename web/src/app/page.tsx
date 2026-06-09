@@ -194,7 +194,6 @@ export default async function HomePage() {
         path: "/",
         name: HOME_TITLE,
         description: HOME_DESCRIPTION,
-        dateModified: "2026-06-05",
       }),
       breadcrumbSchema([{ name: "Home", path: "/" }]),
     ],
@@ -268,14 +267,13 @@ export default async function HomePage() {
           </Link>
 
           <h1 className="max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
-            AI agents for Microsoft 365 admins that run from your own machine.
+            OpenAdminOS for Microsoft 365 admins.
           </h1>
 
           <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-white/60 sm:text-lg">
-            Keep sensitive work local, avoid per-token costs with local models,
-            and approve every change before it happens. Use agents to
-            investigate tenant issues, explain policy behavior, and prepare
-            changes.
+            Run AI agents from your own machine, keep sensitive tenant work
+            local with local models, and approve every Microsoft Graph change
+            before it happens.
           </p>
 
           <div className="mt-8 grid w-full max-w-3xl gap-3 md:grid-cols-3">

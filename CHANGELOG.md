@@ -14,6 +14,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Strengthened marketing homepage Google site-name signals with explicit OpenAdminOS hero copy, canonical homepage schema URLs, and no evergreen homepage `dateModified`.
 - Auto-tag release automation now detects the `release: vX.Y.Z` marker from the full merge commit message, so normal release PR merges can cut tags as well as squash merges.
 - MXC sandbox diagnostics now include SDK-reported backend methods, Windows isolation tier, and probe warnings when available, with remediation copy aligned to the current `wxc-host-prep` subcommands.
 
