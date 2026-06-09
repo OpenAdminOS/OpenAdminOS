@@ -160,6 +160,12 @@
       ],
       "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
       "category": "Utility"
+    },
+    "deb": {
+      "recommends": [
+        "libappindicator3-1",
+        "gnome-keyring"
+      ]
     }
   }
 }

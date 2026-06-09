@@ -5131,6 +5131,13 @@ function humanizeMsalError(error: unknown): string {
   if (lower.includes("interaction_required") || lower.includes("invalid_grant")) {
     return "The previous sign-in session expired. Reconnect from Settings → Tenants and complete the consent prompt.";
   }
+  if (
+    lower.includes("secure storage") ||
+    lower.includes("secret service keyring") ||
+    lower.includes("basic_text")
+  ) {
+    return raw;
+  }
   // Fall back to the raw message so debugging is still possible.
   return `Sign-in failed: ${raw}`;
 }

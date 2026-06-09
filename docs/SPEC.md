@@ -674,6 +674,14 @@ SQLite via Electron's built-in `node:sqlite` for:
 - Intune Chat conversations, tool calls, Graph cache snapshots, and per-tenant cache refresh schedules
 - Optional local self-training events and approved suggestions
 
+Linux tenant sign-in requires a real OS secret-store backend. OpenAdminOS uses
+Electron `safeStorage` for the MSAL token cache and refuses Electron's
+unprotected Linux `basic_text` backend. Debian/Ubuntu packages recommend
+`gnome-keyring`; KDE users can satisfy the same requirement with KWallet. If no
+Secret Service/KWallet session is installed and unlocked, tenant connection
+fails before storing tokens and shows recovery copy instead of silently writing
+refresh tokens to weak local storage.
+
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
 error-reporting telemetry. Packaged production builds may send a minimal public
 registry install count event when a public agent is installed: agent slug, app
