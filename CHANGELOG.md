@@ -12,9 +12,6 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
-- Fixed the v0.2.3 GitHub Release notes to use the full sectioned changelog instead of GitHub's generated PR summary.
-- Fixed macOS menu bar companion startup when a hidden background scheduler instance already owns the single-instance lock before the user opens the app.
-
 ### Security
 
 ## [0.2.3] - 2026-06-10
@@ -42,6 +39,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Fixed the v0.2.3 GitHub Release notes to use the full sectioned changelog instead of GitHub's generated PR summary.
+- Fixed macOS menu bar companion startup when a hidden background scheduler instance already owns the single-instance lock before the user opens the app.
 - Aligned v0.2.3 version metadata across the WhatsApp Web connector, desktop/runtime dependencies, marketing package metadata, renderer fallback state, and release-prep automation.
 - Linux tenant sign-in now refuses unprotected secure-storage fallbacks and shows Debian/KWallet keyring recovery copy instead of the raw Electron safeStorage failure.
 - Apt repository generation now indexes Electron Builder `.deb` filenames after validating package architecture from control metadata.
