@@ -108,7 +108,7 @@ function createFallbackState(activeProviderId: ProviderId): AppState {
 
   return {
     activeProviderId,
-    appVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
+    appVersion: __APP_VERSION__,
     providers,
     registryAgents: [],
     installedAgents: [],

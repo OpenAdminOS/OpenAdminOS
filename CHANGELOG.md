@@ -7,6 +7,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Added
 
 - Added Plausible Analytics to the marketing website, with privacy and spec copy clarifying that analytics is limited to public website pages.
+- Added the first macOS menu bar companion implementation: Electron Tray lifecycle, `#/companion` popover route, shared companion snapshot IPC, read-only Intune Chat prompting through the existing stream path, upcoming schedules, recent activity, and due read-schedule quick actions.
+- Added macOS menu bar companion launch controls in Settings and the tray context menu, backed by shared companion launch IPC, release diagnostics, and Electron's Login Item API.
+- Added a generated macOS `OpenAdminOS Menu Bar Helper.app` login item bundle to the desktop build, copied into `Contents/Library/LoginItems` and verified in the release workflow.
+- Added a root `vision.md` product vision for a macOS-only OpenAdminOS menu bar companion with shared Intune Chat, schedule, cache, and runtime architecture.
 - Added the Intune Device Posture Auditor as the first built-in MXC-backed script agent, with a strict `execution.kind: script` manifest contract, brokered Graph/LLM access, and generated Agent Hub docs.
 - Added a host-mediated MXC sandbox broker that validates Graph, LLM, connector, write-plan, and log requests over brokered stdio/file IPC without passing tenant tokens or secrets into sandboxed code.
 - Added an experimental MXC sandbox runner/probe behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, with sandbox diagnostics in Settings -> About and shared broker protocol types for future host-mediated agent execution.
@@ -16,12 +20,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Strengthened marketing homepage Google site-name signals with explicit OpenAdminOS hero copy, canonical homepage schema URLs, and no evergreen homepage `dateModified`.
 - Auto-tag release automation now detects the `release: vX.Y.Z` marker from the full merge commit message, so normal release PR merges can cut tags as well as squash merges.
+- Simplified the macOS menu bar companion into an Ask-first popover with compact cache/schedule actions, activity shown only when useful, a smaller idle window, the OpenAdminOS app icon as the status item, and route-level renderer code splitting to remove the large initial chunk warning.
 - MXC sandbox diagnostics now include SDK-reported backend methods, Windows isolation tier, and probe warnings when available, with remediation copy aligned to the current `wxc-host-prep` subcommands.
 
 ### Removed
 
 ### Fixed
 
+- Aligned v0.2.3 version metadata across the WhatsApp Web connector, desktop/runtime dependencies, marketing package metadata, renderer fallback state, and release-prep automation.
+- Linux tenant sign-in now refuses unprotected secure-storage fallbacks and shows Debian/KWallet keyring recovery copy instead of the raw Electron safeStorage failure.
 - Apt repository generation now indexes Electron Builder `.deb` filenames after validating package architecture from control metadata.
 - MXC sandbox runs now set `config.process.cwd`, require that cwd to be covered by the filesystem policy, and only pass the SDK `experimental` spawn flag for MXC backends that require it.
 - MXC script agents now broker over per-run file IPC, with the Intune Device Posture Auditor verified on macOS Seatbelt using both Node and Electron-as-Node.

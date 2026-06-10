@@ -159,6 +159,227 @@ button:disabled {
   animation: fade-in-scale 0.18s ease-out;
 }
 
+@keyframes companion-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-companion-rise {
+  animation: companion-rise 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.companion-shell {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent 34%),
+    linear-gradient(145deg, rgba(232, 168, 124, 0.055), transparent 42%),
+    var(--color-bg);
+}
+
+.companion-shell::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.66), transparent 70%);
+}
+
+.companion-panel {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.01)),
+    color-mix(in srgb, var(--color-bg-elevated) 90%, black);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  border: 1px solid color-mix(in srgb, var(--color-border-soft) 78%, white);
+}
+
+.companion-break-text {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.companion-icon-button {
+  display: inline-flex;
+  height: 30px;
+  width: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--color-text-muted);
+  background: rgba(0, 0, 0, 0.1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-border-soft) 86%, white);
+  transition: transform 180ms ease-out, color 180ms ease-out, background 180ms ease-out;
+}
+
+.companion-icon-button:hover {
+  color: var(--color-text);
+  background: var(--color-bg-raised);
+  transform: translateY(-1px);
+}
+
+.companion-primary-button,
+.companion-danger-button,
+.companion-quiet-button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: transform 180ms ease-out, background 180ms ease-out, color 180ms ease-out, opacity 180ms ease-out;
+}
+
+.companion-primary-button {
+  color: #1c1917;
+  background: var(--color-accent);
+}
+
+.companion-primary-button:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+}
+
+.companion-danger-button {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger) 28%, transparent);
+}
+
+.companion-danger-button:hover {
+  transform: translateY(-1px);
+}
+
+.companion-quiet-button {
+  color: var(--color-text-muted);
+  background: transparent;
+  padding-inline: 8px;
+}
+
+.companion-quiet-button:hover {
+  color: var(--color-text-soft);
+  background: color-mix(in srgb, var(--color-bg-raised) 70%, transparent);
+}
+
+.companion-textarea {
+  min-height: 82px;
+  width: 100%;
+  resize: none;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 10px 11px;
+  color: var(--color-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+}
+
+.companion-textarea::placeholder {
+  color: var(--color-text-faint);
+}
+
+.companion-textarea:focus,
+.companion-textarea:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 0 1px var(--color-accent-soft);
+}
+
+.companion-textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.companion-action-card,
+.companion-list-row {
+  animation: companion-rise 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.companion-action-card {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 40px;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 9px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-soft);
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: transform 180ms ease-out, background 180ms ease-out, color 180ms ease-out;
+}
+
+.companion-action-card > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.companion-action-card:hover:not(:disabled) {
+  background: var(--color-bg-raised);
+  color: var(--color-text);
+  transform: translateY(-1px);
+}
+
+.companion-list-row {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  width: 100%;
+  max-width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+  padding: 8px 9px;
+  text-align: left;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  transition: transform 180ms ease-out, background 180ms ease-out, box-shadow 180ms ease-out;
+}
+
+.companion-list-row:hover {
+  background: var(--color-bg-raised);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, var(--color-border-soft));
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-companion-rise,
+  .companion-action-card,
+  .companion-list-row {
+    animation: none;
+  }
+
+  .companion-icon-button,
+  .companion-primary-button,
+  .companion-danger-button,
+  .companion-quiet-button,
+  .companion-action-card,
+  .companion-list-row {
+    transition: none;
+  }
+}
+
 /* Electron window drag regions. Tailwind has no utility for the
  * non-standard -webkit-app-region property, and React's CSS-in-JS
  * doesn't reliably emit it from the camelCase `WebkitAppRegion` prop.

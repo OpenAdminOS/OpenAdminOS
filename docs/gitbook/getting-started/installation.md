@@ -39,6 +39,12 @@ The OpenAdminOS Linux archive key fingerprint is:
 
 Direct AppImage, `.deb`, and `.rpm` downloads remain available from [GitHub Releases](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest). These direct Linux artifacts are unsigned preview builds. Verify the SHA-256 hash from the release notes or `SHA256SUMS.txt` before installing.
 
+Tenant sign-in on Linux requires an unlocked OS keyring because Microsoft
+refresh tokens are stored through Electron `safeStorage`. On Debian or Ubuntu,
+install `gnome-keyring` if your desktop session does not already provide Secret
+Service. KDE users can use KWallet. OpenAdminOS refuses Electron's unprotected
+`basic_text` fallback for tenant tokens.
+
 ## Requirements
 
 - A Microsoft 365 tenant where you can approve the required Graph permissions.
