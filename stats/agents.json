@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-08T21:00:22.320Z",
+  "updatedAt": "2026-06-10T03:00:10.741Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 10,
@@ -19,7 +19,7 @@
     },
     "os-update-posture": {
       "installs": 6,
-      "installs7d": 2
+      "installs7d": 1
     },
     "tenant-health-report": {
       "installs": 8,
@@ -27,15 +27,15 @@
     },
     "user-license-overview": {
       "installs": 7,
-      "installs7d": 2
+      "installs7d": 1
     },
     "conditional-access-explainer": {
-      "installs": 11,
-      "installs7d": 3
+      "installs": 12,
+      "installs7d": 4
     },
     "dormant-app-registrations": {
       "installs": 8,
-      "installs7d": 2
+      "installs7d": 1
     },
     "risky-sign-in-triage": {
       "installs": 5,
@@ -43,7 +43,7 @@
     },
     "secure-score-prioritizer": {
       "installs": 7,
-      "installs7d": 2
+      "installs7d": 1
     },
     "sign-in-failure-explainer": {
       "installs": 7,
