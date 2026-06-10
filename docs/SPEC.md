@@ -1027,6 +1027,7 @@ Required before public v1 release:
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.
 Release automation treats `release: vX.Y.Z` as the canonical marker and parses it from the full merge commit message, so both squash merges and normal merge commits can cut the corresponding tag.
 Release prep must bump every OpenAdminOS-owned package manifest and matching lockfile metadata that carries the product release version, including desktop, runtime, connector packages, QA packages, and the marketing website package.
+Release publishing must use the matching `CHANGELOG.md` section as the GitHub Release body and fail if that section is missing; generated PR summaries are not an acceptable fallback for release notes.
 
 ---
 

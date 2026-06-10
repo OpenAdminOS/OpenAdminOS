@@ -6,6 +6,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+- Fixed the v0.2.3 GitHub Release notes to use the full sectioned changelog instead of GitHub's generated PR summary.
+
+### Security
+
+## [0.2.3] - 2026-06-10
+
+### Added
+
 - Added Plausible Analytics to the marketing website, with privacy and spec copy clarifying that analytics is limited to public website pages.
 - Added the first macOS menu bar companion implementation: Electron Tray lifecycle, `#/companion` popover route, shared companion snapshot IPC, read-only Intune Chat prompting through the existing stream path, upcoming schedules, recent activity, and due read-schedule quick actions.
 - Added macOS menu bar companion launch controls in Settings and the tray context menu, backed by shared companion launch IPC, release diagnostics, and Electron's Login Item API.
