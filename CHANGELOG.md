@@ -13,6 +13,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Fixed the v0.2.3 GitHub Release notes to use the full sectioned changelog instead of GitHub's generated PR summary.
+- Fixed macOS menu bar companion startup when a hidden background scheduler instance already owns the single-instance lock before the user opens the app.
 
 ### Security
 

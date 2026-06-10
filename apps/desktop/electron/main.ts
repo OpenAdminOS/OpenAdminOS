@@ -3101,6 +3101,12 @@ function createMenuBarCompanion(): void {
   });
 }
 
+function createMenuBarCompanionForInteractiveLaunch(): void {
+  if (process.platform === "darwin") {
+    createMenuBarCompanion();
+  }
+}
+
 function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:get-companion-snapshot",
@@ -3714,11 +3720,13 @@ if (!gotLock) {
 
     if (!mainWindow || mainWindow.isDestroyed()) {
       showDockForInteractiveSession();
+      createMenuBarCompanionForInteractiveLaunch();
       void createWindow({ show: true });
       return;
     }
 
     showDockForInteractiveSession();
+    createMenuBarCompanionForInteractiveLaunch();
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
     }
@@ -3862,9 +3870,11 @@ if (!gotLock) {
     app.on("activate", () => {
       if (!mainWindow || mainWindow.isDestroyed()) {
         showDockForInteractiveSession();
+        createMenuBarCompanionForInteractiveLaunch();
         void createWindow({ show: true });
       } else {
         showDockForInteractiveSession();
+        createMenuBarCompanionForInteractiveLaunch();
         mainWindow.show();
         mainWindow.focus();
       }

@@ -1029,6 +1029,8 @@ Release automation treats `release: vX.Y.Z` as the canonical marker and parses i
 Release prep must bump every OpenAdminOS-owned package manifest and matching lockfile metadata that carries the product release version, including desktop, runtime, connector packages, QA packages, and the marketing website package.
 Release publishing must use the matching `CHANGELOG.md` section as the GitHub Release body and fail if that section is missing; generated PR summaries are not an acceptable fallback for release notes.
 
+The macOS menu bar companion must be created during any interactive app launch, including the case where a hidden background scheduler process already owns the Electron single-instance lock and receives the visible launch through the `second-instance` path.
+
 ---
 
 ## 3. Design system
