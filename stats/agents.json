@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-06-10T03:00:10.741Z",
+  "updatedAt": "2026-06-10T15:00:53.885Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 10,
-      "installs7d": 2
+      "installs7d": 1
     },
     "intune-device-posture-auditor": {
       "installs": 0,
@@ -11,11 +11,11 @@
     },
     "offboarding-agent": {
       "installs": 6,
-      "installs7d": 1
+      "installs7d": 0
     },
     "compliance-overview": {
-      "installs": 11,
-      "installs7d": 2
+      "installs": 12,
+      "installs7d": 3
     },
     "os-update-posture": {
       "installs": 6,
@@ -23,7 +23,7 @@
     },
     "tenant-health-report": {
       "installs": 8,
-      "installs7d": 3
+      "installs7d": 2
     },
     "user-license-overview": {
       "installs": 7,
