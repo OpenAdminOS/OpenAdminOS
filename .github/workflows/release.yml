@@ -401,6 +401,7 @@ jobs:
         with:
           draft: false
           make_latest: true
+          overwrite_files: true
           body: ${{ steps.notes.outputs.body }}
           files: |
             release-assets/*

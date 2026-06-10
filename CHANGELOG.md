@@ -33,6 +33,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Strengthened marketing homepage Google site-name signals with explicit OpenAdminOS hero copy, canonical homepage schema URLs, and no evergreen homepage `dateModified`.
 - Auto-tag release automation now detects the `release: vX.Y.Z` marker from the full merge commit message, so normal release PR merges can cut tags as well as squash merges.
 - Simplified the macOS menu bar companion into an Ask-first popover with compact cache/schedule actions, activity shown only when useful, a smaller idle window, the OpenAdminOS app icon as the status item, and route-level renderer code splitting to remove the large initial chunk warning.
+- Stopped reporting passive run, cache, provider, and scheduler issues inside the macOS menu bar companion popover; detailed remediation stays in the full desktop app.
 - MXC sandbox diagnostics now include SDK-reported backend methods, Windows isolation tier, and probe warnings when available, with remediation copy aligned to the current `wxc-host-prep` subcommands.
 
 ### Removed
@@ -41,6 +42,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Fixed the v0.2.3 GitHub Release notes to use the full sectioned changelog instead of GitHub's generated PR summary.
 - Fixed macOS menu bar companion startup when a hidden background scheduler instance already owns the single-instance lock before the user opens the app.
+- Release publishing now explicitly overwrites existing release assets so v0.2.3 backfills can replace the signed installers and updater metadata.
 - Aligned v0.2.3 version metadata across the WhatsApp Web connector, desktop/runtime dependencies, marketing package metadata, renderer fallback state, and release-prep automation.
 - Linux tenant sign-in now refuses unprotected secure-storage fallbacks and shows Debian/KWallet keyring recovery copy instead of the raw Electron safeStorage failure.
 - Apt repository generation now indexes Electron Builder `.deb` filenames after validating package architecture from control metadata.

@@ -1311,9 +1311,6 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
     .map((resource) => resource.refreshedAt)
     .filter((value): value is string => Boolean(value))
     .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
-  const cacheErrors = cacheStatus?.resources
-    .map((resource) => resource.lastError)
-    .filter((value): value is string => Boolean(value));
   const nowMs = Date.now();
   const inFlight = state.runs
     .filter((run) =>
@@ -1347,82 +1344,16 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
     .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))
     .slice(0, 5);
   const recentActivity = state.runs
+    .filter((run) => run.status !== "failed")
     .slice(0, 6)
     .map((run) => ({
       id: run.id,
       label: agentNameForRun(state.installedAgents, run),
       status: run.status,
       queuedAt: run.queuedAt,
-      ...(run.summary ? { summary: run.summary } : run.error ? { summary: run.error } : {}),
+      ...(run.summary ? { summary: run.summary } : {}),
       route: `/runs/${run.id}`,
     }));
-  const attention: CompanionSnapshot["attention"] = [];
-
-  if (!activeTenant) {
-    attention.push({
-      id: "tenant-required",
-      severity: "warning",
-      title: "Tenant required",
-      body: "Connect a Microsoft 365 tenant before asking chat or running schedules.",
-      actionRoute: "/onboarding",
-    });
-  }
-  if (activeProvider && activeProvider.status === "error") {
-    attention.push({
-      id: "provider-error",
-      severity: "danger",
-      title: `${activeProvider.name} unavailable`,
-      body: activeProvider.detail ?? "Open provider settings and test the connection.",
-      actionRoute: "/settings",
-    });
-  }
-  if (activeProvider && activeProvider.status === "not-installed") {
-    attention.push({
-      id: "provider-not-installed",
-      severity: "warning",
-      title: `${activeProvider.name} not ready`,
-      body: activeProvider.detail ?? "Configure a provider before asking Intune Chat.",
-      actionRoute: "/settings",
-    });
-  }
-  if (scheduler.lastError) {
-    attention.push({
-      id: "scheduler-error",
-      severity: "danger",
-      title: "Scheduler needs attention",
-      body: scheduler.lastError,
-      actionRoute: "/settings",
-    });
-  }
-  const pendingWrite = state.runs.find((run) => run.status === "awaiting-confirmation");
-  if (pendingWrite) {
-    attention.push({
-      id: `pending-write-${pendingWrite.id}`,
-      severity: "warning",
-      title: "Write confirmation waiting",
-      body: `${agentNameForRun(state.installedAgents, pendingWrite)} is paused for review.`,
-      actionRoute: `/runs/${pendingWrite.id}`,
-    });
-  }
-  const latestFailure = state.runs.find((run) => run.status === "failed");
-  if (latestFailure) {
-    attention.push({
-      id: `failed-run-${latestFailure.id}`,
-      severity: "danger",
-      title: "Latest run failed",
-      body: latestFailure.error ?? `${agentNameForRun(state.installedAgents, latestFailure)} failed.`,
-      actionRoute: `/runs/${latestFailure.id}`,
-    });
-  }
-  if (cacheErrors?.[0]) {
-    attention.push({
-      id: "cache-error",
-      severity: "warning",
-      title: "Cache refresh issue",
-      body: cacheErrors[0],
-      actionRoute: "/settings",
-    });
-  }
 
   return {
     activeTenant: activeTenant
@@ -1442,14 +1373,13 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
       ...(refreshedAt ? { latestRefreshAt: refreshedAt } : {}),
       stale: !refreshedAt || nowMs - Date.parse(refreshedAt) > 24 * 60 * 60 * 1000,
       refreshing: false,
-      ...(cacheErrors?.[0] ? { lastError: cacheErrors[0] } : {}),
     },
     scheduler,
     companion: getCompanionLaunchSettings(),
     inFlight,
     upcomingSchedules,
     recentActivity,
-    attention: attention.slice(0, 5),
+    attention: [],
   };
 }
 

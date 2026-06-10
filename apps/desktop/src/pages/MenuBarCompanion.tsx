@@ -65,19 +65,8 @@ export default function MenuBarCompanion() {
       const next = await api.getCompanionSnapshot();
       setSnapshot(next);
       setLastSnapshotAt(new Date());
-    } catch (error) {
-      setSnapshot({
-        ...fallbackSnapshot(state),
-        attention: [
-          {
-            id: "companion-snapshot-error",
-            severity: "danger",
-            title: "Companion state unavailable",
-            body: error instanceof Error ? error.message : String(error),
-            actionRoute: "/settings",
-          },
-        ],
-      });
+    } catch {
+      setSnapshot(fallbackSnapshot(state));
       setLastSnapshotAt(new Date());
     }
   }, [state]);
@@ -122,11 +111,8 @@ export default function MenuBarCompanion() {
     const api = window.openAdminOS;
     if (!api || sendingRef.current || !content) return;
     if (!snapshot.activeTenant) {
-      setChat({
-        ...EMPTY_CHAT,
-        phase: "failed",
-        error: "Connect a Microsoft 365 tenant before asking Intune Chat.",
-      });
+      setNotice("Open the full app to finish tenant setup.");
+      await openMain("/onboarding");
       return;
     }
     if (!snapshot.provider || snapshot.provider.status !== "connected") {
@@ -201,14 +187,14 @@ export default function MenuBarCompanion() {
         }
         if (event.type === "failed") {
           setChat({
-            phase: "failed",
+            phase: "idle",
             conversationId: event.result.conversation.id,
             assistantMessageId: event.result.assistantMessage.id,
-            content: event.result.assistantMessage.content,
-            status: "Failed",
+            content: "",
+            status: "Continue in app",
             sources: event.result.assistantMessage.sources ?? [],
-            error: event.error,
           });
+          setNotice("Continue in the full app to review this chat.");
           void loadSnapshot();
         }
         if (event.type === "cancelled") {
@@ -223,14 +209,14 @@ export default function MenuBarCompanion() {
           void loadSnapshot();
         }
       });
-    } catch (error) {
+    } catch {
       setChat({
-        phase: "failed",
+        phase: "idle",
         content: "",
-        status: "Failed",
+        status: "Continue in app",
         sources: [],
-        error: error instanceof Error ? error.message : String(error),
       });
+      setNotice("Continue in the full app to use Intune Chat.");
     } finally {
       sendingRef.current = false;
     }
@@ -249,8 +235,9 @@ export default function MenuBarCompanion() {
       await api.refreshGraphCache();
       setNotice("Tenant cache refreshed.");
       await loadSnapshot();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+    } catch {
+      setNotice("Open Settings in the full app for cache refresh details.");
+      await openMain("/settings");
     } finally {
       setBusyAction(null);
     }
@@ -263,11 +250,14 @@ export default function MenuBarCompanion() {
     setNotice(null);
     try {
       const result = await api.runDueReadSchedules();
-      const errorCopy = result.errors.length > 0 ? ` ${result.errors.length} failed to queue.` : "";
-      setNotice(`${result.queued} read schedule${result.queued === 1 ? "" : "s"} queued.${errorCopy}`);
+      setNotice(`${result.queued} read schedule${result.queued === 1 ? "" : "s"} queued.`);
+      if (result.errors.length > 0) {
+        await openMain("/agents/schedules");
+      }
       await loadSnapshot();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+    } catch {
+      setNotice("Open Schedules in the full app for queue details.");
+      await openMain("/agents/schedules");
     } finally {
       setBusyAction(null);
     }
@@ -283,8 +273,6 @@ export default function MenuBarCompanion() {
           onOpenMain={() => void openMain("/chat")}
           onOpenSettings={() => void openMain("/settings")}
         />
-
-        <AttentionList snapshot={snapshot} onOpen={(route) => void openMain(route)} />
 
         {notice && (
           <div className="companion-break-text animate-companion-rise min-w-0 max-w-full rounded-lg bg-[var(--color-info-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
@@ -363,7 +351,7 @@ function CompanionHeader({
           <div className="flex items-center gap-2">
             <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--color-bg-raised)] text-[var(--color-accent)] ring-1 ring-[var(--color-border-soft)]">
               <IconShield size={17} />
-              <span className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-elevated)] ${snapshot.attention.length > 0 ? "bg-[var(--color-warning)]" : "bg-[var(--color-success)]"}`} />
+              <span className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-elevated)] ${snapshot.activeTenant ? "bg-[var(--color-success)]" : "bg-[var(--color-text-muted)]"}`} />
             </span>
             <span className="min-w-0">
               <span className="block truncate text-[13.5px] font-semibold text-[var(--color-text)]">
@@ -402,32 +390,6 @@ function CompanionHeader({
           label={schedulerLabel}
         />
       </div>
-    </div>
-  );
-}
-
-function AttentionList({
-  snapshot,
-  onOpen,
-}: {
-  snapshot: CompanionSnapshot;
-  onOpen: (route: string) => void;
-}) {
-  if (snapshot.attention.length === 0) return null;
-  return (
-    <div className="grid gap-1.5">
-      {snapshot.attention.slice(0, 2).map((item) => (
-        <button
-          key={item.id}
-          className={`animate-companion-rise min-w-0 max-w-full overflow-hidden rounded-lg px-3 py-2 text-left ring-1 transition-transform duration-200 hover:translateY-[-1px] ${item.severity === "danger" ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/25" : "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/25"}`}
-          onClick={() => item.actionRoute && onOpen(item.actionRoute)}
-        >
-          <span className="block truncate text-[11.5px] font-semibold">{item.title}</span>
-          <span className="companion-break-text mt-0.5 block max-h-[2.9em] overflow-hidden text-[10.5px] leading-relaxed opacity-85">
-            {item.body}
-          </span>
-        </button>
-      ))}
     </div>
   );
 }
@@ -475,7 +437,7 @@ function AskPanel({
       </div>
 
       {chat.phase !== "idle" && (
-        <div className={`companion-break-text mb-2 max-h-[132px] min-w-0 overflow-auto rounded-lg px-3 py-2.5 ring-1 ${chat.phase === "failed" ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/25" : "bg-black/12 text-[var(--color-text-soft)] ring-white/[0.05]"}`}>
+        <div className="companion-break-text mb-2 max-h-[132px] min-w-0 overflow-auto rounded-lg bg-black/12 px-3 py-2.5 text-[var(--color-text-soft)] ring-1 ring-white/[0.05]">
           {chat.phase === "working" && chat.content.length === 0 ? (
             <div className="space-y-2">
               <ProgressLine label="Checking cache" active />
@@ -483,7 +445,7 @@ function AskPanel({
               <ProgressLine label="Generating response" active />
             </div>
           ) : chat.error ? (
-            <p className="text-[12px] leading-relaxed">{chat.error}</p>
+            <p className="text-[12px] leading-relaxed">Continue in the full app to review this chat.</p>
           ) : chat.content ? (
             <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed">{chat.content}</p>
           ) : (
@@ -758,7 +720,7 @@ function OutcomeBadge({ status }: { status: string }) {
     status === "completed"
       ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/25"
       : status === "failed"
-        ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/25"
+        ? "bg-black/10 text-[var(--color-text-muted)] ring-white/[0.06]"
         : "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/25";
   return (
     <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9.5px] ring-1 ${tone}`}>
@@ -798,16 +760,7 @@ function fallbackSnapshot(state: AppState): CompanionSnapshot {
     inFlight: [],
     upcomingSchedules: [],
     recentActivity: [],
-    attention: tenant
-      ? []
-      : [
-          {
-            id: "bridge",
-            severity: "warning",
-            title: "Desktop bridge unavailable",
-            body: "Use the Electron window to access tenants, cache, schedules, and Intune Chat.",
-          },
-        ],
+    attention: [],
   };
 }
 
