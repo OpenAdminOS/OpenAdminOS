@@ -25,6 +25,7 @@
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
+    "@microsoft/mxc-sdk": "0.6.1",
     "@openadminos/agent-sdk": "0.2.3",
     "@openadminos/connector-whatsapp-web": "0.2.3",
     "@openadminos/runtime": "0.2.3",
@@ -77,6 +78,10 @@
         "to": "native"
       },
       {
+        "from": "../../node_modules/@microsoft/mxc-sdk/bin",
+        "to": "native/mxc-sdk/bin"
+      },
+      {
         "from": "build/icon.png",
         "to": "app-icon.png"
       }
@@ -95,6 +100,7 @@
       "notarize": true,
       "binaries": [
         "Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper",
+        "Contents/Resources/native/mxc-sdk/bin/arm64/mxc-exec-mac",
         "Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app/Contents/MacOS/OpenAdminOS Menu Bar Helper"
       ],
       "extraFiles": [

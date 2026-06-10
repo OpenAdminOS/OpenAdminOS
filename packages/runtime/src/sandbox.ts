@@ -282,6 +282,7 @@ async function loadMxcSdk(
   override?: () => Promise<MxcSdk>,
 ): Promise<MxcSdk> {
   if (override) return await override();
+  ensureBundledMxcBinDir();
   const specifier = "@microsoft/mxc-sdk";
   const mod = (await import(specifier)) as Partial<MxcSdk>;
   if (
@@ -292,6 +293,16 @@ async function loadMxcSdk(
     throw new Error("@microsoft/mxc-sdk did not expose the expected API.");
   }
   return mod as MxcSdk;
+}
+
+function ensureBundledMxcBinDir(): void {
+  if (process.env.MXC_BIN_DIR) return;
+  const resourcesPath = (process as { resourcesPath?: string }).resourcesPath;
+  if (!resourcesPath) return;
+  const bundledBinDir = path.join(resourcesPath, "native", "mxc-sdk", "bin");
+  if (existsSync(bundledBinDir)) {
+    process.env.MXC_BIN_DIR = bundledBinDir;
+  }
 }
 
 function collectChildProcess(

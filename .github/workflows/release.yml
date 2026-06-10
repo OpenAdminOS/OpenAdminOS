@@ -182,6 +182,25 @@ jobs:
             codesign --verify --strict --verbose=2 "$helper"
           fi
 
+      - name: Verify MXC macOS executor was packaged
+        shell: bash
+        run: |
+          set -euo pipefail
+          executor="$(find apps/desktop/release -path '*/OpenAdminOS.app/Contents/Resources/native/mxc-sdk/bin/arm64/mxc-exec-mac' -type f -print -quit)"
+          if [ -z "$executor" ]; then
+            echo "::error::MXC macOS executor was not found in the packaged app bundle."
+            find apps/desktop/release -path '*/native/mxc-sdk/*' -print | sort
+            exit 1
+          fi
+          if [ ! -x "$executor" ]; then
+            echo "::error::MXC macOS executor exists but is not executable: $executor"
+            exit 1
+          fi
+          file "$executor"
+          if [ -n "${CSC_LINK:-}" ]; then
+            codesign --verify --strict --verbose=2 "$executor"
+          fi
+
       - name: Verify menu bar login helper was packaged
         shell: bash
         run: |
