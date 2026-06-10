@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Bump every workspace package.json + cross-workspace dep ref to the next
+// Bump every release-versioned package.json + cross-workspace dep ref to the next
 // version, and roll CHANGELOG.md so the [Unreleased] section becomes a
 // dated [X.Y.Z] section with the entries that accumulated since the last
 // release.
@@ -12,6 +12,8 @@
 // Output:
 //   - All package.json files in PACKAGES_TO_BUMP (and their workspace
 //     dep refs) rewritten in place.
+//   - Extra package-lock.json files outside the root workspace lock have
+//     their root package metadata version rewritten in place.
 //   - CHANGELOG.md rolled: a new "## [X.Y.Z] - YYYY-MM-DD" section is
 //     inserted under "## [Unreleased]", carrying every non-empty entry
 //     from the Unreleased section. The Unreleased section is reset to
@@ -39,6 +41,8 @@ const PACKAGES_TO_BUMP = [
   "packages/runtime/package.json",
   "packages/qa-graph/package.json",
   "packages/connector-teams/package.json",
+  "packages/connector-whatsapp-web/package.json",
+  "web/package.json",
 ];
 
 // Registry agents used to ship as workspace packages with their own
@@ -48,6 +52,8 @@ const PACKAGES_TO_BUMP = [
 // longer need version bumping. If new workspace packages with
 // internal-version-pinned deps are added later, list them here.
 const PACKAGES_WITH_WORKSPACE_DEPS = [...PACKAGES_TO_BUMP];
+
+const LOCKFILES_TO_BUMP = ["web/package-lock.json"];
 
 const CHANGELOG_PATH = "CHANGELOG.md";
 
@@ -80,6 +86,7 @@ function main() {
 
   rollChangelog(current, next);
   bumpPackages(current, next);
+  bumpLockfiles(current, next);
 
   process.stdout.write(`BUMPED ${current} -> ${next}\n`);
 }
@@ -138,6 +145,24 @@ function bumpPackages(current, next) {
       `$1${next}"`,
     );
     writeFileSync(file, text);
+  }
+}
+
+function bumpLockfiles(current, next) {
+  for (const file of LOCKFILES_TO_BUMP) {
+    const lock = JSON.parse(readFileSync(file, "utf8"));
+    if (lock.version !== current) {
+      fail(`Could not bump version in ${file}. Expected root version "${current}", found "${lock.version}".`);
+    }
+    if (lock.packages?.[""]?.version !== current) {
+      fail(
+        `Could not bump version in ${file}. Expected packages[""].version "${current}", ` +
+        `found "${lock.packages?.[""]?.version}".`,
+      );
+    }
+    lock.version = next;
+    lock.packages[""].version = next;
+    writeFileSync(file, `${JSON.stringify(lock, null, 2)}\n`);
   }
 }
 

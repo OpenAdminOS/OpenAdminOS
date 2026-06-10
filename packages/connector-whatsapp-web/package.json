@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/connector-whatsapp-web",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "WhatsApp Web connector for OpenAdminOS. Sends outbound notification messages through a locally linked WhatsApp Web session.",

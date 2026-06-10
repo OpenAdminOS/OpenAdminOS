@@ -343,7 +343,7 @@ export class WhatsAppWebClient {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, silentLogger),
       },
-      browser: ["OpenAdminOS", "Desktop", "0.2.2"],
+      browser: ["OpenAdminOS", "Desktop", "0.2.3"],
       logger: silentLogger,
       markOnlineOnConnect: false,
       printQRInTerminal: false,
