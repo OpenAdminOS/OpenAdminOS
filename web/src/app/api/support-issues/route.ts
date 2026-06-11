@@ -2,6 +2,7 @@ import { Octokit } from "@octokit/rest";
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 
+import { redactSupportPublicText } from "~/lib/support/secret-redaction";
 import { getRedis, keys } from "~/lib/stats/redis";
 
 export const runtime = "nodejs";
@@ -226,11 +227,7 @@ function optionalSanitizedText(value: unknown, maxLength: number): string | unde
 }
 
 function sanitizePublicText(value: string, maxLength: number): string {
-  return value
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email]")
-    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[guid]")
-    .replace(/\b[A-Za-z0-9-]+\.onmicrosoft\.com\b/gi, "[tenant-domain]")
-    .replace(/https?:\/\/[^\s"'<>]+/gi, "[url]")
+  return redactSupportPublicText(value)
     .replace(/\s+\n/g, "\n")
     .trim()
     .slice(0, maxLength);

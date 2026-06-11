@@ -712,7 +712,14 @@ identifiers, account usernames, tenant domains, prompts, LLM output, Graph
 response bodies, run reports, raw run logs, SQLite databases, screenshots, MSAL
 tokens, provider credentials, or keychain values. No support report is
 submitted automatically after a crash or failure, and no screenshot/session
-replay capture is part of this flow.
+replay capture is part of this flow. The desktop and support endpoint both run
+a deterministic redaction pass over support issue free text before upload and
+public issue creation. The pass catches common secret shapes such as provider
+API keys, GitHub tokens, AWS/Google/Stripe/npm/Vercel tokens, JWTs, private-key
+blocks, long high-entropy strings, authorization headers, and key/value fields
+such as `client_secret` or `access_token`; it also redacts common public
+identity and local-path markers. This is a backstop for accidental paste, not a
+reason for admins to include tenant data in the report.
 
 ### Intune Chat and local intelligence
 

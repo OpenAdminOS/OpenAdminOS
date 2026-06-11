@@ -34,6 +34,7 @@ import {
   attachWindowStatePersistence,
   loadWindowState,
 } from "./window-state.js";
+import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
   AgentCommunitySubmissionMetadata,
   CompanionLaunchSettings,
@@ -2399,8 +2400,10 @@ function validateSupportBundleInput(value: unknown): SupportBundleInput {
     throw new Error("support bundle source is not known.");
   }
   return {
-    title: requireBoundedString(value.title, "title", 160),
-    description: requireBoundedString(value.description, "description", 2_000),
+    title: sanitizeSupportPublicText(requireBoundedString(value.title, "title", 160)),
+    description: sanitizeSupportPublicText(
+      requireBoundedString(value.description, "description", 2_000),
+    ),
     stepsToReproduce: optionalSupportText(value.stepsToReproduce, "stepsToReproduce", 2_000),
     expectedBehavior: optionalSupportText(value.expectedBehavior, "expectedBehavior", 1_200),
     actualBehavior: optionalSupportText(value.actualBehavior, "actualBehavior", 1_200),
@@ -2446,7 +2449,11 @@ function optionalSupportText(
   if (trimmed.length > maxLength) {
     throw new Error(`${name} is too long.`);
   }
-  return trimmed;
+  return sanitizeSupportPublicText(trimmed);
+}
+
+function sanitizeSupportPublicText(value: string): string {
+  return redactSupportPublicText(value).replace(/\s+\n/g, "\n").trim();
 }
 
 function validateProviderId(value: unknown, name = "providerId"): ProviderId {

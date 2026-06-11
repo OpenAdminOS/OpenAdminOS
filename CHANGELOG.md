@@ -14,6 +14,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+- Added desktop-side and server-side secret redaction for support issue text before upload and public GitHub issue creation.
+
 ## [0.2.3] - 2026-06-10
 
 ### Added

@@ -185,8 +185,8 @@ function ReportIssueModal({
             <IconWarning size={14} className="mt-0.5 shrink-0" />
             <p>
               This creates a public GitHub issue. Do not paste tenant names,
-              UPNs, device names, group names, prompts, Graph output, or run
-              reports.
+              UPNs, device names, group names, API keys, tokens, prompts,
+              Graph output, or run reports.
             </p>
           </div>
         </div>
