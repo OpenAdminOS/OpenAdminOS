@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-06-11T08:00:21.744Z",
+  "updatedAt": "2026-06-11T10:00:29.525Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 10,
-      "installs7d": 1
+      "installs": 11,
+      "installs7d": 2
     },
     "intune-device-posture-auditor": {
       "installs": 0,
@@ -26,8 +26,8 @@
       "installs7d": 4
     },
     "user-license-overview": {
-      "installs": 7,
-      "installs7d": 1
+      "installs": 8,
+      "installs7d": 2
     },
     "conditional-access-explainer": {
       "installs": 12,
