@@ -16,9 +16,9 @@ import {
 
 export const revalidate = 900;
 
-const TITLE = "Download for macOS and Linux";
+const TITLE = "Download for Windows, macOS, and Linux";
 const DESCRIPTION =
-  "Download OpenAdminOS for macOS or Linux, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
+  "Download OpenAdminOS for Windows, macOS, or Linux, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -47,6 +47,27 @@ export default async function DownloadPage() {
       href: latestRelease.macosPkg.url,
       label: ".pkg",
       meta: "Apple Silicon · signed and notarized",
+    },
+  ];
+  const windowsPackages = [
+    {
+      actionLabel: "Download installer",
+      badge: "Default",
+      detail: "NSIS installer for individual workstations",
+      hash: latestRelease.windowsSetup.sha256,
+      href: latestRelease.windowsSetup.url,
+      label: "Installer (.exe)",
+      meta: "Windows x64 · signed",
+      primary: true,
+    },
+    {
+      actionLabel: "Download portable",
+      badge: "Portable",
+      detail: "Single executable, no installation required",
+      hash: latestRelease.windowsPortable.sha256,
+      href: latestRelease.windowsPortable.url,
+      label: "Portable (.exe)",
+      meta: "Windows x64 · signed",
     },
   ];
   const linuxPackages = [
@@ -84,7 +105,7 @@ export default async function DownloadPage() {
       websiteSchema(),
       softwareApplicationSchema({
         downloadUrl: latestRelease.releaseNotesUrl,
-        operatingSystem: "macOS, Linux",
+        operatingSystem: "Windows, macOS, Linux",
         version: latestRelease.version,
       }),
       webPageSchema({
@@ -140,6 +161,12 @@ export default async function DownloadPage() {
         </div>
 
         <DownloadGroup
+          description="Builds are signed with Azure Trusted Signing. Use the installer for a normal workstation install."
+          id="windows-packages"
+          items={windowsPackages}
+          title="Windows x64"
+        />
+        <DownloadGroup
           description="Use the DMG for a normal workstation install. Use the PKG when you need a managed deployment package."
           id="macos-packages"
           items={macosPackages}
@@ -151,18 +178,6 @@ export default async function DownloadPage() {
           items={linuxPackages}
           title="Linux x64"
         />
-        <section className="grid gap-4 border-t border-white/10 py-6 md:grid-cols-[180px_1fr]">
-          <div>
-            <h2 className="text-base font-semibold text-white">Windows</h2>
-            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/35">
-              Planned
-            </p>
-          </div>
-          <p className="max-w-2xl text-sm leading-6 text-white/55">
-            Windows packaging is planned after signing is complete. The app
-            surface and write-confirmation rules are the same across platforms.
-          </p>
-        </section>
       </section>
 
       <section className="mt-12 grid gap-8 border-t border-white/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">

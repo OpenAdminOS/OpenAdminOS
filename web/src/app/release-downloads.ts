@@ -138,6 +138,22 @@ export async function getLatestReleaseDownloads() {
       "OpenAdminOS-mac-arm64.pkg",
       checksums,
     );
+    const windowsSetup = toDownloadAsset(
+      findAsset(
+        assets,
+        (name) => name.includes("win") && name.endsWith("setup.exe"),
+      ),
+      "OpenAdminOS-win-x64-setup.exe",
+      checksums,
+    );
+    const windowsPortable = toDownloadAsset(
+      findAsset(
+        assets,
+        (name) => name.includes("win") && name.endsWith("portable.exe"),
+      ),
+      "OpenAdminOS-win-x64-portable.exe",
+      checksums,
+    );
 
     return {
       checksumUrl,
@@ -153,6 +169,10 @@ export async function getLatestReleaseDownloads() {
       macosPkgUrl: macosPkg.url,
       releaseNotesUrl: release.html_url ?? LATEST_RELEASE_URL,
       version: release.tag_name ?? "Latest release",
+      windowsPortable,
+      windowsPortableUrl: windowsPortable.url,
+      windowsSetup,
+      windowsSetupUrl: windowsSetup.url,
     };
   } catch {
     const fallbackAsset = {
@@ -175,6 +195,10 @@ export async function getLatestReleaseDownloads() {
       macosPkgUrl: LATEST_RELEASE_URL,
       releaseNotesUrl: LATEST_RELEASE_URL,
       version: "Latest release",
+      windowsPortable: fallbackAsset,
+      windowsPortableUrl: LATEST_RELEASE_URL,
+      windowsSetup: fallbackAsset,
+      windowsSetupUrl: LATEST_RELEASE_URL,
     };
   }
 }

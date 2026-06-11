@@ -141,7 +141,7 @@ export function softwareApplicationSchema(input?: {
     name: SITE_NAME,
     applicationCategory: "BusinessApplication",
     applicationSubCategory: "Microsoft 365 administration",
-    operatingSystem: input?.operatingSystem ?? "macOS, Linux",
+    operatingSystem: input?.operatingSystem ?? "Windows, macOS, Linux",
     softwareVersion: input?.version,
     description: HOME_DESCRIPTION,
     isAccessibleForFree: true,

@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added Windows download links (signed NSIS installer + portable) to the marketing site's homepage and download page, replacing the "Planned"/"Soon" placeholders; links resolve from the latest GitHub release and fall back to the releases page until Windows assets are attached.
+
 ### Changed
 
 ### Removed
