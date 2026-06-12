@@ -91,6 +91,14 @@ import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 // two paths consistent and gives users a single "OpenAdminOS Safe
 // Storage" entry regardless of how they're running the app.
 app.setName("OpenAdminOS");
+if (process.platform === "linux") {
+  // Linux preview builds need to run reliably in VMs and desktops without
+  // working 3D/VAAPI. Chromium GPU probing can leave packaged AppImages with
+  // a libva error and no visible window, so prefer software rendering.
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-features", "VaapiVideoDecoder,VaapiVideoEncoder");
+}
 // Do not let Chromium initialize macOS Keychain for the default
 // Electron profile. We don't store passwords/cookies in the renderer,
 // and the prompt wording ("Electron wants to use your confidential
@@ -2950,6 +2958,39 @@ function routeHash(route?: string): string | undefined {
   return route.startsWith("/") ? route : `/${route}`;
 }
 
+function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void {
+  if (!show) return;
+  let revealed = false;
+  const reveal = (reason: string) => {
+    if (revealed || window.isDestroyed()) return;
+    revealed = true;
+    debugStartupLog("showing main window", { reason });
+    window.show();
+  };
+  window.once("ready-to-show", () => reveal("ready-to-show"));
+  window.webContents.once("did-finish-load", () => {
+    const delayMs = process.platform === "linux" ? 250 : 0;
+    setTimeout(() => reveal("did-finish-load"), delayMs);
+  });
+  window.webContents.once(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL) => {
+      debugStartupLog("main window load failed", {
+        errorCode,
+        errorDescription,
+        validatedURL,
+      });
+      setTimeout(() => reveal("did-fail-load"), 500);
+    },
+  );
+  const timeout = setTimeout(
+    () => reveal("startup-timeout"),
+    process.platform === "linux" ? 4_000 : 8_000,
+  );
+  timeout.unref();
+  window.once("closed", () => clearTimeout(timeout));
+}
+
 async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
@@ -2982,11 +3023,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     mainWindow.setFullScreen(true);
   }
 
-  mainWindow.once("ready-to-show", () => {
-    if (show) {
-      mainWindow?.show();
-    }
-  });
+  armMainWindowRevealFallback(mainWindow, show);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url);

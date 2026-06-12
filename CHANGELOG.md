@@ -15,6 +15,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Fixed packaged Linux startup on VM/no-3D systems by disabling Chromium GPU/VAAPI acceleration and adding a main-window reveal fallback when `ready-to-show` never fires.
+
 ### Security
 
 - Added desktop-side and server-side secret redaction for support issue text before upload and public GitHub issue creation.

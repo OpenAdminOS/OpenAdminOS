@@ -39,6 +39,10 @@ The OpenAdminOS Linux archive key fingerprint is:
 
 Direct AppImage, `.deb`, and `.rpm` downloads remain available from [GitHub Releases](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest). These direct Linux artifacts are unsigned preview builds. Verify the SHA-256 hash from the release notes or `SHA256SUMS.txt` before installing.
 
+Linux builds use Chromium software rendering by default. This avoids VAAPI and
+3D acceleration failures on Debian/Ubuntu VMs and other systems where GPU
+drivers are unavailable or incomplete.
+
 Tenant sign-in on Linux requires an unlocked OS keyring because Microsoft
 refresh tokens are stored through Electron `safeStorage`. On Debian or Ubuntu,
 install `gnome-keyring` if your desktop session does not already provide Secret
