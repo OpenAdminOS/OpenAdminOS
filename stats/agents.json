@@ -1,17 +1,17 @@
 {
-  "updatedAt": "2026-06-12T06:00:16.975Z",
+  "updatedAt": "2026-06-12T07:00:36.927Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 11,
-      "installs7d": 1
+      "installs": 12,
+      "installs7d": 2
     },
     "intune-device-posture-auditor": {
       "installs": 0,
       "installs7d": 0
     },
     "offboarding-agent": {
-      "installs": 6,
-      "installs7d": 0
+      "installs": 7,
+      "installs7d": 1
     },
     "compliance-overview": {
       "installs": 13,
@@ -22,8 +22,8 @@
       "installs7d": 0
     },
     "tenant-health-report": {
-      "installs": 10,
-      "installs7d": 4
+      "installs": 11,
+      "installs7d": 5
     },
     "user-license-overview": {
       "installs": 8,
@@ -34,8 +34,8 @@
       "installs7d": 4
     },
     "dormant-app-registrations": {
-      "installs": 9,
-      "installs7d": 2
+      "installs": 10,
+      "installs7d": 3
     },
     "risky-sign-in-triage": {
       "installs": 5,
