@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-12T11:00:05.571Z",
+  "updatedAt": "2026-06-12T13:00:09.838Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 12,
@@ -26,8 +26,8 @@
       "installs7d": 5
     },
     "user-license-overview": {
-      "installs": 9,
-      "installs7d": 3
+      "installs": 10,
+      "installs7d": 4
     },
     "conditional-access-explainer": {
       "installs": 15,
