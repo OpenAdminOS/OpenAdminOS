@@ -31,6 +31,10 @@ import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   resolveRunModel,
   type AgentManifestPreview,
+  type AgentDiscordDelivery,
+  type AgentOutlookDelivery,
+  type AgentSignalDelivery,
+  type AgentSlackDelivery,
   type AgentTeamsDelivery,
   type AgentWhatsAppWebDelivery,
   type AgentUpdateReview,
@@ -62,6 +66,10 @@ export default function AgentDetail({
     updateAgentSchedule,
     updateAgentTeamsDelivery,
     updateAgentWhatsAppWebDelivery,
+    updateAgentOutlookDelivery,
+    updateAgentSlackDelivery,
+    updateAgentDiscordDelivery,
+    updateAgentSignalDelivery,
     exportAgentDraftBundle,
   } = useAppState();
   const toast = useToast();
@@ -569,6 +577,70 @@ export default function AgentDetail({
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentWhatsAppWebDelivery(agent.slug, next),
+                );
+              }}
+            />
+
+            <AgentDefaultConnectorDeliveryCard
+              connectorId="outlook"
+              connectorName="Outlook"
+              delivery={agent.delivery?.outlook}
+              defaultFlag="useDefaultRecipients"
+              onOpenConnectors={() => navigate("/connectors")}
+              onChange={async (next) => {
+                await trackDeliverySave(
+                  updateAgentOutlookDelivery(
+                    agent.slug,
+                    next as AgentOutlookDelivery | null,
+                  ),
+                );
+              }}
+            />
+
+            <AgentDefaultConnectorDeliveryCard
+              connectorId="slack"
+              connectorName="Slack"
+              delivery={agent.delivery?.slack}
+              defaultFlag="useDefaultChannel"
+              onOpenConnectors={() => navigate("/connectors")}
+              onChange={async (next) => {
+                await trackDeliverySave(
+                  updateAgentSlackDelivery(
+                    agent.slug,
+                    next as AgentSlackDelivery | null,
+                  ),
+                );
+              }}
+            />
+
+            <AgentDefaultConnectorDeliveryCard
+              connectorId="discord"
+              connectorName="Discord"
+              delivery={agent.delivery?.discord}
+              defaultFlag="useDefaultWebhook"
+              onOpenConnectors={() => navigate("/connectors")}
+              onChange={async (next) => {
+                await trackDeliverySave(
+                  updateAgentDiscordDelivery(
+                    agent.slug,
+                    next as AgentDiscordDelivery | null,
+                  ),
+                );
+              }}
+            />
+
+            <AgentDefaultConnectorDeliveryCard
+              connectorId="signal"
+              connectorName="Signal"
+              delivery={agent.delivery?.signal}
+              defaultFlag="useDefaultRecipient"
+              onOpenConnectors={() => navigate("/connectors")}
+              onChange={async (next) => {
+                await trackDeliverySave(
+                  updateAgentSignalDelivery(
+                    agent.slug,
+                    next as AgentSignalDelivery | null,
+                  ),
                 );
               }}
             />
@@ -1657,6 +1729,331 @@ function AgentWhatsAppWebDeliveryCard({
       </div>
     </Card>
   );
+}
+
+type AgentDefaultNotificationDelivery =
+  | AgentOutlookDelivery
+  | AgentSlackDelivery
+  | AgentDiscordDelivery
+  | AgentSignalDelivery;
+
+type AgentDefaultNotificationFlag =
+  | "useDefaultRecipients"
+  | "useDefaultChannel"
+  | "useDefaultWebhook"
+  | "useDefaultRecipient";
+
+function AgentDefaultConnectorDeliveryCard({
+  connectorId,
+  connectorName,
+  delivery,
+  defaultFlag,
+  onChange,
+  onOpenConnectors,
+}: {
+  connectorId: "outlook" | "slack" | "discord" | "signal";
+  connectorName: string;
+  delivery: AgentDefaultNotificationDelivery | undefined;
+  defaultFlag: AgentDefaultNotificationFlag;
+  onChange: (delivery: AgentDefaultNotificationDelivery | null) => Promise<void>;
+  onOpenConnectors: () => void;
+}) {
+  const [summary, setSummary] = useState<ConnectorSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const onChangeRef = useRef(onChange);
+  const lastSavedKey = useRef(stableDeliveryKey(delivery ?? null));
+  const [enabled, setEnabled] = useState(delivery?.enabled === true);
+  const [includeManualRuns, setIncludeManualRuns] = useState(
+    delivery?.includeManualRuns ?? true,
+  );
+  const [includeScheduledRuns, setIncludeScheduledRuns] = useState(
+    delivery?.includeScheduledRuns ?? true,
+  );
+  const [notifyOnSuccess, setNotifyOnSuccess] = useState(
+    delivery?.notifyOnSuccess ?? true,
+  );
+  const [notifyOnFailure, setNotifyOnFailure] = useState(
+    delivery?.notifyOnFailure ?? false,
+  );
+  const [notifyOnChangeOnly, setNotifyOnChangeOnly] = useState(
+    delivery?.notifyOnChangeOnly ?? false,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    window.openAdminOS
+      ?.listConnectors()
+      .then((connectors) => {
+        if (cancelled) return;
+        setSummary(
+          connectors.find((connector) => connector.descriptor.id === connectorId) ??
+            null,
+        );
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectorId]);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const defaultStatus = connectorDefaultStatus(connectorId, summary);
+  const ready = defaultStatus.ready;
+  const desiredDelivery: AgentDefaultNotificationDelivery | null | undefined =
+    !enabled
+      ? null
+      : ready
+        ? ({
+            enabled: true,
+            [defaultFlag]: true,
+            includeManualRuns,
+            includeScheduledRuns,
+            notifyOnSuccess,
+            notifyOnFailure,
+            notifyOnChangeOnly,
+          } as AgentDefaultNotificationDelivery)
+        : undefined;
+  const desiredDeliveryKey =
+    desiredDelivery === undefined ? undefined : stableDeliveryKey(desiredDelivery);
+
+  useEffect(() => {
+    if (desiredDeliveryKey === undefined) return;
+    if (desiredDeliveryKey === lastSavedKey.current) return;
+
+    let cancelled = false;
+    const nextDelivery =
+      parseDeliveryKey<AgentDefaultNotificationDelivery>(desiredDeliveryKey);
+    setSaving(true);
+    setError(null);
+    void onChangeRef
+      .current(nextDelivery)
+      .then(() => {
+        if (cancelled) return;
+        lastSavedKey.current = desiredDeliveryKey;
+        setSavedAt(new Date().toISOString());
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSaving(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desiredDeliveryKey]);
+
+  const deliveryStatus = !enabled
+    ? saving
+      ? "Disabling delivery…"
+      : savedAt
+        ? `Delivery disabled · saved ${formatRelative(savedAt)}`
+        : "Delivery off."
+    : desiredDeliveryKey === undefined
+      ? defaultStatus.reason
+      : saving
+        ? "Saving delivery…"
+        : savedAt
+          ? `Saved ${formatRelative(savedAt)}`
+          : "Delivery saved.";
+
+  return (
+    <Card>
+      <div className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <SectionLabel>Delivery</SectionLabel>
+          <Pill tone={enabled ? "success" : "default"}>
+            {enabled ? `${connectorName} on` : "Manual only"}
+          </Pill>
+        </div>
+        <div className="mt-3 flex items-start gap-3 rounded-md bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+          <IconConnectors
+            size={18}
+            className={enabled ? "text-[var(--color-success)]" : "text-[var(--color-text-soft)]"}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-[var(--color-text)]">
+              {connectorName}
+            </div>
+            <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              Send terminal run reports through the connector default. Saved
+              delivery rules post without another prompt.
+            </div>
+          </div>
+        </div>
+
+        {!ready && (
+          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+            {defaultStatus.reason}
+            <button
+              type="button"
+              className="ml-1 font-medium underline"
+              onClick={onOpenConnectors}
+            >
+              Open Connectors
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4 space-y-3">
+          <ToggleRow
+            label={`Send to ${connectorName}`}
+            checked={enabled}
+            onChange={setEnabled}
+            disabled={!ready && !enabled}
+          />
+
+          {enabled && (
+            <>
+              <div className="rounded-md bg-[var(--color-bg-raised)] px-3 py-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+                Default target: {defaultStatus.label}
+              </div>
+              <div className="grid gap-2">
+                <ToggleRow
+                  label="Manual runs"
+                  checked={includeManualRuns}
+                  onChange={setIncludeManualRuns}
+                />
+                <ToggleRow
+                  label="Scheduled runs"
+                  checked={includeScheduledRuns}
+                  onChange={setIncludeScheduledRuns}
+                />
+                <ToggleRow
+                  label="Completed runs"
+                  checked={notifyOnSuccess}
+                  onChange={setNotifyOnSuccess}
+                />
+                <ToggleRow
+                  label="Failed runs"
+                  checked={notifyOnFailure}
+                  onChange={setNotifyOnFailure}
+                />
+                <ToggleRow
+                  label="Only when scheduled findings changed"
+                  checked={notifyOnChangeOnly}
+                  onChange={setNotifyOnChangeOnly}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        {error && (
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+            {error}
+          </div>
+        )}
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <span
+            role="status"
+            aria-live="polite"
+            className="text-[11px] text-[var(--color-text-muted)]"
+          >
+            {loading ? `Checking ${connectorName}…` : deliveryStatus}
+          </span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function connectorDefaultStatus(
+  connectorId: "outlook" | "slack" | "discord" | "signal",
+  summary: ConnectorSummary | null,
+): { ready: boolean; label: string; reason: string } {
+  if (!summary) {
+    return {
+      ready: false,
+      label: "Connector not found",
+      reason: "Connector setup is unavailable.",
+    };
+  }
+  if (summary.status !== "connected") {
+    return {
+      ready: false,
+      label: "Connector not connected",
+      reason: `Configure and test ${summary.descriptor.name} before enabling delivery.`,
+    };
+  }
+  switch (connectorId) {
+    case "outlook": {
+      const recipients = readConnectorConfigString(summary.config, "defaultRecipients");
+      const count = recipients ? recipients.split(/[,\n;]/g).filter(Boolean).length : 0;
+      return count > 0
+        ? {
+            ready: true,
+            label: count === 1 ? "1 Outlook recipient" : `${count} Outlook recipients`,
+            reason: "Outlook delivery ready.",
+          }
+        : {
+            ready: false,
+            label: "No default recipients",
+            reason: "Set default Outlook recipients on the Connectors page.",
+          };
+    }
+    case "slack": {
+      const channel = readConnectorConfigString(summary.config, "defaultChannel");
+      const label =
+        readConnectorConfigString(summary.config, "defaultChannelLabel") ??
+        channel;
+      return channel
+        ? { ready: true, label: label ?? "Slack channel", reason: "Slack delivery ready." }
+        : {
+            ready: false,
+            label: "No default channel",
+            reason: "Set a default Slack channel on the Connectors page.",
+          };
+    }
+    case "discord": {
+      const label =
+        readConnectorConfigString(summary.config, "defaultTargetLabel") ??
+        "Discord webhook";
+      return { ready: true, label, reason: "Discord delivery ready." };
+    }
+    case "signal": {
+      const account = readConnectorConfigString(summary.config, "account");
+      const recipient = readConnectorConfigString(summary.config, "defaultRecipient");
+      const label =
+        readConnectorConfigString(summary.config, "defaultRecipientLabel") ??
+        "Signal recipient";
+      return account && recipient
+        ? { ready: true, label, reason: "Signal delivery ready." }
+        : {
+            ready: false,
+            label: "No default Signal recipient",
+            reason: "Set the Signal account and default recipient on the Connectors page.",
+          };
+    }
+  }
+}
+
+function readConnectorConfigString(
+  config: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = config[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
 }
 
 function readWhatsAppTargetFromConnectorConfig(

@@ -15,13 +15,17 @@
     "dist"
   ],
   "scripts": {
-    "build": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && tsc -p tsconfig.json",
-    "typecheck": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && tsc -p tsconfig.json --noEmit",
+    "build": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && npm run build -w @openadminos/connector-outlook && npm run build -w @openadminos/connector-slack && npm run build -w @openadminos/connector-discord && npm run build -w @openadminos/connector-signal && tsc -p tsconfig.json",
+    "typecheck": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/connector-teams && npm run build -w @openadminos/connector-whatsapp-web && npm run build -w @openadminos/connector-outlook && npm run build -w @openadminos/connector-slack && npm run build -w @openadminos/connector-discord && npm run build -w @openadminos/connector-signal && tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
     "@openadminos/agent-sdk": "0.2.3",
+    "@openadminos/connector-discord": "0.2.3",
+    "@openadminos/connector-outlook": "0.2.3",
+    "@openadminos/connector-signal": "0.2.3",
+    "@openadminos/connector-slack": "0.2.3",
     "@openadminos/connector-teams": "0.2.3",
     "@openadminos/connector-whatsapp-web": "0.2.3",
     "js-yaml": "^4.1.1"

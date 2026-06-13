@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type FormEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -57,6 +58,8 @@ type TeamsDefaultDraft = {
   channelName?: string;
 };
 
+const notificationConnectorIds = ["outlook", "slack", "discord", "signal"] as const;
+
 export default function Connectors() {
   const [connectors, setConnectors] = useState<ConnectorSummary[] | undefined>(
     undefined,
@@ -103,6 +106,11 @@ export default function Connectors() {
   const whatsappSummary = connectors?.find(
     (c) => c.descriptor.id === "whatsapp-web",
   );
+  const notificationSummaries = connectors
+    ? notificationConnectorIds
+        .map((id) => connectors.find((c) => c.descriptor.id === id))
+        .filter(isConnectorSummary)
+    : [];
 
   return (
     <>
@@ -111,15 +119,30 @@ export default function Connectors() {
         title="Connector routing"
         subtitle="Configure where terminal agent reports are posted. Saved delivery rules use these targets without another prompt, and every send is recorded in the run activity."
         actions={
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            leadingIcon={<IconRefresh size={13} />}
-            onClick={() => void refresh()}
-          >
-            Refresh
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              trailingIcon={<IconExternal size={13} />}
+              onClick={() =>
+                void window.openAdminOS?.openExternal(
+                  "https://docs.openadminos.com/connectors",
+                )
+              }
+            >
+              Setup guide
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              leadingIcon={<IconRefresh size={13} />}
+              onClick={() => void refresh()}
+            >
+              Refresh
+            </Button>
+          </div>
         }
       />
       <PageBody>
@@ -147,6 +170,19 @@ export default function Connectors() {
                 ) : null}
                 {whatsappSummary ? (
                   <WhatsAppWebCard summary={whatsappSummary} onRefresh={refresh} />
+                ) : null}
+                {notificationSummaries.length > 0 ? (
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {notificationSummaries.map((summary) => (
+                      <NotificationConnectorCard
+                        key={summary.descriptor.id}
+                        summary={summary}
+                        busy={testing === summary.descriptor.id}
+                        onRefresh={refresh}
+                        onTest={() => handleTest(summary.descriptor.id)}
+                      />
+                    ))}
+                  </div>
                 ) : null}
               </section>
 
@@ -1161,6 +1197,429 @@ function WhatsAppWebCard({
   );
 }
 
+// ─── Notification connector cards ────────────────────────────────────────
+
+type NotificationConnectorId = (typeof notificationConnectorIds)[number];
+
+interface NotificationFieldSpec {
+  key: string;
+  label: string;
+  placeholder?: string;
+  help?: string;
+  multiline?: boolean;
+}
+
+interface NotificationSecretSpec {
+  key: string;
+  label: string;
+  placeholder: string;
+  help: string;
+}
+
+interface NotificationConnectorSpec {
+  id: NotificationConnectorId;
+  Icon: BrandIcon;
+  authLabel: string;
+  description: string;
+  defaultLabel: string;
+  defaultHelp: string;
+  fields: NotificationFieldSpec[];
+  secret?: NotificationSecretSpec;
+}
+
+const notificationConnectorSpecs: Record<
+  NotificationConnectorId,
+  NotificationConnectorSpec
+> = {
+  outlook: {
+    id: "outlook",
+    Icon: OutlookLogo,
+    authLabel: "Graph delegated",
+    description:
+      "Sends run reports by email via Microsoft Graph as the signed-in admin.",
+    defaultLabel: "Default recipients",
+    defaultHelp: "Used by agents that send mail to the connector default.",
+    fields: [
+      {
+        key: "defaultRecipients",
+        label: "Recipients",
+        placeholder: "ops@example.com\nsecurity@example.com",
+        help: "Comma-, semicolon-, or newline-separated email addresses.",
+        multiline: true,
+      },
+      {
+        key: "defaultSubjectPrefix",
+        label: "Subject prefix",
+        placeholder: "[OpenAdminOS]",
+      },
+    ],
+  },
+  slack: {
+    id: "slack",
+    Icon: SlackLogo,
+    authLabel: "External bot token",
+    description:
+      "Posts run reports to a Slack channel through a Slack app bot token.",
+    defaultLabel: "Default channel",
+    defaultHelp: "Use a Slack channel, user, or conversation id.",
+    secret: {
+      key: "botToken",
+      label: "Bot token",
+      placeholder: "xoxb-...",
+      help: "Requires a Slack app with chat:write. Blank keeps the existing token.",
+    },
+    fields: [
+      {
+        key: "defaultChannel",
+        label: "Channel or conversation id",
+        placeholder: "C0123456789",
+      },
+      {
+        key: "defaultChannelLabel",
+        label: "Target label",
+        placeholder: "#intune-alerts",
+      },
+    ],
+  },
+  discord: {
+    id: "discord",
+    Icon: WebhookLogo,
+    authLabel: "Webhook secret",
+    description:
+      "Posts run reports to a Discord channel webhook. Webhook URLs are stored as secrets.",
+    defaultLabel: "Default webhook",
+    defaultHelp: "Webhook URL is write-only; labels stay in normal config.",
+    secret: {
+      key: "webhookUrl",
+      label: "Webhook URL",
+      placeholder: "https://discord.com/api/webhooks/...",
+      help: "Blank keeps the existing webhook URL.",
+    },
+    fields: [
+      {
+        key: "defaultTargetLabel",
+        label: "Target label",
+        placeholder: "#admin-alerts",
+      },
+      {
+        key: "username",
+        label: "Webhook username",
+        placeholder: "OpenAdminOS",
+      },
+      {
+        key: "defaultThreadId",
+        label: "Thread id",
+        placeholder: "Optional",
+      },
+    ],
+  },
+  signal: {
+    id: "signal",
+    Icon: WebhookLogo,
+    authLabel: "Local signal-cli",
+    description:
+      "Sends run reports through a local signal-cli account or local REST bridge.",
+    defaultLabel: "Default recipient",
+    defaultHelp: "Signal delivery requires a local sender account.",
+    fields: [
+      {
+        key: "account",
+        label: "Sender account",
+        placeholder: "+15551234567",
+      },
+      {
+        key: "defaultRecipient",
+        label: "Recipient",
+        placeholder: "+15557654321",
+      },
+      {
+        key: "defaultRecipientLabel",
+        label: "Recipient label",
+        placeholder: "Signal recipient",
+      },
+      {
+        key: "httpUrl",
+        label: "REST bridge URL",
+        placeholder: "http://127.0.0.1:8080",
+      },
+      {
+        key: "cliPath",
+        label: "signal-cli path",
+        placeholder: "signal-cli",
+      },
+      {
+        key: "configPath",
+        label: "signal-cli config directory",
+        placeholder: "Optional",
+      },
+    ],
+  },
+};
+
+function NotificationConnectorCard({
+  summary,
+  busy,
+  onRefresh,
+  onTest,
+}: {
+  summary: ConnectorSummary;
+  busy: boolean;
+  onRefresh: () => Promise<void>;
+  onTest: () => Promise<void> | void;
+}) {
+  const spec = notificationConnectorSpecs[
+    summary.descriptor.id as NotificationConnectorId
+  ];
+  const [draft, setDraft] = useState(() =>
+    configDraftForFields(summary.config, spec?.fields ?? []),
+  );
+  const [secret, setSecret] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [clearingSecret, setClearingSecret] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!spec) return;
+    setDraft(configDraftForFields(summary.config, spec.fields));
+  }, [spec, summary.config]);
+
+  if (!spec) return null;
+
+  const { Icon } = spec;
+  const isConnected = summary.status === "connected";
+  const hasSecret = Boolean(spec.secret);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const api = window.openAdminOS;
+    if (!api) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      const config: Record<string, unknown> = {};
+      for (const field of spec.fields) {
+        const value = draft[field.key]?.trim();
+        if (value) config[field.key] = value;
+      }
+      await api.setConnectorConfig(spec.id, config);
+      if (spec.secret && secret.trim()) {
+        await api.setConnectorSecret(spec.id, spec.secret.key, secret.trim());
+        setSecret("");
+      }
+      setSavedAt(new Date().toISOString());
+      await onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function clearSecret() {
+    const api = window.openAdminOS;
+    if (!api || !spec.secret) return;
+    setClearingSecret(true);
+    setError(undefined);
+    try {
+      await api.setConnectorSecret(spec.id, spec.secret.key, null);
+      setSecret("");
+      setSavedAt(new Date().toISOString());
+      await onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClearingSecret(false);
+    }
+  }
+
+  return (
+    <article className="overflow-hidden rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border-soft)]">
+      <form onSubmit={(event) => void save(event)}>
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white p-1.5 ring-1 ring-[var(--color-border-soft)]">
+              <Icon size={30} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-[15px] font-semibold text-[var(--color-text)]">
+                  {summary.descriptor.name}
+                </h2>
+                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+                  v{summary.descriptor.version}
+                </span>
+                <Tag tone="neutral">{spec.authLabel}</Tag>
+              </div>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+                {spec.description}
+              </p>
+            </div>
+            <StatusPill summary={summary} />
+          </div>
+
+          <div className="mt-4">
+            <SectionLabel>{spec.defaultLabel}</SectionLabel>
+            <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+              {spec.defaultHelp}
+            </p>
+          </div>
+
+          <div className="mt-3 grid gap-3">
+            {spec.secret ? (
+              <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
+                <span>{spec.secret.label}</span>
+                <input
+                  type="password"
+                  value={secret}
+                  name={`${spec.id}-${spec.secret.key}`}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setSecret(event.target.value)}
+                  placeholder={spec.secret.placeholder}
+                  className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] focus:border-[var(--color-accent)]"
+                />
+                <span className="text-[10.5px] text-[var(--color-text-muted)]">
+                  {spec.secret.help}
+                </span>
+              </label>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {spec.fields.map((field) => (
+                <label
+                  key={field.key}
+                  className={field.multiline ? "flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)] sm:col-span-2" : "flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]"}
+                >
+                  <span>{field.label}</span>
+                  {field.multiline ? (
+                    <textarea
+                      value={draft[field.key] ?? ""}
+                      name={`${spec.id}-${field.key}`}
+                      spellCheck={false}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          [field.key]: event.target.value,
+                        }))
+                      }
+                      placeholder={field.placeholder}
+                      rows={3}
+                      className="min-h-[76px] rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-2 text-[12.5px] text-[var(--color-text)] focus:border-[var(--color-accent)]"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={draft[field.key] ?? ""}
+                      name={`${spec.id}-${field.key}`}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          [field.key]: event.target.value,
+                        }))
+                      }
+                      placeholder={field.placeholder}
+                      className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] focus:border-[var(--color-accent)]"
+                    />
+                  )}
+                  {field.help ? (
+                    <span className="text-[10.5px] text-[var(--color-text-muted)]">
+                      {field.help}
+                    </span>
+                  ) : null}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <ConnectorDetailsDisclosure
+            title="Capabilities"
+            summary={`${summary.descriptor.capabilities.length} notify capability, ${summary.descriptor.scopes.length} required scope${summary.descriptor.scopes.length === 1 ? "" : "s"}.`}
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <ConnectorInfoBlock title="Capabilities">
+                <ul className="space-y-1.5">
+                  {summary.descriptor.capabilities.map((cap) => (
+                    <CapabilityRow key={cap.id} capability={cap} />
+                  ))}
+                </ul>
+              </ConnectorInfoBlock>
+              <ConnectorInfoBlock title="Scopes">
+                {summary.descriptor.scopes.length > 0 ? (
+                  <ul className="space-y-0.5 break-words font-mono text-[11px] text-[var(--color-text-soft)]">
+                    {summary.descriptor.scopes.map((scope) => (
+                      <li key={scope}>{scope}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[11.5px] text-[var(--color-text-muted)]">
+                    No Microsoft Graph scopes.
+                  </p>
+                )}
+              </ConnectorInfoBlock>
+            </div>
+          </ConnectorDetailsDisclosure>
+        </div>
+
+        <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/25 px-4 py-3">
+          {error ? (
+            <div className="mb-3">
+              <ConnectorNotice
+                tone="danger"
+                title={`${summary.descriptor.name} setup failed`}
+                body={error}
+              />
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="min-w-0 text-[11.5px] text-[var(--color-text-muted)]">
+              {summary.lastTestedAt
+                ? `Last tested ${formatRelative(summary.lastTestedAt)}${summary.lastTestMessage ? ` - ${summary.lastTestMessage}` : ""}`
+                : savedAt
+                  ? `Saved ${formatRelative(savedAt)}`
+                  : hasSecret
+                    ? "Save config and secret before testing."
+                    : "Save config before testing."}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {spec.secret ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void clearSecret()}
+                  disabled={clearingSecret || saving}
+                >
+                  {clearingSecret ? "Clearing…" : "Clear secret"}
+                </Button>
+              ) : null}
+              <Button
+                type="submit"
+                variant="secondary"
+                size="sm"
+                disabled={saving || clearingSecret}
+              >
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => void onTest()}
+                disabled={busy || saving}
+              >
+                {busy ? "Testing…" : isConnected ? "Re-test" : "Test"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </article>
+  );
+}
+
 // ─── Roadmap cards ────────────────────────────────────────────────────────
 
 interface RoadmapEntry {
@@ -1185,16 +1644,6 @@ const roadmap: RoadmapEntry[] = [
     status: "designed",
   },
   {
-    id: "outlook",
-    name: "Microsoft Outlook",
-    category: "Email",
-    authSource: "graph-delegated",
-    description:
-      "Send run summaries as email. Same MSAL flow as Teams; no new credentials to store.",
-    Icon: OutlookLogo,
-    status: "planned",
-  },
-  {
     id: "jira",
     name: "Jira",
     category: "Ticketing",
@@ -1202,16 +1651,6 @@ const roadmap: RoadmapEntry[] = [
     description:
       "File issues against a project board with structured fields populated from the agent's structured output.",
     Icon: JiraLogo,
-    status: "planned",
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    category: "Communication",
-    authSource: "external",
-    description:
-      "Webhook or app-token posts to a channel. Useful for orgs whose IT comms live in Slack rather than Teams.",
-    Icon: SlackLogo,
     status: "planned",
   },
   {
@@ -1905,6 +2344,24 @@ function SectionHeader({
       <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
     </div>
   );
+}
+
+function isConnectorSummary(
+  summary: ConnectorSummary | undefined,
+): summary is ConnectorSummary {
+  return summary !== undefined;
+}
+
+function configDraftForFields(
+  config: Record<string, unknown>,
+  fields: readonly NotificationFieldSpec[],
+): Record<string, string> {
+  const draft: Record<string, string> = {};
+  for (const field of fields) {
+    const value = config[field.key];
+    draft[field.key] = typeof value === "string" ? value : "";
+  }
+  return draft;
 }
 
 function formatRelative(iso: string): string {

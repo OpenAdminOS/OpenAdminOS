@@ -8,6 +8,7 @@ import type { TokenCacheStorage } from "@openadminos/runtime";
 import type {
   AgentSummary,
   RunRecord,
+  SecretAccessor,
   WhatsAppWebStatus,
 } from "@openadminos/agent-sdk";
 
@@ -38,6 +39,12 @@ function completedRun(id: string): RunRecord {
 function deliveryAgent(
   whatsappWeb: NonNullable<AgentSummary["delivery"]>["whatsappWeb"],
 ): AgentSummary {
+  return deliveryAgentWith({ whatsappWeb });
+}
+
+function deliveryAgentWith(
+  delivery: NonNullable<AgentSummary["delivery"]>,
+): AgentSummary {
   return {
     id: "delivery-agent",
     slug: "delivery-agent",
@@ -51,7 +58,7 @@ function deliveryAgent(
     author: { name: "OpenAdminOS" },
     version: "1.0.0",
     installedAt: now,
-    delivery: { whatsappWeb },
+    delivery,
   };
 }
 
@@ -60,6 +67,21 @@ function queueItem(runId: string, nextAttemptAt = now) {
     id: `${runId}:whatsapp-web`,
     runId,
     connectorId: "whatsapp-web",
+    attempts: 0,
+    createdAt: now,
+    nextAttemptAt,
+  };
+}
+
+function connectorQueueItem(
+  runId: string,
+  connectorId: "slack",
+  nextAttemptAt = now,
+) {
+  return {
+    id: `${runId}:${connectorId}`,
+    runId,
+    connectorId,
     attempts: 0,
     createdAt: now,
     nextAttemptAt,
@@ -246,6 +268,90 @@ describe("post-run WhatsApp delivery", () => {
       assert.equal(run?.steps.at(-1)?.status, "skipped");
       assert.match(run?.steps.at(-1)?.detail ?? "", /failed runs only/);
     } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sends queued Slack run reports with connector secrets and audit metadata", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-slack-"));
+    const statePath = join(dir, "state.json");
+    const posted: Array<{ authorization: string | null; body: Record<string, unknown> }> =
+      [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      posted.push({
+        authorization: new Headers(init?.headers).get("authorization"),
+        body,
+      });
+      return new Response(
+        JSON.stringify({ ok: true, channel: body.channel, ts: "123.456" }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    }) as typeof fetch;
+    const secrets: SecretAccessor = {
+      get: async (key) => (key === "botToken" ? "xoxb-test" : undefined),
+      set: async () => undefined,
+      remove: async () => undefined,
+    };
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [
+        deliveryAgentWith({
+          slack: { enabled: true, useDefaultChannel: true },
+        }),
+      ],
+      runs: [completedRun("run-slack")],
+      tenants: [],
+      connectors: {
+        slack: {
+          config: {
+            defaultChannel: "C123",
+            defaultChannelLabel: "#intune-alerts",
+          },
+        },
+      },
+      runDeliveryQueue: [connectorQueueItem("run-slack", "slack")],
+    });
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      connectorSecretsFor: (connectorId) =>
+        connectorId === "slack"
+          ? secrets
+          : {
+              get: async () => undefined,
+              set: async () => undefined,
+              remove: async () => undefined,
+            },
+    });
+
+    try {
+      await store.processPendingRunDeliveries();
+      const state = await readJson(statePath);
+      const run = (state.runs as RunRecord[])[0];
+      assert.equal(posted.length, 1);
+      assert.equal(posted[0]?.authorization, "Bearer xoxb-test");
+      assert.equal(posted[0]?.body.channel, "C123");
+      assert.match(String(posted[0]?.body.text), /Run completed/);
+      assert.equal(state.runDeliveryQueue, undefined);
+      assert.equal(run?.steps.at(-1)?.status, "completed");
+      assert.match(run?.steps.at(-1)?.label ?? "", /Slack/);
+      const audit = run?.logs.at(-1)?.metadata?.connectorAudit as
+        | Record<string, unknown>
+        | undefined;
+      assert.equal(audit?.connector, "slack");
+      assert.equal(audit?.status, "success");
+      assert.equal(audit?.externalId, "C123:123.456");
+      assert.equal(audit?.egressTarget, "slack:#intune-alerts");
+    } finally {
+      globalThis.fetch = originalFetch;
       store.close();
       await rm(dir, { recursive: true, force: true });
     }

@@ -163,6 +163,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:test-connector", id),
   setConnectorConfig: (id: string, config: Record<string, unknown>) =>
     ipcRenderer.invoke("openadminos:set-connector-config", id, config),
+  setConnectorSecret: (id: string, key: string, value: string | null) =>
+    ipcRenderer.invoke("openadminos:set-connector-secret", id, key, value),
   listConnectorTeams: (id: string) =>
     ipcRenderer.invoke("openadminos:list-connector-teams", id),
   listConnectorChannels: (id: string, teamId: string) =>
@@ -264,6 +266,14 @@ const api: OpenAdminOSApi = {
       slug,
       delivery,
     ),
+  updateAgentOutlookDelivery: (slug, delivery) =>
+    ipcRenderer.invoke("openadminos:update-agent-outlook-delivery", slug, delivery),
+  updateAgentSlackDelivery: (slug, delivery) =>
+    ipcRenderer.invoke("openadminos:update-agent-slack-delivery", slug, delivery),
+  updateAgentDiscordDelivery: (slug, delivery) =>
+    ipcRenderer.invoke("openadminos:update-agent-discord-delivery", slug, delivery),
+  updateAgentSignalDelivery: (slug, delivery) =>
+    ipcRenderer.invoke("openadminos:update-agent-signal-delivery", slug, delivery),
   draftAgentManifest: (prompt: string) =>
     ipcRenderer.invoke("openadminos:draft-agent-manifest", prompt),
   validateAgentDraft: (yamlSource: string, allowedSlug?: string) =>

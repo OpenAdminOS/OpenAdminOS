@@ -38,7 +38,11 @@ import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
   AgentCommunitySubmissionMetadata,
   CompanionLaunchSettings,
+  AgentDiscordDelivery,
+  AgentOutlookDelivery,
   AgentSchedule,
+  AgentSignalDelivery,
+  AgentSlackDelivery,
   AgentTeamsDelivery,
   AgentWhatsAppWebDelivery,
   CompanionRunDueReadSchedulesResult,
@@ -87,6 +91,14 @@ import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 // two paths consistent and gives users a single "OpenAdminOS Safe
 // Storage" entry regardless of how they're running the app.
 app.setName("OpenAdminOS");
+if (process.platform === "linux") {
+  // Linux preview builds need to run reliably in VMs and desktops without
+  // working 3D/VAAPI. Chromium GPU probing can leave packaged AppImages with
+  // a libva error and no visible window, so prefer software rendering.
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+  app.commandLine.appendSwitch("disable-features", "VaapiVideoDecoder,VaapiVideoEncoder");
+}
 // Do not let Chromium initialize macOS Keychain for the default
 // Electron profile. We don't store passwords/cookies in the renderer,
 // and the prompt wording ("Electron wants to use your confidential
@@ -2122,6 +2134,11 @@ function validateJsonRecord(
   return value;
 }
 
+function validateConnectorSecretValue(value: unknown): string | null {
+  if (value === null) return null;
+  return requireBoundedString(value, "connector secret", 20_000);
+}
+
 function validateConnectorDecision(value: unknown): PendingConnectorDecision {
   if (!isPlainRecord(value)) {
     throw new Error("connector decision must be an object.");
@@ -2326,6 +2343,154 @@ function validateAgentWhatsAppWebDelivery(
     }
     delivery.recipientType = value.recipientType;
   }
+  return delivery;
+}
+
+type ValidatedAgentDeliveryBase = {
+  enabled: boolean;
+  includeManualRuns?: boolean;
+  includeScheduledRuns?: boolean;
+  notifyOnSuccess?: boolean;
+  notifyOnFailure?: boolean;
+  notifyOnChangeOnly?: boolean;
+};
+
+function validateAgentDeliveryRecord(
+  value: unknown,
+  name: string,
+): Record<string, unknown> {
+  if (!isPlainRecord(value)) {
+    throw new Error(`${name} must be an object or null.`);
+  }
+  return value;
+}
+
+function readAgentDeliveryBase(
+  value: Record<string, unknown>,
+  name: string,
+): ValidatedAgentDeliveryBase {
+  const delivery: ValidatedAgentDeliveryBase = {
+    enabled: value.enabled === true,
+  };
+  for (const key of [
+    "includeManualRuns",
+    "includeScheduledRuns",
+    "notifyOnSuccess",
+    "notifyOnFailure",
+    "notifyOnChangeOnly",
+  ] as const) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== "boolean") {
+        throw new Error(`${name} ${key} must be a boolean.`);
+      }
+      delivery[key] = value[key];
+    }
+  }
+  return delivery;
+}
+
+function assignOptionalBoolean(
+  delivery: object,
+  value: Record<string, unknown>,
+  key: string,
+  name: string,
+): void {
+  if (value[key] === undefined) return;
+  if (typeof value[key] !== "boolean") {
+    throw new Error(`${name} ${key} must be a boolean.`);
+  }
+  (delivery as Record<string, unknown>)[key] = value[key];
+}
+
+function assignOptionalStrings(
+  delivery: object,
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  name: string,
+): void {
+  for (const key of keys) {
+    if (value[key] !== undefined) {
+      (delivery as Record<string, unknown>)[key] = requireBoundedString(
+        value[key],
+        `${name} ${key}`,
+        256,
+      );
+    }
+  }
+}
+
+function validateAgentOutlookDelivery(value: unknown): AgentOutlookDelivery | null {
+  if (value === null) return null;
+  const record = validateAgentDeliveryRecord(value, "agent Outlook delivery");
+  const delivery: AgentOutlookDelivery = readAgentDeliveryBase(
+    record,
+    "agent Outlook delivery",
+  );
+  assignOptionalBoolean(delivery, record, "useDefaultRecipients", "agent Outlook delivery");
+  if (record.recipients !== undefined) {
+    if (!Array.isArray(record.recipients)) {
+      throw new Error("agent Outlook delivery recipients must be an array.");
+    }
+    delivery.recipients = record.recipients.map((recipient, index) =>
+      requireBoundedString(
+        recipient,
+        `agent Outlook delivery recipients[${index}]`,
+        256,
+      ),
+    );
+  }
+  assignOptionalStrings(delivery, record, ["recipientLabel"], "agent Outlook delivery");
+  return delivery;
+}
+
+function validateAgentSlackDelivery(value: unknown): AgentSlackDelivery | null {
+  if (value === null) return null;
+  const record = validateAgentDeliveryRecord(value, "agent Slack delivery");
+  const delivery: AgentSlackDelivery = readAgentDeliveryBase(
+    record,
+    "agent Slack delivery",
+  );
+  assignOptionalBoolean(delivery, record, "useDefaultChannel", "agent Slack delivery");
+  assignOptionalStrings(
+    delivery,
+    record,
+    ["channel", "channelLabel"],
+    "agent Slack delivery",
+  );
+  return delivery;
+}
+
+function validateAgentDiscordDelivery(value: unknown): AgentDiscordDelivery | null {
+  if (value === null) return null;
+  const record = validateAgentDeliveryRecord(value, "agent Discord delivery");
+  const delivery: AgentDiscordDelivery = readAgentDeliveryBase(
+    record,
+    "agent Discord delivery",
+  );
+  assignOptionalBoolean(delivery, record, "useDefaultWebhook", "agent Discord delivery");
+  assignOptionalStrings(
+    delivery,
+    record,
+    ["threadId", "targetLabel"],
+    "agent Discord delivery",
+  );
+  return delivery;
+}
+
+function validateAgentSignalDelivery(value: unknown): AgentSignalDelivery | null {
+  if (value === null) return null;
+  const record = validateAgentDeliveryRecord(value, "agent Signal delivery");
+  const delivery: AgentSignalDelivery = readAgentDeliveryBase(
+    record,
+    "agent Signal delivery",
+  );
+  assignOptionalBoolean(delivery, record, "useDefaultRecipient", "agent Signal delivery");
+  assignOptionalStrings(
+    delivery,
+    record,
+    ["recipient", "recipientLabel"],
+    "agent Signal delivery",
+  );
   return delivery;
 }
 
@@ -2793,6 +2958,39 @@ function routeHash(route?: string): string | undefined {
   return route.startsWith("/") ? route : `/${route}`;
 }
 
+function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void {
+  if (!show) return;
+  let revealed = false;
+  const reveal = (reason: string) => {
+    if (revealed || window.isDestroyed()) return;
+    revealed = true;
+    debugStartupLog("showing main window", { reason });
+    window.show();
+  };
+  window.once("ready-to-show", () => reveal("ready-to-show"));
+  window.webContents.once("did-finish-load", () => {
+    const delayMs = process.platform === "linux" ? 250 : 0;
+    setTimeout(() => reveal("did-finish-load"), delayMs);
+  });
+  window.webContents.once(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL) => {
+      debugStartupLog("main window load failed", {
+        errorCode,
+        errorDescription,
+        validatedURL,
+      });
+      setTimeout(() => reveal("did-fail-load"), 500);
+    },
+  );
+  const timeout = setTimeout(
+    () => reveal("startup-timeout"),
+    process.platform === "linux" ? 4_000 : 8_000,
+  );
+  timeout.unref();
+  window.once("closed", () => clearTimeout(timeout));
+}
+
 async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
@@ -2825,11 +3023,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     mainWindow.setFullScreen(true);
   }
 
-  mainWindow.once("ready-to-show", () => {
-    if (show) {
-      mainWindow?.show();
-    }
-  });
+  armMainWindowRevealFallback(mainWindow, show);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url);
@@ -3346,6 +3540,16 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:set-connector-secret",
+    handleTrusted((_event, id: unknown, key: unknown, value: unknown) =>
+      store.setConnectorSecret(
+        requireBoundedString(id, "connectorId", 128),
+        requireBoundedString(key, "connector secret key", 128),
+        validateConnectorSecretValue(value),
+      ),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:list-connector-teams",
     handleTrusted((_event, id: unknown) =>
       store.listConnectorTeams(requireBoundedString(id, "connectorId", 128)),
@@ -3513,6 +3717,42 @@ function registerIpcHandlers() {
       store.updateAgentWhatsAppWebDelivery(
         requireAgentSlug(slug, "slug"),
         validateAgentWhatsAppWebDelivery(delivery),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:update-agent-outlook-delivery",
+    handleTrusted((_event, slug: unknown, delivery: unknown) =>
+      store.updateAgentOutlookDelivery(
+        requireAgentSlug(slug, "slug"),
+        validateAgentOutlookDelivery(delivery),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:update-agent-slack-delivery",
+    handleTrusted((_event, slug: unknown, delivery: unknown) =>
+      store.updateAgentSlackDelivery(
+        requireAgentSlug(slug, "slug"),
+        validateAgentSlackDelivery(delivery),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:update-agent-discord-delivery",
+    handleTrusted((_event, slug: unknown, delivery: unknown) =>
+      store.updateAgentDiscordDelivery(
+        requireAgentSlug(slug, "slug"),
+        validateAgentDiscordDelivery(delivery),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:update-agent-signal-delivery",
+    handleTrusted((_event, slug: unknown, delivery: unknown) =>
+      store.updateAgentSignalDelivery(
+        requireAgentSlug(slug, "slug"),
+        validateAgentSignalDelivery(delivery),
       ),
     ),
   );

@@ -413,6 +413,12 @@ function summaryPage(agents) {
 - [Registry trust](trust/registry-trust.md)
 - [Sandboxed code](trust/sandboxed-code.md)
 
+## Connectors
+
+- [Connector setup](connectors/README.md)
+- [Delivery rules](connectors/delivery-rules.md)
+- [Connector setup reference](connectors/setup-reference.md)
+
 ## Agents
 
 - [Agent docs overview](agents/README.md)

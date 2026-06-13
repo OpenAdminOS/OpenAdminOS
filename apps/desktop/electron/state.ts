@@ -80,13 +80,20 @@ import type {
   SelfTrainingSuggestionStatus,
   SendIntuneChatMessageInput,
   SendIntuneChatMessageResult,
+  SecretAccessor,
 } from "@openadminos/agent-sdk";
 import {
+  ConnectorNotConfiguredError,
+  ConnectorValidationError,
   deriveTrustState,
   providerCatalog,
   resolveProviderDefaultModel,
   resolveRunModel,
+  type AgentDiscordDelivery,
+  type AgentOutlookDelivery,
   type AgentSchedule,
+  type AgentSignalDelivery,
+  type AgentSlackDelivery,
   type AgentSummary,
   type AgentTeamsDelivery,
   type AgentWhatsAppWebDelivery,
@@ -107,6 +114,7 @@ import {
 } from "@openadminos/connector-whatsapp-web";
 
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
+import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import {
   searchEndpoints,
@@ -192,7 +200,13 @@ interface PersistedState {
   registrySource?: string;
 }
 
-type RunDeliveryConnectorId = "teams" | typeof WHATSAPP_WEB_CONNECTOR_ID;
+type RunDeliveryConnectorId =
+  | "teams"
+  | typeof WHATSAPP_WEB_CONNECTOR_ID
+  | typeof OUTLOOK_CONNECTOR_ID
+  | typeof SLACK_CONNECTOR_ID
+  | typeof DISCORD_CONNECTOR_ID
+  | typeof SIGNAL_CONNECTOR_ID;
 
 interface RunDeliveryQueueItem {
   id: string;
@@ -252,6 +266,10 @@ const defaultState: PersistedState = {
 const providerIds = new Set<ProviderId>(
   providerCatalog.map((provider) => provider.id),
 );
+const OUTLOOK_CONNECTOR_ID = "outlook" as const;
+const SLACK_CONNECTOR_ID = "slack" as const;
+const DISCORD_CONNECTOR_ID = "discord" as const;
+const SIGNAL_CONNECTOR_ID = "signal" as const;
 const RUN_DELIVERY_MAX_ATTEMPTS = 3;
 const RUN_DELIVERY_RETRY_DELAYS_MS = [30_000, 120_000, 300_000] as const;
 
@@ -352,6 +370,11 @@ export interface AppStateStoreOptions {
    */
   whatsAppWebClientFactory?(input: { authDir: string }): WhatsAppWebClientLike;
   /**
+   * Test hook for external connector secrets. Production stores these
+   * under Electron safeStorage, outside persisted JSON state.
+   */
+  connectorSecretsFor?(connectorId: string): SecretAccessor;
+  /**
    * Allows localhost/private registry sources for tests and explicit
    * development workflows. Packaged builds must leave this false.
    */
@@ -378,6 +401,10 @@ export class AppStateStore {
   private readonly whatsAppWebClientFactory:
     | AppStateStoreOptions["whatsAppWebClientFactory"]
     | undefined;
+  private readonly connectorSecretsForOverride:
+    | AppStateStoreOptions["connectorSecretsFor"]
+    | undefined;
+  private readonly connectorSecretStore: SafeStorageConnectorSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
   private msalClient: PublicClientApplication | undefined;
   // Soft-cancel set. While a run id is here, progress snapshots from
@@ -411,6 +438,8 @@ export class AppStateStore {
       this.graphFactory = undefined;
       this.llmFactory = undefined;
       this.whatsAppWebClientFactory = undefined;
+      this.connectorSecretsForOverride = undefined;
+      this.connectorSecretStore = undefined;
       this.allowDevRegistrySource = false;
     } else {
       this.filePath = options.filePath;
@@ -432,6 +461,12 @@ export class AppStateStore {
       this.graphFactory = options.graphFactory;
       this.llmFactory = options.llmFactory;
       this.whatsAppWebClientFactory = options.whatsAppWebClientFactory;
+      this.connectorSecretsForOverride = options.connectorSecretsFor;
+      this.connectorSecretStore = options.userDataPath
+        ? new SafeStorageConnectorSecretStore(
+            join(options.userDataPath, "connectors", "secrets"),
+          )
+        : undefined;
       this.allowDevRegistrySource = options.allowDevRegistrySource === true;
     }
     // Point the runtime at the OTA-updated manifest tree (if userData is
@@ -485,6 +520,14 @@ export class AppStateStore {
     };
   }
 
+  private connectorSecretsFor(connectorId: string): SecretAccessor {
+    return (
+      this.connectorSecretsForOverride?.(connectorId) ??
+      this.connectorSecretStore?.forConnector(connectorId) ??
+      noSecrets
+    );
+  }
+
   private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
     const client = this.getMsalClient();
     const openBrowser = this.openBrowser;
@@ -511,9 +554,9 @@ export class AppStateStore {
    * (3) is only reached when both (1) and (2) failed — in that case
    * we leave `registryCacheEntries` null so `listRegistryAgents()`
    * walks the filesystem. The bundled agents are the same set the
-   * remote registry will serve once it's public; this dual-source
-   * approach means the app works in private preview today and
-   * transparently switches to remote when the repo is flipped public.
+     * remote registry serves in public preview; this dual-source
+     * approach keeps the app usable when the network registry is
+     * temporarily unavailable.
    *
    * Safe to call multiple times (e.g., on manual refresh).
    */
@@ -1854,7 +1897,7 @@ export class AppStateStore {
     const buildContext = {
       tenant: tenantSession,
       config: runtimeConfig,
-      secrets: noSecrets,
+      secrets: this.connectorSecretsFor(connectorId),
       log: () => undefined,
       idempotencyKeyFor: (stepId: string, iteration: number) =>
         `test:${connectorId}:${stepId}:${iteration}`,
@@ -1997,6 +2040,48 @@ export class AppStateStore {
     return summary;
   }
 
+  async setConnectorSecret(
+    connectorId: string,
+    key: string,
+    value: string | null,
+  ): Promise<ConnectorSummary> {
+    const factory = findConnectorFactory(connectorId);
+    if (!factory) {
+      throw new Error(`Unknown connector '${connectorId}'.`);
+    }
+    if (!/^[a-zA-Z0-9._-]{1,128}$/.test(key)) {
+      throw new Error("setConnectorSecret: key contains unsupported characters.");
+    }
+    const accessor = this.connectorSecretsFor(connectorId);
+    const normalized = typeof value === "string" ? value.trim() : null;
+    if (normalized && normalized.length > 0) {
+      await accessor.set(key, normalized);
+    } else {
+      await accessor.remove(key);
+    }
+
+    await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.connectors?.[connectorId];
+      const nextEntry: NonNullable<PersistedState["connectors"]>[string] = {
+        config: existing?.config ?? {},
+        status: "unknown",
+      };
+      const nextConnectors = {
+        ...(current.connectors ?? {}),
+        [connectorId]: nextEntry,
+      };
+      await this.write({ ...current, connectors: nextConnectors });
+    });
+    const persisted = await this.read();
+    const entry = persisted.connectors?.[connectorId];
+    return {
+      descriptor: factory.descriptor,
+      config: entry?.config ?? {},
+      status: entry?.status ?? "unknown",
+    };
+  }
+
   /**
    * Build the named connector in a one-shot read mode, invoke the
    * supplied read-kind capability, dispose, and return the result.
@@ -2030,7 +2115,7 @@ export class AppStateStore {
     const instance = await factory.build({
       tenant: tenantSession,
       config,
-      secrets: noSecrets,
+      secrets: this.connectorSecretsFor(connectorId),
       log: () => undefined,
       idempotencyKeyFor: (stepId, iteration) =>
         `picker:${connectorId}:${stepId}:${iteration}`,
@@ -2360,6 +2445,134 @@ export class AppStateStore {
         sanitized === null
           ? removeEmptyDelivery({ ...currentDelivery, whatsappWeb: undefined })
           : removeEmptyDelivery({ ...currentDelivery, whatsappWeb: sanitized });
+      nextAgents[idx] = {
+        ...existing,
+        ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
+      };
+      await this.write({ ...persisted, installedAgents: nextAgents });
+    });
+
+    return this.getAppState();
+  }
+
+  async updateAgentOutlookDelivery(
+    slug: string,
+    delivery: AgentOutlookDelivery | null,
+  ): Promise<AppState> {
+    const sanitized =
+      delivery === null ? null : sanitizeOutlookDelivery(delivery);
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentOutlookDelivery: agent "${slug}" is not installed.`);
+      }
+      const existing = persisted.installedAgents[idx];
+      const nextAgents = [...persisted.installedAgents];
+      const currentDelivery = existing.delivery ?? {};
+      const nextDelivery =
+        sanitized === null
+          ? removeEmptyDelivery({ ...currentDelivery, outlook: undefined })
+          : removeEmptyDelivery({ ...currentDelivery, outlook: sanitized });
+      nextAgents[idx] = {
+        ...existing,
+        ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
+      };
+      await this.write({ ...persisted, installedAgents: nextAgents });
+    });
+
+    return this.getAppState();
+  }
+
+  async updateAgentSlackDelivery(
+    slug: string,
+    delivery: AgentSlackDelivery | null,
+  ): Promise<AppState> {
+    const sanitized =
+      delivery === null ? null : sanitizeSlackDelivery(delivery);
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentSlackDelivery: agent "${slug}" is not installed.`);
+      }
+      const existing = persisted.installedAgents[idx];
+      const nextAgents = [...persisted.installedAgents];
+      const currentDelivery = existing.delivery ?? {};
+      const nextDelivery =
+        sanitized === null
+          ? removeEmptyDelivery({ ...currentDelivery, slack: undefined })
+          : removeEmptyDelivery({ ...currentDelivery, slack: sanitized });
+      nextAgents[idx] = {
+        ...existing,
+        ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
+      };
+      await this.write({ ...persisted, installedAgents: nextAgents });
+    });
+
+    return this.getAppState();
+  }
+
+  async updateAgentDiscordDelivery(
+    slug: string,
+    delivery: AgentDiscordDelivery | null,
+  ): Promise<AppState> {
+    const sanitized =
+      delivery === null ? null : sanitizeDiscordDelivery(delivery);
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentDiscordDelivery: agent "${slug}" is not installed.`);
+      }
+      const existing = persisted.installedAgents[idx];
+      const nextAgents = [...persisted.installedAgents];
+      const currentDelivery = existing.delivery ?? {};
+      const nextDelivery =
+        sanitized === null
+          ? removeEmptyDelivery({ ...currentDelivery, discord: undefined })
+          : removeEmptyDelivery({ ...currentDelivery, discord: sanitized });
+      nextAgents[idx] = {
+        ...existing,
+        ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
+      };
+      await this.write({ ...persisted, installedAgents: nextAgents });
+    });
+
+    return this.getAppState();
+  }
+
+  async updateAgentSignalDelivery(
+    slug: string,
+    delivery: AgentSignalDelivery | null,
+  ): Promise<AppState> {
+    const sanitized =
+      delivery === null ? null : sanitizeSignalDelivery(delivery);
+
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const idx = persisted.installedAgents.findIndex(
+        (agent) => agent.slug === slug || agent.id === slug,
+      );
+      if (idx < 0) {
+        throw new Error(`updateAgentSignalDelivery: agent "${slug}" is not installed.`);
+      }
+      const existing = persisted.installedAgents[idx];
+      const nextAgents = [...persisted.installedAgents];
+      const currentDelivery = existing.delivery ?? {};
+      const nextDelivery =
+        sanitized === null
+          ? removeEmptyDelivery({ ...currentDelivery, signal: undefined })
+          : removeEmptyDelivery({ ...currentDelivery, signal: sanitized });
       nextAgents[idx] = {
         ...existing,
         ...(nextDelivery ? { delivery: nextDelivery } : { delivery: undefined }),
@@ -4159,6 +4372,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         createGraph: selection.createGraph,
         tenant: selection.tenantSession,
         connectorConfigs: await this.readConnectorConfigs(),
+        connectorSecretsFor: (connectorId) => this.connectorSecretsFor(connectorId),
         confirmCapability: requestConnectorConfirmation,
         realWrites: true,
         onProgress: (next) =>
@@ -4191,6 +4405,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         createGraph: selection.createGraph,
         tenant: selection.tenantSession,
         connectorConfigs: await this.readConnectorConfigs(),
+        connectorSecretsFor: (connectorId) => this.connectorSecretsFor(connectorId),
         confirmCapability: requestConnectorConfirmation,
         realWrites: true,
         onProgress: (next) =>
@@ -4275,6 +4490,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (agent.delivery?.whatsappWeb?.enabled) {
       connectorIds.push(WHATSAPP_WEB_CONNECTOR_ID);
     }
+    if (agent.delivery?.outlook?.enabled) connectorIds.push(OUTLOOK_CONNECTOR_ID);
+    if (agent.delivery?.slack?.enabled) connectorIds.push(SLACK_CONNECTOR_ID);
+    if (agent.delivery?.discord?.enabled) connectorIds.push(DISCORD_CONNECTOR_ID);
+    if (agent.delivery?.signal?.enabled) connectorIds.push(SIGNAL_CONNECTOR_ID);
     if (connectorIds.length === 0) return;
 
     const now = new Date().toISOString();
@@ -4353,9 +4572,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       return { retryable: false };
     }
     try {
-      return item.connectorId === "teams"
-        ? await this.deliverRunToTeams(run)
-        : await this.deliverRunToWhatsAppWeb(run);
+      switch (item.connectorId) {
+        case "teams":
+          return await this.deliverRunToTeams(run);
+        case WHATSAPP_WEB_CONNECTOR_ID:
+          return await this.deliverRunToWhatsAppWeb(run);
+        case OUTLOOK_CONNECTOR_ID:
+          return await this.deliverRunToOutlook(run);
+        case SLACK_CONNECTOR_ID:
+          return await this.deliverRunToSlack(run);
+        case DISCORD_CONNECTOR_ID:
+          return await this.deliverRunToDiscord(run);
+        case SIGNAL_CONNECTOR_ID:
+          return await this.deliverRunToSignal(run);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.appendRunLog(
@@ -4731,6 +4961,625 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
   }
 
+  private async deliverRunToOutlook(run: RunRecord): Promise<RunDeliveryResult> {
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    const delivery = agent?.delivery?.outlook;
+    if (!agent || !delivery?.enabled) return { retryable: false };
+
+    const evaluation = evaluateRunDeliveryRule(run, delivery, "Outlook");
+    if (!evaluation.shouldSend) {
+      await this.appendRunStep(run.id, {
+        label: "Outlook notification not sent",
+        status: "skipped",
+        detail: evaluation.detail,
+      });
+      await this.appendRunLog(run.id, "info", `Outlook delivery skipped: ${evaluation.detail}`, {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+      });
+      return { retryable: false };
+    }
+
+    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    const tenant = tenantId
+      ? persisted.tenants.find((candidate) => candidate.id === tenantId)
+      : undefined;
+    const baseConfig = persisted.connectors?.[OUTLOOK_CONNECTOR_ID]?.config ?? {};
+    const recipients =
+      delivery.useDefaultRecipients === false
+        ? sanitizeDeliveryList(delivery.recipients)
+        : undefined;
+    const targetLabel = outlookDeliveryTargetLabel(delivery, baseConfig);
+    const stepId = await this.appendRunStep(run.id, {
+      label: "Send run report by Outlook email",
+      status: "running",
+      detail: `${evaluation.detail} Target: ${targetLabel}.`,
+    });
+
+    if (!tenant) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No tenant session was available for Outlook delivery.",
+      );
+      await this.appendRunLog(run.id, "warn", "Outlook delivery failed: no tenant session available.", {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+      });
+      return {
+        retryable: false,
+        error: "No tenant session was available for Outlook delivery.",
+      };
+    }
+    if (delivery.useDefaultRecipients === false && (!recipients || recipients.length === 0)) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No Outlook notification recipients are configured.",
+      );
+      await this.appendRunLog(
+        run.id,
+        "warn",
+        "Outlook delivery failed: no recipients configured.",
+        { connectorId: OUTLOOK_CONNECTOR_ID },
+      );
+      return {
+        retryable: false,
+        error: "No Outlook notification recipients are configured.",
+      };
+    }
+
+    const factory = findConnectorFactory(OUTLOOK_CONNECTOR_ID);
+    if (!factory) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "Outlook connector is not registered.",
+      );
+      await this.appendRunLog(run.id, "warn", "Outlook delivery failed: connector is not registered.", {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+      });
+      return { retryable: false, error: "Outlook connector is not registered." };
+    }
+
+    const client = this.getMsalClient();
+    const openBrowser = this.openBrowser;
+    const tenantSession = createTenantSession({
+      client,
+      tenantId: tenant.id,
+      username: tenant.username,
+      homeAccountId: tenant.homeAccountId,
+      acquireInteractive: async (scopes) =>
+        runInteractiveFlow({ client, scopes, openBrowser }),
+    });
+
+    let instance: Awaited<ReturnType<typeof factory.build>> | undefined;
+    try {
+      instance = await factory.build({
+        tenant: tenantSession,
+        config: baseConfig,
+        secrets: this.connectorSecretsFor(OUTLOOK_CONNECTOR_ID),
+        log: () => undefined,
+        idempotencyKeyFor: (stepId, iteration) =>
+          `${run.id}:outlook-delivery:${stepId}:${iteration}`,
+      });
+      const capabilities = instance.capabilities as {
+        sendMail?: (args: {
+          to?: string[];
+          subject: string;
+          markdown: string;
+          idempotencyKey: string;
+        }) => Promise<unknown>;
+      };
+      if (typeof capabilities.sendMail !== "function") {
+        throw new Error("Outlook connector does not expose sendMail.");
+      }
+      const markdown = formatOutlookDeliveryMessage(run, agent, tenant);
+      const subject = formatDeliveryEmailSubject(run, agent);
+      const idempotencyKey = `${run.id}:${stepId}:send-mail:0`;
+      const args: {
+        to?: string[];
+        subject: string;
+        markdown: string;
+        idempotencyKey: string;
+      } = { subject, markdown, idempotencyKey };
+      if (recipients && recipients.length > 0) args.to = recipients;
+      const auditStartedAt = Date.now();
+      const result = await capabilities.sendMail(args);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: OUTLOOK_CONNECTOR_ID,
+        capability: "send-mail@1",
+        idempotencyKey,
+        egressTarget: "outlook:recipients=redacted",
+        args: { target: targetLabel, subject, markdown },
+        status: "success",
+        startedAt: auditStartedAt,
+        result,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "completed",
+        `Run report sent to ${targetLabel}.`,
+      );
+      await this.appendRunLog(run.id, "info", "Run report delivered by Outlook.", {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: OUTLOOK_CONNECTOR_ID,
+        capability: "send-mail@1",
+        idempotencyKey: `${run.id}:${stepId}:send-mail:0`,
+        egressTarget: "outlook:recipients=redacted",
+        args: { target: targetLabel },
+        status: "failure",
+        startedAt: Date.now(),
+        error,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        `Outlook delivery failed: ${message}`,
+      );
+      await this.appendRunLog(run.id, "warn", `Outlook delivery failed: ${message}`, {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: isRetryableDeliveryError(error), error: message };
+    } finally {
+      await instance?.dispose().catch(() => undefined);
+    }
+  }
+
+  private async deliverRunToSlack(run: RunRecord): Promise<RunDeliveryResult> {
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    const delivery = agent?.delivery?.slack;
+    if (!agent || !delivery?.enabled) return { retryable: false };
+
+    const evaluation = evaluateRunDeliveryRule(run, delivery, "Slack");
+    if (!evaluation.shouldSend) {
+      await this.appendRunStep(run.id, {
+        label: "Slack notification not sent",
+        status: "skipped",
+        detail: evaluation.detail,
+      });
+      await this.appendRunLog(run.id, "info", `Slack delivery skipped: ${evaluation.detail}`, {
+        connectorId: SLACK_CONNECTOR_ID,
+      });
+      return { retryable: false };
+    }
+
+    const baseConfig = persisted.connectors?.[SLACK_CONNECTOR_ID]?.config ?? {};
+    const channel =
+      delivery.useDefaultChannel === false ? delivery.channel?.trim() : undefined;
+    const defaultChannel = readConfigLabel(baseConfig, "defaultChannel");
+    const targetLabel = slackDeliveryTargetLabel(delivery, baseConfig);
+    const stepId = await this.appendRunStep(run.id, {
+      label: "Send run report to Slack",
+      status: "running",
+      detail: `${evaluation.detail} Target: ${targetLabel}.`,
+    });
+
+    if (delivery.useDefaultChannel === false && !channel) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No Slack notification channel is configured.",
+      );
+      await this.appendRunLog(run.id, "warn", "Slack delivery failed: no channel configured.", {
+        connectorId: SLACK_CONNECTOR_ID,
+      });
+      return { retryable: false, error: "No Slack notification channel is configured." };
+    }
+    if (delivery.useDefaultChannel !== false && !defaultChannel) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No default Slack notification channel is configured.",
+      );
+      await this.appendRunLog(
+        run.id,
+        "warn",
+        "Slack delivery failed: no default channel configured.",
+        { connectorId: SLACK_CONNECTOR_ID },
+      );
+      return {
+        retryable: false,
+        error: "No default Slack notification channel is configured.",
+      };
+    }
+
+    const factory = findConnectorFactory(SLACK_CONNECTOR_ID);
+    if (!factory) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "Slack connector is not registered.",
+      );
+      await this.appendRunLog(run.id, "warn", "Slack delivery failed: connector is not registered.", {
+        connectorId: SLACK_CONNECTOR_ID,
+      });
+      return { retryable: false, error: "Slack connector is not registered." };
+    }
+
+    const tenant = resolveRunTenant(persisted, run);
+    let instance: Awaited<ReturnType<typeof factory.build>> | undefined;
+    try {
+      instance = await factory.build({
+        tenant: createLocalOnlyTenantSession(),
+        config: baseConfig,
+        secrets: this.connectorSecretsFor(SLACK_CONNECTOR_ID),
+        log: () => undefined,
+        idempotencyKeyFor: (stepId, iteration) =>
+          `${run.id}:slack-delivery:${stepId}:${iteration}`,
+      });
+      const capabilities = instance.capabilities as {
+        sendMessage?: (args: {
+          channel?: string;
+          text: string;
+          idempotencyKey: string;
+        }) => Promise<unknown>;
+      };
+      if (typeof capabilities.sendMessage !== "function") {
+        throw new Error("Slack connector does not expose sendMessage.");
+      }
+      const text = formatChatDeliveryMessage(run, agent, tenant);
+      const idempotencyKey = `${run.id}:${stepId}:send-message:0`;
+      const args: { channel?: string; text: string; idempotencyKey: string } = {
+        text,
+        idempotencyKey,
+      };
+      if (channel) args.channel = channel;
+      const auditStartedAt = Date.now();
+      const result = await capabilities.sendMessage(args);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: SLACK_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey,
+        egressTarget: `slack:${targetLabel}`,
+        args: { target: targetLabel, text },
+        status: "success",
+        startedAt: auditStartedAt,
+        result,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "completed",
+        `Run report sent to ${targetLabel}.`,
+      );
+      await this.appendRunLog(run.id, "info", "Run report delivered to Slack.", {
+        connectorId: SLACK_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: SLACK_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey: `${run.id}:${stepId}:send-message:0`,
+        egressTarget: `slack:${targetLabel}`,
+        args: { target: targetLabel },
+        status: "failure",
+        startedAt: Date.now(),
+        error,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        `Slack delivery failed: ${message}`,
+      );
+      await this.appendRunLog(run.id, "warn", `Slack delivery failed: ${message}`, {
+        connectorId: SLACK_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: isRetryableDeliveryError(error), error: message };
+    } finally {
+      await instance?.dispose().catch(() => undefined);
+    }
+  }
+
+  private async deliverRunToDiscord(run: RunRecord): Promise<RunDeliveryResult> {
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    const delivery = agent?.delivery?.discord;
+    if (!agent || !delivery?.enabled) return { retryable: false };
+
+    const evaluation = evaluateRunDeliveryRule(run, delivery, "Discord");
+    if (!evaluation.shouldSend) {
+      await this.appendRunStep(run.id, {
+        label: "Discord notification not sent",
+        status: "skipped",
+        detail: evaluation.detail,
+      });
+      await this.appendRunLog(run.id, "info", `Discord delivery skipped: ${evaluation.detail}`, {
+        connectorId: DISCORD_CONNECTOR_ID,
+      });
+      return { retryable: false };
+    }
+
+    const baseConfig = persisted.connectors?.[DISCORD_CONNECTOR_ID]?.config ?? {};
+    const threadId =
+      delivery.useDefaultWebhook === false ? delivery.threadId?.trim() : undefined;
+    const targetLabel = discordDeliveryTargetLabel(delivery, baseConfig);
+    const stepId = await this.appendRunStep(run.id, {
+      label: "Send run report to Discord",
+      status: "running",
+      detail: `${evaluation.detail} Target: ${targetLabel}.`,
+    });
+
+    const factory = findConnectorFactory(DISCORD_CONNECTOR_ID);
+    if (!factory) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "Discord connector is not registered.",
+      );
+      await this.appendRunLog(
+        run.id,
+        "warn",
+        "Discord delivery failed: connector is not registered.",
+        { connectorId: DISCORD_CONNECTOR_ID },
+      );
+      return { retryable: false, error: "Discord connector is not registered." };
+    }
+
+    const tenant = resolveRunTenant(persisted, run);
+    let instance: Awaited<ReturnType<typeof factory.build>> | undefined;
+    try {
+      instance = await factory.build({
+        tenant: createLocalOnlyTenantSession(),
+        config: baseConfig,
+        secrets: this.connectorSecretsFor(DISCORD_CONNECTOR_ID),
+        log: () => undefined,
+        idempotencyKeyFor: (stepId, iteration) =>
+          `${run.id}:discord-delivery:${stepId}:${iteration}`,
+      });
+      const capabilities = instance.capabilities as {
+        sendMessage?: (args: {
+          text: string;
+          threadId?: string;
+          idempotencyKey: string;
+        }) => Promise<unknown>;
+      };
+      if (typeof capabilities.sendMessage !== "function") {
+        throw new Error("Discord connector does not expose sendMessage.");
+      }
+      const text = formatChatDeliveryMessage(run, agent, tenant);
+      const idempotencyKey = `${run.id}:${stepId}:send-message:0`;
+      const args: { text: string; threadId?: string; idempotencyKey: string } = {
+        text,
+        idempotencyKey,
+      };
+      if (threadId) args.threadId = threadId;
+      const auditStartedAt = Date.now();
+      const result = await capabilities.sendMessage(args);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: DISCORD_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey,
+        egressTarget: `discord:${targetLabel}`,
+        args: { target: targetLabel, text },
+        status: "success",
+        startedAt: auditStartedAt,
+        result,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "completed",
+        `Run report sent to ${targetLabel}.`,
+      );
+      await this.appendRunLog(run.id, "info", "Run report delivered to Discord.", {
+        connectorId: DISCORD_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: DISCORD_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey: `${run.id}:${stepId}:send-message:0`,
+        egressTarget: `discord:${targetLabel}`,
+        args: { target: targetLabel },
+        status: "failure",
+        startedAt: Date.now(),
+        error,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        `Discord delivery failed: ${message}`,
+      );
+      await this.appendRunLog(run.id, "warn", `Discord delivery failed: ${message}`, {
+        connectorId: DISCORD_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: isRetryableDeliveryError(error), error: message };
+    } finally {
+      await instance?.dispose().catch(() => undefined);
+    }
+  }
+
+  private async deliverRunToSignal(run: RunRecord): Promise<RunDeliveryResult> {
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    const delivery = agent?.delivery?.signal;
+    if (!agent || !delivery?.enabled) return { retryable: false };
+
+    const evaluation = evaluateRunDeliveryRule(run, delivery, "Signal");
+    if (!evaluation.shouldSend) {
+      await this.appendRunStep(run.id, {
+        label: "Signal notification not sent",
+        status: "skipped",
+        detail: evaluation.detail,
+      });
+      await this.appendRunLog(run.id, "info", `Signal delivery skipped: ${evaluation.detail}`, {
+        connectorId: SIGNAL_CONNECTOR_ID,
+      });
+      return { retryable: false };
+    }
+
+    const baseConfig = persisted.connectors?.[SIGNAL_CONNECTOR_ID]?.config ?? {};
+    const recipient =
+      delivery.useDefaultRecipient === false
+        ? delivery.recipient?.trim()
+        : readConfigLabel(baseConfig, "defaultRecipient");
+    const targetLabel = signalDeliveryTargetLabel(delivery, baseConfig);
+    const stepId = await this.appendRunStep(run.id, {
+      label: "Send run report to Signal",
+      status: "running",
+      detail: `${evaluation.detail} Target: ${targetLabel}.`,
+    });
+
+    if (!recipient) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No Signal notification recipient is configured.",
+      );
+      await this.appendRunLog(
+        run.id,
+        "warn",
+        "Signal delivery failed: no recipient configured.",
+        { connectorId: SIGNAL_CONNECTOR_ID },
+      );
+      return { retryable: false, error: "No Signal notification recipient is configured." };
+    }
+
+    const factory = findConnectorFactory(SIGNAL_CONNECTOR_ID);
+    if (!factory) {
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "Signal connector is not registered.",
+      );
+      await this.appendRunLog(run.id, "warn", "Signal delivery failed: connector is not registered.", {
+        connectorId: SIGNAL_CONNECTOR_ID,
+      });
+      return { retryable: false, error: "Signal connector is not registered." };
+    }
+
+    const tenant = resolveRunTenant(persisted, run);
+    let instance: Awaited<ReturnType<typeof factory.build>> | undefined;
+    try {
+      instance = await factory.build({
+        tenant: createLocalOnlyTenantSession(),
+        config: baseConfig,
+        secrets: this.connectorSecretsFor(SIGNAL_CONNECTOR_ID),
+        log: () => undefined,
+        idempotencyKeyFor: (stepId, iteration) =>
+          `${run.id}:signal-delivery:${stepId}:${iteration}`,
+      });
+      const capabilities = instance.capabilities as {
+        sendMessage?: (args: {
+          to?: string;
+          text: string;
+          idempotencyKey: string;
+        }) => Promise<unknown>;
+      };
+      if (typeof capabilities.sendMessage !== "function") {
+        throw new Error("Signal connector does not expose sendMessage.");
+      }
+      const text = formatPlainDeliveryMessage(run, agent, tenant);
+      const idempotencyKey = `${run.id}:${stepId}:send-message:0`;
+      const args: { to?: string; text: string; idempotencyKey: string } = {
+        text,
+        idempotencyKey,
+      };
+      if (delivery.useDefaultRecipient === false) args.to = recipient;
+      const auditStartedAt = Date.now();
+      const result = await capabilities.sendMessage(args);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: SIGNAL_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey,
+        egressTarget: "signal:to=redacted",
+        args: { target: targetLabel, text },
+        status: "success",
+        startedAt: auditStartedAt,
+        result,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "completed",
+        `Run report sent to ${targetLabel}.`,
+      );
+      await this.appendRunLog(run.id, "info", "Run report delivered to Signal.", {
+        connectorId: SIGNAL_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: false };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const audit = createDeliveryAuditEntry({
+        runId: run.id,
+        stepId,
+        connector: SIGNAL_CONNECTOR_ID,
+        capability: "send-message@1",
+        idempotencyKey: `${run.id}:${stepId}:send-message:0`,
+        egressTarget: "signal:to=redacted",
+        args: { target: targetLabel },
+        status: "failure",
+        startedAt: Date.now(),
+        error,
+      });
+      await this.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        `Signal delivery failed: ${message}`,
+      );
+      await this.appendRunLog(run.id, "warn", `Signal delivery failed: ${message}`, {
+        connectorId: SIGNAL_CONNECTOR_ID,
+        connectorAudit: audit as unknown as Record<string, unknown>,
+      });
+      return { retryable: isRetryableDeliveryError(error), error: message };
+    } finally {
+      await instance?.dispose().catch(() => undefined);
+    }
+  }
+
   private async appendRunLog(
     runId: string,
     level: RunLogLevel,
@@ -4998,7 +5847,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             const obj = entry as Record<string, unknown>;
             const connectorId =
               obj.connectorId === "teams" ||
-              obj.connectorId === WHATSAPP_WEB_CONNECTOR_ID
+              obj.connectorId === WHATSAPP_WEB_CONNECTOR_ID ||
+              obj.connectorId === OUTLOOK_CONNECTOR_ID ||
+              obj.connectorId === SLACK_CONNECTOR_ID ||
+              obj.connectorId === DISCORD_CONNECTOR_ID ||
+              obj.connectorId === SIGNAL_CONNECTOR_ID
                 ? obj.connectorId
                 : undefined;
             if (
@@ -5231,6 +6084,113 @@ function sanitizeWhatsAppWebDelivery(
   return sanitized;
 }
 
+function sanitizeOutlookDelivery(delivery: AgentOutlookDelivery): AgentOutlookDelivery {
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+    throw new Error("updateAgentOutlookDelivery: delivery must be an object or null.");
+  }
+  const useDefaultRecipients = delivery.useDefaultRecipients !== false;
+  const sanitized: AgentOutlookDelivery = {
+    enabled: delivery.enabled === true,
+    useDefaultRecipients,
+    includeManualRuns: delivery.includeManualRuns ?? true,
+    includeScheduledRuns: delivery.includeScheduledRuns ?? true,
+    notifyOnSuccess: delivery.notifyOnSuccess ?? true,
+    notifyOnFailure: delivery.notifyOnFailure ?? false,
+    notifyOnChangeOnly: delivery.notifyOnChangeOnly ?? false,
+  };
+  if (!useDefaultRecipients) {
+    const recipients = sanitizeDeliveryList(delivery.recipients);
+    if (recipients.length === 0) {
+      throw new Error(
+        "updateAgentOutlookDelivery: recipients are required when not using the default Outlook recipients.",
+      );
+    }
+    sanitized.recipients = recipients;
+    const label = delivery.recipientLabel?.trim();
+    if (label) sanitized.recipientLabel = label;
+  }
+  return sanitized;
+}
+
+function sanitizeSlackDelivery(delivery: AgentSlackDelivery): AgentSlackDelivery {
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+    throw new Error("updateAgentSlackDelivery: delivery must be an object or null.");
+  }
+  const useDefaultChannel = delivery.useDefaultChannel !== false;
+  const sanitized: AgentSlackDelivery = {
+    enabled: delivery.enabled === true,
+    useDefaultChannel,
+    includeManualRuns: delivery.includeManualRuns ?? true,
+    includeScheduledRuns: delivery.includeScheduledRuns ?? true,
+    notifyOnSuccess: delivery.notifyOnSuccess ?? true,
+    notifyOnFailure: delivery.notifyOnFailure ?? false,
+    notifyOnChangeOnly: delivery.notifyOnChangeOnly ?? false,
+  };
+  if (!useDefaultChannel) {
+    const channel = delivery.channel?.trim();
+    if (!channel) {
+      throw new Error(
+        "updateAgentSlackDelivery: channel is required when not using the default Slack channel.",
+      );
+    }
+    sanitized.channel = channel;
+    const label = delivery.channelLabel?.trim();
+    if (label) sanitized.channelLabel = label;
+  }
+  return sanitized;
+}
+
+function sanitizeDiscordDelivery(delivery: AgentDiscordDelivery): AgentDiscordDelivery {
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+    throw new Error("updateAgentDiscordDelivery: delivery must be an object or null.");
+  }
+  const useDefaultWebhook = delivery.useDefaultWebhook !== false;
+  const sanitized: AgentDiscordDelivery = {
+    enabled: delivery.enabled === true,
+    useDefaultWebhook,
+    includeManualRuns: delivery.includeManualRuns ?? true,
+    includeScheduledRuns: delivery.includeScheduledRuns ?? true,
+    notifyOnSuccess: delivery.notifyOnSuccess ?? true,
+    notifyOnFailure: delivery.notifyOnFailure ?? false,
+    notifyOnChangeOnly: delivery.notifyOnChangeOnly ?? false,
+  };
+  if (!useDefaultWebhook) {
+    const threadId = delivery.threadId?.trim();
+    if (threadId) sanitized.threadId = threadId;
+    const label = delivery.targetLabel?.trim();
+    if (label) sanitized.targetLabel = label;
+  }
+  return sanitized;
+}
+
+function sanitizeSignalDelivery(delivery: AgentSignalDelivery): AgentSignalDelivery {
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+    throw new Error("updateAgentSignalDelivery: delivery must be an object or null.");
+  }
+  const useDefaultRecipient = delivery.useDefaultRecipient !== false;
+  const sanitized: AgentSignalDelivery = {
+    enabled: delivery.enabled === true,
+    useDefaultRecipient,
+    includeManualRuns: delivery.includeManualRuns ?? true,
+    includeScheduledRuns: delivery.includeScheduledRuns ?? true,
+    notifyOnSuccess: delivery.notifyOnSuccess ?? true,
+    notifyOnFailure: delivery.notifyOnFailure ?? false,
+    notifyOnChangeOnly: delivery.notifyOnChangeOnly ?? false,
+  };
+  if (!useDefaultRecipient) {
+    const recipient = delivery.recipient?.trim();
+    if (!recipient) {
+      throw new Error(
+        "updateAgentSignalDelivery: recipient is required when not using the default Signal recipient.",
+      );
+    }
+    sanitized.recipient = recipient;
+    const label = delivery.recipientLabel?.trim();
+    if (label) sanitized.recipientLabel = label;
+  }
+  return sanitized;
+}
+
 function resolveWhatsAppDefaultRecipient(config: Record<string, unknown>): string {
   const type =
     typeof config.defaultRecipientType === "string"
@@ -5257,7 +6217,14 @@ function sanitizeWhatsAppRecipientType(
 function removeEmptyDelivery(
   delivery: NonNullable<AgentSummary["delivery"]>,
 ): AgentSummary["delivery"] {
-  return delivery.teams || delivery.whatsappWeb ? delivery : undefined;
+  return delivery.teams ||
+    delivery.whatsappWeb ||
+    delivery.outlook ||
+    delivery.slack ||
+    delivery.discord ||
+    delivery.signal
+    ? delivery
+    : undefined;
 }
 
 interface DeliveryRuleSettings {
@@ -5365,6 +6332,79 @@ function whatsAppDeliveryTargetLabel(
   if (type === "self" || !recipient) return "My WhatsApp";
   if (type === "group" || recipient.endsWith("@g.us")) return "WhatsApp group";
   return "WhatsApp recipient";
+}
+
+function outlookDeliveryTargetLabel(
+  delivery: AgentOutlookDelivery,
+  config: Record<string, unknown>,
+): string {
+  if (delivery.useDefaultRecipients === false) {
+    const label = delivery.recipientLabel?.trim();
+    if (label) return label;
+    return formatRecipientCount(sanitizeDeliveryList(delivery.recipients), "Outlook");
+  }
+  const defaultRecipients = sanitizeDeliveryList(
+    splitDeliveryList(readConfigLabel(config, "defaultRecipients")),
+  );
+  return formatRecipientCount(defaultRecipients, "Outlook");
+}
+
+function slackDeliveryTargetLabel(
+  delivery: AgentSlackDelivery,
+  config: Record<string, unknown>,
+): string {
+  if (delivery.useDefaultChannel === false) {
+    return (
+      delivery.channelLabel?.trim() ||
+      delivery.channel?.trim() ||
+      "Slack channel"
+    );
+  }
+  return (
+    readConfigLabel(config, "defaultChannelLabel") ||
+    readConfigLabel(config, "defaultChannel") ||
+    "default Slack channel"
+  );
+}
+
+function discordDeliveryTargetLabel(
+  delivery: AgentDiscordDelivery,
+  config: Record<string, unknown>,
+): string {
+  const label = delivery.targetLabel?.trim() || readConfigLabel(config, "defaultTargetLabel");
+  if (label) return label;
+  const threadId =
+    delivery.useDefaultWebhook === false
+      ? delivery.threadId?.trim()
+      : readConfigLabel(config, "defaultThreadId");
+  return threadId ? "Discord webhook thread" : "Discord webhook";
+}
+
+function signalDeliveryTargetLabel(
+  delivery: AgentSignalDelivery,
+  config: Record<string, unknown>,
+): string {
+  if (delivery.useDefaultRecipient === false) {
+    return delivery.recipientLabel?.trim() || "Signal recipient";
+  }
+  return readConfigLabel(config, "defaultRecipientLabel") || "Signal recipient";
+}
+
+function formatRecipientCount(values: readonly string[], connectorName: string): string {
+  if (values.length === 1) return `1 ${connectorName} recipient`;
+  if (values.length > 1) return `${values.length} ${connectorName} recipients`;
+  return `default ${connectorName} recipients`;
+}
+
+function splitDeliveryList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value.split(/[,\n;]/g);
+}
+
+function sanitizeDeliveryList(values: readonly string[] | undefined): string[] {
+  return (values ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 }
 
 function readConfigLabel(
@@ -5524,6 +6564,156 @@ function formatWhatsAppDeliveryMessage(
     }
   }
   return lines.join("\n");
+}
+
+function formatOutlookDeliveryMessage(
+  run: RunRecord,
+  agent: AgentSummary,
+  tenant: TenantRecord,
+): string {
+  const status = run.status === "completed" ? "Completed" : "Failed";
+  const lines = [
+    `## ${agent.name}`,
+    "",
+    `**Status:** ${status}`,
+    `**Tenant:** ${tenant.displayName}`,
+    `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
+    `**Queued:** ${run.queuedAt}`,
+  ];
+  if (run.changeState) {
+    lines.push(`**Finding state:** ${run.changeState}`);
+  }
+  if (run.providerId) {
+    lines.push(
+      `**Model:** ${run.providerId}${run.model ? ` · ${run.model}` : ""}`,
+    );
+  }
+  if (run.error) {
+    lines.push("", "### Error", "", truncateForDelivery(run.error, 2000));
+  }
+  if (run.summary) {
+    lines.push("", "### Summary", "", truncateForDelivery(run.summary, 8000));
+  }
+  if (run.steps.length > 0) {
+    lines.push("", "### Pipeline", "");
+    for (const step of run.steps.slice(0, 20)) {
+      lines.push(`- ${step.status}: ${step.label}`);
+    }
+    if (run.steps.length > 20) {
+      lines.push(`- ${run.steps.length - 20} more steps`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatChatDeliveryMessage(
+  run: RunRecord,
+  agent: AgentSummary,
+  tenant: TenantRecord | undefined,
+): string {
+  const status = run.status === "completed" ? "Completed" : "Failed";
+  const lines = [
+    "*OpenAdminOS run report*",
+    "",
+    `*Agent:* ${agent.name}`,
+    `*Status:* ${status}`,
+    `*Tenant:* ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    `*Trigger:* ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
+    `*Queued:* ${run.queuedAt}`,
+  ];
+  if (run.changeState) {
+    lines.push(`*Finding state:* ${run.changeState}`);
+  }
+  if (run.providerId) {
+    lines.push(`*Model:* ${run.providerId}${run.model ? ` · ${run.model}` : ""}`);
+  }
+  if (run.error) {
+    lines.push("", "*Error*", truncateForDelivery(run.error, 1200));
+  }
+  if (run.summary) {
+    lines.push("", "*Summary*", truncateForDelivery(run.summary, 2400));
+  }
+  if (run.steps.length > 0) {
+    lines.push("", "*Pipeline*");
+    for (const step of run.steps.slice(0, 12)) {
+      lines.push(`- ${step.status}: ${step.label}`);
+    }
+    if (run.steps.length > 12) {
+      lines.push(`- ${run.steps.length - 12} more steps`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatPlainDeliveryMessage(
+  run: RunRecord,
+  agent: AgentSummary,
+  tenant: TenantRecord | undefined,
+): string {
+  const status = run.status === "completed" ? "Completed" : "Failed";
+  const lines = [
+    "OpenAdminOS run report",
+    "",
+    `Agent: ${agent.name}`,
+    `Status: ${status}`,
+    `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
+    `Queued: ${run.queuedAt}`,
+  ];
+  if (run.changeState) {
+    lines.push(`Finding state: ${run.changeState}`);
+  }
+  if (run.providerId) {
+    lines.push(`Model: ${run.providerId}${run.model ? ` · ${run.model}` : ""}`);
+  }
+  if (run.error) {
+    lines.push("", "Error", truncateForDelivery(run.error, 1200));
+  }
+  if (run.summary) {
+    lines.push("", "Summary", truncateForDelivery(run.summary, 2400));
+  }
+  if (run.steps.length > 0) {
+    lines.push("", "Pipeline");
+    for (const step of run.steps.slice(0, 12)) {
+      lines.push(`- ${step.status}: ${step.label}`);
+    }
+    if (run.steps.length > 12) {
+      lines.push(`- ${run.steps.length - 12} more steps`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatDeliveryEmailSubject(run: RunRecord, agent: AgentSummary): string {
+  const status = run.status === "completed" ? "completed" : "failed";
+  return `OpenAdminOS: ${agent.name} ${status}`;
+}
+
+function resolveRunTenant(
+  persisted: PersistedState,
+  run: RunRecord,
+): TenantRecord | undefined {
+  const tenantId = run.tenantId ?? persisted.activeTenantId;
+  return tenantId
+    ? persisted.tenants.find((candidate) => candidate.id === tenantId)
+    : undefined;
+}
+
+function isRetryableDeliveryError(error: unknown): boolean {
+  if (
+    error instanceof ConnectorNotConfiguredError ||
+    error instanceof ConnectorValidationError
+  ) {
+    return false;
+  }
+  if (error && typeof error === "object" && "recovery" in error) {
+    const recovery = (error as { recovery?: unknown }).recovery;
+    if (recovery === "retry") return true;
+    if (recovery === "fatal" || recovery === "reconfigure" || recovery === "reauth") {
+      return false;
+    }
+  }
+  return true;
 }
 
 function truncateForDelivery(value: string, maxLength: number): string {

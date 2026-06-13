@@ -19,6 +19,10 @@ import {
   type TenantSession,
 } from "@openadminos/agent-sdk";
 
+import { discordConnector } from "@openadminos/connector-discord";
+import { outlookConnector } from "@openadminos/connector-outlook";
+import { signalConnector } from "@openadminos/connector-signal";
+import { slackConnector } from "@openadminos/connector-slack";
 import { teamsConnector } from "@openadminos/connector-teams";
 import { whatsappWebConnector } from "@openadminos/connector-whatsapp-web";
 
@@ -30,6 +34,10 @@ import { whatsappWebConnector } from "@openadminos/connector-whatsapp-web";
  */
 const REGISTERED_CONNECTORS: ReadonlyMap<string, ConnectorFactory<unknown>> =
   new Map<string, ConnectorFactory<unknown>>([
+    ["outlook", outlookConnector],
+    ["slack", slackConnector],
+    ["discord", discordConnector],
+    ["signal", signalConnector],
     ["teams", teamsConnector],
     ["whatsapp-web", whatsappWebConnector],
   ]);
