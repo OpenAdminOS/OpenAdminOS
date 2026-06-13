@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/connector-signal",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "description": "Signal connector for OpenAdminOS. Sends outbound notification messages through signal-cli or a local signal-cli REST bridge.",
@@ -21,7 +21,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@openadminos/agent-sdk": "0.2.3"
+    "@openadminos/agent-sdk": "0.2.4"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",
