@@ -16,6 +16,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Fixed packaged Linux startup on VM/no-3D systems by disabling Chromium GPU/VAAPI acceleration and adding a main-window reveal fallback when `ready-to-show` never fires.
+- Fixed release prep so v0.2.4 release PRs bump the new Outlook, Slack, Discord, and Signal connector package versions.
 
 ### Security
 
