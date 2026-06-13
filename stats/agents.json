@@ -1,61 +1,61 @@
 {
-  "updatedAt": "2026-06-13T15:00:39.698Z",
+  "updatedAt": "2026-06-13T22:00:38.650Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 12,
-      "installs7d": 2
-    },
-    "intune-device-posture-auditor": {
-      "installs": 1,
-      "installs7d": 1
-    },
-    "offboarding-agent": {
-      "installs": 7,
-      "installs7d": 1
-    },
-    "compliance-overview": {
-      "installs": 15,
-      "installs7d": 4
-    },
-    "os-update-posture": {
-      "installs": 7,
-      "installs7d": 1
-    },
-    "tenant-health-report": {
-      "installs": 15,
-      "installs7d": 8
-    },
-    "user-license-overview": {
       "installs": 13,
-      "installs7d": 6
-    },
-    "conditional-access-explainer": {
-      "installs": 18,
-      "installs7d": 8
-    },
-    "dormant-app-registrations": {
-      "installs": 14,
-      "installs7d": 6
-    },
-    "risky-sign-in-triage": {
-      "installs": 7,
-      "installs7d": 2
-    },
-    "secure-score-prioritizer": {
-      "installs": 9,
       "installs7d": 3
     },
-    "sign-in-failure-explainer": {
-      "installs": 11,
+    "intune-device-posture-auditor": {
+      "installs": 2,
+      "installs7d": 2
+    },
+    "offboarding-agent": {
+      "installs": 8,
+      "installs7d": 2
+    },
+    "compliance-overview": {
+      "installs": 16,
       "installs7d": 5
     },
-    "stale-guest-cleanup": {
+    "os-update-posture": {
+      "installs": 8,
+      "installs7d": 2
+    },
+    "tenant-health-report": {
+      "installs": 16,
+      "installs7d": 9
+    },
+    "user-license-overview": {
+      "installs": 14,
+      "installs7d": 7
+    },
+    "conditional-access-explainer": {
+      "installs": 19,
+      "installs7d": 9
+    },
+    "dormant-app-registrations": {
+      "installs": 15,
+      "installs7d": 7
+    },
+    "risky-sign-in-triage": {
       "installs": 8,
       "installs7d": 3
     },
+    "secure-score-prioritizer": {
+      "installs": 10,
+      "installs7d": 4
+    },
+    "sign-in-failure-explainer": {
+      "installs": 12,
+      "installs7d": 6
+    },
+    "stale-guest-cleanup": {
+      "installs": 9,
+      "installs7d": 4
+    },
     "tenant-change-audit": {
-      "installs": 6,
-      "installs7d": 1
+      "installs": 7,
+      "installs7d": 2
     }
   }
 }
