@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-13T22:00:38.650Z",
+  "updatedAt": "2026-06-14T04:00:39.489Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 13,
@@ -10,8 +10,8 @@
       "installs7d": 2
     },
     "offboarding-agent": {
-      "installs": 8,
-      "installs7d": 2
+      "installs": 9,
+      "installs7d": 3
     },
     "compliance-overview": {
       "installs": 16,
