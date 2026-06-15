@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-15T08:00:35.073Z",
+  "updatedAt": "2026-06-15T11:00:36.793Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 14,
@@ -30,7 +30,7 @@
       "installs7d": 8
     },
     "conditional-access-explainer": {
-      "installs": 20,
+      "installs": 21,
       "installs7d": 10
     },
     "dormant-app-registrations": {
@@ -42,12 +42,12 @@
       "installs7d": 4
     },
     "secure-score-prioritizer": {
-      "installs": 11,
+      "installs": 12,
       "installs7d": 5
     },
     "sign-in-failure-explainer": {
       "installs": 13,
-      "installs7d": 7
+      "installs7d": 6
     },
     "stale-guest-cleanup": {
       "installs": 10,
