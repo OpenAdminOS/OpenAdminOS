@@ -1,17 +1,17 @@
 {
-  "updatedAt": "2026-06-23T11:01:29.298Z",
+  "updatedAt": "2026-06-23T14:00:34.920Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 14,
-      "installs7d": 0
+      "installs": 15,
+      "installs7d": 1
     },
     "intune-device-posture-auditor": {
       "installs": 3,
       "installs7d": 0
     },
     "offboarding-agent": {
-      "installs": 10,
-      "installs7d": 0
+      "installs": 11,
+      "installs7d": 1
     },
     "compliance-overview": {
       "installs": 17,
@@ -26,8 +26,8 @@
       "installs7d": 0
     },
     "user-license-overview": {
-      "installs": 15,
-      "installs7d": 0
+      "installs": 16,
+      "installs7d": 1
     },
     "conditional-access-explainer": {
       "installs": 23,
@@ -50,12 +50,12 @@
       "installs7d": 0
     },
     "stale-guest-cleanup": {
-      "installs": 10,
-      "installs7d": 0
+      "installs": 11,
+      "installs7d": 1
     },
     "tenant-change-audit": {
-      "installs": 8,
-      "installs7d": 0
+      "installs": 9,
+      "installs7d": 1
     }
   }
 }
