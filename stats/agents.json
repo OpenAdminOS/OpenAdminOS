@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-23T20:00:32.625Z",
+  "updatedAt": "2026-06-23T21:00:43.917Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 15,
@@ -42,8 +42,8 @@
       "installs7d": 1
     },
     "secure-score-prioritizer": {
-      "installs": 12,
-      "installs7d": 0
+      "installs": 13,
+      "installs7d": 1
     },
     "sign-in-failure-explainer": {
       "installs": 13,
