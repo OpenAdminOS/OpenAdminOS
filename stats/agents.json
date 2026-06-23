@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-23T14:00:34.920Z",
+  "updatedAt": "2026-06-23T20:00:32.625Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 15,
@@ -30,8 +30,8 @@
       "installs7d": 1
     },
     "conditional-access-explainer": {
-      "installs": 23,
-      "installs7d": 2
+      "installs": 24,
+      "installs7d": 3
     },
     "dormant-app-registrations": {
       "installs": 16,
