@@ -121,7 +121,7 @@ The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page
 copy explicitly identifies it as the Impressum / provider identification under
-§ 5 DDG. The legal operator is UgurLabs UG (haftungsbeschränkt), Winterhuder
+§ 5 DDG. The legal operator is Open Admin OS, Winterhuder
 Weg 29, 22085 Hamburg, Germany, reachable at `support@openadminos.com`. The
 listed managing director is Ugur Koc. The register court/register number and VAT
 ID if issued still need confirmation before the provider identification is

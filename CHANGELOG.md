@@ -122,7 +122,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Marketing hero download buttons now use equal-width platform controls with aligned notes for macOS, Linux, and Windows.
 - Marketing landing page now aligns software schema, Windows availability copy, mobile comparison tables, and skip-link accessibility with the current release state.
 - Marketing headers now use a compact mobile stack menu aligned with the logo row instead of a separate row of top buttons.
-- Marketing privacy, terms, footer, schema, sitemap, and `llms.txt` now use `support@openadminos.com` and link a new `/legal-notice` provider-identification page for UgurLabs UG and managing director Ugur Koc, with `/impressum` kept as an alias.
+- Marketing privacy, terms, footer, schema, sitemap, and `llms.txt` now use `support@openadminos.com` and link a new `/legal-notice` provider-identification page for Open Admin OS and managing director Ugur Koc, with `/impressum` kept as an alias.
 - Marketing FAQ items are now accessible native accordions, with the primary product definition expanded by default for SEO/GEO visibility.
 - Marketing landing page now folds the OpenAdminOS definition into the visible FAQ instead of a separate definition card.
 - Marketing search appearance now uses a crawlable 48px PNG favicon, 180px Apple touch icon, clearer secondary page titles, `WebSite.alternateName` schema, and explicit AI-search crawler access in robots.txt.
@@ -328,7 +328,7 @@ If you have v0.1.7 installed on macOS, your app will detect this release on next
 
 ### Changed
 
-- **Project renamed: Open Agents -> OpenAdminOS.** Repo moved to `OpenAdminOS/OpenAdminOS`. Affects the display name across the desktop app and marketing site, the Electron `productName` and `appId` (`com.openadminos.desktop`), all workspace npm packages (`@openagents/*` -> `@openadminos/*`), every internal IPC channel (`openagents:*` -> `openadminos:*`), the `window.openAgents` preload bridge (-> `window.openAdminOS`), the `OpenAgentsApi` SDK type, the custom URL scheme (`openagents://` -> `openadminos://`), and every README/SPEC reference. The parent-brand attribution (Ugurlabs) was dropped and the marketing domain switched from `openagents.sh` to `openadminos.com`. **Existing macOS installs will land on a fresh user-data-dir** (`~/Library/Application Support/OpenAdminOS` instead of `Open Agents`) — tenant connections, run history, and settings do not migrate. Code signing identity and auto-update channel need to be reconfigured under the new bundle ID.
+- **Project renamed: Open Agents -> OpenAdminOS.** Repo moved to `OpenAdminOS/OpenAdminOS`. Affects the display name across the desktop app and marketing site, the Electron `productName` and `appId` (`com.openadminos.desktop`), all workspace npm packages (`@openagents/*` -> `@openadminos/*`), every internal IPC channel (`openagents:*` -> `openadminos:*`), the `window.openAgents` preload bridge (-> `window.openAdminOS`), the `OpenAgentsApi` SDK type, the custom URL scheme (`openagents://` -> `openadminos://`), and every README/SPEC reference. The parent-brand attribution was dropped and the marketing domain switched from `openagents.sh` to `openadminos.com`. **Existing macOS installs will land on a fresh user-data-dir** (`~/Library/Application Support/OpenAdminOS` instead of `Open Agents`) — tenant connections, run history, and settings do not migrate. Code signing identity and auto-update channel need to be reconfigured under the new bundle ID.
 
 ### Added
 
