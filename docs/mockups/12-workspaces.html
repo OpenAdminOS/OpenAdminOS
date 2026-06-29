@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OpenAdminOS - Workspaces</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.main { min-width: 0; display: grid; grid-template-columns: 310px minmax(0, 1fr); background: var(--bg-0); }
+.list-pane { background: var(--bg-1); border-right: 1px solid var(--border); padding: 16px; overflow: hidden; }
+.detail-pane { min-width: 0; overflow: auto; padding: 18px 22px 28px; }
+.pane-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+h1 { font-size: 18px; font-weight: 700; }
+h2 { font-size: 13px; font-weight: 600; margin-bottom: 9px; }
+.sub { color: var(--text-2); font-size: 11px; }
+.card-title { font-size: 13px; font-weight: 600; }
+.search { width: 100%; background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-0); padding: 8px 10px; font: inherit; margin: 8px 0 12px; }
+.button, .pill { border: 1px solid var(--border); background: var(--bg-2); color: var(--text-1); border-radius: 6px; font-size: 11px; padding: 6px 9px; display: inline-flex; align-items: center; gap: 6px; }
+.button.primary { color: var(--bg-0); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.button.danger { color: var(--danger); border-color: rgba(248, 113, 113, .25); background: rgba(248, 113, 113, .08); }
+.pill.accent { color: var(--accent); border-color: rgba(0, 212, 255, .28); background: var(--accent-bg); }
+.pill.ok { color: var(--success); border-color: rgba(74, 222, 128, .24); background: rgba(74, 222, 128, .08); }
+.workspace-row { border: 1px solid var(--border); background: var(--bg-2); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+.workspace-row.active { border-color: rgba(0, 212, 255, .32); background: var(--accent-bg); }
+.row-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.row-title { font-weight: 600; font-size: 13px; }
+.row-meta { display: flex; gap: 8px; flex-wrap: wrap; color: var(--text-2); font-size: 10px; font-family: 'JetBrains Mono', monospace; }
+.empty-mini { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 16px; color: var(--text-2); background: rgba(255,255,255,.015); margin-top: 14px; }
+.detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 16px; }
+.detail-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.sections { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(320px, .8fr); gap: 16px; align-items: start; }
+.section { border: 1px solid var(--border); background: var(--bg-1); border-radius: 8px; margin-bottom: 16px; overflow: hidden; }
+.section-head { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.section-body { padding: 12px 14px; }
+.evidence-row, .note-row, .link-row { border: 1px solid var(--border); background: var(--bg-2); border-radius: 6px; padding: 11px 12px; margin-bottom: 8px; }
+.evidence-top, .link-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.evidence-title, .note-title { font-size: 12px; font-weight: 600; }
+.evidence-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 9px; }
+.metric { background: var(--bg-3); border: 1px solid var(--border); border-radius: 5px; padding: 8px; }
+.metric strong { display: block; font-size: 16px; }
+.metric span { color: var(--text-2); font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .08em; }
+.note-area { width: 100%; min-height: 84px; resize: vertical; background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-0); padding: 10px; font: inherit; }
+.instructions { min-height: 150px; }
+.trust-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); background: var(--bg-2); border-radius: 8px; margin-bottom: 16px; }
+.modal { position: fixed; right: 34px; bottom: 34px; width: 420px; background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 20px 60px rgba(0,0,0,.45); overflow: hidden; }
+.modal-head { padding: 13px 14px; border-bottom: 1px solid var(--border); }
+.modal-body { padding: 14px; }
+.map-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.status { font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--success); }
+@media (max-width: 1080px) {
+  .main { grid-template-columns: 1fr; }
+  .list-pane { display: none; }
+  .sections { grid-template-columns: 1fr; }
+  .modal { left: 22px; right: 22px; width: auto; }
+}
+@media (max-width: 720px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .titlebar-title { text-align: left; }
+  .titlebar-status { display: none; }
+  .detail-pane { padding: 14px; }
+  .detail-head,
+  .trust-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .head-actions { justify-content: flex-start; }
+  .evidence-top,
+  .link-row,
+  .section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modal {
+    bottom: auto;
+    left: auto;
+    margin: 0 14px 14px;
+    position: static;
+    right: auto;
+    width: auto;
+  }
+  .map-row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">OpenAdminOS - Workspaces</div>
+    <div class="titlebar-status"><span class="pulse"></span> Contoso active</div>
+  </div>
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">O</div><div><div class="brand-name">OpenAdminOS</div><div class="brand-sub">public preview</div></div></div>
+    <div class="nav-section">
+      <div class="nav-label">// Primary</div>
+      <div class="nav-item">Agents</div>
+      <div class="nav-item">Intune Chat</div>
+      <div class="nav-item active">Workspaces <span class="nav-badge">4</span></div>
+      <div class="nav-item">Activity</div>
+    </div>
+    <div class="tenant-switcher"><div class="tenant-avatar">C</div><div class="tenant-info"><div class="tenant-name">Contoso</div><div class="tenant-id">single-tenant scope</div></div></div>
+  </aside>
+  <main class="main">
+    <section class="list-pane">
+      <div class="pane-head">
+        <div><h1>Workspaces</h1><div class="sub">Tenant-scoped investigations</div></div>
+        <button class="button primary">New</button>
+      </div>
+      <input class="search" value="compliance" aria-label="Search workspaces">
+      <article class="workspace-row active">
+        <div class="row-top"><div class="row-title">Contoso Windows compliance review</div><span class="pill ok">fresh</span></div>
+        <div class="row-meta"><span>3 pins</span><span>2 chats</span><span>1 run</span><span>updated 4 min</span></div>
+      </article>
+      <article class="workspace-row">
+        <div class="row-top"><div class="row-title">Autopilot ESP failures</div><span class="pill">stale</span></div>
+        <div class="row-meta"><span>5 pins</span><span>1 chat</span><span>0 runs</span><span>updated yesterday</span></div>
+      </article>
+      <article class="workspace-row">
+        <div class="row-top"><div class="row-title">BitLocker exception review</div><span class="pill">active</span></div>
+        <div class="row-meta"><span>1 pin</span><span>0 chats</span><span>2 runs</span><span>updated Jun 12</span></div>
+      </article>
+      <div class="empty-mini">
+        <div class="row-title">Zero-workspace state</div>
+        <div class="sub">Start from Intune Chat, link a run, or create a blank workspace for the active tenant.</div>
+      </div>
+    </section>
+    <section class="detail-pane">
+      <div class="detail-head">
+        <div>
+          <div class="detail-title">Contoso Windows compliance review</div>
+          <div class="sub">Tenant: Contoso - Workspaces never mix tenants. Deleting this workspace keeps chats, runs, tenant config, and Graph cache.</div>
+        </div>
+        <div class="head-actions"><button class="button">Export dossier</button><button class="button">Archive</button><button class="button danger">Delete</button></div>
+      </div>
+      <div class="trust-strip">
+        <div><strong>Local workspace context</strong><div class="sub">Pinned evidence, notes, links, and instructions stay in local SQLite until explicitly exported or attached to a hosted-provider prompt.</div></div>
+        <span class="pill accent">No auto-attach</span>
+      </div>
+      <div class="sections">
+        <div>
+          <section class="section">
+            <div class="section-head"><h2>Pinned evidence</h2><button class="button">Pin from chat</button></div>
+            <div class="section-body">
+              <div class="evidence-row">
+                <div class="evidence-top"><div><div class="evidence-title">Multi-tenant split result - Contoso rows</div><div class="sub">Source: Intune Chat job mtjob_182 - managedDevices - cache refreshed 3 min ago</div></div><span class="pill ok">tenant match</span></div>
+                <div class="evidence-grid">
+                  <div class="metric"><strong>94</strong><span>Windows</span></div>
+                  <div class="metric"><strong>79</strong><span>Compliant</span></div>
+                  <div class="metric"><strong>9</strong><span>Non-compliant</span></div>
+                  <div class="metric"><strong>6</strong><span>Unknown</span></div>
+                </div>
+              </div>
+              <div class="evidence-row">
+                <div class="evidence-top"><div><div class="evidence-title">WIN-11-042 device row</div><div class="sub">Graph cache row - last sync 2026-06-14 08:41 - owner visible in expanded value</div></div><span class="pill">row</span></div>
+              </div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-head"><h2>Notes</h2><button class="button primary">Add note</button></div>
+            <div class="section-body">
+              <textarea class="note-area" aria-label="Workspace note">Confirm whether WIN-11-042 belongs to the shared kiosk exception list before any write-agent plan is reviewed.</textarea>
+              <div class="note-row"><div class="note-title">Review owner exceptions</div><div class="sub">Added today. Stored locally with this tenant workspace.</div></div>
+            </div>
+          </section>
+        </div>
+        <div>
+          <section class="section">
+            <div class="section-head"><h2>Linked context</h2><button class="button">Link</button></div>
+            <div class="section-body">
+              <div class="link-row"><div><div class="evidence-title">Chat: Windows compliance across tenants</div><div class="sub">Linked, not copied</div></div><span class="status">Chat</span></div>
+              <div class="link-row"><div><div class="evidence-title">Run: Intune Device Posture Auditor</div><div class="sub">Run history remains in Activity</div></div><span class="status">Run</span></div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-head"><h2>Workspace instructions</h2><span class="pill">explicit only</span></div>
+            <div class="section-body">
+              <textarea class="note-area instructions" aria-label="Workspace instructions">Prefer local Graph cache evidence. Do not recommend device retirement until the kiosk exception note is checked. These instructions cannot add scopes or bypass write confirmation.</textarea>
+              <div style="display:flex; justify-content:flex-end; margin-top:10px;"><button class="button primary">Save instructions</button></div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-head"><h2>Empty workspace state</h2></div>
+            <div class="section-body"><div class="empty-mini">When a workspace has no evidence, show direct actions: start from Intune Chat, link a run, or add a note. Do not show a marketing hero.</div></div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+  <aside class="modal" aria-label="Split multi-tenant result review">
+    <div class="modal-head"><div class="card-title">Split result to Workspaces</div><div class="sub">One workspace or evidence bundle per tenant. Mixed-tenant evidence is blocked.</div></div>
+    <div class="modal-body">
+      <div class="map-row"><div><strong>Contoso</strong><div class="sub">Use existing workspace - 94 device rows</div></div><span class="pill ok">match</span></div>
+      <div class="map-row"><div><strong>Fabrikam</strong><div class="sub">Create new workspace - 88 device rows</div></div><span class="pill ok">new</span></div>
+      <div class="map-row"><div><strong>Northwind</strong><div class="sub">No rows; attach failure evidence only</div></div><span class="pill">failed</span></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;"><button class="button">Cancel</button><button class="button primary">Create evidence</button></div>
+    </div>
+  </aside>
+</div>
+</body>
+</html>

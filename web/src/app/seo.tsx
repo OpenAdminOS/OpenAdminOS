@@ -7,7 +7,7 @@ export const GITHUB_URL = "https://github.com/OpenAdminOS/OpenAdminOS";
 export const DOCS_URL = "https://docs.openadminos.com/";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/openadminos/";
 export const SUPPORT_EMAIL = "support@openadminos.com";
-export const LEGAL_ENTITY_NAME = "Open Admin OS";
+export const LEGAL_ENTITY_NAME = "OpenAdminOS";
 export const MANAGING_DIRECTOR_NAME = "Ugur Koc";
 export const LEGAL_ENTITY_ADDRESS = {
   streetAddress: "Winterhuder Weg 29",

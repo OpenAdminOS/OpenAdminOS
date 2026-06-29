@@ -122,7 +122,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Marketing hero download buttons now use equal-width platform controls with aligned notes for macOS, Linux, and Windows.
 - Marketing landing page now aligns software schema, Windows availability copy, mobile comparison tables, and skip-link accessibility with the current release state.
 - Marketing headers now use a compact mobile stack menu aligned with the logo row instead of a separate row of top buttons.
-- Marketing privacy, terms, footer, schema, sitemap, and `llms.txt` now use `support@openadminos.com` and link a new `/legal-notice` provider-identification page for Open Admin OS and managing director Ugur Koc, with `/impressum` kept as an alias.
+- Marketing privacy, terms, footer, schema, sitemap, and `llms.txt` now use `support@openadminos.com` and link a new `/legal-notice` provider-identification page for OpenAdminOS and managing director Ugur Koc, with `/impressum` kept as an alias.
 - Marketing FAQ items are now accessible native accordions, with the primary product definition expanded by default for SEO/GEO visibility.
 - Marketing landing page now folds the OpenAdminOS definition into the visible FAQ instead of a separate definition card.
 - Marketing search appearance now uses a crawlable 48px PNG favicon, 180px Apple touch icon, clearer secondary page titles, `WebSite.alternateName` schema, and explicit AI-search crawler access in robots.txt.
