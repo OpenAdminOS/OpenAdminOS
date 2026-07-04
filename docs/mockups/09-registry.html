@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>09 · Agent Hub — OpenAdminOS Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.status-cell {
+  padding: 14px 24px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-cell:last-child { border-right: none; }
+.status-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.status-value {
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-meta { font-size: 11px; color: var(--text-2); }
+
+.content {
+  padding: 24px 32px 32px;
+  flex: 1;
+}
+
+.hub-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+.source-box {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 280px;
+}
+.source-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.source-value {
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-1);
+}
+.source-value .accent { color: var(--accent); }
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.chip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-chip {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-1);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.filter-chip:hover { background: var(--bg-2); color: var(--text-0); }
+.filter-chip.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: rgba(0, 212, 255, 0.28);
+}
+.filter-chip.warn {
+  color: var(--warning);
+  border-color: rgba(251, 191, 36, 0.22);
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.hub-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 16px;
+  align-items: start;
+}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.hub-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 246px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.15s;
+}
+.hub-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.hub-card.selected {
+  border-color: rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.08);
+}
+.hub-card.update {
+  border-color: rgba(251, 191, 36, 0.28);
+}
+.hub-card.script {
+  border-color: rgba(167, 139, 250, 0.28);
+}
+.card-body {
+  padding: 16px;
+  flex: 1;
+}
+.agent-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.agent-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  flex-shrink: 0;
+}
+.agent-icon.devices { color: var(--success); border-color: rgba(74, 222, 128, 0.22); background: rgba(74, 222, 128, 0.07); }
+.agent-icon.policies { color: var(--accent); border-color: rgba(0, 212, 255, 0.22); background: rgba(0, 212, 255, 0.07); }
+.agent-icon.users { color: var(--purple); border-color: rgba(167, 139, 250, 0.22); background: rgba(167, 139, 250, 0.07); }
+.agent-icon.security { color: var(--danger); border-color: rgba(248, 113, 113, 0.22); background: rgba(248, 113, 113, 0.07); }
+.agent-icon.reports { color: var(--warning); border-color: rgba(251, 191, 36, 0.22); background: rgba(251, 191, 36, 0.07); }
+.agent-title-block { flex: 1; min-width: 0; }
+.agent-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.verified-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  color: var(--accent);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  background: rgba(0, 212, 255, 0.08);
+  font-size: 9px;
+  line-height: 1;
+}
+.agent-desc {
+  font-size: 12.5px;
+  color: var(--text-1);
+  line-height: 1.55;
+  margin-bottom: 14px;
+  min-height: 58px;
+}
+.tag-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.tag-sandbox {
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--purple);
+  border: 1px solid rgba(167, 139, 250, 0.22);
+}
+.scope-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.scope-line strong {
+  color: var(--text-0);
+  font-weight: 500;
+}
+.scope-line.warn {
+  border-color: rgba(251, 191, 36, 0.22);
+  background: rgba(251, 191, 36, 0.06);
+  color: var(--warning);
+}
+.hub-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.01);
+}
+.version-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.btn.installed {
+  color: var(--success);
+  border-color: rgba(74, 222, 128, 0.24);
+  background: rgba(74, 222, 128, 0.06);
+}
+.btn.update {
+  color: var(--warning);
+  border-color: rgba(251, 191, 36, 0.28);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.detail-panel {
+  position: sticky;
+  top: 112px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.detail-head {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(0, 212, 255, 0.05) 0%, var(--bg-1) 100%);
+}
+.detail-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+.detail-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.detail-body {
+  padding: 16px 18px 18px;
+}
+.detail-copy {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-1);
+  margin-bottom: 14px;
+}
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.fact {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 10px;
+}
+.fact-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.fact-value {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-0);
+}
+.subhead {
+  margin: 16px 0 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.scope-list {
+  display: grid;
+  gap: 6px;
+}
+.scope-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 8px 9px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--text-1);
+}
+.scope-item.added {
+  color: var(--warning);
+  border-color: rgba(251, 191, 36, 0.25);
+  background: rgba(251, 191, 36, 0.06);
+}
+.scope-reason {
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 10px;
+}
+.provenance {
+  display: grid;
+  gap: 7px;
+}
+.prov-row {
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: 10px;
+  font-size: 11px;
+}
+.prov-key {
+  color: var(--text-3);
+  font-family: 'JetBrains Mono', monospace;
+}
+.prov-value {
+  color: var(--text-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.warning-panel {
+  margin-top: 14px;
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  background: rgba(251, 191, 36, 0.07);
+  border-radius: 7px;
+  padding: 12px;
+}
+.warning-title {
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+.warning-copy {
+  font-size: 11.5px;
+  color: var(--text-1);
+  line-height: 1.6;
+}
+.detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.design-note {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.design-note strong { color: var(--text-0); }
+
+@media (max-width: 1180px) {
+  .hub-layout { grid-template-columns: 1fr; }
+  .detail-panel { position: static; }
+}
+@media (max-width: 900px) {
+  .status-strip { grid-template-columns: repeat(2, 1fr); }
+  .catalog-grid { grid-template-columns: 1fr; }
+  .hub-toolbar { flex-direction: column; }
+  .source-box { width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">OpenAdminOS Agents · Agent Hub</div>
+    <div class="titlebar-status"><div class="pulse"></div><span>local · v0.4.2</span></div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">O</div>
+      <div>
+        <div class="brand-name">OpenAdminOS</div>
+        <div class="brand-sub">PUBLIC PREVIEW</div>
+      </div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <a href="03-agents-grid.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Agents <span class="nav-badge">3</span>
+      </a>
+      <a href="09-registry.html" class="nav-item active">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Agent Hub <span class="nav-badge">42</span>
+      </a>
+      <a href="11-multi-tenant-chat.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        Intune Chat
+      </a>
+      <a href="12-workspaces.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M3 7h18M5 7v12h14V7M8 7V5h8v2"/></svg>
+        Workspaces
+      </a>
+      <a href="04-live-run.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+        Activity
+      </a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Configure</div>
+      <a href="07-llm-provider.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 2"/></svg>
+        LLM Provider
+      </a>
+      <a href="08-tenant-switcher.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Tenants
+      </a>
+    </div>
+    <a href="08-tenant-switcher.html" class="tenant-switcher">
+      <div class="tenant-avatar">CT</div>
+      <div class="tenant-info">
+        <div class="tenant-name">Contoso Tenant</div>
+        <div class="tenant-id">a3f2e1...c4d9</div>
+      </div>
+    </a>
+  </aside>
+
+  <main class="main">
+    <header class="main-header">
+      <div>
+        <h1 class="page-title">Agent Hub</h1>
+        <div class="page-subtitle mono">42 registry agents · 3 installed · updates require review</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn">
+          <svg class="btn-icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-2.64-6.36"/><path d="M21 3v7h-7"/></svg>
+          Refresh
+        </button>
+      </div>
+    </header>
+
+    <div class="status-strip">
+      <div class="status-cell">
+        <div class="status-label">Tenant</div>
+        <div class="status-value"><span class="dot-status ok"></span>Contoso Tenant</div>
+        <div class="status-meta mono">Graph consent valid · 31 scopes granted</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">LLM Provider</div>
+        <div class="status-value"><span class="dot-status ok"></span>Ollama · llama3.1:70b</div>
+        <div class="status-meta mono">localhost:11434 · local provider</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">Registry</div>
+        <div class="status-value"><span class="dot-status accent"></span>GitHub source</div>
+        <div class="status-meta mono">last refreshed 4m ago</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">Data residency</div>
+        <div class="status-value"><span class="dot-status ok"></span>Local-only</div>
+        <div class="status-meta mono">No prompts leave this device</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="hub-toolbar">
+        <div class="filters" style="flex:1">
+          <div class="search-bar" style="width:100%;max-width:520px">
+            <svg style="width:13px;height:13px;stroke:var(--text-2);stroke-width:2;fill:none" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input value="conditional access" aria-label="Search registry agents">
+            <span class="kbd">/</span>
+          </div>
+          <div class="chip-row">
+            <button class="filter-chip active">All</button>
+            <button class="filter-chip">Devices</button>
+            <button class="filter-chip active">Policies</button>
+            <button class="filter-chip">Users</button>
+            <button class="filter-chip">Security</button>
+            <button class="filter-chip">Reports</button>
+            <button class="filter-chip">Installed</button>
+            <button class="filter-chip warn">Write agents</button>
+          </div>
+        </div>
+        <div class="source-box">
+          <div class="source-label">Registry source</div>
+          <div class="source-value"><span class="accent">OpenAdminOS/OpenAdminOS</span> · main · agents/index.json</div>
+          <div class="status-meta mono" style="margin-top:5px">Version-pinned installs. Updates never auto-apply.</div>
+        </div>
+      </div>
+
+      <div class="hub-layout">
+        <section>
+          <div class="section-head">
+            <div class="section-title">// Browse agents</div>
+            <div class="section-link">6 shown · category: policies</div>
+          </div>
+
+          <div class="catalog-grid">
+            <article class="hub-card">
+              <div class="card-body">
+                <div class="agent-head">
+                  <div class="agent-icon devices">DV</div>
+                  <div class="agent-title-block">
+                    <div class="agent-name">Compliance Drift Reporter</div>
+                    <div class="agent-author"><span>@openadminos</span><span class="verified-dot">✓</span><span>v1.2.0</span></div>
+                  </div>
+                  <span class="tag tag-read">Read</span>
+                </div>
+                <div class="agent-desc">Scans device compliance state, flags drift from policy baseline, and produces a digest with root-cause hints.</div>
+                <div class="tag-row">
+                  <span class="tag tag-verified">Verified</span>
+                  <span class="tag tag-community">Devices</span>
+                  <span class="pill">2 scopes</span>
+                </div>
+                <div class="scope-line"><span>Tenant impact</span><strong>Read-only</strong></div>
+              </div>
+              <div class="hub-card-foot">
+                <div class="version-meta">installed · v1.2.0</div>
+                <div class="card-actions">
+                  <button class="btn btn-ghost">Details</button>
+                  <button class="btn installed">Open</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="hub-card update selected">
+              <div class="card-body">
+                <div class="agent-head">
+                  <div class="agent-icon policies">CA</div>
+                  <div class="agent-title-block">
+                    <div class="agent-name">Conditional Access Explainer</div>
+                    <div class="agent-author"><span>@openadminos</span><span class="verified-dot">✓</span><span>v0.9.0</span></div>
+                  </div>
+                  <span class="tag tag-read">Read</span>
+                </div>
+                <div class="agent-desc">Reviews CA coverage, report-only policies, grant controls, exclusions, and device-compliance dependencies.</div>
+                <div class="tag-row">
+                  <span class="tag tag-verified">Verified</span>
+                  <span class="tag tag-community">Policies</span>
+                  <span class="pill">4 scopes</span>
+                </div>
+                <div class="scope-line warn"><span>Update available</span><strong>+1 Graph scope</strong></div>
+              </div>
+              <div class="hub-card-foot">
+                <div class="version-meta">installed v0.8.3 -> v0.9.0</div>
+                <div class="card-actions">
+                  <button class="btn btn-ghost">Details</button>
+                  <button class="btn update">Review update</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="hub-card">
+              <div class="card-body">
+                <div class="agent-head">
+                  <div class="agent-icon users">GU</div>
+                  <div class="agent-title-block">
+                    <div class="agent-name">Stale Guest Cleanup</div>
+                    <div class="agent-author"><span>@community</span><span>v0.5.1</span></div>
+                  </div>
+                  <span class="tag tag-write">Write</span>
+                </div>
+                <div class="agent-desc">Finds inactive guest users, explains per-user rationale, and stages disable actions behind typed confirmation.</div>
+                <div class="tag-row">
+                  <span class="tag tag-community">Users</span>
+                  <span class="pill">5 scopes</span>
+                  <span class="pill">typed confirm</span>
+                </div>
+                <div class="scope-line warn"><span>Write boundary</span><strong>Diff required every run</strong></div>
+              </div>
+              <div class="hub-card-foot">
+                <div class="version-meta">available · v0.5.1</div>
+                <div class="card-actions">
+                  <button class="btn btn-ghost">Details</button>
+                  <button class="btn btn-warning">Install</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="hub-card">
+              <div class="card-body">
+                <div class="agent-head">
+                  <div class="agent-icon users">LC</div>
+                  <div class="agent-title-block">
+                    <div class="agent-name">License Assignment Review</div>
+                    <div class="agent-author"><span>@niklas</span><span>v0.3.2</span></div>
+                  </div>
+                  <span class="tag tag-read">Read</span>
+                </div>
+                <div class="agent-desc">Correlates user license assignment paths with disabled accounts, stale groups, and unused service plans.</div>
+                <div class="tag-row">
+                  <span class="tag tag-community">Users</span>
+                  <span class="pill">3 scopes</span>
+                  <span class="pill">Entra ID P1</span>
+                </div>
+                <div class="scope-line"><span>Tenant impact</span><strong>Read-only</strong></div>
+              </div>
+              <div class="hub-card-foot">
+                <div class="version-meta">available · 418 installs</div>
+                <div class="card-actions">
+                  <button class="btn btn-ghost">Details</button>
+                  <button class="btn btn-primary">Install</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="hub-card">
+              <div class="card-body">
+                <div class="agent-head">
+                  <div class="agent-icon security">RS</div>
+                  <div class="agent-title-block">
+                    <div class="agent-name">Risky Sign-in Triage</div>
+                    <div class="agent-author"><span>@rudyooms</span><span class="verified-dot">✓</span><span>v0.7.0</span></div>
+                  </div>
+                  <span class="tag tag-read">Read</span>
+                </div>
+                <div class="agent-desc">Clusters sign-in failures and risky-user signals by policy, device state, network, and repeated admin action.</div>
+                <div class="tag-row">
+                  <span class="tag tag-verified">Verified</span>
+                  <span class="tag tag-community">Security</span>
+                  <span class="pill">4 scopes</span>
+                </div>
+                <div class="scope-line"><span>Model requirement</span><strong>8k context</strong></div>
+              </div>
+              <div class="hub-card-foot">
+                <div class="version-meta">available · 1.2k installs</div>
+                <div class="card-actions">
+                  <button class="btn btn-ghost">Details</button>
+                  <button class="btn btn-primary">Install</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="hub-card script">
+              <div class="card-body">
+                <div class="agent-head">
+                  <div class="agent-icon reports">MX</div>
+                  <div class="agent-title-block">
+                    <div class="agent-name">Intune Device Posture Auditor</div>
+                    <div class="agent-author"><span>@openadminos</span><span class="verified-dot">✓</span><span>v0.2.3</span></div>
+                  </div>
+                  <span class="tag tag-read">Read</span>
+                </div>
+                <div class="agent-desc">Runs a built-in script agent inside the experimental sandbox, then asks the active host model for the final summary.</div>
+                <div class="tag-row">
+                  <span class="tag tag-sandbox">Script</span>
+                  <span class="tag tag-sandbox">Sandbox</span>
+                  <span class="pill">2 scopes</span>
+                </div>
+                <div class="scope-line"><span>Execution</span><strong>experimental MXC</strong></div>
+              </div>
+              <div class="hub-card-foot">
+                <div class="version-meta">preview · built-in only</div>
+                <div class="card-actions">
+                  <button class="btn btn-ghost">Details</button>
+                  <button class="btn">Review sandbox</button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <aside class="detail-panel">
+          <div class="detail-head">
+            <div class="detail-title">Conditional Access Explainer</div>
+            <div class="detail-meta">@openadminos · verified author · registry update</div>
+          </div>
+          <div class="detail-body">
+            <div class="tag-row">
+              <span class="tag tag-read">Read-only</span>
+              <span class="tag tag-verified">Verified</span>
+              <span class="tag tag-community">Policies</span>
+            </div>
+            <p class="detail-copy">
+              Reviews Conditional Access coverage and explains where policy intent, exclusions, and device compliance requirements do not line up. It cannot change tenant state.
+            </p>
+
+            <div class="fact-grid">
+              <div class="fact">
+                <div class="fact-label">Install state</div>
+                <div class="fact-value">Installed v0.8.3</div>
+              </div>
+              <div class="fact">
+                <div class="fact-label">Available</div>
+                <div class="fact-value">v0.9.0</div>
+              </div>
+              <div class="fact">
+                <div class="fact-label">Mode</div>
+                <div class="fact-value">Read-only</div>
+              </div>
+              <div class="fact">
+                <div class="fact-label">Min app</div>
+                <div class="fact-value">0.3.0+</div>
+              </div>
+            </div>
+
+            <div class="subhead">Required Graph scopes</div>
+            <div class="scope-list">
+              <div class="scope-item"><span>Policy.Read.All</span><span class="scope-reason">CA policies</span></div>
+              <div class="scope-item"><span>Directory.Read.All</span><span class="scope-reason">users, groups</span></div>
+              <div class="scope-item"><span>DeviceManagementManagedDevices.Read.All</span><span class="scope-reason">device state</span></div>
+              <div class="scope-item added"><span>IdentityRiskEvent.Read.All</span><span class="scope-reason">new in v0.9.0</span></div>
+            </div>
+
+            <div class="warning-panel">
+              <div class="warning-title">Scope diff requires review</div>
+              <div class="warning-copy">
+                This update adds one delegated Graph scope. OpenAdminOS shows the scope diff before replacing the pinned local manifest.
+              </div>
+            </div>
+
+            <div class="subhead">Manifest provenance</div>
+            <div class="provenance">
+              <div class="prov-row"><div class="prov-key">Source</div><div class="prov-value">https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/</div></div>
+              <div class="prov-row"><div class="prov-key">Path</div><div class="prov-value">agents/conditional-access-explainer/manifest.yaml</div></div>
+              <div class="prov-row"><div class="prov-key">Version</div><div class="prov-value">0.9.0 · installed 0.8.3</div></div>
+              <div class="prov-row"><div class="prov-key">minAppVersion</div><div class="prov-value">0.3.0</div></div>
+              <div class="prov-row"><div class="prov-key">Manifest SHA</div><div class="prov-value">sha256:9c4e2f8a...b31d</div></div>
+              <div class="prov-row"><div class="prov-key">QA</div><div class="prov-value">schema, scopes, fixture coverage passed</div></div>
+            </div>
+
+            <div class="detail-actions">
+              <button class="btn">Review manifest</button>
+              <button class="btn btn-warning">Review update</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="design-note">
+        <strong>Design notes:</strong> card click opens details, install opens permission review, updates with added scopes open scope-diff review, and script agents stay visibly experimental. Registry freshness stays diagnostic, not a primary content card.
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

@@ -1459,8 +1459,8 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `06-error-states.html` | 8 error patterns reference | ✅ Done |
 | `07-llm-provider.html` | LLM provider configuration | ✅ Done |
 | `08-tenant-switcher.html` | Multi-tenant management | ✅ Done |
-| `09-registry.html` | Community agent registry browse | ⏳ TODO |
-| `10-empty-states.html` | First-time user empty states | ⏳ TODO |
+| `09-registry.html` | Community agent registry browse | ✅ Done |
+| `10-empty-states.html` | First-time user empty states | ✅ Done |
 | `11-multi-tenant-chat.html` | Multi-tenant Intune Chat scope review and result artifact | ✅ Done |
 | `12-workspaces.html` | Single-tenant Workspaces investigation surface | ✅ Done |
 
