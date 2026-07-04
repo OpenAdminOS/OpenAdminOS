@@ -788,6 +788,94 @@ decision. Electron main validates that acknowledgement against the active tenant
 and provider before creating chat messages, refreshing Graph cache resources, or
 building the hosted LLM prompt.
 
+Intune Chat supports multi-tenant read questions as a separate explicit mode
+from normal active-tenant chat. The default scope remains the active tenant. If
+the prompt asks for "all tenants", "every connected tenant", or similar MSP
+language, the composer surfaces a scope review before any Graph refresh or model
+prompt is built. The review names the selected tenants, required Graph resource
+kinds, cache freshness, missing scopes, expired sessions, provider trust, and
+whether any tenant will be skipped. The admin can choose the active tenant,
+selected tenants, or all connected tenants; "all connected tenants" is never
+implied silently by merely having multiple tenants connected.
+
+Tenant groups are local shortcuts for common MSP slices such as "All customers",
+"Pilot tenants", or "EU tenants". A group is not a new tenant boundary and it
+does not grant broader access; it resolves to explicit tenant ids in the scope
+review before any Graph refresh or model prompt is built. Saved multi-tenant
+queries are local prompt templates with declared resource hints and optional
+scope hints. They can prefill the composer for common investigations, but the
+admin can edit the prompt and must still approve the resolved tenant scope.
+
+Multi-tenant chat is read-only aggregation. It can answer questions like
+"List all compliant and non-compliant Windows devices from every connected
+tenant" by refreshing or reading each tenant's local Graph cache, computing the
+counts and device rows deterministically, and then asking the selected model to
+summarize the bounded result. The table/export is the source of truth; the LLM
+explains the findings and caveats. Multi-tenant chat must not perform Graph
+writes, connector delivery, or agent side effects directly. When a prompt maps
+to an agent workflow across tenants, OpenAdminOS creates a multi-tenant job that
+queues one normal tenant-pinned `RunRecord` per tenant rather than one run that
+spans tenants. Write agents require per-tenant review and typed confirmation;
+there is no "confirm all tenants" destructive shortcut.
+
+Before a multi-tenant run starts, Electron main performs a readiness preflight
+for every resolved tenant. The preflight reports whether each tenant is ready,
+expired, missing delegated scopes, stale, recently throttled, blocked by hosted
+provider consent, skipped, or failed. The UI shows recovery actions beside the
+affected tenant, such as reconnecting the tenant, granting missing scopes,
+refreshing cache, or removing the tenant from the run. A skipped or failed tenant
+must be visible in the final answer and export; it cannot disappear from the
+scope silently.
+
+The multi-tenant visual flow is:
+
+1. **Scope review** in the assistant response slot before work starts: tenant
+   checklist, resolved group membership, selected resources, readiness,
+   freshness, scopes, provider/model, and a "Run read-only query" action.
+2. **Per-tenant progress** while the job runs: each tenant row shows queued,
+   refreshing cache, reading local cache, building result, skipped, failed, or
+   ready. Refreshes run with bounded concurrency so one throttled tenant does not
+   block the whole UI.
+3. **Aggregate answer** with compact summary tiles for tenants scanned, failed
+   tenants, Windows devices, compliant, non-compliant, unknown, and stale-data
+   caveats.
+4. **Tenant comparison table** with columns such as tenant, Windows devices,
+   compliant, non-compliant, unknown, last refresh, and status.
+5. **Expandable tenant detail** for device rows, filtered by tenant, compliance
+   state, OS version, and last sync. Export actions are local and explicit
+   (`CSV`, `Markdown`, or `JSON`).
+
+Multi-tenant result tables include filters for tenant, readiness, compliance
+state, operating system, stale data, failed tenants, and skipped tenants. The
+admin can export a compact local dossier that includes the original query,
+resolved tenant scope, saved-query id if used, provider/model, cache freshness,
+skipped/failed tenants, summary counts, comparison table, and detail rows.
+Dossiers are local files, not connector sends, background uploads, or telemetry.
+They may be reopened from multi-tenant job history while clearly showing whether
+the underlying cache has become stale.
+
+Multi-tenant chat uses an "answer artifact" layout for table-heavy results. The
+normal prose answer keeps the readable chat measure, but the result artifact can
+span the available conversation column so comparison tables, filters, and export
+actions do not feel cramped. The table keeps the tenant column visible, supports
+keyboard sorting/filtering, uses text plus icons rather than color alone for
+readiness/compliance state, and allows horizontal overflow inside the artifact
+instead of widening the whole page. Long tenant names, device names, and policy
+names truncate with accessible full-value disclosure. The saved-query picker and
+tenant scope selector live near the composer/header as compact controls; they do
+not replace the assistant-slot scope review, which remains the final checkpoint
+before work starts. Result filters, expanded tenant rows, and selected saved
+query are persisted in the local multi-tenant job state so reopening the result
+restores the investigation context.
+
+Hosted-provider confirmation for multi-tenant chat names every selected tenant
+or shows a counted tenant list with expandable details, names the provider and
+model, and states that retrieved context from those tenants will be sent to the
+hosted provider. Remembered hosted-provider consent remains scoped by
+tenant/provider; a multi-tenant send may proceed only for tenants with remembered
+consent or a fresh batch acknowledgement. Local-provider sends keep Graph data,
+prompts, answer packs, and exports on the device.
+
 The chat page should behave like a focused chat product, not an operations
 dashboard: history on the left, the active conversation and composer in the
 center, and only compact tenant/provider/freshness cues in the chat header.
@@ -821,12 +909,47 @@ cache rows, and self-training event/suggestion counts. Clearing all chat history
 uses an explicit product modal and removes only local conversations, messages,
 and chat tool-call records.
 
-Claude-style Projects are a useful reference, but the OpenAdminOS version should
-be tenant-scoped investigative workspaces rather than generic project folders:
-pinned Graph evidence, relevant agent runs, notes, approved local instructions,
-and source freshness for a specific tenant problem. This is deferred beyond the
-first v0.2.2 chat pass. TODO(ugur): decide the public naming and route shape for
-these workspaces before implementation.
+Claude-style Projects are a useful reference, but the OpenAdminOS version is
+called **Workspaces**. Workspaces are tenant-scoped investigation containers, not
+generic project folders. A workspace holds pinned Graph evidence, linked chat
+conversations, relevant agent runs, local notes, approved local instructions,
+and source freshness for a specific tenant problem. Workspaces stay local-first:
+with a local provider, workspace notes, pinned evidence, chat context, and prompt
+overlays stay on the device; with a hosted provider, any workspace context sent
+to the model follows the same explicit hosted-provider confirmation rules as
+Intune Chat. Workspaces is a top-level primary navigation item at `/workspaces`,
+placed directly after Intune Chat. Intune Chat, Activity, and Run Detail expose
+contextual add/link/pin actions into Workspaces. Workspaces remain
+single-tenant; multi-tenant Intune Chat results can export locally or create/link
+separate tenant-specific workspace evidence, but a single workspace must not mix
+tenant evidence in v0.2.5. The split-to-workspaces action shows a review screen
+with one row per tenant, the target workspace or new workspace name, the evidence
+row count, and freshness. Confirming writes separate local evidence bundles only
+to matching tenant workspaces; cancelling leaves the multi-tenant result
+unchanged.
+
+The Workspaces layout is a dense two-pane investigation surface: a workspace
+list/search pane on the left and the selected workspace detail on the right. The
+detail view groups notes, pinned evidence, linked conversations, linked runs, and
+workspace-local instructions into clear sections without nesting cards inside
+cards or becoming a project board. On narrower desktop widths, the list can
+collapse to preserve evidence reading width, but the global sidebar and status
+strip remain visible. Workspace filters, selected section, and expanded evidence
+groups restore when the admin returns to a workspace.
+
+v0.2.5 ships the read-only multi-tenant Intune Chat path, single-tenant
+Workspace storage/linking, separate multi-tenant progress streaming IPC,
+tenant-pinned agent batch records, chat-answer pinning into Workspaces, and
+explicit workspace context attachment in the chat composer. Cross-tenant agent
+batches never create a mixed-tenant execution context: Electron main queues one
+normal `RunRecord` per ready tenant. Write agents still move through the normal
+per-run plan review and typed confirmation flow, with no "confirm all tenants"
+shortcut. Workspace context attachment is opt-in per prompt and can include
+selected evidence, notes, and workspace instructions only after the UI shows the
+included items. When a hosted provider is active, the confirmation also names
+the attached workspace, tenant, provider, model, evidence count, note count, and
+whether instructions are included before any workspace context enters the model
+prompt.
 
 #### Graph cache
 
@@ -1338,6 +1461,8 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `08-tenant-switcher.html` | Multi-tenant management | ✅ Done |
 | `09-registry.html` | Community agent registry browse | ⏳ TODO |
 | `10-empty-states.html` | First-time user empty states | ⏳ TODO |
+| `11-multi-tenant-chat.html` | Multi-tenant Intune Chat scope review and result artifact | ✅ Done |
+| `12-workspaces.html` | Single-tenant Workspaces investigation surface | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
 
