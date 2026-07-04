@@ -139,6 +139,9 @@ The marketing navbar keeps a compact primary set: Blog, Documentation, GitHub,
 and Download. The Intune use-case page, registry page, and trust-model page
 remain published and indexable even though they are no longer primary navbar
 items, because they target durable admin search and product-evaluation topics.
+The examples gallery at `/examples` is also a secondary marketing page, with
+copyable Build your own Agent prompts grouped by read investigations, confirmed
+write plans, and connector-backed delivery examples.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
