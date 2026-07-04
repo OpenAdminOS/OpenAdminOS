@@ -78,6 +78,48 @@ test("agent draft validation catches connector steps missing descriptor requirem
   assert.match(result.validationErrors.join("\n"), /descriptor\.connectors/);
 });
 
+test("agent draft validation rejects write agents without an LLM step", () => {
+  const source = `# yaml-language-server: $schema=../../schemas/agent-template.schema.json
+descriptor:
+  id: local-device-retire
+  name: Local device retire
+  description: Retires selected managed devices.
+  version: 0.1.0
+  author:
+    name: Local admin
+  category: devices
+  mode: write
+skills:
+  - id: load_devices
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      scopes:
+        - DeviceManagementManagedDevices.ReadWrite.All
+  - id: plan_retire
+    format: write
+    label: Plan retire
+    settings:
+      kind: retire-managed-device
+      source: "{{ load_devices.output }}"
+      confirmationPhrase: "RETIRE {{ actions | size }} DEVICES"
+      actionTemplate:
+        label: "Retire {{ item.deviceName }}"
+        metadata:
+          deviceId: "{{ item.id }}"
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+`;
+  const result = __agentDraftTestUtils.validateAgentDraftSource(source, []);
+
+  assert.equal(result.manifest, undefined);
+  assert.match(result.validationErrors.join("\n"), /no `format: llm` step/i);
+});
+
 test("agent draft prompt includes current builder patterns", () => {
   const prompt = __agentDraftTestUtils.buildNl2AgentSystemPrompt([], [], [
     "find-inactive-devices",
