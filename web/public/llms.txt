@@ -12,6 +12,7 @@ License: MIT
 
 - Homepage: https://www.openadminos.com/
 - Download: https://www.openadminos.com/download
+- Examples gallery: https://www.openadminos.com/examples
 - Agent registry: https://www.openadminos.com/registry
 - Trust model: https://www.openadminos.com/trust-model
 - Blog: https://www.openadminos.com/blog
