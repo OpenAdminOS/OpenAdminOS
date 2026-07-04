@@ -1,3 +1,116 @@
+# v0.2.5 — Workspaces + multi-tenant Intune Chat
+
+**Status: implemented and verified.** Follow-up release after v0.2.4. The theme is making OpenAdminOS better for MSP-style investigation without weakening tenant boundaries: Intune Chat can explicitly answer read-only questions across selected tenants, while Workspaces keep a single tenant problem, its evidence, related conversations, agent runs, notes, and approved local instructions together.
+
+## Product stance
+
+- **Intune Chat supports explicit multi-tenant read aggregation.** The default remains the active tenant; all-tenants or selected-tenants scope requires a visible scope review before Graph refresh or model prompting.
+- **Tenant groups are local shortcuts, not new tenant scopes.** Groups such as "All customers", "Pilot tenants", or "EU tenants" resolve to explicit tenant ids in the scope review before anything runs.
+- **Saved queries are reusable prompts with declared scope hints.** They speed up common MSP investigations without silently broadening tenant access.
+- **Multi-tenant chat is not Workspaces.** Cross-tenant Intune Chat results can be exported locally or split into tenant-specific workspace evidence, but Workspaces remain single-tenant.
+- **The surface is called Workspaces.** Workspaces are tenant-scoped investigation containers, not generic projects.
+- **Workspaces organize evidence; they do not bypass safeguards.** Agent runs still require an active tenant, write agents still pause for confirmation, and hosted providers still require explicit tenant-context confirmation.
+- **Local-first remains literal.** Workspace metadata, notes, pinned evidence, linked chat context, approved instructions, and exports are stored locally in SQLite/userData.
+- **Freshness is part of the object.** Pinned Graph evidence must show source, tenant, row count or object identity where available, cache/live status, and refreshed time.
+- **Workspaces is top-level navigation.** Route Workspaces at `/workspaces`, place it directly after Intune Chat, and use contextual add/link/pin actions from Intune Chat, Activity, and Run Detail.
+- **No silent workspace magic.** A workspace can suggest relevant chats, sources, and agent runs, but it does not secretly attach broad tenant context to prompts.
+
+## Priority 1 — Multi-tenant Intune Chat scope and UI
+
+- [x] **Tenant scope selector** — add an Intune Chat scope control with Active tenant, Selected tenants, and All connected tenants. Active tenant remains the default.
+- [x] **Tenant groups** — add local tenant groups that can be selected in the scope control and expanded into explicit tenant checklists during scope review.
+- [x] **Saved query gallery** — add a compact saved-query picker for common multi-tenant investigations such as Windows compliance, stale devices, BitLocker gaps, risky sign-ins, and Conditional Access gaps.
+- [x] **Prompt scope detection** — detect phrases such as "all tenants", "every connected tenant", and "all customers" and open scope review instead of silently using the active tenant.
+- [x] **Scope readiness preflight** — before a multi-tenant run starts, classify each selected tenant as ready, expired, missing scopes, stale, throttled, or skipped, with a visible recovery path.
+- [x] **Scope review panel** — render tenant checklist, resolved group membership, resource kinds, cache freshness, missing scopes, expired sessions, provider/model, and skipped-tenant warnings before any multi-tenant work starts.
+- [x] **Per-tenant progress card** — show queued, refreshing cache, reading local cache, building result, skipped, failed, or ready for each selected tenant inside the assistant response slot.
+- [x] **Aggregate result view** — render summary tiles and a tenant comparison table for multi-tenant answers. For the Windows compliance prompt, show tenants scanned, Windows devices, compliant, non-compliant, unknown, failed tenants, and stale-data caveats.
+- [x] **Answer artifact layout** — let table-heavy multi-tenant results span the conversation column while keeping prose at readable chat width; keep tenant columns visible and contain horizontal overflow inside the artifact.
+- [x] **Expandable tenant detail** — let admins expand a tenant row to inspect device-level rows with tenant, device name, compliance state, OS, OS version, last sync, owner, and source freshness.
+- [x] **Result filters** — filter multi-tenant result tables by tenant, readiness, compliance state, OS, stale data, and failed/skipped tenants.
+- [x] **Local exports and dossiers** — export multi-tenant results as CSV, Markdown, JSON, or a local dossier that includes query text, tenant scope, provider, freshness, skipped tenants, summary, and detail rows. Exports are explicit local file saves, not connector sends or background uploads.
+- [x] **Split to workspaces** — from a multi-tenant result, create/link separate tenant-specific workspace evidence entries without creating a mixed-tenant workspace.
+- [x] **Hosted-provider batch confirmation** — when a hosted provider is active, confirmation names every selected tenant or shows an expandable tenant list and states that retrieved context from those tenants will be sent to the provider.
+
+## Priority 2 — Multi-tenant host support
+
+- [x] **TenantScope contract** — add a chat input scope shape for active, selected tenant ids, and all connected tenants. Validate selected tenant ids in Electron main.
+- [x] **Tenant group store** — persist local tenant groups with id, name, tenant ids, updated time, and no tenant data beyond membership metadata.
+- [x] **Saved query store** — persist saved query templates with title, prompt text, resource hints, default scope hint, and local-only ordering metadata.
+- [x] **Separate multi-tenant stream IPC** — add a distinct multi-tenant chat stream path instead of overloading the existing single-active-tenant chat send.
+- [x] **Conversation tenant guard** — block appending to a single-tenant conversation when the active tenant no longer matches the conversation tenant; offer to switch tenant or start a new conversation.
+- [x] **Multi-tenant conversation marker** — store multi-tenant chat conversations with explicit scope metadata so history/search can badge them separately from tenant-scoped chats.
+- [x] **Scope preflight service** — compute readiness before execution, including account/session state, required delegated scopes, cache freshness, and recent throttle/failure signals.
+- [x] **Deterministic cross-tenant query helpers** — add SQL helpers for grouped read-only questions such as Windows device compliance by tenant, using cached `tenant_id`, `operating_system`, and `compliance_state`.
+- [x] **Graph cache fan-out** — refresh selected tenants with bounded concurrency and per-tenant failure state. One throttled or expired tenant must not fail the whole answer.
+- [x] **Multi-tenant chat job records** — introduce a local job record for cross-tenant chat queries, including preflight state, resolved tenant ids, saved-query id when used, export artifacts, and run duration.
+- [x] **Cross-tenant agent batch records** — agent batches queue one normal tenant-pinned `RunRecord` per tenant.
+- [x] **Write safety boundary** — multi-tenant chat never applies writes.
+- [x] **Cross-tenant write-agent confirmation** — write-agent batches require per-tenant plan review and typed confirmation; no "confirm all tenants" destructive action.
+
+## Priority 3 — Workspace data model and host APIs
+
+- [x] **Workspace schema migrations** — add local tables for workspaces, linked conversations, pinned evidence, linked agent runs, notes, and workspace-local instructions. Keep tenant id scoped on every row.
+- [x] **Workspace CRUD IPC** — create, rename, archive/delete, list, and load workspaces through validated Electron main IPC. Renderer must not write SQLite directly.
+- [x] **Evidence pinning contract** — define a compact, non-secret evidence reference shape for Graph cache rows, answer-pack sources, chat messages, and run result sections.
+- [x] **Split-result import** — accept tenant-specific evidence bundles created from a multi-tenant Intune Chat result and attach only the matching tenant's rows to each workspace.
+- [x] **Local deletion semantics** — deleting a workspace removes workspace metadata, notes, pins, and links only; it must not delete chat history, run history, tenant config, Graph cache, or connector audit records.
+- [x] **Export format** — export a workspace-local Markdown or JSON dossier with notes, linked chats, pinned evidence metadata, run links, and freshness. Tenant data stays local unless the admin exports it explicitly. Multi-tenant exports are handled by Intune Chat, not Workspaces.
+
+## Priority 4 — Workspaces UI
+
+- [x] **Workspaces route/shell** — add Workspaces as a top-level primary navigation item at `/workspaces`, placed directly after Intune Chat.
+- [x] **Workspace list** — show active tenant, workspace title, updated time, pinned evidence count, linked conversations, linked runs, and freshness state.
+- [x] **Workspace detail** — layout with notes, pinned evidence, linked chat conversations, linked agent runs, and local instructions. Keep the screen dense and operational, not a card-heavy project board.
+- [x] **Adaptive workspace panes** — use a two-pane list/detail layout that can collapse the workspace list at narrower desktop widths without hiding the global sidebar or status strip.
+- [x] **Create from chat** — allow creating a workspace from an Intune Chat conversation and linking the current conversation without copying messages into a second store.
+- [x] **Create from multi-tenant result** — allow creating one workspace per selected tenant from a multi-tenant Intune Chat result, with a review screen that shows the tenant-to-workspace mapping before writing local records.
+- [x] **Pin from chat answer** — allow pinning an answer, source, or source detail into the current workspace with freshness metadata.
+- [x] **Link run to workspace** — allow adding an existing run result to a workspace from Run Detail/Activity and from chat-started agent runs.
+- [x] **Empty states** — add designed zero-workspace and empty-workspace states with direct actions: start from Intune Chat, link a run, or add a note.
+
+## Priority 5 — Workspace-aware prompting
+
+- [x] **Explicit context attachment** — the composer can attach selected workspace evidence or notes to a prompt. It must show what will be included before send.
+- [x] **Hosted-provider confirmation integration** — when workspace context is attached and a hosted provider is active, the confirmation names the workspace, tenant, provider, model, and included context.
+- [x] **Workspace instructions storage** — allow approved local instructions per workspace. These cannot add Graph scopes, change agent mode, alter connector egress, or bypass confirmation.
+- [x] **Workspace instructions prompt composition** — apply workspace instructions only through explicit prompt/context attachment.
+- [x] **Suggestion hooks** — suggest relevant workspaces from matching tenant, conversation title, pinned source kind, or linked run, but never auto-attach context.
+
+## Priority 6 — Verification and docs
+
+- [x] **Host tests** — cover tenant groups, saved queries, multi-tenant scope validation, readiness preflight, per-tenant cache fan-out, partial failures, deterministic aggregation, dossier export, workspace schema migrations, CRUD, split-result import, deletion boundaries, evidence pinning, and export generation.
+- [x] **Renderer tests/smoke** — run a saved multi-tenant Windows compliance query from Intune Chat; review readiness; create a workspace from chat; split a multi-tenant result into tenant workspaces; pin a source; link a run; export the workspace; and delete the workspace without deleting underlying chat/run records.
+- [x] **UX mockups** — add `docs/mockups/11-multi-tenant-chat.html` and `docs/mockups/12-workspaces.html` before implementation, covering empty, loading, partial failure, hosted-provider, export, split-to-workspaces, and narrow-width states.
+- [x] **Accessibility and state review** — verify keyboard access, visible focus, `aria-sort` for sortable tables, icon labels, text+icon status indicators, persisted filters/expanded rows, and long-content truncation with accessible full-value disclosure.
+- [x] **Trust copy audit** — verify local/hosted provider copy across multi-tenant Intune Chat, Workspaces, StatusStrip, and export surfaces.
+- [x] **GitBook docs** — add admin-facing documentation for multi-tenant Intune Chat and Workspaces, covering tenant scope, tenant groups, saved queries, readiness preflight, result dossiers, what is stored locally, what can be attached to prompts, and how deletion/export behaves.
+- [x] **CHANGELOG entry** — record multi-tenant Intune Chat and Workspaces scope under `[Unreleased]` as implementation lands.
+
+## Acceptance criteria
+
+1. An admin can ask Intune Chat for compliant and non-compliant Windows devices across all connected tenants and see a scope review before any tenant data is read.
+2. An admin can create local tenant groups and select one during scope review; the UI shows the resolved tenant list before running.
+3. An admin can launch saved multi-tenant queries for common investigations and edit the prompt before send.
+4. The scope preflight shows ready, expired, missing-scope, stale, throttled, failed, and skipped tenants with recovery paths.
+5. The multi-tenant result shows per-tenant progress, partial failures, summary tiles, a tenant comparison table, filters, expandable device rows, and local CSV/Markdown/JSON/dossier export.
+6. A multi-tenant result can be split into separate tenant-specific workspace evidence without creating a mixed-tenant workspace.
+7. Table-heavy multi-tenant answers use a stable answer artifact layout with keyboard sorting/filtering, text+icon state indicators, and no page-level horizontal scroll.
+8. Hosted-provider multi-tenant sends require explicit confirmation for the selected tenants and provider before prompt construction.
+9. Multi-tenant chat never applies writes or connector side effects directly.
+10. Cross-tenant agent batches queue one tenant-pinned `RunRecord` per tenant; write-agent batches require per-tenant typed confirmation.
+11. An admin can create, rename, open, archive/delete, and export a tenant-scoped workspace.
+12. A workspace can link existing tenant-matching chat conversations and agent runs without duplicating or deleting the underlying records.
+13. An admin can pin Graph evidence/source details from a chat answer and see source freshness, tenant, resource kind, and cache/live status.
+14. Workspace notes and instructions are stored locally and scoped to one tenant.
+15. Workspaces do not accept mixed-tenant evidence; multi-tenant chat results can only export locally or be split into tenant-specific workspace evidence.
+16. Prompting with workspace context is explicit: the UI shows the selected evidence/notes before sending.
+17. Hosted-provider sends with attached workspace context require the same explicit confirmation boundary as Intune Chat.
+18. Deleting a workspace does not delete tenant config, chat history, Graph cache, run history, connector audit records, or self-training records.
+19. Workspace export is local and explicit, with no background upload.
+20. Multi-tenant Chat and Workspaces pass a keyboard/focus, narrow-width, long-content, empty-state, loading-state, and partial-failure UX review before release.
+21. `npm run typecheck`, `npm test`, `npm run qa`, and the relevant Electron smoke test pass before release.
+
 # v0.2.2 — Intune Chat + local intelligence foundation
 
 **Status: implemented and smoke-verified; live-tenant pilot run recommended before release.** Follow-up release after v0.2.1. The theme is making OpenAdminOS feel like an operating surface, not only an agent launcher: admins can ask natural-language questions against their own tenant, route repeatable work into installed agents as skills, and optionally approve local self-training suggestions that adapt those agents to their environment.
@@ -36,7 +149,7 @@
 
 ## Future UX follow-ups
 
-- [ ] **Tenant investigation workspaces** — adapt the useful parts of Claude-style Projects into tenant-scoped investigative workspaces with pinned Graph evidence, linked agent runs, notes, approved local instructions, and freshness metadata. TODO(ugur): decide final public naming and route shape before implementation.
+- [x] **Workspaces** — implemented in v0.2.5 as tenant-scoped investigation containers with pinned Graph evidence, linked agent runs, notes, approved local instructions storage, and freshness metadata. Route placement is top-level `/workspaces`, directly after Intune Chat.
 - [ ] **Reusable output panes** — evaluate artifact-like side panes for large generated outputs such as policy comparison reports, remediation plans, and exportable summaries, without sharing tenant data outside the selected provider trust boundary.
 
 ## Priority 3 — Agent-as-skill routing
