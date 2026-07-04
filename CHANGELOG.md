@@ -9,10 +9,12 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Added a Vitest and Testing Library renderer test baseline for write confirmation, hosted-provider consent, and provider settings.
 - Added Anthropic via the local Claude Code CLI and LM Studio via its local OpenAI-compatible server as runnable LLM providers.
 - Added `docs/agent-sdk.md`, a practical author guide for manifest fields, step kinds, write confirmation, local QA, and community submission.
+- Added a marketing examples gallery with copyable Build your own Agent prompts for read, write, and connector-backed agents.
 
 ### Changed
 
 - Extracted Electron state module-level helpers into focused desktop helper modules without changing runtime behavior.
+- Extracted the Electron Intune Chat domain from `state.ts` into a dedicated service without changing the public store API.
 - Updated README and operating docs to reflect the v0.2.5 shipped surface and the `web/` marketing site path.
 
 ### Removed
