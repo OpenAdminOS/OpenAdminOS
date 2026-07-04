@@ -10,6 +10,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Extracted Electron state module-level helpers into focused desktop helper modules without changing runtime behavior.
 - Updated README and operating docs to reflect the v0.2.5 shipped surface and the `web/` marketing site path.
 
 ### Removed
