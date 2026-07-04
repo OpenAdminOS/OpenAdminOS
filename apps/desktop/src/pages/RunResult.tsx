@@ -22,6 +22,7 @@ import {
 import { ShareMenu } from "../components/ShareMenu";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
+import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { RunTelemetry } from "../components/RunTelemetry";
 import { useToast } from "../components/Toast";
@@ -65,6 +66,8 @@ export default function RunResult() {
     model: run?.model,
   });
   const [now, setNow] = useState(() => Date.now());
+  const shouldShowResult =
+    run?.result !== undefined || run?.status === "completed" || run?.status === "failed";
 
   useEffect(() => {
     if (!isLive) return;
@@ -316,6 +319,8 @@ export default function RunResult() {
         )}
 
         <RunFailureRemediation run={run} />
+
+        {shouldShowResult && <ResultPanel run={run} />}
 
         <div className="mb-6 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
           <RunTelemetry
