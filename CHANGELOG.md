@@ -6,11 +6,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added v0.2.5 multi-tenant Intune Chat for explicit read-only tenant scope review, local tenant groups, saved queries, readiness preflight, hosted-provider batch confirmation, deterministic Windows compliance aggregation, result filters, local exports, and split-to-workspaces evidence import.
+- Added single-tenant Workspaces as a top-level `/workspaces` surface with local SQLite-backed workspace CRUD, pinned evidence, notes, linked chats, linked runs, local instructions storage, Markdown dossier export, and deletion boundaries that leave chats, runs, tenants, and Graph cache intact.
+- Added multi-tenant chat and Workspaces contracts, validated Electron IPC/preload APIs, mockups `11-multi-tenant-chat.html` and `12-workspaces.html`, GitBook documentation, and focused host tests for partial tenant failures and workspace deletion/split-result boundaries.
+- Added streamed multi-tenant chat progress IPC, tenant-pinned cross-tenant agent batch records, chat-answer pinning to Workspaces, explicit workspace context attachment in Intune Chat, and hosted-provider confirmation for attached workspace context.
+
 ### Changed
+
+- Bumped app, workspace package, and UI-displayed version metadata to 0.2.5 for the v0.2.5 roadmap.
 
 ### Removed
 
 ### Fixed
+
+- Added visible keyboard focus states to the v0.2.5 Workspaces and Intune Chat custom controls and tightened the new mockups' narrow-width layout during the UI/UX verification pass.
 
 ### Security
 

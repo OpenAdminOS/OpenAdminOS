@@ -47,11 +47,18 @@ import type {
   AgentWhatsAppWebDelivery,
   CompanionRunDueReadSchedulesResult,
   CompanionSnapshot,
+  CreateWorkspaceInput,
+  ImportMultiTenantResultToWorkspacesInput,
+  MultiTenantChatStreamEvent,
   PendingConnectorDecision,
+  PinWorkspaceEvidenceInput,
+  PreflightMultiTenantChatInput,
   ProviderId,
+  QueueMultiTenantAgentBatchInput,
   RefreshGraphCacheOptions,
   ReleaseDiagnostics,
   ResetSelfTrainingInput,
+  RunMultiTenantChatInput,
   RunGraphApi,
   RunLlmApi,
   RunRecord,
@@ -66,6 +73,10 @@ import type {
   SupportIssueSubmissionResult,
   IntuneChatStreamEvent,
   StartRunOptions,
+  TenantScope,
+  UpdateWorkspaceInput,
+  WorkspaceEvidenceSourceType,
+  WorkspaceStatus,
 } from "@openadminos/agent-sdk";
 import { providerCatalog } from "@openadminos/agent-sdk";
 import {
@@ -147,6 +158,7 @@ const supportIssueSources = new Set([
   "native-menu",
 ]);
 const intuneChatStreamControllers = new Map<string, AbortController>();
+const multiTenantChatStreamControllers = new Map<string, AbortController>();
 const agentSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const agentCategories = new Set([
   "devices",
@@ -160,6 +172,14 @@ const selfTrainingSuggestionStatuses = new Set<SelfTrainingSuggestionStatus>([
   "accepted",
   "rejected",
   "reset",
+]);
+const workspaceStatuses = new Set<WorkspaceStatus>(["active", "archived"]);
+const workspaceEvidenceSourceTypes = new Set<WorkspaceEvidenceSourceType>([
+  "multi-tenant-chat-result",
+  "chat-message",
+  "graph-cache-row",
+  "run-result",
+  "manual",
 ]);
 const DEFAULT_SUPPORT_API_URL = "https://openadminos.com";
 const COMPANION_WINDOW_WIDTH = 390;
@@ -711,6 +731,39 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     await waitFor(() => textarea.value === value, "chat input value");
   };
+  const selectFirstOption = async (ariaLabel: string) => {
+    await waitFor(
+      () => Boolean(document.querySelector(`select[aria-label="${ariaLabel}"]`)),
+      `${ariaLabel} select`,
+    );
+    const select = document.querySelector(`select[aria-label="${ariaLabel}"]`);
+    if (!(select instanceof HTMLSelectElement)) {
+      throw new Error(`${ariaLabel} select was not found.`);
+    }
+    const option = Array.from(select.options).find((candidate) => candidate.value);
+    if (!option) {
+      throw new Error(`${ariaLabel} has no selectable option.`);
+    }
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLSelectElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(select, option.value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() => select.value === option.value, `${ariaLabel} selected`);
+  };
+  const clickFirstEnabledCheckbox = async (label: string) => {
+    await waitFor(
+      () => Boolean(document.querySelector('input[type="checkbox"]:not(:disabled)')),
+      label,
+    );
+    const checkbox = document.querySelector('input[type="checkbox"]:not(:disabled)');
+    if (!(checkbox instanceof HTMLInputElement)) {
+      throw new Error(`${label} checkbox was not found.`);
+    }
+    checkbox.click();
+    await waitFor(() => checkbox.checked, `${label} checked`);
+  };
   const pressEnterInTextarea = async () => {
     await waitFor(() => Boolean(document.querySelector("textarea")), "chat input");
     const textarea = document.querySelector("textarea");
@@ -775,6 +828,32 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await clickNamedButton("Show chat history");
   await waitFor(() => bodyText().includes("Smoke Tenant"), "expanded chat history");
 
+  await selectFirstOption("Saved multi-tenant query");
+  await waitFor(() => {
+    const textarea = document.querySelector("textarea");
+    return textarea instanceof HTMLTextAreaElement &&
+      textarea.value.includes("List all compliant and non-compliant Windows devices");
+  }, "saved multi-tenant query loaded");
+  await clickButton("Send");
+  await waitFor(() => bodyText().includes("Review multi-tenant scope"), "scope review");
+  const sawMultiTenantScopeReview =
+    bodyText().includes("Review multi-tenant scope") &&
+    bodyText().includes("Smoke Tenant");
+  await clickButton("Run read-only query");
+  await waitFor(() => bodyText().includes("Multi-tenant result"), "multi-tenant result");
+  const sawMultiTenantResult = bodyText().includes("Multi-tenant result");
+  await clickButton("Split to Workspaces");
+  await waitFor(() => bodyText().includes("Split result to Workspaces"), "split to workspaces modal");
+  await clickModalButton("Create evidence");
+  await waitFor(() => bodyText().includes("Created") && bodyText().includes("evidence"), "split workspace evidence");
+  const sawSplitToWorkspaces = bodyText().includes("workspace evidence");
+  await clickModalButton("Close");
+  await clickButton("New");
+  await waitFor(
+    () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
+    "new conversation after multi-tenant result",
+  );
+
   await setTextarea("Hold response for cancellation smoke.");
   await pressEnterInTextarea();
   await waitFor(() => Boolean(findButton("Stop")), "chat stop action", 2500);
@@ -836,11 +915,54 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
   await waitFor(() => bodyText().includes("Offboarding agent"), "agent suggestion");
+  const sawAgentSuggestion = bodyText().includes("Offboarding agent");
   await clickSummary("Source details");
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
   );
+  await clickButton("Details");
+  await waitFor(
+      () =>
+        bodyText().includes("Why suggested") &&
+        bodyText().includes("Required scopes") &&
+        bodyText().includes("Write intent") &&
+        bodyText().includes("DeviceManagementManagedDevices.Read.All") &&
+        bodyText().includes("Write actions still use the normal plan and confirmation flow."),
+    "agent suggestion details",
+  );
+  await clickButton("Workspace");
+  await waitFor(
+    () => bodyText().includes("Created workspace") && bodyText().includes("linked this conversation"),
+    "workspace created from conversation",
+  );
+  await clickButton("Pin answer");
+  await waitFor(() => bodyText().includes("Pin answer to workspace"), "pin answer modal");
+  await clickModalButton("Pin answer");
+  await waitFor(() => bodyText().includes("Pinned evidence to"), "pinned answer evidence");
+  const sawWorkspacePin = bodyText().includes("Pinned evidence to");
+  await clickButton("New");
+  await waitFor(
+    () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
+    "new conversation for workspace context",
+  );
+  await selectFirstOption("Attach workspace context");
+  await waitFor(() => bodyText().includes("Chat answer"), "workspace evidence option");
+  await clickFirstEnabledCheckbox("workspace context evidence");
+  await waitFor(
+    () => bodyText().includes("Workspace context selected: 1 evidence"),
+    "workspace context attached",
+  );
+  await setTextarea("Use the attached workspace context to summarize the device evidence.");
+  await pressEnterInTextarea();
+  await waitFor(
+    () => bodyText().includes(smokeAnswer),
+    "workspace context chat response",
+  );
+  const workspaceResponseCount = textOccurrenceCount(smokeAnswer);
+  const sawWorkspaceContextAttachment =
+    bodyText().includes("Workspace context selected: 1 evidence") ||
+    bodyText().includes("Use the attached workspace context");
   await clickButton("Regenerate");
   await waitFor(
     () =>
@@ -850,16 +972,16 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     2500,
   );
   await waitFor(
-    () => textOccurrenceCount(smokeAnswer) >= responseCount + 1,
+    () => textOccurrenceCount(smokeAnswer) >= workspaceResponseCount + 1,
     "regenerated chat response",
   );
   await waitFor(() => !bodyText().includes("Thinking"), "regenerate send settled");
-  const sawRegenerate = textOccurrenceCount(smokeAnswer) >= responseCount + 1;
+  const sawRegenerate = textOccurrenceCount(smokeAnswer) >= workspaceResponseCount + 1;
   await clickButton("Edit");
   await waitFor(() => {
     const textarea = document.querySelector("textarea");
     return textarea instanceof HTMLTextAreaElement &&
-      textarea.value.includes("Which managed devices have not synced");
+      textarea.value.includes("Use the attached workspace context");
   }, "edit prompt loaded into composer");
   await clickButton("Pin");
   await waitFor(
@@ -889,26 +1011,14 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await clickNamedButton("Copy response");
   await waitFor(() => bodyText().includes("Copied"), "copied response feedback");
   const sawAnswer = bodyText().includes("WIN-01 is stale");
-  const sawAgentSuggestion = bodyText().includes("Offboarding agent");
   const sawConversationLifecycle =
     bodyText().includes("Smoke lifecycle review") && bodyText().includes("Unpin");
   const sawSourceDetails = bodyText().includes("/deviceManagement/managedDevices");
   const sawEditResend = (() => {
     const textarea = document.querySelector("textarea");
     return textarea instanceof HTMLTextAreaElement &&
-      textarea.value.includes("Which managed devices have not synced");
+      textarea.value.includes("Use the attached workspace context");
   })();
-
-  await clickButton("Details");
-  await waitFor(
-      () =>
-        bodyText().includes("Why suggested") &&
-        bodyText().includes("Required scopes") &&
-        bodyText().includes("Write intent") &&
-        bodyText().includes("DeviceManagementManagedDevices.Read.All") &&
-        bodyText().includes("Write actions still use the normal plan and confirmation flow."),
-    "agent suggestion details",
-  );
 
   location.hash = "/settings";
   await waitFor(() => bodyText().includes("Settings"), "Settings route");
@@ -949,12 +1059,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     hasEditResend: sawEditResend,
     hasRegenerate: sawRegenerate,
     hasStopGeneration: sawStopGeneration,
+    hasWorkspacePin: sawWorkspacePin,
+    hasWorkspaceContextAttachment: sawWorkspaceContextAttachment,
     hasPinnedCategory: sawPinnedCategory,
     hasContextMenuDelete: sawContextMenuDelete,
     hasAcceptedLearning: bodyText().includes("Active overlays"),
     hasScheduledRefresh: bodyText().includes("Enabled"),
     hasLocalDataControls: sawLocalDataControls,
     hasLocalDataClearModal: sawLocalDataClearModal,
+    hasMultiTenantScopeReview: sawMultiTenantScopeReview,
+    hasMultiTenantResult: sawMultiTenantResult,
+    hasSplitToWorkspaces: sawSplitToWorkspaces,
   };
 }
 
@@ -2102,6 +2217,21 @@ function optionalBoundedString(
   return requireBoundedString(value, name, maxLength);
 }
 
+function optionalTextString(
+  value: unknown,
+  name: string,
+  maxLength: number,
+): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be a string.`);
+  }
+  if (value.length > maxLength) {
+    throw new Error(`${name} is too long.`);
+  }
+  return value;
+}
+
 function validateSetRegistrySourceOptions(
   value: unknown,
 ): { confirmExternalSource?: boolean } {
@@ -2126,6 +2256,9 @@ function validateJsonRecord(
   try {
     serialized = JSON.stringify(value);
   } catch {
+    throw new Error(`${name} must be JSON-serializable.`);
+  }
+  if (serialized === undefined) {
     throw new Error(`${name} must be JSON-serializable.`);
   }
   if (Buffer.byteLength(serialized, "utf8") > maxBytes) {
@@ -2647,11 +2780,90 @@ function validateHostedProviderConsent(
   if (value.remember !== undefined && typeof value.remember !== "boolean") {
     throw new Error("hostedProviderConsent.remember must be a boolean.");
   }
+  let workspaceContext:
+    | NonNullable<SendIntuneChatMessageInput["hostedProviderConsent"]>["workspaceContext"]
+    | undefined;
+  if (value.workspaceContext !== undefined) {
+    if (!isPlainRecord(value.workspaceContext)) {
+      throw new Error("hostedProviderConsent.workspaceContext must be an object.");
+    }
+    const evidenceCount = Number(value.workspaceContext.evidenceCount);
+    const noteCount = Number(value.workspaceContext.noteCount);
+    if (
+      !Number.isInteger(evidenceCount) ||
+      evidenceCount < 0 ||
+      evidenceCount > 250 ||
+      !Number.isInteger(noteCount) ||
+      noteCount < 0 ||
+      noteCount > 250
+    ) {
+      throw new Error("hostedProviderConsent.workspaceContext counts must be non-negative integers.");
+    }
+    if (typeof value.workspaceContext.includesInstructions !== "boolean") {
+      throw new Error("hostedProviderConsent.workspaceContext.includesInstructions must be a boolean.");
+    }
+    workspaceContext = {
+      workspaceId: requireBoundedString(
+        value.workspaceContext.workspaceId,
+        "hostedProviderConsent.workspaceContext.workspaceId",
+        128,
+      ),
+      workspaceTitle: requireBoundedString(
+        value.workspaceContext.workspaceTitle,
+        "hostedProviderConsent.workspaceContext.workspaceTitle",
+        140,
+      ),
+      tenantId: requireBoundedString(
+        value.workspaceContext.tenantId,
+        "hostedProviderConsent.workspaceContext.tenantId",
+        256,
+      ),
+      evidenceCount,
+      noteCount,
+      includesInstructions: value.workspaceContext.includesInstructions,
+    };
+  }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
     providerId: validateProviderId(value.providerId, "hostedProviderConsent.providerId"),
     acknowledgedAt,
     ...(typeof value.remember === "boolean" ? { remember: value.remember } : {}),
+    ...(workspaceContext ? { workspaceContext } : {}),
+  };
+}
+
+function validateWorkspacePromptContextInput(
+  value: unknown,
+): NonNullable<SendIntuneChatMessageInput["workspaceContext"]> {
+  if (!isPlainRecord(value)) {
+    throw new Error("workspaceContext must be an object.");
+  }
+  if (
+    value.includeInstructions !== undefined &&
+    typeof value.includeInstructions !== "boolean"
+  ) {
+    throw new Error("workspaceContext.includeInstructions must be a boolean.");
+  }
+  return {
+    workspaceId: requireBoundedString(value.workspaceId, "workspaceContext.workspaceId", 128),
+    ...(value.evidenceIds !== undefined
+      ? {
+          evidenceIds: validateStringArray(
+            value.evidenceIds,
+            "workspaceContext.evidenceIds",
+            50,
+            128,
+          ),
+        }
+      : {}),
+    ...(value.noteIds !== undefined
+      ? {
+          noteIds: validateStringArray(value.noteIds, "workspaceContext.noteIds", 50, 128),
+        }
+      : {}),
+    ...(typeof value.includeInstructions === "boolean"
+      ? { includeInstructions: value.includeInstructions }
+      : {}),
   };
 }
 
@@ -2673,7 +2885,257 @@ function validateSendIntuneChatMessageInput(value: unknown): SendIntuneChatMessa
     ...(value.hostedProviderConsent !== undefined
       ? { hostedProviderConsent: validateHostedProviderConsent(value.hostedProviderConsent) }
       : {}),
+    ...(value.workspaceContext !== undefined
+      ? { workspaceContext: validateWorkspacePromptContextInput(value.workspaceContext) }
+      : {}),
   };
+}
+
+function validateTenantScope(value: unknown): TenantScope {
+  if (!isPlainRecord(value)) {
+    throw new Error("tenantScope must be an object.");
+  }
+  const kind = requireBoundedString(value.kind, "tenantScope.kind", 32);
+  if (kind === "active") return { kind };
+  const groupIds = validateOptionalStringArray(value.groupIds, "tenantScope.groupIds", 100, 256);
+  if (kind === "all") {
+    return { kind, ...(groupIds ? { groupIds } : {}) };
+  }
+  if (kind === "selected") {
+    const tenantIds = validateStringArray(value.tenantIds, "tenantScope.tenantIds", 250, 256);
+    return { kind, tenantIds, ...(groupIds ? { groupIds } : {}) };
+  }
+  throw new Error("tenantScope.kind must be active, selected, or all.");
+}
+
+function validatePreflightMultiTenantChatInput(
+  value: unknown,
+): PreflightMultiTenantChatInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Multi-tenant preflight input must be an object.");
+  }
+  return {
+    prompt: requireBoundedString(value.prompt, "prompt", 20_000),
+    tenantScope: validateTenantScope(value.tenantScope),
+    ...(value.savedQueryId !== undefined
+      ? { savedQueryId: requireBoundedString(value.savedQueryId, "savedQueryId", 128) }
+      : {}),
+  };
+}
+
+function validateHostedProviderBatchConsent(
+  value: unknown,
+): RunMultiTenantChatInput["hostedProviderConsent"] | undefined {
+  if (value === undefined) return undefined;
+  if (!isPlainRecord(value)) {
+    throw new Error("hostedProviderConsent must be an object.");
+  }
+  const acknowledgedAt = requireBoundedString(
+    value.acknowledgedAt,
+    "hostedProviderConsent.acknowledgedAt",
+    64,
+  );
+  if (!Number.isFinite(Date.parse(acknowledgedAt))) {
+    throw new Error("hostedProviderConsent.acknowledgedAt must be an ISO timestamp.");
+  }
+  if (value.remember !== undefined && typeof value.remember !== "boolean") {
+    throw new Error("hostedProviderConsent.remember must be a boolean.");
+  }
+  return {
+    tenantIds: validateStringArray(
+      value.tenantIds,
+      "hostedProviderConsent.tenantIds",
+      250,
+      256,
+    ),
+    providerId: validateProviderId(value.providerId, "hostedProviderConsent.providerId"),
+    acknowledgedAt,
+    ...(typeof value.remember === "boolean" ? { remember: value.remember } : {}),
+  };
+}
+
+function validateRunMultiTenantChatInput(value: unknown): RunMultiTenantChatInput {
+  const preflight = validatePreflightMultiTenantChatInput(value);
+  if (!isPlainRecord(value)) {
+    throw new Error("Multi-tenant chat input must be an object.");
+  }
+  if (value.refreshIfStale !== undefined && typeof value.refreshIfStale !== "boolean") {
+    throw new Error("refreshIfStale must be a boolean.");
+  }
+  return {
+    ...preflight,
+    ...(typeof value.refreshIfStale === "boolean"
+      ? { refreshIfStale: value.refreshIfStale }
+      : {}),
+    ...(value.hostedProviderConsent !== undefined
+      ? { hostedProviderConsent: validateHostedProviderBatchConsent(value.hostedProviderConsent) }
+      : {}),
+  };
+}
+
+function validateQueueMultiTenantAgentBatchInput(
+  value: unknown,
+): QueueMultiTenantAgentBatchInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Multi-tenant agent batch input must be an object.");
+  }
+  return {
+    agentSlug: requireBoundedString(value.agentSlug, "agentSlug", 160),
+    tenantScope: validateTenantScope(value.tenantScope),
+    ...(value.savedQueryId !== undefined
+      ? { savedQueryId: requireBoundedString(value.savedQueryId, "savedQueryId", 128) }
+      : {}),
+    ...(value.prompt !== undefined
+      ? { prompt: requireBoundedString(value.prompt, "prompt", 20_000) }
+      : {}),
+  };
+}
+
+function validateTenantGroupInput(value: unknown): {
+  id?: string;
+  name: string;
+  tenantIds: string[];
+} {
+  if (!isPlainRecord(value)) throw new Error("Tenant group input must be an object.");
+  return {
+    ...(value.id !== undefined ? { id: requireBoundedString(value.id, "id", 128) } : {}),
+    name: requireBoundedString(value.name, "name", 80),
+    tenantIds: validateStringArray(value.tenantIds, "tenantIds", 250, 256),
+  };
+}
+
+function validateCreateWorkspaceInput(value: unknown): CreateWorkspaceInput {
+  if (!isPlainRecord(value)) throw new Error("Workspace input must be an object.");
+  return {
+    title: requireBoundedString(value.title, "workspace title", 140),
+    ...(value.tenantId !== undefined
+      ? { tenantId: requireBoundedString(value.tenantId, "tenantId", 256) }
+      : {}),
+    ...(value.instructions !== undefined
+      ? { instructions: optionalTextString(value.instructions, "instructions", 10_000) }
+      : {}),
+    ...(value.conversationId !== undefined
+      ? { conversationId: requireBoundedString(value.conversationId, "conversationId", 256) }
+      : {}),
+  };
+}
+
+function validateUpdateWorkspaceInput(value: unknown): UpdateWorkspaceInput {
+  if (!isPlainRecord(value)) throw new Error("Workspace update input must be an object.");
+  const status =
+    value.status === undefined
+      ? undefined
+      : requireBoundedString(value.status, "workspace status", 32);
+  if (status !== undefined && !workspaceStatuses.has(status as WorkspaceStatus)) {
+    throw new Error("Unknown workspace status.");
+  }
+  return {
+    ...(value.title !== undefined
+      ? { title: requireBoundedString(value.title, "workspace title", 140) }
+      : {}),
+    ...(value.instructions !== undefined
+      ? { instructions: optionalTextString(value.instructions, "instructions", 10_000) }
+      : {}),
+    ...(status !== undefined ? { status: status as WorkspaceStatus } : {}),
+  };
+}
+
+function validatePinWorkspaceEvidenceInput(value: unknown): PinWorkspaceEvidenceInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Workspace evidence input must be an object.");
+  }
+  const sourceType = requireBoundedString(value.sourceType, "sourceType", 64);
+  if (!workspaceEvidenceSourceTypes.has(sourceType as WorkspaceEvidenceSourceType)) {
+    throw new Error("Unknown workspace evidence source type.");
+  }
+  return {
+    workspaceId: requireBoundedString(value.workspaceId, "workspaceId", 128),
+    ...(value.tenantId !== undefined
+      ? { tenantId: requireBoundedString(value.tenantId, "tenantId", 256) }
+      : {}),
+    title: requireBoundedString(value.title, "evidence title", 140),
+    sourceType: sourceType as WorkspaceEvidenceSourceType,
+    ...(value.sourceRef !== undefined
+      ? { sourceRef: validateJsonRecord(value.sourceRef, "sourceRef", 20_000) }
+      : {}),
+    content: validateJsonValue(value.content, "content", 500_000),
+    ...(value.freshness !== undefined
+      ? { freshness: validateJsonRecord(value.freshness, "freshness", 20_000) }
+      : {}),
+  };
+}
+
+function validateImportMultiTenantResultToWorkspacesInput(
+  value: unknown,
+): ImportMultiTenantResultToWorkspacesInput {
+  if (!isPlainRecord(value)) throw new Error("Workspace import input must be an object.");
+  if (!Array.isArray(value.tenantMappings) || value.tenantMappings.length > 250) {
+    throw new Error("tenantMappings must be an array with at most 250 entries.");
+  }
+  return {
+    jobId: requireBoundedString(value.jobId, "jobId", 128),
+    tenantMappings: value.tenantMappings.map((mapping, index) => {
+      if (!isPlainRecord(mapping)) {
+        throw new Error(`tenantMappings[${index}] must be an object.`);
+      }
+      return {
+        tenantId: requireBoundedString(
+          mapping.tenantId,
+          `tenantMappings[${index}].tenantId`,
+          256,
+        ),
+        ...(mapping.workspaceId !== undefined
+          ? {
+              workspaceId: requireBoundedString(
+                mapping.workspaceId,
+                `tenantMappings[${index}].workspaceId`,
+                128,
+              ),
+            }
+          : {}),
+        ...(mapping.title !== undefined
+          ? { title: requireBoundedString(mapping.title, `tenantMappings[${index}].title`, 140) }
+          : {}),
+      };
+    }),
+  };
+}
+
+function validateStringArray(
+  value: unknown,
+  name: string,
+  maxItems: number,
+  maxLength: number,
+): string[] {
+  if (!Array.isArray(value) || value.length > maxItems) {
+    throw new Error(`${name} must be an array with at most ${maxItems} entries.`);
+  }
+  return [...new Set(value.map((entry, index) =>
+    requireBoundedString(entry, `${name}[${index}]`, maxLength),
+  ))];
+}
+
+function validateOptionalStringArray(
+  value: unknown,
+  name: string,
+  maxItems: number,
+  maxLength: number,
+): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return validateStringArray(value, name, maxItems, maxLength);
+}
+
+function validateJsonValue<T>(value: T, name: string, maxBytes: number): T {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new Error(`${name} must be JSON-serializable.`);
+  }
+  if (Buffer.byteLength(serialized, "utf8") > maxBytes) {
+    throw new Error(`${name} is too large.`);
+  }
+  return value;
 }
 
 function validateRefreshGraphCacheOptions(
@@ -2872,8 +3334,15 @@ function buildAppMenu(): Menu {
         },
       },
       {
-        label: "Activity",
+        label: "Workspaces",
         accelerator: "CmdOrCtrl+4",
+        click: () => {
+          void openMainWindow("/workspaces");
+        },
+      },
+      {
+        label: "Activity",
+        accelerator: "CmdOrCtrl+5",
         click: () => {
           void openMainWindow("/activity");
         },
@@ -3435,6 +3904,95 @@ function registerIpcHandlers() {
     }),
   );
   ipcMain.handle(
+    "openadminos:list-tenant-groups",
+    handleTrusted(() => store.listTenantGroups()),
+  );
+  ipcMain.handle(
+    "openadminos:save-tenant-group",
+    handleTrusted((_event, input: unknown) =>
+      store.saveTenantGroup(validateTenantGroupInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:delete-tenant-group",
+    handleTrusted((_event, id: unknown) =>
+      store.deleteTenantGroup(requireBoundedString(id, "tenant group id", 128)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:list-saved-multi-tenant-queries",
+    handleTrusted(() => store.listSavedMultiTenantQueries()),
+  );
+  ipcMain.handle(
+    "openadminos:preflight-multi-tenant-intune-chat",
+    handleTrusted((_event, input: unknown) =>
+      store.preflightMultiTenantIntuneChat(
+        validatePreflightMultiTenantChatInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:run-multi-tenant-intune-chat",
+    handleTrusted((_event, input: unknown) =>
+      store.runMultiTenantIntuneChat(validateRunMultiTenantChatInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:stream-multi-tenant-intune-chat",
+    handleTrusted((event, streamId: unknown, input: unknown) => {
+      const safeStreamId = requireBoundedString(streamId, "streamId", 128);
+      const controller = new AbortController();
+      multiTenantChatStreamControllers.set(safeStreamId, controller);
+      return store.streamMultiTenantIntuneChat(
+        validateRunMultiTenantChatInput(input),
+        (streamEvent: MultiTenantChatStreamEvent) => {
+          event.sender.send("openadminos:multi-tenant-chat-stream-event", {
+            streamId: safeStreamId,
+            event: streamEvent,
+          });
+        },
+        { signal: controller.signal },
+      ).finally(() => {
+        multiTenantChatStreamControllers.delete(safeStreamId);
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:cancel-multi-tenant-intune-chat-stream",
+    handleTrusted((_event, streamId: unknown) => {
+      const safeStreamId = requireBoundedString(streamId, "streamId", 128);
+      multiTenantChatStreamControllers.get(safeStreamId)?.abort();
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:list-multi-tenant-chat-jobs",
+    handleTrusted(() => store.listMultiTenantChatJobs()),
+  );
+  ipcMain.handle(
+    "openadminos:get-multi-tenant-chat-job",
+    handleTrusted((_event, id: unknown) =>
+      store.getMultiTenantChatJob(requireBoundedString(id, "jobId", 128)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:queue-multi-tenant-agent-batch",
+    handleTrusted((_event, input: unknown) =>
+      store.queueMultiTenantAgentBatch(
+        validateQueueMultiTenantAgentBatchInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:list-multi-tenant-agent-batches",
+    handleTrusted(() => store.listMultiTenantAgentBatches()),
+  );
+  ipcMain.handle(
+    "openadminos:get-multi-tenant-agent-batch",
+    handleTrusted((_event, id: unknown) =>
+      store.getMultiTenantAgentBatch(requireBoundedString(id, "batchId", 128)),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:refresh-graph-cache",
     handleTrusted((_event, options?: unknown) =>
       store.refreshGraphCache(validateRefreshGraphCacheOptions(options)),
@@ -3520,6 +4078,101 @@ function registerIpcHandlers() {
     "openadminos:reset-self-training-suggestions",
     handleTrusted((_event, input: unknown) =>
       store.resetSelfTrainingSuggestions(validateResetSelfTrainingInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:list-workspaces",
+    handleTrusted((_event, tenantId?: unknown) =>
+      store.listWorkspaces(optionalBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-workspace",
+    handleTrusted((_event, id: unknown) =>
+      store.getWorkspace(requireBoundedString(id, "workspaceId", 128)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:create-workspace",
+    handleTrusted((_event, input: unknown) =>
+      store.createWorkspace(validateCreateWorkspaceInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:update-workspace",
+    handleTrusted((_event, id: unknown, input: unknown) =>
+      store.updateWorkspace(
+        requireBoundedString(id, "workspaceId", 128),
+        validateUpdateWorkspaceInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:archive-workspace",
+    handleTrusted((_event, id: unknown) =>
+      store.archiveWorkspace(requireBoundedString(id, "workspaceId", 128)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:delete-workspace",
+    handleTrusted((_event, id: unknown) =>
+      store.deleteWorkspace(requireBoundedString(id, "workspaceId", 128)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:add-workspace-note",
+    handleTrusted((_event, workspaceId: unknown, content: unknown) =>
+      store.addWorkspaceNote(
+        requireBoundedString(workspaceId, "workspaceId", 128),
+        requireBoundedString(content, "note content", 20_000),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:update-workspace-note",
+    handleTrusted((_event, noteId: unknown, content: unknown) =>
+      store.updateWorkspaceNote(
+        requireBoundedString(noteId, "noteId", 128),
+        requireBoundedString(content, "note content", 20_000),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:pin-workspace-evidence",
+    handleTrusted((_event, input: unknown) =>
+      store.pinWorkspaceEvidence(validatePinWorkspaceEvidenceInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:link-workspace-conversation",
+    handleTrusted((_event, workspaceId: unknown, conversationId: unknown) =>
+      store.linkWorkspaceConversation(
+        requireBoundedString(workspaceId, "workspaceId", 128),
+        requireBoundedString(conversationId, "conversationId", 256),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:link-workspace-run",
+    handleTrusted((_event, workspaceId: unknown, runId: unknown) =>
+      store.linkWorkspaceRun(
+        requireBoundedString(workspaceId, "workspaceId", 128),
+        requireBoundedString(runId, "runId", 128),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:import-multi-tenant-result-to-workspaces",
+    handleTrusted((_event, input: unknown) =>
+      store.importMultiTenantResultToWorkspaces(
+        validateImportMultiTenantResultToWorkspacesInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:export-workspace-dossier",
+    handleTrusted((_event, id: unknown) =>
+      store.exportWorkspaceDossier(requireBoundedString(id, "workspaceId", 128)),
     ),
   );
   ipcMain.handle(

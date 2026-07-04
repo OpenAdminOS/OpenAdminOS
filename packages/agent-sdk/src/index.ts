@@ -584,6 +584,9 @@ export interface IntuneChatConversation {
   updatedAt: string;
   tenantId?: string;
   pinnedAt?: string;
+  scopeKind?: "single-tenant" | "multi-tenant";
+  tenantScope?: TenantScope;
+  multiTenantJobId?: string;
 }
 
 export interface IntuneChatSource {
@@ -750,7 +753,352 @@ export interface HostedProviderChatConsent {
   providerId: ProviderId;
   acknowledgedAt: string;
   remember?: boolean;
+  workspaceContext?: HostedProviderWorkspaceContextConsent;
 }
+
+export type TenantScope =
+  | { kind: "active" }
+  | { kind: "selected"; tenantIds: string[]; groupIds?: string[] }
+  | { kind: "all"; groupIds?: string[] };
+
+export type TenantReadinessStatus =
+  | "ready"
+  | "expired"
+  | "missing-scopes"
+  | "stale"
+  | "throttled"
+  | "skipped"
+  | "failed";
+
+export interface TenantGroup {
+  id: string;
+  name: string;
+  tenantIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedMultiTenantQuery {
+  id: string;
+  title: string;
+  prompt: string;
+  resourceHints: GraphCacheResourceKind[];
+  defaultScope?: TenantScope;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantScopePreflightTenant {
+  tenantId: string;
+  tenantName: string;
+  username?: string;
+  status: TenantReadinessStatus;
+  selected: boolean;
+  cacheFreshness?: string;
+  staleResources: GraphCacheResourceKind[];
+  missingScopes: string[];
+  warnings: string[];
+  recovery: string;
+}
+
+export interface TenantScopePreflight {
+  id: string;
+  prompt: string;
+  tenantScope: TenantScope;
+  resolvedTenantIds: string[];
+  resolvedGroups: TenantGroup[];
+  resources: GraphCacheResourceKind[];
+  providerId: ProviderId;
+  providerName: string;
+  providerIsLocal: boolean;
+  model?: string;
+  generatedAt: string;
+  tenants: TenantScopePreflightTenant[];
+  canRun: boolean;
+}
+
+export interface HostedProviderBatchConsent {
+  tenantIds: string[];
+  providerId: ProviderId;
+  acknowledgedAt: string;
+  remember?: boolean;
+}
+
+export interface PreflightMultiTenantChatInput {
+  prompt: string;
+  tenantScope: TenantScope;
+  savedQueryId?: string;
+}
+
+export interface RunMultiTenantChatInput extends PreflightMultiTenantChatInput {
+  refreshIfStale?: boolean;
+  hostedProviderConsent?: HostedProviderBatchConsent;
+}
+
+export type MultiTenantProgressStatus =
+  | "queued"
+  | "refreshing-cache"
+  | "reading-cache"
+  | "building-result"
+  | "ready"
+  | "skipped"
+  | "failed";
+
+export interface MultiTenantChatTenantProgress {
+  tenantId: string;
+  tenantName: string;
+  status: MultiTenantProgressStatus;
+  detail?: string;
+  updatedAt: string;
+}
+
+export interface MultiTenantDeviceRow {
+  tenantId: string;
+  tenantName: string;
+  deviceId?: string;
+  deviceName: string;
+  complianceState: string;
+  operatingSystem: string;
+  osVersion?: string;
+  lastSyncDateTime?: string;
+  owner?: string;
+  sourceRefreshedAt?: string;
+  stale: boolean;
+}
+
+export interface MultiTenantTenantComparison {
+  tenantId: string;
+  tenantName: string;
+  status: TenantReadinessStatus;
+  windowsDevices: number;
+  compliant: number;
+  nonCompliant: number;
+  unknown: number;
+  lastRefresh?: string;
+  warnings: string[];
+}
+
+export interface MultiTenantChatSummary {
+  tenantsScanned: number;
+  failedTenants: number;
+  skippedTenants: number;
+  staleTenants: number;
+  windowsDevices: number;
+  compliant: number;
+  nonCompliant: number;
+  unknown: number;
+}
+
+export interface MultiTenantChatJob {
+  id: string;
+  conversationId?: string;
+  prompt: string;
+  savedQueryId?: string;
+  tenantScope: TenantScope;
+  resolvedTenantIds: string[];
+  providerId: ProviderId;
+  providerName: string;
+  providerIsLocal: boolean;
+  model?: string;
+  status: "queued" | "running" | "completed" | "partial" | "failed" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
+  preflight: TenantScopePreflight;
+  progress: MultiTenantChatTenantProgress[];
+  summary: MultiTenantChatSummary;
+  comparisons: MultiTenantTenantComparison[];
+  deviceRows: MultiTenantDeviceRow[];
+  assistantText: string;
+  exportDossierMarkdown: string;
+  error?: string;
+}
+
+export interface MultiTenantChatRunResult {
+  job: MultiTenantChatJob;
+  conversation: IntuneChatConversation;
+  userMessage: IntuneChatMessage;
+  assistantMessage: IntuneChatMessage;
+}
+
+export type MultiTenantChatStreamEvent =
+  | {
+      type: "started";
+      job: MultiTenantChatJob;
+    }
+  | {
+      type: "progress";
+      job: MultiTenantChatJob;
+    }
+  | {
+      type: "completed";
+      result: MultiTenantChatRunResult;
+    }
+  | {
+      type: "cancelled";
+      job: MultiTenantChatJob;
+    }
+  | {
+      type: "failed";
+      job?: MultiTenantChatJob;
+      error: string;
+    };
+
+export interface MultiTenantAgentBatch {
+  id: string;
+  agentSlug: string;
+  agentName: string;
+  agentMode: AgentMode;
+  tenantScope: TenantScope;
+  resolvedTenantIds: string[];
+  status:
+    | "queued"
+    | "running"
+    | "awaiting-confirmation"
+    | "completed"
+    | "partial"
+    | "failed"
+    | "cancelled";
+  runIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  preflight: TenantScopePreflight;
+  error?: string;
+}
+
+export interface QueueMultiTenantAgentBatchInput {
+  agentSlug: string;
+  tenantScope: TenantScope;
+  savedQueryId?: string;
+  prompt?: string;
+}
+
+export interface QueueMultiTenantAgentBatchResult {
+  batch: MultiTenantAgentBatch;
+  runs: RunRecord[];
+}
+
+export type WorkspaceStatus = "active" | "archived";
+export type WorkspaceEvidenceSourceType =
+  | "multi-tenant-chat-result"
+  | "chat-message"
+  | "graph-cache-row"
+  | "run-result"
+  | "manual";
+
+export interface WorkspaceSummary {
+  id: string;
+  tenantId: string;
+  tenantName?: string;
+  title: string;
+  status: WorkspaceStatus;
+  evidenceCount: number;
+  conversationCount: number;
+  runCount: number;
+  noteCount: number;
+  freshness?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceEvidence {
+  id: string;
+  workspaceId: string;
+  tenantId: string;
+  title: string;
+  sourceType: WorkspaceEvidenceSourceType;
+  sourceRef?: Record<string, unknown>;
+  content: unknown;
+  freshness?: {
+    resource?: GraphCacheResourceKind;
+    refreshedAt?: string;
+    rowCount?: number;
+    cacheStatus?: "cache" | "live" | "stale" | "unknown";
+  };
+  createdAt: string;
+}
+
+export interface WorkspaceNote {
+  id: string;
+  workspaceId: string;
+  tenantId: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceLink {
+  id: string;
+  workspaceId: string;
+  tenantId: string;
+  type: "conversation" | "run";
+  refId: string;
+  title: string;
+  createdAt: string;
+}
+
+export interface WorkspaceDetail extends WorkspaceSummary {
+  instructions?: string;
+  evidence: WorkspaceEvidence[];
+  notes: WorkspaceNote[];
+  links: WorkspaceLink[];
+}
+
+export interface CreateWorkspaceInput {
+  tenantId?: string;
+  title: string;
+  instructions?: string;
+  conversationId?: string;
+}
+
+export interface UpdateWorkspaceInput {
+  title?: string;
+  instructions?: string;
+  status?: WorkspaceStatus;
+}
+
+export interface PinWorkspaceEvidenceInput {
+  workspaceId: string;
+  tenantId?: string;
+  title: string;
+  sourceType: WorkspaceEvidenceSourceType;
+  sourceRef?: Record<string, unknown>;
+  content: unknown;
+  freshness?: WorkspaceEvidence["freshness"];
+}
+
+export interface ImportMultiTenantResultToWorkspacesInput {
+  jobId: string;
+  tenantMappings: {
+    tenantId: string;
+    workspaceId?: string;
+    title?: string;
+  }[];
+}
+
+export interface ImportMultiTenantResultToWorkspacesResult {
+  workspaces: WorkspaceSummary[];
+  evidence: WorkspaceEvidence[];
+}
+
+export interface WorkspacePromptContextInput {
+  workspaceId: string;
+  evidenceIds?: string[];
+  noteIds?: string[];
+  includeInstructions?: boolean;
+}
+
+export interface WorkspacePromptContextSummary {
+  workspaceId: string;
+  workspaceTitle: string;
+  tenantId: string;
+  evidenceCount: number;
+  noteCount: number;
+  includesInstructions: boolean;
+}
+
+export interface HostedProviderWorkspaceContextConsent
+  extends WorkspacePromptContextSummary {}
 
 export interface SendIntuneChatMessageInput {
   conversationId?: string;
@@ -766,6 +1114,12 @@ export interface SendIntuneChatMessageInput {
    * remembered local decision is applied for the active tenant/provider pair.
    */
   hostedProviderConsent?: HostedProviderChatConsent;
+  /**
+   * Optional single-tenant workspace evidence/notes/instructions to attach
+   * to this prompt. The host validates that the workspace tenant matches the
+   * active conversation tenant before adding it to the model prompt.
+   */
+  workspaceContext?: WorkspacePromptContextInput;
 }
 
 export interface SendIntuneChatMessageResult {
@@ -1164,6 +1518,28 @@ export interface OpenAdminOSApi {
     onEvent: (event: IntuneChatStreamEvent) => void,
   ): Promise<SendIntuneChatMessageResult>;
   cancelIntuneChatStream(): Promise<void>;
+  listTenantGroups(): Promise<TenantGroup[]>;
+  saveTenantGroup(input: { id?: string; name: string; tenantIds: string[] }): Promise<TenantGroup>;
+  deleteTenantGroup(id: string): Promise<void>;
+  listSavedMultiTenantQueries(): Promise<SavedMultiTenantQuery[]>;
+  preflightMultiTenantIntuneChat(
+    input: PreflightMultiTenantChatInput,
+  ): Promise<TenantScopePreflight>;
+  runMultiTenantIntuneChat(
+    input: RunMultiTenantChatInput,
+  ): Promise<MultiTenantChatRunResult>;
+  streamMultiTenantIntuneChat(
+    input: RunMultiTenantChatInput,
+    onEvent: (event: MultiTenantChatStreamEvent) => void,
+  ): Promise<MultiTenantChatRunResult>;
+  cancelMultiTenantIntuneChatStream(): Promise<void>;
+  listMultiTenantChatJobs(): Promise<MultiTenantChatJob[]>;
+  getMultiTenantChatJob(id: string): Promise<MultiTenantChatJob | undefined>;
+  queueMultiTenantAgentBatch(
+    input: QueueMultiTenantAgentBatchInput,
+  ): Promise<QueueMultiTenantAgentBatchResult>;
+  listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
+  getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;
   getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
@@ -1179,6 +1555,24 @@ export interface OpenAdminOSApi {
   approveSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion>;
   rejectSelfTrainingSuggestion(id: string): Promise<SelfTrainingSuggestion>;
   resetSelfTrainingSuggestions(input: ResetSelfTrainingInput): Promise<SelfTrainingSuggestion[]>;
+  listWorkspaces(tenantId?: string): Promise<WorkspaceSummary[]>;
+  getWorkspace(id: string): Promise<WorkspaceDetail | undefined>;
+  createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceDetail>;
+  updateWorkspace(id: string, input: UpdateWorkspaceInput): Promise<WorkspaceDetail>;
+  archiveWorkspace(id: string): Promise<WorkspaceSummary>;
+  deleteWorkspace(id: string): Promise<void>;
+  addWorkspaceNote(workspaceId: string, content: string): Promise<WorkspaceNote>;
+  updateWorkspaceNote(noteId: string, content: string): Promise<WorkspaceNote>;
+  pinWorkspaceEvidence(input: PinWorkspaceEvidenceInput): Promise<WorkspaceEvidence>;
+  linkWorkspaceConversation(
+    workspaceId: string,
+    conversationId: string,
+  ): Promise<WorkspaceLink>;
+  linkWorkspaceRun(workspaceId: string, runId: string): Promise<WorkspaceLink>;
+  importMultiTenantResultToWorkspaces(
+    input: ImportMultiTenantResultToWorkspacesInput,
+  ): Promise<ImportMultiTenantResultToWorkspacesResult>;
+  exportWorkspaceDossier(id: string): Promise<string>;
   /**
    * Returns every connector registered in the host, with its
    * persisted config and last health-check outcome.

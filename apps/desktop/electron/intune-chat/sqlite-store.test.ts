@@ -13,7 +13,12 @@ import {
   staleManagedDeviceSyncThresholdDays,
   thresholdIsoDaysBefore,
 } from "./planner.js";
-import type { AgentSummary, GraphCacheResourceKind } from "@openadminos/agent-sdk";
+import type {
+  AgentSummary,
+  GraphCacheResourceKind,
+  MultiTenantAgentBatch,
+  MultiTenantChatJob,
+} from "@openadminos/agent-sdk";
 
 describe("Intune Chat SQLite store", () => {
   it("persists conversations, messages, cache rows, and self-training decisions", async () => {
@@ -230,6 +235,274 @@ describe("Intune Chat SQLite store", () => {
       assert.equal(chatCleared.chatConversationCount, 0);
       assert.equal(chatCleared.chatMessageCount, 0);
       assert.equal(chatCleared.chatToolCallCount, 0);
+      store.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists tenant groups, multi-tenant jobs, and tenant-scoped workspaces", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      const now = "2026-06-01T10:00:00.000Z";
+      const tenantNames = new Map([
+        ["tenant-1", "Contoso"],
+        ["tenant-2", "Fabrikam"],
+      ]);
+
+      const group = store.saveTenantGroup({
+        id: "group_1",
+        name: "Pilot tenants",
+        tenantIds: ["tenant-1", "tenant-2", "tenant-1"],
+        now,
+      });
+      assert.deepEqual(group.tenantIds, ["tenant-1", "tenant-2"]);
+      assert.equal(store.listTenantGroups()[0]?.name, "Pilot tenants");
+      assert.ok(
+        store
+          .listSavedMultiTenantQueries()
+          .some((query) => query.id === "windows-compliance"),
+      );
+
+      const conversation = store.createConversation({
+        id: "chat_1",
+        title: "Compliance query",
+        tenantId: "tenant-1",
+        now,
+      });
+      store.insertMessage({
+        id: "msg_1",
+        conversationId: conversation.id,
+        role: "assistant",
+        content: "Contoso has one non-compliant Windows device.",
+        status: "completed",
+        createdAt: now,
+      });
+
+      const job: MultiTenantChatJob = {
+        id: "mtjob_1",
+        conversationId: conversation.id,
+        prompt: "List Windows compliance across every connected tenant.",
+        tenantScope: { kind: "all" },
+        resolvedTenantIds: ["tenant-1", "tenant-2"],
+        providerId: "ollama",
+        providerName: "Ollama",
+        providerIsLocal: true,
+        status: "partial",
+        createdAt: now,
+        updatedAt: now,
+        preflight: {
+          id: "preflight_1",
+          prompt: "List Windows compliance across every connected tenant.",
+          tenantScope: { kind: "all" },
+          resolvedTenantIds: ["tenant-1", "tenant-2"],
+          resolvedGroups: [group],
+          resources: ["managedDevices"],
+          providerId: "ollama",
+          providerName: "Ollama",
+          providerIsLocal: true,
+          generatedAt: now,
+          tenants: [
+            {
+              tenantId: "tenant-1",
+              tenantName: "Contoso",
+              username: "admin@contoso.example",
+              status: "ready",
+              selected: true,
+              cacheFreshness: now,
+              staleResources: [],
+              missingScopes: [],
+              warnings: [],
+              recovery: "Ready to run.",
+            },
+            {
+              tenantId: "tenant-2",
+              tenantName: "Fabrikam",
+              username: "admin@fabrikam.example",
+              status: "failed",
+              selected: true,
+              staleResources: ["managedDevices"],
+              missingScopes: [],
+              warnings: ["Graph request failed."],
+              recovery: "Review the cached error or remove this tenant from the run.",
+            },
+          ],
+          canRun: true,
+        },
+        progress: [
+          {
+            tenantId: "tenant-1",
+            tenantName: "Contoso",
+            status: "ready",
+            detail: "1 Windows device row prepared.",
+            updatedAt: now,
+          },
+          {
+            tenantId: "tenant-2",
+            tenantName: "Fabrikam",
+            status: "failed",
+            detail: "Graph request failed.",
+            updatedAt: now,
+          },
+        ],
+        summary: {
+          tenantsScanned: 2,
+          failedTenants: 1,
+          skippedTenants: 0,
+          staleTenants: 0,
+          windowsDevices: 1,
+          compliant: 0,
+          nonCompliant: 1,
+          unknown: 0,
+        },
+        comparisons: [
+          {
+            tenantId: "tenant-1",
+            tenantName: "Contoso",
+            status: "ready",
+            windowsDevices: 1,
+            compliant: 0,
+            nonCompliant: 1,
+            unknown: 0,
+            lastRefresh: now,
+            warnings: [],
+          },
+          {
+            tenantId: "tenant-2",
+            tenantName: "Fabrikam",
+            status: "failed",
+            windowsDevices: 0,
+            compliant: 0,
+            nonCompliant: 0,
+            unknown: 0,
+            warnings: ["Graph request failed."],
+          },
+        ],
+        deviceRows: [
+          {
+            tenantId: "tenant-1",
+            tenantName: "Contoso",
+            deviceId: "device-1",
+            deviceName: "WIN-01",
+            complianceState: "noncompliant",
+            operatingSystem: "Windows",
+            osVersion: "11.0.1",
+            lastSyncDateTime: now,
+            owner: "owner@contoso.example",
+            sourceRefreshedAt: now,
+            stale: false,
+          },
+        ],
+        assistantText: "Contoso has one non-compliant Windows device; Fabrikam failed.",
+        exportDossierMarkdown: "# Multi-tenant Intune Chat dossier\n",
+      };
+      store.upsertMultiTenantJob(job);
+      assert.equal(store.getMultiTenantJob(job.id)?.summary.failedTenants, 1);
+
+      const batch: MultiTenantAgentBatch = {
+        id: "mtbatch_1",
+        agentSlug: "retire-stale-devices",
+        agentName: "Retire stale devices",
+        agentMode: "write",
+        tenantScope: { kind: "all" },
+        resolvedTenantIds: ["tenant-1", "tenant-2"],
+        status: "awaiting-confirmation",
+        runIds: ["run_1", "run_2"],
+        createdAt: now,
+        updatedAt: now,
+        preflight: job.preflight,
+      };
+      store.upsertMultiTenantAgentBatch(batch);
+      assert.equal(
+        store.getMultiTenantAgentBatch(batch.id)?.status,
+        "awaiting-confirmation",
+      );
+      assert.deepEqual(
+        store.listMultiTenantAgentBatches()[0]?.runIds,
+        ["run_1", "run_2"],
+      );
+
+      const workspace = store.createWorkspace({
+        id: "wksp_1",
+        tenantId: "tenant-1",
+        tenantName: "Contoso",
+        title: "Contoso compliance review",
+        instructions: "Use only locally pinned evidence.",
+        now,
+        conversationId: conversation.id,
+      });
+      assert.equal(workspace.links.length, 1);
+      assert.equal(workspace.tenantId, "tenant-1");
+
+      const note = store.addWorkspaceNote({
+        id: "note_1",
+        workspaceId: workspace.id,
+        content: "Check the owner before any remediation.",
+        now,
+      });
+      assert.equal(note.tenantId, "tenant-1");
+      const evidence = store.pinWorkspaceEvidence({
+        id: "ev_1",
+        workspaceId: workspace.id,
+        tenantId: "tenant-1",
+        title: "WIN-01 compliance row",
+        sourceType: "graph-cache-row",
+        sourceRef: { resource: "managedDevices", id: "device-1" },
+        content: { deviceName: "WIN-01", complianceState: "noncompliant" },
+        freshness: {
+          resource: "managedDevices",
+          refreshedAt: now,
+          rowCount: 1,
+          cacheStatus: "cache",
+        },
+        now,
+      });
+      assert.equal(evidence.tenantId, "tenant-1");
+      assert.throws(
+        () =>
+          store.pinWorkspaceEvidence({
+            id: "ev_bad",
+            workspaceId: workspace.id,
+            tenantId: "tenant-2",
+            title: "Wrong tenant",
+            sourceType: "manual",
+            content: {},
+            now,
+          }),
+        /tenant does not match/,
+      );
+
+      const split = store.importMultiTenantResultToWorkspaces({
+        job,
+        tenantNames,
+        mappings: [
+          { tenantId: "tenant-1", workspaceId: workspace.id },
+          { tenantId: "tenant-2", title: "Fabrikam compliance review" },
+        ],
+        createWorkspaceId: () => "wksp_2",
+        createEvidenceId: (() => {
+          let index = 1;
+          return () => `split_ev_${index++}`;
+        })(),
+        now,
+      });
+      assert.equal(split.workspaces.length, 2);
+      assert.equal(split.evidence.length, 2);
+      assert.equal(
+        store.getWorkspace("wksp_2", tenantNames)?.tenantId,
+        "tenant-2",
+      );
+
+      const dossier = store.exportWorkspaceDossier(workspace.id, tenantNames);
+      assert.match(dossier, /Contoso compliance review/);
+      assert.match(dossier, /WIN-01 compliance row/);
+      assert.match(dossier, /Check the owner/);
+
+      store.deleteWorkspace(workspace.id);
+      assert.equal(store.getWorkspace(workspace.id, tenantNames), undefined);
+      assert.equal(store.getConversation(conversation.id)?.id, conversation.id);
+      assert.equal(store.getMultiTenantJob(job.id)?.id, job.id);
       store.close();
     } finally {
       await rm(dir, { recursive: true, force: true });
