@@ -1,7 +1,11 @@
 import {
   classifyOllamaEndpoint,
+  classifyLmStudioEndpoint,
   probeAppleFoundationLlm,
+  probeClaudeCodeLlm,
   probeCodexLlm,
+  probeLmStudioLlm,
+  resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
 } from "@openadminos/runtime";
 import {
@@ -134,6 +138,47 @@ export async function checkAppleFoundation(provider: ProviderSummary): Promise<P
 
 
 
+export async function checkLmStudio(provider: ProviderSummary): Promise<ProviderSummary> {
+  const endpoint = resolveLmStudioEndpoint().replace(/\/$/, "");
+  const endpointTrust = classifyLmStudioEndpoint(endpoint);
+  const trustedProvider = endpointTrust.isLocal
+    ? provider
+    : {
+        ...provider,
+        description:
+          "Use an LM Studio-compatible endpoint outside this device. Tenant prompts leave this device when active.",
+        isLocal: false,
+      };
+  const probe = await probeLmStudioLlm({ endpoint });
+
+  if (!probe.ready) {
+    return {
+      ...trustedProvider,
+      status: probe.status === "error" ? "error" : "not-installed",
+      detail: lmStudioEndpointDetail(
+        endpointTrust,
+        probe.detail ??
+          "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+      ),
+      models: probe.models,
+      defaultModel: probe.defaultModel,
+    };
+  }
+
+  return {
+    ...trustedProvider,
+    status: "connected",
+    detail: lmStudioEndpointDetail(
+      endpointTrust,
+      probe.detail ?? `LM Studio server is running on ${endpoint}.`,
+    ),
+    models: probe.models,
+    defaultModel: probe.defaultModel,
+  };
+}
+
+
+
 export function appleFoundationProbeDetail(
   probe: Awaited<ReturnType<typeof probeAppleFoundationLlm>>,
 ): string {
@@ -157,6 +202,50 @@ export function ollamaEndpointDetail(
 ): string {
   if (endpointTrust.isLocal) return detail;
   return `${detail}. Endpoint is not loopback; prompts leave this device if this provider is active.`;
+}
+
+
+
+export function lmStudioEndpointDetail(
+  endpointTrust: { isLocal: boolean },
+  detail: string,
+): string {
+  if (endpointTrust.isLocal) return detail;
+  return `${detail}. Endpoint is not loopback; prompts leave this device if this provider is active.`;
+}
+
+
+
+export async function checkClaudeCode(provider: ProviderSummary): Promise<ProviderSummary> {
+  const probe = await probeClaudeCodeLlm();
+  if (!probe.installed) {
+    return {
+      ...provider,
+      status: "not-installed",
+      detail: probe.detail ?? "Claude Code CLI (`claude`) is not installed or not on PATH.",
+      models: [],
+    };
+  }
+
+  if (!probe.ready) {
+    return {
+      ...provider,
+      status: "error",
+      detail:
+        probe.detail ??
+        "Claude Code is installed but not authenticated. Run `claude auth login` and try again.",
+      models: probe.models,
+      defaultModel: probe.defaultModel,
+    };
+  }
+
+  return {
+    ...provider,
+    status: "connected",
+    detail: probe.detail ?? "Authenticated through the local Claude Code CLI.",
+    models: probe.models,
+    defaultModel: probe.defaultModel,
+  };
 }
 
 

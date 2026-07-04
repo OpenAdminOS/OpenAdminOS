@@ -67,6 +67,7 @@ openadminos/
 We previously planned for Tauri (smaller binaries, native webview). After analyzing the real constraints, we flipped to Electron. Reasoning:
 
 - **Developer velocity is the primary constraint.** Pure TS/Node end-to-end. No Rust toolchain, no two-language IPC bridge. MSAL Node, Electron's built-in `node:sqlite`, OS keychain storage, and `electron-updater` all work in the main process. `better-sqlite3` was avoided for the v0.2.2 chat/cache layer because it did not rebuild cleanly against Electron 42's Node/V8 ABI in local verification.
+- **MSAL is a desktop dependency as well as a runtime dependency.** Electron main imports `@azure/msal-node` types directly for tenant state, so `apps/desktop` declares the package explicitly. This keeps npm and pnpm workspaces from resolving separate MSAL type identities between Electron main and `@openadminos/runtime`.
 - **Open-source contributor pool.** Community contributions (agents and UI) come from JS/TS devs. Tauri's Rust shell raises the bar for any contributor who wants to fix more than an agent.
 - **UI fidelity.** Chromium everywhere = identical rendering on Win/Mac/Linux. The design language (dense, dark, custom scrollbars, GPU-accelerated transitions) is more reliable on Chromium than on platform-native webviews.
 - **Proven path for this category.** Claude Desktop, VS Code, Linear, Slack, Figma, 1Password — all Electron. The "Electron is bloated" critique mattered more on 8GB-RAM machines than on modern admin workstations.
@@ -219,12 +220,29 @@ the test runs a tiny completion and reports the model and response time. This is
 intentionally visible because hosted/local provider trust is a core product
 decision, not hidden plumbing.
 
+Anthropic support is delivered through the user's locally installed Claude Code
+CLI (`claude`) rather than a stored Anthropic API key. OpenAdminOS probes the CLI
+version and Claude Code auth status, requires Claude Code 2.1.200 or newer, then
+invokes non-interactive print mode with session persistence off, Claude Code
+customizations disabled, MCP config locked down, and all Claude Code tools
+disabled. System prompts are passed with Claude Code's system-prompt flag rather
+than stored in OpenAdminOS. This preserves the "no vendor API keys in
+OpenAdminOS" boundary, but tenant prompts still leave the device because the
+selected Claude model is hosted by Anthropic.
+
 Local-provider trust is endpoint-sensitive. Ollama is local only when the
 configured endpoint is loopback (`localhost`, `127.0.0.0/8`, IPv6 loopback, or
 IPv4-mapped loopback) or a Unix socket. If `OPENAGENTS_OLLAMA_URL` points at a
 LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
 provider summary flips to external/hosted-style trust messaging and Intune Chat
 requires hosted-provider confirmation before tenant context is sent.
+
+LM Studio support uses its local OpenAI-compatible server at
+`http://localhost:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
+development override. Like Ollama, LM Studio is local only when the configured
+HTTP endpoint resolves to loopback. A LAN, internet, wildcard, or invalid
+endpoint flips the provider to external trust messaging before tenant prompts
+are sent.
 
 Apple Foundation support uses Apple's on-device Foundation Models framework
 through a small signed macOS helper binary bundled with the Electron app. The

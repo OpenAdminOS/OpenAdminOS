@@ -6,8 +6,10 @@ import {
   acquireTokenSilent,
   compareSemver,
   createGraphAdapter,
+  createClaudeCodeLlm,
   createCodexLlm,
   createAppleFoundationLlm,
+  createLmStudioLlm,
   createMsalClient,
   createOllamaLlm,
   createRegistryInstallCountPayload,
@@ -216,7 +218,9 @@ import {
 } from "./agent-draft-helpers.js";
 import {
   checkAppleFoundation,
+  checkClaudeCode,
   checkCodex,
+  checkLmStudio,
   checkOllama,
   isProviderId,
 } from "./provider-detail.js";
@@ -934,6 +938,8 @@ export class AppStateStore {
       providerCatalog.map(async (provider) => {
         if (provider.id === "ollama") return checkOllama(provider);
         if (provider.id === "apple-foundation") return checkAppleFoundation(provider);
+        if (provider.id === "lm-studio") return checkLmStudio(provider);
+        if (provider.id === "anthropic") return checkClaudeCode(provider);
         if (provider.id === "openai") return checkCodex(provider);
         return provider;
       }),
@@ -5277,6 +5283,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     if (providerId === "apple-foundation") {
       return createAppleFoundationLlm({ defaultModel });
+    }
+    if (providerId === "lm-studio") {
+      const options: { defaultModel?: string } = {};
+      if (defaultModel) {
+        options.defaultModel = defaultModel;
+      }
+      return createLmStudioLlm(options);
+    }
+    if (providerId === "anthropic") {
+      return createClaudeCodeLlm({ defaultModel });
     }
     if (providerId === "openai") {
       return createCodexLlm({ defaultModel });

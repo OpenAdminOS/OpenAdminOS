@@ -3,6 +3,8 @@ import type { ProviderId } from "./openAdminOS.js";
 const IMPLEMENTED_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set([
   "ollama",
   "apple-foundation",
+  "lm-studio",
+  "anthropic",
   "openai",
 ]);
 

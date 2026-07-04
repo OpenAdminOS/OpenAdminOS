@@ -2556,9 +2556,9 @@ export interface WriteAgentModule extends AgentDefinition {
 
 export type AgentModule = ReadAgentModule | WriteAgentModule;
 
-// TODO(ugur): LM Studio, Anthropic, and Azure OpenAI are kept in the catalog
-// as forward-compat placeholders until adapters land. OpenAI uses the
-// locally-installed Codex CLI, so OpenAdminOS never stores an OpenAI API key.
+// TODO(ugur): Azure OpenAI is kept in the catalog as a forward-compat
+// placeholder until its adapter lands. OpenAI and Anthropic use locally
+// installed vendor CLIs, so OpenAdminOS never stores vendor API keys.
 export const providerCatalog: readonly ProviderSummary[] = [
   {
     id: "ollama",
@@ -2584,20 +2584,20 @@ export const providerCatalog: readonly ProviderSummary[] = [
     id: "lm-studio",
     name: "LM Studio",
     description:
-      "Use LM Studio's local OpenAI-compatible server for private model runs.",
+      "Use LM Studio's local OpenAI-compatible server. Prompts stay on this device when the endpoint is loopback.",
     isLocal: true,
-    status: "not-installed",
-    detail: "Connection check not implemented yet",
+    status: "available",
+    detail: "Waiting for LM Studio server check",
     models: [],
   },
   {
     id: "anthropic",
     name: "Anthropic",
     description:
-      "Hosted Claude models. Tenant prompts leave this device when active.",
+      "Use Claude models through the local Claude Code CLI. Tenant prompts are sent to Anthropic's API when active.",
     isLocal: false,
-    status: "not-installed",
-    detail: "Hosted provider setup is not implemented yet",
+    status: "available",
+    detail: "Waiting for Claude Code CLI connection check",
     models: [],
   },
   {
