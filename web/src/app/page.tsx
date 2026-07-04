@@ -267,13 +267,14 @@ export default async function HomePage() {
           </Link>
 
           <h1 className="max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
-            OpenAdminOS for Microsoft 365 admins.
+            AI agents for your Microsoft 365 tenant.{" "}
+            <span className="block">Run locally, approved by you.</span>
           </h1>
 
           <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-white/60 sm:text-lg">
-            Run AI agents from your own machine, keep sensitive tenant work
-            local with local models, and approve every Microsoft Graph change
-            before it happens.
+            OpenAdminOS is an open-source desktop app for Intune and Entra
+            admins. Agents investigate your tenant with local models, and every
+            Graph change waits for your confirmation.
           </p>
 
           <div className="mt-8 grid w-full max-w-3xl gap-3 md:grid-cols-3">

@@ -23,9 +23,9 @@ export const LEGAL_ENTITY_ADDRESS_LINES = [
 ] as const;
 
 export const HOME_TITLE =
-  "OpenAdminOS - Local-first AI agents for Microsoft 365 admins";
+  "OpenAdminOS - Local AI agents for Microsoft 365";
 export const HOME_DESCRIPTION =
-  "Local-first AI agents for Microsoft 365 admins. Run tenant investigations on your machine and approve every Graph change before it happens.";
+  "Open-source desktop app for Intune and Entra admins. Run Microsoft 365 agents with local models, and approve every Graph change.";
 
 export const SOCIAL_IMAGE_PATH = "/opengraph-image.png";
 export const TWITTER_IMAGE_PATH = "/twitter-image.png";
