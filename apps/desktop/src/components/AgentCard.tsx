@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import type { Agent } from "../types";
+import type { AgentDisplay } from "../shared/agent-display";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
 import { Button } from "./Button";
@@ -21,7 +21,7 @@ function timeSince(iso?: string): string {
   return `Ran ${d}d ago`;
 }
 
-const categoryAccent: Record<Agent["category"], string> = {
+const categoryAccent: Record<AgentDisplay["category"], string> = {
   devices: "from-[#e8a87c]/16 to-[#e8a87c]/4",
   apps: "from-[#a3bfd9]/16 to-[#a3bfd9]/4",
   policies: "from-[#9cc88f]/16 to-[#9cc88f]/4",
@@ -33,8 +33,8 @@ export function AgentCard({
   agent,
   onRun,
 }: {
-  agent: Agent;
-  onRun?: (agent: Agent) => void;
+  agent: AgentDisplay;
+  onRun?: (agent: AgentDisplay) => void;
 }) {
   const navigate = useNavigate();
 

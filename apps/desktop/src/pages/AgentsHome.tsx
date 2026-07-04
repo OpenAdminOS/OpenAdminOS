@@ -16,7 +16,7 @@ import {
   IconShield,
   IconTrend,
 } from "../components/icons";
-import type { Agent } from "../types";
+import type { AgentDisplay } from "../shared/agent-display";
 import {
   deriveTrustState,
   resolveProviderDefaultModel,
@@ -370,7 +370,7 @@ function toDisplayAgent(
   agent: AgentSummary,
   runs: { agentSlug: string; queuedAt: string }[],
   defaultModel?: string,
-): Agent {
+): AgentDisplay {
   const lastRunAt = runs.find((run) => run.agentSlug === agent.slug)?.queuedAt;
 
   return {
