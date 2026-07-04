@@ -41,7 +41,7 @@
 
 ---
 
-## What's in the box (v0.1)
+## What's in the box (v0.2.5)
 
 ### Agent Templates — agents as YAML pipelines
 
@@ -73,7 +73,7 @@ definition:
     summary: '{{ summarize.output.text | default("Summary unavailable.") }}'
 ```
 
-**Four step formats**: `graph` (read Microsoft Graph), `transform` (pure data shaping — `group-by-age`, `filter-by-age`, `count-by-field`), `llm` (required — every agent invokes the model at least once to produce the headline summary), and `write` (emits one action per source item and pauses for typed phrase confirmation).
+**Step formats**: `graph` (read Microsoft Graph), `transform` (pure data shaping), `llm` (required — every agent invokes the model at least once), `map` (per-item sub-pipelines), `write` (emits one action per source item and pauses for typed phrase confirmation), and `connector` (declared outbound egress).
 
 ### Static QA gate
 
@@ -85,7 +85,7 @@ A malformed manifest fails CI with a structured per-field diff.
 
 ### NL2Agent — describe an agent in English
 
-The "New agent" button on the hub opens a two-pane flow. Type a description, the active LLM provider drafts a YAML manifest grounded in the schema and a worked example, the draft renders through the same Manifest Preview component as bundled agents, save & install routes you straight to the new agent's detail page. User-authored agents persist under `userData/agents/<slug>/` and appear in the merged registry without a restart.
+The "Build your own Agent" button on the hub opens a guided flow. Type a description, the active LLM provider drafts a YAML manifest grounded in the schema and a worked example, the draft renders through the same Manifest Preview component as public agents, and Save & install routes you straight to the new agent's detail page. User-authored agents persist under `userData/agents/<slug>/` and appear in the merged registry without a restart.
 
 ### Trust model (non-negotiable)
 
@@ -96,18 +96,21 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 
 ### What's shipped vs what's coming
 
-| | v0.1.9 | Later |
+| Area | Shipped in v0.2.5 | Coming next |
 |---|---|---|
-| Tenant connect | yes (MSAL interactive; required before app shell) | — |
-| Real Graph writes | live POSTs after typed-phrase diff confirm | additional write surface (assignment changes, policy edits) |
-| Local LLM (Ollama) | yes, with `think: false` for reasoning models | — |
-| LM Studio / Anthropic / OpenAI / Azure OpenAI | toggles disabled, "Coming in 0.2" | yes |
-| Per-run schedules | yes (in-process tick while app is open) | OS-level via launchd / Task Scheduler |
-| Auto-update via electron-updater | yes (banner + native dialog) | — |
-| Signed installers + notarization | workflows ready, certs not yet purchased | yes |
-| GitHub-hosted agent registry | fetches `agents/index.json`, caches locally, falls back to bundled agents | forkable enterprise registries |
-| SQLite run history | JSON-file backed | yes |
-| Secrets in OS keychain (keytar) | Electron `safeStorage` only | yes |
+| Tenant connect | MSAL interactive sign-in is required before the app shell. Multi-tenant switching, tenant groups, and explicit multi-tenant chat scope review are implemented. | Further tenant readiness polish as live pilots find gaps. |
+| Intune Chat | Single-tenant chat, explicit multi-tenant read aggregation, saved queries, readiness preflight, local exports, and hosted-provider confirmations are implemented. | Broader answer panes and more resource-specific investigation views. |
+| Workspaces | Single-tenant investigation workspaces with pinned evidence, notes, linked chats, linked runs, local instructions, and local dossier export are implemented. | More workspace import/export polish. |
+| Agent registry | Agent Hub fetches `agents/index.json`, caches locally, version-pins installs, reviews scope-diff updates, and supports custom registry sources. | More maintainer workflow automation. |
+| Build your own Agent | Guided manifest drafting, validation, repair, editable YAML review, local preflight, install, edit, export, and public "Share with community" issue intake are implemented. | More examples and better Graph QA messages. |
+| Reference agents | The repo includes investigator, advisor, dashboard, cleanup, and one experimental script agent. | More agents after maintainer review. |
+| Connectors | Outbound-only Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal delivery are implemented. They send terminal run reports and do not read messages or inboxes. | ServiceNow and other enterprise connectors remain future work. |
+| Schedules | Per-agent schedules use the OS scheduler on macOS and Windows after tenant sign-in. Scheduled runs still use the signed app and local state. | More schedule health and audit polish. |
+| macOS menu bar | The signed app includes a menu-bar companion for active tenant/provider state, schedules, recent activity, and a compact read-only Intune Chat prompt. | Windows/Linux companion surfaces are not planned for 0.3. |
+| LLM providers | Ollama, Apple Foundation Models on compatible macOS, and OpenAI through the local Codex CLI are implemented. | Anthropic via Claude Code CLI, LM Studio, and Azure OpenAI are planned for 0.3. |
+| MXC sandbox | The Intune Device Posture Auditor uses `execution.kind: script` behind the experimental MXC setting. Normal community agents remain YAML templates. | Hardened sandbox policy before arbitrary community script agents. |
+| Installers | macOS DMG/PKG builds are signed and notarized. Linux x64 AppImage, `.deb`, `.rpm`, and the apt repository are published. Windows builds exist unsigned and are not published while signing is pending. | Signed Windows publishing after the signing path is ready. |
+| Local storage | SQLite stores chat, cache, schedules, Workspaces, runs, and local learning state. Secrets stay local through Electron secure storage and platform secret-store requirements. | Keychain hardening continues where platform support needs it. |
 
 ## Reference agents
 
@@ -120,7 +123,7 @@ The "New agent" button on the hub opens a two-pane flow. Type a description, the
 | `sign-in-failure-explainer` | policies | read | Correlates sign-in logs, Conditional Access, device state, and directory changes to explain failures. |
 | `stale-guest-cleanup` | policies | write | Flags stale guests with LLM rationale and disables them only after typed confirmation. |
 
-The repo currently indexes 13 agent and dashboard manifests under `agents/<slug>/manifest.yaml`. Read them — they are the documentation of what the runtime can do.
+The repo currently indexes 14 agent and dashboard manifests under `agents/<slug>/manifest.yaml`. Read them — they are the documentation of what the runtime can do.
 
 ## Quickstart
 
@@ -150,7 +153,7 @@ On first launch, the app routes to onboarding until a Microsoft 365 tenant is co
 ```
 apps/
   desktop/        Electron host (main + preload + Vite/React renderer)
-  marketing/      Next.js marketing site (openadminos.com)
+web/              Next.js marketing site (openadminos.com)
 agents/
   <slug>/         manifest.yaml + manifest.json (+ optional TS)
 packages/

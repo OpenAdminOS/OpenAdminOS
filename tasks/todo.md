@@ -235,7 +235,7 @@
 
 ## Priority 4 — Quality of life candidates
 
-- [ ] **Agent builder docs** — in-app short guide plus README docs for authoring, validating, and submitting agents.
+- [x] **Agent builder docs** — added `docs/agent-sdk.md` for authoring, validating, and submitting agents.
 - [ ] **Examples gallery** — prompt examples that generate useful read, write, and connector-backed agents.
 - [ ] **Better error messages from Graph QA** — turn low-level endpoint/scope failures into copy a tenant admin can act on.
 - [ ] **Screenshots for Agent Hub entries** — generated or user-supplied images in the submission bundle, rendered in Hub detail.

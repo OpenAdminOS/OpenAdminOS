@@ -88,7 +88,7 @@ These are non-negotiable. If you find yourself about to violate one, stop and as
 - **Language:** TypeScript everywhere
 - **Monorepo:** pnpm workspaces + Turborepo
 - **Desktop:** Electron (main + preload + renderer)
-- **Renderer UI:** Vite + React + React Router + Tailwind. Note: SPEC.md previously said Next.js 14 App Router — for the Electron renderer that's overkill (no SSR, no app/route boilerplate needed). Vite is the right call. Next.js stays for `apps/marketing/` only.
+- **Renderer UI:** Vite + React + React Router + Tailwind. Note: SPEC.md previously said Next.js 14 App Router — for the Electron renderer that's overkill (no SSR, no app/route boilerplate needed). Vite is the right call. Next.js stays for `web/` only.
 - **Marketing site:** Next.js, deployed to Vercel at openadminos.com
 - **MSAL:** `@azure/msal-node` for tenant auth, Graph API for everything else
 - **LLM abstraction:** A pluggable provider interface; concrete implementations for Ollama, LM Studio, Anthropic-via-Codex, OpenAI-via-Codex, Azure OpenAI. Where possible, piggyback on locally-installed vendor CLIs (Codex, Codex) to avoid storing API keys and to inherit the user's existing vendor auth.
@@ -115,7 +115,7 @@ The brand is restrained — no AI-hype language, no "intelligent" or "smart" adj
 OpenAdminOS is now in **public preview**. The current active roadmap is the top section of `tasks/todo.md`; `docs/SPEC.md` §5a records the completed v0.1 public-preview foundation milestone. Read both before starting roadmap or implementation work, and keep the longer pre-1.0 path in SPEC.md §5 aligned with the active plan.
 
 Completed v0.1 foundation order of attack (full detail in `tasks/todo.md`):
-1. Monorepo scaffold: pnpm + Turborepo, `apps/desktop` (Electron + Vite), `apps/marketing` (Next.js), shared `packages/*` shells. End state: `pnpm dev` opens an Electron window with the dark theme.
+1. Monorepo scaffold: pnpm + Turborepo, `apps/desktop` (Electron + Vite), `web/` (Next.js), shared `packages/*` shells. End state: `pnpm dev` opens an Electron window with the dark theme.
 2. Design system: port `_design.css` tokens to Tailwind, build core primitives and layout shell.
 3. Screen implementation: all 8 designed mockups + 2 new (`09-registry`, `10-empty-states`) as React routes with mocked data.
 4. LLM abstraction + Ollama provider: real interface, real streaming, smoke test.

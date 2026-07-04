@@ -35,8 +35,8 @@ Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose
 ```
 openadminos/
 ├── apps/
-│   ├── desktop/              # Electron main + preload + renderer (Vite + React)
-│   └── marketing/            # Public marketing site (openadminos.com) — Next.js
+│   └── desktop/              # Electron main + preload + renderer (Vite + React)
+├── web/                      # Public marketing site (openadminos.com) — Next.js
 ├── packages/
 │   ├── runtime/              # Agent execution engine
 │   ├── llm/                  # Provider abstraction + concrete providers

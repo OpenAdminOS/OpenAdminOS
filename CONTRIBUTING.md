@@ -10,7 +10,7 @@ Thanks for your interest. This project is community-built and contributions are 
 
 ## What kinds of contributions we want
 
-- **Agent contributions** — new agents in the registry are the most direct way to help. See `docs/agent-sdk.md` (coming soon).
+- **Agent contributions** — new agents in the registry are the most direct way to help. See [`docs/agent-sdk.md`](docs/agent-sdk.md).
 - **Bug reports and reproductions** — please include OS, OpenAdminOS version, LLM provider, and a redacted log.
 - **UX improvements** — referenced against the mockups in `docs/mockups/`.
 - **Documentation** — especially scenarios we don't cover yet.

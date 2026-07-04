@@ -6,9 +6,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added `docs/agent-sdk.md`, a practical author guide for manifest fields, step kinds, write confirmation, local QA, and community submission.
+
 ### Changed
 
+- Updated README and operating docs to reflect the v0.2.5 shipped surface and the `web/` marketing site path.
+
 ### Removed
+
+- Removed the stale desktop renderer `types.ts` in favor of a narrow display-agent type.
 
 ### Fixed
 
