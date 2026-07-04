@@ -42,9 +42,9 @@ try {
   }
   console.log("[smoke:intune-chat] passed");
 } finally {
-  if (electron && electron.exitCode === null) electron.kill("SIGTERM");
-  if (renderer && renderer.exitCode === null) renderer.kill("SIGTERM");
-  await rm(userDataDir, { recursive: true, force: true });
+  await terminateChild(electron);
+  await terminateChild(renderer);
+  await removeTempDir(userDataDir);
 }
 
 function pipeProcess(child, label) {
@@ -85,6 +85,33 @@ function waitForExit(child, timeoutMs) {
       rejectExit(error);
     });
   });
+}
+
+function terminateChild(child) {
+  if (!child || child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolveTerminate) => {
+    const timeout = setTimeout(() => {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      resolveTerminate();
+    }, 2_000);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolveTerminate();
+    });
+    child.kill("SIGTERM");
+  });
+}
+
+async function removeTempDir(path) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOTEMPTY" || attempt === 4) throw error;
+      await delay(150 * (attempt + 1));
+    }
+  }
 }
 
 function delay(ms) {

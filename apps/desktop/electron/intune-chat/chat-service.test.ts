@@ -191,6 +191,274 @@ describe("Intune Chat host service", () => {
     }
   });
 
+  it("runs a read-only multi-tenant compliance query with contained tenant failures", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+            {
+              id: "tenant-2",
+              displayName: "Fabrikam",
+              username: "admin@fabrikam.example",
+              homeAccountId: "home-account-2",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const requestedTenantIds: string[] = [];
+    const llm: RunLlmApi = {
+      available: true,
+      defaultModel: "mock-chat",
+      async complete() {
+        return {
+          text: "One tenant completed and one tenant failed. Use the comparison table for source counts.",
+          model: "mock-chat",
+        };
+      },
+      async *stream() {
+        yield {
+          delta: "",
+          accumulated: "",
+          done: true,
+          model: "mock-chat",
+        };
+      },
+    };
+
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: ({ tenantId }) => {
+        requestedTenantIds.push(tenantId);
+        const graph: RunGraphApi = {
+          async listManagedDevices() {
+            return [];
+          },
+          async retireManagedDevice() {
+            throw new Error("retireManagedDevice should not run from multi-tenant chat.");
+          },
+          async request(input) {
+            if (input.path !== "/deviceManagement/managedDevices") {
+              return { value: [] };
+            }
+            if (tenantId === "tenant-2") {
+              throw new Error("Graph request failed: 429 too many requests");
+            }
+            return {
+              value: [
+                {
+                  id: "device-1",
+                  deviceName: "WIN-COMPLIANT",
+                  operatingSystem: "Windows",
+                  complianceState: "compliant",
+                  osVersion: "11.0.1",
+                  userPrincipalName: "owner@contoso.example",
+                  lastSyncDateTime: now,
+                },
+                {
+                  id: "device-2",
+                  deviceName: "WIN-NONCOMPLIANT",
+                  operatingSystem: "Windows",
+                  complianceState: "noncompliant",
+                  osVersion: "10.0.1",
+                  lastSyncDateTime: now,
+                },
+                {
+                  id: "device-3",
+                  deviceName: "MAC-01",
+                  operatingSystem: "macOS",
+                  complianceState: "compliant",
+                  lastSyncDateTime: now,
+                },
+              ],
+            };
+          },
+        };
+        return graph;
+      },
+      llmFactory: () => llm,
+    });
+
+    try {
+      const events: string[] = [];
+      const result = await store.streamMultiTenantIntuneChat(
+        {
+          prompt:
+            "List all compliant and all non-compliant Windows devices from every connected tenant.",
+          tenantScope: { kind: "all" },
+        },
+        (event) => {
+          events.push(event.type);
+          if (event.type === "progress") {
+            events.push(event.job.status);
+          }
+        },
+      );
+
+      assert.deepEqual(new Set(requestedTenantIds), new Set(["tenant-1", "tenant-2"]));
+      assert.ok(events.includes("started"));
+      assert.ok(events.includes("progress"));
+      assert.ok(events.includes("completed"));
+      assert.equal(result.job.status, "partial");
+      assert.equal(result.job.summary.tenantsScanned, 2);
+      assert.equal(result.job.summary.failedTenants, 1);
+      assert.equal(result.job.summary.windowsDevices, 2);
+      assert.equal(result.job.summary.compliant, 1);
+      assert.equal(result.job.summary.nonCompliant, 1);
+      assert.equal(result.job.deviceRows.length, 2);
+      assert.equal(
+        result.job.progress.find((entry) => entry.tenantId === "tenant-2")?.status,
+        "failed",
+      );
+      assert.equal(result.conversation.scopeKind, "multi-tenant");
+      assert.equal(result.conversation.multiTenantJobId, result.job.id);
+      assert.match(result.assistantMessage.content, /one tenant failed/i);
+
+      const jobs = await store.listMultiTenantChatJobs();
+      assert.equal(jobs.length, 1);
+      assert.equal(jobs[0]?.id, result.job.id);
+      const messages = await store.getIntuneChatMessages(result.conversation.id);
+      assert.equal(messages.length, 2);
+      assert.equal(messages[0]?.role, "user");
+      assert.equal(messages[1]?.role, "assistant");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("attaches explicit workspace evidence, notes, and instructions to a chat prompt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const graph: RunGraphApi = {
+      async listManagedDevices() {
+        return [];
+      },
+      async retireManagedDevice() {
+        throw new Error("retireManagedDevice should not run from chat.");
+      },
+      async request() {
+        return { value: [] };
+      },
+    };
+    let answerPackPrompt = "";
+    const llm: RunLlmApi = {
+      available: true,
+      defaultModel: "mock-chat",
+      async complete(options) {
+        answerPackPrompt = options.prompt;
+        return {
+          text: "The workspace context points to WIN-42.",
+          model: "mock-chat",
+        };
+      },
+      async *stream() {
+        yield {
+          delta: "",
+          accumulated: "",
+          done: true,
+          model: "mock-chat",
+        };
+      },
+    };
+
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => graph,
+      llmFactory: () => llm,
+    });
+
+    try {
+      const workspace = await store.createWorkspace({
+        title: "Contoso pilot review",
+        instructions: "Use pinned workspace material before broad cache results.",
+      });
+      const note = await store.addWorkspaceNote(
+        workspace.id,
+        "Scope the answer to pilot devices only.",
+      );
+      const evidence = await store.pinWorkspaceEvidence({
+        workspaceId: workspace.id,
+        tenantId: "tenant-1",
+        title: "Pilot device",
+        sourceType: "manual",
+        content: { deviceName: "WIN-42", complianceState: "noncompliant" },
+      });
+
+      const result = await store.sendIntuneChatMessage({
+        content: "Summarize the attached workspace context.",
+        refreshIfStale: false,
+        workspaceContext: {
+          workspaceId: workspace.id,
+          evidenceIds: [evidence.id],
+          noteIds: [note.id],
+          includeInstructions: true,
+        },
+      });
+
+      assert.match(answerPackPrompt, /Workspace context attached by the admin/);
+      assert.match(answerPackPrompt, /WIN-42/);
+      assert.match(answerPackPrompt, /pilot devices only/);
+      assert.match(answerPackPrompt, /Use pinned workspace material/);
+      assert.equal(result.userMessage.content, "Summarize the attached workspace context.");
+      assert.doesNotMatch(result.userMessage.content, /Workspace context attached/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("persists an assistant failure when the LLM provider errors", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";

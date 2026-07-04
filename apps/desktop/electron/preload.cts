@@ -12,10 +12,12 @@ import type {
   StartRunOptions,
   UpdateState,
   IntuneChatStreamEvent,
+  MultiTenantChatStreamEvent,
 } from "@openadminos/agent-sdk";
 
 const platform: HostPlatform = detectPlatform();
 const activeIntuneChatStreamIds = new Set<string>();
+const activeMultiTenantChatStreamIds = new Set<string>();
 
 function detectPlatform(): HostPlatform {
   const userAgent = navigator.userAgent.toLowerCase();
@@ -132,6 +134,77 @@ const api: OpenAdminOSApi = {
       ),
     );
   },
+  listTenantGroups: () => ipcRenderer.invoke("openadminos:list-tenant-groups"),
+  saveTenantGroup: (input) =>
+    ipcRenderer.invoke("openadminos:save-tenant-group", input),
+  deleteTenantGroup: (id: string) =>
+    ipcRenderer.invoke("openadminos:delete-tenant-group", id),
+  listSavedMultiTenantQueries: () =>
+    ipcRenderer.invoke("openadminos:list-saved-multi-tenant-queries"),
+  preflightMultiTenantIntuneChat: (input) =>
+    ipcRenderer.invoke("openadminos:preflight-multi-tenant-intune-chat", input),
+  runMultiTenantIntuneChat: (input) =>
+    ipcRenderer.invoke("openadminos:run-multi-tenant-intune-chat", input),
+  streamMultiTenantIntuneChat: (input, onEvent) => {
+    const streamId = crypto.randomUUID();
+    let cleanedUp = false;
+    let terminalEventSeen = false;
+    activeMultiTenantChatStreamIds.add(streamId);
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      activeMultiTenantChatStreamIds.delete(streamId);
+      ipcRenderer.removeListener(
+        "openadminos:multi-tenant-chat-stream-event",
+        handler,
+      );
+    };
+    const handler = (
+      _event: unknown,
+      payload: { streamId: string; event: MultiTenantChatStreamEvent },
+    ) => {
+      if (payload.streamId === streamId) {
+        onEvent(payload.event);
+        if (
+          payload.event.type === "completed" ||
+          payload.event.type === "failed" ||
+          payload.event.type === "cancelled"
+        ) {
+          terminalEventSeen = true;
+          window.setTimeout(cleanup, 0);
+        }
+      }
+    };
+    ipcRenderer.on("openadminos:multi-tenant-chat-stream-event", handler);
+    return ipcRenderer
+      .invoke("openadminos:stream-multi-tenant-intune-chat", streamId, input)
+      .finally(() => {
+        if (!terminalEventSeen) {
+          window.setTimeout(cleanup, 1000);
+        }
+      });
+  },
+  cancelMultiTenantIntuneChatStream: async () => {
+    const streamIds = [...activeMultiTenantChatStreamIds];
+    await Promise.all(
+      streamIds.map((streamId) =>
+        ipcRenderer.invoke(
+          "openadminos:cancel-multi-tenant-intune-chat-stream",
+          streamId,
+        ),
+      ),
+    );
+  },
+  listMultiTenantChatJobs: () =>
+    ipcRenderer.invoke("openadminos:list-multi-tenant-chat-jobs"),
+  getMultiTenantChatJob: (id: string) =>
+    ipcRenderer.invoke("openadminos:get-multi-tenant-chat-job", id),
+  queueMultiTenantAgentBatch: (input) =>
+    ipcRenderer.invoke("openadminos:queue-multi-tenant-agent-batch", input),
+  listMultiTenantAgentBatches: () =>
+    ipcRenderer.invoke("openadminos:list-multi-tenant-agent-batches"),
+  getMultiTenantAgentBatch: (id: string) =>
+    ipcRenderer.invoke("openadminos:get-multi-tenant-agent-batch", id),
   refreshGraphCache: (options) =>
     ipcRenderer.invoke("openadminos:refresh-graph-cache", options),
   getGraphCacheStatus: (tenantId?: string) =>
@@ -158,6 +231,35 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:reject-self-training-suggestion", id),
   resetSelfTrainingSuggestions: (input) =>
     ipcRenderer.invoke("openadminos:reset-self-training-suggestions", input),
+  listWorkspaces: (tenantId?: string) =>
+    ipcRenderer.invoke("openadminos:list-workspaces", tenantId),
+  getWorkspace: (id: string) => ipcRenderer.invoke("openadminos:get-workspace", id),
+  createWorkspace: (input) =>
+    ipcRenderer.invoke("openadminos:create-workspace", input),
+  updateWorkspace: (id, input) =>
+    ipcRenderer.invoke("openadminos:update-workspace", id, input),
+  archiveWorkspace: (id: string) =>
+    ipcRenderer.invoke("openadminos:archive-workspace", id),
+  deleteWorkspace: (id: string) =>
+    ipcRenderer.invoke("openadminos:delete-workspace", id),
+  addWorkspaceNote: (workspaceId: string, content: string) =>
+    ipcRenderer.invoke("openadminos:add-workspace-note", workspaceId, content),
+  updateWorkspaceNote: (noteId: string, content: string) =>
+    ipcRenderer.invoke("openadminos:update-workspace-note", noteId, content),
+  pinWorkspaceEvidence: (input) =>
+    ipcRenderer.invoke("openadminos:pin-workspace-evidence", input),
+  linkWorkspaceConversation: (workspaceId: string, conversationId: string) =>
+    ipcRenderer.invoke(
+      "openadminos:link-workspace-conversation",
+      workspaceId,
+      conversationId,
+    ),
+  linkWorkspaceRun: (workspaceId: string, runId: string) =>
+    ipcRenderer.invoke("openadminos:link-workspace-run", workspaceId, runId),
+  importMultiTenantResultToWorkspaces: (input) =>
+    ipcRenderer.invoke("openadminos:import-multi-tenant-result-to-workspaces", input),
+  exportWorkspaceDossier: (id: string) =>
+    ipcRenderer.invoke("openadminos:export-workspace-dossier", id),
   listConnectors: () => ipcRenderer.invoke("openadminos:list-connectors"),
   testConnector: (id: string) =>
     ipcRenderer.invoke("openadminos:test-connector", id),

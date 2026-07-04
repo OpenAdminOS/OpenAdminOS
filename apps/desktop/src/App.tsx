@@ -10,6 +10,7 @@ const AgentDetail = lazy(() => import("./pages/AgentDetail"));
 const AgentHub = lazy(() => import("./pages/AgentHub"));
 const Activity = lazy(() => import("./pages/Activity"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
+const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Connectors = lazy(() => import("./pages/Connectors"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/agents/:slug" element={<AgentDetail />} />
           <Route path="/hub" element={<AgentHub />} />
           <Route path="/chat" element={<IntuneChat />} />
+          <Route path="/workspaces" element={<Workspaces />} />
           <Route path="/connectors" element={<Connectors />} />
           <Route path="/activity" element={<Activity />} />
           <Route path="/runs/:id" element={<RunResult />} />

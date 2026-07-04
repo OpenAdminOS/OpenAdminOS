@@ -65,15 +65,32 @@ import type {
   GraphCacheRefreshResourceResult,
   GraphCacheRefreshScheduleSettings,
   GraphCacheResourceKind,
+  GraphCacheResourceStatus,
   GraphCacheStatus,
+  HostedProviderBatchConsent,
+  ImportMultiTenantResultToWorkspacesInput,
+  ImportMultiTenantResultToWorkspacesResult,
+  CreateWorkspaceInput,
   IntuneChatConversation,
   IntuneChatMessage,
   IntuneChatProgressStep,
   IntuneChatStreamStage,
   IntuneChatStreamEvent,
   LocalDataSummary,
+  MultiTenantAgentBatch,
+  MultiTenantChatJob,
+  MultiTenantChatRunResult,
+  MultiTenantChatStreamEvent,
+  MultiTenantDeviceRow,
+  MultiTenantTenantComparison,
+  PinWorkspaceEvidenceInput,
+  PreflightMultiTenantChatInput,
+  QueueMultiTenantAgentBatchInput,
+  QueueMultiTenantAgentBatchResult,
   RefreshGraphCacheOptions,
   ResetSelfTrainingInput,
+  RunMultiTenantChatInput,
+  SavedMultiTenantQuery,
   SetGraphCacheRefreshScheduleInput,
   SelfTrainingSettings,
   SelfTrainingSuggestion,
@@ -81,6 +98,18 @@ import type {
   SendIntuneChatMessageInput,
   SendIntuneChatMessageResult,
   SecretAccessor,
+  TenantGroup,
+  TenantReadinessStatus,
+  TenantScope,
+  TenantScopePreflight,
+  UpdateWorkspaceInput,
+  WorkspaceDetail,
+  WorkspaceEvidence,
+  WorkspaceLink,
+  WorkspaceNote,
+  WorkspacePromptContextInput,
+  WorkspacePromptContextSummary,
+  WorkspaceSummary,
 } from "@openadminos/agent-sdk";
 import {
   ConnectorNotConfiguredError,
@@ -121,6 +150,12 @@ import {
   validatePath,
   type EndpointSummary,
 } from "./graph-catalog.js";
+
+type WorkspacePromptContextPayload = {
+  summary: WorkspacePromptContextSummary;
+  promptBlock: string;
+};
+
 import {
   DEFAULT_REGISTRY_SOURCE,
   refreshRegistry,
@@ -1004,6 +1039,715 @@ export class AppStateStore {
     return this.requireIntelligenceStore().listMessages(conversationId);
   }
 
+  async listTenantGroups(): Promise<TenantGroup[]> {
+    return this.requireIntelligenceStore().listTenantGroups();
+  }
+
+  async saveTenantGroup(input: {
+    id?: string;
+    name: string;
+    tenantIds: string[];
+  }): Promise<TenantGroup> {
+    const persisted = await this.read();
+    const knownTenantIds = new Set(persisted.tenants.map((tenant) => tenant.id));
+    const tenantIds = [...new Set(input.tenantIds)].filter((tenantId) => {
+      if (!knownTenantIds.has(tenantId)) {
+        throw new Error(`Tenant group includes an unknown tenant: ${tenantId}`);
+      }
+      return true;
+    });
+    const name = normalizeTenantGroupName(input.name);
+    return this.requireIntelligenceStore().saveTenantGroup({
+      id: input.id?.trim() || `tgrp_${randomUUID()}`,
+      name,
+      tenantIds,
+      now: new Date().toISOString(),
+    });
+  }
+
+  async deleteTenantGroup(id: string): Promise<void> {
+    if (!id.trim()) throw new Error("Tenant group id is required.");
+    this.requireIntelligenceStore().deleteTenantGroup(id);
+  }
+
+  async listSavedMultiTenantQueries(): Promise<SavedMultiTenantQuery[]> {
+    return this.requireIntelligenceStore().listSavedMultiTenantQueries();
+  }
+
+  async preflightMultiTenantIntuneChat(
+    input: PreflightMultiTenantChatInput,
+  ): Promise<TenantScopePreflight> {
+    return this.buildMultiTenantPreflight(input);
+  }
+
+  async runMultiTenantIntuneChat(
+    input: RunMultiTenantChatInput,
+    onEvent?: (event: MultiTenantChatStreamEvent) => void,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<MultiTenantChatRunResult> {
+    const content = input.prompt.trim();
+    if (!content) throw new Error("Multi-tenant chat prompt is required.");
+    const store = this.requireIntelligenceStore();
+    const persisted = await this.read();
+    const preflight = await this.buildMultiTenantPreflight(input);
+    const providers = await this.listProviders();
+    const activeTenant = this.resolveTenant(persisted);
+    const provider =
+      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
+    const providerId = provider?.id ?? persisted.activeProviderId;
+    this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
+
+    const now = new Date().toISOString();
+    const jobId = `mtjob_${randomUUID()}`;
+    let job: MultiTenantChatJob = {
+      id: jobId,
+      prompt: content,
+      ...(input.savedQueryId ? { savedQueryId: input.savedQueryId } : {}),
+      tenantScope: preflight.tenantScope,
+      resolvedTenantIds: preflight.resolvedTenantIds,
+      providerId,
+      providerName: preflight.providerName,
+      providerIsLocal: preflight.providerIsLocal,
+      ...(preflight.model ? { model: preflight.model } : {}),
+      status: "running",
+      createdAt: now,
+      updatedAt: now,
+      preflight,
+      progress: preflight.tenants.map((tenant) => ({
+        tenantId: tenant.tenantId,
+        tenantName: tenant.tenantName,
+        status:
+          tenant.status === "expired" ||
+          tenant.status === "missing-scopes" ||
+          tenant.status === "throttled" ||
+          tenant.status === "failed"
+            ? "skipped"
+            : "queued",
+        detail: tenant.recovery,
+        updatedAt: now,
+      })),
+      summary: emptyMultiTenantSummary(),
+      comparisons: [],
+      deviceRows: [],
+      assistantText: "",
+      exportDossierMarkdown: "",
+    };
+    const persistJob = (eventType: "started" | "progress" = "progress") => {
+      store.upsertMultiTenantJob(job);
+      onEvent?.({ type: eventType, job });
+    };
+    const assertNotCancelled = () => {
+      if (options.signal?.aborted !== true) return;
+      job = {
+        ...job,
+        status: "cancelled",
+        error: "Stopped by user.",
+        updatedAt: new Date().toISOString(),
+      };
+      store.upsertMultiTenantJob(job);
+      onEvent?.({ type: "cancelled", job });
+      throw new Error("Multi-tenant chat run stopped.");
+    };
+    persistJob("started");
+
+    const runnable = preflight.tenants.filter(
+      (tenant) =>
+        tenant.selected &&
+        tenant.status !== "expired" &&
+        tenant.status !== "missing-scopes" &&
+        tenant.status !== "throttled" &&
+        tenant.status !== "failed" &&
+        tenant.status !== "skipped",
+    );
+    const refreshTenant = async (tenant: (typeof runnable)[number]) => {
+      const startedAt = new Date().toISOString();
+      job = updateJobTenantProgress(job, tenant.tenantId, {
+        status: input.refreshIfStale === false ? "reading-cache" : "refreshing-cache",
+        detail:
+          input.refreshIfStale === false
+            ? "Reading existing local cache."
+            : "Refreshing prompt-relevant cache.",
+        updatedAt: startedAt,
+      });
+      persistJob();
+      try {
+        assertNotCancelled();
+        if (input.refreshIfStale !== false && tenant.staleResources.length > 0) {
+          const refreshResult = await this.refreshGraphCacheInternal({
+            tenantId: tenant.tenantId,
+            resources: tenant.staleResources,
+          });
+          const failedResources = refreshResult.resources.filter((resource) => !resource.ok);
+          if (
+            failedResources.some((resource) => resource.resource === "managedDevices") ||
+            failedResources.length === refreshResult.resources.length
+          ) {
+            throw new Error(
+              failedResources
+                .map(
+                  (resource) =>
+                    `${resource.label}: ${resource.error ?? "Graph cache refresh failed."}`,
+                )
+                .join("; "),
+            );
+          }
+        }
+        job = updateJobTenantProgress(job, tenant.tenantId, {
+          status: "building-result",
+          detail: "Computing tenant result from local cache.",
+          updatedAt: new Date().toISOString(),
+        });
+        persistJob();
+      } catch (error) {
+        if (options.signal?.aborted === true) {
+          throw error;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        job = updateJobTenantProgress(job, tenant.tenantId, {
+          status: "failed",
+          detail: message,
+          updatedAt: new Date().toISOString(),
+        });
+        persistJob();
+      }
+    };
+    assertNotCancelled();
+    await runWithConcurrency(runnable, 2, refreshTenant);
+    assertNotCancelled();
+
+    const comparisons: MultiTenantTenantComparison[] = [];
+    const deviceRows: MultiTenantDeviceRow[] = [];
+    for (const tenant of preflight.tenants) {
+      if (!tenant.selected) continue;
+      const failedProgress = job.progress.find(
+        (entry) => entry.tenantId === tenant.tenantId && entry.status === "failed",
+      );
+      if (failedProgress) {
+        comparisons.push({
+          tenantId: tenant.tenantId,
+          tenantName: tenant.tenantName,
+          status: "failed",
+          windowsDevices: 0,
+          compliant: 0,
+          nonCompliant: 0,
+          unknown: 0,
+          lastRefresh: tenant.cacheFreshness,
+          warnings: [...tenant.warnings, failedProgress.detail ?? "Tenant refresh failed."],
+        });
+        continue;
+      }
+      if (!runnable.some((entry) => entry.tenantId === tenant.tenantId)) {
+        comparisons.push({
+          tenantId: tenant.tenantId,
+          tenantName: tenant.tenantName,
+          status: tenant.status,
+          windowsDevices: 0,
+          compliant: 0,
+          nonCompliant: 0,
+          unknown: 0,
+          lastRefresh: tenant.cacheFreshness,
+          warnings: tenant.warnings,
+        });
+        continue;
+      }
+      const tenantRows = store.readManagedDeviceRowsForTenant({
+        tenantId: tenant.tenantId,
+        limit: 10_000,
+      });
+      const normalizedRows = tenantRows
+        .map((entry) =>
+          normalizeMultiTenantDeviceRow({
+            row: entry.row,
+            tenantId: tenant.tenantId,
+            tenantName: tenant.tenantName,
+            sourceRefreshedAt: entry.refreshedAt,
+          }),
+        )
+        .filter((row): row is MultiTenantDeviceRow => Boolean(row));
+      const windowsRows = normalizedRows.filter((row) =>
+        row.operatingSystem.toLowerCase().includes("windows"),
+      );
+      deviceRows.push(...windowsRows);
+      comparisons.push(buildTenantComparison({
+        tenant,
+        rows: windowsRows,
+      }));
+      job = updateJobTenantProgress(job, tenant.tenantId, {
+        status: "ready",
+        detail: `${windowsRows.length.toLocaleString()} Windows device rows prepared.`,
+        updatedAt: new Date().toISOString(),
+      });
+      persistJob();
+    }
+
+    const summary = buildMultiTenantSummary(comparisons);
+    const assistantText = await this.buildMultiTenantAssistantText({
+      prompt: content,
+      providerId,
+      provider,
+      model: preflight.model,
+      summary,
+      comparisons,
+    });
+    const exportDossierMarkdown = buildMultiTenantDossierMarkdown({
+      prompt: content,
+      providerName: preflight.providerName,
+      model: preflight.model,
+      generatedAt: new Date().toISOString(),
+      summary,
+      comparisons,
+      rows: deviceRows,
+    });
+    const finalStatus =
+      comparisons.some((comparison) =>
+        ["failed", "expired", "missing-scopes", "throttled", "skipped"].includes(
+          comparison.status,
+        ),
+      )
+        ? "partial"
+        : "completed";
+    job = {
+      ...job,
+      status: finalStatus,
+      summary,
+      comparisons,
+      deviceRows,
+      assistantText,
+      exportDossierMarkdown,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const conversation = store.createConversation({
+      id: `chat_${randomUUID()}`,
+      title: chatTitleForPrompt(content),
+      tenantId: activeTenant.id,
+      now,
+      scopeKind: "multi-tenant",
+      tenantScope: preflight.tenantScope,
+      multiTenantJobId: job.id,
+    });
+    job = { ...job, conversationId: conversation.id, updatedAt: new Date().toISOString() };
+    persistJob();
+    const userMessage: IntuneChatMessage = {
+      id: `msg_${randomUUID()}`,
+      conversationId: conversation.id,
+      role: "user",
+      content,
+      status: "completed",
+      createdAt: now,
+    };
+    const assistantMessage: IntuneChatMessage = {
+      id: `msg_${randomUUID()}`,
+      conversationId: conversation.id,
+      role: "assistant",
+      content: assistantText,
+      status: finalStatus === "completed" || finalStatus === "partial" ? "completed" : "failed",
+      createdAt: new Date().toISOString(),
+      providerId,
+      ...(preflight.model ? { model: preflight.model } : {}),
+      sources: [
+        {
+          resource: "managedDevices",
+          label: "Intune managed devices",
+          rows: deviceRows.length,
+          source: "cache",
+          path: "/deviceManagement/managedDevices",
+        },
+      ],
+    };
+    store.insertMessage(userMessage);
+    store.insertMessage(assistantMessage);
+    store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
+
+    const result = {
+      job,
+      conversation: store.getConversation(conversation.id) ?? conversation,
+      userMessage,
+      assistantMessage,
+    };
+    onEvent?.({ type: "completed", result });
+    return result;
+  }
+
+  async streamMultiTenantIntuneChat(
+    input: RunMultiTenantChatInput,
+    onEvent: (event: MultiTenantChatStreamEvent) => void,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<MultiTenantChatRunResult> {
+    try {
+      return await this.runMultiTenantIntuneChat(input, onEvent, options);
+    } catch (caught) {
+      if (options.signal?.aborted !== true) {
+        onEvent({
+          type: "failed",
+          error: caught instanceof Error ? caught.message : String(caught),
+        });
+      }
+      throw caught;
+    }
+  }
+
+  private buildWorkspacePromptContext(
+    input: WorkspacePromptContextInput,
+    tenantId: string,
+    persisted: PersistedState,
+  ): WorkspacePromptContextPayload {
+    const workspaceId = input.workspaceId.trim();
+    if (!workspaceId) throw new Error("Workspace context requires a workspace id.");
+    const store = this.requireIntelligenceStore();
+    const workspace = store.getWorkspace(workspaceId, tenantNamesById(persisted.tenants));
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+    if (workspace.tenantId !== tenantId) {
+      throw new Error("Workspace context tenant does not match the active chat tenant.");
+    }
+
+    const selectedEvidenceIds = new Set(input.evidenceIds ?? []);
+    const selectedNoteIds = new Set(input.noteIds ?? []);
+    const evidence =
+      selectedEvidenceIds.size > 0
+        ? workspace.evidence.filter((entry) => selectedEvidenceIds.has(entry.id))
+        : [];
+    const notes =
+      selectedNoteIds.size > 0
+        ? workspace.notes.filter((entry) => selectedNoteIds.has(entry.id))
+        : [];
+    const includesInstructions =
+      input.includeInstructions === true && Boolean(workspace.instructions?.trim());
+
+    if (!includesInstructions && evidence.length === 0 && notes.length === 0) {
+      throw new Error("Select workspace evidence, notes, or instructions before attaching context.");
+    }
+
+    const missingEvidence = [...selectedEvidenceIds].filter(
+      (id) => !workspace.evidence.some((entry) => entry.id === id),
+    );
+    const missingNotes = [...selectedNoteIds].filter(
+      (id) => !workspace.notes.some((entry) => entry.id === id),
+    );
+    if (missingEvidence.length > 0 || missingNotes.length > 0) {
+      throw new Error("Workspace context includes evidence or notes that no longer exist.");
+    }
+
+    const lines = [
+      "Workspace context attached by the admin.",
+      `Workspace: ${workspace.title}`,
+      `Tenant: ${workspace.tenantName ?? workspace.tenantId}`,
+    ];
+    if (includesInstructions && workspace.instructions) {
+      lines.push("", "Workspace instructions:", workspace.instructions.trim());
+    }
+    if (notes.length > 0) {
+      lines.push("", "Workspace notes:");
+      notes.slice(0, 12).forEach((note, index) => {
+        lines.push(`${index + 1}. ${trimForPrompt(note.content, 1400)}`);
+      });
+    }
+    if (evidence.length > 0) {
+      lines.push("", "Workspace evidence:");
+      evidence.slice(0, 8).forEach((entry, index) => {
+        lines.push(
+          `${index + 1}. ${entry.title} (${entry.sourceType}, ${entry.createdAt})`,
+          trimForPrompt(JSON.stringify(entry.content, null, 2), 2800),
+        );
+      });
+    }
+
+    return {
+      summary: {
+        workspaceId: workspace.id,
+        workspaceTitle: workspace.title,
+        tenantId: workspace.tenantId,
+        evidenceCount: evidence.length,
+        noteCount: notes.length,
+        includesInstructions,
+      },
+      promptBlock: lines.join("\n"),
+    };
+  }
+
+  async listMultiTenantChatJobs(): Promise<MultiTenantChatJob[]> {
+    return this.requireIntelligenceStore().listMultiTenantJobs();
+  }
+
+  async getMultiTenantChatJob(id: string): Promise<MultiTenantChatJob | undefined> {
+    if (!id.trim()) throw new Error("Multi-tenant job id is required.");
+    return this.requireIntelligenceStore().getMultiTenantJob(id);
+  }
+
+  async queueMultiTenantAgentBatch(
+    input: QueueMultiTenantAgentBatchInput,
+  ): Promise<QueueMultiTenantAgentBatchResult> {
+    const agentSlug = input.agentSlug.trim();
+    if (!agentSlug) throw new Error("Agent slug is required.");
+    const store = this.requireIntelligenceStore();
+    const persisted = await this.read();
+    const agent = persisted.installedAgents.find((entry) => entry.slug === agentSlug);
+    if (!agent) {
+      throw new Error(`Agent is not installed: ${agentSlug}`);
+    }
+    assertAgentCompatible(withAgentCompatibility(agent, this.appVersion), "run");
+
+    const prompt =
+      input.prompt?.trim() || `Run ${agent.name} against the selected tenant scope.`;
+    const preflight = await this.buildMultiTenantPreflight({
+      prompt,
+      tenantScope: input.tenantScope,
+      ...(input.savedQueryId ? { savedQueryId: input.savedQueryId } : {}),
+    });
+    const runnable = preflight.tenants.filter(
+      (tenant) =>
+        tenant.selected &&
+        tenant.status !== "expired" &&
+        tenant.status !== "missing-scopes" &&
+        tenant.status !== "throttled" &&
+        tenant.status !== "failed" &&
+        tenant.status !== "skipped",
+    );
+    if (runnable.length === 0) {
+      throw new Error("No selected tenants are ready for this agent batch.");
+    }
+
+    const now = new Date().toISOString();
+    let batch: MultiTenantAgentBatch = {
+      id: `mtbatch_${randomUUID()}`,
+      agentSlug: agent.slug,
+      agentName: agent.name,
+      agentMode: agent.mode,
+      tenantScope: preflight.tenantScope,
+      resolvedTenantIds: runnable.map((tenant) => tenant.tenantId),
+      status: "queued",
+      runIds: [],
+      createdAt: now,
+      updatedAt: now,
+      preflight,
+    };
+    store.upsertMultiTenantAgentBatch(batch);
+
+    const runs: RunRecord[] = [];
+    const failures: string[] = [];
+    for (const tenant of runnable) {
+      try {
+        const run = await this.startRun(agent.slug, {
+          tenantId: tenant.tenantId,
+          trigger: "manual",
+        });
+        runs.push(run);
+        batch = {
+          ...batch,
+          status: agent.mode === "write" ? "awaiting-confirmation" : "running",
+          runIds: runs.map((entry) => entry.id),
+          updatedAt: new Date().toISOString(),
+        };
+        store.upsertMultiTenantAgentBatch(batch);
+      } catch (caught) {
+        failures.push(
+          `${tenant.tenantName}: ${caught instanceof Error ? caught.message : String(caught)}`,
+        );
+      }
+    }
+
+    const finalStatus =
+      failures.length === 0
+        ? agent.mode === "write"
+          ? "awaiting-confirmation"
+          : "running"
+        : runs.length > 0
+          ? "partial"
+          : "failed";
+    batch = {
+      ...batch,
+      status: finalStatus,
+      runIds: runs.map((entry) => entry.id),
+      ...(failures.length > 0 ? { error: failures.join("; ") } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    store.upsertMultiTenantAgentBatch(batch);
+    return { batch, runs };
+  }
+
+  async listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]> {
+    return this.requireIntelligenceStore().listMultiTenantAgentBatches();
+  }
+
+  async getMultiTenantAgentBatch(
+    id: string,
+  ): Promise<MultiTenantAgentBatch | undefined> {
+    if (!id.trim()) throw new Error("Multi-tenant agent batch id is required.");
+    return this.requireIntelligenceStore().getMultiTenantAgentBatch(id);
+  }
+
+  private async buildMultiTenantPreflight(
+    input: PreflightMultiTenantChatInput,
+  ): Promise<TenantScopePreflight> {
+    const prompt = input.prompt.trim();
+    if (!prompt) throw new Error("Multi-tenant chat prompt is required.");
+    const store = this.requireIntelligenceStore();
+    const persisted = await this.read();
+    const activeTenant = this.resolveTenant(persisted);
+    if (persisted.tenants.length === 0) {
+      throw new Error("Connect at least one tenant before using multi-tenant Intune Chat.");
+    }
+    const groups = store.listTenantGroups();
+    const resolvedGroups = resolveTenantGroups(input.tenantScope, groups);
+    const resolvedTenantIds = resolveTenantScopeIds({
+      scope: input.tenantScope,
+      groups: resolvedGroups,
+      tenants: persisted.tenants,
+      activeTenantId: activeTenant.id,
+    });
+    const selectedTenantSet = new Set(resolvedTenantIds);
+    const savedQuery = input.savedQueryId
+      ? store
+          .listSavedMultiTenantQueries()
+          .find((query) => query.id === input.savedQueryId)
+      : undefined;
+    const planned = planChatContext(prompt);
+    const resourceSet = new Set<GraphCacheResourceKind>([
+      ...planned.resources,
+      ...(savedQuery?.resourceHints ?? []),
+    ]);
+    if (isWindowsCompliancePrompt(prompt)) {
+      resourceSet.add("managedDevices");
+    }
+    const resources = sanitizeGraphResources([...resourceSet]);
+    const requiredScopes = requiredScopesForResources(resources);
+    const providers = await this.listProviders();
+    const provider =
+      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
+    const providerId = provider?.id ?? persisted.activeProviderId;
+    const model = resolveProviderDefaultModel(
+      provider,
+      persisted.activeModelByProviderId,
+    ).model;
+    const now = new Date().toISOString();
+    const tenants = persisted.tenants
+      .filter((tenant) => selectedTenantSet.has(tenant.id))
+      .map((tenant) => {
+        const statusRows = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+        const relevantStatus = statusRows.filter((status) =>
+          resources.includes(status.resource),
+        );
+        const staleResources = relevantStatus
+          .filter((status) => isGraphCacheStatusStale(status))
+          .map((status) => status.resource);
+        const cacheFreshness = newestRefreshedAt(relevantStatus);
+        const errors = relevantStatus
+          .map((status) => status.lastError)
+          .filter((error): error is string => Boolean(error));
+        const missingScopes = errors.some((error) => /scope|consent|permission/i.test(error))
+          ? requiredScopes
+          : [];
+        const status = tenantReadinessStatus({
+          missingScopes,
+          staleResources,
+          errors,
+          hasRows: relevantStatus.some((entry) => entry.rows > 0),
+        });
+        return {
+          tenantId: tenant.id,
+          tenantName: tenant.displayName,
+          username: tenant.username,
+          status,
+          selected: true,
+          cacheFreshness,
+          staleResources,
+          missingScopes,
+          warnings: readinessWarnings({ status, staleResources, errors }),
+          recovery: readinessRecovery(status),
+        };
+      });
+    return {
+      id: `preflight_${randomUUID()}`,
+      prompt,
+      tenantScope: input.tenantScope,
+      resolvedTenantIds,
+      resolvedGroups,
+      resources,
+      providerId,
+      providerName: provider?.name ?? providerId,
+      providerIsLocal: provider?.isLocal !== false,
+      ...(model ? { model } : {}),
+      generatedAt: now,
+      tenants,
+      canRun:
+        tenants.length > 0 &&
+        tenants.some((tenant) =>
+          tenant.status === "ready" || tenant.status === "stale",
+        ),
+    };
+  }
+
+  private requireHostedBatchConsent(
+    consent: HostedProviderBatchConsent | undefined,
+    preflight: TenantScopePreflight,
+    provider: ProviderSummary | undefined,
+    providerId: ProviderId,
+  ): void {
+    if (provider?.isLocal !== false) return;
+    if (!consent) {
+      throw new Error(
+        "Hosted provider confirmation is required before multi-tenant chat can send tenant context to the selected provider.",
+      );
+    }
+    if (consent.providerId !== providerId) {
+      throw new Error("Hosted provider confirmation does not match the selected provider.");
+    }
+    const expected = new Set(preflight.resolvedTenantIds);
+    const acknowledged = new Set(consent.tenantIds);
+    for (const tenantId of expected) {
+      if (!acknowledged.has(tenantId)) {
+        throw new Error("Hosted provider confirmation does not cover every selected tenant.");
+      }
+    }
+    const acknowledgedAt = Date.parse(consent.acknowledgedAt);
+    const now = Date.now();
+    if (
+      !Number.isFinite(acknowledgedAt) ||
+      now - acknowledgedAt > 5 * 60 * 1000 ||
+      acknowledgedAt - now > 60 * 1000
+    ) {
+      throw new Error("Hosted provider confirmation expired. Confirm the batch again.");
+    }
+  }
+
+  private async buildMultiTenantAssistantText(input: {
+    prompt: string;
+    providerId: ProviderId;
+    provider: ProviderSummary | undefined;
+    model?: string;
+    summary: MultiTenantChatJob["summary"];
+    comparisons: MultiTenantChatJob["comparisons"];
+  }): Promise<string> {
+    const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
+    const llm = await this.buildLlm(input.providerId, input.model);
+    if (!llm.available) return deterministic;
+    try {
+      const completion = await llm.complete({
+        system: buildIntuneChatSystemPrompt(input.provider?.isLocal === true),
+        prompt: [
+          "Summarize this read-only multi-tenant Intune Chat result for an admin.",
+          "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
+          `Question: ${input.prompt}`,
+          JSON.stringify(
+            {
+              summary: input.summary,
+              tenants: input.comparisons,
+            },
+            null,
+            2,
+          ),
+        ].join("\n\n"),
+        ...(input.model ? { model: input.model } : {}),
+        temperature: 0.2,
+        maxTokens: 700,
+      });
+      return completion.text.trim() || deterministic;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return `${deterministic}\n\nThe selected LLM provider failed while summarizing this multi-tenant result. ${message}`;
+    }
+  }
+
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
     const persisted = await this.read();
     const resolvedTenant = this.resolveTenant(persisted, tenantId);
@@ -1194,13 +1938,25 @@ export class AppStateStore {
       persisted.activeModelByProviderId,
     ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
-    this.requireHostedChatConsent(input, tenant, provider, providerId);
+    const workspaceContext = input.workspaceContext
+      ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
+      : undefined;
+    this.requireHostedChatConsent(
+      input,
+      tenant,
+      provider,
+      providerId,
+      workspaceContext?.summary,
+    );
     const planned = planChatContext(content);
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
       ? store.getConversation(input.conversationId)
       : undefined;
+    if (conversation) {
+      assertConversationTenant(conversation, tenant.id);
+    }
     if (!conversation) {
       conversation = store.createConversation({
         id: `chat_${randomUUID()}`,
@@ -1282,8 +2038,11 @@ export class AppStateStore {
         "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
       assistantContent = assistantError;
     } else {
+      const modelQuestion = workspaceContext
+        ? `${content}\n\n${workspaceContext.promptBlock}`
+        : content;
       const answerPack = buildAnswerPack({
-        question: content,
+        question: modelQuestion,
         tenant,
         cacheStatus,
         rows,
@@ -1369,13 +2128,25 @@ export class AppStateStore {
       persisted.activeModelByProviderId,
     ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
-    this.requireHostedChatConsent(input, tenant, provider, providerId);
+    const workspaceContext = input.workspaceContext
+      ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
+      : undefined;
+    this.requireHostedChatConsent(
+      input,
+      tenant,
+      provider,
+      providerId,
+      workspaceContext?.summary,
+    );
     const planned = planChatContext(content);
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
       ? store.getConversation(input.conversationId)
       : undefined;
+    if (conversation) {
+      assertConversationTenant(conversation, tenant.id);
+    }
     if (!conversation) {
       conversation = store.createConversation({
         id: `chat_${randomUUID()}`,
@@ -1611,8 +2382,11 @@ export class AppStateStore {
         "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
       assistantContent = assistantError;
     } else {
+      const modelQuestion = workspaceContext
+        ? `${content}\n\n${workspaceContext.promptBlock}`
+        : content;
       const answerPack = buildAnswerPack({
-        question: content,
+        question: modelQuestion,
         tenant,
         cacheStatus,
         rows,
@@ -1766,6 +2540,7 @@ export class AppStateStore {
     tenant: TenantRecord,
     provider: ProviderSummary | undefined,
     providerId: ProviderId,
+    workspaceContext?: WorkspacePromptContextSummary,
   ): void {
     if (provider?.isLocal !== false) {
       return;
@@ -1793,6 +2568,24 @@ export class AppStateStore {
     ) {
       throw new Error(
         "Hosted provider confirmation expired. Confirm the chat send again.",
+      );
+    }
+
+    if (!workspaceContext) {
+      return;
+    }
+
+    const acknowledgedWorkspace = consent.workspaceContext;
+    if (
+      !acknowledgedWorkspace ||
+      acknowledgedWorkspace.workspaceId !== workspaceContext.workspaceId ||
+      acknowledgedWorkspace.tenantId !== workspaceContext.tenantId ||
+      acknowledgedWorkspace.evidenceCount !== workspaceContext.evidenceCount ||
+      acknowledgedWorkspace.noteCount !== workspaceContext.noteCount ||
+      acknowledgedWorkspace.includesInstructions !== workspaceContext.includesInstructions
+    ) {
+      throw new Error(
+        "Hosted provider confirmation does not include the attached workspace context. Confirm the chat send again.",
       );
     }
   }
@@ -1842,6 +2635,200 @@ export class AppStateStore {
     });
     await this.writeSelfTrainingFile(tenantId, input.agentSlug);
     return reset;
+  }
+
+  async listWorkspaces(tenantId?: string): Promise<WorkspaceSummary[]> {
+    const persisted = await this.read();
+    const resolvedTenant = tenantId ? this.resolveTenant(persisted, tenantId) : undefined;
+    return this.requireIntelligenceStore().listWorkspaces(
+      tenantNamesById(persisted.tenants),
+      resolvedTenant?.id,
+    );
+  }
+
+  async getWorkspace(id: string): Promise<WorkspaceDetail | undefined> {
+    if (!id.trim()) throw new Error("Workspace id is required.");
+    const persisted = await this.read();
+    return this.requireIntelligenceStore().getWorkspace(
+      id,
+      tenantNamesById(persisted.tenants),
+    );
+  }
+
+  async createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceDetail> {
+    const persisted = await this.read();
+    const tenant = this.resolveTenant(persisted, input.tenantId);
+    return this.requireIntelligenceStore().createWorkspace({
+      id: `wksp_${randomUUID()}`,
+      tenantId: tenant.id,
+      tenantName: tenant.displayName,
+      title: normalizeWorkspaceTitle(input.title),
+      ...(input.instructions ? { instructions: normalizeWorkspaceInstructions(input.instructions) } : {}),
+      now: new Date().toISOString(),
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    });
+  }
+
+  async updateWorkspace(
+    id: string,
+    input: UpdateWorkspaceInput,
+  ): Promise<WorkspaceDetail> {
+    if (!id.trim()) throw new Error("Workspace id is required.");
+    const persisted = await this.read();
+    return this.requireIntelligenceStore().updateWorkspace({
+      id,
+      ...(input.title !== undefined ? { title: normalizeWorkspaceTitle(input.title) } : {}),
+      ...(input.instructions !== undefined
+        ? { instructions: normalizeWorkspaceInstructions(input.instructions) }
+        : {}),
+      ...(input.status !== undefined ? { status: input.status } : {}),
+      now: new Date().toISOString(),
+      tenantNames: tenantNamesById(persisted.tenants),
+    });
+  }
+
+  async archiveWorkspace(id: string): Promise<WorkspaceSummary> {
+    if (!id.trim()) throw new Error("Workspace id is required.");
+    const persisted = await this.read();
+    return this.requireIntelligenceStore().archiveWorkspace(
+      id,
+      new Date().toISOString(),
+      tenantNamesById(persisted.tenants),
+    );
+  }
+
+  async deleteWorkspace(id: string): Promise<void> {
+    if (!id.trim()) throw new Error("Workspace id is required.");
+    this.requireIntelligenceStore().deleteWorkspace(id);
+  }
+
+  async addWorkspaceNote(workspaceId: string, content: string): Promise<WorkspaceNote> {
+    if (!workspaceId.trim()) throw new Error("Workspace id is required.");
+    const trimmed = content.trim();
+    if (!trimmed) throw new Error("Workspace note content is required.");
+    return this.requireIntelligenceStore().addWorkspaceNote({
+      id: `wnote_${randomUUID()}`,
+      workspaceId,
+      content: trimmed,
+      now: new Date().toISOString(),
+    });
+  }
+
+  async updateWorkspaceNote(noteId: string, content: string): Promise<WorkspaceNote> {
+    if (!noteId.trim()) throw new Error("Workspace note id is required.");
+    const trimmed = content.trim();
+    if (!trimmed) throw new Error("Workspace note content is required.");
+    return this.requireIntelligenceStore().updateWorkspaceNote(
+      noteId,
+      trimmed,
+      new Date().toISOString(),
+    );
+  }
+
+  async pinWorkspaceEvidence(
+    input: PinWorkspaceEvidenceInput,
+  ): Promise<WorkspaceEvidence> {
+    const persisted = await this.read();
+    const tenant = this.resolveTenant(persisted, input.tenantId);
+    return this.requireIntelligenceStore().pinWorkspaceEvidence({
+      id: `wev_${randomUUID()}`,
+      workspaceId: input.workspaceId,
+      tenantId: tenant.id,
+      title: normalizeWorkspaceTitle(input.title),
+      sourceType: input.sourceType,
+      ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
+      content: input.content,
+      ...(input.freshness ? { freshness: input.freshness } : {}),
+      now: new Date().toISOString(),
+    });
+  }
+
+  async linkWorkspaceConversation(
+    workspaceId: string,
+    conversationId: string,
+  ): Promise<WorkspaceLink> {
+    const persisted = await this.read();
+    const store = this.requireIntelligenceStore();
+    const workspace = store.getWorkspace(workspaceId, tenantNamesById(persisted.tenants));
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) throw new Error(`Conversation not found: ${conversationId}`);
+    if (conversation.scopeKind === "multi-tenant") {
+      throw new Error("Multi-tenant conversations cannot be linked directly to one workspace. Split the result into tenant-specific evidence instead.");
+    }
+    if (conversation.tenantId && conversation.tenantId !== workspace.tenantId) {
+      throw new Error("Conversation tenant does not match the workspace tenant.");
+    }
+    return store.linkWorkspaceConversation({
+      id: `wlink_${randomUUID()}`,
+      workspaceId,
+      tenantId: workspace.tenantId,
+      conversationId,
+      title: conversation.title,
+      now: new Date().toISOString(),
+    });
+  }
+
+  async linkWorkspaceRun(workspaceId: string, runId: string): Promise<WorkspaceLink> {
+    const persisted = await this.read();
+    const store = this.requireIntelligenceStore();
+    const workspace = store.getWorkspace(workspaceId, tenantNamesById(persisted.tenants));
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+    const run = persisted.runs.find((entry) => entry.id === runId);
+    if (!run) throw new Error(`Run not found: ${runId}`);
+    if (run.tenantId && run.tenantId !== workspace.tenantId) {
+      throw new Error("Run tenant does not match the workspace tenant.");
+    }
+    return store.linkWorkspaceRun({
+      id: `wlink_${randomUUID()}`,
+      workspaceId,
+      tenantId: workspace.tenantId,
+      runId,
+      title: run.summary ?? run.agentSlug,
+      now: new Date().toISOString(),
+    });
+  }
+
+  async importMultiTenantResultToWorkspaces(
+    input: ImportMultiTenantResultToWorkspacesInput,
+  ): Promise<ImportMultiTenantResultToWorkspacesResult> {
+    const persisted = await this.read();
+    const store = this.requireIntelligenceStore();
+    const job = store.getMultiTenantJob(input.jobId);
+    if (!job) throw new Error(`Multi-tenant job not found: ${input.jobId}`);
+    const resolvedTenantIds = new Set(job.resolvedTenantIds);
+    for (const mapping of input.tenantMappings) {
+      if (!resolvedTenantIds.has(mapping.tenantId)) {
+        throw new Error(`Tenant ${mapping.tenantId} is not part of this multi-tenant result.`);
+      }
+      if (mapping.workspaceId) {
+        const workspace = store.getWorkspace(
+          mapping.workspaceId,
+          tenantNamesById(persisted.tenants),
+        );
+        if (!workspace) throw new Error(`Workspace not found: ${mapping.workspaceId}`);
+        if (workspace.tenantId !== mapping.tenantId) {
+          throw new Error("Target workspace tenant does not match the imported tenant.");
+        }
+      }
+    }
+    return store.importMultiTenantResultToWorkspaces({
+      job,
+      tenantNames: tenantNamesById(persisted.tenants),
+      mappings: input.tenantMappings,
+      createWorkspaceId: () => `wksp_${randomUUID()}`,
+      createEvidenceId: () => `wev_${randomUUID()}`,
+      now: new Date().toISOString(),
+    });
+  }
+
+  async exportWorkspaceDossier(id: string): Promise<string> {
+    if (!id.trim()) throw new Error("Workspace id is required.");
+    const persisted = await this.read();
+    return this.requireIntelligenceStore().exportWorkspaceDossier(
+      id,
+      tenantNamesById(persisted.tenants),
+    );
   }
 
   async listConnectors(): Promise<ConnectorSummary[]> {
@@ -6722,6 +7709,12 @@ function truncateForDelivery(value: string, maxLength: number): string {
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+function trimForPrompt(value: string, maxLength: number): string {
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 32)).trimEnd()}\n[truncated locally]`;
+}
+
 function whatsappWebStatusToConnectorStatus(
   status: WhatsAppWebStatus,
 ): ConnectorSummary["status"] {
@@ -8325,6 +9318,362 @@ function sanitizeGraphResources(
     : GRAPH_CACHE_RESOURCES.map((entry) => entry.resource)
   ).filter((resource): resource is GraphCacheResourceKind => allowed.has(resource));
   return [...new Set(selected)];
+}
+
+function tenantNamesById(tenants: TenantRecord[]): Map<string, string> {
+  return new Map(tenants.map((tenant) => [tenant.id, tenant.displayName]));
+}
+
+function normalizeTenantGroupName(name: string): string {
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  if (!trimmed) throw new Error("Tenant group name is required.");
+  if (trimmed.length > 80) throw new Error("Tenant group name is too long.");
+  return trimmed;
+}
+
+function normalizeWorkspaceTitle(title: string): string {
+  const trimmed = title.trim().replace(/\s+/g, " ");
+  if (!trimmed) throw new Error("Workspace title is required.");
+  if (trimmed.length > 140) throw new Error("Workspace title is too long.");
+  return trimmed;
+}
+
+function normalizeWorkspaceInstructions(instructions: string): string {
+  const trimmed = instructions.trim();
+  if (trimmed.length > 10_000) {
+    throw new Error("Workspace instructions are too long.");
+  }
+  return trimmed;
+}
+
+function resolveTenantGroups(scope: TenantScope, groups: TenantGroup[]): TenantGroup[] {
+  const groupIds = new Set(
+    scope.kind === "selected" || scope.kind === "all" ? scope.groupIds ?? [] : [],
+  );
+  return groups.filter((group) => groupIds.has(group.id));
+}
+
+function resolveTenantScopeIds(input: {
+  scope: TenantScope;
+  groups: TenantGroup[];
+  tenants: TenantRecord[];
+  activeTenantId?: string;
+}): string[] {
+  const known = new Set(input.tenants.map((tenant) => tenant.id));
+  if (input.scope.kind === "all") {
+    return input.tenants.map((tenant) => tenant.id);
+  }
+  const selected = new Set<string>();
+  if (input.scope.kind === "active") {
+    if (input.activeTenantId && known.has(input.activeTenantId)) {
+      selected.add(input.activeTenantId);
+    }
+  } else {
+    for (const tenantId of input.scope.tenantIds) {
+      if (!known.has(tenantId)) throw new Error(`Unknown tenant selected: ${tenantId}`);
+      selected.add(tenantId);
+    }
+  }
+  for (const group of input.groups) {
+    for (const tenantId of group.tenantIds) {
+      if (known.has(tenantId)) selected.add(tenantId);
+    }
+  }
+  return [...selected];
+}
+
+function isWindowsCompliancePrompt(prompt: string): boolean {
+  return /\b(windows|device|devices|compliant|non-?compliant|compliance)\b/i.test(prompt);
+}
+
+function isGraphCacheStatusStale(status: GraphCacheResourceStatus): boolean {
+  if (status.lastError) return false;
+  if (!status.refreshedAt || status.rows === 0) return true;
+  const refreshedMs = Date.parse(status.refreshedAt);
+  if (!Number.isFinite(refreshedMs)) return true;
+  return Date.now() - refreshedMs > 6 * 60 * 60 * 1000;
+}
+
+function newestRefreshedAt(statuses: GraphCacheResourceStatus[]): string | undefined {
+  return statuses
+    .map((status) => status.refreshedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+}
+
+function tenantReadinessStatus(input: {
+  missingScopes: string[];
+  staleResources: GraphCacheResourceKind[];
+  errors: string[];
+  hasRows: boolean;
+}): TenantReadinessStatus {
+  if (input.missingScopes.length > 0) return "missing-scopes";
+  if (input.errors.some((error) => /throttl|429|too many requests/i.test(error))) {
+    return "throttled";
+  }
+  if (input.errors.some((error) => /expired|interaction required|login/i.test(error))) {
+    return "expired";
+  }
+  if (input.errors.length > 0 && !input.hasRows) return "failed";
+  if (input.staleResources.length > 0 || !input.hasRows) return "stale";
+  return "ready";
+}
+
+function readinessWarnings(input: {
+  status: TenantReadinessStatus;
+  staleResources: GraphCacheResourceKind[];
+  errors: string[];
+}): string[] {
+  const warnings: string[] = [];
+  if (input.status === "stale") {
+    warnings.push(
+      input.staleResources.length > 0
+        ? `${input.staleResources.length} resource cache needs refresh.`
+        : "No local cache rows yet.",
+    );
+  }
+  if (input.errors.length > 0) warnings.push(input.errors[0]!);
+  return warnings;
+}
+
+function readinessRecovery(status: TenantReadinessStatus): string {
+  const copy: Record<TenantReadinessStatus, string> = {
+    ready: "Ready to run.",
+    stale: "Run can refresh cache before answering.",
+    expired: "Reconnect this tenant before including it.",
+    "missing-scopes": "Grant the missing delegated Graph scopes, then retry.",
+    throttled: "Wait for Microsoft Graph throttling to clear or remove this tenant.",
+    skipped: "Tenant is skipped for this run.",
+    failed: "Review the cached error or remove this tenant from the run.",
+  };
+  return copy[status];
+}
+
+function emptyMultiTenantSummary(): MultiTenantChatJob["summary"] {
+  return {
+    tenantsScanned: 0,
+    failedTenants: 0,
+    skippedTenants: 0,
+    staleTenants: 0,
+    windowsDevices: 0,
+    compliant: 0,
+    nonCompliant: 0,
+    unknown: 0,
+  };
+}
+
+function updateJobTenantProgress(
+  job: MultiTenantChatJob,
+  tenantId: string,
+  patch: Partial<MultiTenantChatJob["progress"][number]>,
+): MultiTenantChatJob {
+  return {
+    ...job,
+    progress: job.progress.map((entry) =>
+      entry.tenantId === tenantId ? { ...entry, ...patch } : entry,
+    ),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let index = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const item = items[index];
+      index += 1;
+      if (item !== undefined) {
+        await worker(item);
+      }
+    }
+  });
+  await Promise.all(workers);
+}
+
+function normalizeMultiTenantDeviceRow(input: {
+  row: unknown;
+  tenantId: string;
+  tenantName: string;
+  sourceRefreshedAt?: string;
+}): MultiTenantDeviceRow | undefined {
+  if (!isRecord(input.row)) return undefined;
+  const deviceName = stringValue(input.row.deviceName) ?? stringValue(input.row.displayName);
+  const operatingSystem = stringValue(input.row.operatingSystem) ?? "Unknown";
+  if (!deviceName) return undefined;
+  const lastSyncDateTime = stringValue(input.row.lastSyncDateTime);
+  const stale = lastSyncDateTime
+    ? Date.now() - Date.parse(lastSyncDateTime) > 7 * 24 * 60 * 60 * 1000
+    : true;
+  return {
+    tenantId: input.tenantId,
+    tenantName: input.tenantName,
+    deviceId: stringValue(input.row.id),
+    deviceName,
+    complianceState:
+      stringValue(input.row.complianceState) ??
+      stringValue(input.row.complianceStatus) ??
+      "unknown",
+    operatingSystem,
+    osVersion: stringValue(input.row.osVersion),
+    lastSyncDateTime,
+    owner:
+      stringValue(input.row.userPrincipalName) ??
+      stringValue(input.row.emailAddress) ??
+      stringValue(input.row.owner),
+    sourceRefreshedAt: input.sourceRefreshedAt,
+    stale,
+  };
+}
+
+function buildTenantComparison(input: {
+  tenant: TenantScopePreflight["tenants"][number];
+  rows: MultiTenantDeviceRow[];
+}): MultiTenantTenantComparison {
+  let compliant = 0;
+  let nonCompliant = 0;
+  let unknown = 0;
+  for (const row of input.rows) {
+    const state = normalizeComplianceState(row.complianceState);
+    if (state === "compliant") compliant += 1;
+    else if (state === "non-compliant") nonCompliant += 1;
+    else unknown += 1;
+  }
+  return {
+    tenantId: input.tenant.tenantId,
+    tenantName: input.tenant.tenantName,
+    status: input.tenant.status === "stale" ? "stale" : "ready",
+    windowsDevices: input.rows.length,
+    compliant,
+    nonCompliant,
+    unknown,
+    lastRefresh: newestString(input.rows.map((row) => row.sourceRefreshedAt)),
+    warnings: input.tenant.warnings,
+  };
+}
+
+function normalizeComplianceState(value: string): "compliant" | "non-compliant" | "unknown" {
+  const normalized = value.toLowerCase().replace(/[\s_]+/g, "-");
+  if (normalized === "compliant") return "compliant";
+  if (normalized === "noncompliant" || normalized === "non-compliant") {
+    return "non-compliant";
+  }
+  return "unknown";
+}
+
+function buildMultiTenantSummary(
+  comparisons: MultiTenantTenantComparison[],
+): MultiTenantChatJob["summary"] {
+  return comparisons.reduce(
+    (summary, tenant) => ({
+      tenantsScanned: summary.tenantsScanned + 1,
+      failedTenants:
+        summary.failedTenants +
+        (["failed", "expired", "missing-scopes", "throttled"].includes(tenant.status)
+          ? 1
+          : 0),
+      skippedTenants: summary.skippedTenants + (tenant.status === "skipped" ? 1 : 0),
+      staleTenants: summary.staleTenants + (tenant.status === "stale" ? 1 : 0),
+      windowsDevices: summary.windowsDevices + tenant.windowsDevices,
+      compliant: summary.compliant + tenant.compliant,
+      nonCompliant: summary.nonCompliant + tenant.nonCompliant,
+      unknown: summary.unknown + tenant.unknown,
+    }),
+    emptyMultiTenantSummary(),
+  );
+}
+
+function buildMultiTenantDossierMarkdown(input: {
+  prompt: string;
+  providerName: string;
+  model?: string;
+  generatedAt: string;
+  summary: MultiTenantChatJob["summary"];
+  comparisons: MultiTenantTenantComparison[];
+  rows: MultiTenantDeviceRow[];
+}): string {
+  const lines = [
+    "# Multi-tenant Intune Chat dossier",
+    "",
+    `Generated: ${input.generatedAt}`,
+    `Provider: ${input.providerName}${input.model ? ` · ${input.model}` : ""}`,
+    `Query: ${input.prompt}`,
+    "",
+    "## Summary",
+    "",
+    `- Tenants scanned: ${input.summary.tenantsScanned}`,
+    `- Failed tenants: ${input.summary.failedTenants}`,
+    `- Stale tenants: ${input.summary.staleTenants}`,
+    `- Windows devices: ${input.summary.windowsDevices}`,
+    `- Compliant: ${input.summary.compliant}`,
+    `- Non-compliant: ${input.summary.nonCompliant}`,
+    `- Unknown: ${input.summary.unknown}`,
+    "",
+    "## Tenant Comparison",
+    "",
+    "| Tenant | Status | Windows | Compliant | Non-compliant | Unknown | Last refresh |",
+    "| --- | --- | ---: | ---: | ---: | ---: | --- |",
+  ];
+  for (const tenant of input.comparisons) {
+    lines.push(
+      `| ${tenant.tenantName} | ${tenant.status} | ${tenant.windowsDevices} | ${tenant.compliant} | ${tenant.nonCompliant} | ${tenant.unknown} | ${tenant.lastRefresh ?? "unknown"} |`,
+    );
+  }
+  lines.push("", "## Device Rows", "");
+  lines.push("| Tenant | Device | Compliance | OS | OS version | Last sync | Owner |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
+  for (const row of input.rows) {
+    lines.push(
+      `| ${row.tenantName} | ${row.deviceName} | ${row.complianceState} | ${row.operatingSystem} | ${row.osVersion ?? ""} | ${row.lastSyncDateTime ?? ""} | ${row.owner ?? ""} |`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function summarizeMultiTenantResult(
+  summary: MultiTenantChatJob["summary"],
+  comparisons: MultiTenantTenantComparison[],
+): string {
+  const caveats = comparisons
+    .filter((tenant) => tenant.status !== "ready")
+    .map((tenant) => `${tenant.tenantName}: ${tenant.status}`);
+  const caveatText =
+    caveats.length > 0
+      ? ` Caveats: ${caveats.join("; ")}.`
+      : " No tenant failures were recorded.";
+  return `Across ${summary.tenantsScanned} tenant${summary.tenantsScanned === 1 ? "" : "s"}, cached Intune data shows ${summary.windowsDevices} Windows devices: ${summary.compliant} compliant, ${summary.nonCompliant} non-compliant, and ${summary.unknown} unknown.${caveatText}`;
+}
+
+function assertConversationTenant(
+  conversation: IntuneChatConversation,
+  activeTenantId: string,
+): void {
+  if (conversation.scopeKind === "multi-tenant") {
+    throw new Error(
+      "This is a multi-tenant result conversation. Start a new active-tenant conversation for follow-up prompts.",
+    );
+  }
+  if (conversation.tenantId && conversation.tenantId !== activeTenantId) {
+    throw new Error(
+      "This conversation belongs to a different tenant. Switch to that tenant or start a new conversation.",
+    );
+  }
+}
+
+function newestString(values: (string | undefined)[]): string | undefined {
+  return values.filter((value): value is string => Boolean(value)).sort().at(-1);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function readPlannedChatRows(

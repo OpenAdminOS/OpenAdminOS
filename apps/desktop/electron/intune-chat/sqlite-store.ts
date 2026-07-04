@@ -5,19 +5,34 @@ import type {
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
   GraphCacheRefreshScheduleSettings,
+  ImportMultiTenantResultToWorkspacesResult,
   IntuneChatConversation,
   IntuneChatMessage,
   IntuneChatToolCall,
   LocalDataSummary,
+  MultiTenantAgentBatch,
+  MultiTenantChatJob,
+  SavedMultiTenantQuery,
   SelfTrainingSettings,
   SelfTrainingSuggestion,
   SelfTrainingSuggestionStatus,
+  TenantGroup,
+  TenantScope,
+  WorkspaceDetail,
+  WorkspaceEvidence,
+  WorkspaceLink,
+  WorkspaceNote,
+  WorkspaceStatus,
+  WorkspaceSummary,
 } from "@openadminos/agent-sdk";
 
 interface ConversationRow {
   id: string;
   title: string;
   tenant_id: string | null;
+  scope_kind: string | null;
+  scope_json: string | null;
+  multi_tenant_job_id: string | null;
   created_at: string;
   updated_at: string;
   pinned_at: string | null;
@@ -50,6 +65,7 @@ interface ResourceStatusRow {
 
 interface ResourceRow {
   raw_json: string;
+  refreshed_at?: string;
 }
 
 interface SettingRow {
@@ -67,6 +83,105 @@ interface SuggestionRow {
   source: SelfTrainingSuggestion["source"];
   created_at: string;
   decided_at: string | null;
+}
+
+interface TenantGroupRow {
+  id: string;
+  name: string;
+  tenant_ids_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SavedQueryRow {
+  id: string;
+  title: string;
+  prompt: string;
+  resource_hints_json: string;
+  default_scope_json: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MultiTenantJobRow {
+  id: string;
+  conversation_id: string | null;
+  prompt: string;
+  saved_query_id: string | null;
+  tenant_scope_json: string;
+  resolved_tenant_ids_json: string;
+  provider_id: string;
+  provider_name: string;
+  provider_is_local: number;
+  model: string | null;
+  status: MultiTenantChatJob["status"];
+  preflight_json: string;
+  progress_json: string;
+  summary_json: string;
+  comparisons_json: string;
+  device_rows_json: string;
+  assistant_text: string;
+  export_dossier_markdown: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MultiTenantAgentBatchRow {
+  id: string;
+  agent_slug: string;
+  agent_name: string;
+  agent_mode: MultiTenantAgentBatch["agentMode"];
+  tenant_scope_json: string;
+  resolved_tenant_ids_json: string;
+  status: MultiTenantAgentBatch["status"];
+  run_ids_json: string;
+  preflight_json: string;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WorkspaceRow {
+  id: string;
+  tenant_id: string;
+  title: string;
+  status: WorkspaceStatus;
+  instructions: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WorkspaceEvidenceRow {
+  id: string;
+  workspace_id: string;
+  tenant_id: string;
+  title: string;
+  source_type: WorkspaceEvidence["sourceType"];
+  source_ref_json: string | null;
+  content_json: string;
+  freshness_json: string | null;
+  created_at: string;
+}
+
+interface WorkspaceNoteRow {
+  id: string;
+  workspace_id: string;
+  tenant_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WorkspaceLinkRow {
+  id: string;
+  workspace_id: string;
+  tenant_id: string;
+  type: WorkspaceLink["type"];
+  ref_id: string;
+  title: string;
+  created_at: string;
 }
 
 export interface GraphCacheResourceDefinition {
@@ -94,7 +209,8 @@ export class IntelligenceSqliteStore {
   listConversations(): IntuneChatConversation[] {
     const rows = this.db
       .prepare(
-        `SELECT id, title, tenant_id, created_at, updated_at, pinned_at
+        `SELECT id, title, tenant_id, scope_kind, scope_json, multi_tenant_job_id,
+                created_at, updated_at, pinned_at
          FROM chat_conversations
          ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC`,
       )
@@ -108,7 +224,8 @@ export class IntelligenceSqliteStore {
     const like = `%${escapeSqlLike(trimmed)}%`;
     const rows = this.db
       .prepare(
-        `SELECT c.id, c.title, c.tenant_id, c.created_at, c.updated_at, c.pinned_at
+        `SELECT c.id, c.title, c.tenant_id, c.scope_kind, c.scope_json,
+                c.multi_tenant_job_id, c.created_at, c.updated_at, c.pinned_at
          FROM chat_conversations c
          WHERE c.title LIKE ? ESCAPE '\\'
             OR EXISTS (
@@ -126,7 +243,8 @@ export class IntelligenceSqliteStore {
   getConversation(id: string): IntuneChatConversation | undefined {
     const row = this.db
       .prepare(
-        `SELECT id, title, tenant_id, created_at, updated_at, pinned_at
+        `SELECT id, title, tenant_id, scope_kind, scope_json, multi_tenant_job_id,
+                created_at, updated_at, pinned_at
          FROM chat_conversations
          WHERE id = ?`,
       )
@@ -139,20 +257,38 @@ export class IntelligenceSqliteStore {
     title: string;
     tenantId: string;
     now: string;
+    scopeKind?: IntuneChatConversation["scopeKind"];
+    tenantScope?: TenantScope;
+    multiTenantJobId?: string;
   }): IntuneChatConversation {
     this.db
       .prepare(
-        `INSERT INTO chat_conversations (id, title, tenant_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO chat_conversations (
+          id, title, tenant_id, scope_kind, scope_json, multi_tenant_job_id,
+          created_at, updated_at
+        )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(input.id, input.title, input.tenantId, input.now, input.now);
+      .run(
+        input.id,
+        input.title,
+        input.tenantId,
+        input.scopeKind ?? "single-tenant",
+        input.tenantScope ? JSON.stringify(input.tenantScope) : null,
+        input.multiTenantJobId ?? null,
+        input.now,
+        input.now,
+      );
     return {
       id: input.id,
       title: input.title,
-        tenantId: input.tenantId,
-        createdAt: input.now,
-        updatedAt: input.now,
-      };
+      tenantId: input.tenantId,
+      scopeKind: input.scopeKind ?? "single-tenant",
+      ...(input.tenantScope ? { tenantScope: input.tenantScope } : {}),
+      ...(input.multiTenantJobId ? { multiTenantJobId: input.multiTenantJobId } : {}),
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
   }
 
   renameConversation(id: string, title: string, now: string): IntuneChatConversation {
@@ -541,6 +677,542 @@ export class IntelligenceSqliteStore {
     return rows.map((row) => readJson<unknown>(row.raw_json, {}));
   }
 
+  readManagedDeviceRowsForTenant(input: {
+    tenantId: string;
+    limit?: number;
+  }): { row: unknown; refreshedAt?: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT raw_json, refreshed_at
+         FROM graph_resources
+         WHERE tenant_id = ? AND resource = 'managedDevices'
+         ORDER BY COALESCE(last_seen_at, refreshed_at) DESC
+         LIMIT ?`,
+      )
+      .all(input.tenantId, input.limit ?? 10_000) as unknown as ResourceRow[];
+    return rows.map((row) => ({
+      row: readJson<unknown>(row.raw_json, {}),
+      ...(row.refreshed_at ? { refreshedAt: row.refreshed_at } : {}),
+    }));
+  }
+
+  listTenantGroups(): TenantGroup[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, name, tenant_ids_json, created_at, updated_at
+         FROM tenant_groups
+         ORDER BY name COLLATE NOCASE ASC`,
+      )
+      .all() as unknown as TenantGroupRow[];
+    return rows.map(readTenantGroup);
+  }
+
+  saveTenantGroup(input: {
+    id: string;
+    name: string;
+    tenantIds: string[];
+    now: string;
+  }): TenantGroup {
+    const existing = this.db
+      .prepare(
+        `SELECT id, name, tenant_ids_json, created_at, updated_at
+         FROM tenant_groups
+         WHERE id = ?`,
+      )
+      .get(input.id) as unknown as TenantGroupRow | undefined;
+    const createdAt = existing?.created_at ?? input.now;
+    this.db
+      .prepare(
+        `INSERT INTO tenant_groups (id, name, tenant_ids_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           tenant_ids_json = excluded.tenant_ids_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        input.id,
+        input.name,
+        JSON.stringify([...new Set(input.tenantIds)]),
+        createdAt,
+        input.now,
+      );
+    return {
+      id: input.id,
+      name: input.name,
+      tenantIds: [...new Set(input.tenantIds)],
+      createdAt,
+      updatedAt: input.now,
+    };
+  }
+
+  deleteTenantGroup(id: string): void {
+    const result = this.db.prepare(`DELETE FROM tenant_groups WHERE id = ?`).run(id);
+    if (result.changes === 0) {
+      throw new Error(`Tenant group not found: ${id}`);
+    }
+  }
+
+  listSavedMultiTenantQueries(): SavedMultiTenantQuery[] {
+    this.ensureDefaultSavedQueries(new Date().toISOString());
+    const rows = this.db
+      .prepare(
+        `SELECT id, title, prompt, resource_hints_json, default_scope_json,
+                sort_order, created_at, updated_at
+         FROM saved_multi_tenant_queries
+         ORDER BY sort_order ASC, title COLLATE NOCASE ASC`,
+      )
+      .all() as unknown as SavedQueryRow[];
+    return rows.map(readSavedQuery);
+  }
+
+  upsertMultiTenantJob(job: MultiTenantChatJob): MultiTenantChatJob {
+    this.db
+      .prepare(
+        `INSERT INTO multi_tenant_jobs (
+          id, conversation_id, prompt, saved_query_id, tenant_scope_json,
+          resolved_tenant_ids_json, provider_id, provider_name, provider_is_local,
+          model, status, preflight_json, progress_json, summary_json,
+          comparisons_json, device_rows_json, assistant_text, export_dossier_markdown,
+          error, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          conversation_id = excluded.conversation_id,
+          status = excluded.status,
+          progress_json = excluded.progress_json,
+          summary_json = excluded.summary_json,
+          comparisons_json = excluded.comparisons_json,
+          device_rows_json = excluded.device_rows_json,
+          assistant_text = excluded.assistant_text,
+          export_dossier_markdown = excluded.export_dossier_markdown,
+          error = excluded.error,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        job.id,
+        job.conversationId ?? null,
+        job.prompt,
+        job.savedQueryId ?? null,
+        JSON.stringify(job.tenantScope),
+        JSON.stringify(job.resolvedTenantIds),
+        job.providerId,
+        job.providerName,
+        job.providerIsLocal ? 1 : 0,
+        job.model ?? null,
+        job.status,
+        JSON.stringify(job.preflight),
+        JSON.stringify(job.progress),
+        JSON.stringify(job.summary),
+        JSON.stringify(job.comparisons),
+        JSON.stringify(job.deviceRows),
+        job.assistantText,
+        job.exportDossierMarkdown,
+        job.error ?? null,
+        job.createdAt,
+        job.updatedAt,
+      );
+    return job;
+  }
+
+  listMultiTenantJobs(): MultiTenantChatJob[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, conversation_id, prompt, saved_query_id, tenant_scope_json,
+                resolved_tenant_ids_json, provider_id, provider_name, provider_is_local,
+                model, status, preflight_json, progress_json, summary_json,
+                comparisons_json, device_rows_json, assistant_text,
+                export_dossier_markdown, error, created_at, updated_at
+         FROM multi_tenant_jobs
+         ORDER BY updated_at DESC`,
+      )
+      .all() as unknown as MultiTenantJobRow[];
+    return rows.map(readMultiTenantJob);
+  }
+
+  getMultiTenantJob(id: string): MultiTenantChatJob | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT id, conversation_id, prompt, saved_query_id, tenant_scope_json,
+                resolved_tenant_ids_json, provider_id, provider_name, provider_is_local,
+                model, status, preflight_json, progress_json, summary_json,
+                comparisons_json, device_rows_json, assistant_text,
+                export_dossier_markdown, error, created_at, updated_at
+         FROM multi_tenant_jobs
+         WHERE id = ?`,
+      )
+      .get(id) as unknown as MultiTenantJobRow | undefined;
+    return row ? readMultiTenantJob(row) : undefined;
+  }
+
+  upsertMultiTenantAgentBatch(batch: MultiTenantAgentBatch): MultiTenantAgentBatch {
+    this.db
+      .prepare(
+        `INSERT INTO multi_tenant_agent_batches (
+          id, agent_slug, agent_name, agent_mode, tenant_scope_json,
+          resolved_tenant_ids_json, status, run_ids_json, preflight_json,
+          error, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          status = excluded.status,
+          run_ids_json = excluded.run_ids_json,
+          preflight_json = excluded.preflight_json,
+          error = excluded.error,
+          updated_at = excluded.updated_at`,
+      )
+      .run(
+        batch.id,
+        batch.agentSlug,
+        batch.agentName,
+        batch.agentMode,
+        JSON.stringify(batch.tenantScope),
+        JSON.stringify(batch.resolvedTenantIds),
+        batch.status,
+        JSON.stringify(batch.runIds),
+        JSON.stringify(batch.preflight),
+        batch.error ?? null,
+        batch.createdAt,
+        batch.updatedAt,
+      );
+    return batch;
+  }
+
+  listMultiTenantAgentBatches(): MultiTenantAgentBatch[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, agent_slug, agent_name, agent_mode, tenant_scope_json,
+                resolved_tenant_ids_json, status, run_ids_json, preflight_json,
+                error, created_at, updated_at
+         FROM multi_tenant_agent_batches
+         ORDER BY updated_at DESC`,
+      )
+      .all() as unknown as MultiTenantAgentBatchRow[];
+    return rows.map(readMultiTenantAgentBatch);
+  }
+
+  getMultiTenantAgentBatch(id: string): MultiTenantAgentBatch | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT id, agent_slug, agent_name, agent_mode, tenant_scope_json,
+                resolved_tenant_ids_json, status, run_ids_json, preflight_json,
+                error, created_at, updated_at
+         FROM multi_tenant_agent_batches
+         WHERE id = ?`,
+      )
+      .get(id) as unknown as MultiTenantAgentBatchRow | undefined;
+    return row ? readMultiTenantAgentBatch(row) : undefined;
+  }
+
+  listWorkspaces(tenantNames: Map<string, string>, tenantId?: string): WorkspaceSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, tenant_id, title, status, instructions, created_at, updated_at
+         FROM workspaces
+         WHERE status != 'archived'
+           ${tenantId ? "AND tenant_id = ?" : ""}
+         ORDER BY updated_at DESC`,
+      )
+      .all(...(tenantId ? [tenantId] : [])) as unknown as WorkspaceRow[];
+    return rows.map((row) => this.readWorkspaceSummary(row, tenantNames));
+  }
+
+  getWorkspace(id: string, tenantNames: Map<string, string>): WorkspaceDetail | undefined {
+    const row = this.getWorkspaceRow(id);
+    if (!row) return undefined;
+    return {
+      ...this.readWorkspaceSummary(row, tenantNames),
+      ...(row.instructions ? { instructions: row.instructions } : {}),
+      evidence: this.listWorkspaceEvidence(id),
+      notes: this.listWorkspaceNotes(id),
+      links: this.listWorkspaceLinks(id),
+    };
+  }
+
+  createWorkspace(input: {
+    id: string;
+    tenantId: string;
+    tenantName?: string;
+    title: string;
+    instructions?: string;
+    now: string;
+    conversationId?: string;
+  }): WorkspaceDetail {
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO workspaces (
+            id, tenant_id, title, status, instructions, created_at, updated_at
+          )
+          VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+        )
+        .run(
+          input.id,
+          input.tenantId,
+          input.title,
+          input.instructions ?? null,
+          input.now,
+          input.now,
+        );
+      if (input.conversationId) {
+        this.linkWorkspaceConversation({
+          id: `wlink_${input.id}`,
+          workspaceId: input.id,
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          title: input.title,
+          now: input.now,
+        });
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    const tenantNames = new Map([[input.tenantId, input.tenantName ?? ""]]);
+    const workspace = this.getWorkspace(input.id, tenantNames);
+    if (!workspace) throw new Error(`Workspace was not created: ${input.id}`);
+    return workspace;
+  }
+
+  updateWorkspace(input: {
+    id: string;
+    title?: string;
+    instructions?: string;
+    status?: WorkspaceStatus;
+    now: string;
+    tenantNames: Map<string, string>;
+  }): WorkspaceDetail {
+    const row = this.getWorkspaceRow(input.id);
+    if (!row) throw new Error(`Workspace not found: ${input.id}`);
+    const nextTitle = input.title ?? row.title;
+    const nextInstructions =
+      input.instructions !== undefined ? input.instructions : row.instructions;
+    const nextStatus = input.status ?? row.status;
+    this.db
+      .prepare(
+        `UPDATE workspaces
+         SET title = ?, instructions = ?, status = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(nextTitle, nextInstructions ?? null, nextStatus, input.now, input.id);
+    const workspace = this.getWorkspace(input.id, input.tenantNames);
+    if (!workspace) throw new Error(`Workspace not found: ${input.id}`);
+    return workspace;
+  }
+
+  archiveWorkspace(id: string, now: string, tenantNames: Map<string, string>): WorkspaceSummary {
+    const detail = this.updateWorkspace({
+      id,
+      status: "archived",
+      now,
+      tenantNames,
+    });
+    return detail;
+  }
+
+  deleteWorkspace(id: string): void {
+    const result = this.db.prepare(`DELETE FROM workspaces WHERE id = ?`).run(id);
+    if (result.changes === 0) {
+      throw new Error(`Workspace not found: ${id}`);
+    }
+  }
+
+  addWorkspaceNote(input: {
+    id: string;
+    workspaceId: string;
+    content: string;
+    now: string;
+  }): WorkspaceNote {
+    const workspace = this.requireWorkspaceRow(input.workspaceId);
+    this.db
+      .prepare(
+        `INSERT INTO workspace_notes (
+          id, workspace_id, tenant_id, content, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(input.id, input.workspaceId, workspace.tenant_id, input.content, input.now, input.now);
+    return {
+      id: input.id,
+      workspaceId: input.workspaceId,
+      tenantId: workspace.tenant_id,
+      content: input.content,
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+  }
+
+  updateWorkspaceNote(id: string, content: string, now: string): WorkspaceNote {
+    const result = this.db
+      .prepare(
+        `UPDATE workspace_notes
+         SET content = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(content, now, id);
+    if (result.changes === 0) throw new Error(`Workspace note not found: ${id}`);
+    const row = this.db
+      .prepare(
+        `SELECT id, workspace_id, tenant_id, content, created_at, updated_at
+         FROM workspace_notes
+         WHERE id = ?`,
+      )
+      .get(id) as unknown as WorkspaceNoteRow | undefined;
+    if (!row) throw new Error(`Workspace note not found: ${id}`);
+    return readWorkspaceNote(row);
+  }
+
+  pinWorkspaceEvidence(input: Omit<WorkspaceEvidence, "createdAt"> & { now: string }): WorkspaceEvidence {
+    const workspace = this.requireWorkspaceRow(input.workspaceId);
+    if (workspace.tenant_id !== input.tenantId) {
+      throw new Error("Workspace evidence tenant does not match the workspace tenant.");
+    }
+    this.db
+      .prepare(
+        `INSERT INTO workspace_evidence (
+          id, workspace_id, tenant_id, title, source_type, source_ref_json,
+          content_json, freshness_json, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        input.workspaceId,
+        input.tenantId,
+        input.title,
+        input.sourceType,
+        input.sourceRef ? JSON.stringify(input.sourceRef) : null,
+        JSON.stringify(input.content),
+        input.freshness ? JSON.stringify(input.freshness) : null,
+        input.now,
+      );
+    this.touchWorkspace(input.workspaceId, input.now);
+    return {
+      id: input.id,
+      workspaceId: input.workspaceId,
+      tenantId: input.tenantId,
+      title: input.title,
+      sourceType: input.sourceType,
+      ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
+      content: input.content,
+      ...(input.freshness ? { freshness: input.freshness } : {}),
+      createdAt: input.now,
+    };
+  }
+
+  linkWorkspaceConversation(input: {
+    id: string;
+    workspaceId: string;
+    tenantId: string;
+    conversationId: string;
+    title: string;
+    now: string;
+  }): WorkspaceLink {
+    return this.insertWorkspaceLink({
+      id: input.id,
+      workspaceId: input.workspaceId,
+      tenantId: input.tenantId,
+      type: "conversation",
+      refId: input.conversationId,
+      title: input.title,
+      now: input.now,
+    });
+  }
+
+  linkWorkspaceRun(input: {
+    id: string;
+    workspaceId: string;
+    tenantId: string;
+    runId: string;
+    title: string;
+    now: string;
+  }): WorkspaceLink {
+    return this.insertWorkspaceLink({
+      id: input.id,
+      workspaceId: input.workspaceId,
+      tenantId: input.tenantId,
+      type: "run",
+      refId: input.runId,
+      title: input.title,
+      now: input.now,
+    });
+  }
+
+  importMultiTenantResultToWorkspaces(input: {
+    job: MultiTenantChatJob;
+    tenantNames: Map<string, string>;
+    mappings: { tenantId: string; workspaceId?: string; title?: string }[];
+    createWorkspaceId: () => string;
+    createEvidenceId: () => string;
+    now: string;
+  }): ImportMultiTenantResultToWorkspacesResult {
+    const workspaces: WorkspaceSummary[] = [];
+    const evidence: WorkspaceEvidence[] = [];
+    this.db.exec("BEGIN");
+    try {
+      for (const mapping of input.mappings) {
+        const tenantRows = input.job.deviceRows.filter(
+          (row) => row.tenantId === mapping.tenantId,
+        );
+        const comparison = input.job.comparisons.find(
+          (row) => row.tenantId === mapping.tenantId,
+        );
+        if (!comparison && tenantRows.length === 0) continue;
+        let workspaceId = mapping.workspaceId;
+        if (!workspaceId) {
+          workspaceId = input.createWorkspaceId();
+          const title =
+            mapping.title ??
+            `${input.tenantNames.get(mapping.tenantId) ?? "Tenant"} · ${input.job.prompt.slice(0, 64)}`;
+          this.db
+            .prepare(
+              `INSERT INTO workspaces (
+                id, tenant_id, title, status, instructions, created_at, updated_at
+              )
+              VALUES (?, ?, ?, 'active', NULL, ?, ?)`,
+            )
+            .run(workspaceId, mapping.tenantId, title, input.now, input.now);
+        }
+        const title = `Multi-tenant chat · ${input.job.prompt.slice(0, 80)}`;
+        const pinned = this.pinWorkspaceEvidence({
+          id: input.createEvidenceId(),
+          workspaceId,
+          tenantId: mapping.tenantId,
+          title,
+          sourceType: "multi-tenant-chat-result",
+          sourceRef: { jobId: input.job.id, prompt: input.job.prompt },
+          content: {
+            comparison,
+            rows: tenantRows,
+          },
+          freshness: {
+            resource: "managedDevices",
+            refreshedAt: comparison?.lastRefresh,
+            rowCount: tenantRows.length,
+            cacheStatus: comparison?.status === "stale" ? "stale" : "cache",
+          },
+          now: input.now,
+        });
+        evidence.push(pinned);
+        const row = this.requireWorkspaceRow(workspaceId);
+        workspaces.push(this.readWorkspaceSummary(row, input.tenantNames));
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { workspaces, evidence };
+  }
+
+  exportWorkspaceDossier(id: string, tenantNames: Map<string, string>): string {
+    const workspace = this.getWorkspace(id, tenantNames);
+    if (!workspace) throw new Error(`Workspace not found: ${id}`);
+    return buildWorkspaceDossier(workspace);
+  }
+
   getSelfTrainingSettings(): SelfTrainingSettings {
     const row = this.db
       .prepare(`SELECT value, updated_at FROM app_settings WHERE key = 'selfTrainingEnabled'`)
@@ -833,6 +1505,9 @@ export class IntelligenceSqliteStore {
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         tenant_id TEXT,
+        scope_kind TEXT,
+        scope_json TEXT,
+        multi_tenant_job_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         pinned_at TEXT
@@ -923,6 +1598,124 @@ export class IntelligenceSqliteStore {
 
       CREATE INDEX IF NOT EXISTS idx_self_training_suggestions_status
         ON self_training_suggestions (status, tenant_id, agent_slug);
+
+      CREATE TABLE IF NOT EXISTS tenant_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        tenant_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS saved_multi_tenant_queries (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        resource_hints_json TEXT NOT NULL,
+        default_scope_json TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS multi_tenant_jobs (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT,
+        prompt TEXT NOT NULL,
+        saved_query_id TEXT,
+        tenant_scope_json TEXT NOT NULL,
+        resolved_tenant_ids_json TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        provider_name TEXT NOT NULL,
+        provider_is_local INTEGER NOT NULL,
+        model TEXT,
+        status TEXT NOT NULL,
+        preflight_json TEXT NOT NULL,
+        progress_json TEXT NOT NULL,
+        summary_json TEXT NOT NULL,
+        comparisons_json TEXT NOT NULL,
+        device_rows_json TEXT NOT NULL,
+        assistant_text TEXT NOT NULL,
+        export_dossier_markdown TEXT NOT NULL,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_multi_tenant_jobs_updated
+        ON multi_tenant_jobs (updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS multi_tenant_agent_batches (
+        id TEXT PRIMARY KEY,
+        agent_slug TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        agent_mode TEXT NOT NULL,
+        tenant_scope_json TEXT NOT NULL,
+        resolved_tenant_ids_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        run_ids_json TEXT NOT NULL,
+        preflight_json TEXT NOT NULL,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_multi_tenant_agent_batches_updated
+        ON multi_tenant_agent_batches (updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS workspaces (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        instructions TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workspaces_tenant_updated
+        ON workspaces (tenant_id, status, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS workspace_evidence (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_ref_json TEXT,
+        content_json TEXT NOT NULL,
+        freshness_json TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_evidence_workspace
+        ON workspace_evidence (workspace_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS workspace_notes (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_notes_workspace
+        ON workspace_notes (workspace_id, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS workspace_links (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(workspace_id, type, ref_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workspace_links_workspace
+        ON workspace_links (workspace_id, type, created_at DESC);
     `);
     this.db
       .prepare(
@@ -938,6 +1731,212 @@ export class IntelligenceSqliteStore {
       "INTEGER NOT NULL DEFAULT 0",
     );
     ensureColumn(this.db, "chat_conversations", "pinned_at", "TEXT");
+    ensureColumn(this.db, "chat_conversations", "scope_kind", "TEXT");
+    ensureColumn(this.db, "chat_conversations", "scope_json", "TEXT");
+    ensureColumn(this.db, "chat_conversations", "multi_tenant_job_id", "TEXT");
+    this.ensureDefaultSavedQueries(new Date().toISOString());
+  }
+
+  private ensureDefaultSavedQueries(now: string): void {
+    const defaults: Omit<SavedMultiTenantQuery, "createdAt" | "updatedAt">[] = [
+      {
+        id: "windows-compliance",
+        title: "Windows compliance by tenant",
+        prompt: "List all compliant and non-compliant Windows devices from every connected tenant.",
+        resourceHints: ["managedDevices"],
+        defaultScope: { kind: "all" },
+        order: 10,
+      },
+      {
+        id: "stale-windows-devices",
+        title: "Stale Windows devices",
+        prompt: "Which Windows devices have not synced in the last 7 days across selected tenants?",
+        resourceHints: ["managedDevices"],
+        defaultScope: { kind: "selected", tenantIds: [] },
+        order: 20,
+      },
+      {
+        id: "bitlocker-gaps",
+        title: "BitLocker gaps",
+        prompt: "Show Windows devices that appear unencrypted or unknown for BitLocker across selected tenants.",
+        resourceHints: ["managedDevices", "managedDeviceEncryptionStates"],
+        defaultScope: { kind: "selected", tenantIds: [] },
+        order: 30,
+      },
+      {
+        id: "risky-sign-ins",
+        title: "Risky sign-ins",
+        prompt: "Summarize recent risky or failed sign-ins across selected tenants.",
+        resourceHints: ["signIns"],
+        defaultScope: { kind: "selected", tenantIds: [] },
+        order: 40,
+      },
+      {
+        id: "conditional-access-gaps",
+        title: "Conditional Access gaps",
+        prompt: "Compare Conditional Access policy coverage across selected tenants.",
+        resourceHints: ["conditionalAccessPolicies"],
+        defaultScope: { kind: "selected", tenantIds: [] },
+        order: 50,
+      },
+    ];
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO saved_multi_tenant_queries (
+        id, title, prompt, resource_hints_json, default_scope_json,
+        sort_order, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const query of defaults) {
+      insert.run(
+        query.id,
+        query.title,
+        query.prompt,
+        JSON.stringify(query.resourceHints),
+        query.defaultScope ? JSON.stringify(query.defaultScope) : null,
+        query.order,
+        now,
+        now,
+      );
+    }
+  }
+
+  private getWorkspaceRow(id: string): WorkspaceRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT id, tenant_id, title, status, instructions, created_at, updated_at
+         FROM workspaces
+         WHERE id = ?`,
+      )
+      .get(id) as unknown as WorkspaceRow | undefined;
+  }
+
+  private requireWorkspaceRow(id: string): WorkspaceRow {
+    const row = this.getWorkspaceRow(id);
+    if (!row) throw new Error(`Workspace not found: ${id}`);
+    return row;
+  }
+
+  private readWorkspaceSummary(
+    row: WorkspaceRow,
+    tenantNames: Map<string, string>,
+  ): WorkspaceSummary {
+    const evidenceCount = this.countRows("workspace_evidence", "workspace_id = ?", [row.id]);
+    const noteCount = this.countRows("workspace_notes", "workspace_id = ?", [row.id]);
+    const conversationCount = this.countRows(
+      "workspace_links",
+      "workspace_id = ? AND type = 'conversation'",
+      [row.id],
+    );
+    const runCount = this.countRows("workspace_links", "workspace_id = ? AND type = 'run'", [row.id]);
+    const freshnessRow = this.db
+      .prepare(
+        `SELECT freshness_json
+         FROM workspace_evidence
+         WHERE workspace_id = ? AND freshness_json IS NOT NULL
+         ORDER BY created_at DESC
+         LIMIT 1`,
+      )
+      .get(row.id) as { freshness_json?: string } | undefined;
+    const freshness = freshnessRow?.freshness_json
+      ? readJson<{ refreshedAt?: string }>(freshnessRow.freshness_json, {}).refreshedAt
+      : undefined;
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      tenantName: tenantNames.get(row.tenant_id),
+      title: row.title,
+      status: row.status,
+      evidenceCount,
+      conversationCount,
+      runCount,
+      noteCount,
+      ...(freshness ? { freshness } : {}),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private listWorkspaceEvidence(workspaceId: string): WorkspaceEvidence[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id, tenant_id, title, source_type, source_ref_json,
+                content_json, freshness_json, created_at
+         FROM workspace_evidence
+         WHERE workspace_id = ?
+         ORDER BY created_at DESC`,
+      )
+      .all(workspaceId) as unknown as WorkspaceEvidenceRow[];
+    return rows.map(readWorkspaceEvidence);
+  }
+
+  private listWorkspaceNotes(workspaceId: string): WorkspaceNote[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id, tenant_id, content, created_at, updated_at
+         FROM workspace_notes
+         WHERE workspace_id = ?
+         ORDER BY updated_at DESC`,
+      )
+      .all(workspaceId) as unknown as WorkspaceNoteRow[];
+    return rows.map(readWorkspaceNote);
+  }
+
+  private listWorkspaceLinks(workspaceId: string): WorkspaceLink[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id, tenant_id, type, ref_id, title, created_at
+         FROM workspace_links
+         WHERE workspace_id = ?
+         ORDER BY created_at DESC`,
+      )
+      .all(workspaceId) as unknown as WorkspaceLinkRow[];
+    return rows.map(readWorkspaceLink);
+  }
+
+  private insertWorkspaceLink(input: {
+    id: string;
+    workspaceId: string;
+    tenantId: string;
+    type: WorkspaceLink["type"];
+    refId: string;
+    title: string;
+    now: string;
+  }): WorkspaceLink {
+    const workspace = this.requireWorkspaceRow(input.workspaceId);
+    if (workspace.tenant_id !== input.tenantId) {
+      throw new Error("Workspace link tenant does not match the workspace tenant.");
+    }
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO workspace_links (
+          id, workspace_id, tenant_id, type, ref_id, title, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        input.workspaceId,
+        input.tenantId,
+        input.type,
+        input.refId,
+        input.title,
+        input.now,
+      );
+    this.touchWorkspace(input.workspaceId, input.now);
+    return {
+      id: input.id,
+      workspaceId: input.workspaceId,
+      tenantId: input.tenantId,
+      type: input.type,
+      refId: input.refId,
+      title: input.title,
+      createdAt: input.now,
+    };
+  }
+
+  private touchWorkspace(id: string, now: string): void {
+    this.db.prepare(`UPDATE workspaces SET updated_at = ? WHERE id = ?`).run(now, id);
   }
 }
 
@@ -946,6 +1945,9 @@ function readConversation(row: ConversationRow): IntuneChatConversation {
     id: row.id,
     title: row.title,
     tenantId: row.tenant_id ?? undefined,
+    scopeKind: row.scope_kind === "multi-tenant" ? "multi-tenant" : "single-tenant",
+    tenantScope: row.scope_json ? readJson<TenantScope | undefined>(row.scope_json, undefined) : undefined,
+    multiTenantJobId: row.multi_tenant_job_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     pinnedAt: row.pinned_at ?? undefined,
@@ -982,6 +1984,182 @@ function readSuggestion(row: SuggestionRow): SelfTrainingSuggestion {
     createdAt: row.created_at,
     decidedAt: row.decided_at ?? undefined,
   };
+}
+
+function readTenantGroup(row: TenantGroupRow): TenantGroup {
+  return {
+    id: row.id,
+    name: row.name,
+    tenantIds: readJson<string[]>(row.tenant_ids_json, []),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function readSavedQuery(row: SavedQueryRow): SavedMultiTenantQuery {
+  return {
+    id: row.id,
+    title: row.title,
+    prompt: row.prompt,
+    resourceHints: readJson<GraphCacheResourceKind[]>(row.resource_hints_json, []),
+    defaultScope: row.default_scope_json
+      ? readJson<TenantScope | undefined>(row.default_scope_json, undefined)
+      : undefined,
+    order: row.sort_order,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function readMultiTenantJob(row: MultiTenantJobRow): MultiTenantChatJob {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id ?? undefined,
+    prompt: row.prompt,
+    savedQueryId: row.saved_query_id ?? undefined,
+    tenantScope: readJson<TenantScope>(row.tenant_scope_json, { kind: "active" }),
+    resolvedTenantIds: readJson<string[]>(row.resolved_tenant_ids_json, []),
+    providerId: row.provider_id as MultiTenantChatJob["providerId"],
+    providerName: row.provider_name,
+    providerIsLocal: row.provider_is_local === 1,
+    model: row.model ?? undefined,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    preflight: readJson<MultiTenantChatJob["preflight"]>(
+      row.preflight_json,
+      {} as MultiTenantChatJob["preflight"],
+    ),
+    progress: readJson<MultiTenantChatJob["progress"]>(row.progress_json, []),
+    summary: readJson<MultiTenantChatJob["summary"]>(row.summary_json, {
+      tenantsScanned: 0,
+      failedTenants: 0,
+      skippedTenants: 0,
+      staleTenants: 0,
+      windowsDevices: 0,
+      compliant: 0,
+      nonCompliant: 0,
+      unknown: 0,
+    }),
+    comparisons: readJson<MultiTenantChatJob["comparisons"]>(row.comparisons_json, []),
+    deviceRows: readJson<MultiTenantChatJob["deviceRows"]>(row.device_rows_json, []),
+    assistantText: row.assistant_text,
+    exportDossierMarkdown: row.export_dossier_markdown,
+    error: row.error ?? undefined,
+  };
+}
+
+function readMultiTenantAgentBatch(
+  row: MultiTenantAgentBatchRow,
+): MultiTenantAgentBatch {
+  return {
+    id: row.id,
+    agentSlug: row.agent_slug,
+    agentName: row.agent_name,
+    agentMode: row.agent_mode,
+    tenantScope: readJson<TenantScope>(row.tenant_scope_json, { kind: "active" }),
+    resolvedTenantIds: readJson<string[]>(row.resolved_tenant_ids_json, []),
+    status: row.status,
+    runIds: readJson<string[]>(row.run_ids_json, []),
+    preflight: readJson<MultiTenantAgentBatch["preflight"]>(
+      row.preflight_json,
+      {} as MultiTenantAgentBatch["preflight"],
+    ),
+    error: row.error ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function readWorkspaceEvidence(row: WorkspaceEvidenceRow): WorkspaceEvidence {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    tenantId: row.tenant_id,
+    title: row.title,
+    sourceType: row.source_type,
+    sourceRef: row.source_ref_json
+      ? readJson<Record<string, unknown>>(row.source_ref_json, {})
+      : undefined,
+    content: readJson<unknown>(row.content_json, {}),
+    freshness: row.freshness_json
+      ? readJson<WorkspaceEvidence["freshness"]>(row.freshness_json, undefined)
+      : undefined,
+    createdAt: row.created_at,
+  };
+}
+
+function readWorkspaceNote(row: WorkspaceNoteRow): WorkspaceNote {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    tenantId: row.tenant_id,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function readWorkspaceLink(row: WorkspaceLinkRow): WorkspaceLink {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    tenantId: row.tenant_id,
+    type: row.type,
+    refId: row.ref_id,
+    title: row.title,
+    createdAt: row.created_at,
+  };
+}
+
+function buildWorkspaceDossier(workspace: WorkspaceDetail): string {
+  const lines = [
+    `# ${workspace.title}`,
+    "",
+    `Tenant: ${workspace.tenantName ?? workspace.tenantId}`,
+    `Status: ${workspace.status}`,
+    `Updated: ${workspace.updatedAt}`,
+    "",
+    "## Notes",
+    "",
+  ];
+  if (workspace.notes.length === 0) {
+    lines.push("No notes recorded.", "");
+  } else {
+    for (const note of workspace.notes) {
+      lines.push(`- ${note.updatedAt}: ${note.content.replace(/\s+/g, " ").trim()}`);
+    }
+    lines.push("");
+  }
+  lines.push("## Pinned Evidence", "");
+  if (workspace.evidence.length === 0) {
+    lines.push("No evidence pinned.", "");
+  } else {
+    for (const evidence of workspace.evidence) {
+      lines.push(`### ${evidence.title}`);
+      lines.push(`- Source: ${evidence.sourceType}`);
+      lines.push(`- Created: ${evidence.createdAt}`);
+      if (evidence.freshness?.refreshedAt) {
+        lines.push(`- Refreshed: ${evidence.freshness.refreshedAt}`);
+      }
+      lines.push("");
+      lines.push("```json");
+      lines.push(JSON.stringify(evidence.content, null, 2));
+      lines.push("```", "");
+    }
+  }
+  lines.push("## Linked Context", "");
+  if (workspace.links.length === 0) {
+    lines.push("No linked conversations or runs.");
+  } else {
+    for (const link of workspace.links) {
+      lines.push(`- ${link.type}: ${link.title} (${link.refId})`);
+    }
+  }
+  if (workspace.instructions) {
+    lines.push("", "## Local Instructions", "", workspace.instructions);
+  }
+  return `${lines.join("\n")}\n`;
 }
 
 function graphCacheScheduleKey(tenantId: string): string {

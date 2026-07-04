@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
@@ -14,6 +14,7 @@ import {
   IconCheck,
   IconClose,
   IconDownload,
+  IconHardDrive,
   IconPlay,
   IconPlus,
   IconSearch,
@@ -25,14 +26,27 @@ import {
   resolveProviderDefaultModel,
   type GraphCacheStatus,
   type GraphCacheResourceKind,
+  type ImportMultiTenantResultToWorkspacesResult,
   type IntuneChatAgentSuggestion,
   type IntuneChatConversation,
   type IntuneChatMessage,
   type IntuneChatProgressStep,
   type IntuneChatSource,
   type IntuneChatStreamEvent,
+  type MultiTenantChatJob,
+  type MultiTenantChatStreamEvent,
+  type SavedMultiTenantQuery,
+  type TenantRecord,
+  type TenantGroup,
+  type TenantScope,
+  type TenantScopePreflight,
+  type RunMultiTenantChatInput,
   type ProviderId,
   type SendIntuneChatMessageInput,
+  type WorkspaceDetail,
+  type WorkspacePromptContextInput,
+  type WorkspacePromptContextSummary,
+  type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
 
@@ -112,14 +126,41 @@ type HostedChatConsentPrompt = {
   providerId: ProviderId;
   providerName: string;
   model?: string;
+  workspaceContext?: WorkspacePromptContextInput;
+  workspaceContextSummary?: WorkspacePromptContextSummary;
 };
 
 type HostedProviderConsentInput = NonNullable<
   SendIntuneChatMessageInput["hostedProviderConsent"]
 >;
 
+type MultiTenantScopeMode = "active" | "selected" | "all";
+
+type MultiTenantFilterState = {
+  tenantId: string;
+  complianceState: string;
+  readiness: string;
+  os: string;
+  staleOnly: boolean;
+};
+
+const defaultMultiTenantFilters: MultiTenantFilterState = {
+  tenantId: "all",
+  complianceState: "all",
+  readiness: "all",
+  os: "all",
+  staleOnly: false,
+};
+
+type HostedBatchConsentPrompt = {
+  preflight: TenantScopePreflight;
+  content: string;
+};
+
+const focusRingClass =
+  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
 const collapsedRailControlClass =
-  "grid h-9 w-9 place-items-center rounded-full text-center leading-none transition-colors";
+  `grid h-9 w-9 place-items-center rounded-full text-center leading-none transition-colors ${focusRingClass}`;
 
 export default function IntuneChat() {
   const navigate = useNavigate();
@@ -144,6 +185,39 @@ export default function IntuneChat() {
   const [hostedConsentPrompt, setHostedConsentPrompt] =
     useState<HostedChatConsentPrompt | null>(null);
   const [rememberHostedConsent, setRememberHostedConsent] = useState(true);
+  const [tenantGroups, setTenantGroups] = useState<TenantGroup[]>([]);
+  const [savedQueries, setSavedQueries] = useState<SavedMultiTenantQuery[]>([]);
+  const [scopeMode, setScopeMode] = useState<MultiTenantScopeMode>("active");
+  const [selectedTenantIds, setSelectedTenantIds] = useState<string[]>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [selectedSavedQueryId, setSelectedSavedQueryId] = useState<string>("");
+  const [multiTenantPreflight, setMultiTenantPreflight] =
+    useState<TenantScopePreflight | null>(null);
+  const [preflightPrompt, setPreflightPrompt] = useState("");
+  const [runningMultiTenant, setRunningMultiTenant] = useState(false);
+  const [activeMultiTenantJob, setActiveMultiTenantJob] =
+    useState<MultiTenantChatJob | null>(null);
+  const [hostedBatchConsentPrompt, setHostedBatchConsentPrompt] =
+    useState<HostedBatchConsentPrompt | null>(null);
+  const [multiTenantJobsByConversationId, setMultiTenantJobsByConversationId] =
+    useState<Record<string, MultiTenantChatJob>>({});
+  const [multiTenantFilters, setMultiTenantFilters] =
+    useState<MultiTenantFilterState>(defaultMultiTenantFilters);
+  const [expandedTenantIds, setExpandedTenantIds] = useState<string[]>([]);
+  const [splitJob, setSplitJob] = useState<MultiTenantChatJob | null>(null);
+  const [splitResult, setSplitResult] =
+    useState<ImportMultiTenantResultToWorkspacesResult | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [attachedWorkspaceId, setAttachedWorkspaceId] = useState("");
+  const [attachedWorkspace, setAttachedWorkspace] = useState<WorkspaceDetail | null>(null);
+  const [selectedWorkspaceEvidenceIds, setSelectedWorkspaceEvidenceIds] = useState<string[]>([]);
+  const [selectedWorkspaceNoteIds, setSelectedWorkspaceNoteIds] = useState<string[]>([]);
+  const [includeWorkspaceInstructions, setIncludeWorkspaceInstructions] = useState(true);
+  const [pinTarget, setPinTarget] = useState<IntuneChatMessage | null>(null);
+  const [pinWorkspaceId, setPinWorkspaceId] = useState("");
+  const [selectedBatchAgentSlug, setSelectedBatchAgentSlug] = useState("");
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
+  const [groupName, setGroupName] = useState("");
   const [renameTarget, setRenameTarget] = useState<IntuneChatConversation | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<IntuneChatConversation | null>(null);
@@ -166,6 +240,115 @@ export default function IntuneChat() {
     provider,
     state.activeModelByProviderId,
   ).model;
+  const workspaceContextSummary = useMemo<WorkspacePromptContextSummary | undefined>(() => {
+    if (!attachedWorkspace) return undefined;
+    const includesInstructions =
+      includeWorkspaceInstructions && Boolean(attachedWorkspace.instructions?.trim());
+    if (
+      !includesInstructions &&
+      selectedWorkspaceEvidenceIds.length === 0 &&
+      selectedWorkspaceNoteIds.length === 0
+    ) {
+      return undefined;
+    }
+    return {
+      workspaceId: attachedWorkspace.id,
+      workspaceTitle: attachedWorkspace.title,
+      tenantId: attachedWorkspace.tenantId,
+      evidenceCount: selectedWorkspaceEvidenceIds.length,
+      noteCount: selectedWorkspaceNoteIds.length,
+      includesInstructions,
+    };
+  }, [
+    attachedWorkspace,
+    includeWorkspaceInstructions,
+    selectedWorkspaceEvidenceIds.length,
+    selectedWorkspaceNoteIds.length,
+  ]);
+
+  const buildWorkspaceContextInput = (): WorkspacePromptContextInput | undefined => {
+    if (!attachedWorkspace || !workspaceContextSummary) return undefined;
+    return {
+      workspaceId: attachedWorkspace.id,
+      ...(selectedWorkspaceEvidenceIds.length > 0
+        ? { evidenceIds: selectedWorkspaceEvidenceIds }
+        : {}),
+      ...(selectedWorkspaceNoteIds.length > 0
+        ? { noteIds: selectedWorkspaceNoteIds }
+        : {}),
+      ...(workspaceContextSummary.includesInstructions ? { includeInstructions: true } : {}),
+    };
+  };
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    void Promise.all([
+      api.listTenantGroups(),
+      api.listSavedMultiTenantQueries(),
+    ])
+      .then(([groups, queries]) => {
+        setTenantGroups(groups);
+        setSavedQueries(queries);
+      })
+      .catch((caught) =>
+        setError(caught instanceof Error ? caught.message : String(caught)),
+      );
+  }, []);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api || !state.activeTenantId) {
+      setWorkspaces([]);
+      setAttachedWorkspaceId("");
+      setAttachedWorkspace(null);
+      return;
+    }
+    void api
+      .listWorkspaces(state.activeTenantId)
+      .then((nextWorkspaces) => {
+        setWorkspaces(nextWorkspaces);
+        setAttachedWorkspaceId((current) =>
+          current && nextWorkspaces.some((workspace) => workspace.id === current)
+            ? current
+            : "",
+        );
+      })
+      .catch((caught) =>
+        setError(caught instanceof Error ? caught.message : String(caught)),
+      );
+  }, [state.activeTenantId]);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api || !attachedWorkspaceId) {
+      setAttachedWorkspace(null);
+      setSelectedWorkspaceEvidenceIds([]);
+      setSelectedWorkspaceNoteIds([]);
+      return;
+    }
+    void api
+      .getWorkspace(attachedWorkspaceId)
+      .then((workspace) => {
+        setAttachedWorkspace(workspace ?? null);
+        setSelectedWorkspaceEvidenceIds((current) =>
+          current.filter((id) => workspace?.evidence.some((entry) => entry.id === id)),
+        );
+        setSelectedWorkspaceNoteIds((current) =>
+          current.filter((id) => workspace?.notes.some((entry) => entry.id === id)),
+        );
+      })
+      .catch((caught) =>
+        setError(caught instanceof Error ? caught.message : String(caught)),
+      );
+  }, [attachedWorkspaceId]);
+
+  useEffect(() => {
+    if (scopeMode !== "selected" || selectedTenantIds.length > 0) return;
+    if (state.activeTenantId) {
+      setSelectedTenantIds([state.activeTenantId]);
+    }
+  }, [scopeMode, selectedTenantIds.length, state.activeTenantId]);
 
   const loadShell = async (
     preferredActiveConversationId?: string | null,
@@ -224,13 +407,27 @@ export default function IntuneChat() {
       setMessages([]);
       return;
     }
+    const activeConversation = conversations.find(
+      (conversation) => conversation.id === activeConversationId,
+    );
     void api
       .getIntuneChatMessages(activeConversationId)
-      .then(setMessages)
+      .then(async (nextMessages) => {
+        setMessages(nextMessages);
+        if (activeConversation?.multiTenantJobId) {
+          const job = await api.getMultiTenantChatJob(activeConversation.multiTenantJobId);
+          if (job?.conversationId) {
+            setMultiTenantJobsByConversationId((current) => ({
+              ...current,
+              [job.conversationId!]: job,
+            }));
+          }
+        }
+      })
       .catch((caught) =>
         setError(caught instanceof Error ? caught.message : String(caught)),
       );
-  }, [activeConversationId, sending]);
+  }, [activeConversationId, conversations, sending]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
@@ -292,6 +489,12 @@ export default function IntuneChat() {
     setChatProgress(null);
     setProgressAssistantMessageId(null);
     setOptimisticDraft(null);
+    setScopeMode("active");
+    setSelectedSavedQueryId("");
+    setMultiTenantPreflight(null);
+    setPreflightPrompt("");
+    setActiveMultiTenantJob(null);
+    setBatchNotice(null);
   };
 
   const handleStopGeneration = async () => {
@@ -312,7 +515,18 @@ export default function IntuneChat() {
     const content = (contentOverride ?? input).trim();
     const api = window.openAdminOS;
     if (!api || !content || sending) return;
-    if (provider && activeTenant && requiresHostedChatConsent(provider, activeTenant)) {
+    if (shouldUseMultiTenantFlow(content, scopeMode)) {
+      await prepareMultiTenantReview(content);
+      return;
+    }
+    const workspaceContext = buildWorkspaceContextInput();
+    const contextSummary = workspaceContext ? workspaceContextSummary : undefined;
+    if (
+      provider &&
+      activeTenant &&
+      !provider.isLocal &&
+      (requiresHostedChatConsent(provider, activeTenant) || Boolean(workspaceContext))
+    ) {
       setHostedConsentPrompt({
         content,
         ...(conversationIdOverride ? { conversationId: conversationIdOverride } : {}),
@@ -321,6 +535,8 @@ export default function IntuneChat() {
         providerId: provider.id,
         providerName: provider.name,
         ...(activeModel ? { model: activeModel } : {}),
+        ...(workspaceContext ? { workspaceContext } : {}),
+        ...(contextSummary ? { workspaceContextSummary: contextSummary } : {}),
       });
       setRememberHostedConsent(true);
       return;
@@ -329,13 +545,115 @@ export default function IntuneChat() {
       content,
       rememberedHostedProviderConsent(provider, activeTenant),
       conversationIdOverride,
+      workspaceContext,
     );
   };
+
+  const buildTenantScope = (content: string): TenantScope => {
+    if (scopeMode === "all" || detectsAllTenantPrompt(content)) {
+      return {
+        kind: "all",
+        ...(selectedGroupIds.length > 0 ? { groupIds: selectedGroupIds } : {}),
+      };
+    }
+    if (scopeMode === "selected") {
+      return {
+        kind: "selected",
+        tenantIds: selectedTenantIds,
+        ...(selectedGroupIds.length > 0 ? { groupIds: selectedGroupIds } : {}),
+      };
+    }
+    return { kind: "active" };
+  };
+
+  const prepareMultiTenantReview = async (content: string) => {
+    const api = window.openAdminOS;
+    if (!api || runningMultiTenant) return;
+    setError(null);
+    setNotice(null);
+    setMultiTenantPreflight(null);
+    setPreflightPrompt(content);
+    try {
+      const preflight = await api.preflightMultiTenantIntuneChat({
+        prompt: content,
+        tenantScope: buildTenantScope(content),
+        ...(selectedSavedQueryId ? { savedQueryId: selectedSavedQueryId } : {}),
+      });
+      setMultiTenantPreflight(preflight);
+      setInput(content);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const runMultiTenantQuery = async (
+    consent?: NonNullable<RunMultiTenantChatInput["hostedProviderConsent"]>,
+  ) => {
+    const api = window.openAdminOS;
+    const preflight = multiTenantPreflight;
+    const content = preflightPrompt.trim();
+    if (!api || !preflight || !content || runningMultiTenant) return;
+    if (!preflight.providerIsLocal && !consent) {
+      setHostedBatchConsentPrompt({ preflight, content });
+      return;
+    }
+    setRunningMultiTenant(true);
+    setError(null);
+    setNotice(null);
+    setBatchNotice(null);
+    setActiveMultiTenantJob(null);
+    try {
+      const result = await api.streamMultiTenantIntuneChat(
+        {
+          prompt: content,
+          tenantScope: preflight.tenantScope,
+          savedQueryId: selectedSavedQueryId || undefined,
+          refreshIfStale: true,
+          ...(consent ? { hostedProviderConsent: consent } : {}),
+        },
+        (event: MultiTenantChatStreamEvent) => {
+          if (event.type === "started" || event.type === "progress") {
+            setActiveMultiTenantJob(event.job);
+          }
+          if (event.type === "completed") {
+            setActiveMultiTenantJob(event.result.job);
+          }
+          if (event.type === "cancelled") {
+            setActiveMultiTenantJob(event.job);
+            setNotice("Multi-tenant query stopped.");
+          }
+          if (event.type === "failed") {
+            setError(event.error);
+          }
+        },
+      );
+      if (result.job.conversationId) {
+        setMultiTenantJobsByConversationId((current) => ({
+          ...current,
+          [result.job.conversationId!]: result.job,
+        }));
+        setExpandedTenantIds(result.job.comparisons.slice(0, 1).map((row) => row.tenantId));
+      }
+      setMultiTenantPreflight(null);
+      setPreflightPrompt("");
+      setInput("");
+      setMessages([result.userMessage, result.assistantMessage]);
+      setActiveConversationId(result.conversation.id);
+      await loadShell(result.conversation.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setRunningMultiTenant(false);
+      setActiveMultiTenantJob(null);
+    }
+  };
+
 
   const executeSend = async (
     content: string,
     hostedProviderConsent?: HostedProviderConsentInput,
     conversationIdOverride?: string,
+    workspaceContext?: WorkspacePromptContextInput,
   ) => {
     const api = window.openAdminOS;
     if (!api || !content || sending) return;
@@ -390,6 +708,7 @@ export default function IntuneChat() {
           content,
           refreshIfStale: true,
           ...(hostedProviderConsent ? { hostedProviderConsent } : {}),
+          ...(workspaceContext ? { workspaceContext } : {}),
         },
         (event) => {
           if (event.type === "started") {
@@ -523,9 +842,149 @@ export default function IntuneChat() {
         pending.tenantId,
         pending.providerId,
         rememberHostedConsent,
+        pending.workspaceContextSummary,
       ),
       pending.conversationId,
+      pending.workspaceContext,
     );
+  };
+
+  const confirmHostedBatchConsentAndRun = async () => {
+    const prompt = hostedBatchConsentPrompt;
+    if (!prompt) return;
+    setHostedBatchConsentPrompt(null);
+    await runMultiTenantQuery({
+      tenantIds: prompt.preflight.resolvedTenantIds,
+      providerId: prompt.preflight.providerId,
+      acknowledgedAt: new Date().toISOString(),
+      remember: true,
+    });
+  };
+
+  const applySavedQuery = (query: SavedMultiTenantQuery) => {
+    setSelectedSavedQueryId(query.id);
+    setInput(query.prompt);
+    if (query.defaultScope?.kind === "all") {
+      setScopeMode("all");
+    } else if (query.defaultScope?.kind === "selected") {
+      setScopeMode("selected");
+      if (query.defaultScope.tenantIds.length > 0) {
+        setSelectedTenantIds(query.defaultScope.tenantIds);
+      }
+    }
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const toggleTenantSelection = (tenantId: string) => {
+    setSelectedTenantIds((current) =>
+      current.includes(tenantId)
+        ? current.filter((id) => id !== tenantId)
+        : [...current, tenantId],
+    );
+  };
+
+  const toggleGroupSelection = (groupId: string) => {
+    setSelectedGroupIds((current) =>
+      current.includes(groupId)
+        ? current.filter((id) => id !== groupId)
+        : [...current, groupId],
+    );
+  };
+
+  const saveCurrentTenantGroup = async () => {
+    const api = window.openAdminOS;
+    if (!api || !groupName.trim()) return;
+    const tenantIds = multiTenantPreflight?.resolvedTenantIds ?? selectedTenantIds;
+    if (tenantIds.length === 0) {
+      setError("Select at least one tenant before saving a group.");
+      return;
+    }
+    try {
+      const group = await api.saveTenantGroup({
+        name: groupName,
+        tenantIds,
+      });
+      setTenantGroups(await api.listTenantGroups());
+      setSelectedGroupIds((current) => [...new Set([...current, group.id])]);
+      setGroupName("");
+      setNotice(`Saved tenant group ${group.name}.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const queueMultiTenantAgentBatch = async () => {
+    const api = window.openAdminOS;
+    const preflight = multiTenantPreflight;
+    if (!api || !preflight || !selectedBatchAgentSlug || runningMultiTenant) return;
+    setError(null);
+    setBatchNotice(null);
+    try {
+      const result = await api.queueMultiTenantAgentBatch({
+        agentSlug: selectedBatchAgentSlug,
+        tenantScope: preflight.tenantScope,
+        savedQueryId: selectedSavedQueryId || undefined,
+        prompt: preflight.prompt,
+      });
+      setBatchNotice(
+        `Queued ${result.runs.length} tenant-pinned run${result.runs.length === 1 ? "" : "s"}.`,
+      );
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const exportMultiTenantJob = async (
+    job: MultiTenantChatJob,
+    format: "md" | "json" | "csv",
+  ) => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    const content =
+      format === "json"
+        ? `${JSON.stringify(job, null, 2)}\n`
+        : format === "csv"
+          ? buildDeviceCsv(job)
+          : job.exportDossierMarkdown;
+    const extension = format === "json" ? "json" : format === "csv" ? "csv" : "md";
+    const result = await api.saveTextFile({
+      suggestedName: `${safeFileName(job.prompt)}.${extension}`,
+      content,
+      filters: [
+        {
+          name: format === "json" ? "JSON" : format === "csv" ? "CSV" : "Markdown",
+          extensions: [extension],
+        },
+      ],
+    });
+    if (!result.canceled) {
+      setNotice(result.filePath ? `Exported result to ${result.filePath}.` : "Exported result.");
+    }
+  };
+
+  const importSplitJob = async () => {
+    const api = window.openAdminOS;
+    const job = splitJob;
+    if (!api || !job) return;
+    try {
+      const result = await api.importMultiTenantResultToWorkspaces({
+        jobId: job.id,
+        tenantMappings: job.comparisons
+          .filter((tenant) => tenant.windowsDevices > 0 || tenant.status === "stale")
+          .map((tenant) => ({
+            tenantId: tenant.tenantId,
+            title: `${tenant.tenantName} · ${job.prompt.slice(0, 80)}`,
+          })),
+      });
+      setSplitResult(result);
+      setNotice(
+        `Created ${result.evidence.length} tenant-specific workspace evidence entr${result.evidence.length === 1 ? "y" : "ies"}.`,
+      );
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
   };
 
   const handleRenameConversation = async () => {
@@ -657,6 +1116,26 @@ export default function IntuneChat() {
     }
   };
 
+  const handleCreateWorkspaceFromConversation = async () => {
+    const api = window.openAdminOS;
+    if (!api || !activeConversation || activeConversation.scopeKind === "multi-tenant") return;
+    setError(null);
+    setNotice(null);
+    try {
+      const workspace = await api.createWorkspace({
+        title: activeConversation.title,
+        ...(activeConversation.tenantId ? { tenantId: activeConversation.tenantId } : {}),
+        conversationId: activeConversation.id,
+      });
+      setNotice(`Created workspace ${workspace.title} and linked this conversation.`);
+      if (activeTenant) {
+        setWorkspaces(await api.listWorkspaces(activeTenant.id));
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
   const handleCopyMessage = async (message: IntuneChatMessage) => {
     const text = message.content.trim();
     if (!text) return;
@@ -670,6 +1149,52 @@ export default function IntuneChat() {
         setCopiedMessageId(null);
         copiedClearTimerRef.current = null;
       }, 1600);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const handlePinMessageToWorkspace = async () => {
+    const api = window.openAdminOS;
+    const message = pinTarget;
+    const workspaceId = pinWorkspaceId || workspaces[0]?.id;
+    if (!api || !message || !workspaceId || !activeTenant) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const workspace = workspaces.find((entry) => entry.id === workspaceId);
+      const evidence = await api.pinWorkspaceEvidence({
+        workspaceId,
+        tenantId: activeTenant.id,
+        title: `Chat answer · ${formatDateTime(message.createdAt)}`,
+        sourceType: "chat-message",
+        sourceRef: {
+          conversationId: message.conversationId,
+          messageId: message.id,
+        },
+        content: {
+          role: message.role,
+          content: message.content,
+          sources: message.sources ?? [],
+          agentSuggestions: message.agentSuggestions ?? [],
+        },
+        ...(message.sources?.[0]?.refreshedAt
+          ? {
+              freshness: {
+                resource: message.sources[0].resource,
+                refreshedAt: message.sources[0].refreshedAt,
+                rowCount: message.sources[0].rows,
+                cacheStatus: message.sources[0].source,
+              },
+            }
+          : {}),
+      });
+      setNotice(
+        `Pinned evidence to ${workspace?.title ?? "workspace"} as ${evidence.title}.`,
+      );
+      setPinTarget(null);
+      setPinWorkspaceId("");
+      setWorkspaces(await api.listWorkspaces(activeTenant.id));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -724,7 +1249,7 @@ export default function IntuneChat() {
       type="button"
       onClick={() => setActiveConversationId(conversation.id)}
       onContextMenu={(event) => openConversationContextMenu(event, conversation)}
-      className={`mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
+      className={`mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors ${focusRingClass} ${
         activeConversationId === conversation.id
           ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
           : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
@@ -795,7 +1320,7 @@ export default function IntuneChat() {
                   title="Hide chat history"
                   aria-label="Hide chat history"
                   onClick={() => setSidebarCollapsed(true)}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                  className={`flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
                 >
                   <IconArrowLeft size={13} />
                 </button>
@@ -976,6 +1501,17 @@ export default function IntuneChat() {
           <div className="flex shrink-0 items-center gap-2">
             {activeConversation && (
               <>
+                {activeConversation.scopeKind !== "multi-tenant" && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    leadingIcon={<IconHardDrive size={12} />}
+                    disabled={sending}
+                    onClick={() => void handleCreateWorkspaceFromConversation()}
+                  >
+                    Workspace
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1023,7 +1559,30 @@ export default function IntuneChat() {
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-6 py-8">
-            {displayedMessages.length === 0 ? (
+            {multiTenantPreflight ? (
+              <div className="flex flex-1 flex-col justify-center gap-6 py-8">
+                <ScopeReviewCard
+                  preflight={multiTenantPreflight}
+                  progressJob={activeMultiTenantJob}
+                  groupName={groupName}
+                  onGroupNameChange={setGroupName}
+                  onSaveGroup={() => void saveCurrentTenantGroup()}
+                  onCancel={() => {
+                    setMultiTenantPreflight(null);
+                    setPreflightPrompt("");
+                    setActiveMultiTenantJob(null);
+                    setBatchNotice(null);
+                  }}
+                  onRun={() => void runMultiTenantQuery()}
+                  running={runningMultiTenant}
+                  installedAgents={state.installedAgents}
+                  selectedBatchAgentSlug={selectedBatchAgentSlug}
+                  onSelectedBatchAgentSlugChange={setSelectedBatchAgentSlug}
+                  onQueueBatch={() => void queueMultiTenantAgentBatch()}
+                  batchNotice={batchNotice}
+                />
+              </div>
+            ) : displayedMessages.length === 0 ? (
               chatProgress ? (
                 <div className="flex flex-1 flex-col justify-center gap-6 py-16">
                   <ChatProgressCard progress={chatProgress} />
@@ -1036,23 +1595,57 @@ export default function IntuneChat() {
               )
             ) : (
               <div className="flex flex-1 flex-col gap-6">
-                {displayedMessages.map((message) => (
-                <ChatMessageBubble
-                    key={message.id}
-                    message={message}
-                    progress={message.id === progressAssistantMessageId ? chatProgress : null}
-                    copied={message.id === copiedMessageId}
-                    runningAgentSlug={runningAgentSlug}
-                    regenerateDisabled={
-                      sending ||
-                      !previousUserPromptForMessage(displayedMessages, message)
-                    }
-                    onCopy={() => void handleCopyMessage(message)}
-                    onEditPrompt={() => handleEditPrompt(message)}
-                    onRegenerate={() => void handleRegenerateResponse(message)}
-                    onRunAgent={handleRunAgent}
-                  />
-                ))}
+                {displayedMessages.map((message) => {
+                  const job = multiTenantJobsByConversationId[message.conversationId];
+                  return (
+                    <div key={message.id} className="space-y-4">
+                      <ChatMessageBubble
+                        message={message}
+                        progress={message.id === progressAssistantMessageId ? chatProgress : null}
+                        copied={message.id === copiedMessageId}
+                        runningAgentSlug={runningAgentSlug}
+                        regenerateDisabled={
+                          sending ||
+                          !previousUserPromptForMessage(displayedMessages, message)
+                        }
+                        onCopy={() => void handleCopyMessage(message)}
+                        onEditPrompt={() => handleEditPrompt(message)}
+                        onRegenerate={() => void handleRegenerateResponse(message)}
+                        onRunAgent={handleRunAgent}
+                        pinDisabled={
+                          !activeTenant ||
+                          activeConversation?.scopeKind === "multi-tenant" ||
+                          workspaces.length === 0 ||
+                          message.status !== "completed"
+                        }
+                        onPin={() => {
+                          setPinTarget(message);
+                          setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
+                        }}
+                      />
+                      {message.role === "assistant" && job && (
+                        <MultiTenantResultArtifact
+                          job={job}
+                          filters={multiTenantFilters}
+                          onFiltersChange={setMultiTenantFilters}
+                          expandedTenantIds={expandedTenantIds}
+                          onToggleTenant={(tenantId) =>
+                            setExpandedTenantIds((current) =>
+                              current.includes(tenantId)
+                                ? current.filter((id) => id !== tenantId)
+                                : [...current, tenantId],
+                            )
+                          }
+                          onExport={(format) => void exportMultiTenantJob(job, format)}
+                          onSplit={() => {
+                            setSplitJob(job);
+                            setSplitResult(null);
+                          }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
                 {sending && chatProgress && !progressMessageVisible && (
                   <ChatProgressCard progress={chatProgress} />
                 )}
@@ -1074,6 +1667,46 @@ export default function IntuneChat() {
                 {notice}
               </div>
             )}
+            <MultiTenantComposerControls
+              scopeMode={scopeMode}
+              onScopeModeChange={setScopeMode}
+              tenants={state.tenants}
+              activeTenantId={state.activeTenantId}
+              selectedTenantIds={selectedTenantIds}
+              onToggleTenant={toggleTenantSelection}
+              tenantGroups={tenantGroups}
+              selectedGroupIds={selectedGroupIds}
+              onToggleGroup={toggleGroupSelection}
+              savedQueries={savedQueries}
+              selectedSavedQueryId={selectedSavedQueryId}
+              onSavedQuery={applySavedQuery}
+              disabled={sending || runningMultiTenant}
+            />
+            <WorkspaceContextControls
+              workspaces={workspaces}
+              workspace={attachedWorkspace}
+              attachedWorkspaceId={attachedWorkspaceId}
+              onWorkspaceChange={setAttachedWorkspaceId}
+              selectedEvidenceIds={selectedWorkspaceEvidenceIds}
+              onToggleEvidence={(id) =>
+                setSelectedWorkspaceEvidenceIds((current) =>
+                  current.includes(id)
+                    ? current.filter((entry) => entry !== id)
+                    : [...current, id],
+                )
+              }
+              selectedNoteIds={selectedWorkspaceNoteIds}
+              onToggleNote={(id) =>
+                setSelectedWorkspaceNoteIds((current) =>
+                  current.includes(id)
+                    ? current.filter((entry) => entry !== id)
+                    : [...current, id],
+                )
+              }
+              includeInstructions={includeWorkspaceInstructions}
+              onIncludeInstructionsChange={setIncludeWorkspaceInstructions}
+              disabled={sending || runningMultiTenant}
+            />
             <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
               <textarea
                 ref={composerRef}
@@ -1094,9 +1727,11 @@ export default function IntuneChat() {
               />
               <div className="flex items-center justify-between gap-3 px-1 pb-1">
                 <div className="truncate text-[11px] text-[var(--color-text-muted)]">
-                  {provider?.isLocal
-                    ? "Tenant context stays on this device with the selected local provider."
-                    : "Retrieved tenant context is sent to the selected hosted provider."}
+                  {workspaceContextSummary
+                    ? `Workspace context selected: ${workspaceContextSummary.evidenceCount} evidence, ${workspaceContextSummary.noteCount} notes.`
+                    : provider?.isLocal
+                      ? "Tenant context stays on this device with the selected local provider."
+                      : "Retrieved tenant context is sent to the selected hosted provider."}
                 </div>
                 {sending ? (
                   <Button
@@ -1129,6 +1764,31 @@ export default function IntuneChat() {
         onRememberChange={setRememberHostedConsent}
         onClose={() => setHostedConsentPrompt(null)}
         onConfirm={() => void confirmHostedConsentAndSend()}
+      />
+      <HostedBatchConsentModal
+        prompt={hostedBatchConsentPrompt}
+        onClose={() => setHostedBatchConsentPrompt(null)}
+        onConfirm={() => void confirmHostedBatchConsentAndRun()}
+      />
+      <SplitToWorkspacesModal
+        job={splitJob}
+        result={splitResult}
+        onClose={() => {
+          setSplitJob(null);
+          setSplitResult(null);
+        }}
+        onConfirm={() => void importSplitJob()}
+      />
+      <PinMessageToWorkspaceModal
+        message={pinTarget}
+        workspaces={workspaces}
+        selectedWorkspaceId={pinWorkspaceId}
+        onWorkspaceChange={setPinWorkspaceId}
+        onClose={() => {
+          setPinTarget(null);
+          setPinWorkspaceId("");
+        }}
+        onConfirm={() => void handlePinMessageToWorkspace()}
       />
       <RenameConversationModal
         conversation={renameTarget}
@@ -1205,6 +1865,1022 @@ function previousUserPromptForMessage(
   return null;
 }
 
+function MultiTenantComposerControls({
+  scopeMode,
+  onScopeModeChange,
+  tenants,
+  activeTenantId,
+  selectedTenantIds,
+  onToggleTenant,
+  tenantGroups,
+  selectedGroupIds,
+  onToggleGroup,
+  savedQueries,
+  selectedSavedQueryId,
+  onSavedQuery,
+  disabled,
+}: {
+  scopeMode: MultiTenantScopeMode;
+  onScopeModeChange: (mode: MultiTenantScopeMode) => void;
+  tenants: TenantRecord[];
+  activeTenantId?: string;
+  selectedTenantIds: string[];
+  onToggleTenant: (tenantId: string) => void;
+  tenantGroups: TenantGroup[];
+  selectedGroupIds: string[];
+  onToggleGroup: (groupId: string) => void;
+  savedQueries: SavedMultiTenantQuery[];
+  selectedSavedQueryId: string;
+  onSavedQuery: (query: SavedMultiTenantQuery) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="mb-3 rounded-xl bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          Scope
+        </span>
+        {(["active", "selected", "all"] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            disabled={disabled}
+            onClick={() => onScopeModeChange(mode)}
+            className={`h-7 rounded-md px-2.5 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRingClass} ${
+              scopeMode === mode
+                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
+                : "bg-[var(--color-bg)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            {mode === "active"
+              ? "Active tenant"
+              : mode === "selected"
+                ? "Selected tenants"
+                : "All connected tenants"}
+          </button>
+        ))}
+        <div className="ml-auto min-w-[180px]">
+          <select
+            value={selectedSavedQueryId}
+            disabled={disabled}
+            onChange={(event) => {
+              const query = savedQueries.find((entry) => entry.id === event.target.value);
+              if (query) onSavedQuery(query);
+            }}
+            className="h-7 w-full rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+            aria-label="Saved multi-tenant query"
+          >
+            <option value="">Saved queries</option>
+            {savedQueries.map((query) => (
+              <option key={query.id} value={query.id}>
+                {query.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {scopeMode === "selected" && (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <div>
+            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Tenants
+            </div>
+            <div className="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto pr-1">
+              {tenants.map((tenant) => (
+                <button
+                  key={tenant.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onToggleTenant(tenant.id)}
+                  className={`rounded-md px-2 py-1 text-[11px] transition-colors ${focusRingClass} ${
+                    selectedTenantIds.includes(tenant.id)
+                      ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                      : tenant.id === activeTenantId
+                        ? "bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+                        : "bg-[var(--color-bg)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {tenant.displayName}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Groups
+            </div>
+            <div className="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto pr-1">
+              {tenantGroups.length === 0 ? (
+                <span className="text-[11px] text-[var(--color-text-muted)]">
+                  Groups can be saved during scope review.
+                </span>
+              ) : (
+                tenantGroups.map((group) => (
+                  <button
+                    key={group.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onToggleGroup(group.id)}
+                    className={`rounded-md px-2 py-1 text-[11px] transition-colors ${focusRingClass} ${
+                      selectedGroupIds.includes(group.id)
+                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                        : "bg-[var(--color-bg)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                  >
+                    {group.name}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkspaceContextControls({
+  workspaces,
+  workspace,
+  attachedWorkspaceId,
+  onWorkspaceChange,
+  selectedEvidenceIds,
+  onToggleEvidence,
+  selectedNoteIds,
+  onToggleNote,
+  includeInstructions,
+  onIncludeInstructionsChange,
+  disabled,
+}: {
+  workspaces: WorkspaceSummary[];
+  workspace: WorkspaceDetail | null;
+  attachedWorkspaceId: string;
+  onWorkspaceChange: (id: string) => void;
+  selectedEvidenceIds: string[];
+  onToggleEvidence: (id: string) => void;
+  selectedNoteIds: string[];
+  onToggleNote: (id: string) => void;
+  includeInstructions: boolean;
+  onIncludeInstructionsChange: (include: boolean) => void;
+  disabled: boolean;
+}) {
+  if (workspaces.length === 0) return null;
+  const hasAttachment =
+    Boolean(workspace) &&
+    (selectedEvidenceIds.length > 0 ||
+      selectedNoteIds.length > 0 ||
+      (includeInstructions && Boolean(workspace?.instructions?.trim())));
+  return (
+    <div className="mb-3 rounded-xl bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          Workspace context
+        </span>
+        <select
+          value={attachedWorkspaceId}
+          disabled={disabled}
+          onChange={(event) => onWorkspaceChange(event.target.value)}
+          className="h-7 min-w-[220px] rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="Attach workspace context"
+        >
+          <option value="">No workspace attached</option>
+          {workspaces.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.title}
+            </option>
+          ))}
+        </select>
+        {hasAttachment && <Pill tone="accent">Attached</Pill>}
+        {!attachedWorkspaceId && (
+          <div className="flex flex-wrap gap-1.5">
+            {workspaces.slice(0, 3).map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => onWorkspaceChange(entry.id)}
+                className="rounded-md bg-[var(--color-bg)] px-2 py-1 text-[11px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {entry.title}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {workspace && (
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <div className="rounded-lg bg-[var(--color-bg)] p-2 ring-1 ring-[var(--color-border-soft)]">
+            <label className="flex cursor-pointer items-start gap-2 text-[11.5px] leading-5 text-[var(--color-text-soft)]">
+              <input
+                type="checkbox"
+                checked={includeInstructions && Boolean(workspace.instructions?.trim())}
+                disabled={disabled || !workspace.instructions?.trim()}
+                onChange={(event) => onIncludeInstructionsChange(event.target.checked)}
+                className="mt-1 h-3.5 w-3.5 accent-[var(--color-accent)]"
+              />
+              <span>
+                Instructions
+                <span className="block text-[10.5px] text-[var(--color-text-muted)]">
+                  {workspace.instructions?.trim()
+                    ? "Include workspace instructions"
+                    : "No instructions saved"}
+                </span>
+              </span>
+            </label>
+          </div>
+          <div className="rounded-lg bg-[var(--color-bg)] p-2 ring-1 ring-[var(--color-border-soft)]">
+            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Evidence
+            </div>
+            <div className="max-h-20 space-y-1 overflow-y-auto pr-1">
+              {workspace.evidence.length === 0 ? (
+                <span className="text-[11px] text-[var(--color-text-muted)]">
+                  No evidence pinned
+                </span>
+              ) : (
+                workspace.evidence.slice(0, 12).map((entry) => (
+                  <label
+                    key={entry.id}
+                    className="flex cursor-pointer items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedEvidenceIds.includes(entry.id)}
+                      disabled={disabled}
+                      onChange={() => onToggleEvidence(entry.id)}
+                      className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                    />
+                    <span className="min-w-0 truncate">{entry.title}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+          <div className="rounded-lg bg-[var(--color-bg)] p-2 ring-1 ring-[var(--color-border-soft)]">
+            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Notes
+            </div>
+            <div className="max-h-20 space-y-1 overflow-y-auto pr-1">
+              {workspace.notes.length === 0 ? (
+                <span className="text-[11px] text-[var(--color-text-muted)]">
+                  No notes saved
+                </span>
+              ) : (
+                workspace.notes.slice(0, 12).map((note) => (
+                  <label
+                    key={note.id}
+                    className="flex cursor-pointer items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedNoteIds.includes(note.id)}
+                      disabled={disabled}
+                      onChange={() => onToggleNote(note.id)}
+                      className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                    />
+                    <span className="min-w-0 truncate">{note.content}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScopeReviewCard({
+  preflight,
+  progressJob,
+  groupName,
+  onGroupNameChange,
+  onSaveGroup,
+  onCancel,
+  onRun,
+  running,
+  installedAgents,
+  selectedBatchAgentSlug,
+  onSelectedBatchAgentSlugChange,
+  onQueueBatch,
+  batchNotice,
+}: {
+  preflight: TenantScopePreflight;
+  progressJob: MultiTenantChatJob | null;
+  groupName: string;
+  onGroupNameChange: (value: string) => void;
+  onSaveGroup: () => void;
+  onCancel: () => void;
+  onRun: () => void;
+  running: boolean;
+  installedAgents: { slug: string; name: string; mode: "read" | "write" }[];
+  selectedBatchAgentSlug: string;
+  onSelectedBatchAgentSlugChange: (slug: string) => void;
+  onQueueBatch: () => void;
+  batchNotice: string | null;
+}) {
+  const blocked = preflight.tenants.filter((tenant) =>
+    ["expired", "missing-scopes", "throttled", "failed"].includes(tenant.status),
+  );
+  const selectedBatchAgent = installedAgents.find(
+    (agent) => agent.slug === selectedBatchAgentSlug,
+  );
+  return (
+    <div className="mx-auto w-full max-w-[920px] rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
+      <div className="border-b border-[var(--color-border-soft)] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] font-semibold text-[var(--color-text)]">
+              Review multi-tenant scope
+            </div>
+            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              {preflight.resolvedTenantIds.length} tenant{preflight.resolvedTenantIds.length === 1 ? "" : "s"} · {preflight.providerName}
+              {preflight.model ? ` · ${preflight.model}` : ""}
+            </div>
+          </div>
+          <Pill tone={preflight.providerIsLocal ? "success" : "warning"}>
+            {preflight.providerIsLocal ? "Local provider" : "Hosted confirmation required"}
+          </Pill>
+        </div>
+        <div className="mt-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          {preflight.prompt}
+        </div>
+      </div>
+      <div className="grid gap-3 p-4 lg:grid-cols-[1fr_260px]">
+        <div className="min-w-0 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
+          <table className="w-full table-fixed text-left text-[12px]">
+            <thead className="bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              <tr>
+                <th className="px-3 py-2">Tenant</th>
+                <th className="w-28 px-3 py-2">Readiness</th>
+                <th className="w-36 px-3 py-2">Freshness</th>
+                <th className="px-3 py-2">Recovery</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preflight.tenants.map((tenant) => (
+                <tr key={tenant.tenantId} className="border-t border-[var(--color-border-soft)]">
+                  <td className="min-w-0 px-3 py-2">
+                    <div className="truncate font-medium text-[var(--color-text)]" title={tenant.tenantName}>
+                      {tenant.tenantName}
+                    </div>
+                    <div className="truncate font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                      {tenant.username ?? tenant.tenantId}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <ReadinessPill status={tenant.status} />
+                  </td>
+                  <td className="px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+                    {tenant.cacheFreshness ? formatDateTime(tenant.cacheFreshness) : "No cache"}
+                  </td>
+                  <td className="px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                    {tenant.recovery}
+                    {tenant.missingScopes.length > 0 && (
+                      <div className="mt-1 font-mono text-[10px] text-[var(--color-warning)]">
+                        {tenant.missingScopes.slice(0, 2).join(", ")}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="space-y-3">
+          {progressJob && (
+            <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                  Run progress
+                </div>
+                <Pill tone={progressJob.status === "partial" ? "warning" : "accent"}>
+                  {progressJob.status}
+                </Pill>
+              </div>
+              <div className="space-y-1.5">
+                {progressJob.progress.map((entry) => (
+                  <div
+                    key={entry.tenantId}
+                    className="flex items-center justify-between gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[11px] ring-1 ring-[var(--color-border-soft)]"
+                  >
+                    <span className="min-w-0 truncate text-[var(--color-text-soft)]">
+                      {entry.tenantName}
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+                      {entry.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Resources
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {preflight.resources.map((resource) => (
+                <Pill key={resource}>{chatResourceLabel(resource)}</Pill>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Save group
+            </div>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={groupName}
+                onChange={(event) => onGroupNameChange(event.target.value)}
+                placeholder="Tenant group name"
+                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+              />
+              <Button size="sm" variant="secondary" disabled={!groupName.trim()} onClick={onSaveGroup}>
+                Save
+              </Button>
+            </div>
+          </div>
+          <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Agent batch
+            </div>
+            <div className="mt-2 flex gap-2">
+              <select
+                value={selectedBatchAgentSlug}
+                onChange={(event) => onSelectedBatchAgentSlugChange(event.target.value)}
+                disabled={running || installedAgents.length === 0}
+                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Agent to queue for selected tenants"
+              >
+                <option value="">Select agent</option>
+                {installedAgents.map((agent) => (
+                  <option key={agent.slug} value={agent.slug}>
+                    {agent.name} · {agent.mode}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={!selectedBatchAgentSlug || running || !preflight.canRun}
+                onClick={onQueueBatch}
+              >
+                Queue
+              </Button>
+            </div>
+            <p className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+              Queues one tenant-pinned run per ready tenant.
+              {selectedBatchAgent?.mode === "write"
+                ? " Write runs still pause for per-run typed confirmation."
+                : " Read runs start with the normal run history."}
+            </p>
+            {batchNotice && (
+              <div className="mt-2 rounded-md bg-[var(--color-success-soft)] px-2 py-1.5 text-[11px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+                {batchNotice}
+              </div>
+            )}
+          </div>
+          {blocked.length > 0 && (
+            <div className="rounded-lg bg-[var(--color-warning-soft)] p-3 text-[11.5px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+              {blocked.length} tenant{blocked.length === 1 ? "" : "s"} will be skipped unless recovered.
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={onCancel} disabled={running}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={onRun} disabled={!preflight.canRun || running}>
+              {running ? "Running" : "Run read-only query"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReadinessPill({ status }: { status: string }) {
+  const tone =
+    status === "ready"
+      ? "success"
+      : status === "stale"
+        ? "warning"
+        : status === "skipped"
+          ? "default"
+          : "danger";
+  return <Pill tone={tone}>{statusLabel(status)}</Pill>;
+}
+
+function MultiTenantResultArtifact({
+  job,
+  filters,
+  onFiltersChange,
+  expandedTenantIds,
+  onToggleTenant,
+  onExport,
+  onSplit,
+}: {
+  job: MultiTenantChatJob;
+  filters: MultiTenantFilterState;
+  onFiltersChange: (filters: MultiTenantFilterState) => void;
+  expandedTenantIds: string[];
+  onToggleTenant: (tenantId: string) => void;
+  onExport: (format: "md" | "json" | "csv") => void;
+  onSplit: () => void;
+}) {
+  const filteredRows = job.deviceRows.filter((row) => {
+    if (filters.tenantId !== "all" && row.tenantId !== filters.tenantId) return false;
+    if (
+      filters.complianceState !== "all" &&
+      normalizeComplianceLabel(row.complianceState) !== filters.complianceState
+    ) {
+      return false;
+    }
+    if (filters.os !== "all" && row.operatingSystem !== filters.os) return false;
+    if (filters.staleOnly && !row.stale) return false;
+    return true;
+  });
+  const visibleComparisons = job.comparisons.filter((comparison) => {
+    if (filters.tenantId !== "all" && comparison.tenantId !== filters.tenantId) return false;
+    if (filters.readiness !== "all" && comparison.status !== filters.readiness) return false;
+    return true;
+  });
+  const osOptions = [...new Set(job.deviceRows.map((row) => row.operatingSystem))].sort();
+  return (
+    <div className="relative left-1/2 w-[min(100%,calc(100vw-380px))] -translate-x-1/2 rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
+      <div className="border-b border-[var(--color-border-soft)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-[12px] font-semibold text-[var(--color-text)]">
+              Multi-tenant result
+            </div>
+            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              {job.providerName}{job.model ? ` · ${job.model}` : ""} · {formatDateTime(job.updatedAt)}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="ghost" onClick={() => onExport("csv")}>
+              CSV
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onExport("json")}>
+              JSON
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onExport("md")}>
+              Dossier
+            </Button>
+            <Button size="sm" variant="secondary" leadingIcon={<IconHardDrive size={12} />} onClick={onSplit}>
+              Split to Workspaces
+            </Button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryTile label="Tenants" value={job.summary.tenantsScanned} />
+          <SummaryTile label="Windows devices" value={job.summary.windowsDevices} />
+          <SummaryTile label="Compliant" value={job.summary.compliant} tone="success" />
+          <SummaryTile label="Non-compliant" value={job.summary.nonCompliant} tone="danger" />
+        </div>
+        {job.progress.length > 0 && (
+          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+            {job.progress.map((entry) => (
+              <div
+                key={entry.tenantId}
+                className="flex min-w-0 items-start justify-between gap-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-[11.5px] font-medium text-[var(--color-text)]" title={entry.tenantName}>
+                    {entry.tenantName}
+                  </div>
+                  {entry.detail && (
+                    <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]" title={entry.detail}>
+                      {entry.detail}
+                    </div>
+                  )}
+                </div>
+                <Pill
+                  tone={
+                    entry.status === "ready"
+                      ? "success"
+                      : entry.status === "failed"
+                        ? "danger"
+                        : entry.status === "skipped"
+                          ? "default"
+                          : "warning"
+                  }
+                >
+                  {statusLabel(entry.status)}
+                </Pill>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="border-b border-[var(--color-border-soft)] p-3">
+        <div className="flex flex-wrap gap-2">
+          <ArtifactSelect
+            label="Tenant"
+            value={filters.tenantId}
+            onChange={(tenantId) => onFiltersChange({ ...filters, tenantId })}
+            options={[
+              { value: "all", label: "All tenants" },
+              ...job.comparisons.map((tenant) => ({
+                value: tenant.tenantId,
+                label: tenant.tenantName,
+              })),
+            ]}
+          />
+          <ArtifactSelect
+            label="Readiness"
+            value={filters.readiness}
+            onChange={(readiness) => onFiltersChange({ ...filters, readiness })}
+            options={[
+              { value: "all", label: "All readiness" },
+              { value: "ready", label: "Ready" },
+              { value: "stale", label: "Stale" },
+              { value: "failed", label: "Failed" },
+              { value: "skipped", label: "Skipped" },
+            ]}
+          />
+          <ArtifactSelect
+            label="Compliance"
+            value={filters.complianceState}
+            onChange={(complianceState) => onFiltersChange({ ...filters, complianceState })}
+            options={[
+              { value: "all", label: "All compliance" },
+              { value: "compliant", label: "Compliant" },
+              { value: "non-compliant", label: "Non-compliant" },
+              { value: "unknown", label: "Unknown" },
+            ]}
+          />
+          <ArtifactSelect
+            label="OS"
+            value={filters.os}
+            onChange={(os) => onFiltersChange({ ...filters, os })}
+            options={[
+              { value: "all", label: "All OS" },
+              ...osOptions.map((os) => ({ value: os, label: os })),
+            ]}
+          />
+          <label className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            <input
+              type="checkbox"
+              checked={filters.staleOnly}
+              onChange={(event) => onFiltersChange({ ...filters, staleOnly: event.target.checked })}
+              className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+            />
+            Stale only
+          </label>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[880px] w-full text-left text-[12px]">
+          <thead className="bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            <tr>
+              <th className="sticky left-0 z-10 bg-[var(--color-bg)] px-3 py-2" aria-sort="ascending">Tenant</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2 text-right">Windows</th>
+              <th className="px-3 py-2 text-right">Compliant</th>
+              <th className="px-3 py-2 text-right">Non-compliant</th>
+              <th className="px-3 py-2 text-right">Unknown</th>
+              <th className="px-3 py-2">Last refresh</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleComparisons.map((tenant) => {
+              const tenantRows = filteredRows.filter((row) => row.tenantId === tenant.tenantId);
+              const expanded = expandedTenantIds.includes(tenant.tenantId);
+              return (
+                <Fragment key={tenant.tenantId}>
+                  <tr className="border-t border-[var(--color-border-soft)]">
+                    <td className="sticky left-0 z-10 bg-[var(--color-bg-raised)] px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => onToggleTenant(tenant.tenantId)}
+                        className={`inline-flex max-w-[240px] items-center gap-1.5 truncate text-left font-medium text-[var(--color-text)] hover:text-[var(--color-accent)] ${focusRingClass}`}
+                        aria-expanded={expanded}
+                      >
+                        {expanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+                        <span className="truncate" title={tenant.tenantName}>
+                          {tenant.tenantName}
+                        </span>
+                      </button>
+                    </td>
+                    <td className="px-3 py-2"><ReadinessPill status={tenant.status} /></td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums">{tenant.windowsDevices}</td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums text-[var(--color-success)]">{tenant.compliant}</td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums text-[var(--color-danger)]">{tenant.nonCompliant}</td>
+                    <td className="px-3 py-2 text-right font-mono tabular-nums">{tenant.unknown}</td>
+                    <td className="px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+                      {tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "Unknown"}
+                    </td>
+                  </tr>
+                  {expanded && (
+                    <tr>
+                      <td colSpan={7} className="bg-[var(--color-bg)] px-3 py-3">
+                        <DeviceRowsTable rows={tenantRows} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SummaryTile({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  tone?: "default" | "success" | "danger";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "text-[var(--color-success)]"
+      : tone === "danger"
+        ? "text-[var(--color-danger)]"
+        : "text-[var(--color-text)]";
+  return (
+    <div className="rounded-lg bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <div className={`mt-1 font-mono text-[18px] font-semibold tabular-nums ${toneClass}`}>
+        {value.toLocaleString()}
+      </div>
+    </div>
+  );
+}
+
+function ArtifactSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-6 min-w-[120px] bg-transparent text-[var(--color-text-soft)] outline-none"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        No device rows match the current filters.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-lg ring-1 ring-[var(--color-border-soft)]">
+      <table className="min-w-[920px] w-full text-left text-[11.5px]">
+        <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <tr>
+            <th className="px-3 py-2" aria-sort="none">Device</th>
+            <th className="px-3 py-2">Compliance</th>
+            <th className="px-3 py-2">OS</th>
+            <th className="px-3 py-2">Version</th>
+            <th className="px-3 py-2">Last sync</th>
+            <th className="px-3 py-2">Owner</th>
+            <th className="px-3 py-2">Freshness</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 250).map((row) => (
+            <tr key={`${row.tenantId}:${row.deviceId ?? row.deviceName}`} className="border-t border-[var(--color-border-soft)]">
+              <td className="max-w-[220px] truncate px-3 py-2 text-[var(--color-text)]" title={row.deviceName}>
+                {row.deviceName}
+              </td>
+              <td className="px-3 py-2">
+                <Pill tone={complianceTone(row.complianceState)}>
+                  {normalizeComplianceLabel(row.complianceState)}
+                </Pill>
+              </td>
+              <td className="px-3 py-2 text-[var(--color-text-soft)]">{row.operatingSystem}</td>
+              <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{row.osVersion ?? "unknown"}</td>
+              <td className="px-3 py-2 text-[var(--color-text-muted)]">
+                {row.lastSyncDateTime ? formatDateTime(row.lastSyncDateTime) : "unknown"}
+              </td>
+              <td className="max-w-[220px] truncate px-3 py-2 text-[var(--color-text-muted)]" title={row.owner}>
+                {row.owner ?? "unknown"}
+              </td>
+              <td className="px-3 py-2 text-[var(--color-text-muted)]">
+                {row.sourceRefreshedAt ? formatDateTime(row.sourceRefreshedAt) : "unknown"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length > 250 && (
+        <div className="border-t border-[var(--color-border-soft)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+          Showing first 250 matching rows. Export the dossier for the full local result.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HostedBatchConsentModal({
+  prompt,
+  onClose,
+  onConfirm,
+}: {
+  prompt: HostedBatchConsentPrompt | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={Boolean(prompt)} onClose={onClose} size="lg">
+      <ModalHeader
+        title="Send multi-tenant context to hosted provider"
+        subtitle={prompt?.preflight.providerName ?? "Hosted provider"}
+        badge={<Pill tone="warning">Hosted batch</Pill>}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          Retrieved context from {prompt?.preflight.resolvedTenantIds.length ?? 0} tenant
+          {(prompt?.preflight.resolvedTenantIds.length ?? 0) === 1 ? "" : "s"} will be sent to {prompt?.preflight.providerName}.
+        </div>
+        <div className="max-h-52 overflow-y-auto rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
+          {prompt?.preflight.tenants.map((tenant) => (
+            <div key={tenant.tenantId} className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 last:border-b-0">
+              <div className="min-w-0">
+                <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                  {tenant.tenantName}
+                </div>
+                <div className="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
+                  {tenant.username ?? tenant.tenantId}
+                </div>
+              </div>
+              <ReadinessPill status={tenant.status} />
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onConfirm}>
+            Confirm batch
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function SplitToWorkspacesModal({
+  job,
+  result,
+  onClose,
+  onConfirm,
+}: {
+  job: MultiTenantChatJob | null;
+  result: ImportMultiTenantResultToWorkspacesResult | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const tenants =
+    job?.comparisons.filter((tenant) => tenant.windowsDevices > 0 || tenant.status === "stale") ??
+    [];
+  return (
+    <Modal open={Boolean(job)} onClose={onClose} size="lg">
+      <ModalHeader
+        title="Split result to Workspaces"
+        subtitle="One tenant-specific evidence entry per workspace"
+        badge={<Pill tone="accent">Single-tenant evidence</Pill>}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          This does not create a mixed-tenant workspace. Each row below becomes local evidence for that tenant only.
+        </div>
+        <div className="overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
+          {tenants.map((tenant) => (
+            <div key={tenant.tenantId} className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 text-[12px] last:border-b-0">
+              <div className="min-w-0">
+                <div className="truncate font-medium text-[var(--color-text)]">{tenant.tenantName}</div>
+                <div className="text-[10.5px] text-[var(--color-text-muted)]">
+                  New workspace evidence · {tenant.windowsDevices} Windows devices
+                </div>
+              </div>
+              <ReadinessPill status={tenant.status} />
+              <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+                {tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "no cache"}
+              </span>
+            </div>
+          ))}
+        </div>
+        {result && (
+          <div className="rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+            Created {result.evidence.length} evidence entr{result.evidence.length === 1 ? "y" : "ies"} across {result.workspaces.length} workspace{result.workspaces.length === 1 ? "" : "s"}.
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+          <Button variant="primary" disabled={tenants.length === 0 || Boolean(result)} onClick={onConfirm}>
+            Create evidence
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function PinMessageToWorkspaceModal({
+  message,
+  workspaces,
+  selectedWorkspaceId,
+  onWorkspaceChange,
+  onClose,
+  onConfirm,
+}: {
+  message: IntuneChatMessage | null;
+  workspaces: WorkspaceSummary[];
+  selectedWorkspaceId: string;
+  onWorkspaceChange: (workspaceId: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={Boolean(message)} onClose={onClose} size="md">
+      <ModalHeader
+        title="Pin answer to workspace"
+        subtitle="Creates tenant-scoped evidence from this chat answer"
+        badge={<Pill tone="accent">Workspace evidence</Pill>}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          This stores the answer and visible sources in the selected workspace. Multi-tenant answers must be split into tenant-specific workspace evidence first.
+        </div>
+        <label className="block">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            Workspace
+          </span>
+          <select
+            value={selectedWorkspaceId}
+            onChange={(event) => onWorkspaceChange(event.target.value)}
+            className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+            aria-label="Workspace for pinned chat answer"
+          >
+            {workspaces.map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>
+                {workspace.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        {message && (
+          <div className="max-h-36 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 text-[12px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+            {message.content.slice(0, 600)}
+            {message.content.length > 600 ? "..." : ""}
+          </div>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!selectedWorkspaceId || workspaces.length === 0}
+            onClick={onConfirm}
+          >
+            Pin answer
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function HostedChatConsentModal({
   prompt,
   remember,
@@ -1236,6 +2912,12 @@ function HostedChatConsentModal({
           <ConsentFact label="Provider" value={prompt?.providerName ?? "Hosted provider"} />
           <ConsentFact label="Model" value={prompt?.model ?? "Provider default"} />
           <ConsentFact label="Stored data" value="Chat history and Graph cache stay local" />
+          {prompt?.workspaceContextSummary && (
+            <ConsentFact
+              label="Workspace"
+              value={`${prompt.workspaceContextSummary.workspaceTitle} · ${prompt.workspaceContextSummary.evidenceCount} evidence · ${prompt.workspaceContextSummary.noteCount} notes`}
+            />
+          )}
         </div>
         <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
           <div className="flex items-start gap-3">
@@ -1251,6 +2933,9 @@ function HostedChatConsentModal({
                 and answer instructions are sent to the hosted provider for this
                 response. Raw cache tables, chat history storage, and self-training
                 files remain on this device.
+                {prompt?.workspaceContextSummary
+                  ? " Selected workspace evidence, notes, and instructions are included in this response prompt."
+                  : ""}
               </p>
             </div>
           </div>
@@ -1412,7 +3097,7 @@ function ConversationContextMenu({
         type="button"
         role="menuitem"
         onClick={onDelete}
-        className="flex w-full items-center justify-between px-3 py-2 text-left text-[12.5px] text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-soft)]"
+        className={`flex w-full items-center justify-between px-3 py-2 text-left text-[12.5px] text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-soft)] ${focusRingClass}`}
       >
         Delete conversation
       </button>
@@ -1441,12 +3126,14 @@ function createHostedProviderConsent(
   tenantId: string,
   providerId: ProviderId,
   remember: boolean,
+  workspaceContext?: WorkspacePromptContextSummary,
 ): HostedProviderConsentInput {
   return {
     tenantId,
     providerId,
     acknowledgedAt: new Date().toISOString(),
     ...(remember ? { remember: true } : {}),
+    ...(workspaceContext ? { workspaceContext } : {}),
   };
 }
 
@@ -1682,7 +3369,7 @@ function EmptyChat({
             <button
               key={group.label}
               onClick={() => setActiveGroup(group.label)}
-              className={`rounded-lg px-3 py-1.5 text-[11.5px] transition-colors ${
+              className={`rounded-lg px-3 py-1.5 text-[11.5px] transition-colors ${focusRingClass} ${
                 activeGroup === group.label
                   ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
                   : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:text-[var(--color-text)]"
@@ -1698,7 +3385,7 @@ function EmptyChat({
               key={prompt}
               disabled={disabled}
               onClick={() => onPrompt(prompt)}
-              className="rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-[13px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+              className={`rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-[13px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50 ${focusRingClass}`}
             >
               {prompt}
             </button>
@@ -1719,6 +3406,8 @@ function ChatMessageBubble({
   onEditPrompt,
   onRegenerate,
   onRunAgent,
+  pinDisabled,
+  onPin,
 }: {
   message: IntuneChatMessage;
   progress: ChatProgressState | null;
@@ -1733,6 +3422,8 @@ function ChatMessageBubble({
     conversationId: string,
     messageId: string,
   ) => Promise<void>;
+  pinDisabled: boolean;
+  onPin: () => void;
 }) {
   const isUser = message.role === "user";
   return (
@@ -1807,7 +3498,7 @@ function ChatMessageBubble({
             aria-label={isUser ? "Copy prompt" : "Copy response"}
             disabled={message.content.trim().length === 0}
             onClick={onCopy}
-            className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40"
+            className={`inline-flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40 ${focusRingClass}`}
           >
             <IconCopy size={11} />
             <span>{copied ? "Copied" : "Copy"}</span>
@@ -1818,22 +3509,34 @@ function ChatMessageBubble({
               title="Edit and resend prompt"
               aria-label="Edit and resend prompt"
               onClick={onEditPrompt}
-              className="inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+              className={`inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
             >
               Edit
             </button>
           )}
           {!isUser && !progress && (
-            <button
-              type="button"
-              title="Regenerate response"
-              aria-label="Regenerate response"
-              disabled={regenerateDisabled}
-              onClick={onRegenerate}
-              className="inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Regenerate
-            </button>
+            <>
+              <button
+                type="button"
+                title="Pin response to workspace"
+                aria-label="Pin response to workspace"
+                disabled={pinDisabled}
+                onClick={onPin}
+                className="inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Pin answer
+              </button>
+              <button
+                type="button"
+                title="Regenerate response"
+                aria-label="Regenerate response"
+                disabled={regenerateDisabled}
+                onClick={onRegenerate}
+                className={`inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40 ${focusRingClass}`}
+              >
+                Regenerate
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -2058,6 +3761,66 @@ function capExportContent(content: string): string {
   const maxLength = 1_900_000;
   if (content.length <= maxLength) return content;
   return `${content.slice(0, maxLength)}\n\n_Export truncated by OpenAdminOS because it exceeded the local save limit._\n`;
+}
+
+function detectsAllTenantPrompt(prompt: string): boolean {
+  return /\b(all tenants|every tenant|every connected tenant|all customers|all clients|across tenants|from every tenant)\b/i.test(prompt);
+}
+
+function shouldUseMultiTenantFlow(prompt: string, scopeMode: MultiTenantScopeMode): boolean {
+  return scopeMode !== "active" || detectsAllTenantPrompt(prompt);
+}
+
+function statusLabel(status: string): string {
+  return status
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function normalizeComplianceLabel(value: string): "compliant" | "non-compliant" | "unknown" {
+  const normalized = value.toLowerCase().replace(/[\s_]+/g, "-");
+  if (normalized === "compliant") return "compliant";
+  if (normalized === "noncompliant" || normalized === "non-compliant") {
+    return "non-compliant";
+  }
+  return "unknown";
+}
+
+function complianceTone(value: string): "success" | "danger" | "warning" {
+  const normalized = normalizeComplianceLabel(value);
+  if (normalized === "compliant") return "success";
+  if (normalized === "non-compliant") return "danger";
+  return "warning";
+}
+
+function buildDeviceCsv(job: MultiTenantChatJob): string {
+  const header = [
+    "tenant",
+    "device",
+    "compliance",
+    "operating_system",
+    "os_version",
+    "last_sync",
+    "owner",
+    "source_refreshed_at",
+  ];
+  const rows = job.deviceRows.map((row) => [
+    row.tenantName,
+    row.deviceName,
+    row.complianceState,
+    row.operatingSystem,
+    row.osVersion ?? "",
+    row.lastSyncDateTime ?? "",
+    row.owner ?? "",
+    row.sourceRefreshedAt ?? "",
+  ]);
+  return `${[header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n")}\n`;
+}
+
+function csvCell(value: string): string {
+  if (!/[",\n]/.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function safeFileName(value: string): string {
