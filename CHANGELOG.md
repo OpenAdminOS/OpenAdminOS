@@ -5,6 +5,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+- Marketing landing page rework: new hero ("AI agents for your Microsoft 365 tenant. Run locally, approved by you."), pre-rendered Remotion hero demo video with reduced-motion poster fallback, traction strip with live GitHub stars and real agent/install stats, three-step "How it works" section replacing four overlapping sections, top-5 real registry agents with install counts, and a trimmed FAQ; plus a new top-level `remotion/` video project.
 
 ### Changed
 
