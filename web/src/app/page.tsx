@@ -1,11 +1,7 @@
 import { type Metadata } from "next";
 import Link from "next/link";
 
-import {
-  AGENT_DISPLAY,
-  getAgentStatsSummary,
-  getTopDisplayAgents,
-} from "~/lib/stats/summary";
+import { getAgentStatsSummary } from "~/lib/stats/summary";
 
 import { AmbientVideo } from "./AmbientVideo";
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
@@ -118,19 +114,6 @@ export default async function HomePage() {
       label: "Licensed, open source",
     },
   ];
-  const registryAgents = agentStatsSummary
-    ? getTopDisplayAgents(agentStatsSummary).map((agent) => ({
-        ...agent,
-        installs: agent.installs as number | null,
-      }))
-    : Object.entries(AGENT_DISPLAY)
-        .slice(0, 5)
-        .map(([slug, display]) => ({
-          slug,
-          installs: null,
-          ...display,
-        }));
-  const hasInstallCounts = agentStatsSummary !== null;
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -430,109 +413,6 @@ export default async function HomePage() {
             >
               Review the trust model
             </Link>
-          </div>
-        </section>
-
-        <section
-          id="agents"
-          className="w-full max-w-7xl border-t border-white/10 py-20"
-        >
-          <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">
-                Agent registry
-              </p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                From the community registry.
-              </h2>
-              <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
-                These are the most-installed agents from the public registry.
-                Each declares its Microsoft Graph scopes and read/write mode
-                before install, and enterprises can point the app at a private
-                registry under the same rules.
-              </p>
-              <Link
-                href="/registry"
-                className="mt-5 inline-flex text-sm font-medium text-sky-200 underline-offset-4 transition hover:text-white hover:underline"
-              >
-                {agentStatsSummary
-                  ? `Browse all ${formatStat(agentStatsSummary.agentCount)} agents`
-                  : "Browse the registry"}
-              </Link>
-            </div>
-
-            <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12]">
-              <div
-                className={`hidden gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40 md:grid ${
-                  hasInstallCounts
-                    ? "grid-cols-[minmax(0,1fr)_96px_minmax(220px,280px)_112px]"
-                    : "grid-cols-[minmax(0,1fr)_96px_minmax(260px,320px)]"
-                }`}
-              >
-                <span>Agent</span>
-                <span>Mode</span>
-                <span>Scopes</span>
-                {hasInstallCounts ? <span>Installs</span> : null}
-              </div>
-              {registryAgents.map((agent) => (
-                <div
-                  key={agent.slug}
-                  className={`grid gap-3 border-b border-white/10 px-4 py-4 last:border-b-0 ${
-                    hasInstallCounts
-                      ? "md:grid-cols-[minmax(0,1fr)_96px_minmax(220px,280px)_112px]"
-                      : "md:grid-cols-[minmax(0,1fr)_96px_minmax(260px,320px)]"
-                  }`}
-                >
-                  <div>
-                    <h3 className="text-sm font-semibold text-white/90">
-                      {agent.name}
-                    </h3>
-                    <p className="mt-1 text-sm leading-6 text-white/50">
-                      {agent.description}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
-                      Mode
-                    </span>
-                    <span
-                      className={`inline-flex h-fit rounded-md border px-2 py-1 text-xs font-medium ${
-                        agent.mode === "write"
-                          ? "border-amber-300/25 bg-amber-300/10 text-amber-200"
-                          : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
-                      }`}
-                    >
-                      {agent.mode === "write" ? "Write" : "Read-only"}
-                    </span>
-                  </div>
-                  <div className="min-w-0">
-                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
-                      Scopes
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {agent.scopes.map((scope) => (
-                        <code
-                          key={scope}
-                          className="rounded border border-white/10 bg-black/30 px-1.5 py-1 font-mono text-[11px] leading-4 text-white/55"
-                        >
-                          {scope}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                  {hasInstallCounts && agent.installs !== null ? (
-                    <div>
-                      <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
-                        Installs
-                      </span>
-                      <p className="font-mono text-xs leading-5 text-white/45">
-                        {formatStat(agent.installs)} installs
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
           </div>
         </section>
 
