@@ -36,8 +36,20 @@ Run under xvfb after installing Ollama locally (2026-07-05):
 - [ ] Optional visual pass on a real desktop session (`npm run dev`) — xvfb screenshots reviewed and look correct.
 - [ ] `git tag v0.3.0` + release once the above pass.
 
+## Phase 5 — Tenant drift timeline (added to v0.3 scope 2026-07-05)
+"What changed in my tenant since Friday, and who changed it?" — versioned config snapshots on every cache refresh, a deterministic diff engine, audit-log attribution, a Changes timeline UI, and a chat tool. Read-only throughout; the LLM never computes diffs, only summarizes them.
+
+Graph facts verified live via Lokka (tenant ffc10f05): `deviceManagement/auditEvents` works on v1.0 with existing scopes (`$filter=activityDateTime ge`, `$select`, `$top`; carries actor UPN/app, target `resourceId`, per-property old/new values); `auditLogs/directoryAudits` v1.0 supports the same time filter (initiatedBy.user, targetResources[].id). Attribution = join diffed object id ↔ audit target id within the snapshot window.
+
+- [ ] D1 — Snapshot + diff core (electron): `drift_snapshots` + `drift_object_versions` tables (interval representation: first/last snapshot per content-hash version, removal marking), hook in `replaceGraphResources` (same transaction), config-tier tracked-resource list, per-resource volatile-field ignore lists, canonical JSON + SHA-256 content hashing, pure diff engine (added/removed/modified with field-level before→after paths), retention pruning, heavy unit tests.
+- [ ] D2 — Drift service + attribution + IPC (electron): timeline/diff query APIs, `intuneAuditEvents` added as a cached Graph resource, incremental audit fetch, actor correlation (matched vs unknown — never guessed), agent-sdk types, validated IPC + preload bridge.
+- [ ] D3 — Changes UI (renderer): `/changes` route + sidebar entry, day-grouped timeline with resource/actor/date filters, field-level diff detail pane (reuse output panes + diff-confirm visual language), pin-to-workspace evidence, designed empty state ("history starts with your second refresh"), accessibility bar, renderer tests.
+- [ ] D4 — Chat tool + settings + docs: read-only `query_drift` chat tool (capped, traced), planner prefetch hints for change questions, drift retention setting in Settings, SPEC.md section, CHANGELOG under [0.3.0], `/changes` screenshot added to the capture harness.
+- [ ] D5 — Review gate: full test chain, smoke under xvfb, screenshots refresh, PR #62 update.
+
 ## Deferred to v0.4+
 - Agentic multi-tenant chat; Azure OpenAI Entra-auth variant; Windows signing; light theme; localization; full WCAG audit; agent signing/verification; cost budgets; signed audit timestamps.
+- Drift follow-ons: expiry radar, threshold watch rules, golden-tenant config diff, device-inventory drift tier (aggregate-level).
 
 ---
 
