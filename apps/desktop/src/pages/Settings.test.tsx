@@ -161,11 +161,36 @@ describe("Settings provider section", () => {
       protectedAwaitingConfirmationCount: 1,
       reason: "Pruned 2 runs older than 180 days.",
     }));
+    const getDriftRetentionSettings = vi.fn(async () => ({
+      neverPrune: false,
+      keepDays: 180,
+    }));
+    const setDriftRetentionSettings = vi.fn(async (input) => ({
+      neverPrune: input.neverPrune,
+      ...(input.keepDays !== null && input.keepDays !== undefined
+        ? { keepDays: input.keepDays }
+        : {}),
+      updatedAt: "2026-07-05T10:00:00.000Z",
+    }));
+    const pruneDriftHistoryNow = vi.fn(async () => ({
+      prunedAt: "2026-07-05T10:00:00.000Z",
+      trigger: "manual" as const,
+      policy: {
+        neverPrune: false,
+        keepDays: 90,
+      },
+      snapshotsDeleted: 3,
+      versionsDeleted: 7,
+      reason: "Pruned 3 snapshots and 7 object versions older than 90 days.",
+    }));
     const bridge = makeMockBridge(
       {
         getRunHistoryRetentionSettings,
         setRunHistoryRetentionSettings,
         pruneRunHistoryNow,
+        getDriftRetentionSettings,
+        setDriftRetentionSettings,
+        pruneDriftHistoryNow,
       },
       createMockAppState({
         runs: [
@@ -184,6 +209,7 @@ describe("Settings provider section", () => {
     await user.click(await screen.findByRole("button", { name: "General" }));
 
     expect(await screen.findByText("Run history retention")).toBeInTheDocument();
+    expect(await screen.findByText("Change history")).toBeInTheDocument();
     expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
     expect(screen.queryByText(/Automatic pruning is planned/i)).not.toBeInTheDocument();
 
@@ -207,5 +233,27 @@ describe("Settings provider section", () => {
     });
     expect(screen.getAllByText(/Pruned 2 runs older than 180 days/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/501 run records remain/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Retention days"), {
+      target: { value: "90" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save change-history retention" }));
+
+    await waitFor(() => {
+      expect(setDriftRetentionSettings).toHaveBeenCalledWith({
+        neverPrune: false,
+        keepDays: 90,
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Prune change history now" }));
+
+    await waitFor(() => {
+      expect(pruneDriftHistoryNow).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      screen.getAllByText(/Pruned 3 snapshots and 7 object versions older than 90 days/i).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/10 local history rows removed/i)).toBeInTheDocument();
   });
 });

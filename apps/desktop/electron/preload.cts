@@ -239,6 +239,12 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:set-run-history-retention-settings", input),
   pruneRunHistoryNow: () =>
     ipcRenderer.invoke("openadminos:prune-run-history-now"),
+  getDriftRetentionSettings: () =>
+    ipcRenderer.invoke("openadminos:get-drift-retention-settings"),
+  setDriftRetentionSettings: (input) =>
+    ipcRenderer.invoke("openadminos:set-drift-retention-settings", input),
+  pruneDriftHistoryNow: () =>
+    ipcRenderer.invoke("openadminos:prune-drift-history-now"),
   exportAuditLog: (input: ExportAuditLogInput) =>
     ipcRenderer.invoke("openadminos:export-audit-log", input),
   getChatInvestigationSettings: () =>

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  DriftTimelineInput,
+  DriftTimelineResult,
   GraphCacheRefreshResourceResult,
   GraphCacheResourceKind,
   GraphRequestInput,
@@ -16,6 +18,7 @@ import {
   definitionForResource,
   pathForResource,
 } from "./planner.js";
+import { DRIFT_TRACKED_RESOURCES } from "./drift/tracked-resources.js";
 import type {
   GraphCacheQueryPredicate,
   IntelligenceSqliteStore,
@@ -24,6 +27,8 @@ import type {
 export const QUERY_CACHE_ROW_CAP = 50;
 export const GRAPH_GET_ROW_CAP = 50;
 export const GRAPH_GET_PAYLOAD_BYTE_CAP = 24_000;
+export const QUERY_DRIFT_ROW_CAP = 50;
+const QUERY_DRIFT_SCAN_LIMIT = 500;
 
 export interface IntuneChatToolDefinition {
   name: IntuneChatInvestigationToolName;
@@ -41,6 +46,7 @@ export interface IntuneChatToolContext {
   store: IntelligenceSqliteStore;
   graphForScopes(scopes: string[]): Promise<RunGraphApi>;
   refreshResource(resource: GraphCacheResourceKind): Promise<GraphCacheRefreshResourceResult>;
+  getDriftTimeline(input: DriftTimelineInput): Promise<DriftTimelineResult>;
 }
 
 export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] = [
@@ -129,6 +135,38 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
       },
     },
   },
+  {
+    name: "query_drift",
+    description:
+      "Answer what changed / who changed it questions from LOCAL drift history only. Uses stored snapshots and cached audit attribution; does not call Microsoft Graph.",
+    params: {
+      type: "object",
+      properties: {
+        resource: {
+          type: "string",
+          enum: [...DRIFT_TRACKED_RESOURCES],
+          description: "Optional drift-tracked resource kind.",
+        },
+        from: {
+          type: "string",
+          description: "Optional inclusive ISO timestamp lower bound.",
+        },
+        to: {
+          type: "string",
+          description: "Optional inclusive ISO timestamp upper bound.",
+        },
+        changeKind: {
+          type: "string",
+          enum: ["added", "removed", "modified"],
+          description: "Optional change kind filter.",
+        },
+        top: {
+          type: "number",
+          description: "Requested rows. Hard-capped at 50.",
+        },
+      },
+    },
+  },
 ] as const;
 
 export function toolDefinitionsForPrompt(): string {
@@ -194,6 +232,8 @@ function executeToolUnchecked(
       return graphGet(ctx, params);
     case "refresh_resource":
       return refreshResource(ctx, params);
+    case "query_drift":
+      return queryDrift(ctx, params);
   }
 }
 
@@ -295,6 +335,53 @@ async function refreshResource(
     refreshedAt: result.refreshedAt,
     error: result.error,
   };
+}
+
+async function queryDrift(
+  ctx: IntuneChatToolContext,
+  params: unknown,
+): Promise<unknown> {
+  const resource = optionalDriftResourceParam(params, "resource");
+  const from = isoDateParam(params, "from");
+  const to = isoDateParam(params, "to");
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    throw new Error("query_drift from date must be before the to date.");
+  }
+  const changeKind = changeKindParam(params);
+  const top = topParam(params);
+  const timeline = await ctx.getDriftTimeline({
+    tenantId: ctx.tenantId,
+    ...(resource ? { resources: [resource] } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    limit: QUERY_DRIFT_SCAN_LIMIT,
+  });
+  const matched = timeline.entries.filter((entry) => {
+    if (entry.changeKind === "baseline") return false;
+    return changeKind ? entry.changeKind === changeKind : true;
+  });
+  const rows = matched.slice(0, top).map((entry) => ({
+    when: entry.capturedAt,
+    resource: entry.resource,
+    kind: entry.changeKind,
+    name: entry.displayName ?? entry.graphId ?? "unknown",
+    fieldsChanged: entry.fieldChangeCount,
+    timestampOnly: entry.timestampOnly,
+    actor: actorLabel(entry.attribution),
+  }));
+  const rowCapped = matched.length > rows.length;
+  const note = rowCapped
+    ? `Results were capped at ${top.toLocaleString()} rows. Narrow resource, from, to, or changeKind for more detail.`
+    : timeline.hasMore
+      ? `Local drift timeline scan reached ${QUERY_DRIFT_SCAN_LIMIT.toLocaleString()} entries. More matching rows may exist; narrow resource, from, to, or changeKind for more detail.`
+      : undefined;
+  return enforcePayloadCap({
+    rows,
+    returnedRows: rows.length,
+    matchedRows: matched.length,
+    top,
+    ...(note ? { note } : {}),
+  });
 }
 
 function validateGraphGetPath(path: string): {
@@ -460,6 +547,9 @@ function summarizeToolResult(
       ? `Refresh failed for ${String(record.resource ?? "resource")}`
       : `${Number(record.rows ?? 0).toLocaleString()} rows refreshed for ${String(record.resource ?? "resource")}`;
   }
+  if (tool === "query_drift") {
+    return `${Number(record.returnedRows ?? 0).toLocaleString()} drift changes returned${record.note ? " · capped" : ""}`;
+  }
   return "Tool call completed.";
 }
 
@@ -481,6 +571,13 @@ export function summarizeToolCallForProgress(
         ? definitionForResource(record.resource).label
         : String(record.resource ?? "resource");
     return `Refreshing ${resource}.`;
+  }
+  if (tool === "query_drift") {
+    const resource =
+      typeof record.resource === "string" && isGraphCacheResourceKind(record.resource)
+        ? definitionForResource(record.resource).label
+        : "change history";
+    return `Querying local drift history: ${resource}.`;
   }
   return "Running tool.";
 }
@@ -514,6 +611,18 @@ function resourceParam(params: unknown, key: string): GraphCacheResourceKind {
     throw new Error(`${key} must be a known Graph cache resource.`);
   }
   return value;
+}
+
+function optionalDriftResourceParam(
+  params: unknown,
+  key: string,
+): GraphCacheResourceKind | undefined {
+  const value = stringParam(params, key);
+  if (!value) return undefined;
+  if (!DRIFT_TRACKED_RESOURCES.has(value as GraphCacheResourceKind)) {
+    throw new Error(`${key} must be a drift-tracked resource.`);
+  }
+  return value as GraphCacheResourceKind;
 }
 
 function isGraphCacheResourceKind(value: string): value is GraphCacheResourceKind {
@@ -580,6 +689,45 @@ function numberParam(params: unknown, key: string): number | undefined {
   const value = (params as Record<string, unknown>)[key];
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   return value;
+}
+
+function topParam(params: unknown): number {
+  if (!params || typeof params !== "object" || Array.isArray(params)) return 25;
+  const parsed = Number((params as Record<string, unknown>).top);
+  return Number.isFinite(parsed)
+    ? Math.max(1, Math.min(QUERY_DRIFT_ROW_CAP, Math.floor(parsed)))
+    : 25;
+}
+
+function isoDateParam(params: unknown, key: "from" | "to"): string | undefined {
+  const value = stringParam(params, key);
+  if (!value) return undefined;
+  if (!Number.isFinite(Date.parse(value))) {
+    throw new Error(`query_drift ${key} must be an ISO timestamp.`);
+  }
+  return value;
+}
+
+function changeKindParam(
+  params: unknown,
+): "added" | "removed" | "modified" | undefined {
+  const value = stringParam(params, "changeKind");
+  if (!value) return undefined;
+  if (value !== "added" && value !== "removed" && value !== "modified") {
+    throw new Error("query_drift changeKind must be added, removed, or modified.");
+  }
+  return value;
+}
+
+function actorLabel(
+  attribution: DriftTimelineResult["entries"][number]["attribution"],
+): string {
+  const actor = attribution?.actor;
+  return (
+    actor?.userPrincipalName ??
+    actor?.appDisplayName ??
+    "unknown"
+  );
 }
 
 function objectParam(params: unknown, key: string): Record<string, unknown> | undefined {

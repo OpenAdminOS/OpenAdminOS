@@ -3328,7 +3328,8 @@ function isInvestigationToolName(value: unknown): value is IntuneChatInvestigati
     value === "list_cached_resources" ||
     value === "query_cache" ||
     value === "graph_get" ||
-    value === "refresh_resource"
+    value === "refresh_resource" ||
+    value === "query_drift"
   );
 }
 

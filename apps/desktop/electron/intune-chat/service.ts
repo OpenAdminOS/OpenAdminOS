@@ -7,6 +7,8 @@ import {
   type AgentSummary,
   type ChatInvestigationMode,
   type ChatInvestigationSettings,
+  type DriftTimelineInput,
+  type DriftTimelineResult,
   type GraphCacheRefreshResult,
   type GraphCacheRefreshResourceResult,
   type GraphCacheRefreshScheduleSettings,
@@ -152,6 +154,7 @@ export interface ChatServiceHost {
     tenantSession: TenantSession;
   }>;
   startRun(agentSlug: string, options?: StartRunOptions): Promise<RunRecord>;
+  getDriftTimeline(input: DriftTimelineInput): Promise<DriftTimelineResult>;
   readonly appVersion: string;
   readonly userDataPath: string | undefined;
   readonly intelligenceStore: IntelligenceSqliteStore | undefined;
@@ -2120,6 +2123,7 @@ export class IntuneChatService {
           error: "Refresh did not return a resource result.",
         };
       },
+      getDriftTimeline: (input) => this.host.getDriftTimeline(input),
     };
   }
 

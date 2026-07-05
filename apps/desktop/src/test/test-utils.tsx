@@ -7,6 +7,7 @@ import { ToastProvider } from "../components/Toast";
 import { AppStateProvider } from "../state";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   deriveTrustState,
   type AgentDraft,
@@ -16,6 +17,7 @@ import {
   type AzureOpenAIProviderConfig,
   type CompanionLaunchSettings,
   type CompanionSnapshot,
+  type DriftRetentionSettings,
   type GraphCacheStatus,
   type LocalDataSummary,
   type OpenAdminOSApi,
@@ -219,6 +221,9 @@ export function makeMockBridge(
   let runHistoryRetention: RunHistoryRetentionSettings = {
     ...DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   };
+  let driftRetention: DriftRetentionSettings = {
+    ...DEFAULT_DRIFT_RETENTION_SETTINGS,
+  };
   const updateState = (nextState: AppState) => {
     appState = nextState;
     return appState;
@@ -365,18 +370,21 @@ export function makeMockBridge(
       createLocalDataSummary(appState.activeTenantId, {
         runHistoryCount: appState.runs.length,
         runHistoryRetention,
+        driftRetention,
       }),
     ),
     clearIntuneChatHistory: vi.fn(async () =>
       createLocalDataSummary(appState.activeTenantId, {
         runHistoryCount: appState.runs.length,
         runHistoryRetention,
+        driftRetention,
       }),
     ),
     clearGraphCache: vi.fn(async () =>
       createLocalDataSummary(appState.activeTenantId, {
         runHistoryCount: appState.runs.length,
         runHistoryRetention,
+        driftRetention,
       }),
     ),
     getRunHistoryRetentionSettings: vi.fn(async () => runHistoryRetention),
@@ -406,6 +414,25 @@ export function makeMockBridge(
       protectedActiveCount: 0,
       protectedAwaitingConfirmationCount: 0,
       reason: "No eligible runs exceeded the retention policy.",
+    })),
+    getDriftRetentionSettings: vi.fn(async () => driftRetention),
+    setDriftRetentionSettings: vi.fn(async (input) => {
+      driftRetention = {
+        neverPrune: input.neverPrune,
+        ...(input.keepDays !== undefined && input.keepDays !== null
+          ? { keepDays: input.keepDays }
+          : {}),
+        updatedAt: now,
+      };
+      return driftRetention;
+    }),
+    pruneDriftHistoryNow: vi.fn(async () => ({
+      prunedAt: now,
+      trigger: "manual" as const,
+      policy: driftRetention,
+      snapshotsDeleted: 0,
+      versionsDeleted: 0,
+      reason: "No drift history exceeded the retention policy.",
     })),
     exportAuditLog: vi.fn(async (input) => ({
       format: input.format,
@@ -736,6 +763,7 @@ function createLocalDataSummary(
     activeTenantCacheResources: [],
     runHistoryCount: 0,
     runHistoryRetention: { ...DEFAULT_RUN_HISTORY_RETENTION_SETTINGS },
+    driftRetention: { ...DEFAULT_DRIFT_RETENTION_SETTINGS },
     ...overrides,
   };
 }

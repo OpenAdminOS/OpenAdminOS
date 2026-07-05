@@ -73,6 +73,7 @@ import type {
   SchedulerLaunchSettings,
   SelfTrainingSuggestionStatus,
   SetAzureOpenAIProviderConfigInput,
+  SetDriftRetentionSettingsInput,
   SetGraphCacheRefreshScheduleInput,
   SetRunHistoryRetentionSettingsInput,
   SendIntuneChatMessageInput,
@@ -891,6 +892,12 @@ async function runScreenshotCapture(): Promise<void> {
       name: "chat-empty",
       file: "app/chat-empty.png",
       waitFor: ["Intune Chat", "What do you want to inspect?", "New conversation"],
+    },
+    {
+      route: "/changes",
+      name: "changes",
+      file: "app/changes.png",
+      waitFor: ["Changes"],
     },
     {
       route: "/settings",
@@ -3853,6 +3860,33 @@ function validateSetRunHistoryRetentionSettingsInput(
   return input;
 }
 
+function validateSetDriftRetentionSettingsInput(
+  value: unknown,
+): SetDriftRetentionSettingsInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Change history retention settings must be an object.");
+  }
+  if (typeof value.neverPrune !== "boolean") {
+    throw new Error("Change history never-prune setting must be a boolean.");
+  }
+  const input: SetDriftRetentionSettingsInput = {
+    neverPrune: value.neverPrune,
+  };
+  if (value.keepDays !== undefined) {
+    input.keepDays =
+      value.keepDays === null
+        ? null
+        : requireBoundedInteger(value.keepDays, "Change history retention days", 30, 730);
+  }
+  if (
+    !input.neverPrune &&
+    (input.keepDays === null || input.keepDays === undefined)
+  ) {
+    throw new Error("Set change-history retention days, or choose never prune.");
+  }
+  return input;
+}
+
 function validateExportAuditLogInput(value: unknown): ExportAuditLogInput {
   if (!isPlainRecord(value)) {
     throw new Error("Audit log export input must be an object.");
@@ -4827,6 +4861,22 @@ function registerIpcHandlers() {
     handleTrusted(() => store.pruneRunHistoryNow()),
   );
   ipcMain.handle(
+    "openadminos:get-drift-retention-settings",
+    handleTrusted(() => store.getDriftRetentionSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:set-drift-retention-settings",
+    handleTrusted((_event, input: unknown) =>
+      store.setDriftRetentionSettings(
+        validateSetDriftRetentionSettingsInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:prune-drift-history-now",
+    handleTrusted(() => store.pruneDriftHistoryNow()),
+  );
+  ipcMain.handle(
     "openadminos:export-audit-log",
     handleTrusted((_event, input: unknown) =>
       store.exportAuditLog(validateExportAuditLogInput(input)),
@@ -5474,6 +5524,9 @@ if (!gotLock) {
     void store.pruneRunHistory("startup").catch((error) => {
       console.warn("[run-history] startup prune failed:", error);
     });
+    void store.pruneDriftHistory("startup").catch((error) => {
+      console.warn("[drift-history] startup prune failed:", error);
+    });
     startAutoUpdater(() => mainWindow ?? undefined);
 
     // Agent scheduler: for normal visible launches, wait for the
@@ -5493,6 +5546,9 @@ if (!gotLock) {
       void store.processPendingRunDeliveries();
       void store.pruneRunHistory("scheduler").catch((error) => {
         console.warn("[run-history] scheduler prune failed:", error);
+      });
+      void store.pruneDriftHistory("scheduler").catch((error) => {
+        console.warn("[drift-history] scheduler prune failed:", error);
       });
     }, SCHEDULER_TICK_MS);
 

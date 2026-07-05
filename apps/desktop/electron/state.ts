@@ -47,6 +47,9 @@ import type {
   ChatInvestigationMode,
   ChatInvestigationSettings,
   ConnectorSummary,
+  DriftHistoryPruneResult,
+  DriftPruneTrigger,
+  DriftRetentionSettings,
   RequestedScope,
   RunGraphApi,
   RunLlmApi,
@@ -89,6 +92,7 @@ import type {
   RunMultiTenantChatInput,
   SavedMultiTenantQuery,
   SetAzureOpenAIProviderConfigInput,
+  SetDriftRetentionSettingsInput,
   SetGraphCacheRefreshScheduleInput,
   SetRunHistoryRetentionSettingsInput,
   SelfTrainingSettings,
@@ -109,6 +113,7 @@ import type {
 import {
   deriveTrustState,
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   providerCatalog,
   resolveProviderDefaultModel,
@@ -279,6 +284,16 @@ interface PersistedState {
    * the result is zero so the admin gets an honest result.
    */
   lastRunHistoryPrune?: RunHistoryPruneResult;
+  /**
+   * Local tenant drift retention. Defaults to 180 days; current object
+   * versions are preserved by the SQLite drift pruner.
+   */
+  driftRetentionDays?: DriftRetentionSettings;
+  /**
+   * Last persisted drift prune result. Follows the same startup/scheduler
+   * vs. manual persistence rule as run-history pruning.
+   */
+  lastDriftHistoryPrune?: DriftHistoryPruneResult;
   /** User-overridable registry source URL. */
   registrySource?: string;
 }
@@ -335,6 +350,16 @@ function nullableRetentionInteger(
   return Math.round(value);
 }
 
+function sanitizeDriftRetentionDays(value: unknown): number | undefined {
+  return sanitizeRunHistoryRetentionInteger(value, 30, 730);
+}
+
+function nullableDriftRetentionDays(
+  value: number | null | undefined,
+): number | undefined {
+  return nullableRetentionInteger(value, "Change history retention", 30, 730);
+}
+
 function isStateRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -370,6 +395,18 @@ function runHistoryPruneReason(
     return `Pruned ${count.toLocaleString()} ${noun} older than ${policy.keepDays.toLocaleString()} days.`;
   }
   return `Pruned ${count.toLocaleString()} ${noun}.`;
+}
+
+function driftPruneReason(
+  result: { snapshotsDeleted: number; versionsDeleted: number },
+  policy: DriftRetentionSettings,
+): string {
+  const snapshots =
+    result.snapshotsDeleted === 1 ? "1 snapshot" : `${result.snapshotsDeleted.toLocaleString()} snapshots`;
+  const versions =
+    result.versionsDeleted === 1 ? "1 object version" : `${result.versionsDeleted.toLocaleString()} object versions`;
+  const days = policy.keepDays ?? DEFAULT_DRIFT_RETENTION_SETTINGS.keepDays ?? 180;
+  return `Pruned ${snapshots} and ${versions} older than ${days.toLocaleString()} days. Current object state was kept.`;
 }
 
 const AUDIT_LOG_SCHEMA_VERSION = 1;
@@ -1041,6 +1078,7 @@ export class AppStateStore {
       buildGraph: (pinnedTenantId, agentScopes) =>
         host.buildGraph(pinnedTenantId, agentScopes),
       startRun: (agentSlug, options) => host.startRun(agentSlug, options),
+      getDriftTimeline: (input) => host.getDriftTimeline(input),
       appVersion: this.appVersion,
       get userDataPath() {
         return host.userDataPath;
@@ -1394,6 +1432,12 @@ export class AppStateStore {
       ...(persisted.lastRunHistoryPrune
         ? { lastRunHistoryPrune: persisted.lastRunHistoryPrune }
         : {}),
+      driftRetention: this.normalizeDriftRetentionSettings(
+        persisted.driftRetentionDays,
+      ),
+      ...(persisted.lastDriftHistoryPrune
+        ? { lastDriftHistoryPrune: persisted.lastDriftHistoryPrune }
+        : {}),
     };
   }
 
@@ -1465,6 +1509,53 @@ export class AppStateStore {
       next.keepDays === undefined
     ) {
       throw new Error("Enable at least one run-history retention rule, or choose never prune.");
+    }
+    return next;
+  }
+
+  private normalizeDriftRetentionSettings(
+    settings?: DriftRetentionSettings | number | "never",
+  ): DriftRetentionSettings {
+    if (settings === "never") {
+      return { neverPrune: true };
+    }
+    if (typeof settings === "number") {
+      const keepDays = sanitizeDriftRetentionDays(settings);
+      return keepDays !== undefined
+        ? { neverPrune: false, keepDays }
+        : { ...DEFAULT_DRIFT_RETENTION_SETTINGS };
+    }
+    if (!settings) {
+      return { ...DEFAULT_DRIFT_RETENTION_SETTINGS };
+    }
+    const next: DriftRetentionSettings = {
+      neverPrune: settings.neverPrune === true,
+    };
+    const keepDays = sanitizeDriftRetentionDays(settings.keepDays);
+    if (keepDays !== undefined) {
+      next.keepDays = keepDays;
+    }
+    if (typeof settings.updatedAt === "string" && settings.updatedAt.trim()) {
+      next.updatedAt = settings.updatedAt;
+    }
+    if (!next.neverPrune && next.keepDays === undefined) {
+      return { ...DEFAULT_DRIFT_RETENTION_SETTINGS };
+    }
+    return next;
+  }
+
+  private normalizeDriftRetentionInput(
+    input: SetDriftRetentionSettingsInput,
+    updatedAt: string,
+  ): DriftRetentionSettings {
+    const neverPrune = input.neverPrune === true;
+    const next: DriftRetentionSettings = { neverPrune, updatedAt };
+    const keepDays = nullableDriftRetentionDays(input.keepDays);
+    if (keepDays !== undefined) {
+      next.keepDays = keepDays;
+    }
+    if (!neverPrune && next.keepDays === undefined) {
+      throw new Error("Set change-history retention days, or choose never prune.");
     }
     return next;
   }
@@ -1957,6 +2048,29 @@ export class AppStateStore {
     return this.pruneRunHistory("manual");
   }
 
+  async getDriftRetentionSettings(): Promise<DriftRetentionSettings> {
+    const persisted = await this.read();
+    return this.normalizeDriftRetentionSettings(persisted.driftRetentionDays);
+  }
+
+  async setDriftRetentionSettings(
+    input: SetDriftRetentionSettingsInput,
+  ): Promise<DriftRetentionSettings> {
+    const settings = this.normalizeDriftRetentionInput(input, new Date().toISOString());
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      await this.write({
+        ...persisted,
+        driftRetentionDays: settings,
+      });
+    });
+    return settings;
+  }
+
+  async pruneDriftHistoryNow(): Promise<DriftHistoryPruneResult> {
+    return this.pruneDriftHistory("manual");
+  }
+
   async exportAuditLog(input: ExportAuditLogInput): Promise<AuditLogExportResult> {
     if (input.format !== "json" && input.format !== "csv") {
       throw new Error("Audit log export format must be json or csv.");
@@ -2103,6 +2217,55 @@ export class AppStateStore {
         if (pruneCandidates.length > 0) {
           this.emitStateChanged("run-history-pruned");
         }
+      }
+      return result;
+    });
+  }
+
+  async pruneDriftHistory(
+    trigger: DriftPruneTrigger,
+  ): Promise<DriftHistoryPruneResult> {
+    return this.serialize(async () => {
+      const persisted = await this.read();
+      const policy = this.normalizeDriftRetentionSettings(persisted.driftRetentionDays);
+      const prunedAt = new Date().toISOString();
+      if (policy.neverPrune) {
+        const result: DriftHistoryPruneResult = {
+          prunedAt,
+          trigger,
+          policy,
+          snapshotsDeleted: 0,
+          versionsDeleted: 0,
+          reason: "Never prune is enabled.",
+        };
+        if (trigger === "manual") {
+          await this.write({ ...persisted, lastDriftHistoryPrune: result });
+        }
+        return result;
+      }
+
+      const keepDays = policy.keepDays ?? DEFAULT_DRIFT_RETENTION_SETTINGS.keepDays;
+      if (keepDays === undefined) {
+        throw new Error("Change-history retention days are not configured.");
+      }
+      const pruned = this.requireIntelligenceStore().pruneDriftHistory(null, keepDays);
+      const deleted = pruned.snapshotsDeleted + pruned.versionsDeleted;
+      const result: DriftHistoryPruneResult = {
+        prunedAt,
+        trigger,
+        policy,
+        snapshotsDeleted: pruned.snapshotsDeleted,
+        versionsDeleted: pruned.versionsDeleted,
+        reason:
+          deleted > 0
+            ? driftPruneReason(pruned, policy)
+            : "No change history exceeded the retention policy.",
+      };
+      if (deleted > 0 || trigger === "manual") {
+        await this.write({
+          ...persisted,
+          lastDriftHistoryPrune: result,
+        });
       }
       return result;
     });
@@ -4649,6 +4812,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           rawRunHistoryRetention as unknown as RunHistoryRetentionSettings,
         );
       }
+      const rawDriftRetention = (parsed as { driftRetentionDays?: unknown })
+        .driftRetentionDays;
+      if (
+        isStateRecord(rawDriftRetention) ||
+        typeof rawDriftRetention === "number" ||
+        rawDriftRetention === "never"
+      ) {
+        state.driftRetentionDays = this.normalizeDriftRetentionSettings(
+          rawDriftRetention as DriftRetentionSettings | number | "never",
+        );
+      }
       const rawLastRunHistoryPrune = (parsed as { lastRunHistoryPrune?: unknown })
         .lastRunHistoryPrune;
       if (isStateRecord(rawLastRunHistoryPrune)) {
@@ -4711,6 +4885,39 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             ...(typeof obj.newestPrunedQueuedAt === "string"
               ? { newestPrunedQueuedAt: obj.newestPrunedQueuedAt }
               : {}),
+          };
+        }
+      }
+      const rawLastDriftHistoryPrune = (parsed as { lastDriftHistoryPrune?: unknown })
+        .lastDriftHistoryPrune;
+      if (isStateRecord(rawLastDriftHistoryPrune)) {
+        const obj = rawLastDriftHistoryPrune;
+        const trigger =
+          obj.trigger === "startup" ||
+          obj.trigger === "scheduler" ||
+          obj.trigger === "manual"
+            ? obj.trigger
+            : undefined;
+        const snapshotsDeleted = sanitizeNonNegativeInteger(obj.snapshotsDeleted);
+        const versionsDeleted = sanitizeNonNegativeInteger(obj.versionsDeleted);
+        if (
+          typeof obj.prunedAt === "string" &&
+          trigger &&
+          typeof obj.reason === "string" &&
+          snapshotsDeleted !== undefined &&
+          versionsDeleted !== undefined
+        ) {
+          state.lastDriftHistoryPrune = {
+            prunedAt: obj.prunedAt,
+            trigger,
+            policy: isStateRecord(obj.policy)
+              ? this.normalizeDriftRetentionSettings(
+                  obj.policy as unknown as DriftRetentionSettings,
+                )
+              : this.normalizeDriftRetentionSettings(state.driftRetentionDays),
+            snapshotsDeleted,
+            versionsDeleted,
+            reason: obj.reason,
           };
         }
       }

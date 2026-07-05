@@ -22,6 +22,7 @@ import {
   IconWarning,
 } from "../components/icons";
 import {
+  DEFAULT_DRIFT_RETENTION_DAYS,
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
   resolveProviderDefaultModel,
@@ -31,6 +32,8 @@ import {
   type ChatInvestigationMode,
   type ChatInvestigationSettings,
   type CompanionLaunchSettings,
+  type DriftHistoryPruneResult,
+  type DriftRetentionSettings,
   type GraphCacheStatus,
   type LocalDataSummary,
   type ProviderId,
@@ -66,6 +69,11 @@ interface RunHistoryRetentionDraft {
   keepLastRunsEnabled: boolean;
   keepLastRuns: number;
   keepDaysEnabled: boolean;
+  keepDays: number;
+}
+
+interface DriftRetentionDraft {
+  neverPrune: boolean;
   keepDays: number;
 }
 
@@ -1717,10 +1725,18 @@ function GeneralSection() {
     );
   const [lastPruneResult, setLastPruneResult] =
     useState<RunHistoryPruneResult | null>(null);
+  const [driftRetention, setDriftRetention] =
+    useState<DriftRetentionSettings | null>(null);
+  const [driftDraft, setDriftDraft] =
+    useState<DriftRetentionDraft>(() => driftRetentionDraftFromSettings(null));
+  const [lastDriftPruneResult, setLastDriftPruneResult] =
+    useState<DriftHistoryPruneResult | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
   const [companionBusy, setCompanionBusy] = useState(false);
   const [sandboxBusy, setSandboxBusy] = useState(false);
   const [runHistoryBusy, setRunHistoryBusy] =
+    useState<"saving" | "pruning" | null>(null);
+  const [driftBusy, setDriftBusy] =
     useState<"saving" | "pruning" | null>(null);
   const [auditExportFormat, setAuditExportFormat] =
     useState<AuditLogExportFormat>("json");
@@ -1730,6 +1746,8 @@ function GeneralSection() {
   const [sandboxError, setSandboxError] = useState<string | null>(null);
   const [runHistoryError, setRunHistoryError] = useState<string | null>(null);
   const [runHistoryNotice, setRunHistoryNotice] = useState<string | null>(null);
+  const [driftError, setDriftError] = useState<string | null>(null);
+  const [driftNotice, setDriftNotice] = useState<string | null>(null);
   const [auditExportNotice, setAuditExportNotice] = useState<string | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -1783,6 +1801,19 @@ function GeneralSection() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setRunHistoryError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getDriftRetentionSettings()
+      .then((settings) => {
+        if (!cancelled) {
+          setDriftRetention(settings);
+          setDriftDraft(driftRetentionDraftFromSettings(settings));
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setDriftError(error instanceof Error ? error.message : String(error));
         }
       });
     return () => {
@@ -1886,6 +1917,44 @@ function GeneralSection() {
       setRunHistoryError(error instanceof Error ? error.message : String(error));
     } finally {
       setRunHistoryBusy(null);
+    }
+  };
+
+  const saveDriftRetention = async () => {
+    const api = window.openAdminOS;
+    if (!api || driftBusy) return;
+    setDriftBusy("saving");
+    setDriftError(null);
+    setDriftNotice(null);
+    try {
+      const next = await api.setDriftRetentionSettings({
+        neverPrune: driftDraft.neverPrune,
+        keepDays: driftDraft.neverPrune ? null : driftDraft.keepDays,
+      });
+      setDriftRetention(next);
+      setDriftDraft(driftRetentionDraftFromSettings(next));
+      setDriftNotice("Change-history retention saved.");
+    } catch (error) {
+      setDriftError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDriftBusy(null);
+    }
+  };
+
+  const pruneDriftHistoryNow = async () => {
+    const api = window.openAdminOS;
+    if (!api || driftBusy) return;
+    setDriftBusy("pruning");
+    setDriftError(null);
+    setDriftNotice(null);
+    try {
+      const result = await api.pruneDriftHistoryNow();
+      setLastDriftPruneResult(result);
+      setDriftNotice(result.reason);
+    } catch (error) {
+      setDriftError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDriftBusy(null);
     }
   };
 
@@ -2097,6 +2166,21 @@ function GeneralSection() {
           }
         />
         <SettingRow
+          label="Change history"
+          description="Pruning removes old local drift snapshots and historical object versions. Current object state is never deleted. The job runs at startup and on the scheduler tick."
+          control={
+            <DriftRetentionControls
+              draft={driftDraft}
+              saved={driftRetention}
+              busy={driftBusy}
+              lastResult={lastDriftPruneResult}
+              onChange={setDriftDraft}
+              onSave={() => void saveDriftRetention()}
+              onPruneNow={() => void pruneDriftHistoryNow()}
+            />
+          }
+        />
+        <SettingRow
           label="Audit log export"
           description="Exports retained run history, write-confirmation events, connector delivery audit entries, and recorded hosted-provider consent acknowledgements. Old run records may already be absent because of retention."
           control={
@@ -2108,17 +2192,17 @@ function GeneralSection() {
             />
           }
         />
-        {(runHistoryError || runHistoryNotice || auditExportNotice) && (
+        {(runHistoryError || runHistoryNotice || driftError || driftNotice || auditExportNotice) && (
           <div
-            role={runHistoryError ? "alert" : "status"}
-            aria-live={runHistoryError ? "assertive" : "polite"}
+            role={runHistoryError || driftError ? "alert" : "status"}
+            aria-live={runHistoryError || driftError ? "assertive" : "polite"}
             className={`rounded-lg px-3 py-2 text-[12px] ring-1 ${
-              runHistoryError
+              runHistoryError || driftError
                 ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
                 : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-[var(--color-border-soft)]"
             }`}
           >
-            {runHistoryError ?? runHistoryNotice ?? auditExportNotice}
+            {runHistoryError ?? driftError ?? runHistoryNotice ?? driftNotice ?? auditExportNotice}
           </div>
         )}
       </div>
@@ -2311,6 +2395,131 @@ function RunHistoryRetentionControls({
         <Button
           size="sm"
           variant="secondary"
+          leadingIcon={<IconRefresh size={12} />}
+          disabled={busy !== null}
+          onClick={onPruneNow}
+        >
+          {busy === "pruning" ? "Pruning" : "Prune now"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DriftRetentionControls({
+  draft,
+  saved,
+  busy,
+  lastResult,
+  onChange,
+  onSave,
+  onPruneNow,
+}: {
+  draft: DriftRetentionDraft;
+  saved: DriftRetentionSettings | null;
+  busy: "saving" | "pruning" | null;
+  lastResult: DriftHistoryPruneResult | null;
+  onChange: (draft: DriftRetentionDraft) => void;
+  onSave: () => void;
+  onPruneNow: () => void;
+}) {
+  const controlsDisabled = busy !== null || draft.neverPrune;
+  const retentionCopy = draft.neverPrune
+    ? "Configuration change history is kept locally until you change this setting. Current object state is never deleted."
+    : `Configuration change history is kept locally for ${draft.keepDays.toLocaleString()} days. Current object state is never deleted.`;
+
+  return (
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+      <div className="flex items-center justify-between gap-3">
+        <Pill tone={draft.neverPrune ? "warning" : "default"}>
+          {driftRetentionSummary(saved)}
+        </Pill>
+        <span className="text-[var(--color-text-muted)]">local snapshots</span>
+      </div>
+
+      <label
+        htmlFor="drift-never-prune"
+        className="flex items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+      >
+        <input
+          id="drift-never-prune"
+          name="drift-never-prune"
+          type="checkbox"
+          checked={draft.neverPrune}
+          disabled={busy !== null}
+          onChange={(event) =>
+            onChange({ ...draft, neverPrune: event.currentTarget.checked })
+          }
+        />
+        <span>Never prune</span>
+      </label>
+
+      <div
+        className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
+          controlsDisabled ? "opacity-60" : ""
+        }`}
+      >
+        <label
+          htmlFor="drift-keep-days"
+          className="block text-[var(--color-text-soft)]"
+        >
+          Retention days
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            id="drift-keep-days"
+            name="drift-keep-days"
+            type="number"
+            min={30}
+            max={730}
+            inputMode="numeric"
+            value={draft.keepDays}
+            disabled={controlsDisabled}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                keepDays: boundedRetentionValue(
+                  event.currentTarget.valueAsNumber,
+                  draft.keepDays,
+                  30,
+                  730,
+                ),
+              })
+            }
+            className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+          <span className="text-[var(--color-text-muted)]">days</span>
+        </div>
+      </div>
+
+      <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+        {retentionCopy}
+      </div>
+
+      {lastResult && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+        >
+          {formatDriftPruneResult(lastResult)}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label="Save change-history retention"
+          disabled={busy !== null}
+          onClick={onSave}
+        >
+          {busy === "saving" ? "Saving" : "Save"}
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label="Prune change history now"
           leadingIcon={<IconRefresh size={12} />}
           disabled={busy !== null}
           onClick={onPruneNow}
@@ -3080,6 +3289,15 @@ function runHistoryRetentionDraftFromSettings(
   };
 }
 
+function driftRetentionDraftFromSettings(
+  settings: DriftRetentionSettings | null,
+): DriftRetentionDraft {
+  return {
+    neverPrune: settings?.neverPrune ?? false,
+    keepDays: settings?.keepDays ?? DEFAULT_DRIFT_RETENTION_DAYS,
+  };
+}
+
 function boundedRetentionValue(
   value: number,
   fallback: number,
@@ -3105,6 +3323,12 @@ function runHistoryRetentionSummary(
   return rules.length > 0 ? rules.join(" / ") : "No rule";
 }
 
+function driftRetentionSummary(settings: DriftRetentionSettings | null): string {
+  if (!settings) return "Loading";
+  if (settings.neverPrune) return "Never prune";
+  return `${(settings.keepDays ?? DEFAULT_DRIFT_RETENTION_DAYS).toLocaleString()} days`;
+}
+
 function formatRunHistoryPruneResult(result: RunHistoryPruneResult): string {
   const protectedParts: string[] = [];
   if (result.protectedWorkspaceCount > 0) {
@@ -3123,6 +3347,13 @@ function formatRunHistoryPruneResult(result: RunHistoryPruneResult): string {
   const protectedText =
     protectedParts.length > 0 ? ` Kept ${protectedParts.join(", ")}.` : "";
   return `${result.reason} ${formatDateTime(result.prunedAt)}. ${result.afterCount.toLocaleString()} run records remain.${protectedText}`
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatDriftPruneResult(result: DriftHistoryPruneResult): string {
+  const removed = result.snapshotsDeleted + result.versionsDeleted;
+  return `${result.reason} ${formatDateTime(result.prunedAt)}. ${removed.toLocaleString()} local history rows removed.`
     .replace(/\s+/g, " ")
     .trim();
 }

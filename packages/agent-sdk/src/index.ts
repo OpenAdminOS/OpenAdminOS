@@ -596,6 +596,44 @@ export interface RunHistoryPruneResult {
   newestPrunedQueuedAt?: string;
 }
 
+export const DEFAULT_DRIFT_RETENTION_DAYS = 180;
+
+export interface DriftRetentionSettings {
+  /**
+   * When true, drift history pruning is disabled completely. Current object
+   * state is kept regardless of this flag; this only controls historical
+   * snapshot/version rows.
+   */
+  neverPrune: boolean;
+  /**
+   * Keep drift snapshot/version history captured within this many days.
+   * Undefined is valid only when neverPrune is true.
+   */
+  keepDays?: number;
+  updatedAt?: string;
+}
+
+export const DEFAULT_DRIFT_RETENTION_SETTINGS: DriftRetentionSettings = {
+  neverPrune: false,
+  keepDays: DEFAULT_DRIFT_RETENTION_DAYS,
+};
+
+export interface SetDriftRetentionSettingsInput {
+  neverPrune: boolean;
+  keepDays?: number | null;
+}
+
+export type DriftPruneTrigger = "startup" | "scheduler" | "manual";
+
+export interface DriftHistoryPruneResult {
+  prunedAt: string;
+  trigger: DriftPruneTrigger;
+  policy: DriftRetentionSettings;
+  snapshotsDeleted: number;
+  versionsDeleted: number;
+  reason: string;
+}
+
 export type AuditLogExportFormat = "json" | "csv";
 
 export interface ExportAuditLogInput {
@@ -737,7 +775,8 @@ export type IntuneChatInvestigationToolName =
   | "list_cached_resources"
   | "query_cache"
   | "graph_get"
-  | "refresh_resource";
+  | "refresh_resource"
+  | "query_drift";
 
 export interface IntuneChatToolTraceEntry {
   id: string;
@@ -982,6 +1021,8 @@ export interface LocalDataSummary {
   runHistoryCount?: number;
   runHistoryRetention?: RunHistoryRetentionSettings;
   lastRunHistoryPrune?: RunHistoryPruneResult;
+  driftRetention?: DriftRetentionSettings;
+  lastDriftHistoryPrune?: DriftHistoryPruneResult;
 }
 
 export interface HostedProviderChatConsent {
@@ -1824,6 +1865,11 @@ export interface OpenAdminOSApi {
     input: SetRunHistoryRetentionSettingsInput,
   ): Promise<RunHistoryRetentionSettings>;
   pruneRunHistoryNow(): Promise<RunHistoryPruneResult>;
+  getDriftRetentionSettings(): Promise<DriftRetentionSettings>;
+  setDriftRetentionSettings(
+    input: SetDriftRetentionSettingsInput,
+  ): Promise<DriftRetentionSettings>;
+  pruneDriftHistoryNow(): Promise<DriftHistoryPruneResult>;
   exportAuditLog(input: ExportAuditLogInput): Promise<AuditLogExportResult>;
   getChatInvestigationSettings(): Promise<ChatInvestigationSettings>;
   setChatInvestigationMode(mode: ChatInvestigationMode): Promise<ChatInvestigationSettings>;

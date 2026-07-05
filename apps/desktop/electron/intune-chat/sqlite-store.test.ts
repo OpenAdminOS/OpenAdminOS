@@ -587,6 +587,13 @@ describe("Intune Chat planner", () => {
     assert.ok(pathForResource("directoryAudits").select?.includes("targetResources"));
   });
 
+  it("prefetches audit resources for tenant drift questions", () => {
+    const plan = planChatContext("Who changed configuration policies since Friday?");
+    assert.equal(plan.resources.includes("directoryAudits"), true);
+    assert.equal(plan.resources.includes("intuneAuditEvents"), true);
+    assert.equal(plan.hasWriteIntent, false);
+  });
+
   it("keeps write agents out of read-only stale-sync recommendations", () => {
     const readAgent: AgentSummary = {
       id: "find-inactive-devices",

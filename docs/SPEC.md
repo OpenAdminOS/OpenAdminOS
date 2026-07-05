@@ -839,8 +839,9 @@ protocol with one fenced JSON tool call per iteration:
 only host-owned read tools, appends observations, and stops after at most six
 iterations. Malformed tool JSON gets one repair prompt; a second malformed
 response or the iteration cap produces a visible fallback notice and answers
-through the deterministic planner path. The toolset is strictly read-only:
-`list_cached_resources`, `query_cache`, `graph_get`, and `refresh_resource`.
+   through the deterministic planner path. The toolset is strictly read-only:
+   `list_cached_resources`, `query_cache`, `graph_get`, `refresh_resource`, and
+   `query_drift`.
 `graph_get` accepts only GET, validates paths against the chat Graph cache
 declarations and bundled Graph catalog read scopes, caps `$top` and returned rows
 at 50, and truncates large live payloads before they return to the model. Every
@@ -1122,17 +1123,48 @@ The v0.2.2 cache uses compact `$select` lists for sign-ins and directory audits,
 validated against Microsoft Graph beta through the Microsoft Graph MCP, so local
 SQLite growth stays bounded before the answer-pack compaction step.
 
-Tenant drift queries are read-only views over local SQLite snapshots. The
-desktop host exposes timeline, entry detail, object history, and status APIs
-from drift snapshot/version rows; it never calls Graph while answering a drift
-query. Attribution is computed at query time from cached Intune audit events and
-directory audits within the previous-snapshot-to-current-snapshot window, padded
-five minutes backward for clock skew. If no cached audit row matches, the result
-is `unknown`; if either audit cache is absent or older than the window, the
-result is `audit-cache-stale` so the UI can ask the admin to refresh audit data
-instead of implying a real actor could not be found. Detail APIs omit raw
+#### Tenant drift timeline
+
+Tenant drift tracks configuration-tier Graph resources where change history is
+useful to an Intune/Entra admin: compliance policies, configuration profiles,
+settings catalog policies, Conditional Access policies, apps and app-management
+policies, scripts/remediations, Autopilot/enrollment profiles, Windows update
+policies, endpoint security intents, group policy configurations, assignment
+filters, and scope tags. High-churn inventory and event resources such as
+managed devices, detected apps, sign-ins, troubleshooting events, overview
+aggregates, and encryption state stay out of drift tracking so the timeline does
+not become noise or a storage sink.
+
+Snapshots are created only when the normal Graph cache refresh writes a tracked
+resource. A first refresh establishes a baseline; later refreshes compare the
+new canonicalized rows against the previous version for each object and store
+added, removed, or modified object-version intervals. Refreshing audit resources
+can improve attribution, but answering a drift query never calls Microsoft Graph.
+The desktop host exposes timeline, entry detail, object history, and status APIs
+from local SQLite snapshot/version rows.
+
+Diffs are deterministic. The host canonicalizes tracked objects, ignores known
+volatile fields, hashes canonical JSON, and computes field-level before/after
+paths with the pure diff engine. The LLM never computes drift and is not allowed
+to invent a changed field; it can only summarize bounded rows returned by the
+host APIs or the read-only `query_drift` chat tool. Detail APIs omit raw
 before/after bodies once either serialized side exceeds 48 KB, while retaining
 the field-change list.
+
+Attribution is honest rather than guessed. At query time the host joins the
+diffed object id to cached Intune audit events and directory audits within the
+previous-snapshot-to-current-snapshot window, padded five minutes backward for
+clock skew. A matched result may show the actor UPN or app display name plus the
+source audit family. If no cached audit row matches, attribution is `unknown`.
+If either audit cache is absent or older than the snapshot window, the result is
+`audit-cache-stale` so the UI can ask the admin to refresh audit data instead of
+implying that a real actor could not be found.
+
+Change history retention is local and configurable in Settings -> General. The
+default keeps snapshot/version history for 180 days, bounded to 30-730 days, with
+a never-prune option. Pruning runs at startup, on the scheduler tick, and through
+the manual Settings action. Current object state is never deleted by drift
+retention; only old historical snapshots and stale object versions are removed.
 
 Verification for the chat surface includes `npm run smoke:intune-chat`. The smoke
 test launches Electron in a dev-only fixture mode, seeds a local tenant, drives
@@ -1146,7 +1178,7 @@ The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
 capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.
 It seeds a Contoso Demo tenant with an `.invalid` admin address, a local Ollama
 model, the real registry index from `agents/index.json`, and smoke Graph/LLM
-factories, then writes 1600x1000 PNGs for four app shell routes and every Agent
+factories, then writes 1600x1000 PNGs for five app shell routes and every Agent
 Hub registry detail under `docs/screenshots/`.
 
 #### Context-window strategy

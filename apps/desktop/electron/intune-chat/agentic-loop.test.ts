@@ -234,5 +234,11 @@ function toolContext(store: IntelligenceSqliteStore): IntuneChatToolContext {
       refreshedAt: "2026-06-01T10:01:00.000Z",
       ok: true,
     }),
+    getDriftTimeline: async () => ({
+      tenantId: "tenant-1",
+      entries: [],
+      hasMore: false,
+      limit: 500,
+    }),
   };
 }

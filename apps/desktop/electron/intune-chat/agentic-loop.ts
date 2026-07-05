@@ -354,7 +354,8 @@ function isToolName(value: string): value is IntuneChatInvestigationToolName {
     value === "list_cached_resources" ||
     value === "query_cache" ||
     value === "graph_get" ||
-    value === "refresh_resource"
+    value === "refresh_resource" ||
+    value === "query_drift"
   );
 }
 
@@ -387,4 +388,3 @@ function assertNotCancelled(signal: AbortSignal | undefined): void {
   error.name = "AbortError";
   throw error;
 }
-

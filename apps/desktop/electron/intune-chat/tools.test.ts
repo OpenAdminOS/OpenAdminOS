@@ -149,6 +149,77 @@ describe("Intune Chat read-only tools", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("query_drift reads local drift timeline rows, clamps top, and records trace", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    try {
+      const store = seededStore(dir, 1);
+      const timelineCalls: unknown[] = [];
+      const ctx = toolContext(store, {
+        getDriftTimeline: async (input) => {
+          timelineCalls.push(input);
+          return {
+            tenantId: "tenant-1",
+            limit: 500,
+            hasMore: true,
+            entries: Array.from({ length: 60 }, (_, index) => ({
+              id: `entry-${index}`,
+              snapshotId: `snapshot-${index}`,
+              capturedAt: `2026-07-05T10:${String(index).padStart(2, "0")}:00.000Z`,
+              resource: "configurationPolicies" as const,
+              resourceLabel: "Settings catalog policies",
+              changeKind: "modified" as const,
+              fieldChangeCount: index + 1,
+              timestampOnly: false,
+              graphId: `policy-${index}`,
+              displayName: `Policy ${index}`,
+              attribution: {
+                status: "matched" as const,
+                actor: { userPrincipalName: "admin@contoso.example" },
+              },
+            })),
+          };
+        },
+      });
+
+      const execution = await executeIntuneChatTool(ctx, "query_drift", {
+        resource: "configurationPolicies",
+        from: "2026-07-05T00:00:00.000Z",
+        to: "2026-07-06T00:00:00.000Z",
+        changeKind: "modified",
+        top: 500,
+      });
+
+      const result = execution.result as {
+        returnedRows: number;
+        top: number;
+        note?: string;
+        rows: Array<{ actor: string; kind: string; fieldsChanged: number }>;
+      };
+      assert.equal(result.top, 50);
+      assert.equal(result.returnedRows, 50);
+      assert.match(result.note ?? "", /capped at 50 rows/i);
+      assert.equal(result.rows[0]?.actor, "admin@contoso.example");
+      assert.equal(result.rows[0]?.kind, "modified");
+      assert.equal(result.rows[0]?.fieldsChanged, 1);
+      assert.equal(execution.trace.tool, "query_drift");
+      assert.match(execution.trace.resultSummary, /50 drift changes returned/);
+      assert.deepEqual(timelineCalls[0], {
+        tenantId: "tenant-1",
+        resources: ["configurationPolicies"],
+        from: "2026-07-05T00:00:00.000Z",
+        to: "2026-07-06T00:00:00.000Z",
+        limit: 500,
+      });
+
+      const invalid = await executeIntuneChatTool(ctx, "query_drift", {
+        resource: "managedDevices",
+      });
+      assert.match(invalid.trace.error ?? "", /drift-tracked resource/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 function seededStore(dir: string, deviceCount: number): IntelligenceSqliteStore {
@@ -176,6 +247,7 @@ function toolContext(
   overrides: Partial<{
     graphForScopes: Parameters<typeof executeIntuneChatTool>[0]["graphForScopes"];
     refreshResource: Parameters<typeof executeIntuneChatTool>[0]["refreshResource"];
+    getDriftTimeline: Parameters<typeof executeIntuneChatTool>[0]["getDriftTimeline"];
   }> = {},
 ): Parameters<typeof executeIntuneChatTool>[0] {
   return {
@@ -202,6 +274,14 @@ function toolContext(
         rows: 0,
         refreshedAt: "2026-06-01T10:01:00.000Z",
         ok: true,
+      })),
+    getDriftTimeline:
+      overrides.getDriftTimeline ??
+      (async () => ({
+        tenantId: "tenant-1",
+        entries: [],
+        hasMore: false,
+        limit: 500,
       })),
   };
 }

@@ -340,6 +340,9 @@ export function planChatContext(question: string): PlannedChatContext {
     add("directoryAudits", "users");
     if (lower.includes("changed in the tenant")) add("troubleshootingEvents");
   }
+  if (matchesAny(lower, ["what changed", "changed since", "who modified", "who changed", "recent changes", "drift"])) {
+    add("directoryAudits", "intuneAuditEvents");
+  }
   if (matchesAny(lower, ["assignment", "assigned", "targeted", "filter", "scope tag", "rbac", "role scope", "excluded", "included"])) {
     add("assignmentFilters", "roleScopeTags", "groups", "users");
     if (matchesAny(lower, ["app", "apps", "unused", "assignments", "all users", "all devices"])) {
