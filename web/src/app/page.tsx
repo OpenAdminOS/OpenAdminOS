@@ -299,7 +299,7 @@ export default async function HomePage() {
             src="/videos/hero-demo.mp4"
             poster="/videos/hero-demo-poster.jpg"
             alt="OpenAdminOS agent run: manifest scopes, local run log, results, and a write-change diff awaiting confirmation"
-            className="aspect-video h-auto w-full object-cover drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)]"
+            className="aspect-video h-auto w-full rounded-xl object-cover drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)] sm:rounded-2xl"
           />
         </section>
 
