@@ -13,7 +13,7 @@ import {
   symlinkSync,
   rmSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 if (!process.env.VERCEL) {
@@ -55,6 +55,8 @@ if (!existsSync(repoContentRoot) && existsSync(webContentRoot)) {
 if (!existsSync(repoPublicRoot) && existsSync(webPublicRoot)) {
   symlinkSync("web/public", repoPublicRoot, "dir");
 }
+
+linkMissingTracedProjectFiles();
 
 if (!existsSync(join(repoNextRoot, "routes-manifest-deterministic.json"))) {
   const routesManifest = join(repoNextRoot, "routes-manifest.json");
@@ -120,6 +122,37 @@ function linkMissingTracedNodePackages() {
   }
 }
 
+function linkMissingTracedProjectFiles() {
+  if (!existsSync(repoNextRoot)) {
+    return;
+  }
+
+  for (const nftFile of findFiles(repoNextRoot, ".nft.json")) {
+    const manifest = JSON.parse(readFileSync(nftFile, "utf8"));
+    for (const filePath of manifest.files ?? []) {
+      const repoPath = resolve(dirname(nftFile), filePath);
+
+      if (
+        !isInsidePath(repoPath, repoRoot) ||
+        isInsidePath(repoPath, repoNodeModules) ||
+        isInsidePath(repoPath, repoNextRoot)
+      ) {
+        continue;
+      }
+
+      const repoRelativePath = relative(repoRoot, repoPath);
+      const webPath = join(webRoot, repoRelativePath);
+
+      if (existsSync(repoPath) || !existsSync(webPath)) {
+        continue;
+      }
+
+      mkdirSync(dirname(repoPath), { recursive: true });
+      symlinkSync(relative(dirname(repoPath), webPath), repoPath);
+    }
+  }
+}
+
 function collectTracedNodePackages(rootDir) {
   const packages = new Set();
 
@@ -150,6 +183,14 @@ function collectTracedNodePackages(rootDir) {
   }
 
   return packages;
+}
+
+function isInsidePath(filePath, rootDir) {
+  const relativePath = relative(resolve(rootDir), resolve(filePath));
+  return (
+    relativePath === "" ||
+    (!relativePath.startsWith("..") && !isAbsolute(relativePath))
+  );
 }
 
 function findFiles(rootDir, suffix) {
