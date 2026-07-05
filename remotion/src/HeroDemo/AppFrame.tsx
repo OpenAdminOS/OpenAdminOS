@@ -16,7 +16,7 @@ const agents = [
 const statusCells = [
   {
     label: 'Tenant',
-    value: 'contoso.onmicrosoft.com · Connected',
+    value: 'contoso.onmicrosoft.com',
     detail: 'Scope active',
     tone: 'emerald' as const,
   },
@@ -125,26 +125,60 @@ export const AppFrame = ({frame, opacity}: {frame: number; opacity: number}) => 
             <div
               key={cell.label}
               style={{
-                padding: '16px 22px',
+                boxSizing: 'border-box',
+                minWidth: 0,
+                padding: '8px 22px',
                 borderRight: `1px solid ${theme.colors.border}`,
               }}
             >
-              <Label>{cell.label}</Label>
+              <Label
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  lineHeight: '20px',
+                }}
+              >
+                {cell.label}
+              </Label>
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 9,
-                  marginTop: 7,
+                  minWidth: 0,
+                  marginTop: 4,
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
                   color: theme.colors.text.primary,
                   fontSize: 23,
                   fontWeight: 650,
+                  lineHeight: '26px',
                 }}
               >
                 <Dot tone={cell.tone} />
-                {cell.value}
+                <span
+                  style={{
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {cell.value}
+                </span>
               </div>
-              <div style={{marginTop: 3, color: theme.colors.text.faint, fontSize: 17}}>
+              <div
+                style={{
+                  marginTop: 2,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  color: theme.colors.text.faint,
+                  fontSize: 17,
+                  lineHeight: '18px',
+                }}
+              >
                 {cell.detail}
               </div>
             </div>
@@ -202,7 +236,16 @@ export const AppFrame = ({frame, opacity}: {frame: number; opacity: number}) => 
                 boxShadow: `inset 3px 0 0 ${theme.colors.accents.sky}`,
               }}
             />
-            <div style={{display: 'grid', gap: 10, position: 'relative'}}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr)',
+                gap: 10,
+                minWidth: 0,
+                position: 'relative',
+                width: '100%',
+              }}
+            >
               {agents.map((agent, index) => {
                 const selected = frame >= 118 ? index === 0 : index === 2;
 
@@ -211,6 +254,9 @@ export const AppFrame = ({frame, opacity}: {frame: number; opacity: number}) => 
                     key={agent.name}
                     style={{
                       minHeight: 54,
+                      minWidth: 0,
+                      maxWidth: '100%',
+                      overflow: 'hidden',
                       padding: '8px 12px 8px 16px',
                       borderRadius: 8,
                       display: 'flex',
@@ -221,6 +267,8 @@ export const AppFrame = ({frame, opacity}: {frame: number; opacity: number}) => 
                   >
                     <div
                       style={{
+                        minWidth: 0,
+                        maxWidth: '100%',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -232,6 +280,8 @@ export const AppFrame = ({frame, opacity}: {frame: number; opacity: number}) => 
                     </div>
                     <div
                       style={{
+                        minWidth: 0,
+                        maxWidth: '100%',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
