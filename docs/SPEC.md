@@ -152,7 +152,12 @@ available inside the `web/` Vercel build. The demo video is rendered offline
 from the top-level `remotion/` project (not part of the npm workspace, never
 installed on Vercel) into committed `web/public/videos/` assets; the embed is
 a muted autoplay loop that falls back to a static poster when
-`prefers-reduced-motion` is set.
+`prefers-reduced-motion` is set. The composition is a faithful recreation of
+the real desktop app UI — it uses the design tokens from
+`apps/desktop/src/styles/globals.css` (warm stone palette, amber accent) and
+mirrors the actual chrome (sidebar, tenant card, status strip) against
+`web/public/openadminos-app.png`; it must not drift into an invented visual
+style.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
