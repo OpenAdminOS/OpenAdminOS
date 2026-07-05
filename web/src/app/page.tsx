@@ -68,22 +68,12 @@ const COMMON_QUESTIONS = [
   {
     question: "What Microsoft Graph permissions do agents need?",
     answer:
-      "Each agent declares its required Graph scopes in its manifest. OpenAdminOS shows those scopes before install and before consent, so admins can see what an agent can read or propose changing before it runs.",
+      "Each agent declares its required Graph scopes in its manifest. OpenAdminOS shows those scopes before install and before consent, so admins can see what an agent can read or propose changing before it runs. Enterprises can point the app at a private registry; the same scope declaration and write-confirmation rules still apply.",
   },
   {
     question: "What happens before a write agent changes my tenant?",
     answer:
       "Write agents always pause at a diff confirmation screen. Destructive operations require typed confirmation. There is no trust-this-agent bypass and no skip toggle for write operations.",
-  },
-  {
-    question: "Can I use a private agent registry?",
-    answer:
-      "Yes. Enterprises can point OpenAdminOS at their own curated registry instead of using only the public community registry. Agents still use the same manifest, scope declaration, and write-confirmation rules.",
-  },
-  {
-    question: "Which LLM providers are supported?",
-    answer:
-      "Ollama is the local provider path available today. LM Studio is planned. Hosted providers such as OpenAI, Anthropic, and Azure OpenAI are optional and are treated as a different trust boundary in the UI.",
   },
   {
     question: "Is OpenAdminOS affiliated with Microsoft?",
@@ -550,31 +540,20 @@ export default async function HomePage() {
         </section>
 
         <section className="w-full max-w-7xl border-t border-white/10 py-20">
-          <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
-                Open source
-              </p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                No vendor-owned agent runtime.
-              </h2>
-              <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
-                The app, runtime, agents, and registry contract are open from
-                day one. Audit them, change them, or point OpenAdminOS at your
-                own curated registry.
-              </p>
-            </div>
-            <div className="rounded-xl border border-white/10 bg-black/35 p-4 font-mono text-sm text-white/60">
-              <p className="text-white/35">~/code</p>
-              <p className="mt-3">$ gh repo fork OpenAdminOS/OpenAdminOS --clone</p>
-              <p className="text-emerald-300/80">✓ Cloned OpenAdminOS</p>
-              <p className="mt-3">$ pnpm install</p>
-              <p className="text-emerald-300/80">✓ workspace ready</p>
-              <p className="mt-3">$ pnpm dev</p>
-              <p className="text-sky-300/80">OpenAdminOS desktop app started</p>
-            </div>
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+              Open source
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+              No vendor-owned agent runtime.
+            </h2>
+            <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+              The app, runtime, agents, and registry contract are open from day
+              one. Audit them, change them, or point OpenAdminOS at your own
+              curated registry.
+            </p>
           </div>
-          <div className="mt-8 grid gap-3 sm:grid-cols-4">
+          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {PROOF_ITEMS.map(([label, detail]) => (
               <div
                 key={label}
@@ -634,9 +613,8 @@ export default async function HomePage() {
             Run tenant agents on your terms.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-white/60 sm:text-base">
-            Use local models when privacy, repeatability, or cost matters. Use
-            hosted models when you choose to. Either way, OpenAdminOS keeps
-            tenant work inspectable and changes gated.
+            Use local models by default, hosted models by choice, and approve
+            every Graph change.
           </p>
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
