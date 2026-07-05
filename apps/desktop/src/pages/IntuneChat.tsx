@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
@@ -1346,12 +1346,20 @@ export default function IntuneChat() {
               <div className="relative">
                 <IconSearch
                   size={13}
+                  aria-hidden="true"
                   className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
                 />
+                <label htmlFor="conversation-search" className="sr-only">
+                  Search conversations
+                </label>
                 <input
+                  id="conversation-search"
+                  name="conversation-search"
+                  type="search"
                   value={conversationSearch}
                   onChange={(event) => setConversationSearch(event.target.value)}
                   placeholder="Search conversations"
+                  autoComplete="off"
                   className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:ring-[var(--color-accent)]"
                 />
               </div>
@@ -1710,7 +1718,12 @@ export default function IntuneChat() {
               disabled={sending || runningMultiTenant}
             />
             <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
+              <label htmlFor="intune-chat-composer" className="sr-only">
+                Chat prompt
+              </label>
               <textarea
+                id="intune-chat-composer"
+                name="intune-chat-composer"
                 ref={composerRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
@@ -1896,9 +1909,15 @@ function MultiTenantComposerControls({
   onSavedQuery: (query: SavedMultiTenantQuery) => void;
   disabled: boolean;
 }) {
+  const savedQuerySelectId = useId();
+
   return (
     <div className="mb-3 rounded-xl bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        role="group"
+        aria-label="Tenant scope"
+        className="flex flex-wrap items-center gap-2"
+      >
         <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
           Scope
         </span>
@@ -1922,7 +1941,12 @@ function MultiTenantComposerControls({
           </button>
         ))}
         <div className="ml-auto min-w-[180px]">
+          <label htmlFor={savedQuerySelectId} className="sr-only">
+            Saved multi-tenant query
+          </label>
           <select
+            id={savedQuerySelectId}
+            name="saved-multi-tenant-query"
             value={selectedSavedQueryId}
             disabled={disabled}
             onChange={(event) => {
@@ -1930,7 +1954,6 @@ function MultiTenantComposerControls({
               if (query) onSavedQuery(query);
             }}
             className="h-7 w-full rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
-            aria-label="Saved multi-tenant query"
           >
             <option value="">Saved queries</option>
             {savedQueries.map((query) => (
@@ -2026,6 +2049,7 @@ function WorkspaceContextControls({
   onIncludeInstructionsChange: (include: boolean) => void;
   disabled: boolean;
 }) {
+  const workspaceSelectId = useId();
   if (workspaces.length === 0) return null;
   const hasAttachment =
     Boolean(workspace) &&
@@ -2038,12 +2062,16 @@ function WorkspaceContextControls({
         <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
           Workspace context
         </span>
+        <label htmlFor={workspaceSelectId} className="sr-only">
+          Attach workspace context
+        </label>
         <select
+          id={workspaceSelectId}
+          name="attached-workspace-context"
           value={attachedWorkspaceId}
           disabled={disabled}
           onChange={(event) => onWorkspaceChange(event.target.value)}
           className="h-7 min-w-[220px] rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Attach workspace context"
         >
           <option value="">No workspace attached</option>
           {workspaces.map((entry) => (
@@ -2251,7 +2279,11 @@ function ScopeReviewCard({
         </div>
         <div className="space-y-3">
           {progressJob && (
-            <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]"
+            >
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                   Run progress
@@ -2292,10 +2324,16 @@ function ScopeReviewCard({
               Save group
             </div>
             <div className="mt-2 flex gap-2">
+              <label htmlFor="tenant-group-name" className="sr-only">
+                Tenant group name
+              </label>
               <input
+                id="tenant-group-name"
+                name="tenant-group-name"
                 value={groupName}
                 onChange={(event) => onGroupNameChange(event.target.value)}
                 placeholder="Tenant group name"
+                autoComplete="off"
                 className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
               />
               <Button size="sm" variant="secondary" disabled={!groupName.trim()} onClick={onSaveGroup}>
@@ -2509,7 +2547,11 @@ function MultiTenantResultArtifact({
           <OutputSummaryTile label="Non-compliant" value={job.summary.nonCompliant} tone="danger" />
         </OutputSummaryGrid>
         {job.progress.length > 0 && (
-          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-3 grid gap-2 lg:grid-cols-2"
+          >
             {job.progress.map((entry) => (
               <div
                 key={entry.tenantId}
@@ -2588,8 +2630,13 @@ function MultiTenantResultArtifact({
             ...osOptions.map((os) => ({ value: os, label: os })),
           ]}
         />
-        <label className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <label
+          htmlFor="multi-tenant-stale-only"
+          className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+        >
           <input
+            id="multi-tenant-stale-only"
+            name="multi-tenant-stale-only"
             type="checkbox"
             checked={filters.staleOnly}
             onChange={(event) => onFiltersChange({ ...filters, staleOnly: event.target.checked })}
@@ -2835,15 +2882,16 @@ function PinMessageToWorkspaceModal({
         <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           This stores the answer and visible sources in the selected workspace. Multi-tenant answers must be split into tenant-specific workspace evidence first.
         </div>
-        <label className="block">
+        <label htmlFor="pin-answer-workspace" className="block">
           <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Workspace
           </span>
           <select
+            id="pin-answer-workspace"
+            name="pin-answer-workspace"
             value={selectedWorkspaceId}
             onChange={(event) => onWorkspaceChange(event.target.value)}
             className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
-            aria-label="Workspace for pinned chat answer"
           >
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
@@ -2934,8 +2982,13 @@ function HostedChatConsentModal({
             </div>
           </div>
         </div>
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <label
+          htmlFor="remember-hosted-provider-confirmation"
+          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+        >
           <input
+            id="remember-hosted-provider-confirmation"
+            name="remember-hosted-provider-confirmation"
             type="checkbox"
             checked={remember}
             onChange={(event) => onRememberChange(event.target.checked)}
@@ -2993,11 +3046,13 @@ function RenameConversationModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <label className="block">
+        <label htmlFor="conversation-title" className="block">
           <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Conversation title
           </span>
           <input
+            id="conversation-title"
+            name="conversation-title"
             value={title}
             onChange={(event) => onTitleChange(event.target.value)}
             autoFocus
@@ -3258,7 +3313,11 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
 
   return (
     <div className="flex justify-start">
-      <div className="w-full max-w-[560px] rounded-xl bg-[var(--color-bg-raised)] px-3.5 py-3 ring-1 ring-[var(--color-border-soft)]">
+      <div
+        role="status"
+        aria-live="polite"
+        className="w-full max-w-[560px] rounded-xl bg-[var(--color-bg-raised)] px-3.5 py-3 ring-1 ring-[var(--color-border-soft)]"
+      >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-text)]">
             {progress.message}
@@ -3267,9 +3326,16 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
             {completedCount}/{progress.steps.length}
           </div>
         </div>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border-soft)]">
+        <div
+          className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border-soft)]"
+          role="progressbar"
+          aria-label={progress.message}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+        >
           <div
-            className={`h-full rounded-full transition-all duration-300 ${
+            className={`h-full rounded-full transition-[width,background-color] duration-300 ${
               hasFailed
                 ? "bg-[var(--color-danger)]"
                 : isComplete
@@ -3299,6 +3365,9 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
                   </div>
                 )}
               </div>
+              <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+                {statusLabel(step.status)}
+              </span>
             </div>
           ))}
         </div>
@@ -3315,26 +3384,35 @@ function ProgressStepGlyph({
   if (status === "completed") {
     return (
       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/35">
-        <IconCheck size={10} />
+        <IconCheck size={10} aria-hidden="true" />
       </span>
     );
   }
   if (status === "failed") {
     return (
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[10px] font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35">
+      <span
+        aria-hidden="true"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[10px] font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35"
+      >
         !
       </span>
     );
   }
   if (status === "active") {
     return (
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)]">
+      <span
+        aria-hidden="true"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)]"
+      >
         <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
       </span>
     );
   }
   return (
-    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 ring-[var(--color-text)]/25">
+    <span
+      aria-hidden="true"
+      className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 ring-[var(--color-text)]/25"
+    >
       <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-text-soft)]" />
     </span>
   );
@@ -3370,6 +3448,7 @@ function EmptyChat({
           {promptGroups.map((group) => (
             <button
               key={group.label}
+              type="button"
               onClick={() => setActiveGroup(group.label)}
               className={`rounded-lg px-3 py-1.5 text-[11.5px] transition-colors ${focusRingClass} ${
                 activeGroup === group.label
@@ -3909,6 +3988,7 @@ function AgentSuggestionCard({
   onRun: () => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsId = useId();
   const visibleScopes = suggestion.scopes.slice(0, 3);
   const hiddenScopeCount = Math.max(0, suggestion.scopes.length - visibleScopes.length);
   const matchedTerms = suggestion.matchedTerms ?? [];
@@ -3936,6 +4016,8 @@ function AgentSuggestionCard({
             size="sm"
             variant="ghost"
             onClick={() => setDetailsOpen((current) => !current)}
+            aria-expanded={detailsOpen}
+            aria-controls={detailsId}
           >
             {detailsOpen ? "Hide details" : "Details"}
           </Button>
@@ -3951,7 +4033,10 @@ function AgentSuggestionCard({
         </div>
       </div>
       {detailsOpen && (
-        <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-[11px] leading-5 text-[var(--color-text-muted)]">
+        <div
+          id={detailsId}
+          className="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-[11px] leading-5 text-[var(--color-text-muted)]"
+        >
           <div>{suggestion.reason}</div>
           {(matchedTerms.length > 0 ||
             matchedConcepts.length > 0 ||

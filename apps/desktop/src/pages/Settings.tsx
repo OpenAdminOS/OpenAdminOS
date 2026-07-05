@@ -619,7 +619,11 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
   if (loading) {
     return (
       <Card>
-        <div className="p-5 text-[12px] text-[var(--color-text-muted)]">
+        <div
+          role="status"
+          aria-live="polite"
+          className="p-5 text-[12px] text-[var(--color-text-muted)]"
+        >
           Loading Azure OpenAI settings.
         </div>
       </Card>
@@ -652,6 +656,8 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <AzureConfigField label="Endpoint URL" htmlFor="azure-openai-endpoint">
             <input
               id="azure-openai-endpoint"
+              name="azure-openai-endpoint"
+              type="url"
               value={endpoint}
               onChange={(event) => {
                 setEndpoint(event.target.value);
@@ -659,6 +665,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
                 setNotice(null);
               }}
               placeholder="https://contoso.openai.azure.com"
+              autoComplete="off"
               spellCheck={false}
               className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
             />
@@ -666,6 +673,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <AzureConfigField label="Deployment name" htmlFor="azure-openai-deployment">
             <input
               id="azure-openai-deployment"
+              name="azure-openai-deployment"
               value={deployment}
               onChange={(event) => {
                 setDeployment(event.target.value);
@@ -673,6 +681,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
                 setNotice(null);
               }}
               placeholder="gpt-4o-admin"
+              autoComplete="off"
               spellCheck={false}
               className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
             />
@@ -680,6 +689,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <AzureConfigField label="API version" htmlFor="azure-openai-api-version">
             <input
               id="azure-openai-api-version"
+              name="azure-openai-api-version"
               value={apiVersion}
               onChange={(event) => {
                 setApiVersion(event.target.value);
@@ -687,6 +697,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
                 setNotice(null);
               }}
               placeholder={DEFAULT_AZURE_OPENAI_API_VERSION}
+              autoComplete="off"
               spellCheck={false}
               className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
             />
@@ -735,6 +746,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     id="azure-openai-api-key"
+                    name="azure-openai-api-key"
                     type="password"
                     value={apiKeyDraft}
                     onChange={(event) => {
@@ -773,12 +785,19 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
         </div>
 
         {error && (
-          <div className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div
+            role="alert"
+            className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+          >
             {error}
           </div>
         )}
         {notice && (
-          <div className="mt-4 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30">
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-4 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30"
+          >
             {notice}
           </div>
         )}
@@ -1250,7 +1269,11 @@ function ChatSettingsSection() {
           label="Chat investigation mode"
           description="Controls whether single-tenant Intune Chat can run read-only tool calls before answering. Multi-tenant chat stays deterministic."
           control={
-            <div className="grid min-w-[360px] grid-cols-3 gap-1 rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border-soft)]">
+            <div
+              role="group"
+              aria-label="Chat investigation mode"
+              className="grid min-w-[360px] grid-cols-3 gap-1 rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border-soft)]"
+            >
               {([
                 {
                   value: "auto",
@@ -1434,7 +1457,12 @@ function ChatSettingsSection() {
           description="Refreshes the active tenant cache through the local scheduler while the user is signed in."
           control={
             <div className="flex items-center gap-2">
+              <label htmlFor="periodic-cache-refresh-interval" className="sr-only">
+                Periodic cache refresh interval
+              </label>
               <select
+                id="periodic-cache-refresh-interval"
+                name="periodic-cache-refresh-interval"
                 value={scheduleInterval}
                 disabled={scheduleBusy || !activeTenant}
                 onChange={(event) => {
@@ -2082,6 +2110,8 @@ function GeneralSection() {
         />
         {(runHistoryError || runHistoryNotice || auditExportNotice) && (
           <div
+            role={runHistoryError ? "alert" : "status"}
+            aria-live={runHistoryError ? "assertive" : "polite"}
             className={`rounded-lg px-3 py-2 text-[12px] ring-1 ${
               runHistoryError
                 ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
@@ -2130,10 +2160,14 @@ function RunHistoryRetentionControls({
         </span>
       </div>
 
-      <label className="flex items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+      <label
+        htmlFor="run-history-never-prune"
+        className="flex items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+      >
         <input
+          id="run-history-never-prune"
+          name="run-history-never-prune"
           type="checkbox"
-          aria-label="Never prune run history"
           checked={draft.neverPrune}
           disabled={busy !== null}
           onChange={(event) =>
@@ -2144,15 +2178,19 @@ function RunHistoryRetentionControls({
       </label>
 
       <div className="grid grid-cols-2 gap-2">
-        <label
+        <div
           className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
             controlsDisabled ? "opacity-60" : ""
           }`}
         >
-          <span className="flex items-center gap-2 text-[var(--color-text-soft)]">
+          <label
+            htmlFor="run-history-keep-last-runs-enabled"
+            className="flex items-center gap-2 text-[var(--color-text-soft)]"
+          >
             <input
+              id="run-history-keep-last-runs-enabled"
+              name="run-history-keep-last-runs-enabled"
               type="checkbox"
-              aria-label="Keep newest run count"
               checked={draft.keepLastRunsEnabled}
               disabled={controlsDisabled}
               onChange={(event) =>
@@ -2163,12 +2201,17 @@ function RunHistoryRetentionControls({
               }
             />
             Keep newest
-          </span>
+          </label>
+          <label htmlFor="run-history-keep-last-runs" className="sr-only">
+            Runs to keep
+          </label>
           <input
+            id="run-history-keep-last-runs"
+            name="run-history-keep-last-runs"
             type="number"
             min={1}
             max={100000}
-            aria-label="Runs to keep"
+            inputMode="numeric"
             value={draft.keepLastRuns}
             disabled={controlsDisabled || !draft.keepLastRunsEnabled}
             onChange={(event) =>
@@ -2184,17 +2227,21 @@ function RunHistoryRetentionControls({
             }
             className="mt-2 h-7 w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
           />
-        </label>
+        </div>
 
-        <label
+        <div
           className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
             controlsDisabled ? "opacity-60" : ""
           }`}
         >
-          <span className="flex items-center gap-2 text-[var(--color-text-soft)]">
+          <label
+            htmlFor="run-history-keep-days-enabled"
+            className="flex items-center gap-2 text-[var(--color-text-soft)]"
+          >
             <input
+              id="run-history-keep-days-enabled"
+              name="run-history-keep-days-enabled"
               type="checkbox"
-              aria-label="Keep recent run age"
               checked={draft.keepDaysEnabled}
               disabled={controlsDisabled}
               onChange={(event) =>
@@ -2205,13 +2252,18 @@ function RunHistoryRetentionControls({
               }
             />
             Keep newer than
-          </span>
+          </label>
           <div className="mt-2 flex items-center gap-2">
+            <label htmlFor="run-history-keep-days" className="sr-only">
+              Run age days to keep
+            </label>
             <input
+              id="run-history-keep-days"
+              name="run-history-keep-days"
               type="number"
               min={1}
               max={3650}
-              aria-label="Run age days to keep"
+              inputMode="numeric"
               value={draft.keepDays}
               disabled={controlsDisabled || !draft.keepDaysEnabled}
               onChange={(event) =>
@@ -2229,7 +2281,7 @@ function RunHistoryRetentionControls({
             />
             <span className="text-[var(--color-text-muted)]">days</span>
           </div>
-        </label>
+        </div>
       </div>
 
       <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
@@ -2238,7 +2290,11 @@ function RunHistoryRetentionControls({
       </div>
 
       {lastResult && (
-        <div className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+        >
           {formatRunHistoryPruneResult(lastResult)}
         </div>
       )}
@@ -2279,7 +2335,11 @@ function AuditLogExportControls({
 }) {
   return (
     <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
-      <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border-soft)]">
+      <div
+        role="group"
+        aria-label="Audit log export format"
+        className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border-soft)]"
+      >
         {(["json", "csv"] satisfies AuditLogExportFormat[]).map((option) => {
           const active = format === option;
           return (

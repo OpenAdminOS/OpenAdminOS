@@ -111,12 +111,20 @@ export default function AgentsHome() {
             <div className="relative">
               <IconSearch
                 size={14}
+                aria-hidden="true"
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
               />
+              <label htmlFor="installed-agents-search" className="sr-only">
+                Search installed agents
+              </label>
               <input
+                id="installed-agents-search"
+                name="installed-agents-search"
+                type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search installed agents"
+                autoComplete="off"
                 className="h-9 w-[260px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
               />
             </div>

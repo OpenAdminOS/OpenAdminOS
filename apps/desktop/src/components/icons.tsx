@@ -6,6 +6,8 @@ const base = (size: number, props: IconProps) => ({
   width: size,
   height: size,
   viewBox: "0 0 24 24",
+  "aria-hidden": props["aria-label"] || props["aria-labelledby"] ? undefined : true,
+  focusable: false,
   fill: "none",
   stroke: "currentColor",
   strokeWidth: 1.6,

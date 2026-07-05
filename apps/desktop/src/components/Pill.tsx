@@ -44,5 +44,10 @@ export function StatusDot({
     info: "bg-[var(--color-info)]",
     muted: "bg-[var(--color-text-faint)]",
   } as const;
-  return <span className={`inline-block h-1.5 w-1.5 rounded-full ${colorMap[tone]} ${className}`} />;
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block h-1.5 w-1.5 rounded-full ${colorMap[tone]} ${className}`}
+    />
+  );
 }

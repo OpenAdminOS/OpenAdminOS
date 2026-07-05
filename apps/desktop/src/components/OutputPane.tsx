@@ -233,14 +233,20 @@ export function OutputFilterSelect({
   options: { value: string; label: string }[];
   onChange: (value: string) => void;
 }) {
+  const selectId = useId();
+
   return (
-    <label className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+    <label
+      htmlFor={selectId}
+      className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+    >
       <span>{label}</span>
       <select
+        id={selectId}
+        name={selectId}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={`h-6 min-w-[120px] bg-transparent text-[var(--color-text-soft)] outline-none ${focusRingClass}`}
-        aria-label={label}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

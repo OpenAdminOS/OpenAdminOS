@@ -202,11 +202,18 @@ export function CommandPalette({
       >
         <div className="flex items-center gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
           <IconSearch size={15} className="text-[var(--color-text-muted)]" />
+          <label htmlFor="command-palette-search" className="sr-only">
+            Search commands, agents, or pages
+          </label>
           <input
+            id="command-palette-search"
+            name="command-palette-search"
+            type="search"
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Type a command, agent name, or page…"
+            autoComplete="off"
             className="flex-1 bg-transparent text-[14px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
           />
           <kbd className="rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">

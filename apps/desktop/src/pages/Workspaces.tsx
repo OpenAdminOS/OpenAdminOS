@@ -246,12 +246,20 @@ export default function Workspaces() {
           <div className="relative mt-3">
             <IconSearch
               size={13}
+              aria-hidden="true"
               className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
             />
+            <label htmlFor="workspace-search" className="sr-only">
+              Search workspaces
+            </label>
             <input
+              id="workspace-search"
+              name="workspace-search"
+              type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search workspaces"
+              autoComplete="off"
               className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:ring-[var(--color-accent)]"
             />
           </div>
@@ -373,7 +381,12 @@ export default function Workspaces() {
 
                 <WorkspaceSection title="Notes" badge={`${detail.notes.length}`}>
                   <div className="flex gap-2">
+                    <label htmlFor="workspace-note-text" className="sr-only">
+                      Add a local investigation note
+                    </label>
                     <textarea
+                      id="workspace-note-text"
+                      name="workspace-note-text"
                       value={noteText}
                       onChange={(event) => setNoteText(event.target.value)}
                       placeholder="Add a local investigation note"
@@ -442,7 +455,12 @@ export default function Workspaces() {
                 </WorkspaceSection>
 
                 <WorkspaceSection title="Local instructions">
+                  <label htmlFor="workspace-local-instructions" className="sr-only">
+                    Approved local instructions for this workspace
+                  </label>
                   <textarea
+                    id="workspace-local-instructions"
+                    name="workspace-local-instructions"
                     value={instructions}
                     onChange={(event) => setInstructions(event.target.value)}
                     placeholder="Approved local instructions for this workspace"
@@ -602,22 +620,26 @@ function CreateWorkspaceModal({
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader title="Create workspace" subtitle="Single-tenant local investigation" onClose={onClose} />
       <div className="space-y-4 p-6">
-        <label className="block">
+        <label htmlFor="workspace-title" className="block">
           <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Title
           </span>
           <input
+            id="workspace-title"
+            name="workspace-title"
             value={title}
             onChange={(event) => onTitleChange(event.target.value)}
             autoFocus
             className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
           />
         </label>
-        <label className="block">
+        <label htmlFor="workspace-tenant" className="block">
           <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Tenant
           </span>
           <select
+            id="workspace-tenant"
+            name="workspace-tenant"
             value={tenantId}
             onChange={(event) => onTenantChange(event.target.value)}
             className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"

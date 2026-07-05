@@ -217,12 +217,20 @@ export default function AgentHub() {
             <div className="relative">
               <IconSearch
                 size={14}
+                aria-hidden="true"
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
               />
+              <label htmlFor="agent-hub-search" className="sr-only">
+                Search agents, authors, scopes
+              </label>
               <input
+                id="agent-hub-search"
+                name="agent-hub-search"
+                type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search agents, authors, scopes"
+                autoComplete="off"
                 className="h-9 w-[300px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
               />
             </div>
@@ -622,13 +630,7 @@ function HubAgentCard({
   return (
     <Card>
       <div
-        role="button"
-        tabIndex={0}
-        onClick={onViewDetails}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") onViewDetails();
-        }}
-        className="flex cursor-pointer flex-col gap-4 p-5 outline-none transition-colors hover:bg-[var(--color-surface)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40"
+        className="flex flex-col gap-4 p-5"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">

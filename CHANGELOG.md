@@ -28,6 +28,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Tightened renderer accessibility basics across v0.3 Intune Chat, Settings, Run Result, output panes, and clear existing control-label/card interaction offenders.
+
 ### Security
 
 ## [0.2.5] - 2026-07-04

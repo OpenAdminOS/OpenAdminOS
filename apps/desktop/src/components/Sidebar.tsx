@@ -35,7 +35,7 @@ function NavRow({ item }: { item: NavItem }) {
       to={item.to}
       end={item.end}
       className={({ isActive }) =>
-        `group relative flex items-center gap-2.5 rounded-lg py-1.5 text-[13px] font-medium transition-all duration-150 ${
+        `group relative flex items-center gap-2.5 rounded-lg py-1.5 text-[13px] font-medium transition-colors duration-150 ${
           isActive
             ? "bg-gradient-to-r from-[var(--color-surface-hover)] to-[var(--color-surface)] text-[var(--color-text)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
             : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
