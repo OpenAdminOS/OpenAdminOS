@@ -544,6 +544,58 @@ export interface RunRecord {
   tokens?: LlmTokenUsage;
 }
 
+export const DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS = 500;
+export const DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS = 180;
+
+export interface RunHistoryRetentionSettings {
+  /**
+   * When true, run history pruning is disabled completely. The host still
+   * returns this setting through IPC so Settings can explain why no records
+   * are being removed.
+   */
+  neverPrune: boolean;
+  /**
+   * Keep at least this many newest runs. Undefined disables the count rule.
+   */
+  keepLastRuns?: number;
+  /**
+   * Keep runs queued within this many days. Undefined disables the age rule.
+   */
+  keepDays?: number;
+  updatedAt?: string;
+}
+
+export const DEFAULT_RUN_HISTORY_RETENTION_SETTINGS: RunHistoryRetentionSettings = {
+  neverPrune: false,
+  keepLastRuns: DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
+  keepDays: DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
+};
+
+export interface SetRunHistoryRetentionSettingsInput {
+  neverPrune: boolean;
+  keepLastRuns?: number | null;
+  keepDays?: number | null;
+}
+
+export type RunHistoryPruneTrigger = "startup" | "scheduler" | "manual";
+
+export interface RunHistoryPruneResult {
+  prunedAt: string;
+  trigger: RunHistoryPruneTrigger;
+  policy: RunHistoryRetentionSettings;
+  beforeCount: number;
+  afterCount: number;
+  eligibleCount: number;
+  prunedCount: number;
+  protectedCount: number;
+  protectedWorkspaceCount: number;
+  protectedActiveCount: number;
+  protectedAwaitingConfirmationCount: number;
+  reason: string;
+  oldestPrunedQueuedAt?: string;
+  newestPrunedQueuedAt?: string;
+}
+
 export interface TrustState {
   label: string;
   detail: string;
@@ -789,6 +841,9 @@ export interface LocalDataSummary {
   activeTenantId?: string;
   activeTenantGraphRowCount?: number;
   activeTenantCacheResources?: GraphCacheResourceStatus[];
+  runHistoryCount?: number;
+  runHistoryRetention?: RunHistoryRetentionSettings;
+  lastRunHistoryPrune?: RunHistoryPruneResult;
 }
 
 export interface HostedProviderChatConsent {
@@ -1620,6 +1675,11 @@ export interface OpenAdminOSApi {
   getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary>;
   clearIntuneChatHistory(): Promise<LocalDataSummary>;
   clearGraphCache(tenantId?: string): Promise<LocalDataSummary>;
+  getRunHistoryRetentionSettings(): Promise<RunHistoryRetentionSettings>;
+  setRunHistoryRetentionSettings(
+    input: SetRunHistoryRetentionSettingsInput,
+  ): Promise<RunHistoryRetentionSettings>;
+  pruneRunHistoryNow(): Promise<RunHistoryPruneResult>;
   getChatInvestigationSettings(): Promise<ChatInvestigationSettings>;
   setChatInvestigationMode(mode: ChatInvestigationMode): Promise<ChatInvestigationSettings>;
   getSelfTrainingSettings(): Promise<SelfTrainingSettings>;

@@ -224,6 +224,12 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:clear-intune-chat-history"),
   clearGraphCache: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:clear-graph-cache", tenantId),
+  getRunHistoryRetentionSettings: () =>
+    ipcRenderer.invoke("openadminos:get-run-history-retention-settings"),
+  setRunHistoryRetentionSettings: (input) =>
+    ipcRenderer.invoke("openadminos:set-run-history-retention-settings", input),
+  pruneRunHistoryNow: () =>
+    ipcRenderer.invoke("openadminos:prune-run-history-now"),
   getChatInvestigationSettings: () =>
     ipcRenderer.invoke("openadminos:get-chat-investigation-settings"),
   setChatInvestigationMode: (mode) =>

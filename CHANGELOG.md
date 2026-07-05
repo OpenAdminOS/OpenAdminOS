@@ -12,6 +12,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Added Azure OpenAI provider configuration in Settings with endpoint, deployment, API version, write-only encrypted key storage, and renderer coverage for key replacement.
 - Added `docs/agent-sdk.md`, a practical author guide for manifest fields, step kinds, write confirmation, local QA, and community submission.
 - Added a marketing examples gallery with copyable Build your own Agent prompts for read, write, and connector-backed agents.
+- Added configurable run-history retention in Settings with 500-run/180-day defaults, never-prune support, startup/scheduler/manual pruning, workspace/live/confirmation exclusions, last-prune reporting, IPC coverage, and focused host/renderer tests.
 
 ### Changed
 

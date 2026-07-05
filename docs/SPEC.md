@@ -717,10 +717,20 @@ This is modeled on **Home Assistant integrations** (https://developers.home-assi
 SQLite via Electron's built-in `node:sqlite` for:
 - Tenant configurations (encrypted via OS keychain for tokens)
 - Installed agent registry
-- Run history (full structured logs)
+- Run history (full structured logs; the current desktop host persists `RunRecord[]` in profile `state.json` until the storage package migration moves it behind SQLite)
 - LLM provider configurations (with hosted-provider API keys in OS keychain)
 - Intune Chat conversations, tool calls, Graph cache snapshots, and per-tenant cache refresh schedules
 - Optional local self-training events and approved suggestions
+
+Run history retention is configurable in Settings -> General. The default policy
+is deliberately generous: keep the newest 500 runs and any run queued in the
+last 180 days. A run is pruned only when it falls outside every enabled keep
+rule; admins can disable the count rule, disable the age rule, or choose
+never-prune. Pruning runs at desktop startup and on the existing scheduler tick,
+and Settings also exposes a manual "Prune now" action. The pruner must never
+delete a run that is linked to or pinned in a Workspace, currently queued or
+running, or awaiting write confirmation. Settings surfaces the last prune result
+so local deletion is not silent.
 
 Linux tenant sign-in requires a real OS secret-store backend. OpenAdminOS uses
 Electron `safeStorage` for the MSAL token cache and refuses Electron's
@@ -958,11 +968,12 @@ at the top of the chat history rail under a collapsible Pinned section, separate
 from Recent conversations. Conversation rows expose a right-click context menu
 for local deletion while still using the same product confirmation modal as the
 header Delete action.
-Settings -> Intune Chat also exposes a local data summary for the SQLite store:
-database size, chat conversation/message/tool-call counts, active-tenant Graph
-cache rows, and self-training event/suggestion counts. Clearing all chat history
-uses an explicit product modal and removes only local conversations, messages,
-and chat tool-call records.
+Settings -> Intune Chat also exposes a local data summary for local storage:
+SQLite database size, chat conversation/message/tool-call counts, active-tenant
+Graph cache rows, self-training event/suggestion counts, run-history record
+count, and the last run-history prune result. Clearing all chat history uses an
+explicit product modal and removes only local conversations, messages, and chat
+tool-call records.
 
 Claude-style Projects are a useful reference, but the OpenAdminOS version is
 called **Workspaces**. Workspaces are tenant-scoped investigation containers, not
@@ -1423,12 +1434,14 @@ These must exist and work well before any public release.
 - Settings -> About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, menu bar launch state, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
 - Support issue reporting is visible from the sidebar footer, failed-run remediation cards, and Settings → About. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
-- Run history with filters (agent, tenant, date, status)
+- Run history with filters (agent, tenant, date, status) and configurable
+  retention for old eligible records
 - Audit log export (JSON/CSV with cryptographic timestamps for compliance buyers)
 - Keyboard shortcuts (⌘K palette, ⌘R rerun, ⌘/ search, ⌘? help)
 - Agent permissions inspector (browser-extension-style permission screen pre-install)
 - Update / version management (pin by default, explicit upgrade, changelog visible)
-- Logs export and retention policy (where stored, how big, when rotated)
+- Non-run diagnostic log export and retention policy (where stored, how big,
+  when rotated)
 
 ### Designed before launch (not strict blockers)
 

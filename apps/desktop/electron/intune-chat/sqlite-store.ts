@@ -1035,6 +1035,41 @@ export class IntelligenceSqliteStore {
     };
   }
 
+  listWorkspaceReferencedRunIds(): string[] {
+    const ids = new Set<string>();
+    const linkRows = this.db
+      .prepare(
+        `SELECT ref_id
+         FROM workspace_links
+         WHERE type = 'run'`,
+      )
+      .all() as unknown as Array<{ ref_id: string }>;
+    for (const row of linkRows) {
+      if (row.ref_id) ids.add(row.ref_id);
+    }
+
+    const evidenceRows = this.db
+      .prepare(
+        `SELECT source_ref_json
+         FROM workspace_evidence
+         WHERE source_type = 'run-result'
+           AND source_ref_json IS NOT NULL`,
+      )
+      .all() as unknown as Array<{ source_ref_json: string }>;
+    for (const row of evidenceRows) {
+      const sourceRef = readJson<Record<string, unknown> | undefined>(
+        row.source_ref_json,
+        undefined,
+      );
+      const runId = sourceRef?.runId;
+      if (typeof runId === "string" && runId.trim()) {
+        ids.add(runId);
+      }
+    }
+
+    return [...ids];
+  }
+
   createWorkspace(input: {
     id: string;
     tenantId: string;

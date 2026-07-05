@@ -21,6 +21,8 @@ import {
   IconWarning,
 } from "../components/icons";
 import {
+  DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
+  DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type AzureOpenAIProviderConfig,
@@ -33,6 +35,8 @@ import {
   type ProviderTestResult,
   type ProviderSummary,
   type ReleaseDiagnostics,
+  type RunHistoryPruneResult,
+  type RunHistoryRetentionSettings,
   type SandboxSettings,
   type SchedulerLaunchSettings,
   type SelfTrainingSettings,
@@ -54,6 +58,14 @@ const sections = [
 ] as const;
 
 type SectionId = (typeof sections)[number]["id"];
+
+interface RunHistoryRetentionDraft {
+  neverPrune: boolean;
+  keepLastRunsEnabled: boolean;
+  keepLastRuns: number;
+  keepDaysEnabled: boolean;
+  keepDays: number;
+}
 
 const OFFICIAL_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
@@ -1071,7 +1083,7 @@ function ChatSettingsSection() {
       setError(caught instanceof Error ? caught.message : String(caught)),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeTenantId]);
+  }, [state.activeTenantId, state.runs.length]);
 
   const handleRefreshCache = async () => {
     const api = window.openAdminOS;
@@ -1201,6 +1213,12 @@ function ChatSettingsSection() {
   const graphCacheLabel = activeTenant
     ? `${activeTenantCacheRows.toLocaleString()} rows for ${activeTenant.displayName}`
     : "No active tenant";
+  const runHistoryLabel = localDataSummary?.runHistoryCount !== undefined
+    ? `${localDataSummary.runHistoryCount.toLocaleString()} records`
+    : `${state.runs.length.toLocaleString()} records`;
+  const lastPruneLabel = localDataSummary?.lastRunHistoryPrune
+    ? formatRunHistoryPruneResult(localDataSummary.lastRunHistoryPrune)
+    : "No run-history prune result recorded.";
 
   return (
     <div className="max-w-[820px]">
@@ -1344,7 +1362,7 @@ function ChatSettingsSection() {
                   Local data
                 </div>
                 <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
-                  Intune Chat stores conversations, cache rows, and learning decisions in local SQLite.
+                  Chat, cache, and learning records live in local SQLite. Run history lives in this profile's local state store.
                 </div>
               </div>
               <Pill tone="success">
@@ -1363,6 +1381,7 @@ function ChatSettingsSection() {
               />
               <LocalDataMetric label="Chat history" value={chatHistoryLabel} />
               <LocalDataMetric label="Active tenant cache" value={graphCacheLabel} />
+              <LocalDataMetric label="Run history" value={runHistoryLabel} />
               <LocalDataMetric
                 label="Self-training"
                 value={
@@ -1371,6 +1390,9 @@ function ChatSettingsSection() {
                     : "Loading"
                 }
               />
+            </div>
+            <div className="mt-3 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+              {lastPruneLabel}
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -1650,19 +1672,31 @@ function ClearLocalDataModal({
 }
 
 function GeneralSection() {
-  const { state } = useAppState();
+  const { state, refresh } = useAppState();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
   const [companionLaunch, setCompanionLaunch] =
     useState<CompanionLaunchSettings | null>(null);
   const [sandboxSettings, setSandboxSettings] =
     useState<SandboxSettings | null>(null);
+  const [runHistoryRetention, setRunHistoryRetention] =
+    useState<RunHistoryRetentionSettings | null>(null);
+  const [runHistoryDraft, setRunHistoryDraft] =
+    useState<RunHistoryRetentionDraft>(() =>
+      runHistoryRetentionDraftFromSettings(null),
+    );
+  const [lastPruneResult, setLastPruneResult] =
+    useState<RunHistoryPruneResult | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
   const [companionBusy, setCompanionBusy] = useState(false);
   const [sandboxBusy, setSandboxBusy] = useState(false);
+  const [runHistoryBusy, setRunHistoryBusy] =
+    useState<"saving" | "pruning" | null>(null);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [companionError, setCompanionError] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
+  const [runHistoryError, setRunHistoryError] = useState<string | null>(null);
+  const [runHistoryNotice, setRunHistoryNotice] = useState<string | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -1702,6 +1736,19 @@ function GeneralSection() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setSandboxError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getRunHistoryRetentionSettings()
+      .then((settings) => {
+        if (!cancelled) {
+          setRunHistoryRetention(settings);
+          setRunHistoryDraft(runHistoryRetentionDraftFromSettings(settings));
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setRunHistoryError(error instanceof Error ? error.message : String(error));
         }
       });
     return () => {
@@ -1753,6 +1800,58 @@ function GeneralSection() {
       setSandboxError(error instanceof Error ? error.message : String(error));
     } finally {
       setSandboxBusy(false);
+    }
+  };
+
+  const saveRunHistoryRetention = async () => {
+    const api = window.openAdminOS;
+    if (!api || runHistoryBusy) return;
+    if (
+      !runHistoryDraft.neverPrune &&
+      !runHistoryDraft.keepLastRunsEnabled &&
+      !runHistoryDraft.keepDaysEnabled
+    ) {
+      setRunHistoryError("Enable at least one retention rule, or choose never prune.");
+      return;
+    }
+    setRunHistoryBusy("saving");
+    setRunHistoryError(null);
+    setRunHistoryNotice(null);
+    try {
+      const next = await api.setRunHistoryRetentionSettings({
+        neverPrune: runHistoryDraft.neverPrune,
+        keepLastRuns: runHistoryDraft.keepLastRunsEnabled
+          ? runHistoryDraft.keepLastRuns
+          : null,
+        keepDays: runHistoryDraft.keepDaysEnabled
+          ? runHistoryDraft.keepDays
+          : null,
+      });
+      setRunHistoryRetention(next);
+      setRunHistoryDraft(runHistoryRetentionDraftFromSettings(next));
+      setRunHistoryNotice("Run-history retention saved.");
+    } catch (error) {
+      setRunHistoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRunHistoryBusy(null);
+    }
+  };
+
+  const pruneRunHistoryNow = async () => {
+    const api = window.openAdminOS;
+    if (!api || runHistoryBusy) return;
+    setRunHistoryBusy("pruning");
+    setRunHistoryError(null);
+    setRunHistoryNotice(null);
+    try {
+      const result = await api.pruneRunHistoryNow();
+      setLastPruneResult(result);
+      setRunHistoryNotice(result.reason);
+      await refresh();
+    } catch (error) {
+      setRunHistoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRunHistoryBusy(null);
     }
   };
 
@@ -1915,13 +2014,201 @@ function GeneralSection() {
         />
         <SettingRow
           label="Run history retention"
-          description="Run records live in this profile's local store. Automatic pruning is planned."
+          description="Pruning removes old run records from local history. Workspace-linked or workspace-pinned runs, queued/running runs, and runs awaiting confirmation are kept. The job runs at startup and on the scheduler tick."
           control={
-            <Pill>
-              <StatusDot tone="muted" /> Coming soon
-            </Pill>
+            <RunHistoryRetentionControls
+              draft={runHistoryDraft}
+              saved={runHistoryRetention}
+              runCount={state.runs.length}
+              busy={runHistoryBusy}
+              lastResult={lastPruneResult}
+              onChange={setRunHistoryDraft}
+              onSave={() => void saveRunHistoryRetention()}
+              onPruneNow={() => void pruneRunHistoryNow()}
+            />
           }
         />
+        {(runHistoryError || runHistoryNotice) && (
+          <div
+            className={`rounded-lg px-3 py-2 text-[12px] ring-1 ${
+              runHistoryError
+                ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
+                : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-[var(--color-border-soft)]"
+            }`}
+          >
+            {runHistoryError ?? runHistoryNotice}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RunHistoryRetentionControls({
+  draft,
+  saved,
+  runCount,
+  busy,
+  lastResult,
+  onChange,
+  onSave,
+  onPruneNow,
+}: {
+  draft: RunHistoryRetentionDraft;
+  saved: RunHistoryRetentionSettings | null;
+  runCount: number;
+  busy: "saving" | "pruning" | null;
+  lastResult: RunHistoryPruneResult | null;
+  onChange: (draft: RunHistoryRetentionDraft) => void;
+  onSave: () => void;
+  onPruneNow: () => void;
+}) {
+  const controlsDisabled = busy !== null || draft.neverPrune;
+  const valid =
+    draft.neverPrune || draft.keepLastRunsEnabled || draft.keepDaysEnabled;
+
+  return (
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+      <div className="flex items-center justify-between gap-3">
+        <Pill tone={draft.neverPrune ? "warning" : "default"}>
+          {draft.neverPrune ? "Never prune" : runHistoryRetentionSummary(saved)}
+        </Pill>
+        <span className="text-[var(--color-text-muted)]">
+          {runCount.toLocaleString()} records
+        </span>
+      </div>
+
+      <label className="flex items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <input
+          type="checkbox"
+          aria-label="Never prune run history"
+          checked={draft.neverPrune}
+          disabled={busy !== null}
+          onChange={(event) =>
+            onChange({ ...draft, neverPrune: event.currentTarget.checked })
+          }
+        />
+        <span>Never prune</span>
+      </label>
+
+      <div className="grid grid-cols-2 gap-2">
+        <label
+          className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
+            controlsDisabled ? "opacity-60" : ""
+          }`}
+        >
+          <span className="flex items-center gap-2 text-[var(--color-text-soft)]">
+            <input
+              type="checkbox"
+              aria-label="Keep newest run count"
+              checked={draft.keepLastRunsEnabled}
+              disabled={controlsDisabled}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  keepLastRunsEnabled: event.currentTarget.checked,
+                })
+              }
+            />
+            Keep newest
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={100000}
+            aria-label="Runs to keep"
+            value={draft.keepLastRuns}
+            disabled={controlsDisabled || !draft.keepLastRunsEnabled}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                keepLastRuns: boundedRetentionValue(
+                  event.currentTarget.valueAsNumber,
+                  draft.keepLastRuns,
+                  1,
+                  100_000,
+                ),
+              })
+            }
+            className="mt-2 h-7 w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+        </label>
+
+        <label
+          className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
+            controlsDisabled ? "opacity-60" : ""
+          }`}
+        >
+          <span className="flex items-center gap-2 text-[var(--color-text-soft)]">
+            <input
+              type="checkbox"
+              aria-label="Keep recent run age"
+              checked={draft.keepDaysEnabled}
+              disabled={controlsDisabled}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  keepDaysEnabled: event.currentTarget.checked,
+                })
+              }
+            />
+            Keep newer than
+          </span>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              max={3650}
+              aria-label="Run age days to keep"
+              value={draft.keepDays}
+              disabled={controlsDisabled || !draft.keepDaysEnabled}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  keepDays: boundedRetentionValue(
+                    event.currentTarget.valueAsNumber,
+                    draft.keepDays,
+                    1,
+                    3_650,
+                  ),
+                })
+              }
+              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+            />
+            <span className="text-[var(--color-text-muted)]">days</span>
+          </div>
+        </label>
+      </div>
+
+      <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+        Deletes only records outside every enabled rule. Keeps workspace evidence,
+        queued/running runs, and write confirmations.
+      </div>
+
+      {lastResult && (
+        <div className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+          {formatRunHistoryPruneResult(lastResult)}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy !== null || !valid}
+          onClick={onSave}
+        >
+          {busy === "saving" ? "Saving" : "Save"}
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          leadingIcon={<IconRefresh size={12} />}
+          disabled={busy !== null}
+          onClick={onPruneNow}
+        >
+          {busy === "pruning" ? "Pruning" : "Prune now"}
+        </Button>
       </div>
     </div>
   );
@@ -2613,6 +2900,66 @@ function Stat({ label, value, mono = false }: { label: string; value: string; mo
       </div>
     </div>
   );
+}
+
+function runHistoryRetentionDraftFromSettings(
+  settings: RunHistoryRetentionSettings | null,
+): RunHistoryRetentionDraft {
+  return {
+    neverPrune: settings?.neverPrune ?? false,
+    keepLastRunsEnabled: settings?.keepLastRuns !== undefined,
+    keepLastRuns:
+      settings?.keepLastRuns ?? DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
+    keepDaysEnabled: settings?.keepDays !== undefined,
+    keepDays: settings?.keepDays ?? DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
+  };
+}
+
+function boundedRetentionValue(
+  value: number,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function runHistoryRetentionSummary(
+  settings: RunHistoryRetentionSettings | null,
+): string {
+  if (!settings) return "Loading";
+  if (settings.neverPrune) return "Never prune";
+  const rules: string[] = [];
+  if (settings.keepLastRuns !== undefined) {
+    rules.push(`${settings.keepLastRuns.toLocaleString()} runs`);
+  }
+  if (settings.keepDays !== undefined) {
+    rules.push(`${settings.keepDays.toLocaleString()} days`);
+  }
+  return rules.length > 0 ? rules.join(" / ") : "No rule";
+}
+
+function formatRunHistoryPruneResult(result: RunHistoryPruneResult): string {
+  const protectedParts: string[] = [];
+  if (result.protectedWorkspaceCount > 0) {
+    protectedParts.push(
+      `${result.protectedWorkspaceCount.toLocaleString()} workspace-linked`,
+    );
+  }
+  if (result.protectedActiveCount > 0) {
+    protectedParts.push(`${result.protectedActiveCount.toLocaleString()} active`);
+  }
+  if (result.protectedAwaitingConfirmationCount > 0) {
+    protectedParts.push(
+      `${result.protectedAwaitingConfirmationCount.toLocaleString()} awaiting confirmation`,
+    );
+  }
+  const protectedText =
+    protectedParts.length > 0 ? ` Kept ${protectedParts.join(", ")}.` : "";
+  return `${result.reason} ${formatDateTime(result.prunedAt)}. ${result.afterCount.toLocaleString()} run records remain.${protectedText}`
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function formatRelative(iso: string): string {

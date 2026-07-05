@@ -53,6 +53,9 @@ import type {
   RunGraphApi,
   RunLlmApi,
   RunLogLevel,
+  RunHistoryPruneResult,
+  RunHistoryPruneTrigger,
+  RunHistoryRetentionSettings,
   RunStepStatus,
   ProviderTestResult,
   StartRunOptions,
@@ -83,6 +86,7 @@ import type {
   SavedMultiTenantQuery,
   SetAzureOpenAIProviderConfigInput,
   SetGraphCacheRefreshScheduleInput,
+  SetRunHistoryRetentionSettingsInput,
   SelfTrainingSettings,
   SelfTrainingSuggestion,
   SelfTrainingSuggestionStatus,
@@ -101,6 +105,7 @@ import type {
 import {
   deriveTrustState,
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   providerCatalog,
   resolveProviderDefaultModel,
   resolveRunModel,
@@ -290,6 +295,17 @@ interface PersistedState {
    * transient connector failure occurred.
    */
   runDeliveryQueue?: RunDeliveryQueueItem[];
+  /**
+   * Local run-history retention. Defaults are intentionally generous:
+   * keep the newest 500 runs and anything queued in the last 180 days.
+   */
+  runHistoryRetention?: RunHistoryRetentionSettings;
+  /**
+   * Last persisted prune result. Scheduler/startup only write this when
+   * records were actually deleted; manual "Prune now" writes even when
+   * the result is zero so the admin gets an honest result.
+   */
+  lastRunHistoryPrune?: RunHistoryPruneResult;
   /** User-overridable registry source URL. */
   registrySource?: string;
 }
@@ -311,6 +327,77 @@ const defaultState: PersistedState = {
   runs: [],
   tenants: [],
 };
+
+function sanitizeRunHistoryRetentionInteger(
+  value: unknown,
+  min: number,
+  max: number,
+): number | undefined {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < min ||
+    value > max
+  ) {
+    return undefined;
+  }
+  return Math.round(value);
+}
+
+function nullableRetentionInteger(
+  value: number | null | undefined,
+  label: string,
+  min: number,
+  max: number,
+): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw new Error(`${label} must be between ${min} and ${max}.`);
+  }
+  return Math.round(value);
+}
+
+function isStateRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sanitizeNonNegativeInteger(value: unknown): number | undefined {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0
+  ) {
+    return undefined;
+  }
+  return Math.round(value);
+}
+
+function runHistorySortMs(run: RunRecord): number {
+  const parsed = Date.parse(run.queuedAt || run.startedAt || run.finishedAt || "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function runHistoryPruneReason(
+  count: number,
+  policy: RunHistoryRetentionSettings,
+): string {
+  const noun = count === 1 ? "run" : "runs";
+  if (policy.keepLastRuns !== undefined && policy.keepDays !== undefined) {
+    return `Pruned ${count.toLocaleString()} ${noun} outside the newest ${policy.keepLastRuns.toLocaleString()} runs and older than ${policy.keepDays.toLocaleString()} days.`;
+  }
+  if (policy.keepLastRuns !== undefined) {
+    return `Pruned ${count.toLocaleString()} ${noun} beyond the newest ${policy.keepLastRuns.toLocaleString()} runs.`;
+  }
+  if (policy.keepDays !== undefined) {
+    return `Pruned ${count.toLocaleString()} ${noun} older than ${policy.keepDays.toLocaleString()} days.`;
+  }
+  return `Pruned ${count.toLocaleString()} ${noun}.`;
+}
 
 export interface AppStateStoreOptions {
   filePath: string;
@@ -775,6 +862,134 @@ export class AppStateStore {
     return next;
   }
 
+  private withRunHistorySummary(
+    summary: LocalDataSummary,
+    persisted: PersistedState,
+  ): LocalDataSummary {
+    return {
+      ...summary,
+      runHistoryCount: persisted.runs.length,
+      runHistoryRetention: this.normalizeRunHistoryRetentionSettings(
+        persisted.runHistoryRetention,
+      ),
+      ...(persisted.lastRunHistoryPrune
+        ? { lastRunHistoryPrune: persisted.lastRunHistoryPrune }
+        : {}),
+    };
+  }
+
+  private normalizeRunHistoryRetentionSettings(
+    settings?: RunHistoryRetentionSettings,
+  ): RunHistoryRetentionSettings {
+    if (!settings) {
+      return { ...DEFAULT_RUN_HISTORY_RETENTION_SETTINGS };
+    }
+    const next: RunHistoryRetentionSettings = {
+      neverPrune: settings.neverPrune === true,
+    };
+    const keepLastRuns = sanitizeRunHistoryRetentionInteger(
+      settings.keepLastRuns,
+      1,
+      100_000,
+    );
+    if (keepLastRuns !== undefined) {
+      next.keepLastRuns = keepLastRuns;
+    }
+    const keepDays = sanitizeRunHistoryRetentionInteger(
+      settings.keepDays,
+      1,
+      3_650,
+    );
+    if (keepDays !== undefined) {
+      next.keepDays = keepDays;
+    }
+    if (typeof settings.updatedAt === "string" && settings.updatedAt.trim()) {
+      next.updatedAt = settings.updatedAt;
+    }
+    if (
+      !next.neverPrune &&
+      next.keepLastRuns === undefined &&
+      next.keepDays === undefined
+    ) {
+      return { ...DEFAULT_RUN_HISTORY_RETENTION_SETTINGS };
+    }
+    return next;
+  }
+
+  private normalizeRunHistoryRetentionInput(
+    input: SetRunHistoryRetentionSettingsInput,
+    updatedAt: string,
+  ): RunHistoryRetentionSettings {
+    const neverPrune = input.neverPrune === true;
+    const next: RunHistoryRetentionSettings = { neverPrune, updatedAt };
+    const keepLastRuns = nullableRetentionInteger(
+      input.keepLastRuns,
+      "Run count retention",
+      1,
+      100_000,
+    );
+    if (keepLastRuns !== undefined) {
+      next.keepLastRuns = keepLastRuns;
+    }
+    const keepDays = nullableRetentionInteger(
+      input.keepDays,
+      "Run age retention",
+      1,
+      3_650,
+    );
+    if (keepDays !== undefined) {
+      next.keepDays = keepDays;
+    }
+    if (
+      !neverPrune &&
+      next.keepLastRuns === undefined &&
+      next.keepDays === undefined
+    ) {
+      throw new Error("Enable at least one run-history retention rule, or choose never prune.");
+    }
+    return next;
+  }
+
+  private getRunHistoryPruneProtectedRunIds(runs: RunRecord[]): {
+    all: Set<string>;
+    workspace: Set<string>;
+    active: Set<string>;
+    awaitingConfirmation: Set<string>;
+  } {
+    const knownRunIds = new Set(runs.map((run) => run.id));
+    const workspace = new Set(
+      (this.intelligenceStore?.listWorkspaceReferencedRunIds() ?? []).filter(
+        (runId) => knownRunIds.has(runId),
+      ),
+    );
+    const active = new Set<string>();
+    const awaitingConfirmation = new Set<string>();
+
+    for (const run of runs) {
+      // Exclusion: queued/running runs are live runtime state and may still
+      // receive progress snapshots, logs, connector audit entries, or results.
+      if (run.status === "queued" || run.status === "running") {
+        active.add(run.id);
+      }
+      // Exclusion: awaiting-confirmation runs are the human-in-the-loop write
+      // safety gate. Pruning must never erase a pending approval decision.
+      if (run.status === "awaiting-confirmation") {
+        awaitingConfirmation.add(run.id);
+      }
+    }
+
+    const all = new Set<string>();
+    for (const runId of workspace) {
+      // Exclusion: workspace-linked or workspace-pinned runs are investigation
+      // evidence. Workspace deletion intentionally leaves underlying run
+      // history intact; retention follows the same boundary.
+      all.add(runId);
+    }
+    for (const runId of active) all.add(runId);
+    for (const runId of awaitingConfirmation) all.add(runId);
+    return { all, workspace, active, awaitingConfirmation };
+  }
+
   async getAppState(): Promise<AppState> {
     const persisted = await this.read();
     const providers = await this.listProviders();
@@ -1161,15 +1376,139 @@ export class AppStateStore {
   }
 
   async getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary> {
-    return this.chatService.getLocalDataSummary(tenantId);
+    const [summary, persisted] = await Promise.all([
+      this.chatService.getLocalDataSummary(tenantId),
+      this.read(),
+    ]);
+    return this.withRunHistorySummary(summary, persisted);
   }
 
   async clearIntuneChatHistory(): Promise<LocalDataSummary> {
-    return this.chatService.clearIntuneChatHistory();
+    const summary = await this.chatService.clearIntuneChatHistory();
+    const persisted = await this.read();
+    return this.withRunHistorySummary(summary, persisted);
   }
 
   async clearGraphCache(tenantId?: string): Promise<LocalDataSummary> {
-    return this.chatService.clearGraphCache(tenantId);
+    const summary = await this.chatService.clearGraphCache(tenantId);
+    const persisted = await this.read();
+    return this.withRunHistorySummary(summary, persisted);
+  }
+
+  async getRunHistoryRetentionSettings(): Promise<RunHistoryRetentionSettings> {
+    const persisted = await this.read();
+    return this.normalizeRunHistoryRetentionSettings(persisted.runHistoryRetention);
+  }
+
+  async setRunHistoryRetentionSettings(
+    input: SetRunHistoryRetentionSettingsInput,
+  ): Promise<RunHistoryRetentionSettings> {
+    const settings = this.normalizeRunHistoryRetentionInput(input, new Date().toISOString());
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      await this.write({
+        ...persisted,
+        runHistoryRetention: settings,
+      });
+    });
+    return settings;
+  }
+
+  async pruneRunHistoryNow(): Promise<RunHistoryPruneResult> {
+    return this.pruneRunHistory("manual");
+  }
+
+  async pruneRunHistory(
+    trigger: RunHistoryPruneTrigger,
+  ): Promise<RunHistoryPruneResult> {
+    return this.serialize(async () => {
+      const persisted = await this.read();
+      const policy = this.normalizeRunHistoryRetentionSettings(
+        persisted.runHistoryRetention,
+      );
+      const protectedSets = this.getRunHistoryPruneProtectedRunIds(persisted.runs);
+      const prunedAt = new Date().toISOString();
+      const base = {
+        prunedAt,
+        trigger,
+        policy,
+        beforeCount: persisted.runs.length,
+        eligibleCount: Math.max(0, persisted.runs.length - protectedSets.all.size),
+        protectedCount: protectedSets.all.size,
+        protectedWorkspaceCount: protectedSets.workspace.size,
+        protectedActiveCount: protectedSets.active.size,
+        protectedAwaitingConfirmationCount: protectedSets.awaitingConfirmation.size,
+      };
+
+      if (policy.neverPrune) {
+        const result: RunHistoryPruneResult = {
+          ...base,
+          afterCount: persisted.runs.length,
+          prunedCount: 0,
+          reason: "Never prune is enabled.",
+        };
+        if (trigger === "manual") {
+          await this.write({ ...persisted, lastRunHistoryPrune: result });
+        }
+        return result;
+      }
+
+      const newestKeptIds =
+        policy.keepLastRuns !== undefined
+          ? new Set(
+              [...persisted.runs]
+                .sort((a, b) => runHistorySortMs(b) - runHistorySortMs(a))
+                .slice(0, policy.keepLastRuns)
+                .map((run) => run.id),
+            )
+          : undefined;
+      const cutoffMs =
+        policy.keepDays !== undefined
+          ? Date.now() - policy.keepDays * 24 * 60 * 60 * 1000
+          : undefined;
+
+      const pruneCandidates = persisted.runs
+        .filter((run) => {
+          if (protectedSets.all.has(run.id)) return false;
+          const keptByCount = newestKeptIds?.has(run.id) === true;
+          const keptByAge =
+            cutoffMs !== undefined && runHistorySortMs(run) >= cutoffMs;
+          return !keptByCount && !keptByAge;
+        })
+        .sort((a, b) => runHistorySortMs(a) - runHistorySortMs(b));
+      const prunedIds = new Set(pruneCandidates.map((run) => run.id));
+      const nextRuns =
+        prunedIds.size > 0
+          ? persisted.runs.filter((run) => !prunedIds.has(run.id))
+          : persisted.runs;
+      const result: RunHistoryPruneResult = {
+        ...base,
+        afterCount: nextRuns.length,
+        prunedCount: pruneCandidates.length,
+        reason:
+          pruneCandidates.length > 0
+            ? runHistoryPruneReason(pruneCandidates.length, policy)
+            : "No eligible runs exceeded the retention policy.",
+        ...(pruneCandidates[0]?.queuedAt
+          ? { oldestPrunedQueuedAt: pruneCandidates[0].queuedAt }
+          : {}),
+        ...(pruneCandidates.at(-1)?.queuedAt
+          ? { newestPrunedQueuedAt: pruneCandidates.at(-1)!.queuedAt }
+          : {}),
+      };
+
+      if (pruneCandidates.length > 0 || trigger === "manual") {
+        await this.write({
+          ...persisted,
+          runs: nextRuns,
+          lastRunHistoryPrune: result,
+        });
+        if (pruneCandidates.length > 0) {
+          this.emitStateChanged("run-history-pruned");
+        }
+      }
+      return result;
+    });
   }
 
   async refreshGraphCache(
@@ -5515,6 +5854,78 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           .filter((entry): entry is RunDeliveryQueueItem => entry !== undefined);
         if (sanitizedQueue.length > 0) {
           state.runDeliveryQueue = sanitizedQueue;
+        }
+      }
+      const rawRunHistoryRetention = (parsed as { runHistoryRetention?: unknown })
+        .runHistoryRetention;
+      if (isStateRecord(rawRunHistoryRetention)) {
+        state.runHistoryRetention = this.normalizeRunHistoryRetentionSettings(
+          rawRunHistoryRetention as unknown as RunHistoryRetentionSettings,
+        );
+      }
+      const rawLastRunHistoryPrune = (parsed as { lastRunHistoryPrune?: unknown })
+        .lastRunHistoryPrune;
+      if (isStateRecord(rawLastRunHistoryPrune)) {
+        const obj = rawLastRunHistoryPrune;
+        const trigger =
+          obj.trigger === "startup" ||
+          obj.trigger === "scheduler" ||
+          obj.trigger === "manual"
+            ? obj.trigger
+            : undefined;
+        const beforeCount = sanitizeNonNegativeInteger(obj.beforeCount);
+        const afterCount = sanitizeNonNegativeInteger(obj.afterCount);
+        const eligibleCount = sanitizeNonNegativeInteger(obj.eligibleCount);
+        const prunedCount = sanitizeNonNegativeInteger(obj.prunedCount);
+        const protectedCount = sanitizeNonNegativeInteger(obj.protectedCount);
+        const protectedWorkspaceCount = sanitizeNonNegativeInteger(
+          obj.protectedWorkspaceCount,
+        );
+        const protectedActiveCount = sanitizeNonNegativeInteger(
+          obj.protectedActiveCount,
+        );
+        const protectedAwaitingConfirmationCount = sanitizeNonNegativeInteger(
+          obj.protectedAwaitingConfirmationCount,
+        );
+        if (
+          typeof obj.prunedAt === "string" &&
+          trigger &&
+          typeof obj.reason === "string" &&
+          beforeCount !== undefined &&
+          afterCount !== undefined &&
+          eligibleCount !== undefined &&
+          prunedCount !== undefined &&
+          protectedCount !== undefined &&
+          protectedWorkspaceCount !== undefined &&
+          protectedActiveCount !== undefined &&
+          protectedAwaitingConfirmationCount !== undefined
+        ) {
+          state.lastRunHistoryPrune = {
+            prunedAt: obj.prunedAt,
+            trigger,
+            policy: isStateRecord(obj.policy)
+              ? this.normalizeRunHistoryRetentionSettings(
+                  obj.policy as unknown as RunHistoryRetentionSettings,
+                )
+              : this.normalizeRunHistoryRetentionSettings(
+                  state.runHistoryRetention,
+                ),
+            beforeCount,
+            afterCount,
+            eligibleCount,
+            prunedCount,
+            protectedCount,
+            protectedWorkspaceCount,
+            protectedActiveCount,
+            protectedAwaitingConfirmationCount,
+            reason: obj.reason,
+            ...(typeof obj.oldestPrunedQueuedAt === "string"
+              ? { oldestPrunedQueuedAt: obj.oldestPrunedQueuedAt }
+              : {}),
+            ...(typeof obj.newestPrunedQueuedAt === "string"
+              ? { newestPrunedQueuedAt: obj.newestPrunedQueuedAt }
+              : {}),
+          };
         }
       }
       this.lastReadSnapshot = state;

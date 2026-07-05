@@ -7,6 +7,7 @@ import { ToastProvider } from "../components/Toast";
 import { AppStateProvider } from "../state";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   deriveTrustState,
   type AgentDraft,
   type AgentDraftPreflightResult,
@@ -22,6 +23,7 @@ import {
   type ProviderSummary,
   type ReleaseDiagnostics,
   type RunRecord,
+  type RunHistoryRetentionSettings,
   type SandboxSettings,
   type SchedulerLaunchSettings,
   type SendIntuneChatMessageInput,
@@ -214,6 +216,9 @@ export function makeMockBridge(
     apiVersion: DEFAULT_AZURE_OPENAI_API_VERSION,
     hasKey: false,
   };
+  let runHistoryRetention: RunHistoryRetentionSettings = {
+    ...DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
+  };
   const updateState = (nextState: AppState) => {
     appState = nextState;
     return appState;
@@ -356,9 +361,52 @@ export function makeMockBridge(
       intervalMinutes: input.intervalMinutes ?? 240,
       tenantId: input.tenantId,
     })),
-    getLocalDataSummary: vi.fn(async () => createLocalDataSummary(appState.activeTenantId)),
-    clearIntuneChatHistory: vi.fn(async () => createLocalDataSummary(appState.activeTenantId)),
-    clearGraphCache: vi.fn(async () => createLocalDataSummary(appState.activeTenantId)),
+    getLocalDataSummary: vi.fn(async () =>
+      createLocalDataSummary(appState.activeTenantId, {
+        runHistoryCount: appState.runs.length,
+        runHistoryRetention,
+      }),
+    ),
+    clearIntuneChatHistory: vi.fn(async () =>
+      createLocalDataSummary(appState.activeTenantId, {
+        runHistoryCount: appState.runs.length,
+        runHistoryRetention,
+      }),
+    ),
+    clearGraphCache: vi.fn(async () =>
+      createLocalDataSummary(appState.activeTenantId, {
+        runHistoryCount: appState.runs.length,
+        runHistoryRetention,
+      }),
+    ),
+    getRunHistoryRetentionSettings: vi.fn(async () => runHistoryRetention),
+    setRunHistoryRetentionSettings: vi.fn(async (input) => {
+      runHistoryRetention = {
+        neverPrune: input.neverPrune,
+        ...(input.keepLastRuns !== undefined && input.keepLastRuns !== null
+          ? { keepLastRuns: input.keepLastRuns }
+          : {}),
+        ...(input.keepDays !== undefined && input.keepDays !== null
+          ? { keepDays: input.keepDays }
+          : {}),
+        updatedAt: now,
+      };
+      return runHistoryRetention;
+    }),
+    pruneRunHistoryNow: vi.fn(async () => ({
+      prunedAt: now,
+      trigger: "manual" as const,
+      policy: runHistoryRetention,
+      beforeCount: appState.runs.length,
+      afterCount: appState.runs.length,
+      eligibleCount: appState.runs.length,
+      prunedCount: 0,
+      protectedCount: 0,
+      protectedWorkspaceCount: 0,
+      protectedActiveCount: 0,
+      protectedAwaitingConfirmationCount: 0,
+      reason: "No eligible runs exceeded the retention policy.",
+    })),
     getChatInvestigationSettings: vi.fn(async () => ({ mode: "auto" as const })),
     setChatInvestigationMode: vi.fn(async (mode) => ({ mode, updatedAt: now })),
     getSelfTrainingSettings: vi.fn(async () => ({ enabled: false })),
@@ -642,7 +690,10 @@ function createChatResult(
   };
 }
 
-function createLocalDataSummary(activeTenantId?: string): LocalDataSummary {
+function createLocalDataSummary(
+  activeTenantId?: string,
+  overrides: Partial<LocalDataSummary> = {},
+): LocalDataSummary {
   return {
     sqliteBytes: 0,
     chatConversationCount: 0,
@@ -655,6 +706,9 @@ function createLocalDataSummary(activeTenantId?: string): LocalDataSummary {
     activeTenantId,
     activeTenantGraphRowCount: 0,
     activeTenantCacheResources: [],
+    runHistoryCount: 0,
+    runHistoryRetention: { ...DEFAULT_RUN_HISTORY_RETENTION_SETTINGS },
+    ...overrides,
   };
 }
 

@@ -69,6 +69,7 @@ import type {
   SelfTrainingSuggestionStatus,
   SetAzureOpenAIProviderConfigInput,
   SetGraphCacheRefreshScheduleInput,
+  SetRunHistoryRetentionSettingsInput,
   SendIntuneChatMessageInput,
   SupportBundleInput,
   SupportIssueSubmissionInput,
@@ -3238,6 +3239,58 @@ function validateSetGraphCacheRefreshScheduleInput(
   };
 }
 
+function validateSetRunHistoryRetentionSettingsInput(
+  value: unknown,
+): SetRunHistoryRetentionSettingsInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Run history retention settings must be an object.");
+  }
+  if (typeof value.neverPrune !== "boolean") {
+    throw new Error("Run history never-prune setting must be a boolean.");
+  }
+  const input: SetRunHistoryRetentionSettingsInput = {
+    neverPrune: value.neverPrune,
+  };
+  if (value.keepLastRuns !== undefined) {
+    input.keepLastRuns =
+      value.keepLastRuns === null
+        ? null
+        : requireBoundedInteger(value.keepLastRuns, "Run history count", 1, 100_000);
+  }
+  if (value.keepDays !== undefined) {
+    input.keepDays =
+      value.keepDays === null
+        ? null
+        : requireBoundedInteger(value.keepDays, "Run history age", 1, 3_650);
+  }
+  if (
+    !input.neverPrune &&
+    (input.keepLastRuns === null || input.keepLastRuns === undefined) &&
+    (input.keepDays === null || input.keepDays === undefined)
+  ) {
+    throw new Error("Enable at least one run-history retention rule, or choose never prune.");
+  }
+  return input;
+}
+
+function requireBoundedInteger(
+  value: unknown,
+  name: string,
+  min: number,
+  max: number,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  }
+  return value;
+}
+
 function validateSelfTrainingSuggestionStatus(
   value: unknown,
 ): SelfTrainingSuggestionStatus | undefined {
@@ -4100,6 +4153,22 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:get-run-history-retention-settings",
+    handleTrusted(() => store.getRunHistoryRetentionSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:set-run-history-retention-settings",
+    handleTrusted((_event, input: unknown) =>
+      store.setRunHistoryRetentionSettings(
+        validateSetRunHistoryRetentionSettingsInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:prune-run-history-now",
+    handleTrusted(() => store.pruneRunHistoryNow()),
+  );
+  ipcMain.handle(
     "openadminos:get-self-training-settings",
     handleTrusted(() => store.getSelfTrainingSettings()),
   );
@@ -4729,6 +4798,9 @@ if (!gotLock) {
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
     void refreshRegistryInBackground("startup");
+    void store.pruneRunHistory("startup").catch((error) => {
+      console.warn("[run-history] startup prune failed:", error);
+    });
     startAutoUpdater(() => mainWindow ?? undefined);
 
     // Agent scheduler: for normal visible launches, wait for the
@@ -4746,6 +4818,9 @@ if (!gotLock) {
       void store.fireDueSchedules();
       void store.refreshDueGraphCaches();
       void store.processPendingRunDeliveries();
+      void store.pruneRunHistory("scheduler").catch((error) => {
+        console.warn("[run-history] scheduler prune failed:", error);
+      });
     }, SCHEDULER_TICK_MS);
 
     // Periodic registry refresh: every 6 hours, silently re-fetch the
