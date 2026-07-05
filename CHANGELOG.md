@@ -29,6 +29,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Added `docs/mockups/09-registry.html` and `docs/mockups/10-empty-states.html` design references and swept implemented screens against the empty-state patterns.
 - Added reusable output pane components shared by chat answer artifacts, run results, and the investigation tool trace.
 - Added write-plan and run-confirmation invariant tests covering typed-phrase enforcement, plan/apply mismatch rejection, and tenant pinning.
+- Added a dev-only `npm run screenshots` harness that captures Agent Hub detail PNGs for every registry entry plus app-shell hero shots under `docs/screenshots/`.
 
 ### Changed
 
@@ -45,6 +46,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Tightened renderer accessibility basics across v0.3 Intune Chat, Settings, Run Result, output panes, and clear existing control-label/card interaction offenders.
+- Fixed write-intent detection to match imperative verbs as whole words so read questions about assignment or enablement state ("apps assigned but not installed") are answered instead of refused.
 
 ### Security
 

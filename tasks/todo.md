@@ -29,10 +29,11 @@
 - [x] Accessibility basics pass across v0.3 surfaces + clear existing offenders.
 
 ## Release gate — remaining before tagging v0.3.0
-These need a desktop session (this cycle's automation ran on a display-less machine):
-- [ ] Hub screenshots per registry entry (`npm run dev`, capture screens).
-- [ ] Smoke scripts on a machine with a display: `npm run smoke:intune-chat`, `npm run smoke:report-issue` (they launch Electron; blocked headless).
-- [ ] Live provider matrix: probe → models → chat → agent run → investigative chat per installed provider (Ollama/LM Studio/Azure need local installs or a real Azure resource; Claude Code and Codex CLIs verified present).
+Run under xvfb after installing Ollama locally (2026-07-05):
+- [x] Hub screenshots per registry entry (`xvfb-run -a -s "-screen 0 1600x1000x24" npm run screenshots`).
+- [x] Smoke scripts: `npm run smoke:intune-chat` and `npm run smoke:report-issue` pass under xvfb. Fixing the run surfaced and fixed a write-intent false-positive bug (whole-word matching) plus smoke-driver drift from the a11y label change and pre-LLM write blocking.
+- [x] Live provider matrix (headless-verifiable part): Ollama probe/complete/stream live (llama3.2:1b, qwen2.5:7b holds the investigative JSON protocol), Claude Code and Codex adapters complete real prompts, LM Studio probe reports the designed not-running copy. Remaining: LM Studio full run (GUI app) and Azure OpenAI against a real resource — both need Ugur.
+- [ ] Optional visual pass on a real desktop session (`npm run dev`) — xvfb screenshots reviewed and look correct.
 - [ ] `git tag v0.3.0` + release once the above pass.
 
 ## Deferred to v0.4+

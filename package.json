@@ -14,6 +14,7 @@
     "test": "npm run test -w @openadminos/connector-whatsapp-web && npm run test -w @openadminos/connector-outlook && npm run test -w @openadminos/connector-slack && npm run test -w @openadminos/connector-discord && npm run test -w @openadminos/connector-signal && npm run test -w @openadminos/runtime && npm run test -w @openadminos/qa-graph && npm run test -w @openadminos/desktop && npm run test:renderer -w @openadminos/desktop",
     "smoke:intune-chat": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/smoke-intune-chat.mjs",
     "smoke:report-issue": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/smoke-report-issue.mjs",
+    "screenshots": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/capture-screenshots.mjs",
     "dist:desktop": "npm run dist -w @openadminos/desktop",
     "registry:index": "node scripts/generate-registry-index.mjs",
     "docs:generate": "npm run registry:index && node scripts/generate-gitbook-docs.mjs",

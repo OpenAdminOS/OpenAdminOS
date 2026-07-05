@@ -1128,6 +1128,12 @@ response action, accepts a local self-training suggestion, and confirms schedule
 cache refresh UI state.
 This fixture does not replace a final live-tenant pilot run, but it guards the
 desktop path without requiring tenant credentials in CI or local automation.
+The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
+capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.
+It seeds a Contoso Demo tenant with an `.invalid` admin address, a local Ollama
+model, the real registry index from `agents/index.json`, and smoke Graph/LLM
+factories, then writes 1600x1000 PNGs for four app shell routes and every Agent
+Hub registry detail under `docs/screenshots/`.
 
 #### Context-window strategy
 

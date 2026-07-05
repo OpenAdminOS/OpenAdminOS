@@ -137,6 +137,13 @@ const intuneChatSmokeUserData = process.env.OPENADMINOS_INTUNE_CHAT_SMOKE_USER_D
 const isReportIssueSmokeLaunch =
   !app.isPackaged && process.env.OPENADMINOS_REPORT_ISSUE_SMOKE === "1";
 const reportIssueSmokeUserData = process.env.OPENADMINOS_REPORT_ISSUE_SMOKE_USER_DATA;
+const isScreenshotCaptureLaunch =
+  !app.isPackaged && process.env.OPENADMINOS_SCREENSHOT_CAPTURE === "1";
+const screenshotCaptureUserData =
+  process.env.OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA;
+const screenshotCaptureOutDir = !app.isPackaged
+  ? process.env.OPENADMINOS_SCREENSHOT_OUT_DIR
+  : undefined;
 const capturedExternalUrlFile = !app.isPackaged
   ? process.env.OPENADMINOS_CAPTURE_EXTERNAL_URL
   : undefined;
@@ -193,15 +200,29 @@ const workspaceEvidenceSourceTypes = new Set<WorkspaceEvidenceSourceType>([
 const DEFAULT_SUPPORT_API_URL = "https://openadminos.com";
 const COMPANION_WINDOW_WIDTH = 390;
 const COMPANION_WINDOW_HEIGHT = 520;
+const SCREENSHOT_CAPTURE_WIDTH = 1600;
+const SCREENSHOT_CAPTURE_HEIGHT = 1000;
 const launchSandboxedCodeDefault = process.env[OPENADMINOS_MXC_FLAG] === "1";
 
 const smokeUserData = isIntuneChatSmokeLaunch
   ? intuneChatSmokeUserData
   : isReportIssueSmokeLaunch
     ? reportIssueSmokeUserData
-    : undefined;
+    : isScreenshotCaptureLaunch
+      ? screenshotCaptureUserData
+      : undefined;
 
 const overrideUserData = smokeUserData ?? devUserDataDir;
+
+if (
+  isScreenshotCaptureLaunch &&
+  (!screenshotCaptureUserData || !screenshotCaptureOutDir)
+) {
+  console.error(
+    "[screenshot-capture] failed OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA and OPENADMINOS_SCREENSHOT_OUT_DIR are required.",
+  );
+  process.exit(1);
+}
 
 if (overrideUserData) {
   mkdirSync(overrideUserData, { recursive: true });
@@ -450,6 +471,206 @@ function seedReportIssueSmokeState(userDataDir: string): void {
   );
 }
 
+interface ScreenshotRegistryEntry {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  mode: "read" | "write";
+  category: string;
+  tier?: string;
+  requiresEntraTier?: string;
+  author: {
+    name: string;
+    handle?: string;
+    verified?: boolean;
+  };
+  scopes: string[];
+  minAppVersion?: string;
+  manifestUrl?: string;
+  execution?: unknown;
+}
+
+function seedScreenshotCaptureState(userDataDir: string): void {
+  if (!isScreenshotCaptureLaunch) return;
+  mkdirSync(userDataDir, { recursive: true });
+  const now = new Date().toISOString();
+  const entries = loadScreenshotRegistryEntries();
+  const installedSlugs = new Set([
+    "compliance-overview",
+    "find-inactive-devices",
+    "offboarding-agent",
+  ]);
+  const installedEntries = entries.filter((entry) => installedSlugs.has(entry.slug));
+  const fallbackInstalledEntries =
+    installedEntries.length > 0 ? installedEntries : entries.slice(0, 3);
+  const installedAgents = fallbackInstalledEntries.map((entry) => ({
+    id: entry.id,
+    slug: entry.slug,
+    name: entry.name,
+    description: entry.description,
+    mode: entry.mode,
+    category: entry.category,
+    tier: entry.tier ?? "agent",
+    requiresEntraTier: entry.requiresEntraTier ?? "free",
+    scopes: entry.scopes,
+    author: entry.author,
+    version: entry.version,
+    installedAt: now,
+    registryId: entry.id,
+    minAppVersion: entry.minAppVersion,
+    ...(entry.execution ? { execution: entry.execution } : {}),
+  }));
+
+  writeFileSync(
+    join(userDataDir, "state.json"),
+    JSON.stringify(
+      {
+        activeProviderId: "ollama",
+        activeModelByProviderId: { ollama: "screenshot-local-model" },
+        installedAgents,
+        runs: [],
+        tenants: [
+          {
+            id: "contoso-demo-tenant",
+            displayName: "Contoso Demo",
+            username: "admin@contoso-demo.invalid",
+            homeAccountId: "contoso-demo-home-account",
+            addedAt: now,
+            entraTier: "p2",
+          },
+        ],
+        activeTenantId: "contoso-demo-tenant",
+        registryInstallCountsEnabled: false,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const registryCacheDir = join(userDataDir, "registry-cache");
+  mkdirSync(registryCacheDir, { recursive: true });
+  writeFileSync(
+    join(registryCacheDir, "index.json"),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        agents: entries,
+        cachedAt: now,
+        sourceUrl: DEFAULT_REGISTRY_SOURCE,
+      },
+      null,
+      2,
+    ) + "\n",
+    "utf8",
+  );
+}
+
+function loadScreenshotRegistryEntries(): ScreenshotRegistryEntry[] {
+  const indexPath = findScreenshotRegistryIndexPath();
+  const parsed = JSON.parse(readFileSync(indexPath, "utf8")) as {
+    agents?: unknown;
+  };
+  if (!Array.isArray(parsed.agents)) {
+    throw new Error(`Screenshot registry index has no agents array: ${indexPath}`);
+  }
+  return parsed.agents.map((entry, index) =>
+    normalizeScreenshotRegistryEntry(entry, index, indexPath),
+  );
+}
+
+function normalizeScreenshotRegistryEntry(
+  entry: unknown,
+  index: number,
+  indexPath: string,
+): ScreenshotRegistryEntry {
+  if (!entry || typeof entry !== "object") {
+    throw new Error(`Screenshot registry entry ${index} is not an object in ${indexPath}.`);
+  }
+  const candidate = entry as Record<string, unknown>;
+  const mode = candidate.mode;
+  const author = candidate.author;
+  const scopes = candidate.scopes;
+  if (mode !== "read" && mode !== "write") {
+    throw new Error(`Screenshot registry entry ${index} has invalid mode.`);
+  }
+  if (!author || typeof author !== "object") {
+    throw new Error(`Screenshot registry entry ${index} has invalid author.`);
+  }
+  if (!Array.isArray(scopes) || scopes.some((scope) => typeof scope !== "string")) {
+    throw new Error(`Screenshot registry entry ${index} has invalid scopes.`);
+  }
+  const normalized: ScreenshotRegistryEntry = {
+    id: requireStringField(candidate, "id", index, indexPath),
+    slug: requireStringField(candidate, "slug", index, indexPath),
+    name: requireStringField(candidate, "name", index, indexPath),
+    description: requireStringField(candidate, "description", index, indexPath),
+    version: requireStringField(candidate, "version", index, indexPath),
+    mode,
+    category: requireStringField(candidate, "category", index, indexPath),
+    author: {
+      name: requireStringField(
+        author as Record<string, unknown>,
+        "name",
+        index,
+        indexPath,
+      ),
+      ...(typeof (author as Record<string, unknown>).handle === "string"
+        ? { handle: (author as Record<string, unknown>).handle as string }
+        : {}),
+      ...(typeof (author as Record<string, unknown>).verified === "boolean"
+        ? { verified: (author as Record<string, unknown>).verified as boolean }
+        : {}),
+    },
+    scopes: scopes as string[],
+  };
+  if (typeof candidate.tier === "string" && candidate.tier) {
+    normalized.tier = candidate.tier;
+  }
+  if (typeof candidate.requiresEntraTier === "string" && candidate.requiresEntraTier) {
+    normalized.requiresEntraTier = candidate.requiresEntraTier;
+  }
+  if (typeof candidate.minAppVersion === "string") {
+    normalized.minAppVersion = candidate.minAppVersion;
+  }
+  if (typeof candidate.manifestUrl === "string") {
+    normalized.manifestUrl = candidate.manifestUrl;
+  }
+  if (candidate.execution) {
+    normalized.execution = candidate.execution;
+  }
+  return normalized;
+}
+
+function requireStringField(
+  record: Record<string, unknown>,
+  field: string,
+  index: number,
+  indexPath: string,
+): string {
+  const value = record[field];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(
+      `Screenshot registry entry ${index} is missing string field "${field}" in ${indexPath}.`,
+    );
+  }
+  return value;
+}
+
+function findScreenshotRegistryIndexPath(): string {
+  const candidates = [
+    join(process.cwd(), "agents", "index.json"),
+    join(app.getAppPath(), "..", "..", "agents", "index.json"),
+    join(currentDir, "..", "..", "..", "agents", "index.json"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error("Unable to find agents/index.json for screenshot capture.");
+}
+
 function createIntuneChatSmokeGraph(): RunGraphApi {
   return {
     async listManagedDevices() {
@@ -552,6 +773,14 @@ function failReportIssueSmoke(error: unknown): void {
   app.exit(1);
 }
 
+function failScreenshotCapture(error: unknown): void {
+  console.error(
+    "[screenshot-capture] failed",
+    error instanceof Error ? error.stack ?? error.message : error,
+  );
+  app.exit(1);
+}
+
 async function runIntuneChatSmoke(): Promise<void> {
   if (!isIntuneChatSmokeLaunch) return;
   const window = mainWindow;
@@ -621,6 +850,233 @@ async function runReportIssueSmoke(): Promise<void> {
     JSON.stringify({ ...result, issueUrl: capturedUrl }),
   );
   app.exit(0);
+}
+
+async function runScreenshotCapture(): Promise<void> {
+  if (!isScreenshotCaptureLaunch) return;
+  if (!screenshotCaptureOutDir) {
+    throw new Error("OPENADMINOS_SCREENSHOT_OUT_DIR is required.");
+  }
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) {
+    throw new Error("Screenshot capture window was not available.");
+  }
+
+  window.setSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
+  window.show();
+  window.focus();
+
+  const entries = loadScreenshotRegistryEntries();
+  const appShots = [
+    {
+      route: "/",
+      name: "agents-home",
+      file: "app/agents-home.png",
+      waitFor: ["Agents", "Browse hub", "Contoso Demo"],
+    },
+    {
+      route: "/hub",
+      name: "hub-grid",
+      file: "app/hub-grid.png",
+      waitFor: ["Agent Hub", `${entries.length} agents`],
+    },
+    {
+      route: "/chat",
+      name: "chat-empty",
+      file: "app/chat-empty.png",
+      waitFor: ["Intune Chat", "What do you want to inspect?", "New conversation"],
+    },
+    {
+      route: "/settings",
+      name: "settings",
+      file: "app/settings.png",
+      waitFor: ["Settings", "LLM Providers"],
+    },
+  ];
+
+  let count = 0;
+  for (const shot of appShots) {
+    await runScreenshotCaptureStep(window, {
+      kind: "route",
+      route: shot.route,
+      waitFor: shot.waitFor,
+    });
+    await captureScreenshotPng(window, shot.file);
+    count += 1;
+  }
+
+  for (const entry of entries) {
+    try {
+      await runScreenshotCaptureStep(window, {
+        kind: "hub-detail",
+        route: "/hub",
+        slug: entry.slug,
+        name: entry.name,
+        expectedCount: entries.length,
+      });
+      await captureScreenshotPng(window, `hub/${entry.slug}.png`);
+      count += 1;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Hub detail failed for ${entry.slug}: ${detail}`);
+    }
+  }
+
+  console.log(`[screenshot-capture] passed ${count}`);
+  app.exit(0);
+}
+
+async function runScreenshotCaptureStep(
+  window: BrowserWindow,
+  step: ScreenshotCaptureStep,
+): Promise<void> {
+  await window.webContents.executeJavaScript(
+    `(${screenshotCaptureStepScript.toString()})(${JSON.stringify(step)})`,
+    true,
+  );
+}
+
+async function captureScreenshotPng(
+  window: BrowserWindow,
+  relativePath: string,
+): Promise<void> {
+  if (!screenshotCaptureOutDir) {
+    throw new Error("OPENADMINOS_SCREENSHOT_OUT_DIR is required.");
+  }
+  if (!/^(app|hub)\/[a-z0-9-]+\.png$/.test(relativePath)) {
+    throw new Error(`Invalid screenshot output path: ${relativePath}`);
+  }
+  const outputPath = join(screenshotCaptureOutDir, relativePath);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  const image = await window.webContents.capturePage();
+  await writeFile(outputPath, image.toPNG());
+  console.log(`[screenshot-capture] wrote ${outputPath}`);
+}
+
+type ScreenshotCaptureStep =
+  | {
+      kind: "route";
+      route: string;
+      waitFor: string[];
+    }
+  | {
+      kind: "hub-detail";
+      route: string;
+      slug: string;
+      name: string;
+      expectedCount: number;
+    };
+
+async function screenshotCaptureStepScript(
+  step: ScreenshotCaptureStep,
+): Promise<void> {
+  const waitFor = async (
+    predicate: () => boolean,
+    label: string,
+    timeoutMs = 12000,
+  ) => {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(
+      `Timed out waiting for ${label}. Current page text: ${(document.body.textContent ?? "").slice(0, 1800)}`,
+    );
+  };
+  const delay = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+  const bodyText = () => document.body.textContent ?? "";
+  const closeModal = async () => {
+    const close = document.querySelector<HTMLButtonElement>(
+      '.fixed button[aria-label="Close"]',
+    );
+    if (!close) return;
+    close.click();
+    await waitFor(() => !document.querySelector(".fixed"), "modal close", 4000);
+  };
+  const resetScroll = () => {
+    window.scrollTo(0, 0);
+    for (const element of Array.from(document.querySelectorAll<HTMLElement>("*"))) {
+      if (element.scrollTop > 0) element.scrollTop = 0;
+    }
+  };
+  const navigateHash = async (route: string) => {
+    const expected = `#${route}`;
+    if (location.hash !== expected) {
+      location.hash = route;
+    }
+    await waitFor(() => location.hash === expected, `${route} hash`);
+    await delay(150);
+  };
+  const textIncludesAll = (needles: string[]) =>
+    needles.every((needle) => bodyText().includes(needle));
+  const elementHasNearbyAncestorText = (element: Element, text: string) => {
+    let current: Element | null = element;
+    let depth = 0;
+    while (current && current !== document.body && depth < 7) {
+      if (
+        (current.textContent ?? "").includes(text) &&
+        current.querySelectorAll("button").length <= 4
+      ) {
+        return true;
+      }
+      current = current.parentElement;
+      depth += 1;
+    }
+    return false;
+  };
+  const findDetailsButton = (agentName: string): HTMLButtonElement | undefined =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) =>
+        button.textContent?.trim() === "Details" &&
+        elementHasNearbyAncestorText(button, agentName),
+    );
+
+  await closeModal();
+  await navigateHash(step.route);
+  resetScroll();
+
+  if (step.kind === "route") {
+    await waitFor(
+      () => textIncludesAll(step.waitFor),
+      `${step.route} route content`,
+    );
+    await delay(250);
+    return;
+  }
+
+  await waitFor(
+    () =>
+      bodyText().includes("Agent Hub") &&
+      bodyText().includes(`${step.expectedCount} agents`) &&
+      bodyText().includes(step.name),
+    `Hub grid for ${step.slug}`,
+  );
+  await waitFor(
+    () => Boolean(findDetailsButton(step.name)),
+    `Details button for ${step.slug}`,
+  );
+  const detailsButton = findDetailsButton(step.name);
+  if (!detailsButton) {
+    throw new Error(`Details button was not found for ${step.slug}.`);
+  }
+  detailsButton.scrollIntoView({ block: "center", inline: "nearest" });
+  await delay(150);
+  detailsButton.click();
+  await waitFor(
+    () => {
+      const modal = document.querySelector(".fixed");
+      const text = modal?.textContent ?? "";
+      return (
+        text.includes(step.name) &&
+        text.includes("Tenant impact") &&
+        text.includes("Required scopes")
+      );
+    },
+    `Hub detail modal for ${step.slug}`,
+  );
+  await delay(300);
 }
 
 async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
@@ -3638,12 +4094,23 @@ function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void
 async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
-    ...(typeof persisted.x === "number" ? { x: persisted.x } : {}),
-    ...(typeof persisted.y === "number" ? { y: persisted.y } : {}),
-    width: persisted.width,
-    height: persisted.height,
-    minWidth: 960,
-    minHeight: 680,
+    ...(!isScreenshotCaptureLaunch && typeof persisted.x === "number"
+      ? { x: persisted.x }
+      : {}),
+    ...(!isScreenshotCaptureLaunch && typeof persisted.y === "number"
+      ? { y: persisted.y }
+      : {}),
+    width: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_WIDTH : persisted.width,
+    height: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : persisted.height,
+    minWidth: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_WIDTH : 960,
+    minHeight: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : 680,
+    ...(isScreenshotCaptureLaunch
+      ? {
+          maxWidth: SCREENSHOT_CAPTURE_WIDTH,
+          maxHeight: SCREENSHOT_CAPTURE_HEIGHT,
+          resizable: false,
+        }
+      : {}),
     title: "OpenAdminOS",
     backgroundColor: "#0a0c10",
     show: false,
@@ -3658,12 +4125,14 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     },
   });
 
-  attachWindowStatePersistence(mainWindow);
+  if (!isScreenshotCaptureLaunch) {
+    attachWindowStatePersistence(mainWindow);
+  }
 
-  if (persisted.maximized) {
+  if (!isScreenshotCaptureLaunch && persisted.maximized) {
     mainWindow.maximize();
   }
-  if (persisted.fullscreen) {
+  if (!isScreenshotCaptureLaunch && persisted.fullscreen) {
     mainWindow.setFullScreen(true);
   }
 
@@ -3693,6 +4162,9 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     if (isReportIssueSmokeLaunch) {
       void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
     }
+    if (isScreenshotCaptureLaunch) {
+      void loadPromise.then(runScreenshotCapture).catch(failScreenshotCapture);
+    }
   } else {
     const initialRoute = routeHash(route);
     const loadPromise = mainWindow.loadURL(
@@ -3703,6 +4175,9 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     }
     if (isReportIssueSmokeLaunch) {
       void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
+    }
+    if (isScreenshotCaptureLaunch) {
+      void loadPromise.then(runScreenshotCapture).catch(failScreenshotCapture);
     }
   }
 
@@ -4800,6 +5275,15 @@ if (!gotLock) {
     const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
     seedIntuneChatSmokeState(userDataDir);
     seedReportIssueSmokeState(userDataDir);
+    try {
+      seedScreenshotCaptureState(userDataDir);
+    } catch (error) {
+      if (isScreenshotCaptureLaunch) {
+        failScreenshotCapture(error);
+        return;
+      }
+      throw error;
+    }
 
     installConnectorConfirmBridge({
       getMainWindow: () => mainWindow,
@@ -4832,7 +5316,7 @@ if (!gotLock) {
       onStateChanged: (info) => {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
       },
-      ...(isIntuneChatSmokeLaunch
+      ...(isIntuneChatSmokeLaunch || isScreenshotCaptureLaunch
         ? {
             graphFactory: () => createIntuneChatSmokeGraph(),
             llmFactory: () => createIntuneChatSmokeLlm(),
