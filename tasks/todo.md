@@ -32,7 +32,7 @@
 Run under xvfb after installing Ollama locally (2026-07-05):
 - [x] Hub screenshots per registry entry (`xvfb-run -a -s "-screen 0 1600x1000x24" npm run screenshots`).
 - [x] Smoke scripts: `npm run smoke:intune-chat` and `npm run smoke:report-issue` pass under xvfb. Fixing the run surfaced and fixed a write-intent false-positive bug (whole-word matching) plus smoke-driver drift from the a11y label change and pre-LLM write blocking.
-- [x] Live provider matrix (headless-verifiable part): Ollama probe/complete/stream live (llama3.2:1b, qwen2.5:7b holds the investigative JSON protocol), Claude Code and Codex adapters complete real prompts, LM Studio probe reports the designed not-running copy. Remaining: LM Studio full run (GUI app) and Azure OpenAI against a real resource — both need Ugur.
+- [x] Live provider matrix: Ollama probe/complete/stream live (llama3.2:1b; qwen2.5:7b holds the investigative JSON protocol), Claude Code and Codex adapters complete real prompts, LM Studio verified live against a headless 0.4.18 server (probe connected + model list, complete, stream; 0.5b model correctly triggers the deterministic-mode heuristic). Azure OpenAI verified against Microsoft's GA 2024-10-21 data-plane reference instead of a live resource per Ugur (URL shape, api-key header, api-version, body fields, SSE data:[DONE]); note: o-series models on newer api-versions need max_completion_tokens, fine on GA with standard chat models.
 - [ ] Optional visual pass on a real desktop session (`npm run dev`) — xvfb screenshots reviewed and look correct.
 - [ ] `git tag v0.3.0` + release once the above pass.
 
