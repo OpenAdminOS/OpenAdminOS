@@ -3,13 +3,68 @@ import type {CSSProperties, ReactNode} from 'react';
 import {theme} from '../theme';
 import {Button, Card, Chip, Divider, IconBox, Label, Mono, StatusDot, alpha, truncate} from './ui';
 
-export const WINDOW_WIDTH = 1768;
-export const WINDOW_HEIGHT = 982;
+export const WINDOW_WIDTH = 1920;
+export const WINDOW_HEIGHT = 1080;
 export const TITLE_BAR_HEIGHT = 36;
 export const STATUS_HEIGHT = 32;
 export const SIDEBAR_WIDTH = 300;
 export const MAIN_WIDTH = WINDOW_WIDTH - SIDEBAR_WIDTH;
 export const MAIN_HEIGHT = WINDOW_HEIGHT - TITLE_BAR_HEIGHT - STATUS_HEIGHT;
+const PAGE_HEADER_HEIGHT = 154;
+const PAGE_HEADER_PADDING_TOP = 39;
+const PAGE_HEADER_PADDING_X = 42;
+const PAGE_HEADER_PADDING_BOTTOM = 28;
+const PAGE_BODY_PADDING_TOP = 32;
+const PAGE_BODY_PADDING_X = 42;
+const PAGE_BODY_PADDING_BOTTOM = 34;
+const BUTTON_HEIGHT = 40;
+const HEADER_RUN_BUTTON_WIDTH = 86;
+const BORDER_WIDTH = 1;
+
+const FEATURED_TABS_HEIGHT = 68;
+const FEATURED_CARD_MARGIN_TOP = 22;
+const FEATURED_CARD_PADDING = 30;
+const FEATURED_CHIP_ROW_HEIGHT = 27;
+const FEATURED_TITLE_MARGIN_TOP = 18;
+const FEATURED_TITLE_HEIGHT = 38;
+const FEATURED_META_MARGIN_TOP = 12;
+const FEATURED_META_HEIGHT = 26;
+const FEATURED_DESCRIPTION_MARGIN_TOP = 22;
+const FEATURED_DESCRIPTION_HEIGHT = 54;
+const FEATURED_ACTIONS_MARGIN_TOP = 22;
+
+const installButtonLeft =
+  SIDEBAR_WIDTH + PAGE_BODY_PADDING_X + BORDER_WIDTH + FEATURED_CARD_PADDING;
+const installButtonTop =
+  TITLE_BAR_HEIGHT +
+  PAGE_HEADER_HEIGHT +
+  PAGE_BODY_PADDING_TOP +
+  FEATURED_TABS_HEIGHT +
+  FEATURED_CARD_MARGIN_TOP +
+  BORDER_WIDTH +
+  FEATURED_CARD_PADDING +
+  FEATURED_CHIP_ROW_HEIGHT +
+  FEATURED_TITLE_MARGIN_TOP +
+  FEATURED_TITLE_HEIGHT +
+  FEATURED_META_MARGIN_TOP +
+  FEATURED_META_HEIGHT +
+  FEATURED_DESCRIPTION_MARGIN_TOP +
+  FEATURED_DESCRIPTION_HEIGHT +
+  FEATURED_ACTIONS_MARGIN_TOP;
+const runButtonLeft =
+  SIDEBAR_WIDTH + MAIN_WIDTH - PAGE_HEADER_PADDING_X - HEADER_RUN_BUTTON_WIDTH;
+const runButtonTop =
+  TITLE_BAR_HEIGHT + PAGE_HEADER_HEIGHT - PAGE_HEADER_PADDING_BOTTOM - BUTTON_HEIGHT;
+const cursorTargets = {
+  install: {
+    x: installButtonLeft + 31,
+    y: installButtonTop + 17,
+  },
+  run: {
+    x: runButtonLeft + 29,
+    y: runButtonTop + 17,
+  },
+} as const;
 
 export const AppFrame = ({
   children,
@@ -23,10 +78,9 @@ export const AppFrame = ({
       style={{
         position: 'absolute',
         inset: 0,
-        display: 'grid',
-        placeItems: 'center',
         fontFamily: theme.fonts.sans,
         color: theme.colors.text.primary,
+        background: theme.colors.bg,
       }}
     >
       <div
@@ -34,10 +88,7 @@ export const AppFrame = ({
           width: WINDOW_WIDTH,
           height: WINDOW_HEIGHT,
           overflow: 'hidden',
-          borderRadius: 14,
-          border: `1px solid ${theme.colors.borderStrong}`,
           background: theme.colors.bg,
-          boxShadow: '0 38px 110px rgba(0,0,0,0.62)',
         }}
       >
         <TitleBar />
@@ -98,14 +149,14 @@ export const PageHeader = ({
   return (
     <header
       style={{
-        height: 154,
+        height: PAGE_HEADER_HEIGHT,
         boxSizing: 'border-box',
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'space-between',
         gap: 28,
         borderBottom: `1px solid ${theme.colors.borderSoft}`,
-        padding: '39px 42px 28px',
+        padding: `${PAGE_HEADER_PADDING_TOP}px ${PAGE_HEADER_PADDING_X}px ${PAGE_HEADER_PADDING_BOTTOM}px`,
       }}
     >
       <div style={{minWidth: 0, flex: 1}}>
@@ -153,7 +204,7 @@ export const PageBody = ({
         flex: 1,
         minHeight: 0,
         overflow: 'hidden',
-        padding: '32px 42px 34px',
+        padding: `${PAGE_BODY_PADDING_TOP}px ${PAGE_BODY_PADDING_X}px ${PAGE_BODY_PADDING_BOTTOM}px`,
         boxSizing: 'border-box',
         ...style,
       }}
@@ -210,11 +261,33 @@ export const RefreshButton = () => {
 export const Cursor = ({frame}: {frame: number}) => {
   const sceneOne = frame < 120;
   const x = sceneOne
-    ? interpolatePiecewise(frame, [0, 26, 84, 108, 120], [1320, 1190, 486, 486, 486])
-    : interpolatePiecewise(frame, [120, 158, 194, 214], [486, 1420, 1648, 1648]);
+    ? interpolatePiecewise(
+        frame,
+        [0, 26, 84, 108, 120],
+        [
+          1320,
+          1190,
+          cursorTargets.install.x,
+          cursorTargets.install.x,
+          cursorTargets.install.x,
+        ],
+      )
+    : interpolatePiecewise(
+        frame,
+        [120, 158, 194, 214],
+        [cursorTargets.install.x, 1560, cursorTargets.run.x, cursorTargets.run.x],
+      );
   const y = sceneOne
-    ? interpolatePiecewise(frame, [0, 26, 84, 108, 120], [266, 276, 604, 604, 604])
-    : interpolatePiecewise(frame, [120, 158, 194, 214], [604, 260, 158, 158]);
+    ? interpolatePiecewise(
+        frame,
+        [0, 26, 84, 108, 120],
+        [266, 276, cursorTargets.install.y, cursorTargets.install.y, cursorTargets.install.y],
+      )
+    : interpolatePiecewise(
+        frame,
+        [120, 158, 194, 214],
+        [cursorTargets.install.y, 250, cursorTargets.run.y, cursorTargets.run.y],
+      );
   const visible = frame < 226 ? 1 : 0;
   const intro = Math.min(1, Math.max(0, frame / 18));
   const outro = frame > 210 ? Math.max(0, (226 - frame) / 16) : 1;
