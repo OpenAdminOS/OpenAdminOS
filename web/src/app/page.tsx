@@ -35,52 +35,6 @@ const HOME_NAV_ITEMS: readonly MobileNavItem[] = [
   { href: "/download", label: "Download", primary: true },
 ];
 
-const TRUST_ITEMS = [
-  {
-    label: "Local models",
-    detail: "Use Ollama today for private runs without per-token vendor costs.",
-    command: "ollama serve",
-  },
-  {
-    label: "Model choice",
-    detail: "LM Studio is planned; hosted providers stay optional.",
-    command: "localhost:1234",
-  },
-  {
-    label: "Hosted providers",
-    detail: "OpenAI, Anthropic, or Azure OpenAI are labeled before every run.",
-    command: "explicit egress",
-  },
-  {
-    label: "Tenant boundary",
-    detail: "Local runs keep tenant data, prompts, and results on this device.",
-    command: "no tenant telemetry",
-  },
-];
-
-const USE_CASES = [
-  {
-    label: "Investigate",
-    detail:
-      "Correlate tenant signals across users, devices, sign-ins, policies, and audit logs.",
-  },
-  {
-    label: "Explain",
-    detail:
-      "Turn Conditional Access, Secure Score, and posture data into admin-readable reasoning.",
-  },
-  {
-    label: "Prioritize",
-    detail:
-      "Rank stale devices, risky accounts, policy gaps, and cleanup candidates by tenant context.",
-  },
-  {
-    label: "Prepare changes",
-    detail:
-      "Generate reviewed write plans with evidence before anything touches the tenant.",
-  },
-];
-
 const AGENTS = [
   {
     name: "Sign-in failure explainer",
@@ -110,29 +64,6 @@ const PROOF_ITEMS = [
   ["Open runtime", "Agents, desktop app, registry, and SDK"],
   ["Forkable registry", "Point enterprises at their own curated agents"],
   ["No tenant telemetry", "Tenant content does not leave by default"],
-];
-
-const COMPARISON_ROWS = [
-  {
-    axis: "Local models",
-    local: "Prompts and tenant context stay on the workstation.",
-    hosted: "Optional hosted providers are labeled before tenant context is sent.",
-  },
-  {
-    axis: "Read-only agents",
-    local: "Run investigations and reports without changing tenant state.",
-    hosted: "Use the same read-only contract, with hosted model egress disclosed.",
-  },
-  {
-    axis: "Write agents",
-    local: "Prepare a Graph change diff and wait for approval.",
-    hosted: "Still require the same diff and typed confirmation gates.",
-  },
-  {
-    axis: "Agent registry",
-    local: "Install from the public open registry or point to a private registry.",
-    hosted: "Registry choice does not change the write-confirmation contract.",
-  },
 ];
 
 const COMMON_QUESTIONS = [
@@ -373,120 +304,106 @@ export default async function HomePage() {
         </section>
 
         <section className="w-full max-w-7xl py-20">
-          <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
-                Admin work
-              </p>
-              <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-                Agents for the work scripts do not explain.
-              </h2>
-              <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
-                OpenAdminOS agents read Microsoft 365 tenant data, shape the
-                evidence, use the selected model for reasoning, and return work
-                an admin can inspect before acting.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              {USE_CASES.map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
-                >
-                  <h3 className="text-sm font-semibold">{item.label}</h3>
-                  <p className="mt-2 text-sm leading-6 text-white/55">
-                    {item.detail}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="grid w-full max-w-7xl gap-5 border-t border-white/10 py-20 md:grid-cols-[0.95fr_1.05fr] md:items-start">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300/80">
-              Local-first by default
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+              How it works
             </p>
-            <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-              Run repeatable tenant work locally.
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+              Install an agent, run it locally, approve what changes.
             </h2>
-            <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
-              Use local models for drafts, investigations, scheduled checks,
-              and agent runs without a per-token meter. If you choose a hosted
-              model, the app says so before tenant data is sent.
-            </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {TRUST_ITEMS.map((item) => (
-              <div
-                key={item.label}
-                className="rounded-lg border border-white/10 bg-white/[0.035] p-4"
+          <div className="mt-8 grid gap-3 lg:grid-cols-3">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 sm:p-6">
+              <p className="font-mono text-2xl text-white/25">01</p>
+              <h3 className="mt-5 text-base font-semibold">
+                Install from an open registry.
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                Each agent&apos;s manifest lists its Microsoft Graph scopes,
+                read or write mode, and model requirements before you install
+                it. Enterprises can point the app at a private registry; the
+                rules do not change.
+              </p>
+              <Link
+                href="/registry"
+                className="mt-4 inline-flex text-sm font-medium text-sky-200 underline-offset-4 transition hover:text-white hover:underline"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold">{item.label}</h3>
-                  <code className="rounded border border-white/10 bg-black/35 px-2 py-1 font-mono text-[11px] text-white/50">
-                    {item.command}
-                  </code>
-                </div>
-                <p className="mt-3 text-sm leading-6 text-white/55">
-                  {item.detail}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="w-full max-w-7xl border-t border-white/10 py-20">
-          <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
-                Operating modes
-              </p>
-              <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-                The data boundary changes by mode.
-              </h2>
-              <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
-                Local and hosted model choices are not treated as cosmetic
-                settings. Read-only and write agents also have different
-                confirmation paths.
-              </p>
+                Browse the registry
+              </Link>
             </div>
-            <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12]">
-              <div className="hidden grid-cols-[0.75fr_1fr_1fr] gap-3 border-b border-white/10 px-4 py-3 font-mono text-[11px] uppercase tracking-wider text-white/40 md:grid">
-                <span>Mode</span>
-                <span>Local-first path</span>
-                <span>Hosted or write path</span>
+
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 sm:p-6">
+              <p className="font-mono text-2xl text-white/25">02</p>
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <h3 className="text-base font-semibold">
+                  Run it against your tenant.
+                </h3>
+                <code className="w-fit rounded border border-white/10 bg-black/35 px-2 py-1 font-mono text-[11px] text-white/50">
+                  ollama serve
+                </code>
               </div>
-              {COMPARISON_ROWS.map((row) => (
-                <div
-                  key={row.axis}
-                  className="grid gap-3 border-b border-white/10 px-4 py-4 text-sm last:border-b-0 md:grid-cols-[0.75fr_1fr_1fr]"
-                >
-                  <h3 className="font-semibold text-white/90">{row.axis}</h3>
-                  <p className="leading-6 text-white/55">
-                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
-                      Local-first path
-                    </span>
-                    {row.local}
-                  </p>
-                  <p className="leading-6 text-white/55">
-                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-white/35 md:hidden">
-                      Hosted or write path
-                    </span>
-                    {row.hosted}
-                  </p>
-                </div>
-              ))}
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                The app signs in with MSAL and reads tenant data through
+                Microsoft Graph. With a local model like Ollama, prompts and
+                tenant data stay on this device. Hosted providers are optional
+                and labeled before anything leaves.
+              </p>
+              <p className="mt-3 font-mono text-[12px] leading-5 text-white/42">
+                Investigate · Explain · Prioritize · Prepare changes
+              </p>
+              <Link
+                href="/llm-providers"
+                className="mt-4 inline-flex text-sm font-medium text-emerald-200 underline-offset-4 transition hover:text-white hover:underline"
+              >
+                Compare model providers
+              </Link>
+            </div>
+
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 sm:p-6">
+              <p className="font-mono text-2xl text-white/25">03</p>
+              <h3 className="mt-5 text-base font-semibold">
+                Approve every change.
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-white/55">
+                Read-only agents run autonomously. Write agents stop at a diff
+                of the proposed Graph change, and destructive operations require
+                typed confirmation. There is no trust-this-agent bypass.
+              </p>
             </div>
           </div>
         </section>
 
         <section
+          id="safety"
+          className="grid w-full max-w-7xl gap-8 border-t border-white/10 py-20 lg:grid-cols-[1fr_1fr] lg:items-center"
+        >
+          <DiffConfirmationDemo />
+
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/80">
+              Human in the loop
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+              Changes wait for your approval.
+            </h2>
+            <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+              Read-only agents can run autonomously. Any change shows a diff
+              first, and destructive actions require typed confirmation. There
+              is no trust-this-agent bypass.
+            </p>
+            <Link
+              href="/trust-model"
+              className="mt-5 inline-flex text-sm font-medium text-amber-200 underline-offset-4 transition hover:text-white hover:underline"
+            >
+              Review the trust model
+            </Link>
+          </div>
+        </section>
+
+        <section
           id="agents"
-          className="w-full max-w-7xl border-y border-white/10 py-20"
+          className="w-full max-w-7xl border-t border-white/10 py-20"
         >
           <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
             <div>
@@ -553,92 +470,6 @@ export default async function HomePage() {
                 </div>
               ))}
             </div>
-          </div>
-        </section>
-
-        <section className="grid w-full max-w-7xl gap-6 border-t border-white/10 py-20 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">
-              Graph permissions
-            </p>
-            <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-              Agents declare the Microsoft Graph scopes they need.
-            </h2>
-            <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
-              OpenAdminOS uses{" "}
-              <Link
-                href="https://learn.microsoft.com/en-us/entra/identity-platform/msal-overview"
-                target="_blank"
-                rel="noreferrer"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
-              >
-                MSAL
-              </Link>{" "}
-              for Microsoft identity sign-in and Microsoft Graph for tenant
-              data. Consent is tied to the scopes declared by the agents an admin
-              chooses to run.
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <h3 className="text-sm font-semibold">Before install</h3>
-              <p className="mt-3 text-sm leading-6 text-white/55">
-                The agent manifest lists required Graph scopes, read/write mode,
-                model requirements, settings, and connector egress before the
-                agent is installed.
-              </p>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <h3 className="text-sm font-semibold">Before run</h3>
-              <p className="mt-3 text-sm leading-6 text-white/55">
-                If the active tenant is missing, expired, or ambiguous, the run
-                cannot start. If a write plan is produced, the diff gate appears
-                before any tenant change.
-              </p>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <h3 className="text-sm font-semibold">For private registries</h3>
-              <p className="mt-3 text-sm leading-6 text-white/55">
-                Internal registries use the same scope declaration and
-                confirmation rules as public registry agents. The source changes;
-                the trust contract does not.
-              </p>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-              <h3 className="text-sm font-semibold">For hosted models</h3>
-              <p className="mt-3 text-sm leading-6 text-white/55">
-                Graph data selected for the prompt is labeled as egress before it
-                is sent to a hosted provider. Local providers keep that prompt on
-                the workstation.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section
-          id="safety"
-          className="grid w-full max-w-7xl gap-8 py-20 lg:grid-cols-[1fr_1fr] lg:items-center"
-        >
-          <DiffConfirmationDemo />
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/80">
-              Human in the loop
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-              Changes wait for your approval.
-            </h2>
-            <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
-              Read-only agents can run autonomously. Any change shows a diff
-              first, and destructive actions require typed confirmation. There
-              is no trust-this-agent bypass.
-            </p>
-            <Link
-              href="/trust-model"
-              className="mt-5 inline-flex text-sm font-medium text-amber-200 underline-offset-4 transition hover:text-white hover:underline"
-            >
-              Review the trust model
-            </Link>
           </div>
         </section>
 
