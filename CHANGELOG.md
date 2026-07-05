@@ -20,6 +20,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Extracted Electron state module-level helpers into focused desktop helper modules without changing runtime behavior.
 - Extracted the Electron Intune Chat domain from `state.ts` into a dedicated service without changing the public store API.
 - Extracted the Electron post-run connector delivery domain from `state.ts` into a dedicated service without changing the public store API.
+- Extracted the Electron run lifecycle domain from `state.ts` into a dedicated service without changing the public store API.
 - Updated README and operating docs to reflect the v0.2.5 shipped surface and the `web/` marketing site path.
 
 ### Removed
