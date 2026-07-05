@@ -68,6 +68,11 @@ export const GRAPH_CACHE_RESOURCES: readonly GraphCacheResourceDefinition[] = [
     scopes: SCOPES.audit,
   },
   {
+    resource: "intuneAuditEvents",
+    label: "Intune audit events",
+    scopes: SCOPES.deviceConfig,
+  },
+  {
     resource: "conditionalAccessPolicies",
     label: "Conditional Access policies",
     scopes: SCOPES.policy,
@@ -519,6 +524,24 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "additionalDetails",
         ],
         query: { "$top": "250" },
+      };
+    case "intuneAuditEvents":
+      return {
+        path: "/deviceManagement/auditEvents",
+        select: [
+          "id",
+          "displayName",
+          "componentName",
+          "activityDateTime",
+          "activityType",
+          "activityOperationType",
+          "activityResult",
+          "category",
+          "correlationId",
+          "actor",
+          "resources",
+        ],
+        query: { "$top": "250", "$orderby": "activityDateTime desc" },
       };
     case "conditionalAccessPolicies":
       return {

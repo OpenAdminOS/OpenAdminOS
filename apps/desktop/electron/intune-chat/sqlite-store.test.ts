@@ -818,6 +818,16 @@ function isAcceptedPermissionSuperset(
   ) {
     return true;
   }
+  // Live Intune audit event checks for the D2 drift timeline confirmed that
+  // DeviceManagementConfiguration.Read.All can read /deviceManagement/auditEvents
+  // in v1.0. The bundled Graph PM index currently lists the Apps read family.
+  if (
+    (resource as string) === "intuneAuditEvents" &&
+    scope === "DeviceManagementConfiguration.Read.All" &&
+    documentedScopes.includes("DeviceManagementApps.Read.All")
+  ) {
+    return true;
+  }
   return scope === "User.Read.All" && documentedScopes.includes("User.ReadBasic.All");
 }
 
@@ -827,11 +837,26 @@ function isKnownGraphPmPropertyGap(
 ): boolean {
   // Microsoft Graph returns userPrincipalName for /users; the bundled Graph PM
   // resource index currently omits it from the user schema.
-  return resource === "users" && field === "userPrincipalName";
+  if (resource === "users" && field === "userPrincipalName") return true;
+  if ((resource as string) === "intuneAuditEvents") {
+    return new Set([
+      "displayName",
+      "componentName",
+      "activityType",
+      "activityOperationType",
+      "activityResult",
+      "correlationId",
+      "actor",
+      "resources",
+    ]).has(field);
+  }
+  return false;
 }
 
-function graphPmResourceName(resource: GraphCacheResourceKind): string {
-  const resourceNames: Record<GraphCacheResourceKind, string> = {
+function graphPmResourceName(
+  resource: GraphCacheResourceKind | "intuneAuditEvents",
+): string {
+  const resourceNames: Record<GraphCacheResourceKind | "intuneAuditEvents", string> = {
     managedDevices: "managedDevice",
     entraDevices: "device",
     users: "user",
@@ -841,6 +866,7 @@ function graphPmResourceName(resource: GraphCacheResourceKind): string {
     configurationPolicies: "deviceManagementConfigurationPolicy",
     signIns: "signIn",
     directoryAudits: "directoryAudit",
+    intuneAuditEvents: "auditEvent",
     conditionalAccessPolicies: "conditionalAccessPolicy",
     mobileApps: "mobileApp",
     detectedApps: "detectedApp",

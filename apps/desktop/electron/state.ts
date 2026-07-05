@@ -62,6 +62,13 @@ import type {
   GraphCacheRefreshResult,
   GraphCacheRefreshScheduleSettings,
   GraphCacheStatus,
+  DriftEntryDetail,
+  DriftEntryDetailInput,
+  DriftObjectHistoryInput,
+  DriftObjectHistoryResult,
+  DriftStatus,
+  DriftTimelineInput,
+  DriftTimelineResult,
   ImportMultiTenantResultToWorkspacesInput,
   ImportMultiTenantResultToWorkspacesResult,
   CreateWorkspaceInput,
@@ -141,6 +148,8 @@ import {
 } from "./registry-client.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { IntuneChatService } from "./intune-chat/service.js";
+import { definitionForResource } from "./intune-chat/planner.js";
+import { DriftService } from "./intune-chat/drift/service.js";
 import { RunService } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -939,6 +948,7 @@ export class AppStateStore {
   private readonly userDataPath: string | undefined;
   private readonly intelligenceStore: IntelligenceSqliteStore | undefined;
   private readonly chatService: IntuneChatService;
+  private readonly driftService: DriftService;
   private readonly runService: RunService;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
@@ -1041,6 +1051,36 @@ export class AppStateStore {
       get graphFactory() {
         return host.graphFactory;
       },
+    });
+    this.driftService = new DriftService({
+      read: () => host.read(),
+      resolveTenant: (persisted, tenantId) =>
+        host.resolveTenant(persisted as PersistedState, tenantId),
+      listDriftSnapshots: (tenantId, options) =>
+        host.requireIntelligenceStore().listDriftSnapshots(tenantId, options),
+      getDriftSnapshot: (tenantId, snapshotId) =>
+        host.requireIntelligenceStore().getDriftSnapshot(tenantId, snapshotId),
+      listDriftChangesForSnapshot: (tenantId, snapshotId) =>
+        host.requireIntelligenceStore().listDriftChangesForSnapshot(
+          tenantId,
+          snapshotId,
+        ),
+      getDriftObjectHistory: (tenantId, resource, graphId, options) =>
+        host.requireIntelligenceStore().getDriftObjectHistory(
+          tenantId,
+          resource,
+          graphId,
+          options,
+        ),
+      listCachedGraphResourceRows: (input) =>
+        host.requireIntelligenceStore().listCachedGraphResourceRows(input),
+      getGraphCacheStatus: (tenantId, resources) =>
+        host.requireIntelligenceStore().getGraphCacheStatus(
+          tenantId,
+          resources.map((resource) => definitionForResource(resource)),
+        ),
+      getDriftResourceStats: (tenantId, resources) =>
+        host.requireIntelligenceStore().getDriftResourceStats(tenantId, resources),
     });
     this.runService = new RunService({
       read: () => host.read(),
@@ -1840,6 +1880,26 @@ export class AppStateStore {
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
     return this.chatService.getGraphCacheStatus(tenantId);
+  }
+
+  async getDriftTimeline(input: DriftTimelineInput): Promise<DriftTimelineResult> {
+    return this.driftService.getDriftTimeline(input);
+  }
+
+  async getDriftEntryDetail(
+    input: DriftEntryDetailInput,
+  ): Promise<DriftEntryDetail> {
+    return this.driftService.getDriftEntryDetail(input);
+  }
+
+  async getDriftObjectHistory(
+    input: DriftObjectHistoryInput,
+  ): Promise<DriftObjectHistoryResult> {
+    return this.driftService.getDriftObjectHistory(input);
+  }
+
+  async getDriftStatus(tenantId: string): Promise<DriftStatus> {
+    return this.driftService.getDriftStatus(tenantId);
   }
 
   async getGraphCacheRefreshSchedule(

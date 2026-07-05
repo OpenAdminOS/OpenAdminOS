@@ -778,6 +778,7 @@ export type GraphCacheResourceKind =
   | "configurationPolicies"
   | "signIns"
   | "directoryAudits"
+  | "intuneAuditEvents"
   | "conditionalAccessPolicies"
   | "mobileApps"
   | "detectedApps"
@@ -816,6 +817,115 @@ export interface GraphCacheStatus {
   tenantId?: string;
   resources: GraphCacheResourceStatus[];
   schedule?: GraphCacheRefreshScheduleSettings;
+}
+
+export type DriftTimelineChangeKind = "added" | "removed" | "modified" | "baseline";
+
+export interface DriftAttribution {
+  status: "matched" | "unknown";
+  reason?: "audit-cache-stale";
+  actor?: {
+    userPrincipalName?: string;
+    appDisplayName?: string;
+    actorType?: string;
+  };
+  activity?: string;
+  activityDateTime?: string;
+  source?: "intuneAudit" | "directoryAudit";
+  alsoMatched?: number;
+}
+
+export interface DriftFieldChange {
+  path: string;
+  kind: "added" | "removed" | "changed";
+  before?: unknown;
+  after?: unknown;
+}
+
+export interface DriftTimelineInput {
+  tenantId: string;
+  from?: string;
+  to?: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+}
+
+export interface DriftTimelineEntry {
+  id: string;
+  snapshotId: string;
+  capturedAt: string;
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  changeKind: DriftTimelineChangeKind;
+  fieldChangeCount: number;
+  timestampOnly: boolean;
+  graphId?: string;
+  displayName?: string;
+  rowCount?: number;
+  attribution?: DriftAttribution;
+}
+
+export interface DriftTimelineResult {
+  tenantId: string;
+  entries: DriftTimelineEntry[];
+  hasMore: boolean;
+  limit: number;
+}
+
+export interface DriftEntryDetailInput {
+  tenantId: string;
+  snapshotId: string;
+  resource: GraphCacheResourceKind;
+  graphId: string;
+}
+
+export interface DriftEntryDetail {
+  changes: DriftFieldChange[];
+  summary: string;
+  before?: unknown;
+  after?: unknown;
+  truncated?: boolean;
+  attribution?: DriftAttribution;
+}
+
+export interface DriftObjectHistoryInput {
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  limit?: number;
+}
+
+export interface DriftObjectHistoryEntry {
+  version: number;
+  snapshotId: string;
+  capturedAt: string;
+  contentHash: string;
+  displayName?: string;
+  removedSnapshotId?: string;
+  removedAt?: string;
+}
+
+export interface DriftObjectHistoryResult {
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  versions: DriftObjectHistoryEntry[];
+}
+
+export interface DriftResourceStatus {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  baselineCaptured: boolean;
+  baselineCapturedAt?: string;
+  lastSnapshotAt?: string;
+  snapshotCount: number;
+  totalTrackedVersions: number;
+  currentObjectCount: number;
+}
+
+export interface DriftStatus {
+  tenantId: string;
+  resources: DriftResourceStatus[];
 }
 
 export interface RefreshGraphCacheOptions {
@@ -1696,6 +1806,12 @@ export interface OpenAdminOSApi {
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;
   getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus>;
+  getDriftTimeline?(input: DriftTimelineInput): Promise<DriftTimelineResult>;
+  getDriftEntryDetail?(input: DriftEntryDetailInput): Promise<DriftEntryDetail>;
+  getDriftObjectHistory?(
+    input: DriftObjectHistoryInput,
+  ): Promise<DriftObjectHistoryResult>;
+  getDriftStatus?(tenantId: string): Promise<DriftStatus>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,

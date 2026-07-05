@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added tenant drift D2 service/query APIs, cached Intune audit-event attribution, SDK drift contracts, and validated desktop IPC/preload channels.
 - Added tenant drift D1 snapshot storage, config-resource content hashing, a pure field diff engine, SQLite drift query/prune APIs, and focused host tests.
 
 ### Changed

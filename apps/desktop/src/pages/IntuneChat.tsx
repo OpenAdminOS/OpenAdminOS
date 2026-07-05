@@ -3779,6 +3779,7 @@ function chatResourceLabel(resource: GraphCacheResourceKind): string {
     deviceHealthScripts: "Remediations",
     deviceManagementScripts: "Platform scripts",
     directoryAudits: "Directory audit logs",
+    intuneAuditEvents: "Intune audit events",
     endpointSecurityIntents: "Endpoint security policies",
     entraDevices: "Entra devices",
     groupPolicyConfigurations: "Administrative templates",

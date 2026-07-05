@@ -75,6 +75,14 @@ interface ResourceRow {
   refreshed_at?: string;
 }
 
+interface CachedGraphResourceRow {
+  resource: GraphCacheResourceKind;
+  graph_id: string;
+  raw_json: string;
+  display_name: string | null;
+  refreshed_at: string;
+}
+
 interface NormalizedGraphObject {
   graphId: string;
   searchText: string;
@@ -325,6 +333,25 @@ export interface DriftObjectVersionRecord {
 export interface DriftPruneResult {
   snapshotsDeleted: number;
   versionsDeleted: number;
+}
+
+export interface CachedGraphResourceRecord {
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  row: unknown;
+  rawJson: string;
+  displayName?: string;
+  refreshedAt: string;
+}
+
+export interface DriftResourceStatsRecord {
+  resource: GraphCacheResourceKind;
+  baselineSnapshotId?: string;
+  baselineCapturedAt?: string;
+  lastSnapshotAt?: string;
+  snapshotCount: number;
+  totalTrackedVersions: number;
+  currentObjectCount: number;
 }
 
 export class IntelligenceSqliteStore {
@@ -930,6 +957,21 @@ export class IntelligenceSqliteStore {
     return rows.map(readDriftSnapshot);
   }
 
+  getDriftSnapshot(
+    tenantId: string,
+    snapshotId: string,
+  ): DriftSnapshotRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT id, tenant_id, resource, captured_at, row_count,
+                changes_added, changes_removed, changes_modified
+         FROM drift_snapshots
+         WHERE tenant_id = ? AND id = ?`,
+      )
+      .get(tenantId, snapshotId) as unknown as DriftSnapshotRow | undefined;
+    return row ? readDriftSnapshot(row) : undefined;
+  }
+
   listDriftChangesForSnapshot(
     tenantId: string,
     snapshotId: string,
@@ -1045,6 +1087,102 @@ export class IntelligenceSqliteStore {
       )
       .all(tenantId, resource, graphId, limit) as unknown as DriftObjectVersionRow[];
     return rows.map(readDriftObjectVersion);
+  }
+
+  listCachedGraphResourceRows(input: {
+    tenantId: string;
+    resource: GraphCacheResourceKind;
+    limit?: number;
+  }): CachedGraphResourceRecord[] {
+    const limit = normalizeCachedRowLimit(input.limit, 1000);
+    const rows = this.db
+      .prepare(
+        `SELECT resource, graph_id, raw_json, display_name, refreshed_at
+         FROM graph_resources
+         WHERE tenant_id = ? AND resource = ?
+         ORDER BY COALESCE(last_seen_at, refreshed_at) DESC, graph_id ASC
+         LIMIT ?`,
+      )
+      .all(input.tenantId, input.resource, limit) as unknown as CachedGraphResourceRow[];
+    return rows.map((row) => ({
+      resource: row.resource,
+      graphId: row.graph_id,
+      row: readJson<unknown>(row.raw_json, {}),
+      rawJson: row.raw_json,
+      ...(row.display_name ? { displayName: row.display_name } : {}),
+      refreshedAt: row.refreshed_at,
+    }));
+  }
+
+  getDriftResourceStats(
+    tenantId: string,
+    resources: readonly GraphCacheResourceKind[],
+  ): DriftResourceStatsRecord[] {
+    return resources.map((resource) => {
+      const firstSnapshot = this.db
+        .prepare(
+          `SELECT id, captured_at
+           FROM drift_snapshots
+           WHERE tenant_id = ? AND resource = ?
+           ORDER BY captured_at ASC, id ASC
+           LIMIT 1`,
+        )
+        .get(tenantId, resource) as unknown as
+        | { id: string; captured_at: string }
+        | undefined;
+      const lastSnapshot = this.db
+        .prepare(
+          `SELECT captured_at
+           FROM drift_snapshots
+           WHERE tenant_id = ? AND resource = ?
+           ORDER BY captured_at DESC, id DESC
+           LIMIT 1`,
+        )
+        .get(tenantId, resource) as unknown as
+        | { captured_at: string }
+        | undefined;
+      const currentRow = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM drift_object_versions v
+           INNER JOIN (
+             SELECT graph_id, MAX(version) AS version
+             FROM drift_object_versions
+             WHERE tenant_id = ? AND resource = ?
+             GROUP BY graph_id
+           ) latest
+             ON latest.graph_id = v.graph_id
+            AND latest.version = v.version
+           WHERE v.tenant_id = ?
+             AND v.resource = ?
+             AND v.removed_at IS NULL`,
+        )
+        .get(tenantId, resource, tenantId, resource) as
+        | { count?: number }
+        | undefined;
+      return {
+        resource,
+        ...(firstSnapshot
+          ? {
+              baselineSnapshotId: firstSnapshot.id,
+              baselineCapturedAt: firstSnapshot.captured_at,
+            }
+          : {}),
+        ...(lastSnapshot ? { lastSnapshotAt: lastSnapshot.captured_at } : {}),
+        snapshotCount: this.countRows(
+          "drift_snapshots",
+          "tenant_id = ? AND resource = ?",
+          [tenantId, resource],
+        ),
+        totalTrackedVersions: this.countRows(
+          "drift_object_versions",
+          "tenant_id = ? AND resource = ?",
+          [tenantId, resource],
+        ),
+        currentObjectCount:
+          typeof currentRow?.count === "number" ? currentRow.count : 0,
+      };
+    });
   }
 
   pruneDriftHistory(tenantId: string | null, retentionDays: number): DriftPruneResult {
@@ -2934,6 +3072,11 @@ function groupDriftVersions(
 function normalizeDriftLimit(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(500, Math.floor(value)));
+}
+
+function normalizeCachedRowLimit(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(1000, Math.floor(value)));
 }
 
 function readMultiTenantJob(row: MultiTenantJobRow): MultiTenantChatJob {

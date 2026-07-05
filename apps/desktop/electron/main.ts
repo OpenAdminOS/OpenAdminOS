@@ -49,7 +49,11 @@ import type {
   CompanionRunDueReadSchedulesResult,
   CompanionSnapshot,
   CreateWorkspaceInput,
+  DriftEntryDetailInput,
+  DriftObjectHistoryInput,
+  DriftTimelineInput,
   ExportAuditLogInput,
+  GraphCacheResourceKind,
   ImportMultiTenantResultToWorkspacesInput,
   MultiTenantChatStreamEvent,
   PendingConnectorDecision,
@@ -93,6 +97,7 @@ import {
   probeMxcSandbox,
 } from "@openadminos/runtime";
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
+import { DRIFT_TRACKED_RESOURCES } from "./intune-chat/drift/tracked-resources.js";
 import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 
 // Set the app name BEFORE anything else that could touch the macOS
@@ -162,6 +167,7 @@ const providerIds = new Set(providerCatalog.map((provider) => provider.id));
 const graphCacheResourceKinds = new Set<string>(
   GRAPH_CACHE_RESOURCES.map((resource) => resource.resource),
 );
+const driftTrackedResourceKinds = new Set<string>(DRIFT_TRACKED_RESOURCES);
 const supportIssueSources = new Set([
   "sidebar",
   "run-failure",
@@ -3702,6 +3708,87 @@ function validateRefreshGraphCacheOptions(
   };
 }
 
+function validateDriftTimelineInput(value: unknown): DriftTimelineInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Drift timeline input must be an object.");
+  }
+  const from = validateOptionalDriftBoundary(value.from, "from");
+  const to = validateOptionalDriftBoundary(value.to, "to");
+  if (from !== undefined && to !== undefined && Date.parse(from) > Date.parse(to)) {
+    throw new Error("Drift timeline from date must be before the to date.");
+  }
+  const input: DriftTimelineInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+  };
+  if (from !== undefined) input.from = from;
+  if (to !== undefined) input.to = to;
+  if (value.resources !== undefined) {
+    input.resources = validateDriftResourceArray(value.resources, "resources");
+  }
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "drift timeline limit", 1, 500);
+  }
+  return input;
+}
+
+function validateDriftEntryDetailInput(value: unknown): DriftEntryDetailInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Drift entry detail input must be an object.");
+  }
+  return {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+    snapshotId: requireBoundedString(value.snapshotId, "snapshotId", 300),
+    resource: validateDriftResource(value.resource, "resource"),
+    graphId: requireBoundedString(value.graphId, "graphId", 512),
+  };
+}
+
+function validateDriftObjectHistoryInput(value: unknown): DriftObjectHistoryInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Drift object history input must be an object.");
+  }
+  const input: DriftObjectHistoryInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+    resource: validateDriftResource(value.resource, "resource"),
+    graphId: requireBoundedString(value.graphId, "graphId", 512),
+  };
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "drift object history limit", 1, 500);
+  }
+  return input;
+}
+
+function validateOptionalDriftBoundary(
+  value: unknown,
+  label: "from" | "to",
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const boundary = requireBoundedString(value, `drift ${label}`, 80);
+  if (!Number.isFinite(Date.parse(boundary))) {
+    throw new Error(`Drift ${label} date must be an ISO timestamp.`);
+  }
+  return boundary;
+}
+
+function validateDriftResourceArray(value: unknown, name: string): GraphCacheResourceKind[] {
+  if (!Array.isArray(value) || value.length > DRIFT_TRACKED_RESOURCES.size) {
+    throw new Error(
+      `${name} must be an array with at most ${DRIFT_TRACKED_RESOURCES.size} entries.`,
+    );
+  }
+  return [...new Set(value.map((entry, index) =>
+    validateDriftResource(entry, `${name}[${index}]`),
+  ))];
+}
+
+function validateDriftResource(value: unknown, name: string): GraphCacheResourceKind {
+  const resource = requireBoundedString(value, name, 128);
+  if (!driftTrackedResourceKinds.has(resource)) {
+    throw new Error(`Unknown drift-tracked resource: ${resource}`);
+  }
+  return resource as GraphCacheResourceKind;
+}
+
 function validateSetGraphCacheRefreshScheduleInput(
   value: unknown,
 ): SetGraphCacheRefreshScheduleInput {
@@ -4662,6 +4749,30 @@ function registerIpcHandlers() {
     "openadminos:get-graph-cache-status",
     handleTrusted((_event, tenantId?: unknown) =>
       store.getGraphCacheStatus(optionalBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-timeline",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftTimeline(validateDriftTimelineInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-entry-detail",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftEntryDetail(validateDriftEntryDetailInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-object-history",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftObjectHistory(validateDriftObjectHistoryInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-status",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.getDriftStatus(requireBoundedString(tenantId, "tenantId", 256)),
     ),
   );
   ipcMain.handle(

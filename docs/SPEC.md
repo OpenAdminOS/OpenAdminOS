@@ -1080,6 +1080,7 @@ Initial cache targets:
 - `/deviceManagement/troubleshootingEvents`
 - `/auditLogs/signIns`
 - `/auditLogs/directoryAudits`
+- `/deviceManagement/auditEvents`
 - `/identity/conditionalAccess/policies`
 
 Initial tenant connection requests the Graph PM-audited read scopes needed for
@@ -1120,6 +1121,18 @@ Audit-log cache pulls must be field-selected rather than raw unbounded rows.
 The v0.2.2 cache uses compact `$select` lists for sign-ins and directory audits,
 validated against Microsoft Graph beta through the Microsoft Graph MCP, so local
 SQLite growth stays bounded before the answer-pack compaction step.
+
+Tenant drift queries are read-only views over local SQLite snapshots. The
+desktop host exposes timeline, entry detail, object history, and status APIs
+from drift snapshot/version rows; it never calls Graph while answering a drift
+query. Attribution is computed at query time from cached Intune audit events and
+directory audits within the previous-snapshot-to-current-snapshot window, padded
+five minutes backward for clock skew. If no cached audit row matches, the result
+is `unknown`; if either audit cache is absent or older than the window, the
+result is `audit-cache-stale` so the UI can ask the admin to refresh audit data
+instead of implying a real actor could not be found. Detail APIs omit raw
+before/after bodies once either serialized side exceeds 48 KB, while retaining
+the field-change list.
 
 Verification for the chat surface includes `npm run smoke:intune-chat`. The smoke
 test launches Electron in a dev-only fixture mode, seeds a local tenant, drives

@@ -215,6 +215,14 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:refresh-graph-cache", options),
   getGraphCacheStatus: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-status", tenantId),
+  getDriftTimeline: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-timeline", input),
+  getDriftEntryDetail: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-entry-detail", input),
+  getDriftObjectHistory: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-object-history", input),
+  getDriftStatus: (tenantId: string) =>
+    ipcRenderer.invoke("openadminos:get-drift-status", tenantId),
   getGraphCacheRefreshSchedule: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-refresh-schedule", tenantId),
   setGraphCacheRefreshSchedule: (input) =>
