@@ -29,6 +29,8 @@ const webNodeModules = join(webRoot, "node_modules");
 const repoNodeModules = join(repoRoot, "node_modules");
 const webContentRoot = join(webRoot, "content");
 const repoContentRoot = join(repoRoot, "content");
+const webPublicRoot = join(webRoot, "public");
+const repoPublicRoot = join(repoRoot, "public");
 
 if (!existsSync(webNextRoot)) {
   console.error(
@@ -48,6 +50,10 @@ linkMissingTracedNodePackages();
 
 if (!existsSync(repoContentRoot) && existsSync(webContentRoot)) {
   symlinkSync("web/content", repoContentRoot, "dir");
+}
+
+if (!existsSync(repoPublicRoot) && existsSync(webPublicRoot)) {
+  symlinkSync("web/public", repoPublicRoot, "dir");
 }
 
 if (!existsSync(join(repoNextRoot, "routes-manifest-deterministic.json"))) {

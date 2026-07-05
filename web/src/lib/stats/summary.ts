@@ -80,8 +80,9 @@ export function getTopDisplayAgents(
 
 export async function getAgentStatsSummary(): Promise<AgentStatsSummary | null> {
   try {
-    const filePath = join(process.cwd(), "public", "stats", "agents.json");
-    const content = await readFile(filePath, "utf8");
+    const content = await readAgentStatsFile();
+    if (!content) return null;
+
     const parsed = JSON.parse(content) as unknown;
 
     if (!isRecord(parsed) || !isRecord(parsed.agents)) return null;
@@ -110,6 +111,23 @@ export async function getAgentStatsSummary(): Promise<AgentStatsSummary | null> 
   } catch {
     return null;
   }
+}
+
+async function readAgentStatsFile(): Promise<string | null> {
+  const candidates = [
+    join(process.cwd(), "public", "stats", "agents.json"),
+    join(process.cwd(), "web", "public", "stats", "agents.json"),
+  ];
+
+  for (const filePath of candidates) {
+    try {
+      return await readFile(filePath, "utf8");
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
