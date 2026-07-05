@@ -1,120 +1,180 @@
-import {interpolate, spring, useVideoConfig} from 'remotion';
+import {interpolate} from 'remotion';
 
 import {theme} from '../theme';
-import {Chip, Label, Panel, clamp} from './ui';
+import {PageBody, PageHeader, PageScene} from './AppFrame';
+import {Button, Card, Chip, Label, Mono, TextBlock, alpha, clamp, truncate} from './ui';
 
 const rows = [
   {
-    policy: 'Require MFA for admins',
-    finding: 'Emergency access account excluded',
-    severity: 'review',
-    tone: 'amber' as const,
+    name: 'CA - Admin MFA pilot',
+    state: 'Report-only',
+    note: 'Still excludes one emergency access account. Confirm that exclusion is intended.',
   },
   {
-    policy: 'Block legacy authentication',
-    finding: 'Enabled for all users',
-    severity: 'ok',
-    tone: 'emerald' as const,
+    name: 'CA - Require compliant device',
+    state: 'Report-only',
+    note: 'No planned promotion date is recorded in the policy notes.',
   },
   {
-    policy: 'Report-only pilots',
-    finding: '3 policies still in report-only',
-    severity: 'medium',
-    tone: 'sky' as const,
-  },
-  {
-    policy: 'Trusted locations',
-    finding: 'Two broad ranges need review',
-    severity: 'review',
-    tone: 'amber' as const,
+    name: 'CA - Guest baseline review',
+    state: 'Report-only',
+    note: 'Applies only to guest users. Owner review is needed before enforcement.',
   },
 ];
 
-export const ResultsTable = ({frame}: {frame: number}) => {
-  const {fps} = useVideoConfig();
-  const localFrame = frame - 360;
-  const intro = Math.min(
-    1,
-    spring({
-      frame: Math.max(0, localFrame),
-      fps,
-      config: {damping: 19, mass: 0.82, stiffness: 88},
-    }),
-  );
-  const opacity = interpolate(frame, [360, 386, 500, 510], [0, 1, 1, 0], clamp);
+export const ResultScene = ({frame}: {frame: number}) => {
+  const localFrame = frame - 390;
 
+  return (
+    <PageScene>
+      <PageHeader
+        eyebrow="Result"
+        title="Conditional Access explainer"
+        subtitle="Completed locally · 24 policies reviewed · no tenant changes made"
+        actions={
+          <>
+            <Button variant="ghost" style={{height: 40, width: 114}}>
+              Export
+            </Button>
+            <Button variant="primary" style={{height: 40, width: 96}}>
+              Save
+            </Button>
+          </>
+        }
+      />
+      <PageBody>
+        <div style={{display: 'grid', gap: 22, alignContent: 'start'}}>
+          <Card style={{padding: 26}}>
+            <div style={{display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24}}>
+              <div style={{minWidth: 0, maxWidth: 820}}>
+                <Label>Summary</Label>
+                <div
+                  style={{
+                    color: theme.colors.text.primary,
+                    fontSize: 24,
+                    fontWeight: 760,
+                    lineHeight: '32px',
+                    marginTop: 10,
+                  }}
+                >
+                  Three report-only policies need owner review before enforcement.
+                </div>
+                <TextBlock style={{marginTop: 12}}>
+                  The tenant has baseline MFA and legacy-auth controls in place. The main gap is policy
+                  lifecycle: three policies remain in report-only state and one admin exclusion should be
+                  checked against the break-glass account process.
+                </TextBlock>
+              </div>
+              <Card
+                style={{
+                  width: 320,
+                  padding: 16,
+                  background: theme.colors.bgRaised,
+                  borderRadius: theme.radii.lg,
+                }}
+              >
+                <Label>Evidence</Label>
+                <div style={{display: 'grid', gap: 9, marginTop: 13}}>
+                  <Evidence value="24" label="Policies read" />
+                  <Evidence value="3" label="Report-only" />
+                  <Evidence value="0" label="Writes proposed" />
+                </div>
+              </Card>
+            </div>
+          </Card>
+
+          <Card style={{overflow: 'hidden'}}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                padding: '20px 22px',
+                borderBottom: `1px solid ${theme.colors.borderSoft}`,
+              }}
+            >
+              <div>
+                <Label>Flagged policies</Label>
+                <div style={{color: theme.colors.text.soft, fontSize: 14, marginTop: 6}}>
+                  Review these before changing enforcement.
+                </div>
+              </div>
+              <Mono style={{color: theme.colors.text.muted}}>run_20260705_211314</Mono>
+            </div>
+
+            <div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1.1fr) 150px minmax(0, 1.4fr)',
+                  gap: 18,
+                  padding: '13px 22px',
+                  background: theme.colors.bgRaised,
+                  color: theme.colors.text.muted,
+                  fontFamily: theme.fonts.mono,
+                  fontSize: 12,
+                  lineHeight: '18px',
+                  textTransform: 'uppercase',
+                }}
+              >
+                <span>Policy</span>
+                <span>State</span>
+                <span>Note</span>
+              </div>
+              {rows.map((row, index) => {
+                const progress = interpolate(localFrame, [16 + index * 9, 30 + index * 9], [0, 1], clamp);
+                return (
+                  <div
+                    key={row.name}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0, 1.1fr) 150px minmax(0, 1.4fr)',
+                      gap: 18,
+                      alignItems: 'center',
+                      minHeight: 72,
+                      padding: '0 22px',
+                      borderTop: `1px solid ${theme.colors.borderSoft}`,
+                      opacity: progress,
+                      transform: `translateX(${interpolate(progress, [0, 1], [8, 0], clamp)}px)`,
+                    }}
+                  >
+                    <div style={{...truncate, color: theme.colors.text.primary, fontSize: 16, fontWeight: 720}}>
+                      {row.name}
+                    </div>
+                    <div>
+                      <Chip tone="warning" style={{fontSize: 12, lineHeight: '18px', padding: '1px 8px'}}>
+                        {row.state}
+                      </Chip>
+                    </div>
+                    <div style={{color: theme.colors.text.soft, fontSize: 15, lineHeight: '22px'}}>
+                      {row.note}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+      </PageBody>
+    </PageScene>
+  );
+};
+
+const Evidence = ({value, label}: {value: string; label: string}) => {
   return (
     <div
       style={{
-        position: 'absolute',
-        inset: 30,
-        opacity,
-        transform: `translateY(${interpolate(intro, [0, 1], [28, 0], clamp)}px)`,
+        display: 'flex',
+        alignItems: 'baseline',
+        justifyContent: 'space-between',
+        gap: 14,
+        borderBottom: `1px solid ${alpha(theme.colors.text.primary, 0.055)}`,
+        paddingBottom: 8,
       }}
     >
-      <Panel style={{padding: 28, height: '100%'}}>
-        <Label>Result</Label>
-        <div style={{marginTop: 8, color: theme.colors.text.primary, fontSize: 31, fontWeight: 760}}>
-          24 policies reviewed. 4 findings need admin review; no changes proposed.
-        </div>
-        <div style={{marginTop: 8, color: theme.colors.text.muted, fontSize: 19}}>
-          Read-only report generated locally from the active tenant scope.
-        </div>
-
-        <div
-          style={{
-            marginTop: 28,
-            border: `1px solid ${theme.colors.border}`,
-            borderRadius: 8,
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1.05fr 1.35fr 170px',
-              padding: '13px 18px',
-              background: 'rgba(255,255,255,0.04)',
-              color: theme.colors.text.faint,
-              fontFamily: theme.fonts.mono,
-              fontSize: 16,
-              textTransform: 'uppercase',
-            }}
-          >
-            <span>Policy</span>
-            <span>Finding</span>
-            <span>Severity</span>
-          </div>
-          {rows.map((row, index) => {
-            const rowProgress = interpolate(localFrame, [18 + index * 10, 34 + index * 10], [0, 1], clamp);
-
-            return (
-              <div
-                key={row.policy}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1.05fr 1.35fr 170px',
-                  padding: '18px 18px',
-                  borderTop: `1px solid ${theme.colors.border}`,
-                  alignItems: 'center',
-                  opacity: rowProgress,
-                  transform: `translateX(${interpolate(rowProgress, [0, 1], [18, 0], clamp)}px)`,
-                }}
-              >
-                <div style={{color: theme.colors.text.primary, fontSize: 20, fontWeight: 650}}>
-                  {row.policy}
-                </div>
-                <div style={{color: theme.colors.text.secondary, fontSize: 20}}>{row.finding}</div>
-                <div>
-                  <Chip tone={row.tone} style={{fontSize: 17, padding: '3px 10px'}}>
-                    {row.severity}
-                  </Chip>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Panel>
+      <Mono style={{color: theme.colors.text.primary, fontSize: 19}}>{value}</Mono>
+      <span style={{...truncate, color: theme.colors.text.muted, fontSize: 13}}>{label}</span>
     </div>
   );
 };

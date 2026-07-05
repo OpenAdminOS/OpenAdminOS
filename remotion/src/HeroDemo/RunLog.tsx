@@ -1,172 +1,208 @@
-import {interpolate, spring, useVideoConfig} from 'remotion';
+import {interpolate} from 'remotion';
 
 import {theme} from '../theme';
-import {Chip, Dot, Label, Panel, alpha, clamp} from './ui';
+import {PageBody, PageHeader, PageScene} from './AppFrame';
+import {Card, Chip, Label, Mono, StatusDot, alpha, clamp, truncate} from './ui';
 
 const logLines = [
-  {at: 0, channel: 'graph', text: 'Fetching Conditional Access policies... 24 found'},
-  {at: 38, channel: 'graph', text: 'Checking exclusions against directory roles...'},
-  {at: 76, channel: 'policy', text: '3 policies in report-only mode'},
-  {at: 114, channel: 'graph', text: 'Correlating named locations...'},
+  {
+    at: 16,
+    time: '00:08.2',
+    step: 'graph',
+    message: 'Fetching CA policies — 24 found',
+    tone: 'info' as const,
+  },
+  {
+    at: 46,
+    time: '00:09.4',
+    step: 'graph',
+    message: 'Checking exclusions against directory roles',
+    tone: 'info' as const,
+  },
+  {
+    at: 78,
+    time: '00:10.5',
+    step: 'policy',
+    message: 'Flagging 3 report-only policies',
+    tone: 'warning' as const,
+  },
+  {
+    at: 108,
+    time: '00:11.8',
+    step: 'llm',
+    message: 'Composing summary with Ollama · gemma4:latest',
+    tone: 'success' as const,
+  },
 ];
 
-export const RunLog = ({frame}: {frame: number}) => {
-  const {fps} = useVideoConfig();
-  const localFrame = frame - 210;
-  const intro = Math.min(
-    1,
-    spring({
-      frame: Math.max(0, localFrame),
-      fps,
-      config: {damping: 20, mass: 0.9, stiffness: 86},
-    }),
-  );
-  const outro = interpolate(frame, [354, 382], [1, 0], clamp);
+export const LiveRunScene = ({frame}: {frame: number}) => {
+  const localFrame = frame - 240;
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 30,
-        opacity: intro * outro,
-        transform: `translateY(${interpolate(intro, [0, 1], [24, 0], clamp)}px)`,
-      }}
-    >
-      <Panel style={{height: '100%', display: 'grid', gridTemplateRows: 'auto 1fr'}}>
+    <PageScene>
+      <PageHeader
+        eyebrow="Run"
+        title="Conditional Access explainer · read-only"
+        subtitle="run_20260705_211314 · ugurlabs.com · no write operations"
+        actions={
+          <Chip tone="success" style={{fontSize: 13}}>
+            <StatusDot tone="success" size={7} />
+            local — no egress
+          </Chip>
+        }
+      />
+      <PageBody>
         <div
           style={{
-            padding: '22px 26px',
-            borderBottom: `1px solid ${theme.colors.border}`,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
+            display: 'grid',
+            gridTemplateColumns: '310px minmax(0, 1fr)',
+            gap: 22,
+            height: '100%',
           }}
         >
-          <div>
-            <Label>Live run</Label>
-            <div style={{marginTop: 6, color: theme.colors.text.primary, fontSize: 28, fontWeight: 740}}>
-              Reading tenant policy state
+          <Card style={{padding: 22, alignSelf: 'start'}}>
+            <Label>Run context</Label>
+            <div style={{display: 'grid', gap: 15, marginTop: 18}}>
+              <ContextValue label="Tenant" value="ugurlabs.com" />
+              <ContextValue label="Provider" value="Ollama" />
+              <ContextValue label="Model" value="gemma4:latest" />
+              <ContextValue label="Mode" value="Read-only" />
             </div>
-          </div>
-          <Chip tone="emerald">
-            <Dot />
-            local-only
-          </Chip>
-        </div>
-
-        <div style={{display: 'grid', gridTemplateColumns: '290px 1fr'}}>
-          <div
-            style={{
-              borderRight: `1px solid ${theme.colors.border}`,
-              padding: 24,
-              display: 'grid',
-              alignContent: 'start',
-              gap: 16,
-              background: 'rgba(255,255,255,0.018)',
-            }}
-          >
-            {[
-              ['Tenant', 'contoso.onmicrosoft.com'],
-              ['Provider', 'Ollama'],
-              ['Model', 'llama3.1'],
-              ['Mode', 'Read-only'],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <div style={{color: theme.colors.text.faint, fontFamily: theme.fonts.mono, fontSize: 15}}>
-                  {label}
-                </div>
-                <div style={{color: theme.colors.text.secondary, fontSize: 18, marginTop: 4}}>
-                  {value}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{padding: 24}}>
             <div
               style={{
-                borderRadius: 8,
-                overflow: 'hidden',
-                border: `1px solid ${theme.colors.border}`,
-                background: '#090a0d',
-                fontFamily: theme.fonts.mono,
+                marginTop: 22,
+                borderRadius: theme.radii.md,
+                background: theme.colors.successSoft,
+                border: `1px solid ${alpha(theme.colors.success, 0.22)}`,
+                color: theme.colors.text.soft,
+                fontSize: 13,
+                lineHeight: '21px',
+                padding: 13,
               }}
             >
+              Graph data and prompt stay on this device with the selected local provider.
+            </div>
+          </Card>
+
+          <Card
+            style={{
+              display: 'grid',
+              gridTemplateRows: 'auto 1fr',
+              overflow: 'hidden',
+              minHeight: 548,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                padding: '20px 22px',
+                borderBottom: `1px solid ${theme.colors.borderSoft}`,
+              }}
+            >
+              <div style={{minWidth: 0}}>
+                <Label>Live activity</Label>
+                <div
+                  style={{
+                    ...truncate,
+                    color: theme.colors.text.primary,
+                    fontSize: 22,
+                    fontWeight: 760,
+                    lineHeight: '30px',
+                    marginTop: 7,
+                  }}
+                >
+                  Reading tenant policy state
+                </div>
+              </div>
+              <Mono style={{color: theme.colors.text.muted}}>streaming</Mono>
+            </div>
+
+            <div style={{padding: 22}}>
               <div
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '110px 130px 1fr',
-                  padding: '11px 18px',
-                  color: theme.colors.text.faint,
-                  background: theme.colors.panel,
-                  borderBottom: `1px solid ${theme.colors.border}`,
-                  fontSize: 15,
-                  textTransform: 'uppercase',
+                  border: `1px solid ${theme.colors.borderSoft}`,
+                  borderRadius: theme.radii.lg,
+                  background: theme.colors.bg,
+                  overflow: 'hidden',
+                  fontFamily: theme.fonts.mono,
                 }}
               >
-                <span>Time</span>
-                <span>Step</span>
-                <span>Message</span>
-              </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '108px 136px minmax(0, 1fr)',
+                    gap: 14,
+                    padding: '12px 18px',
+                    background: theme.colors.bgRaised,
+                    borderBottom: `1px solid ${theme.colors.borderSoft}`,
+                    color: theme.colors.text.muted,
+                    fontSize: 12,
+                    lineHeight: '18px',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  <span>Time</span>
+                  <span>Step</span>
+                  <span>Message</span>
+                </div>
+                <div style={{minHeight: 266}}>
+                  {logLines.map((line, index) => {
+                    const progress = interpolate(localFrame, [line.at, line.at + 14], [0, 1], clamp);
+                    const borderTop = index === 0 ? undefined : `1px solid ${alpha(theme.colors.text.primary, 0.045)}`;
 
-              <div style={{padding: '10px 0'}}>
-                {logLines.map((line, index) => {
-                  const progress = interpolate(
-                    localFrame,
-                    [line.at, line.at + 18],
-                    [0, 1],
-                    clamp,
-                  );
-
-                  return (
-                    <div
-                      key={line.text}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '110px 130px 1fr',
-                        padding: '13px 18px',
-                        color: theme.colors.text.secondary,
-                        fontSize: 18,
-                        borderBottom:
-                          index === logLines.length - 1 ? undefined : `1px solid rgba(255,255,255,0.05)`,
-                        opacity: progress,
-                        transform: `translateY(${interpolate(progress, [0, 1], [12, 0], clamp)}px)`,
-                      }}
-                    >
-                      <span style={{color: theme.colors.text.faint}}>
-                        00:{String(7 + index * 2).padStart(2, '0')}
-                      </span>
-                      <span
+                    return (
+                      <div
+                        key={line.message}
                         style={{
-                          color:
-                            line.channel === 'policy'
-                              ? theme.colors.accents.amber
-                              : theme.colors.accents.sky,
+                          display: 'grid',
+                          gridTemplateColumns: '108px 136px minmax(0, 1fr)',
+                          gap: 14,
+                          alignItems: 'center',
+                          minHeight: 58,
+                          padding: '0 18px',
+                          borderTop,
+                          color: theme.colors.text.soft,
+                          fontSize: 15,
+                          lineHeight: '20px',
+                          opacity: progress,
+                          transform: `translateY(${interpolate(progress, [0, 1], [8, 0], clamp)}px)`,
                         }}
                       >
-                        {line.channel}
-                      </span>
-                      <span>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            width: 9,
-                            height: 9,
-                            borderRadius: 999,
-                            marginRight: 10,
-                            background: alpha(theme.colors.accents.emerald, 0.9),
-                          }}
-                        />
-                        {line.text}
-                      </span>
-                    </div>
-                  );
-                })}
+                        <span style={{color: theme.colors.text.muted}}>{line.time}</span>
+                        <span style={{color: tokenColor(line.tone)}}>{line.step}</span>
+                        <span style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 0}}>
+                          <StatusDot tone={line.tone} size={7} />
+                          <span style={truncate}>{line.message}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
+          </Card>
         </div>
-      </Panel>
+      </PageBody>
+    </PageScene>
+  );
+};
+
+const ContextValue = ({label, value}: {label: string; value: string}) => {
+  return (
+    <div>
+      <Label style={{fontSize: 11}}>{label}</Label>
+      <div style={{...truncate, color: theme.colors.text.primary, fontSize: 15, lineHeight: '22px', marginTop: 4}}>
+        {value}
+      </div>
     </div>
   );
+};
+
+const tokenColor = (tone: 'info' | 'warning' | 'success') => {
+  if (tone === 'info') return theme.colors.info;
+  if (tone === 'warning') return theme.colors.warning;
+  return theme.colors.success;
 };

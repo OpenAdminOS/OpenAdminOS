@@ -1,58 +1,23 @@
-import {Sequence, interpolate, spring, useVideoConfig} from 'remotion';
+import type {CSSProperties, ReactNode} from 'react';
 
 import {theme} from '../theme';
-import {ManifestPanel} from './ManifestPanel';
-import {ResultsTable} from './ResultsTable';
-import {RunLog} from './RunLog';
-import {Chip, Dot, Label, Panel, alpha, clamp} from './ui';
+import {Button, Card, Chip, Divider, IconBox, Label, Mono, StatusDot, alpha, truncate} from './ui';
 
-const agents = [
-  {name: 'Conditional Access explainer', meta: 'Policy.Read.All'},
-  {name: 'Compliance overview', meta: 'DeviceManagementConfiguration.Read.All'},
-  {name: 'Tenant health report', meta: 'Directory.Read.All'},
-  {name: 'Find inactive devices', meta: 'DeviceManagementManagedDevices.Read.All'},
-];
+export const WINDOW_WIDTH = 1768;
+export const WINDOW_HEIGHT = 982;
+export const TITLE_BAR_HEIGHT = 36;
+export const STATUS_HEIGHT = 32;
+export const SIDEBAR_WIDTH = 300;
+export const MAIN_WIDTH = WINDOW_WIDTH - SIDEBAR_WIDTH;
+export const MAIN_HEIGHT = WINDOW_HEIGHT - TITLE_BAR_HEIGHT - STATUS_HEIGHT;
 
-const statusCells = [
-  {
-    label: 'Tenant',
-    value: 'contoso.onmicrosoft.com',
-    detail: 'Scope active',
-    tone: 'emerald' as const,
-  },
-  {
-    label: 'LLM',
-    value: 'Ollama · llama3.1',
-    detail: 'Local provider',
-    tone: 'emerald' as const,
-  },
-  {
-    label: 'Registry',
-    value: '14 agents',
-    detail: 'Community index cached',
-    tone: 'sky' as const,
-  },
-  {
-    label: 'Writes',
-    value: 'Diff gate required',
-    detail: 'No bypass available',
-    tone: 'amber' as const,
-  },
-];
-
-export const AppFrame = ({frame, opacity}: {frame: number; opacity: number}) => {
-  const {fps} = useVideoConfig();
-  const selectionProgress = Math.min(
-    1,
-    spring({
-      frame: Math.max(0, frame - 90),
-      fps,
-      config: {damping: 18, mass: 0.8, stiffness: 92},
-    }),
-  );
-  const highlightTop = interpolate(selectionProgress, [0, 1], [248, 92], clamp);
-  const localChipOpacity = interpolate(frame, [205, 230], [0, 1], clamp);
-
+export const AppFrame = ({
+  children,
+  activeNav = 'Agent Hub',
+}: {
+  children: ReactNode;
+  activeNav?: string;
+}) => {
   return (
     <div
       style={{
@@ -60,360 +25,585 @@ export const AppFrame = ({frame, opacity}: {frame: number; opacity: number}) => 
         inset: 0,
         display: 'grid',
         placeItems: 'center',
-        opacity,
-        transform: `translateY(${interpolate(opacity, [0, 1], [18, 0], clamp)}px)`,
+        fontFamily: theme.fonts.sans,
+        color: theme.colors.text.primary,
       }}
     >
       <div
         style={{
-          width: 1640,
-          height: 900,
+          width: WINDOW_WIDTH,
+          height: WINDOW_HEIGHT,
           overflow: 'hidden',
-          borderRadius: 18,
+          borderRadius: 14,
           border: `1px solid ${theme.colors.borderStrong}`,
           background: theme.colors.bg,
-          boxShadow: '0 44px 120px rgba(0,0,0,0.58)',
-          fontFamily: theme.fonts.sans,
+          boxShadow: '0 38px 110px rgba(0,0,0,0.62)',
         }}
       >
-        <div
-          style={{
-            height: 52,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 18,
-            padding: '0 18px',
-            borderBottom: `1px solid ${theme.colors.border}`,
-            background: theme.colors.panel,
-          }}
-        >
-          <div style={{display: 'flex', gap: 9}}>
-            {['#ff5f57', '#febc2e', '#28c840'].map((color) => (
-              <div
-                key={color}
-                style={{width: 13, height: 13, borderRadius: 999, background: color}}
-              />
-            ))}
-          </div>
-          <div
-            style={{
-              flex: 1,
-              textAlign: 'center',
-              color: theme.colors.text.faint,
-              fontFamily: theme.fonts.mono,
-              fontSize: 18,
-            }}
-          >
-            OpenAdminOS
-          </div>
-          <Chip tone="emerald" style={{fontSize: 17, padding: '3px 10px'}}>
-            <Dot />
-            local · v0.2.5
-          </Chip>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
-            height: 86,
-            borderBottom: `1px solid ${theme.colors.border}`,
-            background: 'rgba(255,255,255,0.025)',
-          }}
-        >
-          {statusCells.map((cell) => (
-            <div
-              key={cell.label}
-              style={{
-                boxSizing: 'border-box',
-                minWidth: 0,
-                padding: '8px 22px',
-                borderRight: `1px solid ${theme.colors.border}`,
-              }}
-            >
-              <Label
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  lineHeight: '20px',
-                }}
-              >
-                {cell.label}
-              </Label>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 9,
-                  minWidth: 0,
-                  marginTop: 4,
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap',
-                  color: theme.colors.text.primary,
-                  fontSize: 23,
-                  fontWeight: 650,
-                  lineHeight: '26px',
-                }}
-              >
-                <Dot tone={cell.tone} />
-                <span
-                  style={{
-                    minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {cell.value}
-                </span>
-              </div>
-              <div
-                style={{
-                  marginTop: 2,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: theme.colors.text.faint,
-                  fontSize: 17,
-                  lineHeight: '18px',
-                }}
-              >
-                {cell.detail}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{display: 'grid', gridTemplateColumns: '330px 1fr', height: 762}}>
-          <aside
+        <TitleBar />
+        <div style={{display: 'flex', height: MAIN_HEIGHT}}>
+          <Sidebar activeNav={activeNav} />
+          <main
             style={{
               position: 'relative',
-              borderRight: `1px solid ${theme.colors.border}`,
-              background: theme.colors.panel,
-              padding: 26,
+              width: MAIN_WIDTH,
+              height: MAIN_HEIGHT,
+              overflow: 'hidden',
+              background: theme.colors.bg,
             }}
           >
-            <div style={{display: 'flex', alignItems: 'center', gap: 14, marginBottom: 34}}>
-              <div
-                style={{
-                  width: 42,
-                  height: 42,
-                  display: 'grid',
-                  placeItems: 'center',
-                  borderRadius: 8,
-                  background: alpha(theme.colors.accents.sky, 0.11),
-                  border: `1px solid ${alpha(theme.colors.accents.sky, 0.32)}`,
-                  color: theme.colors.accents.sky,
-                  fontFamily: theme.fonts.mono,
-                  fontWeight: 800,
-                  fontSize: 18,
-                }}
-              >
-                OA
-              </div>
-              <div>
-                <div style={{color: theme.colors.text.primary, fontSize: 22, fontWeight: 700}}>
-                  Agents
-                </div>
-                <div style={{color: theme.colors.text.faint, fontFamily: theme.fonts.mono, fontSize: 15}}>
-                  Open registry
-                </div>
-              </div>
-            </div>
-
-            <Label style={{marginBottom: 12}}>Installed</Label>
-            <div
-              style={{
-                position: 'absolute',
-                left: 18,
-                right: 18,
-                top: highlightTop,
-                height: 54,
-                borderRadius: 8,
-                background: alpha(theme.colors.accents.sky, 0.1),
-                border: `1px solid ${alpha(theme.colors.accents.sky, 0.24)}`,
-                boxShadow: `inset 3px 0 0 ${theme.colors.accents.sky}`,
-              }}
-            />
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1fr)',
-                gap: 10,
-                minWidth: 0,
-                position: 'relative',
-                width: '100%',
-              }}
-            >
-              {agents.map((agent, index) => {
-                const selected = frame >= 118 ? index === 0 : index === 2;
-
-                return (
-                  <div
-                    key={agent.name}
-                    style={{
-                      minHeight: 54,
-                      minWidth: 0,
-                      maxWidth: '100%',
-                      overflow: 'hidden',
-                      padding: '8px 12px 8px 16px',
-                      borderRadius: 8,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'center',
-                      color: selected ? theme.colors.text.primary : theme.colors.text.secondary,
-                    }}
-                  >
-                    <div
-                      style={{
-                        minWidth: 0,
-                        maxWidth: '100%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontSize: 18,
-                        fontWeight: selected ? 700 : 550,
-                      }}
-                    >
-                      {agent.name}
-                    </div>
-                    <div
-                      style={{
-                        minWidth: 0,
-                        maxWidth: '100%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        color: theme.colors.text.faint,
-                        fontFamily: theme.fonts.mono,
-                        fontSize: 13,
-                        marginTop: 2,
-                      }}
-                    >
-                      {agent.meta}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </aside>
-
-          <main style={{position: 'relative', background: theme.colors.bg, overflow: 'hidden'}}>
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                backgroundImage:
-                  'linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)',
-                backgroundSize: '44px 44px',
-                maskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.82), rgba(0,0,0,0.18))',
-              }}
-            />
-            <div
-              style={{
-                position: 'relative',
-                height: 78,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0 30px',
-                borderBottom: `1px solid ${theme.colors.border}`,
-                background: 'rgba(13,14,18,0.84)',
-              }}
-            >
-              <div>
-                <div style={{color: theme.colors.text.primary, fontSize: 25, fontWeight: 750}}>
-                  Agent run
-                </div>
-                <div style={{color: theme.colors.text.faint, fontFamily: theme.fonts.mono, fontSize: 15}}>
-                  Conditional Access explainer · read-only
-                </div>
-              </div>
-              <div style={{opacity: localChipOpacity}}>
-                <Chip tone="emerald">
-                  <Dot />
-                  local — no egress
-                </Chip>
-              </div>
-            </div>
-
-            <div style={{position: 'relative', height: 684, padding: 30}}>
-              <Sequence from={0} durationInFrames={150}>
-                <EmptyState frame={frame} />
-              </Sequence>
-              <Sequence from={90} durationInFrames={180}>
-                <ManifestPanel frame={frame} />
-              </Sequence>
-              <Sequence from={210} durationInFrames={180}>
-                <RunLog frame={frame} />
-              </Sequence>
-              <Sequence from={360} durationInFrames={150}>
-                <ResultsTable frame={frame} />
-              </Sequence>
-            </div>
+            {children}
           </main>
         </div>
+        <StatusStrip />
       </div>
     </div>
   );
 };
 
-const EmptyState = ({frame}: {frame: number}) => {
-  const opacity = interpolate(frame, [0, 35, 92, 135], [0, 1, 1, 0], clamp);
+export const PageScene = ({
+  children,
+  style,
+}: {
+  children: ReactNode;
+  style?: CSSProperties;
+}) => {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        minWidth: 0,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+export const PageHeader = ({
+  eyebrow,
+  title,
+  subtitle,
+  actions,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle: ReactNode;
+  actions?: ReactNode;
+}) => {
+  return (
+    <header
+      style={{
+        height: 154,
+        boxSizing: 'border-box',
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        gap: 28,
+        borderBottom: `1px solid ${theme.colors.borderSoft}`,
+        padding: '39px 42px 28px',
+      }}
+    >
+      <div style={{minWidth: 0, flex: 1}}>
+        <Label style={{fontSize: 13, marginBottom: 12}}>{eyebrow}</Label>
+        <div
+          style={{
+            ...truncate,
+            color: theme.colors.text.primary,
+            fontSize: 30,
+            fontWeight: 760,
+            letterSpacing: 0,
+            lineHeight: '36px',
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            ...truncate,
+            color: theme.colors.text.soft,
+            fontSize: 17,
+            lineHeight: '24px',
+            marginTop: 8,
+          }}
+        >
+          {subtitle}
+        </div>
+      </div>
+      {actions ? <div style={{display: 'flex', alignItems: 'center', gap: 10}}>{actions}</div> : null}
+    </header>
+  );
+};
+
+export const PageBody = ({
+  children,
+  style,
+}: {
+  children: ReactNode;
+  style?: CSSProperties;
+}) => {
+  return (
+    <div
+      style={{
+        position: 'relative',
+        flex: 1,
+        minHeight: 0,
+        overflow: 'hidden',
+        padding: '32px 42px 34px',
+        boxSizing: 'border-box',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+export const SearchBox = ({placeholder, width = 360}: {placeholder: string; width?: number}) => {
+  return (
+    <div
+      style={{
+        width,
+        height: 40,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        borderRadius: theme.radii.lg,
+        background: theme.colors.surface,
+        border: `1px solid ${theme.colors.border}`,
+        color: theme.colors.text.muted,
+        boxSizing: 'border-box',
+        padding: '0 15px',
+      }}
+    >
+      <span style={{fontSize: 18, lineHeight: 1}}>⌕</span>
+      <span style={{...truncate, fontSize: 15, lineHeight: '18px'}}>{placeholder}</span>
+    </div>
+  );
+};
+
+export const RefreshButton = () => {
+  return (
+    <div
+      style={{
+        width: 40,
+        height: 40,
+        display: 'grid',
+        placeItems: 'center',
+        borderRadius: theme.radii.lg,
+        background: theme.colors.surface,
+        border: `1px solid ${theme.colors.border}`,
+        color: theme.colors.text.soft,
+        boxSizing: 'border-box',
+        fontSize: 19,
+      }}
+    >
+      ↻
+    </div>
+  );
+};
+
+export const Cursor = ({frame}: {frame: number}) => {
+  const sceneOne = frame < 120;
+  const x = sceneOne
+    ? interpolatePiecewise(frame, [0, 26, 84, 108, 120], [1320, 1190, 486, 486, 486])
+    : interpolatePiecewise(frame, [120, 158, 194, 214], [486, 1420, 1648, 1648]);
+  const y = sceneOne
+    ? interpolatePiecewise(frame, [0, 26, 84, 108, 120], [266, 276, 604, 604, 604])
+    : interpolatePiecewise(frame, [120, 158, 194, 214], [604, 260, 158, 158]);
+  const visible = frame < 226 ? 1 : 0;
+  const intro = Math.min(1, Math.max(0, frame / 18));
+  const outro = frame > 210 ? Math.max(0, (226 - frame) / 16) : 1;
+  const pressed =
+    (frame >= 94 && frame <= 104) || (frame >= 197 && frame <= 207);
+
+  if (visible === 0) return null;
 
   return (
     <div
       style={{
         position: 'absolute',
-        inset: 30,
-        display: 'grid',
-        placeItems: 'center',
-        opacity,
+        left: x,
+        top: y,
+        width: 28,
+        height: 34,
+        opacity: intro * outro,
+        transform: `scale(${pressed ? 0.9 : 1})`,
+        transformOrigin: '4px 4px',
+        zIndex: 60,
+        filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.55))',
       }}
     >
-      <Panel
+      <div
         style={{
-          width: 610,
-          minHeight: 270,
-          padding: 32,
-          display: 'grid',
-          placeItems: 'center',
-          textAlign: 'center',
-          background: 'rgba(13,14,18,0.82)',
+          width: 24,
+          height: 31,
+          clipPath: 'polygon(0 0, 0 28px, 7px 22px, 12px 33px, 17px 31px, 12px 20px, 22px 20px)',
+          background: theme.colors.text.primary,
+        }}
+      />
+    </div>
+  );
+};
+
+const TitleBar = () => {
+  return (
+    <div
+      style={{
+        height: TITLE_BAR_HEIGHT,
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 14px',
+        boxSizing: 'border-box',
+        background: theme.colors.bg,
+      }}
+    >
+      <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+        {['#ff5f57', '#febc2e', '#28c840'].map((color) => (
+          <span key={color} style={{width: 16, height: 16, borderRadius: 999, background: color}} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const Sidebar = ({activeNav}: {activeNav: string}) => {
+  const nav = [
+    {label: 'Agents', icon: '◇', badge: '0'},
+    {label: 'Agent Hub', icon: '▦'},
+    {label: 'Connectors', icon: '⌯'},
+    {label: 'Activity', icon: '⌁'},
+    {label: 'Settings', icon: '⚙'},
+  ];
+
+  return (
+    <aside
+      style={{
+        width: SIDEBAR_WIDTH,
+        height: MAIN_HEIGHT,
+        boxSizing: 'border-box',
+        borderRight: `1px solid ${theme.colors.borderSoft}`,
+        background: theme.colors.sidebarSolid,
+        padding: '17px 12px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{display: 'flex', alignItems: 'center', gap: 10, height: 40, padding: '0 4px'}}>
+        <IconBox tone="accent" size={25} style={{borderRadius: 8, fontSize: 13}}>
+          ⊙
+        </IconBox>
+        <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
+          <span style={{...truncate, color: theme.colors.text.primary, fontSize: 14, fontWeight: 740}}>
+            OpenAdminOS
+          </span>
+          <Mono
+            style={{
+              display: 'inline-flex',
+              borderRadius: 4,
+              background: theme.colors.bgRaised,
+              color: theme.colors.text.muted,
+              fontSize: 11,
+              lineHeight: '17px',
+              padding: '0 6px',
+            }}
+          >
+            v0.2.5
+          </Mono>
+        </div>
+        <StatusDot tone="success" size={6} />
+      </div>
+
+      <Card
+        style={{
+          height: 66,
+          marginTop: 12,
+          padding: 11,
+          borderRadius: theme.radii.xl,
+          background: theme.colors.surface,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
         }}
       >
         <div
           style={{
-            width: 66,
-            height: 66,
-            borderRadius: 12,
-            border: `1px solid ${theme.colors.borderStrong}`,
+            width: 38,
+            height: 38,
             display: 'grid',
             placeItems: 'center',
-            color: theme.colors.text.faint,
-            fontFamily: theme.fonts.mono,
-            fontSize: 22,
-            marginBottom: 24,
+            borderRadius: 999,
+            background: theme.colors.accent,
+            color: theme.colors.bg,
+            fontSize: 15,
+            fontWeight: 800,
+            flex: '0 0 auto',
           }}
         >
-          []
+          UG
         </div>
-        <div style={{color: theme.colors.text.primary, fontSize: 30, fontWeight: 750}}>
-          No agent selected
+        <div style={{minWidth: 0, flex: 1}}>
+          <div style={{...truncate, color: theme.colors.text.primary, fontSize: 14, fontWeight: 760}}>
+            ugurlabs.com
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              minWidth: 0,
+              marginTop: 2,
+              color: theme.colors.text.muted,
+              fontSize: 12,
+            }}
+          >
+            <StatusDot tone="success" size={6} />
+            <span style={truncate}>administrator@ugurlabs.com</span>
+          </div>
+        </div>
+        <span style={{color: theme.colors.text.faint, fontSize: 15}}>⌄</span>
+      </Card>
+
+      <div
+        style={{
+          height: 38,
+          marginTop: 9,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 9,
+          borderRadius: theme.radii.lg,
+          background: theme.colors.bgRaised,
+          color: theme.colors.text.muted,
+          border: `1px solid ${theme.colors.borderSoft}`,
+          boxSizing: 'border-box',
+          padding: '0 11px',
+          fontSize: 13,
+        }}
+      >
+        <span style={{fontSize: 14}}>⌘</span>
+        <span style={{...truncate, flex: 1}}>Quick search</span>
+        <Mono style={{fontSize: 11, color: theme.colors.text.faint}}>⌘K</Mono>
+      </div>
+
+      <Divider style={{margin: '11px 3px 12px'}} />
+
+      <nav style={{display: 'grid', gap: 4}}>
+        <Label style={{fontSize: 11, padding: '0 9px 5px'}}>Workspace</Label>
+        {nav.map((item) => {
+          const active = item.label === activeNav;
+          return (
+            <div
+              key={item.label}
+              style={{
+                position: 'relative',
+                height: 38,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 11,
+                borderRadius: theme.radii.lg,
+                padding: '0 10px',
+                boxSizing: 'border-box',
+                color: active ? theme.colors.text.primary : theme.colors.text.soft,
+                background: active
+                  ? `linear-gradient(90deg, ${theme.colors.surfaceHover}, ${theme.colors.surface})`
+                  : 'transparent',
+                boxShadow: active ? 'inset 0 1px 0 rgba(255,255,255,0.04)' : undefined,
+              }}
+            >
+              {active ? (
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 11,
+                    width: 3,
+                    height: 17,
+                    borderRadius: 999,
+                    background: theme.colors.accent,
+                  }}
+                />
+              ) : null}
+              <span
+                style={{
+                  width: 18,
+                  color: active ? theme.colors.accent : theme.colors.text.muted,
+                  fontSize: 17,
+                  textAlign: 'center',
+                }}
+              >
+                {item.icon}
+              </span>
+              <span style={{...truncate, flex: 1, fontSize: 14, fontWeight: 680}}>{item.label}</span>
+              {item.badge ? (
+                <Mono
+                  style={{
+                    color: active ? theme.colors.accent : theme.colors.text.muted,
+                    background: active ? theme.colors.accentSoft : theme.colors.bgRaised,
+                    borderRadius: 8,
+                    fontSize: 11,
+                    lineHeight: '19px',
+                    minWidth: 20,
+                    textAlign: 'center',
+                  }}
+                >
+                  {item.badge}
+                </Mono>
+              ) : null}
+            </div>
+          );
+        })}
+      </nav>
+
+      <Card
+        style={{
+          height: 132,
+          marginTop: 28,
+          padding: 14,
+          borderRadius: theme.radii.xl,
+          background: theme.colors.surface,
+        }}
+      >
+        <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10}}>
+          <Label style={{fontSize: 11}}>Runs · last 7d</Label>
+          <Mono style={{fontSize: 12, color: theme.colors.text.soft}}>0</Mono>
         </div>
         <div
           style={{
-            maxWidth: 450,
-            marginTop: 10,
-            color: theme.colors.text.muted,
-            fontSize: 20,
-            lineHeight: 1.48,
+            height: 40,
+            marginTop: 18,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            alignItems: 'end',
+            gap: 7,
+            padding: '0 12px',
           }}
         >
-          Choose an agent to review permissions, model requirements, and tenant impact before it runs.
+          {[3, 5, 4, 7, 5, 8, 5].map((height, index) => (
+            <div
+              key={`${height}-${index}`}
+              style={{
+                height,
+                borderRadius: 999,
+                background: alpha(theme.colors.text.faint, 0.45),
+              }}
+            />
+          ))}
         </div>
-      </Panel>
-    </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            color: theme.colors.text.faint,
+            fontFamily: theme.fonts.mono,
+            fontSize: 10,
+            textAlign: 'center',
+            marginTop: 4,
+          }}
+        >
+          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => (
+            <span key={`${day}-${index}`}>{day}</span>
+          ))}
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            marginTop: 10,
+            color: theme.colors.text.muted,
+            fontSize: 12,
+          }}
+        >
+          <StatusDot tone="warning" size={6} />
+          <span style={truncate}>No runs recorded yet</span>
+        </div>
+      </Card>
+
+      <div style={{flex: 1}} />
+    </aside>
+  );
+};
+
+const StatusStrip = () => {
+  return (
+    <footer
+      style={{
+        height: STATUS_HEIGHT,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderTop: `1px solid ${theme.colors.borderSoft}`,
+        background: theme.colors.bg,
+        color: theme.colors.text.muted,
+        boxSizing: 'border-box',
+        padding: '0 16px',
+        fontFamily: theme.fonts.mono,
+        fontSize: 12,
+      }}
+    >
+      <div style={{display: 'flex', alignItems: 'center', gap: 10, minWidth: 0}}>
+        <span style={{color: theme.colors.info}}>☁</span>
+        <span style={{...truncate, color: theme.colors.text.soft}}>tenant: ugurlabs.com</span>
+        <span
+          style={{
+            border: `1px solid ${theme.colors.borderSoft}`,
+            borderRadius: 5,
+            color: theme.colors.text.muted,
+            fontSize: 10,
+            lineHeight: '16px',
+            padding: '0 6px',
+            textTransform: 'uppercase',
+          }}
+        >
+          ENTRA P2
+        </span>
+        <span style={{opacity: 0.45}}>·</span>
+        <span style={{color: theme.colors.success}}>▵</span>
+        <span style={{...truncate, color: theme.colors.text.soft}}>Ollama · gemma4:latest</span>
+      </div>
+      <div style={{color: theme.colors.text.faint, flex: '0 0 auto'}}>v0.2.5 · local-first</div>
+    </footer>
+  );
+};
+
+const interpolatePiecewise = (frame: number, points: number[], values: number[]) => {
+  if (points.length !== values.length || points.length === 0) return 0;
+  const firstPoint = points[0] ?? 0;
+  const firstValue = values[0] ?? 0;
+  const lastPoint = points[points.length - 1] ?? firstPoint;
+  const lastValue = values[values.length - 1] ?? firstValue;
+
+  if (frame <= firstPoint) return firstValue;
+  if (frame >= lastPoint) return lastValue;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index] ?? lastPoint;
+    if (frame <= point) {
+      const prevPoint = points[index - 1] ?? firstPoint;
+      const prevValue = values[index - 1] ?? firstValue;
+      const value = values[index] ?? lastValue;
+      const progress = (frame - prevPoint) / (point - prevPoint);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      return prevValue + (value - prevValue) * eased;
+    }
+  }
+
+  return lastValue;
+};
+
+export const HeaderRunButton = ({pressed = false}: {pressed?: boolean}) => {
+  return (
+    <Button
+      variant="primary"
+      pressed={pressed}
+      style={{height: 40, minWidth: 86, fontSize: 15}}
+    >
+      Run
+    </Button>
   );
 };

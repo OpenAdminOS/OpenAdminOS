@@ -1,13 +1,17 @@
+import type {CSSProperties, ReactNode} from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame} from 'remotion';
 
 import {theme} from '../theme';
-import {AppFrame} from './AppFrame';
-import {DiffGate} from './DiffGate';
-import {clamp} from './ui';
+import {AgentHubScene} from './AgentHubScene';
+import {AppFrame, Cursor} from './AppFrame';
+import {DiffGateScene} from './DiffGate';
+import {AgentDetailScene} from './ManifestPanel';
+import {ResultScene} from './ResultsTable';
+import {LiveRunScene} from './RunLog';
+import {clamp, sceneFade} from './ui';
 
 export const HeroDemo = () => {
   const frame = useCurrentFrame();
-  const appOpacity = interpolate(frame, [0, 42], [0, 1], clamp);
 
   return (
     <AbsoluteFill
@@ -17,15 +21,51 @@ export const HeroDemo = () => {
         overflow: 'hidden',
       }}
     >
-      <AbsoluteFill
-        style={{
-          backgroundImage:
-            'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
-          backgroundSize: '60px 60px',
-          opacity: 0.42,
-        }}
-      />
-      {frame < 510 ? <AppFrame frame={frame} opacity={appOpacity} /> : <DiffGate frame={frame} />}
+      <AppFrame activeNav="Agent Hub">
+        <SceneLayer opacity={sceneFade(frame, 0, 120)}>
+          <AgentHubScene frame={frame} />
+        </SceneLayer>
+        <SceneLayer opacity={sceneFade(frame, 112, 240)}>
+          <AgentDetailScene frame={frame} />
+        </SceneLayer>
+        <SceneLayer opacity={sceneFade(frame, 232, 390)}>
+          <LiveRunScene frame={frame} />
+        </SceneLayer>
+        <SceneLayer opacity={sceneFade(frame, 382, 480)}>
+          <ResultScene frame={frame} />
+        </SceneLayer>
+        <SceneLayer
+          opacity={interpolate(frame, [472, 480], [0, 1], clamp)}
+          style={{transform: `translateY(${interpolate(frame, [472, 480], [8, 0], clamp)}px)`}}
+        >
+          <DiffGateScene frame={frame} />
+        </SceneLayer>
+      </AppFrame>
+      <Cursor frame={frame} />
     </AbsoluteFill>
+  );
+};
+
+const SceneLayer = ({
+  opacity,
+  children,
+  style,
+}: {
+  opacity: number;
+  children: ReactNode;
+  style?: CSSProperties;
+}) => {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        opacity,
+        transform: `translateY(${(1 - opacity) * 6}px)`,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
   );
 };
