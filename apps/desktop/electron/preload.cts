@@ -3,6 +3,7 @@ import type {
   HostPlatform,
   OpenAdminOSApi,
   AgentCommunitySubmissionMetadata,
+  ExportAuditLogInput,
   PendingConnectorConfirmation,
   PendingConnectorDecision,
   ProviderId,
@@ -230,6 +231,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:set-run-history-retention-settings", input),
   pruneRunHistoryNow: () =>
     ipcRenderer.invoke("openadminos:prune-run-history-now"),
+  exportAuditLog: (input: ExportAuditLogInput) =>
+    ipcRenderer.invoke("openadminos:export-audit-log", input),
   getChatInvestigationSettings: () =>
     ipcRenderer.invoke("openadminos:get-chat-investigation-settings"),
   setChatInvestigationMode: (mode) =>

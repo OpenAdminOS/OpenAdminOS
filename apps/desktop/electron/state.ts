@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -43,7 +43,10 @@ import type {
   AgentCommunitySubmissionReview,
   AgentCommunitySubmissionResult,
   AgentDraftPreflightResult,
+  AuditLogExportResult,
+  ConnectorAuditEntry,
   ExportAgentBundleResult,
+  ExportAuditLogInput,
   AgentManifestPreview,
   AgentUpdateReview,
   ChatInvestigationMode,
@@ -397,6 +400,487 @@ function runHistoryPruneReason(
     return `Pruned ${count.toLocaleString()} ${noun} older than ${policy.keepDays.toLocaleString()} days.`;
   }
   return `Pruned ${count.toLocaleString()} ${noun}.`;
+}
+
+const AUDIT_LOG_SCHEMA_VERSION = 1;
+const AUDIT_CHAIN_START_HASH = "0".repeat(64);
+
+type AuditLogEventSource =
+  | "run-history"
+  | "connector-audit"
+  | "hosted-provider-consent";
+
+interface AuditLogActor {
+  kind: "connected-admin" | "local-admin";
+  tenantId?: string;
+  tenantName?: string;
+  username?: string;
+  homeAccountId?: string;
+}
+
+interface AuditLogEventSeed {
+  id: string;
+  timestamp: string;
+  type: string;
+  source: AuditLogEventSource;
+  runId?: string;
+  tenantId?: string;
+  agentSlug?: string;
+  actor?: AuditLogActor;
+  details: Record<string, unknown>;
+}
+
+type AuditLogEvent = AuditLogEventSeed & { sha256: string };
+
+interface AuditLogBuildInput {
+  runs: RunRecord[];
+  tenants: TenantRecord[];
+  installedAgents: AgentSummary[];
+  hostedProviderConsentEvents: Array<{
+    id: string;
+    tenantId: string;
+    source: string;
+    payload: Record<string, unknown>;
+    createdAt: string;
+  }>;
+}
+
+function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
+  const tenantById = new Map(input.tenants.map((tenant) => [tenant.id, tenant]));
+  const agentBySlug = new Map(
+    input.installedAgents.map((agent) => [agent.slug || agent.id, agent]),
+  );
+  const events: AuditLogEventSeed[] = [];
+
+  for (const run of input.runs) {
+    const tenant = run.tenantId ? tenantById.get(run.tenantId) : undefined;
+    const agent = agentBySlug.get(run.agentSlug);
+    const runDetails = runAuditDetails(run, agent, tenant);
+    events.push({
+      id: `run:${run.id}:queued`,
+      timestamp: run.queuedAt,
+      type: "run.queued",
+      source: "run-history",
+      runId: run.id,
+      ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+      agentSlug: run.agentSlug,
+      details: runDetails,
+    });
+    if (run.startedAt) {
+      events.push({
+        id: `run:${run.id}:started`,
+        timestamp: run.startedAt,
+        type: "run.started",
+        source: "run-history",
+        runId: run.id,
+        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+        agentSlug: run.agentSlug,
+        details: runDetails,
+      });
+    }
+    const confirmationRequestedAt = findConfirmationRequestedAt(run);
+    if (run.plan && run.plan.actions.length > 0 && confirmationRequestedAt) {
+      events.push({
+        id: `run:${run.id}:write-confirmation-requested`,
+        timestamp: confirmationRequestedAt,
+        type: "write.confirmation.requested",
+        source: "run-history",
+        runId: run.id,
+        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+        agentSlug: run.agentSlug,
+        details: writeConfirmationDetails(run, "requested"),
+      });
+    }
+    if (run.confirmedAt) {
+      events.push({
+        id: `run:${run.id}:write-confirmation-accepted`,
+        timestamp: run.confirmedAt,
+        type: "write.confirmation.accepted",
+        source: "run-history",
+        runId: run.id,
+        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+        agentSlug: run.agentSlug,
+        actor: actorForRun(run, tenant),
+        details: writeConfirmationDetails(run, "accepted"),
+      });
+    }
+    if (run.rejectedAt) {
+      events.push({
+        id: `run:${run.id}:write-confirmation-rejected`,
+        timestamp: run.rejectedAt,
+        type: "write.confirmation.rejected",
+        source: "run-history",
+        runId: run.id,
+        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+        agentSlug: run.agentSlug,
+        actor: actorForRun(run, tenant),
+        details: writeConfirmationDetails(run, "rejected"),
+      });
+    }
+    if (run.finishedAt) {
+      events.push({
+        id: `run:${run.id}:finished`,
+        timestamp: run.finishedAt,
+        type: `run.${run.status}`,
+        source: "run-history",
+        runId: run.id,
+        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+        agentSlug: run.agentSlug,
+        details: {
+          ...runDetails,
+          status: run.status,
+          durationMs: runDurationMs(run),
+          ...(run.error ? { error: run.error } : {}),
+          resultPresent: run.result !== undefined,
+          ...(run.result !== undefined
+            ? { resultDigest: digestUnknown(run.result) }
+            : {}),
+        },
+      });
+    }
+    for (const log of run.logs) {
+      const connectorAudit = readConnectorAuditEntry(log.metadata?.connectorAudit);
+      if (!connectorAudit) continue;
+      events.push({
+        id: `connector:${run.id}:${log.id}`,
+        timestamp: log.timestamp,
+        type: "connector.delivery",
+        source: "connector-audit",
+        runId: run.id,
+        ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+        agentSlug: run.agentSlug,
+        details: {
+          logId: log.id,
+          logLevel: log.level,
+          logMessage: log.message,
+          ...connectorAudit,
+        },
+      });
+    }
+  }
+
+  for (const consent of input.hostedProviderConsentEvents) {
+    events.push({
+      id: `hosted-provider-consent:${consent.id}`,
+      timestamp: consent.createdAt,
+      type: "hosted-provider.consent",
+      source: "hosted-provider-consent",
+      tenantId: consent.tenantId,
+      actor: actorForTenant(tenantById.get(consent.tenantId)),
+      details: {
+        source: consent.source,
+        ...consent.payload,
+      },
+    });
+  }
+
+  return events.sort(compareAuditEvents);
+}
+
+function runAuditDetails(
+  run: RunRecord,
+  agent: AgentSummary | undefined,
+  tenant: TenantRecord | undefined,
+): Record<string, unknown> {
+  return {
+    statusAtExport: run.status,
+    agentSlug: run.agentSlug,
+    ...(agent?.name ? { agentName: agent.name } : {}),
+    ...(agent?.mode ? { agentMode: agent.mode } : {}),
+    ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+    ...(tenant?.displayName ? { tenantName: tenant.displayName } : {}),
+    ...(run.providerId ? { providerId: run.providerId } : {}),
+    ...(run.model ? { model: run.model } : {}),
+    ...(run.trigger ? { trigger: run.trigger } : {}),
+    ...(run.changeState ? { changeState: run.changeState } : {}),
+    stepCount: run.steps.length,
+    logCount: run.logs.length,
+    resultPresent: run.result !== undefined,
+    errorPresent: run.error !== undefined,
+    ...(run.summary ? { summaryDigest: digestText(run.summary) } : {}),
+    ...(run.tokens ? { tokens: run.tokens } : {}),
+  };
+}
+
+function writeConfirmationDetails(
+  run: RunRecord,
+  outcome: "requested" | "accepted" | "rejected",
+): Record<string, unknown> {
+  const actions = run.plan?.actions ?? [];
+  return {
+    outcome,
+    actionCount: actions.length,
+    actionKinds: [...new Set(actions.map((action) => action.kind))].sort(),
+    severityCounts: actions.reduce<Record<string, number>>((counts, action) => {
+      const severity = action.severity ?? "unknown";
+      counts[severity] = (counts[severity] ?? 0) + 1;
+      return counts;
+    }, {}),
+    expectedPhraseStoredInRunPlan: typeof run.plan?.confirmationPhrase === "string",
+    expectedPhraseExported: false,
+    typedPhraseContentStored: false,
+    typedPhraseContentExported: false,
+  };
+}
+
+function findConfirmationRequestedAt(run: RunRecord): string | undefined {
+  const log = run.logs.find((entry) =>
+    /awaiting typed confirmation/i.test(entry.message),
+  );
+  return log?.timestamp ?? run.startedAt ?? run.queuedAt;
+}
+
+function actorForRun(
+  run: RunRecord,
+  tenant: TenantRecord | undefined,
+): AuditLogActor {
+  return actorForTenant(tenant, run.tenantId);
+}
+
+function actorForTenant(
+  tenant: TenantRecord | undefined,
+  fallbackTenantId?: string,
+): AuditLogActor {
+  if (!tenant) {
+    return {
+      kind: "local-admin",
+      ...(fallbackTenantId ? { tenantId: fallbackTenantId } : {}),
+    };
+  }
+  return {
+    kind: "connected-admin",
+    tenantId: tenant.id,
+    tenantName: tenant.displayName,
+    username: tenant.username,
+    homeAccountId: tenant.homeAccountId,
+  };
+}
+
+function runDurationMs(run: RunRecord): number | undefined {
+  if (!run.startedAt || !run.finishedAt) return undefined;
+  const started = Date.parse(run.startedAt);
+  const finished = Date.parse(run.finishedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(finished)) return undefined;
+  return Math.max(0, finished - started);
+}
+
+function readConnectorAuditEntry(value: unknown): ConnectorAuditEntry | undefined {
+  if (!isStateRecord(value)) return undefined;
+  const requiredStrings = [
+    "runId",
+    "stepId",
+    "connector",
+    "capability",
+    "kind",
+    "idempotencyKey",
+    "egressTarget",
+    "argsDigest",
+    "status",
+  ];
+  if (requiredStrings.some((key) => typeof value[key] !== "string")) {
+    return undefined;
+  }
+  if (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs)) {
+    return undefined;
+  }
+  return {
+    runId: value.runId as string,
+    stepId: value.stepId as string,
+    connector: value.connector as string,
+    capability: value.capability as string,
+    kind: value.kind as ConnectorAuditEntry["kind"],
+    idempotencyKey: value.idempotencyKey as string,
+    egressTarget: value.egressTarget as string,
+    argsDigest: value.argsDigest as string,
+    status: value.status as ConnectorAuditEntry["status"],
+    durationMs: Math.max(0, Math.round(value.durationMs)),
+    ...(typeof value.externalId === "string" ? { externalId: value.externalId } : {}),
+    ...(typeof value.externalUrl === "string" ? { externalUrl: value.externalUrl } : {}),
+    ...(typeof value.errorClass === "string" ? { errorClass: value.errorClass } : {}),
+    ...(typeof value.errorMessage === "string" ? { errorMessage: value.errorMessage } : {}),
+  };
+}
+
+function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): number {
+  const leftMs = Date.parse(left.timestamp);
+  const rightMs = Date.parse(right.timestamp);
+  const timeDiff =
+    (Number.isFinite(leftMs) ? leftMs : 0) -
+    (Number.isFinite(rightMs) ? rightMs : 0);
+  if (timeDiff !== 0) return timeDiff;
+  const sourceOrder: Record<AuditLogEventSource, number> = {
+    "run-history": 0,
+    "connector-audit": 1,
+    "hosted-provider-consent": 2,
+  };
+  const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
+  if (sourceDiff !== 0) return sourceDiff;
+  return left.id.localeCompare(right.id);
+}
+
+function applyAuditHashChain(events: AuditLogEventSeed[]): {
+  events: AuditLogEvent[];
+  finalHash: string;
+} {
+  let previousHash = AUDIT_CHAIN_START_HASH;
+  const hashed = events.map((event) => {
+    const sha256 = createHash("sha256")
+      .update(previousHash)
+      .update(canonicalJson(event))
+      .digest("hex");
+    previousHash = sha256;
+    return { ...event, sha256 };
+  });
+  return { events: hashed, finalHash: previousHash };
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const entries = Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`);
+  return `{${entries.join(",")}}`;
+}
+
+function digestText(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function digestUnknown(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function auditEventWithinRange(
+  event: AuditLogEventSeed,
+  fromMs: number | undefined,
+  toMs: number | undefined,
+): boolean {
+  const timestampMs = Date.parse(event.timestamp);
+  if (!Number.isFinite(timestampMs)) return false;
+  if (fromMs !== undefined && timestampMs < fromMs) return false;
+  if (toMs !== undefined && timestampMs > toMs) return false;
+  return true;
+}
+
+function parseAuditExportBoundary(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`${label} must be an ISO timestamp.`);
+  }
+  return timestamp;
+}
+
+function auditLogSuggestedName(format: ExportAuditLogInput["format"], generatedAt: string): string {
+  const stamp = generatedAt.replace(/[:.]/g, "-");
+  return `openadminos-audit-log-${stamp}.${format}`;
+}
+
+function serializeAuditLogJson(input: {
+  generatedAt: string;
+  from?: string;
+  to?: string;
+  retentionPolicy: RunHistoryRetentionSettings;
+  lastPruneResult?: RunHistoryPruneResult;
+  events: AuditLogEvent[];
+  finalHash: string;
+}): string {
+  // TODO(ugur): Add signed timestamp/counter-signature support for compliance exports.
+  return `${JSON.stringify(
+    {
+      schemaVersion: AUDIT_LOG_SCHEMA_VERSION,
+      generatedAt: input.generatedAt,
+      filters: {
+        ...(input.from ? { from: input.from } : {}),
+        ...(input.to ? { to: input.to } : {}),
+      },
+      retention: {
+        policy: input.retentionPolicy,
+        ...(input.lastPruneResult ? { lastPruneResult: input.lastPruneResult } : {}),
+        note:
+          "Run history may omit records removed by the local retention policy.",
+      },
+      hashChain: {
+        algorithm: "sha256",
+        startHash: AUDIT_CHAIN_START_HASH,
+        finalHash: input.finalHash,
+        entryHashInput:
+          "previous entry sha256 hex + canonical JSON event without sha256",
+        signedTimestamps: "not implemented",
+      },
+      eventCount: input.events.length,
+      events: input.events,
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function serializeAuditLogCsv(input: {
+  generatedAt: string;
+  from?: string;
+  to?: string;
+  retentionPolicy: RunHistoryRetentionSettings;
+  lastPruneResult?: RunHistoryPruneResult;
+  events: AuditLogEvent[];
+  finalHash: string;
+}): string {
+  const columns = [
+    "schemaVersion",
+    "generatedAt",
+    "filterFrom",
+    "filterTo",
+    "retentionPolicyJson",
+    "lastPruneResultJson",
+    "chainAlgorithm",
+    "chainStartHash",
+    "chainFinalHash",
+    "sha256",
+    "timestamp",
+    "type",
+    "source",
+    "runId",
+    "tenantId",
+    "agentSlug",
+    "actorJson",
+    "detailsJson",
+  ];
+  const rows = input.events.map((event) =>
+    [
+      AUDIT_LOG_SCHEMA_VERSION,
+      input.generatedAt,
+      input.from ?? "",
+      input.to ?? "",
+      canonicalJson(input.retentionPolicy),
+      input.lastPruneResult ? canonicalJson(input.lastPruneResult) : "",
+      "sha256",
+      AUDIT_CHAIN_START_HASH,
+      input.finalHash,
+      event.sha256,
+      event.timestamp,
+      event.type,
+      event.source,
+      event.runId ?? "",
+      event.tenantId ?? "",
+      event.agentSlug ?? "",
+      event.actor ? canonicalJson(event.actor) : "",
+      canonicalJson(event.details),
+    ].map(csvCell).join(","),
+  );
+  return `${columns.join(",")}\n${rows.join("\n")}${rows.length > 0 ? "\n" : ""}`;
+}
+
+function csvCell(value: unknown): string {
+  const text = String(value ?? "");
+  if (!/[",\r\n]/.test(text)) return text;
+  return `"${text.replace(/"/g, "\"\"")}"`;
 }
 
 export interface AppStateStoreOptions {
@@ -1416,6 +1900,64 @@ export class AppStateStore {
 
   async pruneRunHistoryNow(): Promise<RunHistoryPruneResult> {
     return this.pruneRunHistory("manual");
+  }
+
+  async exportAuditLog(input: ExportAuditLogInput): Promise<AuditLogExportResult> {
+    if (input.format !== "json" && input.format !== "csv") {
+      throw new Error("Audit log export format must be json or csv.");
+    }
+    const fromMs = parseAuditExportBoundary(input.from, "from");
+    const toMs = parseAuditExportBoundary(input.to, "to");
+    if (fromMs !== undefined && toMs !== undefined && fromMs > toMs) {
+      throw new Error("Audit log export from date must be before the to date.");
+    }
+
+    const persisted = await this.read();
+    const retentionPolicy = this.normalizeRunHistoryRetentionSettings(
+      persisted.runHistoryRetention,
+    );
+    const generatedAt = new Date().toISOString();
+    const allEvents = buildAuditLogEvents({
+      runs: persisted.runs,
+      tenants: persisted.tenants,
+      installedAgents: persisted.installedAgents,
+      hostedProviderConsentEvents:
+        this.intelligenceStore?.listHostedProviderConsentAuditEvents() ?? [],
+    });
+    const filteredEvents = allEvents.filter((event) =>
+      auditEventWithinRange(event, fromMs, toMs),
+    );
+    const { events, finalHash } = applyAuditHashChain(filteredEvents);
+    const common = {
+      generatedAt,
+      ...(input.from ? { from: input.from } : {}),
+      ...(input.to ? { to: input.to } : {}),
+      retentionPolicy,
+      ...(persisted.lastRunHistoryPrune
+        ? { lastPruneResult: persisted.lastRunHistoryPrune }
+        : {}),
+      events,
+      finalHash,
+    };
+    const content =
+      input.format === "json"
+        ? serializeAuditLogJson(common)
+        : serializeAuditLogCsv(common);
+    return {
+      format: input.format,
+      suggestedName: auditLogSuggestedName(input.format, generatedAt),
+      mimeType: input.format === "json" ? "application/json" : "text/csv",
+      content,
+      generatedAt,
+      eventCount: events.length,
+      hashChain: {
+        algorithm: "sha256",
+        startHash: AUDIT_CHAIN_START_HASH,
+        finalHash,
+      },
+      ...(input.from ? { from: input.from } : {}),
+      ...(input.to ? { to: input.to } : {}),
+    };
   }
 
   async pruneRunHistory(

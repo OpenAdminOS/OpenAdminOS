@@ -732,6 +732,20 @@ delete a run that is linked to or pinned in a Workspace, currently queued or
 running, or awaiting write confirmation. Settings surfaces the last prune result
 so local deletion is not silent.
 
+Audit log export lives in Settings -> General next to run-history retention.
+It is an explicit local save only, never an upload. JSON and CSV exports include
+retained run-history events, write-confirmation request/accepted/rejected
+events without exporting the typed phrase content, connector delivery audit
+entries from `ConnectorAuditEntry`, and hosted-provider consent events recorded
+in the SQLite `audit_events` table from this version onward. The export header
+records the active run-history retention policy and the last prune result when
+present so missing old runs are explainable. Each exported event carries a
+SHA-256 hash chained as
+`previousHash + canonical JSON event without sha256`, starting from 64 zeroes;
+JSON records the start and final hash in `hashChain`, and CSV includes the hash
+and chain metadata columns. Signed or third-party cryptographic timestamps are
+deferred.
+
 Linux tenant sign-in requires a real OS secret-store backend. OpenAdminOS uses
 Electron `safeStorage` for the MSAL token cache and refuses Electron's
 unprotected Linux `basic_text` backend. Debian/Ubuntu packages recommend
@@ -1436,7 +1450,7 @@ These must exist and work well before any public release.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
 - Run history with filters (agent, tenant, date, status) and configurable
   retention for old eligible records
-- Audit log export (JSON/CSV with cryptographic timestamps for compliance buyers)
+- Audit log export (JSON/CSV with SHA-256 hash chain; signed timestamps deferred)
 - Keyboard shortcuts (⌘K palette, ⌘R rerun, ⌘/ search, ⌘? help)
 - Agent permissions inspector (browser-extension-style permission screen pre-install)
 - Update / version management (pin by default, explicit upgrade, changelog visible)

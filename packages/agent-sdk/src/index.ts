@@ -596,6 +596,34 @@ export interface RunHistoryPruneResult {
   newestPrunedQueuedAt?: string;
 }
 
+export type AuditLogExportFormat = "json" | "csv";
+
+export interface ExportAuditLogInput {
+  format: AuditLogExportFormat;
+  /** Inclusive ISO timestamp lower bound. */
+  from?: string;
+  /** Inclusive ISO timestamp upper bound. */
+  to?: string;
+}
+
+export interface AuditLogHashChainSummary {
+  algorithm: "sha256";
+  startHash: string;
+  finalHash: string;
+}
+
+export interface AuditLogExportResult {
+  format: AuditLogExportFormat;
+  suggestedName: string;
+  mimeType: "application/json" | "text/csv";
+  content: string;
+  generatedAt: string;
+  eventCount: number;
+  hashChain: AuditLogHashChainSummary;
+  from?: string;
+  to?: string;
+}
+
 export interface TrustState {
   label: string;
   detail: string;
@@ -1680,6 +1708,7 @@ export interface OpenAdminOSApi {
     input: SetRunHistoryRetentionSettingsInput,
   ): Promise<RunHistoryRetentionSettings>;
   pruneRunHistoryNow(): Promise<RunHistoryPruneResult>;
+  exportAuditLog(input: ExportAuditLogInput): Promise<AuditLogExportResult>;
   getChatInvestigationSettings(): Promise<ChatInvestigationSettings>;
   setChatInvestigationMode(mode: ChatInvestigationMode): Promise<ChatInvestigationSettings>;
   getSelfTrainingSettings(): Promise<SelfTrainingSettings>;

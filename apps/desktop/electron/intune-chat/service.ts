@@ -270,6 +270,41 @@ export class IntuneChatService {
     }
   }
 
+  private recordHostedProviderConsentSafely(input: {
+    tenantIds: string[];
+    providerId: ProviderId;
+    providerName?: string;
+    model?: string;
+    acknowledgedAt: string;
+    remember?: boolean;
+    scope: "single-tenant-chat" | "multi-tenant-chat";
+    workspaceContext?: WorkspacePromptContextSummary;
+  }): void {
+    const primaryTenantId = input.tenantIds[0];
+    if (!this.host.intelligenceStore || !primaryTenantId) return;
+    try {
+      this.host.intelligenceStore.recordHostedProviderConsentAuditEvent({
+        id: `event_${randomUUID()}`,
+        tenantId: primaryTenantId,
+        source: input.scope,
+        payload: {
+          tenantIds: input.tenantIds,
+          providerId: input.providerId,
+          ...(input.providerName ? { providerName: input.providerName } : {}),
+          ...(input.model ? { model: input.model } : {}),
+          acknowledgedAt: input.acknowledgedAt,
+          remember: input.remember === true,
+          ...(input.workspaceContext
+            ? { workspaceContext: input.workspaceContext }
+            : {}),
+        },
+        createdAt: input.acknowledgedAt,
+      });
+    } catch (error) {
+      console.warn("[audit] failed to record hosted-provider consent", error);
+    }
+  }
+
   async listIntuneChatConversations(): Promise<IntuneChatConversation[]> {
     return this.host.requireIntelligenceStore().listConversations();
   }
@@ -378,6 +413,17 @@ export class IntuneChatService {
       providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
     const providerId = provider?.id ?? persisted.activeProviderId;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
+    if (provider?.isLocal === false && input.hostedProviderConsent) {
+      this.recordHostedProviderConsentSafely({
+        tenantIds: preflight.resolvedTenantIds,
+        providerId,
+        providerName: preflight.providerName,
+        ...(preflight.model ? { model: preflight.model } : {}),
+        acknowledgedAt: input.hostedProviderConsent.acknowledgedAt,
+        remember: input.hostedProviderConsent.remember,
+        scope: "multi-tenant-chat",
+      });
+    }
 
     const now = new Date().toISOString();
     const jobId = `mtjob_${randomUUID()}`;
@@ -1230,6 +1276,20 @@ export class IntuneChatService {
       providerId,
       workspaceContext?.summary,
     );
+    if (provider?.isLocal === false && input.hostedProviderConsent) {
+      this.recordHostedProviderConsentSafely({
+        tenantIds: [tenant.id],
+        providerId,
+        providerName: provider.name,
+        ...(selectedModel ? { model: selectedModel } : {}),
+        acknowledgedAt: input.hostedProviderConsent.acknowledgedAt,
+        remember: input.hostedProviderConsent.remember,
+        scope: "single-tenant-chat",
+        ...(workspaceContext?.summary
+          ? { workspaceContext: workspaceContext.summary }
+          : {}),
+      });
+    }
     const planned = planChatContext(content);
     const now = new Date().toISOString();
 
@@ -1479,6 +1539,20 @@ export class IntuneChatService {
       providerId,
       workspaceContext?.summary,
     );
+    if (provider?.isLocal === false && input.hostedProviderConsent) {
+      this.recordHostedProviderConsentSafely({
+        tenantIds: [tenant.id],
+        providerId,
+        providerName: provider.name,
+        ...(selectedModel ? { model: selectedModel } : {}),
+        acknowledgedAt: input.hostedProviderConsent.acknowledgedAt,
+        remember: input.hostedProviderConsent.remember,
+        scope: "single-tenant-chat",
+        ...(workspaceContext?.summary
+          ? { workspaceContext: workspaceContext.summary }
+          : {}),
+      });
+    }
     const planned = planChatContext(content);
     const now = new Date().toISOString();
 

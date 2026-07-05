@@ -49,6 +49,7 @@ import type {
   CompanionRunDueReadSchedulesResult,
   CompanionSnapshot,
   CreateWorkspaceInput,
+  ExportAuditLogInput,
   ImportMultiTenantResultToWorkspacesInput,
   MultiTenantChatStreamEvent,
   PendingConnectorDecision,
@@ -3273,6 +3274,41 @@ function validateSetRunHistoryRetentionSettingsInput(
   return input;
 }
 
+function validateExportAuditLogInput(value: unknown): ExportAuditLogInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Audit log export input must be an object.");
+  }
+  if (value.format !== "json" && value.format !== "csv") {
+    throw new Error("Audit log export format must be json or csv.");
+  }
+  const input: ExportAuditLogInput = { format: value.format };
+  const from = validateOptionalAuditLogBoundary(value.from, "from");
+  const to = validateOptionalAuditLogBoundary(value.to, "to");
+  if (from !== undefined) input.from = from;
+  if (to !== undefined) input.to = to;
+  if (
+    from !== undefined &&
+    to !== undefined &&
+    Date.parse(from) > Date.parse(to)
+  ) {
+    throw new Error("Audit log export from date must be before the to date.");
+  }
+  return input;
+}
+
+function validateOptionalAuditLogBoundary(
+  value: unknown,
+  label: "from" | "to",
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const boundary = requireBoundedString(value, `audit log ${label}`, 80);
+  const parsed = Date.parse(boundary);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Audit log ${label} date must be an ISO timestamp.`);
+  }
+  return boundary;
+}
+
 function requireBoundedInteger(
   value: unknown,
   name: string,
@@ -4167,6 +4203,12 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:prune-run-history-now",
     handleTrusted(() => store.pruneRunHistoryNow()),
+  );
+  ipcMain.handle(
+    "openadminos:export-audit-log",
+    handleTrusted((_event, input: unknown) =>
+      store.exportAuditLog(validateExportAuditLogInput(input)),
+    ),
   );
   ipcMain.handle(
     "openadminos:get-self-training-settings",

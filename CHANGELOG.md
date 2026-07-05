@@ -13,6 +13,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Added `docs/agent-sdk.md`, a practical author guide for manifest fields, step kinds, write confirmation, local QA, and community submission.
 - Added a marketing examples gallery with copyable Build your own Agent prompts for read, write, and connector-backed agents.
 - Added configurable run-history retention in Settings with 500-run/180-day defaults, never-prune support, startup/scheduler/manual pruning, workspace/live/confirmation exclusions, last-prune reporting, IPC coverage, and focused host/renderer tests.
+- Added explicit local JSON/CSV audit log export with retained run history, write-confirmation events, connector delivery audit entries, recorded hosted-provider consent events, retention metadata, and a SHA-256 hash chain.
 
 ### Changed
 

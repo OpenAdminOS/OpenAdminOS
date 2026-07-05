@@ -81,6 +81,14 @@ interface SettingRow {
   updated_at: string;
 }
 
+export interface HostedProviderConsentAuditRecord {
+  id: string;
+  tenantId: string;
+  source: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
 interface ToolCallRow {
   id: string;
   conversation_id: string;
@@ -1541,6 +1549,47 @@ export class IntelligenceSqliteStore {
       );
   }
 
+  recordHostedProviderConsentAuditEvent(input: HostedProviderConsentAuditRecord): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO audit_events (
+          id, type, tenant_id, source, payload_json, created_at
+        )
+        VALUES (?, 'hosted-provider.consent', ?, ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        input.tenantId,
+        input.source,
+        JSON.stringify(input.payload),
+        input.createdAt,
+      );
+  }
+
+  listHostedProviderConsentAuditEvents(): HostedProviderConsentAuditRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, tenant_id, source, payload_json, created_at
+         FROM audit_events
+         WHERE type = 'hosted-provider.consent'
+         ORDER BY created_at ASC, id ASC`,
+      )
+      .all() as Array<{
+        id: string;
+        tenant_id: string;
+        source: string;
+        payload_json: string;
+        created_at: string;
+      }>;
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      source: row.source,
+      payload: readJson<Record<string, unknown>>(row.payload_json, {}),
+      createdAt: row.created_at,
+    }));
+  }
+
   createSelfTrainingSuggestion(input: SelfTrainingSuggestion): SelfTrainingSuggestion {
     this.db
       .prepare(
@@ -1754,6 +1803,18 @@ export class IntelligenceSqliteStore {
         payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        tenant_id TEXT,
+        source TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_events_created
+        ON audit_events (created_at ASC, id ASC);
 
       CREATE TABLE IF NOT EXISTS self_training_suggestions (
         id TEXT PRIMARY KEY,

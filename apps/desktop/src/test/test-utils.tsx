@@ -407,6 +407,34 @@ export function makeMockBridge(
       protectedAwaitingConfirmationCount: 0,
       reason: "No eligible runs exceeded the retention policy.",
     })),
+    exportAuditLog: vi.fn(async (input) => ({
+      format: input.format,
+      suggestedName: `openadminos-audit-log.${input.format}`,
+      mimeType: input.format === "json" ? "application/json" as const : "text/csv" as const,
+      content:
+        input.format === "json"
+          ? `${JSON.stringify({
+              schemaVersion: 1,
+              generatedAt: now,
+              hashChain: {
+                algorithm: "sha256",
+                startHash: "0".repeat(64),
+                finalHash: "0".repeat(64),
+              },
+              eventCount: 0,
+              events: [],
+            })}\n`
+          : "sha256,timestamp,type,source\n",
+      generatedAt: now,
+      eventCount: 0,
+      hashChain: {
+        algorithm: "sha256" as const,
+        startHash: "0".repeat(64),
+        finalHash: "0".repeat(64),
+      },
+      ...(input.from ? { from: input.from } : {}),
+      ...(input.to ? { to: input.to } : {}),
+    })),
     getChatInvestigationSettings: vi.fn(async () => ({ mode: "auto" as const })),
     setChatInvestigationMode: vi.fn(async (mode) => ({ mode, updatedAt: now })),
     getSelfTrainingSettings: vi.fn(async () => ({ enabled: false })),
