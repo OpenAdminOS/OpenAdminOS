@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
+import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
 import { Pill, StatusDot } from "../components/Pill";
 import {
   IconBolt,
@@ -33,6 +34,7 @@ import {
   type IntuneChatProgressStep,
   type IntuneChatSource,
   type IntuneChatStreamEvent,
+  type IntuneChatToolTraceEntry,
   type MultiTenantChatJob,
   type MultiTenantChatStreamEvent,
   type SavedMultiTenantQuery,
@@ -1344,12 +1346,20 @@ export default function IntuneChat() {
               <div className="relative">
                 <IconSearch
                   size={13}
+                  aria-hidden="true"
                   className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
                 />
+                <label htmlFor="conversation-search" className="sr-only">
+                  Search conversations
+                </label>
                 <input
+                  id="conversation-search"
+                  name="conversation-search"
+                  type="search"
                   value={conversationSearch}
                   onChange={(event) => setConversationSearch(event.target.value)}
                   placeholder="Search conversations"
+                  autoComplete="off"
                   className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:ring-[var(--color-accent)]"
                 />
               </div>
@@ -1708,7 +1718,12 @@ export default function IntuneChat() {
               disabled={sending || runningMultiTenant}
             />
             <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
+              <label htmlFor="intune-chat-composer" className="sr-only">
+                Chat prompt
+              </label>
               <textarea
+                id="intune-chat-composer"
+                name="intune-chat-composer"
                 ref={composerRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
@@ -1894,9 +1909,15 @@ function MultiTenantComposerControls({
   onSavedQuery: (query: SavedMultiTenantQuery) => void;
   disabled: boolean;
 }) {
+  const savedQuerySelectId = useId();
+
   return (
     <div className="mb-3 rounded-xl bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        role="group"
+        aria-label="Tenant scope"
+        className="flex flex-wrap items-center gap-2"
+      >
         <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
           Scope
         </span>
@@ -1920,7 +1941,12 @@ function MultiTenantComposerControls({
           </button>
         ))}
         <div className="ml-auto min-w-[180px]">
+          <label htmlFor={savedQuerySelectId} className="sr-only">
+            Saved multi-tenant query
+          </label>
           <select
+            id={savedQuerySelectId}
+            name="saved-multi-tenant-query"
             value={selectedSavedQueryId}
             disabled={disabled}
             onChange={(event) => {
@@ -1928,7 +1954,6 @@ function MultiTenantComposerControls({
               if (query) onSavedQuery(query);
             }}
             className="h-7 w-full rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
-            aria-label="Saved multi-tenant query"
           >
             <option value="">Saved queries</option>
             {savedQueries.map((query) => (
@@ -2024,6 +2049,7 @@ function WorkspaceContextControls({
   onIncludeInstructionsChange: (include: boolean) => void;
   disabled: boolean;
 }) {
+  const workspaceSelectId = useId();
   if (workspaces.length === 0) return null;
   const hasAttachment =
     Boolean(workspace) &&
@@ -2036,12 +2062,16 @@ function WorkspaceContextControls({
         <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
           Workspace context
         </span>
+        <label htmlFor={workspaceSelectId} className="sr-only">
+          Attach workspace context
+        </label>
         <select
+          id={workspaceSelectId}
+          name="attached-workspace-context"
           value={attachedWorkspaceId}
           disabled={disabled}
           onChange={(event) => onWorkspaceChange(event.target.value)}
           className="h-7 min-w-[220px] rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Attach workspace context"
         >
           <option value="">No workspace attached</option>
           {workspaces.map((entry) => (
@@ -2249,7 +2279,11 @@ function ScopeReviewCard({
         </div>
         <div className="space-y-3">
           {progressJob && (
-            <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]"
+            >
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                   Run progress
@@ -2290,10 +2324,16 @@ function ScopeReviewCard({
               Save group
             </div>
             <div className="mt-2 flex gap-2">
+              <label htmlFor="tenant-group-name" className="sr-only">
+                Tenant group name
+              </label>
               <input
+                id="tenant-group-name"
+                name="tenant-group-name"
                 value={groupName}
                 onChange={(event) => onGroupNameChange(event.target.value)}
                 placeholder="Tenant group name"
+                autoComplete="off"
                 className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
               />
               <Button size="sm" variant="secondary" disabled={!groupName.trim()} onClick={onSaveGroup}>
@@ -2407,41 +2447,111 @@ function MultiTenantResultArtifact({
     return true;
   });
   const osOptions = [...new Set(job.deviceRows.map((row) => row.operatingSystem))].sort();
+  const comparisonColumns: OutputTableColumn<MultiTenantChatJob["comparisons"][number]>[] = [
+    {
+      id: "tenant",
+      header: "Tenant",
+      sticky: true,
+      sortValue: (tenant) => tenant.tenantName,
+      render: (tenant) => {
+        const expanded = expandedTenantIds.includes(tenant.tenantId);
+        return (
+          <button
+            type="button"
+            onClick={() => onToggleTenant(tenant.tenantId)}
+            className={`inline-flex max-w-[240px] items-center gap-1.5 truncate text-left font-medium text-[var(--color-text)] hover:text-[var(--color-accent)] ${focusRingClass}`}
+            aria-expanded={expanded}
+          >
+            {expanded ? <IconChevronDown size={12} aria-hidden="true" /> : <IconChevronRight size={12} aria-hidden="true" />}
+            <span className="truncate" title={tenant.tenantName}>
+              {tenant.tenantName}
+            </span>
+          </button>
+        );
+      },
+    },
+    {
+      id: "status",
+      header: "Status",
+      sortValue: (tenant) => tenant.status,
+      render: (tenant) => <ReadinessPill status={tenant.status} />,
+    },
+    {
+      id: "windows",
+      header: "Windows",
+      align: "right",
+      sortValue: (tenant) => tenant.windowsDevices,
+      render: (tenant) => tenant.windowsDevices.toLocaleString(),
+      cellClassName: "font-mono tabular-nums",
+    },
+    {
+      id: "compliant",
+      header: "Compliant",
+      align: "right",
+      sortValue: (tenant) => tenant.compliant,
+      render: (tenant) => tenant.compliant.toLocaleString(),
+      cellClassName: "font-mono tabular-nums text-[var(--color-success)]",
+    },
+    {
+      id: "nonCompliant",
+      header: "Non-compliant",
+      align: "right",
+      sortValue: (tenant) => tenant.nonCompliant,
+      render: (tenant) => tenant.nonCompliant.toLocaleString(),
+      cellClassName: "font-mono tabular-nums text-[var(--color-danger)]",
+    },
+    {
+      id: "unknown",
+      header: "Unknown",
+      align: "right",
+      sortValue: (tenant) => tenant.unknown,
+      render: (tenant) => tenant.unknown.toLocaleString(),
+      cellClassName: "font-mono tabular-nums",
+    },
+    {
+      id: "lastRefresh",
+      header: "Last refresh",
+      sortValue: (tenant) => tenant.lastRefresh ?? "",
+      render: (tenant) => (tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "Unknown"),
+      cellClassName: "text-[11px] text-[var(--color-text-muted)]",
+    },
+  ];
+
   return (
-    <div className="relative left-1/2 w-[min(100%,calc(100vw-380px))] -translate-x-1/2 rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
+    <OutputPane
+      title="Multi-tenant result"
+      subtitle={`${job.providerName}${job.model ? ` · ${job.model}` : ""} · ${formatDateTime(job.updatedAt)}`}
+      className="relative left-1/2 w-[min(100%,calc(100vw-380px))] -translate-x-1/2"
+      actions={
+        <>
+          <Button size="sm" variant="ghost" aria-label="Export multi-tenant result as CSV" onClick={() => onExport("csv")}>
+            CSV
+          </Button>
+          <Button size="sm" variant="ghost" aria-label="Export multi-tenant result as JSON" onClick={() => onExport("json")}>
+            JSON
+          </Button>
+          <Button size="sm" variant="ghost" aria-label="Export multi-tenant result dossier" onClick={() => onExport("md")}>
+            Dossier
+          </Button>
+          <Button size="sm" variant="secondary" leadingIcon={<IconHardDrive size={12} />} onClick={onSplit}>
+            Split to Workspaces
+          </Button>
+        </>
+      }
+    >
       <div className="border-b border-[var(--color-border-soft)] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-[12px] font-semibold text-[var(--color-text)]">
-              Multi-tenant result
-            </div>
-            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-              {job.providerName}{job.model ? ` · ${job.model}` : ""} · {formatDateTime(job.updatedAt)}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="ghost" onClick={() => onExport("csv")}>
-              CSV
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => onExport("json")}>
-              JSON
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => onExport("md")}>
-              Dossier
-            </Button>
-            <Button size="sm" variant="secondary" leadingIcon={<IconHardDrive size={12} />} onClick={onSplit}>
-              Split to Workspaces
-            </Button>
-          </div>
-        </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryTile label="Tenants" value={job.summary.tenantsScanned} />
-          <SummaryTile label="Windows devices" value={job.summary.windowsDevices} />
-          <SummaryTile label="Compliant" value={job.summary.compliant} tone="success" />
-          <SummaryTile label="Non-compliant" value={job.summary.nonCompliant} tone="danger" />
-        </div>
+        <OutputSummaryGrid>
+          <OutputSummaryTile label="Tenants" value={job.summary.tenantsScanned} />
+          <OutputSummaryTile label="Windows devices" value={job.summary.windowsDevices} />
+          <OutputSummaryTile label="Compliant" value={job.summary.compliant} tone="success" />
+          <OutputSummaryTile label="Non-compliant" value={job.summary.nonCompliant} tone="danger" />
+        </OutputSummaryGrid>
         {job.progress.length > 0 && (
-          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-3 grid gap-2 lg:grid-cols-2"
+          >
             {job.progress.map((entry) => (
               <div
                 key={entry.tenantId}
@@ -2475,179 +2585,140 @@ function MultiTenantResultArtifact({
           </div>
         )}
       </div>
-      <div className="border-b border-[var(--color-border-soft)] p-3">
-        <div className="flex flex-wrap gap-2">
-          <ArtifactSelect
-            label="Tenant"
-            value={filters.tenantId}
-            onChange={(tenantId) => onFiltersChange({ ...filters, tenantId })}
-            options={[
-              { value: "all", label: "All tenants" },
-              ...job.comparisons.map((tenant) => ({
-                value: tenant.tenantId,
-                label: tenant.tenantName,
-              })),
-            ]}
+      <OutputPaneToolbar>
+        <OutputFilterSelect
+          label="Tenant"
+          value={filters.tenantId}
+          onChange={(tenantId) => onFiltersChange({ ...filters, tenantId })}
+          options={[
+            { value: "all", label: "All tenants" },
+            ...job.comparisons.map((tenant) => ({
+              value: tenant.tenantId,
+              label: tenant.tenantName,
+            })),
+          ]}
+        />
+        <OutputFilterSelect
+          label="Readiness"
+          value={filters.readiness}
+          onChange={(readiness) => onFiltersChange({ ...filters, readiness })}
+          options={[
+            { value: "all", label: "All readiness" },
+            { value: "ready", label: "Ready" },
+            { value: "stale", label: "Stale" },
+            { value: "failed", label: "Failed" },
+            { value: "skipped", label: "Skipped" },
+          ]}
+        />
+        <OutputFilterSelect
+          label="Compliance"
+          value={filters.complianceState}
+          onChange={(complianceState) => onFiltersChange({ ...filters, complianceState })}
+          options={[
+            { value: "all", label: "All compliance" },
+            { value: "compliant", label: "Compliant" },
+            { value: "non-compliant", label: "Non-compliant" },
+            { value: "unknown", label: "Unknown" },
+          ]}
+        />
+        <OutputFilterSelect
+          label="OS"
+          value={filters.os}
+          onChange={(os) => onFiltersChange({ ...filters, os })}
+          options={[
+            { value: "all", label: "All OS" },
+            ...osOptions.map((os) => ({ value: os, label: os })),
+          ]}
+        />
+        <label
+          htmlFor="multi-tenant-stale-only"
+          className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+        >
+          <input
+            id="multi-tenant-stale-only"
+            name="multi-tenant-stale-only"
+            type="checkbox"
+            checked={filters.staleOnly}
+            onChange={(event) => onFiltersChange({ ...filters, staleOnly: event.target.checked })}
+            className="h-3.5 w-3.5 accent-[var(--color-accent)]"
           />
-          <ArtifactSelect
-            label="Readiness"
-            value={filters.readiness}
-            onChange={(readiness) => onFiltersChange({ ...filters, readiness })}
-            options={[
-              { value: "all", label: "All readiness" },
-              { value: "ready", label: "Ready" },
-              { value: "stale", label: "Stale" },
-              { value: "failed", label: "Failed" },
-              { value: "skipped", label: "Skipped" },
-            ]}
-          />
-          <ArtifactSelect
-            label="Compliance"
-            value={filters.complianceState}
-            onChange={(complianceState) => onFiltersChange({ ...filters, complianceState })}
-            options={[
-              { value: "all", label: "All compliance" },
-              { value: "compliant", label: "Compliant" },
-              { value: "non-compliant", label: "Non-compliant" },
-              { value: "unknown", label: "Unknown" },
-            ]}
-          />
-          <ArtifactSelect
-            label="OS"
-            value={filters.os}
-            onChange={(os) => onFiltersChange({ ...filters, os })}
-            options={[
-              { value: "all", label: "All OS" },
-              ...osOptions.map((os) => ({ value: os, label: os })),
-            ]}
-          />
-          <label className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            <input
-              type="checkbox"
-              checked={filters.staleOnly}
-              onChange={(event) => onFiltersChange({ ...filters, staleOnly: event.target.checked })}
-              className="h-3.5 w-3.5 accent-[var(--color-accent)]"
-            />
-            Stale only
-          </label>
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-[880px] w-full text-left text-[12px]">
-          <thead className="bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-            <tr>
-              <th className="sticky left-0 z-10 bg-[var(--color-bg)] px-3 py-2" aria-sort="ascending">Tenant</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2 text-right">Windows</th>
-              <th className="px-3 py-2 text-right">Compliant</th>
-              <th className="px-3 py-2 text-right">Non-compliant</th>
-              <th className="px-3 py-2 text-right">Unknown</th>
-              <th className="px-3 py-2">Last refresh</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleComparisons.map((tenant) => {
-              const tenantRows = filteredRows.filter((row) => row.tenantId === tenant.tenantId);
-              const expanded = expandedTenantIds.includes(tenant.tenantId);
-              return (
-                <Fragment key={tenant.tenantId}>
-                  <tr className="border-t border-[var(--color-border-soft)]">
-                    <td className="sticky left-0 z-10 bg-[var(--color-bg-raised)] px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => onToggleTenant(tenant.tenantId)}
-                        className={`inline-flex max-w-[240px] items-center gap-1.5 truncate text-left font-medium text-[var(--color-text)] hover:text-[var(--color-accent)] ${focusRingClass}`}
-                        aria-expanded={expanded}
-                      >
-                        {expanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
-                        <span className="truncate" title={tenant.tenantName}>
-                          {tenant.tenantName}
-                        </span>
-                      </button>
-                    </td>
-                    <td className="px-3 py-2"><ReadinessPill status={tenant.status} /></td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">{tenant.windowsDevices}</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums text-[var(--color-success)]">{tenant.compliant}</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums text-[var(--color-danger)]">{tenant.nonCompliant}</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">{tenant.unknown}</td>
-                    <td className="px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
-                      {tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "Unknown"}
-                    </td>
-                  </tr>
-                  {expanded && (
-                    <tr>
-                      <td colSpan={7} className="bg-[var(--color-bg)] px-3 py-3">
-                        <DeviceRowsTable rows={tenantRows} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function SummaryTile({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: number;
-  tone?: "default" | "success" | "danger";
-}) {
-  const toneClass =
-    tone === "success"
-      ? "text-[var(--color-success)]"
-      : tone === "danger"
-        ? "text-[var(--color-danger)]"
-        : "text-[var(--color-text)]";
-  return (
-    <div className="rounded-lg bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className={`mt-1 font-mono text-[18px] font-semibold tabular-nums ${toneClass}`}>
-        {value.toLocaleString()}
-      </div>
-    </div>
-  );
-}
-
-function ArtifactSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-      <span>{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="h-6 min-w-[120px] bg-transparent text-[var(--color-text-soft)] outline-none"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+          Stale only
+        </label>
+      </OutputPaneToolbar>
+      <OutputDataTable
+        rows={visibleComparisons}
+        columns={comparisonColumns}
+        getRowId={(tenant) => tenant.tenantId}
+        initialSort={{ columnId: "tenant", direction: "ascending" }}
+        minWidthClassName="min-w-[880px]"
+        isRowExpanded={(tenant) => expandedTenantIds.includes(tenant.tenantId)}
+        renderExpandedRow={(tenant) => {
+          const tenantRows = filteredRows.filter((row) => row.tenantId === tenant.tenantId);
+          return <DeviceRowsTable rows={tenantRows} />;
+        }}
+      />
+    </OutputPane>
   );
 }
 
 function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
+  const columns: OutputTableColumn<MultiTenantChatJob["deviceRows"][number]>[] = [
+    {
+      id: "device",
+      header: "Device",
+      sortValue: (row) => row.deviceName,
+      render: (row) => row.deviceName,
+      cellClassName: "max-w-[220px] truncate text-[var(--color-text)]",
+      title: (row) => row.deviceName,
+    },
+    {
+      id: "compliance",
+      header: "Compliance",
+      sortValue: (row) => normalizeComplianceLabel(row.complianceState),
+      render: (row) => (
+        <Pill tone={complianceTone(row.complianceState)}>
+          {normalizeComplianceLabel(row.complianceState)}
+        </Pill>
+      ),
+    },
+    {
+      id: "os",
+      header: "OS",
+      sortValue: (row) => row.operatingSystem,
+      render: (row) => row.operatingSystem,
+      cellClassName: "text-[var(--color-text-soft)]",
+    },
+    {
+      id: "version",
+      header: "Version",
+      sortValue: (row) => row.osVersion ?? "",
+      render: (row) => row.osVersion ?? "unknown",
+      cellClassName: "font-mono text-[var(--color-text-muted)]",
+    },
+    {
+      id: "lastSync",
+      header: "Last sync",
+      sortValue: (row) => row.lastSyncDateTime ?? "",
+      render: (row) => (row.lastSyncDateTime ? formatDateTime(row.lastSyncDateTime) : "unknown"),
+      cellClassName: "text-[var(--color-text-muted)]",
+    },
+    {
+      id: "owner",
+      header: "Owner",
+      sortValue: (row) => row.owner ?? "",
+      render: (row) => row.owner ?? "unknown",
+      cellClassName: "max-w-[220px] truncate text-[var(--color-text-muted)]",
+      title: (row) => row.owner,
+    },
+    {
+      id: "freshness",
+      header: "Freshness",
+      sortValue: (row) => row.sourceRefreshedAt ?? "",
+      render: (row) => (row.sourceRefreshedAt ? formatDateTime(row.sourceRefreshedAt) : "unknown"),
+      cellClassName: "text-[var(--color-text-muted)]",
+    },
+  ];
+
   if (rows.length === 0) {
     return (
       <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
@@ -2656,45 +2727,15 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
     );
   }
   return (
-    <div className="overflow-x-auto rounded-lg ring-1 ring-[var(--color-border-soft)]">
-      <table className="min-w-[920px] w-full text-left text-[11.5px]">
-        <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-          <tr>
-            <th className="px-3 py-2" aria-sort="none">Device</th>
-            <th className="px-3 py-2">Compliance</th>
-            <th className="px-3 py-2">OS</th>
-            <th className="px-3 py-2">Version</th>
-            <th className="px-3 py-2">Last sync</th>
-            <th className="px-3 py-2">Owner</th>
-            <th className="px-3 py-2">Freshness</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 250).map((row) => (
-            <tr key={`${row.tenantId}:${row.deviceId ?? row.deviceName}`} className="border-t border-[var(--color-border-soft)]">
-              <td className="max-w-[220px] truncate px-3 py-2 text-[var(--color-text)]" title={row.deviceName}>
-                {row.deviceName}
-              </td>
-              <td className="px-3 py-2">
-                <Pill tone={complianceTone(row.complianceState)}>
-                  {normalizeComplianceLabel(row.complianceState)}
-                </Pill>
-              </td>
-              <td className="px-3 py-2 text-[var(--color-text-soft)]">{row.operatingSystem}</td>
-              <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{row.osVersion ?? "unknown"}</td>
-              <td className="px-3 py-2 text-[var(--color-text-muted)]">
-                {row.lastSyncDateTime ? formatDateTime(row.lastSyncDateTime) : "unknown"}
-              </td>
-              <td className="max-w-[220px] truncate px-3 py-2 text-[var(--color-text-muted)]" title={row.owner}>
-                {row.owner ?? "unknown"}
-              </td>
-              <td className="px-3 py-2 text-[var(--color-text-muted)]">
-                {row.sourceRefreshedAt ? formatDateTime(row.sourceRefreshedAt) : "unknown"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
+      <OutputDataTable
+        rows={rows.slice(0, 250)}
+        columns={columns}
+        getRowId={(row) => `${row.tenantId}:${row.deviceId ?? row.deviceName}`}
+        initialSort={{ columnId: "device", direction: "ascending" }}
+        minWidthClassName="min-w-[920px]"
+        tableClassName="text-[11.5px]"
+      />
       {rows.length > 250 && (
         <div className="border-t border-[var(--color-border-soft)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
           Showing first 250 matching rows. Export the dossier for the full local result.
@@ -2841,15 +2882,16 @@ function PinMessageToWorkspaceModal({
         <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           This stores the answer and visible sources in the selected workspace. Multi-tenant answers must be split into tenant-specific workspace evidence first.
         </div>
-        <label className="block">
+        <label htmlFor="pin-answer-workspace" className="block">
           <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Workspace
           </span>
           <select
+            id="pin-answer-workspace"
+            name="pin-answer-workspace"
             value={selectedWorkspaceId}
             onChange={(event) => onWorkspaceChange(event.target.value)}
             className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
-            aria-label="Workspace for pinned chat answer"
           >
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
@@ -2940,8 +2982,13 @@ function HostedChatConsentModal({
             </div>
           </div>
         </div>
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <label
+          htmlFor="remember-hosted-provider-confirmation"
+          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+        >
           <input
+            id="remember-hosted-provider-confirmation"
+            name="remember-hosted-provider-confirmation"
             type="checkbox"
             checked={remember}
             onChange={(event) => onRememberChange(event.target.checked)}
@@ -2999,11 +3046,13 @@ function RenameConversationModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <label className="block">
+        <label htmlFor="conversation-title" className="block">
           <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Conversation title
           </span>
           <input
+            id="conversation-title"
+            name="conversation-title"
             value={title}
             onChange={(event) => onTitleChange(event.target.value)}
             autoFocus
@@ -3224,12 +3273,20 @@ function fallbackProgressSteps(
     {
       id: "context-pack",
       label: "Build answer context",
-      status: stage === "building-context" ? "active" : "pending",
+      status:
+        stage === "building-context"
+          ? "active"
+          : stage === "running-tools" || stage === "generating-answer"
+            ? "completed"
+            : "pending",
     },
     {
       id: "model-answer",
       label: "Generate response",
-      status: stage === "generating-answer" ? "active" : "pending",
+      status:
+        stage === "running-tools" || stage === "generating-answer"
+          ? "active"
+          : "pending",
     },
   ];
 }
@@ -3256,7 +3313,11 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
 
   return (
     <div className="flex justify-start">
-      <div className="w-full max-w-[560px] rounded-xl bg-[var(--color-bg-raised)] px-3.5 py-3 ring-1 ring-[var(--color-border-soft)]">
+      <div
+        role="status"
+        aria-live="polite"
+        className="w-full max-w-[560px] rounded-xl bg-[var(--color-bg-raised)] px-3.5 py-3 ring-1 ring-[var(--color-border-soft)]"
+      >
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-text)]">
             {progress.message}
@@ -3265,9 +3326,16 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
             {completedCount}/{progress.steps.length}
           </div>
         </div>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border-soft)]">
+        <div
+          className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border-soft)]"
+          role="progressbar"
+          aria-label={progress.message}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+        >
           <div
-            className={`h-full rounded-full transition-all duration-300 ${
+            className={`h-full rounded-full transition-[width,background-color] duration-300 ${
               hasFailed
                 ? "bg-[var(--color-danger)]"
                 : isComplete
@@ -3297,6 +3365,9 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
                   </div>
                 )}
               </div>
+              <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+                {statusLabel(step.status)}
+              </span>
             </div>
           ))}
         </div>
@@ -3313,26 +3384,35 @@ function ProgressStepGlyph({
   if (status === "completed") {
     return (
       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/35">
-        <IconCheck size={10} />
+        <IconCheck size={10} aria-hidden="true" />
       </span>
     );
   }
   if (status === "failed") {
     return (
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[10px] font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35">
+      <span
+        aria-hidden="true"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[10px] font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35"
+      >
         !
       </span>
     );
   }
   if (status === "active") {
     return (
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)]">
+      <span
+        aria-hidden="true"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)]"
+      >
         <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
       </span>
     );
   }
   return (
-    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 ring-[var(--color-text)]/25">
+    <span
+      aria-hidden="true"
+      className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 ring-[var(--color-text)]/25"
+    >
       <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-text-soft)]" />
     </span>
   );
@@ -3368,6 +3448,7 @@ function EmptyChat({
           {promptGroups.map((group) => (
             <button
               key={group.label}
+              type="button"
               onClick={() => setActiveGroup(group.label)}
               className={`rounded-lg px-3 py-1.5 text-[11.5px] transition-colors ${focusRingClass} ${
                 activeGroup === group.label
@@ -3467,6 +3548,9 @@ function ChatMessageBubble({
             </div>
             <SourceDetails sources={message.sources} />
           </>
+        )}
+        {!isUser && message.toolTrace && message.toolTrace.length > 0 && (
+          <ToolTraceDetails trace={message.toolTrace} />
         )}
         {!isUser && message.agentSuggestions && message.agentSuggestions.length > 0 && (
           <div className="mt-4 flex flex-col gap-2">
@@ -3613,6 +3697,57 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
   );
 }
 
+function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
+  return (
+    <div className="mt-2">
+      <OutputPaneSection
+        title="What ran"
+        subtitle={`${trace.length} read-only tool call${trace.length === 1 ? "" : "s"}`}
+        defaultCollapsed
+        bodyClassName="p-2"
+      >
+        <div className="grid gap-2">
+          {trace.map((entry, index) => (
+            <div
+              key={entry.id}
+              className="rounded-md bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] text-[var(--color-text)]">
+                    {index + 1}. {entry.tool}
+                  </div>
+                  <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                    {summarizeToolParams(entry.params)}
+                  </div>
+                </div>
+                <Pill tone={entry.error ? "warning" : "success"}>
+                  {entry.durationMs} ms
+                </Pill>
+              </div>
+              <div className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                {entry.resultSummary}
+              </div>
+              {entry.error && (
+                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-[11px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                  {entry.error}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </OutputPaneSection>
+    </div>
+  );
+}
+
+function summarizeToolParams(params: unknown): string {
+  if (!params || typeof params !== "object") return "{}";
+  const json = JSON.stringify(params);
+  if (!json) return "{}";
+  return json.length > 180 ? `${json.slice(0, 180)}...` : json;
+}
+
 function SourceFact({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -3644,6 +3779,7 @@ function chatResourceLabel(resource: GraphCacheResourceKind): string {
     deviceHealthScripts: "Remediations",
     deviceManagementScripts: "Platform scripts",
     directoryAudits: "Directory audit logs",
+    intuneAuditEvents: "Intune audit events",
     endpointSecurityIntents: "Endpoint security policies",
     entraDevices: "Entra devices",
     groupPolicyConfigurations: "Administrative templates",
@@ -3724,6 +3860,16 @@ function buildConversationExportMarkdown(input: {
         lines.push(`  - Capped: ${source.pageLimitReached ? "yes" : "no"}`);
         lines.push(`  - Refreshed: ${source.refreshedAt ?? "not refreshed"}`);
         if (source.error) lines.push(`  - Error: ${source.error}`);
+      }
+      lines.push("");
+    }
+
+    if (message.toolTrace?.length) {
+      lines.push("### What Ran", "");
+      for (const entry of message.toolTrace) {
+        lines.push(`- \`${entry.tool}\` · ${entry.resultSummary} · ${entry.durationMs} ms`);
+        lines.push(`  - Params: \`${summarizeToolParams(entry.params)}\``);
+        if (entry.error) lines.push(`  - Error: ${entry.error}`);
       }
       lines.push("");
     }
@@ -3843,6 +3989,7 @@ function AgentSuggestionCard({
   onRun: () => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsId = useId();
   const visibleScopes = suggestion.scopes.slice(0, 3);
   const hiddenScopeCount = Math.max(0, suggestion.scopes.length - visibleScopes.length);
   const matchedTerms = suggestion.matchedTerms ?? [];
@@ -3870,6 +4017,8 @@ function AgentSuggestionCard({
             size="sm"
             variant="ghost"
             onClick={() => setDetailsOpen((current) => !current)}
+            aria-expanded={detailsOpen}
+            aria-controls={detailsId}
           >
             {detailsOpen ? "Hide details" : "Details"}
           </Button>
@@ -3885,7 +4034,10 @@ function AgentSuggestionCard({
         </div>
       </div>
       {detailsOpen && (
-        <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-[11px] leading-5 text-[var(--color-text-muted)]">
+        <div
+          id={detailsId}
+          className="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-[11px] leading-5 text-[var(--color-text-muted)]"
+        >
           <div>{suggestion.reason}</div>
           {(matchedTerms.length > 0 ||
             matchedConcepts.length > 0 ||

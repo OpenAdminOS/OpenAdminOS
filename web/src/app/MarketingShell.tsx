@@ -18,6 +18,12 @@ export function MarketingShell({ children }: { children: ReactNode }) {
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_72%)]"
       />
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#070709]"
+      >
+        Skip to content
+      </a>
       <header className="relative z-30 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
         <Link
           href="/"
@@ -51,7 +57,11 @@ export function MarketingShell({ children }: { children: ReactNode }) {
         <MobileNav items={MARKETING_NAV_ITEMS} />
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-7xl flex-1 px-6 pb-20 pt-10 sm:px-10">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="relative z-10 mx-auto w-full max-w-7xl flex-1 px-6 pb-20 pt-10 sm:px-10"
+      >
         {children}
       </main>
 
@@ -78,6 +88,13 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             className="underline-offset-4 transition hover:text-white/70 hover:underline"
           >
             Legal notice
+          </Link>
+          {" · "}
+          <Link
+            href="/examples"
+            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+          >
+            Examples
           </Link>
           {" · "}
           <Link

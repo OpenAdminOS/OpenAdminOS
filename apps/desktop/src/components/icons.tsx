@@ -6,6 +6,8 @@ const base = (size: number, props: IconProps) => ({
   width: size,
   height: size,
   viewBox: "0 0 24 24",
+  "aria-hidden": props["aria-label"] || props["aria-labelledby"] ? undefined : true,
+  focusable: false,
   fill: "none",
   stroke: "currentColor",
   strokeWidth: 1.6,
@@ -33,6 +35,17 @@ export const IconHub = ({ size = 18, ...p }: IconProps) => (
 export const IconActivity = ({ size = 18, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <path d="M3 12 H7 L9.5 5 L14 19 L16.5 12 H21" />
+  </svg>
+);
+
+export const IconChanges = ({ size = 18, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M7 5 V15" />
+    <circle cx="7" cy="5" r="2" />
+    <circle cx="7" cy="19" r="2" />
+    <path d="M7 15 C7 11 12 11 12 7 V5" />
+    <path d="M15 5 H21" />
+    <path d="M18 2 V8" />
   </svg>
 );
 

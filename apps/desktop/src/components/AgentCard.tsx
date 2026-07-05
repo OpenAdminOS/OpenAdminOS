@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import type { Agent } from "../types";
+import type { AgentDisplay } from "../shared/agent-display";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
 import { Button } from "./Button";
@@ -21,7 +21,7 @@ function timeSince(iso?: string): string {
   return `Ran ${d}d ago`;
 }
 
-const categoryAccent: Record<Agent["category"], string> = {
+const categoryAccent: Record<AgentDisplay["category"], string> = {
   devices: "from-[#e8a87c]/16 to-[#e8a87c]/4",
   apps: "from-[#a3bfd9]/16 to-[#a3bfd9]/4",
   policies: "from-[#9cc88f]/16 to-[#9cc88f]/4",
@@ -33,13 +33,13 @@ export function AgentCard({
   agent,
   onRun,
 }: {
-  agent: Agent;
-  onRun?: (agent: Agent) => void;
+  agent: AgentDisplay;
+  onRun?: (agent: AgentDisplay) => void;
 }) {
   const navigate = useNavigate();
 
   return (
-    <Card interactive onClick={() => navigate(`/agents/${agent.slug}`)}>
+    <Card className="transition-colors duration-150 hover:bg-[var(--color-surface-hover)] hover:ring-[var(--color-border-strong)]">
       <div className="flex flex-col gap-4 p-5">
         <div className="flex items-start gap-3">
           <div
@@ -55,8 +55,14 @@ export function AgentCard({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h3 className="truncate text-[14px] font-medium text-[var(--color-text)]">
-                {agent.name}
+              <h3 className="min-w-0 truncate text-[14px] font-medium text-[var(--color-text)]">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/agents/${agent.slug}`)}
+                  className="max-w-full truncate rounded text-left transition-colors hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+                >
+                  {agent.name}
+                </button>
               </h3>
             </div>
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">

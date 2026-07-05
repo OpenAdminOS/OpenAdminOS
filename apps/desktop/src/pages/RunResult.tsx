@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
@@ -22,6 +22,7 @@ import {
 import { ShareMenu } from "../components/ShareMenu";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
+import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { RunTelemetry } from "../components/RunTelemetry";
 import { useToast } from "../components/Toast";
@@ -65,6 +66,8 @@ export default function RunResult() {
     model: run?.model,
   });
   const [now, setNow] = useState(() => Date.now());
+  const shouldShowResult =
+    run?.result !== undefined || run?.status === "completed" || run?.status === "failed";
 
   useEffect(() => {
     if (!isLive) return;
@@ -91,10 +94,11 @@ export default function RunResult() {
         <PageHeader
           eyebrow={
             <button
+              type="button"
               onClick={() => navigate("/activity")}
               className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
             >
-              <IconArrowLeft size={12} /> Run history
+              <IconArrowLeft size={12} aria-hidden="true" /> Run history
             </button>
           }
           title="Run not found"
@@ -134,10 +138,11 @@ export default function RunResult() {
       <PageHeader
         eyebrow={
           <button
+            type="button"
             onClick={() => navigate("/activity")}
             className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
           >
-            <IconArrowLeft size={12} /> Run history
+            <IconArrowLeft size={12} aria-hidden="true" /> Run history
           </button>
         }
         title={agent?.name ?? run.agentSlug}
@@ -149,8 +154,15 @@ export default function RunResult() {
                 {statusLabel(run.status)}
               </Pill>
               {isLive && (
-                <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]">
-                  <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-warning)]" />
+                <span
+                  role="status"
+                  aria-live="polite"
+                  className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-warning)]"
+                  />
                   Streaming updates
                 </span>
               )}
@@ -171,6 +183,8 @@ export default function RunResult() {
               <span>{formatDate(run.queuedAt)}</span>
               <span className="opacity-50">·</span>
               <button
+                type="button"
+                aria-label={`Copy run id ${run.id}`}
                 onClick={() => {
                   void copyTextToClipboard(run.id)
                     .then(() => toast.success("Run ID copied."))
@@ -181,7 +195,7 @@ export default function RunResult() {
                 title="Copy run id"
                 className="inline-flex items-center gap-1 font-mono transition-colors hover:text-[var(--color-text)]"
               >
-                <IconCopy size={10} />
+                <IconCopy size={10} aria-hidden="true" />
                 <span>{run.id.slice(0, 8)}</span>
               </button>
             </span>
@@ -317,6 +331,8 @@ export default function RunResult() {
 
         <RunFailureRemediation run={run} />
 
+        {shouldShowResult && <ResultPanel run={run} />}
+
         <div className="mb-6 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
           <RunTelemetry
             run={run}
@@ -331,6 +347,7 @@ export default function RunResult() {
 
         <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
           <span
+            aria-hidden="true"
             className={
               runProvider?.isLocal
                 ? "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
@@ -345,12 +362,17 @@ export default function RunResult() {
 }
 
 function statusIcon(status: RunStatus) {
-  if (status === "completed") return <IconCheck size={10} />;
+  if (status === "completed") return <IconCheck size={10} aria-hidden="true" />;
   if (status === "failed" || status === "rejected" || status === "cancelled") {
-    return <IconWarning size={10} />;
+    return <IconWarning size={10} aria-hidden="true" />;
   }
-  if (status === "awaiting-confirmation") return <IconBolt size={10} />;
-  return <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current" />;
+  if (status === "awaiting-confirmation") return <IconBolt size={10} aria-hidden="true" />;
+  return (
+    <span
+      aria-hidden="true"
+      className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current"
+    />
+  );
 }
 
 function OutcomeCard({
@@ -452,6 +474,7 @@ function OutcomeCard({
           <div className="mt-4 rounded-md bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
             <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-text)]">
               <span
+                aria-hidden="true"
                 className={
                   providerIsLocal
                     ? "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
@@ -478,14 +501,25 @@ function LiveReportPreview({
   streaming: boolean;
 }) {
   return (
-    <div className="relative mt-4 max-w-[920px]">
+    <div
+      className="relative mt-4 max-w-[920px]"
+      aria-live={streaming ? "polite" : undefined}
+      aria-busy={streaming || undefined}
+    >
       <MarkdownPreview
         source={source}
         className="text-[14px] font-normal leading-relaxed text-[var(--color-text)]"
       />
       {streaming && (
-        <span className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
-          <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-accent)]" />
+        <span
+          role="status"
+          aria-live="polite"
+          className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]"
+        >
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-accent)]"
+          />
           generating report
         </span>
       )}
@@ -744,11 +778,17 @@ function DiffConfirmPanel({
                     {plan.confirmationPhrase}
                   </span>
                 </div>
+                <label htmlFor="run-confirmation-phrase" className="sr-only">
+                  Type confirmation phrase
+                </label>
                 <input
+                  id="run-confirmation-phrase"
+                  name="run-confirmation-phrase"
                   autoFocus
                   value={typed}
                   onChange={(event) => setTyped(event.target.value)}
                   placeholder="Type here to enable Apply"
+                  autoComplete="off"
                   disabled={busy}
                   className={`h-11 rounded-lg bg-[var(--color-bg)] px-4 font-mono text-[13px] text-[var(--color-text)] ring-1 placeholder:text-[var(--color-text-muted)] focus:outline-none ${
                     armed
@@ -777,7 +817,9 @@ function DiffConfirmPanel({
               </div>
 
               {error && (
-                <div className="mt-3 text-[12px] text-[var(--color-danger)]">{error}</div>
+                <div role="alert" className="mt-3 text-[12px] text-[var(--color-danger)]">
+                  {error}
+                </div>
               )}
             </div>
           </div>
@@ -789,6 +831,7 @@ function DiffConfirmPanel({
 
 function ActionRow({ action, index }: { action: WriteAction; index: number }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const previewId = useId();
   const destructive = action.severity === "destructive";
   // For graph-write actions we display the HTTP method as the badge;
   // for the legacy retire-managed-device kind (no rendered request)
@@ -819,10 +862,13 @@ function ActionRow({ action, index }: { action: WriteAction; index: number }) {
           <button
             type="button"
             onClick={() => setPreviewOpen((open) => !open)}
-            className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text-soft)]"
+            aria-expanded={previewOpen}
+            aria-controls={previewId}
+            className="inline-flex items-center gap-1.5 rounded text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text-soft)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
           >
             <IconChevronDown
               size={10}
+              aria-hidden="true"
               style={{
                 transform: previewOpen ? "rotate(0deg)" : "rotate(-90deg)",
                 transition: "transform 0.15s ease",
@@ -831,7 +877,10 @@ function ActionRow({ action, index }: { action: WriteAction; index: number }) {
             {previewOpen ? "Hide request preview" : "Show request preview"}
           </button>
           {previewOpen && (
-            <pre className="mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            <pre
+              id={previewId}
+              className="mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+            >
               {formatRequestPreview(action.request)}
             </pre>
           )}

@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/runtime",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -21,13 +21,13 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.2.1",
-    "@openadminos/agent-sdk": "0.2.5",
-    "@openadminos/connector-discord": "0.2.5",
-    "@openadminos/connector-outlook": "0.2.5",
-    "@openadminos/connector-signal": "0.2.5",
-    "@openadminos/connector-slack": "0.2.5",
-    "@openadminos/connector-teams": "0.2.5",
-    "@openadminos/connector-whatsapp-web": "0.2.5",
+    "@openadminos/agent-sdk": "0.3.0",
+    "@openadminos/connector-discord": "0.3.0",
+    "@openadminos/connector-outlook": "0.3.0",
+    "@openadminos/connector-signal": "0.3.0",
+    "@openadminos/connector-slack": "0.3.0",
+    "@openadminos/connector-teams": "0.3.0",
+    "@openadminos/connector-whatsapp-web": "0.3.0",
     "js-yaml": "^4.1.1"
   },
   "optionalDependencies": {

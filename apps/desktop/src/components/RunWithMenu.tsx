@@ -84,10 +84,11 @@ export function RunWithMenu({
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Choose provider or model for this run"
         title="Run with a specific provider or model"
         className="!rounded-l-none !border-l !border-[var(--color-bg)]/30 !px-2"
       >
-        <IconChevronDown size={11} />
+        <IconChevronDown size={11} aria-hidden="true" />
       </Button>
       {open && (
         <div

@@ -3,10 +3,12 @@ import type {
   HostPlatform,
   OpenAdminOSApi,
   AgentCommunitySubmissionMetadata,
+  ExportAuditLogInput,
   PendingConnectorConfirmation,
   PendingConnectorDecision,
   ProviderId,
   SaveTextFileArgs,
+  SetAzureOpenAIProviderConfigInput,
   SupportBundleInput,
   SupportIssueSubmissionInput,
   StartRunOptions,
@@ -68,6 +70,10 @@ const api: OpenAdminOSApi = {
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
   testProvider: (providerId: ProviderId, model?: string) =>
     ipcRenderer.invoke("openadminos:test-provider", providerId, model),
+  getAzureOpenAIConfig: () =>
+    ipcRenderer.invoke("openadminos:get-azure-openai-config"),
+  setAzureOpenAIConfig: (input: SetAzureOpenAIProviderConfigInput) =>
+    ipcRenderer.invoke("openadminos:set-azure-openai-config", input),
   listIntuneChatConversations: () =>
     ipcRenderer.invoke("openadminos:list-intune-chat-conversations"),
   searchIntuneChatConversations: (query: string) =>
@@ -209,6 +215,14 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:refresh-graph-cache", options),
   getGraphCacheStatus: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-status", tenantId),
+  getDriftTimeline: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-timeline", input),
+  getDriftEntryDetail: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-entry-detail", input),
+  getDriftObjectHistory: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-object-history", input),
+  getDriftStatus: (tenantId: string) =>
+    ipcRenderer.invoke("openadminos:get-drift-status", tenantId),
   getGraphCacheRefreshSchedule: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-refresh-schedule", tenantId),
   setGraphCacheRefreshSchedule: (input) =>
@@ -219,6 +233,24 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:clear-intune-chat-history"),
   clearGraphCache: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:clear-graph-cache", tenantId),
+  getRunHistoryRetentionSettings: () =>
+    ipcRenderer.invoke("openadminos:get-run-history-retention-settings"),
+  setRunHistoryRetentionSettings: (input) =>
+    ipcRenderer.invoke("openadminos:set-run-history-retention-settings", input),
+  pruneRunHistoryNow: () =>
+    ipcRenderer.invoke("openadminos:prune-run-history-now"),
+  getDriftRetentionSettings: () =>
+    ipcRenderer.invoke("openadminos:get-drift-retention-settings"),
+  setDriftRetentionSettings: (input) =>
+    ipcRenderer.invoke("openadminos:set-drift-retention-settings", input),
+  pruneDriftHistoryNow: () =>
+    ipcRenderer.invoke("openadminos:prune-drift-history-now"),
+  exportAuditLog: (input: ExportAuditLogInput) =>
+    ipcRenderer.invoke("openadminos:export-audit-log", input),
+  getChatInvestigationSettings: () =>
+    ipcRenderer.invoke("openadminos:get-chat-investigation-settings"),
+  setChatInvestigationMode: (mode) =>
+    ipcRenderer.invoke("openadminos:set-chat-investigation-mode", mode),
   getSelfTrainingSettings: () =>
     ipcRenderer.invoke("openadminos:get-self-training-settings"),
   setSelfTrainingEnabled: (enabled: boolean) =>

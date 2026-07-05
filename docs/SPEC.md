@@ -35,8 +35,8 @@ Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose
 ```
 openadminos/
 ├── apps/
-│   ├── desktop/              # Electron main + preload + renderer (Vite + React)
-│   └── marketing/            # Public marketing site (openadminos.com) — Next.js
+│   └── desktop/              # Electron main + preload + renderer (Vite + React)
+├── web/                      # Public marketing site (openadminos.com) — Next.js
 ├── packages/
 │   ├── runtime/              # Agent execution engine
 │   ├── llm/                  # Provider abstraction + concrete providers
@@ -67,6 +67,7 @@ openadminos/
 We previously planned for Tauri (smaller binaries, native webview). After analyzing the real constraints, we flipped to Electron. Reasoning:
 
 - **Developer velocity is the primary constraint.** Pure TS/Node end-to-end. No Rust toolchain, no two-language IPC bridge. MSAL Node, Electron's built-in `node:sqlite`, OS keychain storage, and `electron-updater` all work in the main process. `better-sqlite3` was avoided for the v0.2.2 chat/cache layer because it did not rebuild cleanly against Electron 42's Node/V8 ABI in local verification.
+- **MSAL is a desktop dependency as well as a runtime dependency.** Electron main imports `@azure/msal-node` types directly for tenant state, so `apps/desktop` declares the package explicitly. This keeps npm and pnpm workspaces from resolving separate MSAL type identities between Electron main and `@openadminos/runtime`.
 - **Open-source contributor pool.** Community contributions (agents and UI) come from JS/TS devs. Tauri's Rust shell raises the bar for any contributor who wants to fix more than an agent.
 - **UI fidelity.** Chromium everywhere = identical rendering on Win/Mac/Linux. The design language (dense, dark, custom scrollbars, GPU-accelerated transitions) is more reliable on Chromium than on platform-native webviews.
 - **Proven path for this category.** Claude Desktop, VS Code, Linear, Slack, Figma, 1Password — all Electron. The "Electron is bloated" critique mattered more on 8GB-RAM machines than on modern admin workstations.
@@ -138,6 +139,9 @@ The marketing navbar keeps a compact primary set: Blog, Documentation, GitHub,
 and Download. The Intune use-case page, registry page, and trust-model page
 remain published and indexable even though they are no longer primary navbar
 items, because they target durable admin search and product-evaluation topics.
+The examples gallery at `/examples` is also a secondary marketing page, with
+copyable Build your own Agent prompts grouped by read investigations, confirmed
+write plans, and connector-backed delivery examples.
 The marketing homepage uses a seven-section structure: hero ("AI agents for
 your Microsoft 365 tenant. Run locally, approved by you."), a pre-rendered
 product demo video, a traction strip, a three-step "How it works" section, the
@@ -239,12 +243,40 @@ the test runs a tiny completion and reports the model and response time. This is
 intentionally visible because hosted/local provider trust is a core product
 decision, not hidden plumbing.
 
+Anthropic support is delivered through the user's locally installed Claude Code
+CLI (`claude`) rather than a stored Anthropic API key. OpenAdminOS probes the CLI
+version and Claude Code auth status, requires Claude Code 2.1.200 or newer, then
+invokes non-interactive print mode with session persistence off, Claude Code
+customizations disabled, MCP config locked down, and all Claude Code tools
+disabled. System prompts are passed with Claude Code's system-prompt flag rather
+than stored in OpenAdminOS. This preserves the "no vendor API keys in
+OpenAdminOS" boundary, but tenant prompts still leave the device because the
+selected Claude model is hosted by Anthropic.
+
+Azure OpenAI support is a direct API-key provider, not a local CLI bridge.
+Settings -> LLM Providers collects the Azure OpenAI endpoint URL, deployment
+name, API version, and a write-only API key. The renderer can read only
+non-secret configuration plus a `hasKey` boolean; stored keys are never
+displayed back to the renderer. The host stores the key encrypted with the
+desktop OS secure-storage backend and sends it only to the configured Azure
+OpenAI endpoint when Azure OpenAI is the active hosted provider. The provider
+status becomes available after endpoint, deployment, API version, and key are
+present; the Settings test action runs a minimal chat completion before admins
+send tenant context.
+
 Local-provider trust is endpoint-sensitive. Ollama is local only when the
 configured endpoint is loopback (`localhost`, `127.0.0.0/8`, IPv6 loopback, or
 IPv4-mapped loopback) or a Unix socket. If `OPENAGENTS_OLLAMA_URL` points at a
 LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
 provider summary flips to external/hosted-style trust messaging and Intune Chat
 requires hosted-provider confirmation before tenant context is sent.
+
+LM Studio support uses its local OpenAI-compatible server at
+`http://localhost:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
+development override. Like Ollama, LM Studio is local only when the configured
+HTTP endpoint resolves to loopback. A LAN, internet, wildcard, or invalid
+endpoint flips the provider to external trust messaging before tenant prompts
+are sent.
 
 Apple Foundation support uses Apple's on-device Foundation Models framework
 through a small signed macOS helper binary bundled with the Electron app. The
@@ -705,10 +737,35 @@ This is modeled on **Home Assistant integrations** (https://developers.home-assi
 SQLite via Electron's built-in `node:sqlite` for:
 - Tenant configurations (encrypted via OS keychain for tokens)
 - Installed agent registry
-- Run history (full structured logs)
+- Run history (full structured logs; the current desktop host persists `RunRecord[]` in profile `state.json` until the storage package migration moves it behind SQLite)
 - LLM provider configurations (with hosted-provider API keys in OS keychain)
 - Intune Chat conversations, tool calls, Graph cache snapshots, and per-tenant cache refresh schedules
+- Tenant drift snapshot/version history for config-tier Graph cache resources; high-churn inventory resources stay out of drift tracking
 - Optional local self-training events and approved suggestions
+
+Run history retention is configurable in Settings -> General. The default policy
+is deliberately generous: keep the newest 500 runs and any run queued in the
+last 180 days. A run is pruned only when it falls outside every enabled keep
+rule; admins can disable the count rule, disable the age rule, or choose
+never-prune. Pruning runs at desktop startup and on the existing scheduler tick,
+and Settings also exposes a manual "Prune now" action. The pruner must never
+delete a run that is linked to or pinned in a Workspace, currently queued or
+running, or awaiting write confirmation. Settings surfaces the last prune result
+so local deletion is not silent.
+
+Audit log export lives in Settings -> General next to run-history retention.
+It is an explicit local save only, never an upload. JSON and CSV exports include
+retained run-history events, write-confirmation request/accepted/rejected
+events without exporting the typed phrase content, connector delivery audit
+entries from `ConnectorAuditEntry`, and hosted-provider consent events recorded
+in the SQLite `audit_events` table from this version onward. The export header
+records the active run-history retention policy and the last prune result when
+present so missing old runs are explainable. Each exported event carries a
+SHA-256 hash chained as
+`previousHash + canonical JSON event without sha256`, starting from 64 zeroes;
+JSON records the start and final hash in `hashChain`, and CSV includes the hash
+and chain metadata columns. Signed or third-party cryptographic timestamps are
+deferred.
 
 Linux tenant sign-in requires a real OS secret-store backend. OpenAdminOS uses
 Electron `safeStorage` for the MSAL token cache and refuses Electron's
@@ -792,6 +849,30 @@ renderer keeps a transient in-flight draft so background history/cache reloads
 cannot leave a send in "Thinking" without a visible prompt and progress card.
 Live Graph refreshes triggered by chat write successful rows back into the same
 local SQLite cache used by manual and scheduled refresh.
+
+Single-tenant Intune Chat can run a bounded read-only investigative loop before
+answering. The loop keeps the keyword planner as a cache-warming prefetch hint
+and deterministic fallback, then asks the selected provider to use a prompt
+protocol with one fenced JSON tool call per iteration:
+`{"tool":"query_cache","params":{...}}` or a final
+`{"final":true,"answer":"..."}` object. The host parses the response, executes
+only host-owned read tools, appends observations, and stops after at most six
+iterations. Malformed tool JSON gets one repair prompt; a second malformed
+response or the iteration cap produces a visible fallback notice and answers
+   through the deterministic planner path. The toolset is strictly read-only:
+   `list_cached_resources`, `query_cache`, `graph_get`, `refresh_resource`, and
+   `query_drift`.
+`graph_get` accepts only GET, validates paths against the chat Graph cache
+declarations and bundled Graph catalog read scopes, caps `$top` and returned rows
+at 50, and truncates large live payloads before they return to the model. Every
+tool call streams as a visible progress step and is persisted in `chat_tool_calls`
+with the completed assistant message; the renderer shows a collapsible "What
+ran" trace with tool name, parameters summary, result summary, duration, and
+errors. Settings -> Intune Chat exposes **Chat investigation mode** with `auto`
+(default), `always agentic`, and `always deterministic`. In auto mode, hosted
+providers and known-capable local models use investigative mode; local models
+whose names indicate a tiny/small/mini/<7B class fall back to deterministic
+retrieval with honest copy.
 
 Chat does not run without an active tenant. The status strip shows the active
 tenant, provider, model, and data freshness. When the selected provider is local,
@@ -923,11 +1004,12 @@ at the top of the chat history rail under a collapsible Pinned section, separate
 from Recent conversations. Conversation rows expose a right-click context menu
 for local deletion while still using the same product confirmation modal as the
 header Delete action.
-Settings -> Intune Chat also exposes a local data summary for the SQLite store:
-database size, chat conversation/message/tool-call counts, active-tenant Graph
-cache rows, and self-training event/suggestion counts. Clearing all chat history
-uses an explicit product modal and removes only local conversations, messages,
-and chat tool-call records.
+Settings -> Intune Chat also exposes a local data summary for local storage:
+SQLite database size, chat conversation/message/tool-call counts, active-tenant
+Graph cache rows, self-training event/suggestion counts, run-history record
+count, and the last run-history prune result. Clearing all chat history uses an
+explicit product modal and removes only local conversations, messages, and chat
+tool-call records.
 
 Claude-style Projects are a useful reference, but the OpenAdminOS version is
 called **Workspaces**. Workspaces are tenant-scoped investigation containers, not
@@ -1019,6 +1101,7 @@ Initial cache targets:
 - `/deviceManagement/troubleshootingEvents`
 - `/auditLogs/signIns`
 - `/auditLogs/directoryAudits`
+- `/deviceManagement/auditEvents`
 - `/identity/conditionalAccess/policies`
 
 Initial tenant connection requests the Graph PM-audited read scopes needed for
@@ -1060,6 +1143,49 @@ The v0.2.2 cache uses compact `$select` lists for sign-ins and directory audits,
 validated against Microsoft Graph beta through the Microsoft Graph MCP, so local
 SQLite growth stays bounded before the answer-pack compaction step.
 
+#### Tenant drift timeline
+
+Tenant drift tracks configuration-tier Graph resources where change history is
+useful to an Intune/Entra admin: compliance policies, configuration profiles,
+settings catalog policies, Conditional Access policies, apps and app-management
+policies, scripts/remediations, Autopilot/enrollment profiles, Windows update
+policies, endpoint security intents, group policy configurations, assignment
+filters, and scope tags. High-churn inventory and event resources such as
+managed devices, detected apps, sign-ins, troubleshooting events, overview
+aggregates, and encryption state stay out of drift tracking so the timeline does
+not become noise or a storage sink.
+
+Snapshots are created only when the normal Graph cache refresh writes a tracked
+resource. A first refresh establishes a baseline; later refreshes compare the
+new canonicalized rows against the previous version for each object and store
+added, removed, or modified object-version intervals. Refreshing audit resources
+can improve attribution, but answering a drift query never calls Microsoft Graph.
+The desktop host exposes timeline, entry detail, object history, and status APIs
+from local SQLite snapshot/version rows.
+
+Diffs are deterministic. The host canonicalizes tracked objects, ignores known
+volatile fields, hashes canonical JSON, and computes field-level before/after
+paths with the pure diff engine. The LLM never computes drift and is not allowed
+to invent a changed field; it can only summarize bounded rows returned by the
+host APIs or the read-only `query_drift` chat tool. Detail APIs omit raw
+before/after bodies once either serialized side exceeds 48 KB, while retaining
+the field-change list.
+
+Attribution is honest rather than guessed. At query time the host joins the
+diffed object id to cached Intune audit events and directory audits within the
+previous-snapshot-to-current-snapshot window, padded five minutes backward for
+clock skew. A matched result may show the actor UPN or app display name plus the
+source audit family. If no cached audit row matches, attribution is `unknown`.
+If either audit cache is absent or older than the snapshot window, the result is
+`audit-cache-stale` so the UI can ask the admin to refresh audit data instead of
+implying that a real actor could not be found.
+
+Change history retention is local and configurable in Settings -> General. The
+default keeps snapshot/version history for 180 days, bounded to 30-730 days, with
+a never-prune option. Pruning runs at startup, on the scheduler tick, and through
+the manual Settings action. Current object state is never deleted by drift
+retention; only old historical snapshots and stale object versions are removed.
+
 Verification for the chat surface includes `npm run smoke:intune-chat`. The smoke
 test launches Electron in a dev-only fixture mode, seeds a local tenant, drives
 the real preload/IPC chat path through a 10-prompt pass, verifies a grounded
@@ -1068,6 +1194,12 @@ response action, accepts a local self-training suggestion, and confirms schedule
 cache refresh UI state.
 This fixture does not replace a final live-tenant pilot run, but it guards the
 desktop path without requiring tenant credentials in CI or local automation.
+The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
+capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.
+It seeds a Contoso Demo tenant with an `.invalid` admin address, a local Ollama
+model, the real registry index from `agents/index.json`, and smoke Graph/LLM
+factories, then writes 1600x1000 PNGs for five app shell routes and every Agent
+Hub registry detail under `docs/screenshots/`.
 
 #### Context-window strategy
 
@@ -1388,12 +1520,14 @@ These must exist and work well before any public release.
 - Settings -> About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, menu bar launch state, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
 - Support issue reporting is visible from the sidebar footer, failed-run remediation cards, and Settings → About. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
-- Run history with filters (agent, tenant, date, status)
-- Audit log export (JSON/CSV with cryptographic timestamps for compliance buyers)
+- Run history with filters (agent, tenant, date, status) and configurable
+  retention for old eligible records
+- Audit log export (JSON/CSV with SHA-256 hash chain; signed timestamps deferred)
 - Keyboard shortcuts (⌘K palette, ⌘R rerun, ⌘/ search, ⌘? help)
 - Agent permissions inspector (browser-extension-style permission screen pre-install)
 - Update / version management (pin by default, explicit upgrade, changelog visible)
-- Logs export and retention policy (where stored, how big, when rotated)
+- Non-run diagnostic log export and retention policy (where stored, how big,
+  when rotated)
 
 ### Designed before launch (not strict blockers)
 
@@ -1479,8 +1613,8 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `06-error-states.html` | 8 error patterns reference | ✅ Done |
 | `07-llm-provider.html` | LLM provider configuration | ✅ Done |
 | `08-tenant-switcher.html` | Multi-tenant management | ✅ Done |
-| `09-registry.html` | Community agent registry browse | ⏳ TODO |
-| `10-empty-states.html` | First-time user empty states | ⏳ TODO |
+| `09-registry.html` | Community agent registry browse | ✅ Done |
+| `10-empty-states.html` | First-time user empty states | ✅ Done |
 | `11-multi-tenant-chat.html` | Multi-tenant Intune Chat scope review and result artifact | ✅ Done |
 | `12-workspaces.html` | Single-tenant Workspaces investigation surface | ✅ Done |
 

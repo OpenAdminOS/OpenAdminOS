@@ -27,6 +27,26 @@ export interface ProviderTestResult {
   durationMs?: number;
 }
 
+export const DEFAULT_AZURE_OPENAI_API_VERSION = "2024-10-21";
+
+export interface AzureOpenAIProviderConfig {
+  endpoint: string;
+  deployment: string;
+  apiVersion: string;
+  hasKey: boolean;
+}
+
+export interface SetAzureOpenAIProviderConfigInput {
+  endpoint: string;
+  deployment: string;
+  apiVersion: string;
+  /**
+   * Write-only. Undefined keeps the existing stored key, a string replaces it,
+   * and null clears it.
+   */
+  apiKey?: string | null;
+}
+
 export type AgentMode = "read" | "write";
 
 export type AgentCategory =
@@ -524,6 +544,124 @@ export interface RunRecord {
   tokens?: LlmTokenUsage;
 }
 
+export const DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS = 500;
+export const DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS = 180;
+
+export interface RunHistoryRetentionSettings {
+  /**
+   * When true, run history pruning is disabled completely. The host still
+   * returns this setting through IPC so Settings can explain why no records
+   * are being removed.
+   */
+  neverPrune: boolean;
+  /**
+   * Keep at least this many newest runs. Undefined disables the count rule.
+   */
+  keepLastRuns?: number;
+  /**
+   * Keep runs queued within this many days. Undefined disables the age rule.
+   */
+  keepDays?: number;
+  updatedAt?: string;
+}
+
+export const DEFAULT_RUN_HISTORY_RETENTION_SETTINGS: RunHistoryRetentionSettings = {
+  neverPrune: false,
+  keepLastRuns: DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
+  keepDays: DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
+};
+
+export interface SetRunHistoryRetentionSettingsInput {
+  neverPrune: boolean;
+  keepLastRuns?: number | null;
+  keepDays?: number | null;
+}
+
+export type RunHistoryPruneTrigger = "startup" | "scheduler" | "manual";
+
+export interface RunHistoryPruneResult {
+  prunedAt: string;
+  trigger: RunHistoryPruneTrigger;
+  policy: RunHistoryRetentionSettings;
+  beforeCount: number;
+  afterCount: number;
+  eligibleCount: number;
+  prunedCount: number;
+  protectedCount: number;
+  protectedWorkspaceCount: number;
+  protectedActiveCount: number;
+  protectedAwaitingConfirmationCount: number;
+  reason: string;
+  oldestPrunedQueuedAt?: string;
+  newestPrunedQueuedAt?: string;
+}
+
+export const DEFAULT_DRIFT_RETENTION_DAYS = 180;
+
+export interface DriftRetentionSettings {
+  /**
+   * When true, drift history pruning is disabled completely. Current object
+   * state is kept regardless of this flag; this only controls historical
+   * snapshot/version rows.
+   */
+  neverPrune: boolean;
+  /**
+   * Keep drift snapshot/version history captured within this many days.
+   * Undefined is valid only when neverPrune is true.
+   */
+  keepDays?: number;
+  updatedAt?: string;
+}
+
+export const DEFAULT_DRIFT_RETENTION_SETTINGS: DriftRetentionSettings = {
+  neverPrune: false,
+  keepDays: DEFAULT_DRIFT_RETENTION_DAYS,
+};
+
+export interface SetDriftRetentionSettingsInput {
+  neverPrune: boolean;
+  keepDays?: number | null;
+}
+
+export type DriftPruneTrigger = "startup" | "scheduler" | "manual";
+
+export interface DriftHistoryPruneResult {
+  prunedAt: string;
+  trigger: DriftPruneTrigger;
+  policy: DriftRetentionSettings;
+  snapshotsDeleted: number;
+  versionsDeleted: number;
+  reason: string;
+}
+
+export type AuditLogExportFormat = "json" | "csv";
+
+export interface ExportAuditLogInput {
+  format: AuditLogExportFormat;
+  /** Inclusive ISO timestamp lower bound. */
+  from?: string;
+  /** Inclusive ISO timestamp upper bound. */
+  to?: string;
+}
+
+export interface AuditLogHashChainSummary {
+  algorithm: "sha256";
+  startHash: string;
+  finalHash: string;
+}
+
+export interface AuditLogExportResult {
+  format: AuditLogExportFormat;
+  suggestedName: string;
+  mimeType: "application/json" | "text/csv";
+  content: string;
+  generatedAt: string;
+  eventCount: number;
+  hashChain: AuditLogHashChainSummary;
+  from?: string;
+  to?: string;
+}
+
 export interface TrustState {
   label: string;
   detail: string;
@@ -628,7 +766,26 @@ export interface IntuneChatMessage {
   providerId?: ProviderId;
   model?: string;
   sources?: IntuneChatSource[];
+  toolTrace?: IntuneChatToolTraceEntry[];
   agentSuggestions?: IntuneChatAgentSuggestion[];
+  error?: string;
+}
+
+export type IntuneChatInvestigationToolName =
+  | "list_cached_resources"
+  | "query_cache"
+  | "graph_get"
+  | "refresh_resource"
+  | "query_drift";
+
+export interface IntuneChatToolTraceEntry {
+  id: string;
+  tool: IntuneChatInvestigationToolName;
+  params: unknown;
+  resultSummary: string;
+  durationMs: number;
+  createdAt: string;
+  completedAt: string;
   error?: string;
 }
 
@@ -636,7 +793,12 @@ export interface IntuneChatToolCall {
   id: string;
   conversationId: string;
   messageId?: string;
-  type: "graph-cache-refresh" | "agent-suggestion" | "agent-run" | "self-training-suggestion";
+  type:
+    | "graph-cache-refresh"
+    | "agent-suggestion"
+    | "agent-run"
+    | "self-training-suggestion"
+    | IntuneChatInvestigationToolName;
   status: "pending" | "completed" | "failed";
   createdAt: string;
   completedAt?: string;
@@ -655,6 +817,7 @@ export type GraphCacheResourceKind =
   | "configurationPolicies"
   | "signIns"
   | "directoryAudits"
+  | "intuneAuditEvents"
   | "conditionalAccessPolicies"
   | "mobileApps"
   | "detectedApps"
@@ -693,6 +856,115 @@ export interface GraphCacheStatus {
   tenantId?: string;
   resources: GraphCacheResourceStatus[];
   schedule?: GraphCacheRefreshScheduleSettings;
+}
+
+export type DriftTimelineChangeKind = "added" | "removed" | "modified" | "baseline";
+
+export interface DriftAttribution {
+  status: "matched" | "unknown";
+  reason?: "audit-cache-stale";
+  actor?: {
+    userPrincipalName?: string;
+    appDisplayName?: string;
+    actorType?: string;
+  };
+  activity?: string;
+  activityDateTime?: string;
+  source?: "intuneAudit" | "directoryAudit";
+  alsoMatched?: number;
+}
+
+export interface DriftFieldChange {
+  path: string;
+  kind: "added" | "removed" | "changed";
+  before?: unknown;
+  after?: unknown;
+}
+
+export interface DriftTimelineInput {
+  tenantId: string;
+  from?: string;
+  to?: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+}
+
+export interface DriftTimelineEntry {
+  id: string;
+  snapshotId: string;
+  capturedAt: string;
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  changeKind: DriftTimelineChangeKind;
+  fieldChangeCount: number;
+  timestampOnly: boolean;
+  graphId?: string;
+  displayName?: string;
+  rowCount?: number;
+  attribution?: DriftAttribution;
+}
+
+export interface DriftTimelineResult {
+  tenantId: string;
+  entries: DriftTimelineEntry[];
+  hasMore: boolean;
+  limit: number;
+}
+
+export interface DriftEntryDetailInput {
+  tenantId: string;
+  snapshotId: string;
+  resource: GraphCacheResourceKind;
+  graphId: string;
+}
+
+export interface DriftEntryDetail {
+  changes: DriftFieldChange[];
+  summary: string;
+  before?: unknown;
+  after?: unknown;
+  truncated?: boolean;
+  attribution?: DriftAttribution;
+}
+
+export interface DriftObjectHistoryInput {
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  limit?: number;
+}
+
+export interface DriftObjectHistoryEntry {
+  version: number;
+  snapshotId: string;
+  capturedAt: string;
+  contentHash: string;
+  displayName?: string;
+  removedSnapshotId?: string;
+  removedAt?: string;
+}
+
+export interface DriftObjectHistoryResult {
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  versions: DriftObjectHistoryEntry[];
+}
+
+export interface DriftResourceStatus {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  baselineCaptured: boolean;
+  baselineCapturedAt?: string;
+  lastSnapshotAt?: string;
+  snapshotCount: number;
+  totalTrackedVersions: number;
+  currentObjectCount: number;
+}
+
+export interface DriftStatus {
+  tenantId: string;
+  resources: DriftResourceStatus[];
 }
 
 export interface RefreshGraphCacheOptions {
@@ -746,6 +1018,11 @@ export interface LocalDataSummary {
   activeTenantId?: string;
   activeTenantGraphRowCount?: number;
   activeTenantCacheResources?: GraphCacheResourceStatus[];
+  runHistoryCount?: number;
+  runHistoryRetention?: RunHistoryRetentionSettings;
+  lastRunHistoryPrune?: RunHistoryPruneResult;
+  driftRetention?: DriftRetentionSettings;
+  lastDriftHistoryPrune?: DriftHistoryPruneResult;
 }
 
 export interface HostedProviderChatConsent {
@@ -1139,6 +1416,7 @@ export type IntuneChatStreamStage =
   | "checking-cache"
   | "refreshing-cache"
   | "building-context"
+  | "running-tools"
   | "generating-answer"
   | "completed"
   | "failed";
@@ -1168,6 +1446,22 @@ export type IntuneChatStreamEvent =
       cacheStatus?: GraphCacheStatus;
     }
   | {
+      type: "tool-step-start";
+      conversationId: string;
+      assistantMessageId: string;
+      tool: IntuneChatInvestigationToolName;
+      params: unknown;
+      message: string;
+      startedAt: string;
+    }
+  | {
+      type: "tool-step-finish";
+      conversationId: string;
+      assistantMessageId: string;
+      traceEntry: IntuneChatToolTraceEntry;
+      message: string;
+    }
+  | {
       type: "delta";
       conversationId: string;
       assistantMessageId: string;
@@ -1189,6 +1483,13 @@ export type IntuneChatStreamEvent =
       type: "cancelled";
       result: SendIntuneChatMessageResult;
     };
+
+export type ChatInvestigationMode = "auto" | "always-agentic" | "always-deterministic";
+
+export interface ChatInvestigationSettings {
+  mode: ChatInvestigationMode;
+  updatedAt?: string;
+}
 
 export interface SelfTrainingSettings {
   enabled: boolean;
@@ -1498,6 +1799,10 @@ export interface OpenAdminOSApi {
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
+  getAzureOpenAIConfig(): Promise<AzureOpenAIProviderConfig>;
+  setAzureOpenAIConfig(
+    input: SetAzureOpenAIProviderConfigInput,
+  ): Promise<AzureOpenAIProviderConfig>;
   listIntuneChatConversations(): Promise<IntuneChatConversation[]>;
   searchIntuneChatConversations(query: string): Promise<IntuneChatConversation[]>;
   renameIntuneChatConversation(
@@ -1542,6 +1847,12 @@ export interface OpenAdminOSApi {
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;
   getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus>;
+  getDriftTimeline?(input: DriftTimelineInput): Promise<DriftTimelineResult>;
+  getDriftEntryDetail?(input: DriftEntryDetailInput): Promise<DriftEntryDetail>;
+  getDriftObjectHistory?(
+    input: DriftObjectHistoryInput,
+  ): Promise<DriftObjectHistoryResult>;
+  getDriftStatus?(tenantId: string): Promise<DriftStatus>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,
@@ -1549,6 +1860,19 @@ export interface OpenAdminOSApi {
   getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary>;
   clearIntuneChatHistory(): Promise<LocalDataSummary>;
   clearGraphCache(tenantId?: string): Promise<LocalDataSummary>;
+  getRunHistoryRetentionSettings(): Promise<RunHistoryRetentionSettings>;
+  setRunHistoryRetentionSettings(
+    input: SetRunHistoryRetentionSettingsInput,
+  ): Promise<RunHistoryRetentionSettings>;
+  pruneRunHistoryNow(): Promise<RunHistoryPruneResult>;
+  getDriftRetentionSettings(): Promise<DriftRetentionSettings>;
+  setDriftRetentionSettings(
+    input: SetDriftRetentionSettingsInput,
+  ): Promise<DriftRetentionSettings>;
+  pruneDriftHistoryNow(): Promise<DriftHistoryPruneResult>;
+  exportAuditLog(input: ExportAuditLogInput): Promise<AuditLogExportResult>;
+  getChatInvestigationSettings(): Promise<ChatInvestigationSettings>;
+  setChatInvestigationMode(mode: ChatInvestigationMode): Promise<ChatInvestigationSettings>;
   getSelfTrainingSettings(): Promise<SelfTrainingSettings>;
   setSelfTrainingEnabled(enabled: boolean): Promise<SelfTrainingSettings>;
   listSelfTrainingSuggestions(status?: SelfTrainingSuggestionStatus): Promise<SelfTrainingSuggestion[]>;
@@ -2556,9 +2880,8 @@ export interface WriteAgentModule extends AgentDefinition {
 
 export type AgentModule = ReadAgentModule | WriteAgentModule;
 
-// TODO(ugur): LM Studio, Anthropic, and Azure OpenAI are kept in the catalog
-// as forward-compat placeholders until adapters land. OpenAI uses the
-// locally-installed Codex CLI, so OpenAdminOS never stores an OpenAI API key.
+// TODO(ugur): Entra ID token auth variant for Azure OpenAI is deferred to v0.4
+// (needs app registration + scope design).
 export const providerCatalog: readonly ProviderSummary[] = [
   {
     id: "ollama",
@@ -2584,20 +2907,20 @@ export const providerCatalog: readonly ProviderSummary[] = [
     id: "lm-studio",
     name: "LM Studio",
     description:
-      "Use LM Studio's local OpenAI-compatible server for private model runs.",
+      "Use LM Studio's local OpenAI-compatible server. Prompts stay on this device when the endpoint is loopback.",
     isLocal: true,
-    status: "not-installed",
-    detail: "Connection check not implemented yet",
+    status: "available",
+    detail: "Waiting for LM Studio server check",
     models: [],
   },
   {
     id: "anthropic",
     name: "Anthropic",
     description:
-      "Hosted Claude models. Tenant prompts leave this device when active.",
+      "Use Claude models through the local Claude Code CLI. Tenant prompts are sent to Anthropic's API when active.",
     isLocal: false,
-    status: "not-installed",
-    detail: "Hosted provider setup is not implemented yet",
+    status: "available",
+    detail: "Waiting for Claude Code CLI connection check",
     models: [],
   },
   {
@@ -2614,10 +2937,10 @@ export const providerCatalog: readonly ProviderSummary[] = [
     id: "azure-openai",
     name: "Azure OpenAI",
     description:
-      "Hosted Azure OpenAI deployments using the organization's Azure boundary.",
+      "Use your Azure OpenAI deployment. Tenant prompts are sent to your Azure resource's endpoint.",
     isLocal: false,
-    status: "not-installed",
-    detail: "Hosted provider setup is not implemented yet",
+    status: "available",
+    detail: "Waiting for Azure OpenAI configuration",
     models: [],
   },
 ];

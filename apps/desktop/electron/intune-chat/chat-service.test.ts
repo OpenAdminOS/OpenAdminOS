@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { AppStateStore } from "../state.js";
+import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
@@ -11,6 +12,21 @@ const tokenStore: TokenCacheStorage = {
   read: async () => "",
   write: async () => undefined,
 };
+
+let originalOllamaUrl: string | undefined;
+
+before(() => {
+  originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
+  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+});
+
+after(() => {
+  if (originalOllamaUrl === undefined) {
+    delete process.env.OPENAGENTS_OLLAMA_URL;
+    return;
+  }
+  process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
+});
 
 describe("Intune Chat host service", () => {
   it("refreshes Graph cache, builds an answer pack, and persists chat messages", async () => {
@@ -22,6 +38,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [
             {
               id: "offboarding-agent",
@@ -140,7 +157,6 @@ describe("Intune Chat host service", () => {
       statsApiUrl: "",
       graphFactory: ({ scopes }) => {
         assert.deepEqual(scopes, [
-          "AuditLog.Read.All",
           "Device.Read.All",
           "DeviceManagementManagedDevices.Read.All",
         ]);
@@ -152,14 +168,13 @@ describe("Intune Chat host service", () => {
     try {
       await store.setSelfTrainingEnabled(true);
       const result = await store.sendIntuneChatMessage({
-        content: "Always retire stale Windows devices that have not synced.",
+        content: "Which stale Windows devices have not synced recently?",
       });
 
       assert.deepEqual(graphRequests, [
         "GET /deviceManagement/managedDevices",
         "GET /deviceManagement/managedDevices?skip=page-2",
         "GET /devices",
-        "GET /auditLogs/signIns",
       ]);
       assert.match(answerPackPrompt, /WIN-01/);
       assert.match(answerPackPrompt, /WIN-02/);
@@ -169,7 +184,7 @@ describe("Intune Chat host service", () => {
       assert.equal(result.assistantMessage.sources?.[0]?.source, "live");
       assert.equal(result.assistantMessage.sources?.[0]?.path, "/deviceManagement/managedDevices");
       assert.ok(result.assistantMessage.sources?.[0]?.select?.includes("lastSyncDateTime"));
-      assert.equal(result.assistantMessage.agentSuggestions?.[0]?.agentSlug, "offboarding-agent");
+      assert.equal(result.assistantMessage.agentSuggestions?.length ?? 0, 0);
       const managedDeviceStatus = result.cacheStatus.resources.find(
         (resource) => resource.resource === "managedDevices",
       );
@@ -183,8 +198,202 @@ describe("Intune Chat host service", () => {
       assert.equal(messages[1]?.role, "assistant");
 
       const suggestions = await store.listSelfTrainingSuggestions("pending");
-      assert.equal(suggestions.length, 1);
-      assert.equal(suggestions[0]?.agentSlug, "offboarding-agent");
+      assert.equal(suggestions.length, 0);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("streams agentic single-tenant chat and persists the tool trace", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "llama3.1:8b" },
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const graph: RunGraphApi = {
+      async listManagedDevices() {
+        return [];
+      },
+      async retireManagedDevice() {
+        throw new Error("retireManagedDevice should not run from chat.");
+      },
+      async request() {
+        return { value: [] };
+      },
+    };
+    let completeCalls = 0;
+    const llm: RunLlmApi = {
+      available: true,
+      defaultModel: "llama3.1:8b",
+      async complete() {
+        completeCalls += 1;
+        if (completeCalls === 1) {
+          return {
+            text: '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
+            model: "llama3.1:8b",
+          };
+        }
+        return {
+          text: '```json\n{"final":true,"answer":"The cache query completed."}\n```',
+          model: "llama3.1:8b",
+        };
+      },
+      async *stream() {
+        throw new Error("deterministic fallback should not run.");
+      },
+    };
+
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => graph,
+      llmFactory: () => llm,
+    });
+    let closed = false;
+
+    try {
+      await store.setChatInvestigationMode("always-agentic");
+      const eventTypes: string[] = [];
+      const result = await store.streamIntuneChatMessage(
+        {
+          content: "Which managed devices should I inspect?",
+          refreshIfStale: false,
+        },
+        (event) => eventTypes.push(event.type),
+      );
+
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.equal(result.assistantMessage.content, "The cache query completed.");
+      assert.equal(result.assistantMessage.toolTrace?.[0]?.tool, "query_cache");
+      assert.ok(eventTypes.includes("tool-step-start"));
+      assert.ok(eventTypes.includes("tool-step-finish"));
+
+      const messages = await store.getIntuneChatMessages(result.conversation.id);
+      assert.equal(messages[1]?.toolTrace?.[0]?.tool, "query_cache");
+      store.close();
+      closed = true;
+
+      const sqlite = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      try {
+        const toolCalls = sqlite.listToolCalls(result.conversation.id);
+        assert.equal(toolCalls.some((call) => call.type === "query_cache"), true);
+      } finally {
+        sqlite.close();
+      }
+    } finally {
+      if (!closed) store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to deterministic streaming when agentic protocol repair fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "llama3.1:8b" },
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const graph: RunGraphApi = {
+      async listManagedDevices() {
+        return [];
+      },
+      async retireManagedDevice() {
+        throw new Error("retireManagedDevice should not run from chat.");
+      },
+      async request() {
+        return { value: [] };
+      },
+    };
+    const llm: RunLlmApi = {
+      available: true,
+      defaultModel: "llama3.1:8b",
+      async complete() {
+        return {
+          text: "```json\n{\"tool\":\"query_cache\",\n```",
+          model: "llama3.1:8b",
+        };
+      },
+      async *stream() {
+        yield {
+          delta: "Deterministic answer.",
+          accumulated: "Deterministic answer.",
+          done: true,
+          model: "llama3.1:8b",
+        };
+      },
+    };
+
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => graph,
+      llmFactory: () => llm,
+    });
+
+    try {
+      await store.setChatInvestigationMode("always-agentic");
+      const result = await store.streamIntuneChatMessage(
+        {
+          content: "Which managed devices should I inspect?",
+          refreshIfStale: false,
+        },
+        () => undefined,
+      );
+
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.match(result.assistantMessage.content, /malformed tool JSON twice/i);
+      assert.match(result.assistantMessage.content, /Deterministic answer/);
+      assert.equal(result.assistantMessage.toolTrace?.length ?? 0, 0);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -200,6 +409,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -359,6 +569,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -468,6 +679,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -548,6 +760,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -623,8 +836,8 @@ describe("Intune Chat host service", () => {
 
       assert.match(result.assistantMessage.content, /First token and final token/);
       assert.ok(events.includes("started"));
-      assert.ok(events.includes("First token"));
-      assert.ok(events.includes("First token and final token."));
+      assert.ok(events.some((event) => event.includes("First token")));
+      assert.ok(events.some((event) => event.includes("First token and final token.")));
       assert.ok(events.includes("completed"));
 
       const messages = await store.getIntuneChatMessages(result.conversation.id);
@@ -646,6 +859,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [

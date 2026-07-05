@@ -45,9 +45,15 @@ import type {
   AgentSlackDelivery,
   AgentTeamsDelivery,
   AgentWhatsAppWebDelivery,
+  ChatInvestigationMode,
   CompanionRunDueReadSchedulesResult,
   CompanionSnapshot,
   CreateWorkspaceInput,
+  DriftEntryDetailInput,
+  DriftObjectHistoryInput,
+  DriftTimelineInput,
+  ExportAuditLogInput,
+  GraphCacheResourceKind,
   ImportMultiTenantResultToWorkspacesInput,
   MultiTenantChatStreamEvent,
   PendingConnectorDecision,
@@ -66,7 +72,10 @@ import type {
   SaveTextFileArgs,
   SchedulerLaunchSettings,
   SelfTrainingSuggestionStatus,
+  SetAzureOpenAIProviderConfigInput,
+  SetDriftRetentionSettingsInput,
   SetGraphCacheRefreshScheduleInput,
+  SetRunHistoryRetentionSettingsInput,
   SendIntuneChatMessageInput,
   SupportBundleInput,
   SupportIssueSubmissionInput,
@@ -89,6 +98,7 @@ import {
   probeMxcSandbox,
 } from "@openadminos/runtime";
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
+import { DRIFT_TRACKED_RESOURCES } from "./intune-chat/drift/tracked-resources.js";
 import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 
 // Set the app name BEFORE anything else that could touch the macOS
@@ -133,6 +143,13 @@ const intuneChatSmokeUserData = process.env.OPENADMINOS_INTUNE_CHAT_SMOKE_USER_D
 const isReportIssueSmokeLaunch =
   !app.isPackaged && process.env.OPENADMINOS_REPORT_ISSUE_SMOKE === "1";
 const reportIssueSmokeUserData = process.env.OPENADMINOS_REPORT_ISSUE_SMOKE_USER_DATA;
+const isScreenshotCaptureLaunch =
+  !app.isPackaged && process.env.OPENADMINOS_SCREENSHOT_CAPTURE === "1";
+const screenshotCaptureUserData =
+  process.env.OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA;
+const screenshotCaptureOutDir = !app.isPackaged
+  ? process.env.OPENADMINOS_SCREENSHOT_OUT_DIR
+  : undefined;
 const capturedExternalUrlFile = !app.isPackaged
   ? process.env.OPENADMINOS_CAPTURE_EXTERNAL_URL
   : undefined;
@@ -151,6 +168,7 @@ const providerIds = new Set(providerCatalog.map((provider) => provider.id));
 const graphCacheResourceKinds = new Set<string>(
   GRAPH_CACHE_RESOURCES.map((resource) => resource.resource),
 );
+const driftTrackedResourceKinds = new Set<string>(DRIFT_TRACKED_RESOURCES);
 const supportIssueSources = new Set([
   "sidebar",
   "run-failure",
@@ -173,6 +191,11 @@ const selfTrainingSuggestionStatuses = new Set<SelfTrainingSuggestionStatus>([
   "rejected",
   "reset",
 ]);
+const chatInvestigationModes = new Set<ChatInvestigationMode>([
+  "auto",
+  "always-agentic",
+  "always-deterministic",
+]);
 const workspaceStatuses = new Set<WorkspaceStatus>(["active", "archived"]);
 const workspaceEvidenceSourceTypes = new Set<WorkspaceEvidenceSourceType>([
   "multi-tenant-chat-result",
@@ -184,15 +207,29 @@ const workspaceEvidenceSourceTypes = new Set<WorkspaceEvidenceSourceType>([
 const DEFAULT_SUPPORT_API_URL = "https://openadminos.com";
 const COMPANION_WINDOW_WIDTH = 390;
 const COMPANION_WINDOW_HEIGHT = 520;
+const SCREENSHOT_CAPTURE_WIDTH = 1600;
+const SCREENSHOT_CAPTURE_HEIGHT = 1000;
 const launchSandboxedCodeDefault = process.env[OPENADMINOS_MXC_FLAG] === "1";
 
 const smokeUserData = isIntuneChatSmokeLaunch
   ? intuneChatSmokeUserData
   : isReportIssueSmokeLaunch
     ? reportIssueSmokeUserData
-    : undefined;
+    : isScreenshotCaptureLaunch
+      ? screenshotCaptureUserData
+      : undefined;
 
 const overrideUserData = smokeUserData ?? devUserDataDir;
+
+if (
+  isScreenshotCaptureLaunch &&
+  (!screenshotCaptureUserData || !screenshotCaptureOutDir)
+) {
+  console.error(
+    "[screenshot-capture] failed OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA and OPENADMINOS_SCREENSHOT_OUT_DIR are required.",
+  );
+  process.exit(1);
+}
 
 if (overrideUserData) {
   mkdirSync(overrideUserData, { recursive: true });
@@ -441,6 +478,206 @@ function seedReportIssueSmokeState(userDataDir: string): void {
   );
 }
 
+interface ScreenshotRegistryEntry {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  version: string;
+  mode: "read" | "write";
+  category: string;
+  tier?: string;
+  requiresEntraTier?: string;
+  author: {
+    name: string;
+    handle?: string;
+    verified?: boolean;
+  };
+  scopes: string[];
+  minAppVersion?: string;
+  manifestUrl?: string;
+  execution?: unknown;
+}
+
+function seedScreenshotCaptureState(userDataDir: string): void {
+  if (!isScreenshotCaptureLaunch) return;
+  mkdirSync(userDataDir, { recursive: true });
+  const now = new Date().toISOString();
+  const entries = loadScreenshotRegistryEntries();
+  const installedSlugs = new Set([
+    "compliance-overview",
+    "find-inactive-devices",
+    "offboarding-agent",
+  ]);
+  const installedEntries = entries.filter((entry) => installedSlugs.has(entry.slug));
+  const fallbackInstalledEntries =
+    installedEntries.length > 0 ? installedEntries : entries.slice(0, 3);
+  const installedAgents = fallbackInstalledEntries.map((entry) => ({
+    id: entry.id,
+    slug: entry.slug,
+    name: entry.name,
+    description: entry.description,
+    mode: entry.mode,
+    category: entry.category,
+    tier: entry.tier ?? "agent",
+    requiresEntraTier: entry.requiresEntraTier ?? "free",
+    scopes: entry.scopes,
+    author: entry.author,
+    version: entry.version,
+    installedAt: now,
+    registryId: entry.id,
+    minAppVersion: entry.minAppVersion,
+    ...(entry.execution ? { execution: entry.execution } : {}),
+  }));
+
+  writeFileSync(
+    join(userDataDir, "state.json"),
+    JSON.stringify(
+      {
+        activeProviderId: "ollama",
+        activeModelByProviderId: { ollama: "screenshot-local-model" },
+        installedAgents,
+        runs: [],
+        tenants: [
+          {
+            id: "contoso-demo-tenant",
+            displayName: "Contoso Demo",
+            username: "admin@contoso-demo.invalid",
+            homeAccountId: "contoso-demo-home-account",
+            addedAt: now,
+            entraTier: "p2",
+          },
+        ],
+        activeTenantId: "contoso-demo-tenant",
+        registryInstallCountsEnabled: false,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const registryCacheDir = join(userDataDir, "registry-cache");
+  mkdirSync(registryCacheDir, { recursive: true });
+  writeFileSync(
+    join(registryCacheDir, "index.json"),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        agents: entries,
+        cachedAt: now,
+        sourceUrl: DEFAULT_REGISTRY_SOURCE,
+      },
+      null,
+      2,
+    ) + "\n",
+    "utf8",
+  );
+}
+
+function loadScreenshotRegistryEntries(): ScreenshotRegistryEntry[] {
+  const indexPath = findScreenshotRegistryIndexPath();
+  const parsed = JSON.parse(readFileSync(indexPath, "utf8")) as {
+    agents?: unknown;
+  };
+  if (!Array.isArray(parsed.agents)) {
+    throw new Error(`Screenshot registry index has no agents array: ${indexPath}`);
+  }
+  return parsed.agents.map((entry, index) =>
+    normalizeScreenshotRegistryEntry(entry, index, indexPath),
+  );
+}
+
+function normalizeScreenshotRegistryEntry(
+  entry: unknown,
+  index: number,
+  indexPath: string,
+): ScreenshotRegistryEntry {
+  if (!entry || typeof entry !== "object") {
+    throw new Error(`Screenshot registry entry ${index} is not an object in ${indexPath}.`);
+  }
+  const candidate = entry as Record<string, unknown>;
+  const mode = candidate.mode;
+  const author = candidate.author;
+  const scopes = candidate.scopes;
+  if (mode !== "read" && mode !== "write") {
+    throw new Error(`Screenshot registry entry ${index} has invalid mode.`);
+  }
+  if (!author || typeof author !== "object") {
+    throw new Error(`Screenshot registry entry ${index} has invalid author.`);
+  }
+  if (!Array.isArray(scopes) || scopes.some((scope) => typeof scope !== "string")) {
+    throw new Error(`Screenshot registry entry ${index} has invalid scopes.`);
+  }
+  const normalized: ScreenshotRegistryEntry = {
+    id: requireStringField(candidate, "id", index, indexPath),
+    slug: requireStringField(candidate, "slug", index, indexPath),
+    name: requireStringField(candidate, "name", index, indexPath),
+    description: requireStringField(candidate, "description", index, indexPath),
+    version: requireStringField(candidate, "version", index, indexPath),
+    mode,
+    category: requireStringField(candidate, "category", index, indexPath),
+    author: {
+      name: requireStringField(
+        author as Record<string, unknown>,
+        "name",
+        index,
+        indexPath,
+      ),
+      ...(typeof (author as Record<string, unknown>).handle === "string"
+        ? { handle: (author as Record<string, unknown>).handle as string }
+        : {}),
+      ...(typeof (author as Record<string, unknown>).verified === "boolean"
+        ? { verified: (author as Record<string, unknown>).verified as boolean }
+        : {}),
+    },
+    scopes: scopes as string[],
+  };
+  if (typeof candidate.tier === "string" && candidate.tier) {
+    normalized.tier = candidate.tier;
+  }
+  if (typeof candidate.requiresEntraTier === "string" && candidate.requiresEntraTier) {
+    normalized.requiresEntraTier = candidate.requiresEntraTier;
+  }
+  if (typeof candidate.minAppVersion === "string") {
+    normalized.minAppVersion = candidate.minAppVersion;
+  }
+  if (typeof candidate.manifestUrl === "string") {
+    normalized.manifestUrl = candidate.manifestUrl;
+  }
+  if (candidate.execution) {
+    normalized.execution = candidate.execution;
+  }
+  return normalized;
+}
+
+function requireStringField(
+  record: Record<string, unknown>,
+  field: string,
+  index: number,
+  indexPath: string,
+): string {
+  const value = record[field];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(
+      `Screenshot registry entry ${index} is missing string field "${field}" in ${indexPath}.`,
+    );
+  }
+  return value;
+}
+
+function findScreenshotRegistryIndexPath(): string {
+  const candidates = [
+    join(process.cwd(), "agents", "index.json"),
+    join(app.getAppPath(), "..", "..", "agents", "index.json"),
+    join(currentDir, "..", "..", "..", "agents", "index.json"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error("Unable to find agents/index.json for screenshot capture.");
+}
+
 function createIntuneChatSmokeGraph(): RunGraphApi {
   return {
     async listManagedDevices() {
@@ -543,6 +780,14 @@ function failReportIssueSmoke(error: unknown): void {
   app.exit(1);
 }
 
+function failScreenshotCapture(error: unknown): void {
+  console.error(
+    "[screenshot-capture] failed",
+    error instanceof Error ? error.stack ?? error.message : error,
+  );
+  app.exit(1);
+}
+
 async function runIntuneChatSmoke(): Promise<void> {
   if (!isIntuneChatSmokeLaunch) return;
   const window = mainWindow;
@@ -612,6 +857,239 @@ async function runReportIssueSmoke(): Promise<void> {
     JSON.stringify({ ...result, issueUrl: capturedUrl }),
   );
   app.exit(0);
+}
+
+async function runScreenshotCapture(): Promise<void> {
+  if (!isScreenshotCaptureLaunch) return;
+  if (!screenshotCaptureOutDir) {
+    throw new Error("OPENADMINOS_SCREENSHOT_OUT_DIR is required.");
+  }
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) {
+    throw new Error("Screenshot capture window was not available.");
+  }
+
+  window.setSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
+  window.show();
+  window.focus();
+
+  const entries = loadScreenshotRegistryEntries();
+  const appShots = [
+    {
+      route: "/",
+      name: "agents-home",
+      file: "app/agents-home.png",
+      waitFor: ["Agents", "Browse hub", "Contoso Demo"],
+    },
+    {
+      route: "/hub",
+      name: "hub-grid",
+      file: "app/hub-grid.png",
+      waitFor: ["Agent Hub", `${entries.length} agents`],
+    },
+    {
+      route: "/chat",
+      name: "chat-empty",
+      file: "app/chat-empty.png",
+      waitFor: ["Intune Chat", "What do you want to inspect?", "New conversation"],
+    },
+    {
+      route: "/changes",
+      name: "changes",
+      file: "app/changes.png",
+      waitFor: ["Changes"],
+    },
+    {
+      route: "/settings",
+      name: "settings",
+      file: "app/settings.png",
+      waitFor: ["Settings", "LLM Providers"],
+    },
+  ];
+
+  let count = 0;
+  for (const shot of appShots) {
+    await runScreenshotCaptureStep(window, {
+      kind: "route",
+      route: shot.route,
+      waitFor: shot.waitFor,
+    });
+    await captureScreenshotPng(window, shot.file);
+    count += 1;
+  }
+
+  for (const entry of entries) {
+    try {
+      await runScreenshotCaptureStep(window, {
+        kind: "hub-detail",
+        route: "/hub",
+        slug: entry.slug,
+        name: entry.name,
+        expectedCount: entries.length,
+      });
+      await captureScreenshotPng(window, `hub/${entry.slug}.png`);
+      count += 1;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Hub detail failed for ${entry.slug}: ${detail}`);
+    }
+  }
+
+  console.log(`[screenshot-capture] passed ${count}`);
+  app.exit(0);
+}
+
+async function runScreenshotCaptureStep(
+  window: BrowserWindow,
+  step: ScreenshotCaptureStep,
+): Promise<void> {
+  await window.webContents.executeJavaScript(
+    `(${screenshotCaptureStepScript.toString()})(${JSON.stringify(step)})`,
+    true,
+  );
+}
+
+async function captureScreenshotPng(
+  window: BrowserWindow,
+  relativePath: string,
+): Promise<void> {
+  if (!screenshotCaptureOutDir) {
+    throw new Error("OPENADMINOS_SCREENSHOT_OUT_DIR is required.");
+  }
+  if (!/^(app|hub)\/[a-z0-9-]+\.png$/.test(relativePath)) {
+    throw new Error(`Invalid screenshot output path: ${relativePath}`);
+  }
+  const outputPath = join(screenshotCaptureOutDir, relativePath);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  const image = await window.webContents.capturePage();
+  await writeFile(outputPath, image.toPNG());
+  console.log(`[screenshot-capture] wrote ${outputPath}`);
+}
+
+type ScreenshotCaptureStep =
+  | {
+      kind: "route";
+      route: string;
+      waitFor: string[];
+    }
+  | {
+      kind: "hub-detail";
+      route: string;
+      slug: string;
+      name: string;
+      expectedCount: number;
+    };
+
+async function screenshotCaptureStepScript(
+  step: ScreenshotCaptureStep,
+): Promise<void> {
+  const waitFor = async (
+    predicate: () => boolean,
+    label: string,
+    timeoutMs = 12000,
+  ) => {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(
+      `Timed out waiting for ${label}. Current page text: ${(document.body.textContent ?? "").slice(0, 1800)}`,
+    );
+  };
+  const delay = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+  const bodyText = () => document.body.textContent ?? "";
+  const closeModal = async () => {
+    const close = document.querySelector<HTMLButtonElement>(
+      '.fixed button[aria-label="Close"]',
+    );
+    if (!close) return;
+    close.click();
+    await waitFor(() => !document.querySelector(".fixed"), "modal close", 4000);
+  };
+  const resetScroll = () => {
+    window.scrollTo(0, 0);
+    for (const element of Array.from(document.querySelectorAll<HTMLElement>("*"))) {
+      if (element.scrollTop > 0) element.scrollTop = 0;
+    }
+  };
+  const navigateHash = async (route: string) => {
+    const expected = `#${route}`;
+    if (location.hash !== expected) {
+      location.hash = route;
+    }
+    await waitFor(() => location.hash === expected, `${route} hash`);
+    await delay(150);
+  };
+  const textIncludesAll = (needles: string[]) =>
+    needles.every((needle) => bodyText().includes(needle));
+  const elementHasNearbyAncestorText = (element: Element, text: string) => {
+    let current: Element | null = element;
+    let depth = 0;
+    while (current && current !== document.body && depth < 7) {
+      if (
+        (current.textContent ?? "").includes(text) &&
+        current.querySelectorAll("button").length <= 4
+      ) {
+        return true;
+      }
+      current = current.parentElement;
+      depth += 1;
+    }
+    return false;
+  };
+  const findDetailsButton = (agentName: string): HTMLButtonElement | undefined =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) =>
+        button.textContent?.trim() === "Details" &&
+        elementHasNearbyAncestorText(button, agentName),
+    );
+
+  await closeModal();
+  await navigateHash(step.route);
+  resetScroll();
+
+  if (step.kind === "route") {
+    await waitFor(
+      () => textIncludesAll(step.waitFor),
+      `${step.route} route content`,
+    );
+    await delay(250);
+    return;
+  }
+
+  await waitFor(
+    () =>
+      bodyText().includes("Agent Hub") &&
+      bodyText().includes(`${step.expectedCount} agents`) &&
+      bodyText().includes(step.name),
+    `Hub grid for ${step.slug}`,
+  );
+  await waitFor(
+    () => Boolean(findDetailsButton(step.name)),
+    `Details button for ${step.slug}`,
+  );
+  const detailsButton = findDetailsButton(step.name);
+  if (!detailsButton) {
+    throw new Error(`Details button was not found for ${step.slug}.`);
+  }
+  detailsButton.scrollIntoView({ block: "center", inline: "nearest" });
+  await delay(150);
+  detailsButton.click();
+  await waitFor(
+    () => {
+      const modal = document.querySelector(".fixed");
+      const text = modal?.textContent ?? "";
+      return (
+        text.includes(step.name) &&
+        text.includes("Tenant impact") &&
+        text.includes("Required scopes")
+      );
+    },
+    `Hub detail modal for ${step.slug}`,
+  );
+  await delay(300);
 }
 
 async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
@@ -731,18 +1209,27 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     await waitFor(() => textarea.value === value, "chat input value");
   };
-  const selectFirstOption = async (ariaLabel: string) => {
-    await waitFor(
-      () => Boolean(document.querySelector(`select[aria-label="${ariaLabel}"]`)),
-      `${ariaLabel} select`,
+  const findSelectByAccessibleName = (name: string): HTMLSelectElement | undefined => {
+    const byAriaLabel = document.querySelector(`select[aria-label="${name}"]`);
+    if (byAriaLabel instanceof HTMLSelectElement) return byAriaLabel;
+    const label = Array.from(document.querySelectorAll("label")).find(
+      (candidate) => candidate.textContent?.trim() === name && candidate.htmlFor,
     );
-    const select = document.querySelector(`select[aria-label="${ariaLabel}"]`);
+    const byLabel = label ? document.getElementById(label.htmlFor) : null;
+    return byLabel instanceof HTMLSelectElement ? byLabel : undefined;
+  };
+  const selectFirstOption = async (accessibleName: string) => {
+    await waitFor(
+      () => Boolean(findSelectByAccessibleName(accessibleName)),
+      `${accessibleName} select`,
+    );
+    const select = findSelectByAccessibleName(accessibleName);
     if (!(select instanceof HTMLSelectElement)) {
-      throw new Error(`${ariaLabel} select was not found.`);
+      throw new Error(`${accessibleName} select was not found.`);
     }
     const option = Array.from(select.options).find((candidate) => candidate.value);
     if (!option) {
-      throw new Error(`${ariaLabel} has no selectable option.`);
+      throw new Error(`${accessibleName} has no selectable option.`);
     }
     const setter = Object.getOwnPropertyDescriptor(
       HTMLSelectElement.prototype,
@@ -750,7 +1237,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     )?.set;
     setter?.call(select, option.value);
     select.dispatchEvent(new Event("change", { bubbles: true }));
-    await waitFor(() => select.value === option.value, `${ariaLabel} selected`);
+    await waitFor(() => select.value === option.value, `${accessibleName} selected`);
   };
   const clickFirstEnabledCheckbox = async (label: string) => {
     await waitFor(
@@ -884,8 +1371,10 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   ];
 
   let responseCount = 0;
+  let sawAgentSuggestion = false;
   const smokeAnswer =
     "WIN-01 is stale based on cached Intune and Entra device evidence.";
+  const writeBlockedAnswer = "I cannot perform tenant changes directly from chat.";
   for (const [index, prompt] of testPrompts.entries()) {
     if (index === 1) {
       await clickButton("New");
@@ -906,6 +1395,21 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       2500,
     );
     await waitFor(() => bodyText().includes(prompt), "optimistic user prompt", 2500);
+    if (index === 0) {
+      // Write-intent prompts are blocked before any LLM call; expect the
+      // designed refusal plus a write-agent handoff instead of a model answer.
+      await waitFor(
+        () => bodyText().includes(writeBlockedAnswer),
+        "write-intent blocked response",
+      );
+      await waitFor(
+        () => bodyText().includes("Offboarding agent"),
+        "write-intent agent handoff",
+      );
+      sawAgentSuggestion = bodyText().includes("Offboarding agent");
+      await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
+      continue;
+    }
     await waitFor(
       () => textOccurrenceCount(smokeAnswer) >= expectedResponseCount,
       `chat response ${expectedResponseCount}`,
@@ -914,12 +1418,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     responseCount = expectedResponseCount;
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
-  await waitFor(() => bodyText().includes("Offboarding agent"), "agent suggestion");
-  const sawAgentSuggestion = bodyText().includes("Offboarding agent");
   await clickSummary("Source details");
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
+  );
+  // The agent suggestion card lives in the write-intent conversation; switch
+  // to it for the details assertions, then return to the read conversation.
+  await clickButton("Always retire stale Windows devices");
+  await waitFor(
+    () => bodyText().includes(writeBlockedAnswer),
+    "write-intent conversation transcript",
   );
   await clickButton("Details");
   await waitFor(
@@ -930,6 +1439,11 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
         bodyText().includes("DeviceManagementManagedDevices.Read.All") &&
         bodyText().includes("Write actions still use the normal plan and confirmation flow."),
     "agent suggestion details",
+  );
+  await clickButton("Which managed devices have not synced in the last 7");
+  await waitFor(
+    () => bodyText().includes(smokeAnswer),
+    "read conversation transcript restored",
   );
   await clickButton("Workspace");
   await waitFor(
@@ -2232,6 +2746,41 @@ function optionalTextString(
   return value;
 }
 
+function boundedTextString(
+  value: unknown,
+  name: string,
+  maxLength: number,
+): string {
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be a string.`);
+  }
+  if (value.length > maxLength) {
+    throw new Error(`${name} is too long.`);
+  }
+  return value;
+}
+
+function validateAzureOpenAIConfigInput(
+  value: unknown,
+): SetAzureOpenAIProviderConfigInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Azure OpenAI config must be an object.");
+  }
+  const input: SetAzureOpenAIProviderConfigInput = {
+    endpoint: boundedTextString(value.endpoint, "Azure OpenAI endpoint", 500),
+    deployment: boundedTextString(value.deployment, "Azure OpenAI deployment", 200),
+    apiVersion: boundedTextString(value.apiVersion, "Azure OpenAI API version", 64),
+  };
+  if (Object.prototype.hasOwnProperty.call(value, "apiKey")) {
+    if (value.apiKey === null) {
+      input.apiKey = null;
+    } else {
+      input.apiKey = boundedTextString(value.apiKey, "Azure OpenAI API key", 20_000);
+    }
+  }
+  return input;
+}
+
 function validateSetRegistrySourceOptions(
   value: unknown,
 ): { confirmExternalSource?: boolean } {
@@ -3166,6 +3715,87 @@ function validateRefreshGraphCacheOptions(
   };
 }
 
+function validateDriftTimelineInput(value: unknown): DriftTimelineInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Drift timeline input must be an object.");
+  }
+  const from = validateOptionalDriftBoundary(value.from, "from");
+  const to = validateOptionalDriftBoundary(value.to, "to");
+  if (from !== undefined && to !== undefined && Date.parse(from) > Date.parse(to)) {
+    throw new Error("Drift timeline from date must be before the to date.");
+  }
+  const input: DriftTimelineInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+  };
+  if (from !== undefined) input.from = from;
+  if (to !== undefined) input.to = to;
+  if (value.resources !== undefined) {
+    input.resources = validateDriftResourceArray(value.resources, "resources");
+  }
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "drift timeline limit", 1, 500);
+  }
+  return input;
+}
+
+function validateDriftEntryDetailInput(value: unknown): DriftEntryDetailInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Drift entry detail input must be an object.");
+  }
+  return {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+    snapshotId: requireBoundedString(value.snapshotId, "snapshotId", 300),
+    resource: validateDriftResource(value.resource, "resource"),
+    graphId: requireBoundedString(value.graphId, "graphId", 512),
+  };
+}
+
+function validateDriftObjectHistoryInput(value: unknown): DriftObjectHistoryInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Drift object history input must be an object.");
+  }
+  const input: DriftObjectHistoryInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+    resource: validateDriftResource(value.resource, "resource"),
+    graphId: requireBoundedString(value.graphId, "graphId", 512),
+  };
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "drift object history limit", 1, 500);
+  }
+  return input;
+}
+
+function validateOptionalDriftBoundary(
+  value: unknown,
+  label: "from" | "to",
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const boundary = requireBoundedString(value, `drift ${label}`, 80);
+  if (!Number.isFinite(Date.parse(boundary))) {
+    throw new Error(`Drift ${label} date must be an ISO timestamp.`);
+  }
+  return boundary;
+}
+
+function validateDriftResourceArray(value: unknown, name: string): GraphCacheResourceKind[] {
+  if (!Array.isArray(value) || value.length > DRIFT_TRACKED_RESOURCES.size) {
+    throw new Error(
+      `${name} must be an array with at most ${DRIFT_TRACKED_RESOURCES.size} entries.`,
+    );
+  }
+  return [...new Set(value.map((entry, index) =>
+    validateDriftResource(entry, `${name}[${index}]`),
+  ))];
+}
+
+function validateDriftResource(value: unknown, name: string): GraphCacheResourceKind {
+  const resource = requireBoundedString(value, name, 128);
+  if (!driftTrackedResourceKinds.has(resource)) {
+    throw new Error(`Unknown drift-tracked resource: ${resource}`);
+  }
+  return resource as GraphCacheResourceKind;
+}
+
 function validateSetGraphCacheRefreshScheduleInput(
   value: unknown,
 ): SetGraphCacheRefreshScheduleInput {
@@ -3196,6 +3826,120 @@ function validateSetGraphCacheRefreshScheduleInput(
   };
 }
 
+function validateSetRunHistoryRetentionSettingsInput(
+  value: unknown,
+): SetRunHistoryRetentionSettingsInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Run history retention settings must be an object.");
+  }
+  if (typeof value.neverPrune !== "boolean") {
+    throw new Error("Run history never-prune setting must be a boolean.");
+  }
+  const input: SetRunHistoryRetentionSettingsInput = {
+    neverPrune: value.neverPrune,
+  };
+  if (value.keepLastRuns !== undefined) {
+    input.keepLastRuns =
+      value.keepLastRuns === null
+        ? null
+        : requireBoundedInteger(value.keepLastRuns, "Run history count", 1, 100_000);
+  }
+  if (value.keepDays !== undefined) {
+    input.keepDays =
+      value.keepDays === null
+        ? null
+        : requireBoundedInteger(value.keepDays, "Run history age", 1, 3_650);
+  }
+  if (
+    !input.neverPrune &&
+    (input.keepLastRuns === null || input.keepLastRuns === undefined) &&
+    (input.keepDays === null || input.keepDays === undefined)
+  ) {
+    throw new Error("Enable at least one run-history retention rule, or choose never prune.");
+  }
+  return input;
+}
+
+function validateSetDriftRetentionSettingsInput(
+  value: unknown,
+): SetDriftRetentionSettingsInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Change history retention settings must be an object.");
+  }
+  if (typeof value.neverPrune !== "boolean") {
+    throw new Error("Change history never-prune setting must be a boolean.");
+  }
+  const input: SetDriftRetentionSettingsInput = {
+    neverPrune: value.neverPrune,
+  };
+  if (value.keepDays !== undefined) {
+    input.keepDays =
+      value.keepDays === null
+        ? null
+        : requireBoundedInteger(value.keepDays, "Change history retention days", 30, 730);
+  }
+  if (
+    !input.neverPrune &&
+    (input.keepDays === null || input.keepDays === undefined)
+  ) {
+    throw new Error("Set change-history retention days, or choose never prune.");
+  }
+  return input;
+}
+
+function validateExportAuditLogInput(value: unknown): ExportAuditLogInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Audit log export input must be an object.");
+  }
+  if (value.format !== "json" && value.format !== "csv") {
+    throw new Error("Audit log export format must be json or csv.");
+  }
+  const input: ExportAuditLogInput = { format: value.format };
+  const from = validateOptionalAuditLogBoundary(value.from, "from");
+  const to = validateOptionalAuditLogBoundary(value.to, "to");
+  if (from !== undefined) input.from = from;
+  if (to !== undefined) input.to = to;
+  if (
+    from !== undefined &&
+    to !== undefined &&
+    Date.parse(from) > Date.parse(to)
+  ) {
+    throw new Error("Audit log export from date must be before the to date.");
+  }
+  return input;
+}
+
+function validateOptionalAuditLogBoundary(
+  value: unknown,
+  label: "from" | "to",
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const boundary = requireBoundedString(value, `audit log ${label}`, 80);
+  const parsed = Date.parse(boundary);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Audit log ${label} date must be an ISO timestamp.`);
+  }
+  return boundary;
+}
+
+function requireBoundedInteger(
+  value: unknown,
+  name: string,
+  min: number,
+  max: number,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  }
+  return value;
+}
+
 function validateSelfTrainingSuggestionStatus(
   value: unknown,
 ): SelfTrainingSuggestionStatus | undefined {
@@ -3205,6 +3949,14 @@ function validateSelfTrainingSuggestionStatus(
     throw new Error("Unknown self-training suggestion status.");
   }
   return status as SelfTrainingSuggestionStatus;
+}
+
+function validateChatInvestigationMode(value: unknown): ChatInvestigationMode {
+  const mode = requireBoundedString(value, "chat investigation mode", 32);
+  if (!chatInvestigationModes.has(mode as ChatInvestigationMode)) {
+    throw new Error("Unknown chat investigation mode.");
+  }
+  return mode as ChatInvestigationMode;
 }
 
 function validateResetSelfTrainingInput(value: unknown): ResetSelfTrainingInput {
@@ -3463,12 +4215,23 @@ function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void
 async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
-    ...(typeof persisted.x === "number" ? { x: persisted.x } : {}),
-    ...(typeof persisted.y === "number" ? { y: persisted.y } : {}),
-    width: persisted.width,
-    height: persisted.height,
-    minWidth: 960,
-    minHeight: 680,
+    ...(!isScreenshotCaptureLaunch && typeof persisted.x === "number"
+      ? { x: persisted.x }
+      : {}),
+    ...(!isScreenshotCaptureLaunch && typeof persisted.y === "number"
+      ? { y: persisted.y }
+      : {}),
+    width: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_WIDTH : persisted.width,
+    height: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : persisted.height,
+    minWidth: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_WIDTH : 960,
+    minHeight: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : 680,
+    ...(isScreenshotCaptureLaunch
+      ? {
+          maxWidth: SCREENSHOT_CAPTURE_WIDTH,
+          maxHeight: SCREENSHOT_CAPTURE_HEIGHT,
+          resizable: false,
+        }
+      : {}),
     title: "OpenAdminOS",
     backgroundColor: "#0a0c10",
     show: false,
@@ -3483,12 +4246,14 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     },
   });
 
-  attachWindowStatePersistence(mainWindow);
+  if (!isScreenshotCaptureLaunch) {
+    attachWindowStatePersistence(mainWindow);
+  }
 
-  if (persisted.maximized) {
+  if (!isScreenshotCaptureLaunch && persisted.maximized) {
     mainWindow.maximize();
   }
-  if (persisted.fullscreen) {
+  if (!isScreenshotCaptureLaunch && persisted.fullscreen) {
     mainWindow.setFullScreen(true);
   }
 
@@ -3518,6 +4283,9 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     if (isReportIssueSmokeLaunch) {
       void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
     }
+    if (isScreenshotCaptureLaunch) {
+      void loadPromise.then(runScreenshotCapture).catch(failScreenshotCapture);
+    }
   } else {
     const initialRoute = routeHash(route);
     const loadPromise = mainWindow.loadURL(
@@ -3528,6 +4296,9 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     }
     if (isReportIssueSmokeLaunch) {
       void loadPromise.then(runReportIssueSmoke).catch(failReportIssueSmoke);
+    }
+    if (isScreenshotCaptureLaunch) {
+      void loadPromise.then(runScreenshotCapture).catch(failScreenshotCapture);
     }
   }
 
@@ -3822,6 +4593,16 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:get-azure-openai-config",
+    handleTrusted(() => store.getAzureOpenAIConfig()),
+  );
+  ipcMain.handle(
+    "openadminos:set-azure-openai-config",
+    handleTrusted((_event, input: unknown) =>
+      store.setAzureOpenAIConfig(validateAzureOpenAIConfigInput(input)),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:list-intune-chat-conversations",
     handleTrusted(() => store.listIntuneChatConversations()),
   );
@@ -4005,6 +4786,30 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:get-drift-timeline",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftTimeline(validateDriftTimelineInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-entry-detail",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftEntryDetail(validateDriftEntryDetailInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-object-history",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftObjectHistory(validateDriftObjectHistoryInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-status",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.getDriftStatus(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:get-graph-cache-refresh-schedule",
     handleTrusted((_event, tenantId?: unknown) =>
       store.getGraphCacheRefreshSchedule(
@@ -4040,8 +4845,56 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:get-run-history-retention-settings",
+    handleTrusted(() => store.getRunHistoryRetentionSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:set-run-history-retention-settings",
+    handleTrusted((_event, input: unknown) =>
+      store.setRunHistoryRetentionSettings(
+        validateSetRunHistoryRetentionSettingsInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:prune-run-history-now",
+    handleTrusted(() => store.pruneRunHistoryNow()),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-retention-settings",
+    handleTrusted(() => store.getDriftRetentionSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:set-drift-retention-settings",
+    handleTrusted((_event, input: unknown) =>
+      store.setDriftRetentionSettings(
+        validateSetDriftRetentionSettingsInput(input),
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:prune-drift-history-now",
+    handleTrusted(() => store.pruneDriftHistoryNow()),
+  );
+  ipcMain.handle(
+    "openadminos:export-audit-log",
+    handleTrusted((_event, input: unknown) =>
+      store.exportAuditLog(validateExportAuditLogInput(input)),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:get-self-training-settings",
     handleTrusted(() => store.getSelfTrainingSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:get-chat-investigation-settings",
+    handleTrusted(() => store.getChatInvestigationSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:set-chat-investigation-mode",
+    handleTrusted((_event, mode: unknown) =>
+      store.setChatInvestigationMode(validateChatInvestigationMode(mode)),
+    ),
   );
   ipcMain.handle(
     "openadminos:set-self-training-enabled",
@@ -4583,6 +5436,15 @@ if (!gotLock) {
     const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
     seedIntuneChatSmokeState(userDataDir);
     seedReportIssueSmokeState(userDataDir);
+    try {
+      seedScreenshotCaptureState(userDataDir);
+    } catch (error) {
+      if (isScreenshotCaptureLaunch) {
+        failScreenshotCapture(error);
+        return;
+      }
+      throw error;
+    }
 
     installConnectorConfirmBridge({
       getMainWindow: () => mainWindow,
@@ -4615,7 +5477,7 @@ if (!gotLock) {
       onStateChanged: (info) => {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
       },
-      ...(isIntuneChatSmokeLaunch
+      ...(isIntuneChatSmokeLaunch || isScreenshotCaptureLaunch
         ? {
             graphFactory: () => createIntuneChatSmokeGraph(),
             llmFactory: () => createIntuneChatSmokeLlm(),
@@ -4659,6 +5521,12 @@ if (!gotLock) {
     // Fetch registry index in the background after the window is ready.
     // Falls back to local filesystem agents until the fetch completes.
     void refreshRegistryInBackground("startup");
+    void store.pruneRunHistory("startup").catch((error) => {
+      console.warn("[run-history] startup prune failed:", error);
+    });
+    void store.pruneDriftHistory("startup").catch((error) => {
+      console.warn("[drift-history] startup prune failed:", error);
+    });
     startAutoUpdater(() => mainWindow ?? undefined);
 
     // Agent scheduler: for normal visible launches, wait for the
@@ -4676,6 +5544,12 @@ if (!gotLock) {
       void store.fireDueSchedules();
       void store.refreshDueGraphCaches();
       void store.processPendingRunDeliveries();
+      void store.pruneRunHistory("scheduler").catch((error) => {
+        console.warn("[run-history] scheduler prune failed:", error);
+      });
+      void store.pruneDriftHistory("scheduler").catch((error) => {
+        console.warn("[drift-history] scheduler prune failed:", error);
+      });
     }, SCHEDULER_TICK_MS);
 
     // Periodic registry refresh: every 6 hours, silently re-fetch the

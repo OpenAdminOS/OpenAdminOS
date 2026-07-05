@@ -1,3 +1,58 @@
+# v0.3 — "Ask anything, run it anywhere"
+
+**Status: implemented on `v0.3-dev`; release gate partially complete (see below).** The theme: Intune Chat becomes agentic, and every advertised LLM provider actually works. Supporting work (retention, audit export, honest docs, accessibility) serves one story — a tool you can trust to think about your tenant, locally.
+
+## Phase 0 — Foundations
+- [x] Doc honesty pass: README shipped-vs-coming table, agent count, `web/` path, `docs/agent-sdk.md` authored, dead renderer `types.ts` removed.
+- [x] Write-plan safety test hardening: typed-phrase enforcement, plan/apply mismatch rejection, tenant pinning, run-confirmation host tests.
+- [x] `state.ts` decomposition, four verbatim stages: module helpers → `intune-chat/service.ts` → `run-delivery.ts` → `runs.ts`. 10,036 → 4,678 lines; `confirmRun` verified byte-identical.
+
+## Phase 1 — Provider completeness (6/6)
+- [x] Anthropic via local Claude Code CLI (no stored API key, scrubbed spawn env, min version 2.1.200).
+- [x] LM Studio via local OpenAI-compatible server (loopback trust classification).
+- [x] Azure OpenAI API-key variant: endpoint/deployment/api-version in state, key in safeStorage only, write-only Settings form, `hasKey` boolean to renderer. Entra ID auth variant deferred to v0.4.
+
+## Phase 2 — Agentic Intune Chat (flagship)
+- [x] Read-only tool layer: `list_cached_resources`, `query_cache`, `graph_get` (GET-only, catalog/scope validated), `refresh_resource`; every call streamed and persisted to `chat_tool_calls`.
+- [x] Bounded prompt-JSON loop: 6 iterations, 50-row caps, 24 KB Graph payloads, one repair attempt, visible deterministic fallback.
+- [x] Rollout: three-state investigation mode (auto / always agentic / always deterministic) with a conservative small-model heuristic; multi-tenant chat stays deterministic.
+
+## Phase 3 — Trust & safety
+- [x] Run-history retention: keep-last-500 / 180-day defaults, never-prune option, startup + scheduler + manual pruning; workspace-pinned, live, and awaiting-confirmation runs are never pruned.
+- [x] Audit log export: JSON/CSV with SHA-256 hash chain over run lifecycle, write confirmations, connector deliveries, and hosted-provider consent events. Signed timestamps deferred.
+- [x] Renderer test baseline (Vitest + Testing Library) for write confirmation, hosted consent, provider settings.
+
+## Phase 4 — UX polish
+- [x] Mockups `09-registry.html` + `10-empty-states.html` and empty-state sweep.
+- [x] Reusable output panes shared by chat artifacts, run results, and the tool trace.
+- [x] Examples gallery on the marketing site (`/examples`).
+- [x] Accessibility basics pass across v0.3 surfaces + clear existing offenders.
+
+## Release gate — remaining before tagging v0.3.0
+Run under xvfb after installing Ollama locally (2026-07-05):
+- [x] Hub screenshots per registry entry (`xvfb-run -a -s "-screen 0 1600x1000x24" npm run screenshots`).
+- [x] Smoke scripts: `npm run smoke:intune-chat` and `npm run smoke:report-issue` pass under xvfb. Fixing the run surfaced and fixed a write-intent false-positive bug (whole-word matching) plus smoke-driver drift from the a11y label change and pre-LLM write blocking.
+- [x] Live provider matrix: Ollama probe/complete/stream live (llama3.2:1b; qwen2.5:7b holds the investigative JSON protocol), Claude Code and Codex adapters complete real prompts, LM Studio verified live against a headless 0.4.18 server (probe connected + model list, complete, stream; 0.5b model correctly triggers the deterministic-mode heuristic). Azure OpenAI verified against Microsoft's GA 2024-10-21 data-plane reference instead of a live resource per Ugur (URL shape, api-key header, api-version, body fields, SSE data:[DONE]); note: o-series models on newer api-versions need max_completion_tokens, fine on GA with standard chat models.
+- [ ] Optional visual pass on a real desktop session (`npm run dev`) — xvfb screenshots reviewed and look correct.
+- [ ] `git tag v0.3.0` + release once the above pass.
+
+## Phase 5 — Tenant drift timeline (added to v0.3 scope 2026-07-05)
+"What changed in my tenant since Friday, and who changed it?" — versioned config snapshots on every cache refresh, a deterministic diff engine, audit-log attribution, a Changes timeline UI, and a chat tool. Read-only throughout; the LLM never computes diffs, only summarizes them.
+
+Graph facts verified live via Lokka (tenant ffc10f05): `deviceManagement/auditEvents` works on v1.0 with existing scopes (`$filter=activityDateTime ge`, `$select`, `$top`; carries actor UPN/app, target `resourceId`, per-property old/new values); `auditLogs/directoryAudits` v1.0 supports the same time filter (initiatedBy.user, targetResources[].id). Attribution = join diffed object id ↔ audit target id within the snapshot window.
+
+- [x] D1 — Snapshot + diff core (electron): `drift_snapshots` + `drift_object_versions` tables (interval representation: first/last snapshot per content-hash version, removal marking), hook in `replaceGraphResources` (same transaction), config-tier tracked-resource list, per-resource volatile-field ignore lists, canonical JSON + SHA-256 content hashing, pure diff engine (added/removed/modified with field-level before→after paths), retention pruning, heavy unit tests.
+- [x] D2 — Drift service + attribution + IPC (electron): timeline/diff query APIs, `intuneAuditEvents` added as a cached Graph resource with newest-first capped refresh, actor correlation (matched vs unknown — never guessed), agent-sdk types, validated IPC + preload bridge.
+- [ ] D3 — Changes UI (renderer): `/changes` route + sidebar entry, day-grouped timeline with resource/actor/date filters, field-level diff detail pane (reuse output panes + diff-confirm visual language), pin-to-workspace evidence, designed empty state ("history starts with your second refresh"), accessibility bar, renderer tests.
+- [x] D4 — Chat tool + settings + docs: read-only `query_drift` chat tool (capped, traced), planner prefetch hints for change questions, drift retention setting in Settings, SPEC.md section, CHANGELOG under [0.3.0], `/changes` screenshot added to the capture harness.
+- [ ] D5 — Review gate: full test chain, smoke under xvfb, screenshots refresh, PR #62 update.
+
+## Deferred to v0.4+
+- Agentic multi-tenant chat; Azure OpenAI Entra-auth variant; Windows signing; light theme; localization; full WCAG audit; agent signing/verification; cost budgets; signed audit timestamps.
+- Drift follow-ons: expiry radar, threshold watch rules, golden-tenant config diff, device-inventory drift tier (aggregate-level).
+
+---
+
 # v0.2.5 — Workspaces + multi-tenant Intune Chat
 
 **Status: implemented and verified.** Follow-up release after v0.2.4. The theme is making OpenAdminOS better for MSP-style investigation without weakening tenant boundaries: Intune Chat can explicitly answer read-only questions across selected tenants, while Workspaces keep a single tenant problem, its evidence, related conversations, agent runs, notes, and approved local instructions together.
@@ -235,7 +290,7 @@
 
 ## Priority 4 — Quality of life candidates
 
-- [ ] **Agent builder docs** — in-app short guide plus README docs for authoring, validating, and submitting agents.
+- [x] **Agent builder docs** — added `docs/agent-sdk.md` for authoring, validating, and submitting agents.
 - [ ] **Examples gallery** — prompt examples that generate useful read, write, and connector-backed agents.
 - [ ] **Better error messages from Graph QA** — turn low-level endpoint/scope failures into copy a tenant admin can act on.
 - [ ] **Screenshots for Agent Hub entries** — generated or user-supplied images in the submission bundle, rendered in Hub detail.

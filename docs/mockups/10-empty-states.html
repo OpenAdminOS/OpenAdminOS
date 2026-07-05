@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>10 · Empty states — OpenAdminOS Agents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_design.css">
+<style>
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.status-cell {
+  padding: 14px 24px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-cell:last-child { border-right: none; }
+.status-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.status-value {
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-meta { font-size: 11px; color: var(--text-2); }
+
+.content { padding: 24px 32px 32px; flex: 1; }
+.section-intro {
+  margin-bottom: 24px;
+  font-size: 13px;
+  color: var(--text-1);
+  line-height: 1.7;
+  max-width: 760px;
+}
+.empty-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.empty-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.empty-card.blocking {
+  border-color: rgba(248, 113, 113, 0.26);
+}
+.empty-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.empty-kicker {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.empty-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.empty-route {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.empty-body {
+  padding: 16px 18px 18px;
+}
+.terminal-art {
+  height: 118px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.015), transparent 45%),
+    var(--bg-2);
+  padding: 12px;
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.terminal-art::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.art-window {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: grid;
+  gap: 8px;
+}
+.art-row {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--bg-4);
+  border: 1px solid var(--border-strong);
+}
+.art-row.short { width: 42%; }
+.art-row.med { width: 64%; }
+.art-row.long { width: 84%; }
+.art-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  align-content: end;
+}
+.art-cell {
+  min-height: 30px;
+  border-radius: 5px;
+  border: 1px dashed var(--border-strong);
+  background: rgba(255,255,255,0.015);
+}
+.art-cell.fill {
+  border-style: solid;
+  background: var(--bg-3);
+}
+.art-panel {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-3);
+  padding: 9px;
+}
+.art-panel .art-row { height: 7px; margin-bottom: 7px; }
+.art-panel .art-row:last-child { margin-bottom: 0; }
+.art-warning {
+  border-color: rgba(248, 113, 113, 0.32);
+  background: rgba(248, 113, 113, 0.05);
+}
+.art-warning .art-row {
+  background: rgba(248, 113, 113, 0.16);
+  border-color: rgba(248, 113, 113, 0.22);
+}
+.art-accent .art-row:first-child {
+  background: rgba(0, 212, 255, 0.12);
+  border-color: rgba(0, 212, 255, 0.24);
+}
+.art-stack {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+.art-stack .art-panel { min-height: 74px; }
+.empty-copy {
+  font-size: 12.5px;
+  color: var(--text-1);
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+.empty-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.design-note {
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.7;
+}
+.design-note strong { color: var(--text-0); }
+
+@media (max-width: 960px) {
+  .status-strip,
+  .empty-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+    <div class="titlebar-title">OpenAdminOS Agents · Empty states reference</div>
+    <div class="titlebar-status"><div class="pulse"></div><span>local · reference</span></div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">O</div>
+      <div>
+        <div class="brand-name">OpenAdminOS</div>
+        <div class="brand-sub">PUBLIC PREVIEW</div>
+      </div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <a href="03-agents-grid.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Agents
+      </a>
+      <a href="09-registry.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+        Agent Hub
+      </a>
+      <a href="11-multi-tenant-chat.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        Intune Chat
+      </a>
+      <a href="12-workspaces.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M3 7h18M5 7v12h14V7M8 7V5h8v2"/></svg>
+        Workspaces
+      </a>
+      <a href="10-empty-states.html" class="nav-item active">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg>
+        Empty states
+      </a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Configure</div>
+      <a href="07-llm-provider.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 2"/></svg>
+        LLM Provider
+      </a>
+      <a href="08-tenant-switcher.html" class="nav-item">
+        <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Tenants
+      </a>
+    </div>
+    <div class="tenant-switcher">
+      <div class="tenant-avatar">--</div>
+      <div class="tenant-info">
+        <div class="tenant-name">No tenant connected</div>
+        <div class="tenant-id">agents blocked</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="main-header">
+      <div>
+        <h1 class="page-title">Empty states</h1>
+        <div class="page-subtitle mono">Reference set · zero-data and first-run states</div>
+      </div>
+    </header>
+
+    <div class="status-strip">
+      <div class="status-cell">
+        <div class="status-label">Tenant</div>
+        <div class="status-value"><span class="dot-status danger"></span>Not connected</div>
+        <div class="status-meta mono">Agent runs blocked</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">LLM Provider</div>
+        <div class="status-value"><span class="dot-status idle"></span>Not tested</div>
+        <div class="status-meta mono">choose local or hosted</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">Active runs</div>
+        <div class="status-value"><span class="dot-status idle"></span>0 running</div>
+        <div class="status-meta mono">no local run history</div>
+      </div>
+      <div class="status-cell">
+        <div class="status-label">Data residency</div>
+        <div class="status-value"><span class="dot-status ok"></span>Local by default</div>
+        <div class="status-meta mono">copy changes when hosted is selected</div>
+      </div>
+    </div>
+
+    <div class="content">
+      <p class="section-intro">
+        These states appear when a surface has no local data yet. Each one uses the same restrained density as the full app, gives one direct explanation, and offers a single primary action.
+      </p>
+
+      <div class="empty-grid">
+        <section class="empty-card">
+          <div class="empty-head">
+            <div>
+              <div class="empty-kicker">Home</div>
+              <div class="empty-title">Zero agents installed</div>
+            </div>
+            <div class="empty-route">/agents</div>
+          </div>
+          <div class="empty-body">
+            <div class="terminal-art">
+              <div class="art-window">
+                <div class="art-row med"></div>
+                <div class="art-grid">
+                  <div class="art-cell"></div>
+                  <div class="art-cell"></div>
+                  <div class="art-cell"></div>
+                </div>
+                <div class="art-row short"></div>
+              </div>
+            </div>
+            <div class="empty-copy">No agents installed. Browse the Hub to install your first one.</div>
+            <div class="empty-actions"><a href="09-registry.html" class="btn btn-primary">Browse Agent Hub</a></div>
+          </div>
+        </section>
+
+        <section class="empty-card">
+          <div class="empty-head">
+            <div>
+              <div class="empty-kicker">Activity</div>
+              <div class="empty-title">Zero runs</div>
+            </div>
+            <div class="empty-route">/activity</div>
+          </div>
+          <div class="empty-body">
+            <div class="terminal-art">
+              <div class="art-window">
+                <div class="art-panel">
+                  <div class="art-row long"></div>
+                  <div class="art-row med"></div>
+                  <div class="art-row short"></div>
+                </div>
+                <div class="art-row short"></div>
+              </div>
+            </div>
+            <div class="empty-copy">No runs recorded yet. Run an installed agent to create local history.</div>
+            <div class="empty-actions"><a href="03-agents-grid.html" class="btn btn-primary">Open Agents</a></div>
+          </div>
+        </section>
+
+        <section class="empty-card blocking">
+          <div class="empty-head">
+            <div>
+              <div class="empty-kicker">Tenants</div>
+              <div class="empty-title">Zero tenants</div>
+            </div>
+            <div class="empty-route">blocking</div>
+          </div>
+          <div class="empty-body">
+            <div class="terminal-art art-warning">
+              <div class="art-window">
+                <div class="art-panel art-warning">
+                  <div class="art-row long"></div>
+                  <div class="art-row med"></div>
+                  <div class="art-row short"></div>
+                </div>
+                <div class="art-row med"></div>
+              </div>
+            </div>
+            <div class="empty-copy">Connect a tenant to start. Agents cannot run without an active tenant scope.</div>
+            <div class="empty-actions"><a href="02-msal-consent.html" class="btn btn-primary">Connect tenant</a></div>
+          </div>
+        </section>
+
+        <section class="empty-card">
+          <div class="empty-head">
+            <div>
+              <div class="empty-kicker">Workspaces</div>
+              <div class="empty-title">Zero workspaces</div>
+            </div>
+            <div class="empty-route">/workspaces</div>
+          </div>
+          <div class="empty-body">
+            <div class="terminal-art">
+              <div class="art-window art-stack">
+                <div class="art-panel">
+                  <div class="art-row long"></div>
+                  <div class="art-row med"></div>
+                  <div class="art-row short"></div>
+                </div>
+                <div class="art-panel">
+                  <div class="art-row med"></div>
+                  <div class="art-row long"></div>
+                  <div class="art-row short"></div>
+                </div>
+              </div>
+            </div>
+            <div class="empty-copy">No workspaces yet. Create one from a tenant investigation or start with a note.</div>
+            <div class="empty-actions"><a href="12-workspaces.html" class="btn btn-primary">Create workspace</a></div>
+          </div>
+        </section>
+
+        <section class="empty-card">
+          <div class="empty-head">
+            <div>
+              <div class="empty-kicker">Intune Chat</div>
+              <div class="empty-title">Zero chat history</div>
+            </div>
+            <div class="empty-route">/chat</div>
+          </div>
+          <div class="empty-body">
+            <div class="terminal-art art-accent">
+              <div class="art-window">
+                <div class="art-row long"></div>
+                <div class="art-row med"></div>
+                <div class="art-panel">
+                  <div class="art-row long"></div>
+                  <div class="art-row short"></div>
+                </div>
+              </div>
+            </div>
+            <div class="empty-copy">Ask a tenant question in plain language. Chat uses cache or live Graph reads before answering.</div>
+            <div class="empty-actions"><a href="11-multi-tenant-chat.html" class="btn btn-primary">Start chat</a></div>
+          </div>
+        </section>
+
+        <section class="empty-card">
+          <div class="empty-head">
+            <div>
+              <div class="empty-kicker">Schedules</div>
+              <div class="empty-title">Zero schedules</div>
+            </div>
+            <div class="empty-route">/agents/schedules</div>
+          </div>
+          <div class="empty-body">
+            <div class="terminal-art">
+              <div class="art-window">
+                <div class="art-row short"></div>
+                <div class="art-grid">
+                  <div class="art-cell fill"></div>
+                  <div class="art-cell"></div>
+                  <div class="art-cell"></div>
+                </div>
+                <div class="art-row long"></div>
+              </div>
+            </div>
+            <div class="empty-copy">No schedules configured. Add one from an installed agent when it should run again.</div>
+            <div class="empty-actions"><a href="03-agents-grid.html" class="btn btn-primary">Add schedule</a></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="design-note">
+        <strong>Design notes:</strong> keep empty-state copy one sentence, keep the action singular, and treat no-tenant as blocking. Illustrations use terminal panels, tables, and skeleton structure instead of decorative characters or cartoon art.
+      </div>
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

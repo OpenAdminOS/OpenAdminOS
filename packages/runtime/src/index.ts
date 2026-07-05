@@ -30,6 +30,9 @@ import type {
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
+import { createClaudeCodeLlm, probeClaudeCodeLlm } from "./llm-claude-code.js";
+import { createLmStudioLlm, probeLmStudioLlm } from "./llm-lm-studio.js";
+import { createAzureOpenAiLlm, probeAzureOpenAi } from "./llm-azure-openai.js";
 import {
   createAppleFoundationLlm,
   probeAppleFoundationLlm,
@@ -58,6 +61,28 @@ export {
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";
 export { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
+export {
+  createClaudeCodeLlm,
+  createClaudeCodeProcessEnv,
+  probeClaudeCodeLlm,
+  type ClaudeCodeProbeResult,
+  type ClaudeCodeProviderOptions,
+} from "./llm-claude-code.js";
+export {
+  classifyLmStudioEndpoint,
+  createLmStudioLlm,
+  probeLmStudioLlm,
+  resolveLmStudioEndpoint,
+  type LmStudioEndpointTrust,
+  type LmStudioProbeResult,
+  type LmStudioProviderOptions,
+} from "./llm-lm-studio.js";
+export {
+  createAzureOpenAiLlm,
+  probeAzureOpenAi,
+  type AzureOpenAiProbeResult,
+  type AzureOpenAiProviderOptions,
+} from "./llm-azure-openai.js";
 export {
   createAppleFoundationLlm,
   createAppleFoundationProcessEnv,

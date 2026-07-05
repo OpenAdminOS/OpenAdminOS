@@ -1,7 +1,7 @@
 {
   "name": "@openadminos/desktop",
   "private": true,
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Open-source, local-first agents for Microsoft 365 admins.",
   "author": {
     "name": "OpenAdminOS",
@@ -22,13 +22,15 @@
     "dist": "npm run build && electron-builder",
     "preview": "vite preview",
     "test": "node --import tsx --test \"electron/**/*.test.ts\"",
+    "test:renderer": "vitest run --config vitest.config.ts",
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit"
   },
   "dependencies": {
+    "@azure/msal-node": "^5.3.1",
     "@microsoft/mxc-sdk": "0.6.1",
-    "@openadminos/agent-sdk": "0.2.5",
-    "@openadminos/connector-whatsapp-web": "0.2.5",
-    "@openadminos/runtime": "0.2.5",
+    "@openadminos/agent-sdk": "0.3.0",
+    "@openadminos/connector-whatsapp-web": "0.3.0",
+    "@openadminos/runtime": "0.3.0",
     "electron-updater": "^6.6.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -36,6 +38,9 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^25.8.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -43,9 +48,11 @@
     "concurrently": "^9.1.2",
     "electron": "^42.3.0",
     "electron-builder": "^26.8.1",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4.0.0",
     "typescript": "~6.0.3",
     "vite": "^8.0.13",
+    "vitest": "^4.1.9",
     "wait-on": "^9.0.10"
   },
   "build": {

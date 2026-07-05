@@ -7,11 +7,49 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Added
 - Marketing landing page rework: new hero ("AI agents for your Microsoft 365 tenant. Run locally, approved by you."), pre-rendered Remotion hero demo video with reduced-motion poster fallback, traction strip with live GitHub stars and real agent/install stats, three-step "How it works" section replacing four overlapping sections, top-5 real registry agents with install counts, and a trimmed FAQ; plus a new top-level `remotion/` video project.
 
+- Added the tenant drift timeline with versioned configuration snapshots, field-level diffs, audit attribution, a Changes page, the read-only `query_drift` chat tool, and local retention controls.
+
 ### Changed
 
 ### Removed
 
 ### Fixed
+
+### Security
+
+## [0.3.0] - 2026-07-05
+
+### Added
+
+- Added single-tenant Intune Chat investigative mode with bounded read-only tool calls, streamed tool progress, persisted "What ran" traces, deterministic fallback, and a Settings mode control.
+- Added a Vitest and Testing Library renderer test baseline for write confirmation, hosted-provider consent, and provider settings.
+- Added Anthropic via the local Claude Code CLI and LM Studio via its local OpenAI-compatible server as runnable LLM providers.
+- Added Azure OpenAI provider configuration in Settings with endpoint, deployment, API version, write-only encrypted key storage, and renderer coverage for key replacement.
+- Added `docs/agent-sdk.md`, a practical author guide for manifest fields, step kinds, write confirmation, local QA, and community submission.
+- Added a marketing examples gallery with copyable Build your own Agent prompts for read, write, and connector-backed agents.
+- Added configurable run-history retention in Settings with 500-run/180-day defaults, never-prune support, startup/scheduler/manual pruning, workspace/live/confirmation exclusions, last-prune reporting, IPC coverage, and focused host/renderer tests.
+- Added explicit local JSON/CSV audit log export with retained run history, write-confirmation events, connector delivery audit entries, recorded hosted-provider consent events, retention metadata, and a SHA-256 hash chain.
+- Added `docs/mockups/09-registry.html` and `docs/mockups/10-empty-states.html` design references and swept implemented screens against the empty-state patterns.
+- Added reusable output pane components shared by chat answer artifacts, run results, and the investigation tool trace.
+- Added write-plan and run-confirmation invariant tests covering typed-phrase enforcement, plan/apply mismatch rejection, and tenant pinning.
+- Added a dev-only `npm run screenshots` harness that captures Agent Hub detail PNGs for every registry entry plus app-shell hero shots under `docs/screenshots/`.
+
+### Changed
+
+- Extracted Electron state module-level helpers into focused desktop helper modules without changing runtime behavior.
+- Extracted the Electron Intune Chat domain from `state.ts` into a dedicated service without changing the public store API.
+- Extracted the Electron post-run connector delivery domain from `state.ts` into a dedicated service without changing the public store API.
+- Extracted the Electron run lifecycle domain from `state.ts` into a dedicated service without changing the public store API.
+- Updated README and operating docs to reflect the v0.2.5 shipped surface and the `web/` marketing site path.
+
+### Removed
+
+- Removed the stale desktop renderer `types.ts` in favor of a narrow display-agent type.
+
+### Fixed
+
+- Tightened renderer accessibility basics across v0.3 Intune Chat, Settings, Run Result, output panes, and clear existing control-label/card interaction offenders.
+- Fixed write-intent detection to match imperative verbs as whole words so read questions about assignment or enablement state ("apps assigned but not installed") are answered instead of refused.
 
 ### Security
 

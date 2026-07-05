@@ -511,6 +511,35 @@ describe("Intune Chat SQLite store", () => {
 });
 
 describe("Intune Chat planner", () => {
+  it("only flags write intent for whole-word imperative verbs", () => {
+    const readQuestions = [
+      "Which required apps are assigned but not installed on targeted devices?",
+      "Which endpoint security policies are assigned to all devices?",
+      "Which devices have BitLocker enabled?",
+      "Which accounts were disabled last week?",
+      "Show recently deleted devices.",
+    ];
+    for (const question of readQuestions) {
+      assert.equal(
+        planChatContext(question).hasWriteIntent,
+        false,
+        `expected no write intent for: ${question}`,
+      );
+    }
+    const writeQuestions = [
+      "Retire stale Intune devices that have not synced",
+      "Disable the accounts of departed users",
+      "Assign the sales app to the field team",
+    ];
+    for (const question of writeQuestions) {
+      assert.equal(
+        planChatContext(question).hasWriteIntent,
+        true,
+        `expected write intent for: ${question}`,
+      );
+    }
+  });
+
   it("plans device context and suggests matching agents", () => {
     const plan = planChatContext("Retire stale Intune devices that have not synced");
     assert.deepEqual(plan.resources.slice(0, 2), ["managedDevices", "entraDevices"]);
@@ -556,6 +585,13 @@ describe("Intune Chat planner", () => {
     assert.equal(candidate?.text.includes("11111111-1111"), false);
     assert.ok(pathForResource("signIns").select?.includes("appliedConditionalAccessPolicies"));
     assert.ok(pathForResource("directoryAudits").select?.includes("targetResources"));
+  });
+
+  it("prefetches audit resources for tenant drift questions", () => {
+    const plan = planChatContext("Who changed configuration policies since Friday?");
+    assert.equal(plan.resources.includes("directoryAudits"), true);
+    assert.equal(plan.resources.includes("intuneAuditEvents"), true);
+    assert.equal(plan.hasWriteIntent, false);
   });
 
   it("keeps write agents out of read-only stale-sync recommendations", () => {
@@ -789,6 +825,16 @@ function isAcceptedPermissionSuperset(
   ) {
     return true;
   }
+  // Live Intune audit event checks for the D2 drift timeline confirmed that
+  // DeviceManagementConfiguration.Read.All can read /deviceManagement/auditEvents
+  // in v1.0. The bundled Graph PM index currently lists the Apps read family.
+  if (
+    (resource as string) === "intuneAuditEvents" &&
+    scope === "DeviceManagementConfiguration.Read.All" &&
+    documentedScopes.includes("DeviceManagementApps.Read.All")
+  ) {
+    return true;
+  }
   return scope === "User.Read.All" && documentedScopes.includes("User.ReadBasic.All");
 }
 
@@ -798,11 +844,26 @@ function isKnownGraphPmPropertyGap(
 ): boolean {
   // Microsoft Graph returns userPrincipalName for /users; the bundled Graph PM
   // resource index currently omits it from the user schema.
-  return resource === "users" && field === "userPrincipalName";
+  if (resource === "users" && field === "userPrincipalName") return true;
+  if ((resource as string) === "intuneAuditEvents") {
+    return new Set([
+      "displayName",
+      "componentName",
+      "activityType",
+      "activityOperationType",
+      "activityResult",
+      "correlationId",
+      "actor",
+      "resources",
+    ]).has(field);
+  }
+  return false;
 }
 
-function graphPmResourceName(resource: GraphCacheResourceKind): string {
-  const resourceNames: Record<GraphCacheResourceKind, string> = {
+function graphPmResourceName(
+  resource: GraphCacheResourceKind | "intuneAuditEvents",
+): string {
+  const resourceNames: Record<GraphCacheResourceKind | "intuneAuditEvents", string> = {
     managedDevices: "managedDevice",
     entraDevices: "device",
     users: "user",
@@ -812,6 +873,7 @@ function graphPmResourceName(resource: GraphCacheResourceKind): string {
     configurationPolicies: "deviceManagementConfigurationPolicy",
     signIns: "signIn",
     directoryAudits: "directoryAudit",
+    intuneAuditEvents: "auditEvent",
     conditionalAccessPolicies: "conditionalAccessPolicy",
     mobileApps: "mobileApp",
     detectedApps: "detectedApp",

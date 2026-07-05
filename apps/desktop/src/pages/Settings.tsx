@@ -14,6 +14,7 @@ import {
   IconCloud,
   IconExternal,
   IconHardDrive,
+  IconHash,
   IconLock,
   IconPlus,
   IconRefresh,
@@ -21,18 +22,31 @@ import {
   IconWarning,
 } from "../components/icons";
 import {
+  DEFAULT_DRIFT_RETENTION_DAYS,
+  DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
+  DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
   resolveProviderDefaultModel,
+  DEFAULT_AZURE_OPENAI_API_VERSION,
+  type AuditLogExportFormat,
+  type AzureOpenAIProviderConfig,
+  type ChatInvestigationMode,
+  type ChatInvestigationSettings,
   type CompanionLaunchSettings,
+  type DriftHistoryPruneResult,
+  type DriftRetentionSettings,
   type GraphCacheStatus,
   type LocalDataSummary,
   type ProviderId,
   type ProviderTestResult,
   type ProviderSummary,
   type ReleaseDiagnostics,
+  type RunHistoryPruneResult,
+  type RunHistoryRetentionSettings,
   type SandboxSettings,
   type SchedulerLaunchSettings,
   type SelfTrainingSettings,
   type SelfTrainingSuggestion,
+  type SetAzureOpenAIProviderConfigInput,
   type TenantRecord,
   type TrustState,
 } from "../shared/openAdminOS";
@@ -50,6 +64,19 @@ const sections = [
 
 type SectionId = (typeof sections)[number]["id"];
 
+interface RunHistoryRetentionDraft {
+  neverPrune: boolean;
+  keepLastRunsEnabled: boolean;
+  keepLastRuns: number;
+  keepDaysEnabled: boolean;
+  keepDays: number;
+}
+
+interface DriftRetentionDraft {
+  neverPrune: boolean;
+  keepDays: number;
+}
+
 const OFFICIAL_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
@@ -64,6 +91,7 @@ export default function Settings() {
     disconnectTenant,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
+    refresh,
   } = useAppState();
   const [tenantBusy, setTenantBusy] = useState(false);
   const [tenantError, setTenantError] = useState<string | null>(null);
@@ -107,6 +135,7 @@ export default function Settings() {
               activeModelByProviderId={state.activeModelByProviderId}
               onSetActiveProvider={setActiveProvider}
               onSetActiveModel={setActiveModel}
+              onProviderConfigSaved={refresh}
             />
           )}
           {section === "tenants" && (
@@ -146,33 +175,39 @@ function ProvidersSection({
   activeModelByProviderId,
   onSetActiveProvider,
   onSetActiveModel,
+  onProviderConfigSaved,
 }: {
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
   activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined;
   onSetActiveProvider: (id: ProviderId) => Promise<void>;
   onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
+  onProviderConfigSaved: () => Promise<void>;
 }) {
+  const localProviders = providers.filter((p) => p.isLocal);
+  const cliHostedProviders = providers.filter(
+    (p) => !p.isLocal && p.id !== "azure-openai",
+  );
+  const azureOpenAIProvider = providers.find((p) => p.id === "azure-openai");
+
   return (
     <div className="max-w-[820px]">
       <SectionTitle
         title="LLM Providers"
-        subtitle="OpenAdminOS never stores API keys. For hosted providers, we piggyback on your installed CLI's authentication so usage runs against your existing subscription."
+        subtitle="Local providers keep tenant prompts on this device. Hosted providers send prompts to the selected service; CLI-backed providers use the vendor CLI, while Azure OpenAI stores one encrypted key locally."
       />
 
       <div className="mt-6 grid grid-cols-1 gap-3">
-        {providers
-          .filter((p) => p.isLocal)
-          .map((p) => (
-            <ProviderRow
-              key={p.id}
-              provider={p}
-              activeProviderId={activeProviderId}
-              activeModel={activeModelByProviderId?.[p.id]}
-              onSetActiveProvider={onSetActiveProvider}
-              onSetActiveModel={onSetActiveModel}
-            />
-          ))}
+        {localProviders.map((p) => (
+          <ProviderRow
+            key={p.id}
+            provider={p}
+            activeProviderId={activeProviderId}
+            activeModel={activeModelByProviderId?.[p.id]}
+            onSetActiveProvider={onSetActiveProvider}
+            onSetActiveModel={onSetActiveModel}
+          />
+        ))}
       </div>
 
       <div className="mt-10 mb-3 flex items-center gap-3">
@@ -187,19 +222,43 @@ function ProvidersSection({
         key.
       </p>
       <div className="grid grid-cols-1 gap-3">
-        {providers
-          .filter((p) => !p.isLocal)
-          .map((p) => (
+        {cliHostedProviders.map((p) => (
+          <ProviderRow
+            key={p.id}
+            provider={p}
+            activeProviderId={activeProviderId}
+            activeModel={activeModelByProviderId?.[p.id]}
+            onSetActiveProvider={onSetActiveProvider}
+            onSetActiveModel={onSetActiveModel}
+          />
+        ))}
+      </div>
+
+      {azureOpenAIProvider && (
+        <>
+          <div className="mt-10 mb-3 flex items-center gap-3">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Hosted via Azure API key
+            </span>
+            <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
+          </div>
+          <p className="mb-4 max-w-[640px] text-[12px] text-[var(--color-text-muted)]">
+            Azure OpenAI uses your Azure resource endpoint and deployment. The
+            API key is encrypted with OS secure storage and is write-only in the
+            renderer.
+          </p>
+          <div className="grid grid-cols-1 gap-3">
             <ProviderRow
-              key={p.id}
-              provider={p}
+              provider={azureOpenAIProvider}
               activeProviderId={activeProviderId}
-              activeModel={activeModelByProviderId?.[p.id]}
+              activeModel={activeModelByProviderId?.[azureOpenAIProvider.id]}
               onSetActiveProvider={onSetActiveProvider}
               onSetActiveModel={onSetActiveModel}
             />
-          ))}
-      </div>
+            <AzureOpenAIConfigForm onSaved={onProviderConfigSaved} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -226,11 +285,15 @@ function ProviderRow({
     provider,
     activeModel ? { [provider.id]: activeModel } : undefined,
   ).model;
+  const providerReadyForTest =
+    provider.status === "connected" ||
+    (provider.id === "azure-openai" && provider.status === "available");
   const canTest =
     implemented &&
-    provider.status === "connected" &&
+    providerReadyForTest &&
     (provider.id === "openai" ||
       provider.id === "ollama" ||
+      provider.id === "azure-openai" ||
       provider.id === "apple-foundation");
 
   const handleTest = async () => {
@@ -433,6 +496,356 @@ function ProviderRow({
   );
 }
 
+function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
+  const [config, setConfig] = useState<AzureOpenAIProviderConfig | null>(null);
+  const [endpoint, setEndpoint] = useState("");
+  const [deployment, setDeployment] = useState("");
+  const [apiVersion, setApiVersion] = useState(
+    DEFAULT_AZURE_OPENAI_API_VERSION,
+  );
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [replacingKey, setReplacingKey] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const applyConfig = (next: AzureOpenAIProviderConfig) => {
+    setConfig(next);
+    setEndpoint(next.endpoint);
+    setDeployment(next.deployment);
+    setApiVersion(next.apiVersion || DEFAULT_AZURE_OPENAI_API_VERSION);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = window.openAdminOS;
+    if (!api) {
+      setLoading(false);
+      setError("Azure OpenAI settings are unavailable outside the desktop app.");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    api
+      .getAzureOpenAIConfig()
+      .then((next) => {
+        if (!cancelled) applyConfig(next);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasStoredKey = config?.hasKey ?? false;
+  const showKeyInput = !hasStoredKey || replacingKey;
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (saving) return;
+
+    const trimmedEndpoint = endpoint.trim();
+    const trimmedDeployment = deployment.trim();
+    const trimmedApiVersion =
+      apiVersion.trim() || DEFAULT_AZURE_OPENAI_API_VERSION;
+    const trimmedApiKey = apiKeyDraft.trim();
+
+    if (!trimmedEndpoint) {
+      setError("Endpoint URL is required.");
+      setNotice(null);
+      return;
+    }
+    try {
+      new URL(trimmedEndpoint);
+    } catch {
+      setError("Endpoint URL must be a valid Azure OpenAI resource URL.");
+      setNotice(null);
+      return;
+    }
+    if (!trimmedDeployment) {
+      setError("Deployment name is required.");
+      setNotice(null);
+      return;
+    }
+    if (!trimmedApiVersion) {
+      setError("API version is required.");
+      setNotice(null);
+      return;
+    }
+    if (!hasStoredKey && !trimmedApiKey) {
+      setError("Enter an Azure OpenAI API key before saving.");
+      setNotice(null);
+      return;
+    }
+    if (hasStoredKey && replacingKey && !trimmedApiKey) {
+      setError("Enter a replacement key, or cancel replacement before saving.");
+      setNotice(null);
+      return;
+    }
+
+    const input: SetAzureOpenAIProviderConfigInput = {
+      endpoint: trimmedEndpoint,
+      deployment: trimmedDeployment,
+      apiVersion: trimmedApiVersion,
+    };
+    if (showKeyInput) {
+      input.apiKey = trimmedApiKey;
+    }
+
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const next = await window.openAdminOS?.setAzureOpenAIConfig(input);
+      if (!next) {
+        throw new Error("Azure OpenAI settings are unavailable outside the desktop app.");
+      }
+      applyConfig(next);
+      setApiKeyDraft("");
+      setReplacingKey(false);
+      await onSaved();
+      setNotice(
+        "Azure OpenAI settings saved. Use Test on the provider row before sending tenant context.",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <div
+          role="status"
+          aria-live="polite"
+          className="p-5 text-[12px] text-[var(--color-text-muted)]"
+        >
+          Loading Azure OpenAI settings.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <form onSubmit={(event) => void handleSubmit(event)} className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <IconLock size={13} className="text-[var(--color-text-muted)]" />
+              <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                Azure OpenAI configuration
+              </h3>
+            </div>
+            <p className="mt-1 max-w-[620px] text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+              Your key is encrypted with the OS secure storage and never leaves
+              this device except to call your Azure endpoint.
+            </p>
+          </div>
+          <Pill tone={hasStoredKey ? "success" : "warning"}>
+            <StatusDot tone={hasStoredKey ? "success" : "warning"} />
+            {hasStoredKey ? "Key stored" : "Key required"}
+          </Pill>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4">
+          <AzureConfigField label="Endpoint URL" htmlFor="azure-openai-endpoint">
+            <input
+              id="azure-openai-endpoint"
+              name="azure-openai-endpoint"
+              type="url"
+              value={endpoint}
+              onChange={(event) => {
+                setEndpoint(event.target.value);
+                setError(null);
+                setNotice(null);
+              }}
+              placeholder="https://contoso.openai.azure.com"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            />
+          </AzureConfigField>
+          <AzureConfigField label="Deployment name" htmlFor="azure-openai-deployment">
+            <input
+              id="azure-openai-deployment"
+              name="azure-openai-deployment"
+              value={deployment}
+              onChange={(event) => {
+                setDeployment(event.target.value);
+                setError(null);
+                setNotice(null);
+              }}
+              placeholder="gpt-4o-admin"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            />
+          </AzureConfigField>
+          <AzureConfigField label="API version" htmlFor="azure-openai-api-version">
+            <input
+              id="azure-openai-api-version"
+              name="azure-openai-api-version"
+              value={apiVersion}
+              onChange={(event) => {
+                setApiVersion(event.target.value);
+                setError(null);
+                setNotice(null);
+              }}
+              placeholder={DEFAULT_AZURE_OPENAI_API_VERSION}
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            />
+          </AzureConfigField>
+
+          <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                  API key
+                </div>
+                <div className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                  Stored keys are never displayed. Replace writes a new key over
+                  the existing encrypted value.
+                </div>
+              </div>
+              {hasStoredKey && !replacingKey && (
+                <div className="flex items-center gap-2">
+                  <Pill tone="success">
+                    <IconCheck size={10} /> Key stored
+                  </Pill>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setReplacingKey(true);
+                      setApiKeyDraft("");
+                      setError(null);
+                      setNotice(null);
+                    }}
+                  >
+                    Replace
+                  </Button>
+                </div>
+              )}
+            </div>
+            {showKeyInput && (
+              <div className="mt-3">
+                <label
+                  htmlFor="azure-openai-api-key"
+                  className="sr-only"
+                >
+                  API key
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="azure-openai-api-key"
+                    name="azure-openai-api-key"
+                    type="password"
+                    value={apiKeyDraft}
+                    onChange={(event) => {
+                      setApiKeyDraft(event.target.value);
+                      setError(null);
+                      setNotice(null);
+                    }}
+                    placeholder={
+                      hasStoredKey
+                        ? "Paste a replacement key"
+                        : "Paste Azure OpenAI API key"
+                    }
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+                  />
+                  {hasStoredKey && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setReplacingKey(false);
+                        setApiKeyDraft("");
+                        setError(null);
+                        setNotice(null);
+                      }}
+                    >
+                      Cancel replace
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+          >
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-4 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30"
+          >
+            {notice}
+          </div>
+        )}
+
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--color-border-soft)] pt-4">
+          <div className="text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+            Azure OpenAI is hosted. Tenant prompts are sent to the configured
+            Azure endpoint when this provider is active.
+          </div>
+          <Button type="submit" size="sm" variant="primary" disabled={saving}>
+            {saving ? "Saving" : "Save Azure OpenAI"}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+function AzureConfigField({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[150px_1fr] sm:items-center">
+      <label
+        htmlFor={htmlFor}
+        className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+      >
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
 function ProviderFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
@@ -631,6 +1044,8 @@ function ChatSettingsSection() {
     useState<LocalDataSummary | null>(null);
   const [learningSettings, setLearningSettings] =
     useState<SelfTrainingSettings>({ enabled: false });
+  const [investigationSettings, setInvestigationSettings] =
+    useState<ChatInvestigationSettings>({ mode: "auto" });
   const [suggestions, setSuggestions] = useState<SelfTrainingSuggestion[]>([]);
   const [refreshingCache, setRefreshingCache] = useState(false);
   const [clearingLocalData, setClearingLocalData] =
@@ -669,14 +1084,22 @@ function ChatSettingsSection() {
   const loadChatSettings = async () => {
     const api = window.openAdminOS;
     if (!api) return;
-    const [nextCache, nextLearning, nextSuggestions, nextLocalData] = await Promise.all([
+    const [
+      nextCache,
+      nextLearning,
+      nextInvestigation,
+      nextSuggestions,
+      nextLocalData,
+    ] = await Promise.all([
       api.getGraphCacheStatus().catch(() => null),
       api.getSelfTrainingSettings(),
+      api.getChatInvestigationSettings(),
       api.listSelfTrainingSuggestions(),
       api.getLocalDataSummary().catch(() => null),
     ]);
     setCacheStatus(nextCache);
     setLearningSettings(nextLearning);
+    setInvestigationSettings(nextInvestigation);
     setSuggestions(nextSuggestions);
     setLocalDataSummary(nextLocalData);
     if (nextCache?.schedule?.intervalMinutes) {
@@ -689,7 +1112,7 @@ function ChatSettingsSection() {
       setError(caught instanceof Error ? caught.message : String(caught)),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeTenantId]);
+  }, [state.activeTenantId, state.runs.length]);
 
   const handleRefreshCache = async () => {
     const api = window.openAdminOS;
@@ -743,6 +1166,17 @@ function ChatSettingsSection() {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setScheduleBusy(false);
+    }
+  };
+
+  const handleInvestigationModeChange = async (mode: ChatInvestigationMode) => {
+    const api = window.openAdminOS;
+    if (!api || mode === investigationSettings.mode) return;
+    setError(null);
+    try {
+      setInvestigationSettings(await api.setChatInvestigationMode(mode));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
@@ -808,6 +1242,12 @@ function ChatSettingsSection() {
   const graphCacheLabel = activeTenant
     ? `${activeTenantCacheRows.toLocaleString()} rows for ${activeTenant.displayName}`
     : "No active tenant";
+  const runHistoryLabel = localDataSummary?.runHistoryCount !== undefined
+    ? `${localDataSummary.runHistoryCount.toLocaleString()} records`
+    : `${state.runs.length.toLocaleString()} records`;
+  const lastPruneLabel = localDataSummary?.lastRunHistoryPrune
+    ? formatRunHistoryPruneResult(localDataSummary.lastRunHistoryPrune)
+    : "No run-history prune result recorded.";
 
   return (
     <div className="max-w-[820px]">
@@ -833,6 +1273,60 @@ function ChatSettingsSection() {
       )}
 
       <div className="mt-6 flex flex-col gap-3">
+        <SettingRow
+          label="Chat investigation mode"
+          description="Controls whether single-tenant Intune Chat can run read-only tool calls before answering. Multi-tenant chat stays deterministic."
+          control={
+            <div
+              role="group"
+              aria-label="Chat investigation mode"
+              className="grid min-w-[360px] grid-cols-3 gap-1 rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border-soft)]"
+            >
+              {([
+                {
+                  value: "auto",
+                  label: "Auto",
+                  detail: "Hosted and capable local models investigate.",
+                },
+                {
+                  value: "always-agentic",
+                  label: "Investigative",
+                  detail: "Always allow read-only tool calls.",
+                },
+                {
+                  value: "always-deterministic",
+                  label: "Deterministic",
+                  detail: "Use keyword-planned cache retrieval.",
+                },
+              ] satisfies Array<{
+                value: ChatInvestigationMode;
+                label: string;
+                detail: string;
+              }>).map((option) => {
+                const active = investigationSettings.mode === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => void handleInvestigationModeChange(option.value)}
+                    className={`rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+                      active
+                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                        : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                    }`}
+                    aria-pressed={active}
+                  >
+                    <span className="block text-[11.5px] font-medium">{option.label}</span>
+                    <span className="mt-0.5 block text-[10px] leading-4 text-[var(--color-text-muted)]">
+                      {option.detail}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          }
+        />
+
         <SettingRow
           label="Tenant cache"
           description={
@@ -901,7 +1395,7 @@ function ChatSettingsSection() {
                   Local data
                 </div>
                 <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
-                  Intune Chat stores conversations, cache rows, and learning decisions in local SQLite.
+                  Chat, cache, and learning records live in local SQLite. Run history lives in this profile's local state store.
                 </div>
               </div>
               <Pill tone="success">
@@ -920,6 +1414,7 @@ function ChatSettingsSection() {
               />
               <LocalDataMetric label="Chat history" value={chatHistoryLabel} />
               <LocalDataMetric label="Active tenant cache" value={graphCacheLabel} />
+              <LocalDataMetric label="Run history" value={runHistoryLabel} />
               <LocalDataMetric
                 label="Self-training"
                 value={
@@ -928,6 +1423,9 @@ function ChatSettingsSection() {
                     : "Loading"
                 }
               />
+            </div>
+            <div className="mt-3 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+              {lastPruneLabel}
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -967,7 +1465,12 @@ function ChatSettingsSection() {
           description="Refreshes the active tenant cache through the local scheduler while the user is signed in."
           control={
             <div className="flex items-center gap-2">
+              <label htmlFor="periodic-cache-refresh-interval" className="sr-only">
+                Periodic cache refresh interval
+              </label>
               <select
+                id="periodic-cache-refresh-interval"
+                name="periodic-cache-refresh-interval"
                 value={scheduleInterval}
                 disabled={scheduleBusy || !activeTenant}
                 onChange={(event) => {
@@ -1207,19 +1710,45 @@ function ClearLocalDataModal({
 }
 
 function GeneralSection() {
-  const { state } = useAppState();
+  const { state, refresh } = useAppState();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
   const [companionLaunch, setCompanionLaunch] =
     useState<CompanionLaunchSettings | null>(null);
   const [sandboxSettings, setSandboxSettings] =
     useState<SandboxSettings | null>(null);
+  const [runHistoryRetention, setRunHistoryRetention] =
+    useState<RunHistoryRetentionSettings | null>(null);
+  const [runHistoryDraft, setRunHistoryDraft] =
+    useState<RunHistoryRetentionDraft>(() =>
+      runHistoryRetentionDraftFromSettings(null),
+    );
+  const [lastPruneResult, setLastPruneResult] =
+    useState<RunHistoryPruneResult | null>(null);
+  const [driftRetention, setDriftRetention] =
+    useState<DriftRetentionSettings | null>(null);
+  const [driftDraft, setDriftDraft] =
+    useState<DriftRetentionDraft>(() => driftRetentionDraftFromSettings(null));
+  const [lastDriftPruneResult, setLastDriftPruneResult] =
+    useState<DriftHistoryPruneResult | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
   const [companionBusy, setCompanionBusy] = useState(false);
   const [sandboxBusy, setSandboxBusy] = useState(false);
+  const [runHistoryBusy, setRunHistoryBusy] =
+    useState<"saving" | "pruning" | null>(null);
+  const [driftBusy, setDriftBusy] =
+    useState<"saving" | "pruning" | null>(null);
+  const [auditExportFormat, setAuditExportFormat] =
+    useState<AuditLogExportFormat>("json");
+  const [auditExportBusy, setAuditExportBusy] = useState(false);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const [companionError, setCompanionError] = useState<string | null>(null);
   const [sandboxError, setSandboxError] = useState<string | null>(null);
+  const [runHistoryError, setRunHistoryError] = useState<string | null>(null);
+  const [runHistoryNotice, setRunHistoryNotice] = useState<string | null>(null);
+  const [driftError, setDriftError] = useState<string | null>(null);
+  const [driftNotice, setDriftNotice] = useState<string | null>(null);
+  const [auditExportNotice, setAuditExportNotice] = useState<string | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -1259,6 +1788,32 @@ function GeneralSection() {
       .catch((error: unknown) => {
         if (!cancelled) {
           setSandboxError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getRunHistoryRetentionSettings()
+      .then((settings) => {
+        if (!cancelled) {
+          setRunHistoryRetention(settings);
+          setRunHistoryDraft(runHistoryRetentionDraftFromSettings(settings));
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setRunHistoryError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    api
+      .getDriftRetentionSettings()
+      .then((settings) => {
+        if (!cancelled) {
+          setDriftRetention(settings);
+          setDriftDraft(driftRetentionDraftFromSettings(settings));
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setDriftError(error instanceof Error ? error.message : String(error));
         }
       });
     return () => {
@@ -1310,6 +1865,130 @@ function GeneralSection() {
       setSandboxError(error instanceof Error ? error.message : String(error));
     } finally {
       setSandboxBusy(false);
+    }
+  };
+
+  const saveRunHistoryRetention = async () => {
+    const api = window.openAdminOS;
+    if (!api || runHistoryBusy) return;
+    if (
+      !runHistoryDraft.neverPrune &&
+      !runHistoryDraft.keepLastRunsEnabled &&
+      !runHistoryDraft.keepDaysEnabled
+    ) {
+      setRunHistoryError("Enable at least one retention rule, or choose never prune.");
+      return;
+    }
+    setRunHistoryBusy("saving");
+    setRunHistoryError(null);
+    setRunHistoryNotice(null);
+    try {
+      const next = await api.setRunHistoryRetentionSettings({
+        neverPrune: runHistoryDraft.neverPrune,
+        keepLastRuns: runHistoryDraft.keepLastRunsEnabled
+          ? runHistoryDraft.keepLastRuns
+          : null,
+        keepDays: runHistoryDraft.keepDaysEnabled
+          ? runHistoryDraft.keepDays
+          : null,
+      });
+      setRunHistoryRetention(next);
+      setRunHistoryDraft(runHistoryRetentionDraftFromSettings(next));
+      setRunHistoryNotice("Run-history retention saved.");
+    } catch (error) {
+      setRunHistoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRunHistoryBusy(null);
+    }
+  };
+
+  const pruneRunHistoryNow = async () => {
+    const api = window.openAdminOS;
+    if (!api || runHistoryBusy) return;
+    setRunHistoryBusy("pruning");
+    setRunHistoryError(null);
+    setRunHistoryNotice(null);
+    try {
+      const result = await api.pruneRunHistoryNow();
+      setLastPruneResult(result);
+      setRunHistoryNotice(result.reason);
+      await refresh();
+    } catch (error) {
+      setRunHistoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRunHistoryBusy(null);
+    }
+  };
+
+  const saveDriftRetention = async () => {
+    const api = window.openAdminOS;
+    if (!api || driftBusy) return;
+    setDriftBusy("saving");
+    setDriftError(null);
+    setDriftNotice(null);
+    try {
+      const next = await api.setDriftRetentionSettings({
+        neverPrune: driftDraft.neverPrune,
+        keepDays: driftDraft.neverPrune ? null : driftDraft.keepDays,
+      });
+      setDriftRetention(next);
+      setDriftDraft(driftRetentionDraftFromSettings(next));
+      setDriftNotice("Change-history retention saved.");
+    } catch (error) {
+      setDriftError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDriftBusy(null);
+    }
+  };
+
+  const pruneDriftHistoryNow = async () => {
+    const api = window.openAdminOS;
+    if (!api || driftBusy) return;
+    setDriftBusy("pruning");
+    setDriftError(null);
+    setDriftNotice(null);
+    try {
+      const result = await api.pruneDriftHistoryNow();
+      setLastDriftPruneResult(result);
+      setDriftNotice(result.reason);
+    } catch (error) {
+      setDriftError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDriftBusy(null);
+    }
+  };
+
+  const exportAuditLog = async () => {
+    const api = window.openAdminOS;
+    if (!api || auditExportBusy) return;
+    setAuditExportBusy(true);
+    setRunHistoryError(null);
+    setRunHistoryNotice(null);
+    setAuditExportNotice(null);
+    try {
+      const exported = await api.exportAuditLog({ format: auditExportFormat });
+      const saved = await api.saveTextFile({
+        suggestedName: exported.suggestedName,
+        content: exported.content,
+        filters:
+          auditExportFormat === "json"
+            ? [{ name: "JSON", extensions: ["json"] }]
+            : [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (saved.canceled) {
+        setAuditExportNotice("Audit log export cancelled.");
+        return;
+      }
+      setAuditExportNotice(
+        `Audit log saved locally. ${exported.eventCount.toLocaleString()} events. Final hash ${exported.hashChain.finalHash.slice(0, 12)}...`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRunHistoryError(
+        `Audit log export failed: ${message} Try again, choose another save location, or narrow the date range through the export API.`,
+      );
+    } finally {
+      setAuditExportBusy(false);
     }
   };
 
@@ -1472,13 +2151,438 @@ function GeneralSection() {
         />
         <SettingRow
           label="Run history retention"
-          description="Run records live in this profile's local store. Automatic pruning is planned."
+          description="Pruning removes old run records from local history. Workspace-linked or workspace-pinned runs, queued/running runs, and runs awaiting confirmation are kept. The job runs at startup and on the scheduler tick."
           control={
-            <Pill>
-              <StatusDot tone="muted" /> Coming soon
-            </Pill>
+            <RunHistoryRetentionControls
+              draft={runHistoryDraft}
+              saved={runHistoryRetention}
+              runCount={state.runs.length}
+              busy={runHistoryBusy}
+              lastResult={lastPruneResult}
+              onChange={setRunHistoryDraft}
+              onSave={() => void saveRunHistoryRetention()}
+              onPruneNow={() => void pruneRunHistoryNow()}
+            />
           }
         />
+        <SettingRow
+          label="Change history"
+          description="Pruning removes old local drift snapshots and historical object versions. Current object state is never deleted. The job runs at startup and on the scheduler tick."
+          control={
+            <DriftRetentionControls
+              draft={driftDraft}
+              saved={driftRetention}
+              busy={driftBusy}
+              lastResult={lastDriftPruneResult}
+              onChange={setDriftDraft}
+              onSave={() => void saveDriftRetention()}
+              onPruneNow={() => void pruneDriftHistoryNow()}
+            />
+          }
+        />
+        <SettingRow
+          label="Audit log export"
+          description="Exports retained run history, write-confirmation events, connector delivery audit entries, and recorded hosted-provider consent acknowledgements. Old run records may already be absent because of retention."
+          control={
+            <AuditLogExportControls
+              format={auditExportFormat}
+              busy={auditExportBusy}
+              onFormatChange={setAuditExportFormat}
+              onExport={() => void exportAuditLog()}
+            />
+          }
+        />
+        {(runHistoryError || runHistoryNotice || driftError || driftNotice || auditExportNotice) && (
+          <div
+            role={runHistoryError || driftError ? "alert" : "status"}
+            aria-live={runHistoryError || driftError ? "assertive" : "polite"}
+            className={`rounded-lg px-3 py-2 text-[12px] ring-1 ${
+              runHistoryError || driftError
+                ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
+                : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-[var(--color-border-soft)]"
+            }`}
+          >
+            {runHistoryError ?? driftError ?? runHistoryNotice ?? driftNotice ?? auditExportNotice}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RunHistoryRetentionControls({
+  draft,
+  saved,
+  runCount,
+  busy,
+  lastResult,
+  onChange,
+  onSave,
+  onPruneNow,
+}: {
+  draft: RunHistoryRetentionDraft;
+  saved: RunHistoryRetentionSettings | null;
+  runCount: number;
+  busy: "saving" | "pruning" | null;
+  lastResult: RunHistoryPruneResult | null;
+  onChange: (draft: RunHistoryRetentionDraft) => void;
+  onSave: () => void;
+  onPruneNow: () => void;
+}) {
+  const controlsDisabled = busy !== null || draft.neverPrune;
+  const valid =
+    draft.neverPrune || draft.keepLastRunsEnabled || draft.keepDaysEnabled;
+
+  return (
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+      <div className="flex items-center justify-between gap-3">
+        <Pill tone={draft.neverPrune ? "warning" : "default"}>
+          {draft.neverPrune ? "Never prune" : runHistoryRetentionSummary(saved)}
+        </Pill>
+        <span className="text-[var(--color-text-muted)]">
+          {runCount.toLocaleString()} records
+        </span>
+      </div>
+
+      <label
+        htmlFor="run-history-never-prune"
+        className="flex items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+      >
+        <input
+          id="run-history-never-prune"
+          name="run-history-never-prune"
+          type="checkbox"
+          checked={draft.neverPrune}
+          disabled={busy !== null}
+          onChange={(event) =>
+            onChange({ ...draft, neverPrune: event.currentTarget.checked })
+          }
+        />
+        <span>Never prune</span>
+      </label>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div
+          className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
+            controlsDisabled ? "opacity-60" : ""
+          }`}
+        >
+          <label
+            htmlFor="run-history-keep-last-runs-enabled"
+            className="flex items-center gap-2 text-[var(--color-text-soft)]"
+          >
+            <input
+              id="run-history-keep-last-runs-enabled"
+              name="run-history-keep-last-runs-enabled"
+              type="checkbox"
+              checked={draft.keepLastRunsEnabled}
+              disabled={controlsDisabled}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  keepLastRunsEnabled: event.currentTarget.checked,
+                })
+              }
+            />
+            Keep newest
+          </label>
+          <label htmlFor="run-history-keep-last-runs" className="sr-only">
+            Runs to keep
+          </label>
+          <input
+            id="run-history-keep-last-runs"
+            name="run-history-keep-last-runs"
+            type="number"
+            min={1}
+            max={100000}
+            inputMode="numeric"
+            value={draft.keepLastRuns}
+            disabled={controlsDisabled || !draft.keepLastRunsEnabled}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                keepLastRuns: boundedRetentionValue(
+                  event.currentTarget.valueAsNumber,
+                  draft.keepLastRuns,
+                  1,
+                  100_000,
+                ),
+              })
+            }
+            className="mt-2 h-7 w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+        </div>
+
+        <div
+          className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
+            controlsDisabled ? "opacity-60" : ""
+          }`}
+        >
+          <label
+            htmlFor="run-history-keep-days-enabled"
+            className="flex items-center gap-2 text-[var(--color-text-soft)]"
+          >
+            <input
+              id="run-history-keep-days-enabled"
+              name="run-history-keep-days-enabled"
+              type="checkbox"
+              checked={draft.keepDaysEnabled}
+              disabled={controlsDisabled}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  keepDaysEnabled: event.currentTarget.checked,
+                })
+              }
+            />
+            Keep newer than
+          </label>
+          <div className="mt-2 flex items-center gap-2">
+            <label htmlFor="run-history-keep-days" className="sr-only">
+              Run age days to keep
+            </label>
+            <input
+              id="run-history-keep-days"
+              name="run-history-keep-days"
+              type="number"
+              min={1}
+              max={3650}
+              inputMode="numeric"
+              value={draft.keepDays}
+              disabled={controlsDisabled || !draft.keepDaysEnabled}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  keepDays: boundedRetentionValue(
+                    event.currentTarget.valueAsNumber,
+                    draft.keepDays,
+                    1,
+                    3_650,
+                  ),
+                })
+              }
+              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+            />
+            <span className="text-[var(--color-text-muted)]">days</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+        Deletes only records outside every enabled rule. Keeps workspace evidence,
+        queued/running runs, and write confirmations.
+      </div>
+
+      {lastResult && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+        >
+          {formatRunHistoryPruneResult(lastResult)}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy !== null || !valid}
+          onClick={onSave}
+        >
+          {busy === "saving" ? "Saving" : "Save"}
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          leadingIcon={<IconRefresh size={12} />}
+          disabled={busy !== null}
+          onClick={onPruneNow}
+        >
+          {busy === "pruning" ? "Pruning" : "Prune now"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DriftRetentionControls({
+  draft,
+  saved,
+  busy,
+  lastResult,
+  onChange,
+  onSave,
+  onPruneNow,
+}: {
+  draft: DriftRetentionDraft;
+  saved: DriftRetentionSettings | null;
+  busy: "saving" | "pruning" | null;
+  lastResult: DriftHistoryPruneResult | null;
+  onChange: (draft: DriftRetentionDraft) => void;
+  onSave: () => void;
+  onPruneNow: () => void;
+}) {
+  const controlsDisabled = busy !== null || draft.neverPrune;
+  const retentionCopy = draft.neverPrune
+    ? "Configuration change history is kept locally until you change this setting. Current object state is never deleted."
+    : `Configuration change history is kept locally for ${draft.keepDays.toLocaleString()} days. Current object state is never deleted.`;
+
+  return (
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+      <div className="flex items-center justify-between gap-3">
+        <Pill tone={draft.neverPrune ? "warning" : "default"}>
+          {driftRetentionSummary(saved)}
+        </Pill>
+        <span className="text-[var(--color-text-muted)]">local snapshots</span>
+      </div>
+
+      <label
+        htmlFor="drift-never-prune"
+        className="flex items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+      >
+        <input
+          id="drift-never-prune"
+          name="drift-never-prune"
+          type="checkbox"
+          checked={draft.neverPrune}
+          disabled={busy !== null}
+          onChange={(event) =>
+            onChange({ ...draft, neverPrune: event.currentTarget.checked })
+          }
+        />
+        <span>Never prune</span>
+      </label>
+
+      <div
+        className={`rounded-md bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border-soft)] ${
+          controlsDisabled ? "opacity-60" : ""
+        }`}
+      >
+        <label
+          htmlFor="drift-keep-days"
+          className="block text-[var(--color-text-soft)]"
+        >
+          Retention days
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            id="drift-keep-days"
+            name="drift-keep-days"
+            type="number"
+            min={30}
+            max={730}
+            inputMode="numeric"
+            value={draft.keepDays}
+            disabled={controlsDisabled}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                keepDays: boundedRetentionValue(
+                  event.currentTarget.valueAsNumber,
+                  draft.keepDays,
+                  30,
+                  730,
+                ),
+              })
+            }
+            className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+          />
+          <span className="text-[var(--color-text-muted)]">days</span>
+        </div>
+      </div>
+
+      <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+        {retentionCopy}
+      </div>
+
+      {lastResult && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+        >
+          {formatDriftPruneResult(lastResult)}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label="Save change-history retention"
+          disabled={busy !== null}
+          onClick={onSave}
+        >
+          {busy === "saving" ? "Saving" : "Save"}
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label="Prune change history now"
+          leadingIcon={<IconRefresh size={12} />}
+          disabled={busy !== null}
+          onClick={onPruneNow}
+        >
+          {busy === "pruning" ? "Pruning" : "Prune now"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AuditLogExportControls({
+  format,
+  busy,
+  onFormatChange,
+  onExport,
+}: {
+  format: AuditLogExportFormat;
+  busy: boolean;
+  onFormatChange: (format: AuditLogExportFormat) => void;
+  onExport: () => void;
+}) {
+  return (
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+      <div
+        role="group"
+        aria-label="Audit log export format"
+        className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border-soft)]"
+      >
+        {(["json", "csv"] satisfies AuditLogExportFormat[]).map((option) => {
+          const active = format === option;
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={active}
+              disabled={busy}
+              onClick={() => onFormatChange(option)}
+              className={`h-7 rounded-md text-[11.5px] font-medium uppercase tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+                active
+                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+              } ${busy ? "opacity-60" : ""}`}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+      <div className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        Saved through the local file dialog. Nothing is uploaded. CSV includes the
+        per-entry hash; JSON includes the full hash-chain header.
+      </div>
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="secondary"
+          leadingIcon={<IconHash size={12} />}
+          disabled={busy}
+          onClick={onExport}
+        >
+          {busy ? "Exporting" : "Export audit log"}
+        </Button>
       </div>
     </div>
   );
@@ -2170,6 +3274,88 @@ function Stat({ label, value, mono = false }: { label: string; value: string; mo
       </div>
     </div>
   );
+}
+
+function runHistoryRetentionDraftFromSettings(
+  settings: RunHistoryRetentionSettings | null,
+): RunHistoryRetentionDraft {
+  return {
+    neverPrune: settings?.neverPrune ?? false,
+    keepLastRunsEnabled: settings?.keepLastRuns !== undefined,
+    keepLastRuns:
+      settings?.keepLastRuns ?? DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
+    keepDaysEnabled: settings?.keepDays !== undefined,
+    keepDays: settings?.keepDays ?? DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
+  };
+}
+
+function driftRetentionDraftFromSettings(
+  settings: DriftRetentionSettings | null,
+): DriftRetentionDraft {
+  return {
+    neverPrune: settings?.neverPrune ?? false,
+    keepDays: settings?.keepDays ?? DEFAULT_DRIFT_RETENTION_DAYS,
+  };
+}
+
+function boundedRetentionValue(
+  value: number,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function runHistoryRetentionSummary(
+  settings: RunHistoryRetentionSettings | null,
+): string {
+  if (!settings) return "Loading";
+  if (settings.neverPrune) return "Never prune";
+  const rules: string[] = [];
+  if (settings.keepLastRuns !== undefined) {
+    rules.push(`${settings.keepLastRuns.toLocaleString()} runs`);
+  }
+  if (settings.keepDays !== undefined) {
+    rules.push(`${settings.keepDays.toLocaleString()} days`);
+  }
+  return rules.length > 0 ? rules.join(" / ") : "No rule";
+}
+
+function driftRetentionSummary(settings: DriftRetentionSettings | null): string {
+  if (!settings) return "Loading";
+  if (settings.neverPrune) return "Never prune";
+  return `${(settings.keepDays ?? DEFAULT_DRIFT_RETENTION_DAYS).toLocaleString()} days`;
+}
+
+function formatRunHistoryPruneResult(result: RunHistoryPruneResult): string {
+  const protectedParts: string[] = [];
+  if (result.protectedWorkspaceCount > 0) {
+    protectedParts.push(
+      `${result.protectedWorkspaceCount.toLocaleString()} workspace-linked`,
+    );
+  }
+  if (result.protectedActiveCount > 0) {
+    protectedParts.push(`${result.protectedActiveCount.toLocaleString()} active`);
+  }
+  if (result.protectedAwaitingConfirmationCount > 0) {
+    protectedParts.push(
+      `${result.protectedAwaitingConfirmationCount.toLocaleString()} awaiting confirmation`,
+    );
+  }
+  const protectedText =
+    protectedParts.length > 0 ? ` Kept ${protectedParts.join(", ")}.` : "";
+  return `${result.reason} ${formatDateTime(result.prunedAt)}. ${result.afterCount.toLocaleString()} run records remain.${protectedText}`
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function formatDriftPruneResult(result: DriftHistoryPruneResult): string {
+  const removed = result.snapshotsDeleted + result.versionsDeleted;
+  return `${result.reason} ${formatDateTime(result.prunedAt)}. ${removed.toLocaleString()} local history rows removed.`
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function formatRelative(iso: string): string {

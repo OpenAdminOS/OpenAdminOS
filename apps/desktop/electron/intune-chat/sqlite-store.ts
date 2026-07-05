@@ -1,14 +1,19 @@
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
+  ChatInvestigationMode,
+  ChatInvestigationSettings,
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
   GraphCacheRefreshScheduleSettings,
   ImportMultiTenantResultToWorkspacesResult,
   IntuneChatConversation,
+  IntuneChatInvestigationToolName,
   IntuneChatMessage,
   IntuneChatToolCall,
+  IntuneChatToolTraceEntry,
   LocalDataSummary,
   MultiTenantAgentBatch,
   MultiTenantChatJob,
@@ -25,6 +30,8 @@ import type {
   WorkspaceStatus,
   WorkspaceSummary,
 } from "@openadminos/agent-sdk";
+import { driftContentHash } from "./drift/canonical.js";
+import { DRIFT_TRACKED_RESOURCES } from "./drift/tracked-resources.js";
 
 interface ConversationRow {
   id: string;
@@ -68,9 +75,83 @@ interface ResourceRow {
   refreshed_at?: string;
 }
 
+interface CachedGraphResourceRow {
+  resource: GraphCacheResourceKind;
+  graph_id: string;
+  raw_json: string;
+  display_name: string | null;
+  refreshed_at: string;
+}
+
+interface NormalizedGraphObject {
+  graphId: string;
+  searchText: string;
+  displayName: string | null;
+  userPrincipalName: string | null;
+  operatingSystem: string | null;
+  complianceState: string | null;
+  lastSeenAt: string | null;
+}
+
+interface NormalizedGraphResourceRow {
+  row: unknown;
+  rawJson: string;
+  normalized: NormalizedGraphObject;
+}
+
+interface DriftSnapshotRow {
+  id: string;
+  tenant_id: string;
+  resource: GraphCacheResourceKind;
+  captured_at: string;
+  row_count: number;
+  changes_added: number;
+  changes_removed: number;
+  changes_modified: number;
+}
+
+interface DriftObjectVersionRow {
+  tenant_id: string;
+  resource: GraphCacheResourceKind;
+  graph_id: string;
+  version: number;
+  content_hash: string;
+  raw_json: string;
+  display_name: string | null;
+  first_seen_snapshot_id: string;
+  first_seen_at: string;
+  removed_snapshot_id: string | null;
+  removed_at: string | null;
+}
+
+interface QueryCacheRow extends ResourceRow {
+  total_count: number;
+}
+
 interface SettingRow {
   value: string;
   updated_at: string;
+}
+
+export interface HostedProviderConsentAuditRecord {
+  id: string;
+  tenantId: string;
+  source: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+interface ToolCallRow {
+  id: string;
+  conversation_id: string;
+  message_id: string | null;
+  type: string;
+  status: IntuneChatToolCall["status"];
+  input_json: string | null;
+  output_json: string | null;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
 }
 
 interface SuggestionRow {
@@ -188,6 +269,89 @@ export interface GraphCacheResourceDefinition {
   resource: GraphCacheResourceKind;
   label: string;
   scopes: string[];
+}
+
+export type GraphCacheQueryOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "startsWith"
+  | "in"
+  | "lt"
+  | "lte"
+  | "gt"
+  | "gte";
+
+export interface GraphCacheQueryPredicate {
+  field: string;
+  op: GraphCacheQueryOperator;
+  value: string | number | boolean | Array<string | number | boolean>;
+}
+
+export interface GraphCacheQueryResult {
+  resource: GraphCacheResourceKind;
+  totalCount: number;
+  returnedRows: number;
+  limit: number;
+  rows: { row: unknown; refreshedAt?: string }[];
+}
+
+export interface DriftSnapshotRecord {
+  id: string;
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  capturedAt: string;
+  rowCount: number;
+  changesAdded: number;
+  changesRemoved: number;
+  changesModified: number;
+}
+
+export interface DriftSnapshotChangeRecord {
+  kind: "added" | "removed" | "modified";
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  displayName?: string;
+  previousRawJson?: string;
+  currentRawJson?: string;
+}
+
+export interface DriftObjectVersionRecord {
+  tenantId: string;
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  version: number;
+  contentHash: string;
+  rawJson: string;
+  displayName?: string;
+  firstSeenSnapshotId: string;
+  firstSeenAt: string;
+  removedSnapshotId?: string;
+  removedAt?: string;
+}
+
+export interface DriftPruneResult {
+  snapshotsDeleted: number;
+  versionsDeleted: number;
+}
+
+export interface CachedGraphResourceRecord {
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  row: unknown;
+  rawJson: string;
+  displayName?: string;
+  refreshedAt: string;
+}
+
+export interface DriftResourceStatsRecord {
+  resource: GraphCacheResourceKind;
+  baselineSnapshotId?: string;
+  baselineCapturedAt?: string;
+  lastSnapshotAt?: string;
+  snapshotCount: number;
+  totalTrackedVersions: number;
+  currentObjectCount: number;
 }
 
 export class IntelligenceSqliteStore {
@@ -398,7 +562,25 @@ export class IntelligenceSqliteStore {
          ORDER BY created_at ASC`,
       )
       .all(conversationId) as unknown as MessageRow[];
-    return rows.map(readMessage);
+    const messages = rows.map(readMessage);
+    const traceByMessage = this.listInvestigationToolTraces(conversationId);
+    return messages.map((message) => {
+      const toolTrace = traceByMessage.get(message.id);
+      return toolTrace && toolTrace.length > 0 ? { ...message, toolTrace } : message;
+    });
+  }
+
+  listToolCalls(conversationId: string): IntuneChatToolCall[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, conversation_id, message_id, type, status, input_json, output_json,
+                error, created_at, completed_at
+         FROM chat_tool_calls
+         WHERE conversation_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .all(conversationId) as unknown as ToolCallRow[];
+    return rows.map(readToolCall);
   }
 
   insertToolCall(toolCall: IntuneChatToolCall): void {
@@ -434,9 +616,23 @@ export class IntelligenceSqliteStore {
     pageLimitReached?: boolean;
     refreshedAt: string;
   }): void {
-    const snapshotId = `${input.resource}-${Date.now()}`;
+    const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
     this.db.exec("BEGIN");
     try {
+      const normalizedRows = input.rows.map((row) => ({
+        row,
+        rawJson: JSON.stringify(row) ?? "null",
+        normalized: normalizeGraphObject(row),
+      }));
+      if (DRIFT_TRACKED_RESOURCES.has(input.resource)) {
+        this.captureDriftSnapshot({
+          tenantId: input.tenantId,
+          resource: input.resource,
+          rows: normalizedRows,
+          snapshotId,
+          refreshedAt: input.refreshedAt,
+        });
+      }
       this.db
         .prepare(
           `DELETE FROM graph_resources
@@ -451,20 +647,19 @@ export class IntelligenceSqliteStore {
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      for (const row of input.rows) {
-        const normalized = normalizeGraphObject(row);
+      for (const entry of normalizedRows) {
         insert.run(
           input.tenantId,
           input.resource,
-          normalized.graphId,
+          entry.normalized.graphId,
           snapshotId,
-          JSON.stringify(row),
-          normalized.searchText,
-          normalized.displayName,
-          normalized.userPrincipalName,
-          normalized.operatingSystem,
-          normalized.complianceState,
-          normalized.lastSeenAt,
+          entry.rawJson,
+          entry.normalized.searchText,
+          entry.normalized.displayName,
+          entry.normalized.userPrincipalName,
+          entry.normalized.operatingSystem,
+          entry.normalized.complianceState,
+          entry.normalized.lastSeenAt,
           input.refreshedAt,
         );
       }
@@ -498,6 +693,165 @@ export class IntelligenceSqliteStore {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private captureDriftSnapshot(input: {
+    tenantId: string;
+    resource: GraphCacheResourceKind;
+    rows: NormalizedGraphResourceRow[];
+    snapshotId: string;
+    refreshedAt: string;
+  }): void {
+    const previousRows = this.db
+      .prepare(
+        `SELECT graph_id, raw_json, display_name
+         FROM graph_resources
+         WHERE tenant_id = ? AND resource = ?`,
+      )
+      .all(input.tenantId, input.resource) as unknown as Array<{
+        graph_id: string;
+        raw_json: string;
+        display_name: string | null;
+      }>;
+    const previousById = new Map<string, { rawJson: string; contentHash: string }>();
+    for (const row of previousRows) {
+      previousById.set(row.graph_id, {
+        rawJson: row.raw_json,
+        contentHash: driftContentHash(readJson<unknown>(row.raw_json, row.raw_json), input.resource),
+      });
+    }
+
+    const currentById = new Map<
+      string,
+      { rawJson: string; contentHash: string; displayName: string | null }
+    >();
+    for (const entry of input.rows) {
+      currentById.set(entry.normalized.graphId, {
+        rawJson: entry.rawJson,
+        contentHash: driftContentHash(entry.row, input.resource),
+        displayName: entry.normalized.displayName,
+      });
+    }
+
+    const latestById = this.readLatestDriftVersions(input.tenantId, input.resource);
+    const hasPreviousSnapshot =
+      this.countRows("drift_snapshots", "tenant_id = ? AND resource = ?", [
+        input.tenantId,
+        input.resource,
+      ]) > 0;
+
+    if (!hasPreviousSnapshot) {
+      this.insertDriftSnapshot({
+        id: input.snapshotId,
+        tenantId: input.tenantId,
+        resource: input.resource,
+        capturedAt: input.refreshedAt,
+        rowCount: input.rows.length,
+        changesAdded: 0,
+        changesRemoved: 0,
+        changesModified: 0,
+      });
+      for (const [graphId, current] of currentById) {
+        this.insertDriftObjectVersion({
+          tenantId: input.tenantId,
+          resource: input.resource,
+          graphId,
+          version: 1,
+          contentHash: current.contentHash,
+          rawJson: current.rawJson,
+          displayName: current.displayName,
+          firstSeenSnapshotId: input.snapshotId,
+          firstSeenAt: input.refreshedAt,
+        });
+      }
+      return;
+    }
+
+    const added: string[] = [];
+    const removed: string[] = [];
+    const modified: string[] = [];
+    for (const graphId of currentById.keys()) {
+      if (!previousById.has(graphId)) {
+        added.push(graphId);
+        continue;
+      }
+      const previous = previousById.get(graphId);
+      const current = currentById.get(graphId);
+      if (previous && current && previous.contentHash !== current.contentHash) {
+        modified.push(graphId);
+      }
+    }
+    for (const graphId of previousById.keys()) {
+      if (!currentById.has(graphId)) removed.push(graphId);
+    }
+
+    // The first refresh is a baseline snapshot. Later zero-change refreshes are
+    // intentionally skipped so the drift timeline does not accumulate noise.
+    if (added.length === 0 && removed.length === 0 && modified.length === 0) return;
+
+    this.insertDriftSnapshot({
+      id: input.snapshotId,
+      tenantId: input.tenantId,
+      resource: input.resource,
+      capturedAt: input.refreshedAt,
+      rowCount: input.rows.length,
+      changesAdded: added.length,
+      changesRemoved: removed.length,
+      changesModified: modified.length,
+    });
+
+    for (const graphId of added) {
+      const current = currentById.get(graphId);
+      if (!current) continue;
+      const latest = latestById.get(graphId);
+      this.insertDriftObjectVersion({
+        tenantId: input.tenantId,
+        resource: input.resource,
+        graphId,
+        version: (latest?.version ?? 0) + 1,
+        contentHash: current.contentHash,
+        rawJson: current.rawJson,
+        displayName: current.displayName,
+        firstSeenSnapshotId: input.snapshotId,
+        firstSeenAt: input.refreshedAt,
+      });
+    }
+
+    for (const graphId of modified) {
+      const current = currentById.get(graphId);
+      if (!current) continue;
+      const latest = latestById.get(graphId);
+      this.insertDriftObjectVersion({
+        tenantId: input.tenantId,
+        resource: input.resource,
+        graphId,
+        version: (latest?.version ?? 0) + 1,
+        contentHash: current.contentHash,
+        rawJson: current.rawJson,
+        displayName: current.displayName,
+        firstSeenSnapshotId: input.snapshotId,
+        firstSeenAt: input.refreshedAt,
+      });
+    }
+
+    for (const graphId of removed) {
+      const latest = latestById.get(graphId);
+      if (!latest || latest.removed_at) continue;
+      this.db
+        .prepare(
+          `UPDATE drift_object_versions
+           SET removed_snapshot_id = ?, removed_at = ?
+           WHERE tenant_id = ? AND resource = ? AND graph_id = ? AND version = ?`,
+        )
+        .run(
+          input.snapshotId,
+          input.refreshedAt,
+          input.tenantId,
+          input.resource,
+          graphId,
+          latest.version,
+        );
     }
   }
 
@@ -564,6 +918,345 @@ export class IntelligenceSqliteStore {
         lastError: row.last_error ?? undefined,
       };
     });
+  }
+
+  listDriftSnapshots(
+    tenantId: string,
+    options: {
+      resource?: GraphCacheResourceKind;
+      from?: string;
+      to?: string;
+      limit?: number;
+    } = {},
+  ): DriftSnapshotRecord[] {
+    const where = ["tenant_id = ?"];
+    const args: Array<string | number> = [tenantId];
+    if (options.resource) {
+      where.push("resource = ?");
+      args.push(options.resource);
+    }
+    if (options.from) {
+      where.push("captured_at >= ?");
+      args.push(options.from);
+    }
+    if (options.to) {
+      where.push("captured_at <= ?");
+      args.push(options.to);
+    }
+    const limit = normalizeDriftLimit(options.limit, 100);
+    const rows = this.db
+      .prepare(
+        `SELECT id, tenant_id, resource, captured_at, row_count,
+                changes_added, changes_removed, changes_modified
+         FROM drift_snapshots
+         WHERE ${where.join(" AND ")}
+         ORDER BY captured_at DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(...args, limit) as unknown as DriftSnapshotRow[];
+    return rows.map(readDriftSnapshot);
+  }
+
+  getDriftSnapshot(
+    tenantId: string,
+    snapshotId: string,
+  ): DriftSnapshotRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT id, tenant_id, resource, captured_at, row_count,
+                changes_added, changes_removed, changes_modified
+         FROM drift_snapshots
+         WHERE tenant_id = ? AND id = ?`,
+      )
+      .get(tenantId, snapshotId) as unknown as DriftSnapshotRow | undefined;
+    return row ? readDriftSnapshot(row) : undefined;
+  }
+
+  listDriftChangesForSnapshot(
+    tenantId: string,
+    snapshotId: string,
+  ): DriftSnapshotChangeRecord[] {
+    const snapshot = this.db
+      .prepare(
+        `SELECT id, tenant_id, resource, captured_at, row_count,
+                changes_added, changes_removed, changes_modified
+         FROM drift_snapshots
+         WHERE tenant_id = ? AND id = ?`,
+      )
+      .get(tenantId, snapshotId) as unknown as DriftSnapshotRow | undefined;
+    if (!snapshot) return [];
+    if (
+      snapshot.changes_added === 0 &&
+      snapshot.changes_removed === 0 &&
+      snapshot.changes_modified === 0
+    ) {
+      return [];
+    }
+
+    const changes: DriftSnapshotChangeRecord[] = [];
+    const firstSeenRows = this.db
+      .prepare(
+        `SELECT tenant_id, resource, graph_id, version, content_hash, raw_json,
+                display_name, first_seen_snapshot_id, first_seen_at,
+                removed_snapshot_id, removed_at
+         FROM drift_object_versions
+         WHERE tenant_id = ? AND resource = ? AND first_seen_snapshot_id = ?
+         ORDER BY graph_id ASC, version ASC`,
+      )
+      .all(tenantId, snapshot.resource, snapshotId) as unknown as DriftObjectVersionRow[];
+
+    for (const row of firstSeenRows) {
+      if (row.version === 1) {
+        changes.push({
+          kind: "added",
+          resource: row.resource,
+          graphId: row.graph_id,
+          ...(row.display_name ? { displayName: row.display_name } : {}),
+          currentRawJson: row.raw_json,
+        });
+        continue;
+      }
+      const previous = this.getDriftObjectVersionRow(
+        tenantId,
+        row.resource,
+        row.graph_id,
+        row.version - 1,
+      );
+      if (!previous || previous.removed_at) {
+        changes.push({
+          kind: "added",
+          resource: row.resource,
+          graphId: row.graph_id,
+          ...(row.display_name ? { displayName: row.display_name } : {}),
+          currentRawJson: row.raw_json,
+        });
+        continue;
+      }
+      changes.push({
+        kind: "modified",
+        resource: row.resource,
+        graphId: row.graph_id,
+        ...(row.display_name ? { displayName: row.display_name } : {}),
+        previousRawJson: previous.raw_json,
+        currentRawJson: row.raw_json,
+      });
+    }
+
+    const removedRows = this.db
+      .prepare(
+        `SELECT tenant_id, resource, graph_id, version, content_hash, raw_json,
+                display_name, first_seen_snapshot_id, first_seen_at,
+                removed_snapshot_id, removed_at
+         FROM drift_object_versions
+         WHERE tenant_id = ? AND resource = ? AND removed_snapshot_id = ?
+         ORDER BY graph_id ASC, version ASC`,
+      )
+      .all(tenantId, snapshot.resource, snapshotId) as unknown as DriftObjectVersionRow[];
+    for (const row of removedRows) {
+      changes.push({
+        kind: "removed",
+        resource: row.resource,
+        graphId: row.graph_id,
+        ...(row.display_name ? { displayName: row.display_name } : {}),
+        previousRawJson: row.raw_json,
+      });
+    }
+
+    return changes.sort((a, b) => {
+      const byGraphId = a.graphId.localeCompare(b.graphId);
+      return byGraphId === 0 ? a.kind.localeCompare(b.kind) : byGraphId;
+    });
+  }
+
+  getDriftObjectHistory(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+    graphId: string,
+    options: { limit?: number } = {},
+  ): DriftObjectVersionRecord[] {
+    const limit = normalizeDriftLimit(options.limit, 50);
+    const rows = this.db
+      .prepare(
+        `SELECT tenant_id, resource, graph_id, version, content_hash, raw_json,
+                display_name, first_seen_snapshot_id, first_seen_at,
+                removed_snapshot_id, removed_at
+         FROM drift_object_versions
+         WHERE tenant_id = ? AND resource = ? AND graph_id = ?
+         ORDER BY version DESC
+         LIMIT ?`,
+      )
+      .all(tenantId, resource, graphId, limit) as unknown as DriftObjectVersionRow[];
+    return rows.map(readDriftObjectVersion);
+  }
+
+  listCachedGraphResourceRows(input: {
+    tenantId: string;
+    resource: GraphCacheResourceKind;
+    limit?: number;
+  }): CachedGraphResourceRecord[] {
+    const limit = normalizeCachedRowLimit(input.limit, 1000);
+    const rows = this.db
+      .prepare(
+        `SELECT resource, graph_id, raw_json, display_name, refreshed_at
+         FROM graph_resources
+         WHERE tenant_id = ? AND resource = ?
+         ORDER BY COALESCE(last_seen_at, refreshed_at) DESC, graph_id ASC
+         LIMIT ?`,
+      )
+      .all(input.tenantId, input.resource, limit) as unknown as CachedGraphResourceRow[];
+    return rows.map((row) => ({
+      resource: row.resource,
+      graphId: row.graph_id,
+      row: readJson<unknown>(row.raw_json, {}),
+      rawJson: row.raw_json,
+      ...(row.display_name ? { displayName: row.display_name } : {}),
+      refreshedAt: row.refreshed_at,
+    }));
+  }
+
+  getDriftResourceStats(
+    tenantId: string,
+    resources: readonly GraphCacheResourceKind[],
+  ): DriftResourceStatsRecord[] {
+    return resources.map((resource) => {
+      const firstSnapshot = this.db
+        .prepare(
+          `SELECT id, captured_at
+           FROM drift_snapshots
+           WHERE tenant_id = ? AND resource = ?
+           ORDER BY captured_at ASC, id ASC
+           LIMIT 1`,
+        )
+        .get(tenantId, resource) as unknown as
+        | { id: string; captured_at: string }
+        | undefined;
+      const lastSnapshot = this.db
+        .prepare(
+          `SELECT captured_at
+           FROM drift_snapshots
+           WHERE tenant_id = ? AND resource = ?
+           ORDER BY captured_at DESC, id DESC
+           LIMIT 1`,
+        )
+        .get(tenantId, resource) as unknown as
+        | { captured_at: string }
+        | undefined;
+      const currentRow = this.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM drift_object_versions v
+           INNER JOIN (
+             SELECT graph_id, MAX(version) AS version
+             FROM drift_object_versions
+             WHERE tenant_id = ? AND resource = ?
+             GROUP BY graph_id
+           ) latest
+             ON latest.graph_id = v.graph_id
+            AND latest.version = v.version
+           WHERE v.tenant_id = ?
+             AND v.resource = ?
+             AND v.removed_at IS NULL`,
+        )
+        .get(tenantId, resource, tenantId, resource) as
+        | { count?: number }
+        | undefined;
+      return {
+        resource,
+        ...(firstSnapshot
+          ? {
+              baselineSnapshotId: firstSnapshot.id,
+              baselineCapturedAt: firstSnapshot.captured_at,
+            }
+          : {}),
+        ...(lastSnapshot ? { lastSnapshotAt: lastSnapshot.captured_at } : {}),
+        snapshotCount: this.countRows(
+          "drift_snapshots",
+          "tenant_id = ? AND resource = ?",
+          [tenantId, resource],
+        ),
+        totalTrackedVersions: this.countRows(
+          "drift_object_versions",
+          "tenant_id = ? AND resource = ?",
+          [tenantId, resource],
+        ),
+        currentObjectCount:
+          typeof currentRow?.count === "number" ? currentRow.count : 0,
+      };
+    });
+  }
+
+  pruneDriftHistory(tenantId: string | null, retentionDays: number): DriftPruneResult {
+    const days = Number.isFinite(retentionDays) ? Math.max(0, retentionDays) : 0;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    let snapshotsDeleted = 0;
+    let versionsDeleted = 0;
+    this.db.exec("BEGIN");
+    try {
+      const rows = tenantId
+        ? this.db
+            .prepare(
+              `SELECT tenant_id, resource, graph_id, version, content_hash, raw_json,
+                      display_name, first_seen_snapshot_id, first_seen_at,
+                      removed_snapshot_id, removed_at
+               FROM drift_object_versions
+               WHERE tenant_id = ?
+               ORDER BY tenant_id, resource, graph_id, version ASC`,
+            )
+            .all(tenantId)
+        : this.db
+            .prepare(
+              `SELECT tenant_id, resource, graph_id, version, content_hash, raw_json,
+                      display_name, first_seen_snapshot_id, first_seen_at,
+                      removed_snapshot_id, removed_at
+               FROM drift_object_versions
+               ORDER BY tenant_id, resource, graph_id, version ASC`,
+            )
+            .all();
+      const grouped = groupDriftVersions(rows as unknown as DriftObjectVersionRow[]);
+      const deleteVersion = this.db.prepare(
+        `DELETE FROM drift_object_versions
+         WHERE tenant_id = ? AND resource = ? AND graph_id = ? AND version = ?`,
+      );
+      for (const versions of grouped.values()) {
+        const latest = versions.at(-1);
+        if (!latest) continue;
+        const objectRemovedBeforeCutoff =
+          latest.removed_at !== null && latest.removed_at < cutoff;
+        for (const version of versions) {
+          const isLiveCurrent =
+            latest.version === version.version && latest.removed_at === null;
+          if (isLiveCurrent) continue;
+          const shouldDelete =
+            objectRemovedBeforeCutoff ||
+            (version.version < latest.version && version.first_seen_at < cutoff) ||
+            (version.removed_at !== null && version.removed_at < cutoff);
+          if (!shouldDelete) continue;
+          const result = deleteVersion.run(
+            version.tenant_id,
+            version.resource,
+            version.graph_id,
+            version.version,
+          );
+          versionsDeleted += Number(result.changes ?? 0);
+        }
+      }
+
+      const snapshotWhere = ["captured_at < ?"];
+      const snapshotArgs: string[] = [cutoff];
+      if (tenantId) {
+        snapshotWhere.push("tenant_id = ?");
+        snapshotArgs.push(tenantId);
+      }
+      const snapshotResult = this.db
+        .prepare(`DELETE FROM drift_snapshots WHERE ${snapshotWhere.join(" AND ")}`)
+        .run(...snapshotArgs);
+      snapshotsDeleted = Number(snapshotResult.changes ?? 0);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { snapshotsDeleted, versionsDeleted };
   }
 
   clearGraphCache(tenantId: string): void {
@@ -655,6 +1348,48 @@ export class IntelligenceSqliteStore {
       out[resource] = parsed;
     }
     return out;
+  }
+
+  queryGraphCache(input: {
+    tenantId: string;
+    resource: GraphCacheResourceKind;
+    filters?: GraphCacheQueryPredicate[];
+    sort?: { field: string; direction?: "asc" | "desc" };
+    limit?: number;
+  }): GraphCacheQueryResult {
+    const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 25)));
+    const where: string[] = ["tenant_id = ?", "resource = ?"];
+    const args: Array<string | number> = [input.tenantId, input.resource];
+
+    for (const predicate of input.filters ?? []) {
+      const built = buildGraphCachePredicateSql(predicate);
+      where.push(built.sql);
+      args.push(...built.args);
+    }
+
+    const sortField = input.sort?.field
+      ? graphCacheFieldSql(input.sort.field)
+      : "COALESCE(last_seen_at, refreshed_at)";
+    const sortDirection = input.sort?.direction === "asc" ? "ASC" : "DESC";
+    const sql = `
+      SELECT raw_json, refreshed_at, COUNT(*) OVER () AS total_count
+      FROM graph_resources
+      WHERE ${where.join(" AND ")}
+      ORDER BY ${sortField} ${sortDirection}
+      LIMIT ?`;
+    const rows = this.db
+      .prepare(sql)
+      .all(...args, limit) as unknown as QueryCacheRow[];
+    return {
+      resource: input.resource,
+      totalCount: rows[0]?.total_count ?? 0,
+      returnedRows: rows.length,
+      limit,
+      rows: rows.map((row) => ({
+        row: readJson<unknown>(row.raw_json, {}),
+        ...(row.refreshed_at ? { refreshedAt: row.refreshed_at } : {}),
+      })),
+    };
   }
 
   readManagedDevicesLastSyncBefore(input: {
@@ -927,6 +1662,41 @@ export class IntelligenceSqliteStore {
       notes: this.listWorkspaceNotes(id),
       links: this.listWorkspaceLinks(id),
     };
+  }
+
+  listWorkspaceReferencedRunIds(): string[] {
+    const ids = new Set<string>();
+    const linkRows = this.db
+      .prepare(
+        `SELECT ref_id
+         FROM workspace_links
+         WHERE type = 'run'`,
+      )
+      .all() as unknown as Array<{ ref_id: string }>;
+    for (const row of linkRows) {
+      if (row.ref_id) ids.add(row.ref_id);
+    }
+
+    const evidenceRows = this.db
+      .prepare(
+        `SELECT source_ref_json
+         FROM workspace_evidence
+         WHERE source_type = 'run-result'
+           AND source_ref_json IS NOT NULL`,
+      )
+      .all() as unknown as Array<{ source_ref_json: string }>;
+    for (const row of evidenceRows) {
+      const sourceRef = readJson<Record<string, unknown> | undefined>(
+        row.source_ref_json,
+        undefined,
+      );
+      const runId = sourceRef?.runId;
+      if (typeof runId === "string" && runId.trim()) {
+        ids.add(runId);
+      }
+    }
+
+    return [...ids];
   }
 
   createWorkspace(input: {
@@ -1221,6 +1991,17 @@ export class IntelligenceSqliteStore {
     return { enabled: row.value === "true", updatedAt: row.updated_at };
   }
 
+  getChatInvestigationSettings(): ChatInvestigationSettings {
+    const row = this.db
+      .prepare(`SELECT value, updated_at FROM app_settings WHERE key = 'chatInvestigationMode'`)
+      .get() as SettingRow | undefined;
+    const mode = isChatInvestigationMode(row?.value) ? row.value : "auto";
+    return {
+      mode,
+      ...(row?.updated_at ? { updatedAt: row.updated_at } : {}),
+    };
+  }
+
   getGraphCacheRefreshSchedule(
     tenantId: string,
     now: string = new Date().toISOString(),
@@ -1343,6 +2124,25 @@ export class IntelligenceSqliteStore {
     return { enabled, updatedAt: now };
   }
 
+  setChatInvestigationMode(
+    mode: ChatInvestigationMode,
+    now: string,
+  ): ChatInvestigationSettings {
+    if (!isChatInvestigationMode(mode)) {
+      throw new Error(`Unknown chat investigation mode: ${mode}`);
+    }
+    this.db
+      .prepare(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ('chatInvestigationMode', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at`,
+      )
+      .run(mode, now);
+    return { mode, updatedAt: now };
+  }
+
   recordLearningEvent(input: {
     id: string;
     tenantId: string;
@@ -1368,6 +2168,47 @@ export class IntelligenceSqliteStore {
         JSON.stringify(input.payload),
         input.createdAt,
       );
+  }
+
+  recordHostedProviderConsentAuditEvent(input: HostedProviderConsentAuditRecord): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO audit_events (
+          id, type, tenant_id, source, payload_json, created_at
+        )
+        VALUES (?, 'hosted-provider.consent', ?, ?, ?, ?)`,
+      )
+      .run(
+        input.id,
+        input.tenantId,
+        input.source,
+        JSON.stringify(input.payload),
+        input.createdAt,
+      );
+  }
+
+  listHostedProviderConsentAuditEvents(): HostedProviderConsentAuditRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, tenant_id, source, payload_json, created_at
+         FROM audit_events
+         WHERE type = 'hosted-provider.consent'
+         ORDER BY created_at ASC, id ASC`,
+      )
+      .all() as Array<{
+        id: string;
+        tenant_id: string;
+        source: string;
+        payload_json: string;
+        created_at: string;
+      }>;
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      source: row.source,
+      payload: readJson<Record<string, unknown>>(row.payload_json, {}),
+      createdAt: row.created_at,
+    }));
   }
 
   createSelfTrainingSuggestion(input: SelfTrainingSuggestion): SelfTrainingSuggestion {
@@ -1477,6 +2318,104 @@ export class IntelligenceSqliteStore {
     return rows.map(readSuggestion);
   }
 
+  private readLatestDriftVersions(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+  ): Map<string, DriftObjectVersionRow> {
+    const rows = this.db
+      .prepare(
+        `SELECT v.tenant_id, v.resource, v.graph_id, v.version, v.content_hash,
+                v.raw_json, v.display_name, v.first_seen_snapshot_id,
+                v.first_seen_at, v.removed_snapshot_id, v.removed_at
+         FROM drift_object_versions v
+         INNER JOIN (
+           SELECT graph_id, MAX(version) AS version
+           FROM drift_object_versions
+           WHERE tenant_id = ? AND resource = ?
+           GROUP BY graph_id
+         ) latest
+           ON latest.graph_id = v.graph_id
+          AND latest.version = v.version
+         WHERE v.tenant_id = ? AND v.resource = ?`,
+      )
+      .all(tenantId, resource, tenantId, resource) as unknown as DriftObjectVersionRow[];
+    return new Map(rows.map((row) => [row.graph_id, row]));
+  }
+
+  private getDriftObjectVersionRow(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+    graphId: string,
+    version: number,
+  ): DriftObjectVersionRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT tenant_id, resource, graph_id, version, content_hash, raw_json,
+                display_name, first_seen_snapshot_id, first_seen_at,
+                removed_snapshot_id, removed_at
+         FROM drift_object_versions
+         WHERE tenant_id = ? AND resource = ? AND graph_id = ? AND version = ?`,
+      )
+      .get(tenantId, resource, graphId, version) as unknown as
+      | DriftObjectVersionRow
+      | undefined;
+  }
+
+  private insertDriftSnapshot(snapshot: DriftSnapshotRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO drift_snapshots (
+          id, tenant_id, resource, captured_at, row_count,
+          changes_added, changes_removed, changes_modified
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        snapshot.id,
+        snapshot.tenantId,
+        snapshot.resource,
+        snapshot.capturedAt,
+        snapshot.rowCount,
+        snapshot.changesAdded,
+        snapshot.changesRemoved,
+        snapshot.changesModified,
+      );
+  }
+
+  private insertDriftObjectVersion(
+    version: Omit<
+      DriftObjectVersionRecord,
+      "displayName" | "removedSnapshotId" | "removedAt"
+    > & {
+      displayName: string | null;
+      removedSnapshotId?: string;
+      removedAt?: string;
+    },
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO drift_object_versions (
+          tenant_id, resource, graph_id, version, content_hash, raw_json,
+          display_name, first_seen_snapshot_id, first_seen_at,
+          removed_snapshot_id, removed_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        version.tenantId,
+        version.resource,
+        version.graphId,
+        version.version,
+        version.contentHash,
+        version.rawJson,
+        version.displayName,
+        version.firstSeenSnapshotId,
+        version.firstSeenAt,
+        version.removedSnapshotId ?? null,
+        version.removedAt ?? null,
+      );
+  }
+
   private countRows(
     tableName: string,
     where?: string,
@@ -1574,6 +2513,38 @@ export class IntelligenceSqliteStore {
         PRIMARY KEY (tenant_id, resource)
       );
 
+      CREATE TABLE IF NOT EXISTS drift_snapshots (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        captured_at TEXT NOT NULL,
+        row_count INTEGER NOT NULL,
+        changes_added INTEGER NOT NULL,
+        changes_removed INTEGER NOT NULL,
+        changes_modified INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_drift_snapshots_lookup
+        ON drift_snapshots (tenant_id, resource, captured_at);
+
+      CREATE TABLE IF NOT EXISTS drift_object_versions (
+        tenant_id TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        graph_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        raw_json TEXT NOT NULL,
+        display_name TEXT,
+        first_seen_snapshot_id TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL,
+        removed_snapshot_id TEXT,
+        removed_at TEXT,
+        PRIMARY KEY (tenant_id, resource, graph_id, version)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_drift_versions_lookup
+        ON drift_object_versions (tenant_id, resource, first_seen_at);
+
       CREATE TABLE IF NOT EXISTS learning_events (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
@@ -1583,6 +2554,18 @@ export class IntelligenceSqliteStore {
         payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        tenant_id TEXT,
+        source TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_events_created
+        ON audit_events (created_at ASC, id ASC);
 
       CREATE TABLE IF NOT EXISTS self_training_suggestions (
         id TEXT PRIMARY KEY,
@@ -1721,6 +2704,12 @@ export class IntelligenceSqliteStore {
       .prepare(
         `INSERT OR IGNORE INTO schema_migrations (id, name, applied_at)
          VALUES (1, 'intune-chat-cache-and-learning', ?)`,
+      )
+      .run(new Date().toISOString());
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO schema_migrations (id, name, applied_at)
+         VALUES (2, 'tenant-drift-snapshots', ?)`,
       )
       .run(new Date().toISOString());
     ensureColumn(this.db, "graph_cache_status", "page_count", "INTEGER NOT NULL DEFAULT 0");
@@ -1894,6 +2883,30 @@ export class IntelligenceSqliteStore {
     return rows.map(readWorkspaceLink);
   }
 
+  private listInvestigationToolTraces(
+    conversationId: string,
+  ): Map<string, IntuneChatToolTraceEntry[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, conversation_id, message_id, type, status, input_json, output_json,
+                error, created_at, completed_at
+         FROM chat_tool_calls
+         WHERE conversation_id = ?
+           AND message_id IS NOT NULL
+         ORDER BY created_at ASC`,
+      )
+      .all(conversationId) as unknown as ToolCallRow[];
+    const byMessage = new Map<string, IntuneChatToolTraceEntry[]>();
+    for (const row of rows) {
+      if (!isInvestigationToolName(row.type) || !row.message_id) continue;
+      const trace = readToolTrace(row);
+      const existing = byMessage.get(row.message_id) ?? [];
+      existing.push(trace);
+      byMessage.set(row.message_id, existing);
+    }
+    return byMessage;
+  }
+
   private insertWorkspaceLink(input: {
     id: string;
     workspaceId: string;
@@ -2009,6 +3022,61 @@ function readSavedQuery(row: SavedQueryRow): SavedMultiTenantQuery {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function readDriftSnapshot(row: DriftSnapshotRow): DriftSnapshotRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    resource: row.resource,
+    capturedAt: row.captured_at,
+    rowCount: row.row_count,
+    changesAdded: row.changes_added,
+    changesRemoved: row.changes_removed,
+    changesModified: row.changes_modified,
+  };
+}
+
+function readDriftObjectVersion(row: DriftObjectVersionRow): DriftObjectVersionRecord {
+  return {
+    tenantId: row.tenant_id,
+    resource: row.resource,
+    graphId: row.graph_id,
+    version: row.version,
+    contentHash: row.content_hash,
+    rawJson: row.raw_json,
+    ...(row.display_name ? { displayName: row.display_name } : {}),
+    firstSeenSnapshotId: row.first_seen_snapshot_id,
+    firstSeenAt: row.first_seen_at,
+    ...(row.removed_snapshot_id ? { removedSnapshotId: row.removed_snapshot_id } : {}),
+    ...(row.removed_at ? { removedAt: row.removed_at } : {}),
+  };
+}
+
+function groupDriftVersions(
+  rows: DriftObjectVersionRow[],
+): Map<string, DriftObjectVersionRow[]> {
+  const grouped = new Map<string, DriftObjectVersionRow[]>();
+  for (const row of rows) {
+    const key = `${row.tenant_id}\u0000${row.resource}\u0000${row.graph_id}`;
+    const existing = grouped.get(key) ?? [];
+    existing.push(row);
+    grouped.set(key, existing);
+  }
+  for (const versions of grouped.values()) {
+    versions.sort((a, b) => a.version - b.version);
+  }
+  return grouped;
+}
+
+function normalizeDriftLimit(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(500, Math.floor(value)));
+}
+
+function normalizeCachedRowLimit(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(1000, Math.floor(value)));
 }
 
 function readMultiTenantJob(row: MultiTenantJobRow): MultiTenantChatJob {
@@ -2200,6 +3268,149 @@ function escapeSqlLike(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
 
+function readToolCall(row: ToolCallRow): IntuneChatToolCall {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    messageId: row.message_id ?? undefined,
+    type: row.type as IntuneChatToolCall["type"],
+    status: row.status,
+    input: row.input_json ? readJson<unknown>(row.input_json, undefined) : undefined,
+    output: row.output_json ? readJson<unknown>(row.output_json, undefined) : undefined,
+    error: row.error ?? undefined,
+    createdAt: row.created_at,
+    completedAt: row.completed_at ?? undefined,
+  };
+}
+
+function readToolTrace(row: ToolCallRow): IntuneChatToolTraceEntry {
+  const output = row.output_json
+    ? readJson<Partial<IntuneChatToolTraceEntry>>(row.output_json, {})
+    : {};
+  return {
+    id: typeof output.id === "string" ? output.id : row.id,
+    tool: isInvestigationToolName(output.tool) ? output.tool : row.type as IntuneChatInvestigationToolName,
+    params:
+      output.params !== undefined
+        ? output.params
+        : row.input_json
+          ? readJson<unknown>(row.input_json, {})
+          : {},
+    resultSummary:
+      typeof output.resultSummary === "string"
+        ? output.resultSummary
+        : row.error ?? "Tool call completed.",
+    durationMs:
+      typeof output.durationMs === "number" && Number.isFinite(output.durationMs)
+        ? output.durationMs
+        : durationBetween(row.created_at, row.completed_at ?? row.created_at),
+    createdAt: typeof output.createdAt === "string" ? output.createdAt : row.created_at,
+    completedAt:
+      typeof output.completedAt === "string"
+        ? output.completedAt
+        : row.completed_at ?? row.created_at,
+    error:
+      typeof output.error === "string"
+        ? output.error
+        : row.error ?? undefined,
+  };
+}
+
+function durationBetween(start: string, finish: string): number {
+  const startMs = new Date(start).getTime();
+  const finishMs = new Date(finish).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(finishMs)) return 0;
+  return Math.max(0, Math.round(finishMs - startMs));
+}
+
+function isInvestigationToolName(value: unknown): value is IntuneChatInvestigationToolName {
+  return (
+    value === "list_cached_resources" ||
+    value === "query_cache" ||
+    value === "graph_get" ||
+    value === "refresh_resource" ||
+    value === "query_drift"
+  );
+}
+
+function isChatInvestigationMode(value: unknown): value is ChatInvestigationMode {
+  return value === "auto" || value === "always-agentic" || value === "always-deterministic";
+}
+
+function buildGraphCachePredicateSql(predicate: GraphCacheQueryPredicate): {
+  sql: string;
+  args: Array<string | number>;
+} {
+  const field = graphCacheFieldSql(predicate.field);
+  const value = predicate.value;
+  switch (predicate.op) {
+    case "eq":
+      return { sql: `${field} = ?`, args: [sqlScalar(value)] };
+    case "neq":
+      return { sql: `${field} != ?`, args: [sqlScalar(value)] };
+    case "contains":
+      return {
+        sql: `CAST(${field} AS TEXT) LIKE ? ESCAPE '\\'`,
+        args: [`%${escapeSqlLike(String(sqlScalar(value)))}%`],
+      };
+    case "startsWith":
+      return {
+        sql: `CAST(${field} AS TEXT) LIKE ? ESCAPE '\\'`,
+        args: [`${escapeSqlLike(String(sqlScalar(value)))}%`],
+      };
+    case "lt":
+      return { sql: `${field} < ?`, args: [sqlScalar(value)] };
+    case "lte":
+      return { sql: `${field} <= ?`, args: [sqlScalar(value)] };
+    case "gt":
+      return { sql: `${field} > ?`, args: [sqlScalar(value)] };
+    case "gte":
+      return { sql: `${field} >= ?`, args: [sqlScalar(value)] };
+    case "in": {
+      if (!Array.isArray(value)) {
+        throw new Error("query_cache predicate 'in' requires an array value.");
+      }
+      const values = value.slice(0, 20).map(sqlScalar);
+      if (values.length === 0) return { sql: "1 = 0", args: [] };
+      return {
+        sql: `${field} IN (${values.map(() => "?").join(", ")})`,
+        args: values,
+      };
+    }
+    default:
+      throw new Error(`Unsupported query_cache operator: ${String(predicate.op)}`);
+  }
+}
+
+function sqlScalar(value: unknown): string | number {
+  if (Array.isArray(value)) return sqlScalar(value[0]);
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function graphCacheFieldSql(field: string): string {
+  const normalized = field.trim();
+  const mapped: Record<string, string> = {
+    graphId: "graph_id",
+    id: "graph_id",
+    searchText: "search_text",
+    displayName: "display_name",
+    userPrincipalName: "user_principal_name",
+    operatingSystem: "operating_system",
+    complianceState: "compliance_state",
+    lastSeenAt: "last_seen_at",
+    refreshedAt: "refreshed_at",
+  };
+  if (mapped[normalized]) return mapped[normalized];
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(normalized)) {
+    throw new Error(`Unsupported cache field: ${field}`);
+  }
+  return `json_extract(raw_json, '$.${normalized}')`;
+}
+
 function ensureColumn(
   db: DatabaseSync,
   table: string,
@@ -2216,15 +3427,7 @@ function ensureColumn(
   }
 }
 
-function normalizeGraphObject(value: unknown): {
-  graphId: string;
-  searchText: string;
-  displayName: string | null;
-  userPrincipalName: string | null;
-  operatingSystem: string | null;
-  complianceState: string | null;
-  lastSeenAt: string | null;
-} {
+function normalizeGraphObject(value: unknown): NormalizedGraphObject {
   const obj = isRecord(value) ? value : {};
   const graphId = readString(obj.id) ?? readString(obj.deviceId) ?? randomSyntheticId(value);
   const displayName = readString(obj.displayName) ?? readString(obj.deviceName);
