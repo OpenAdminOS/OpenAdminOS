@@ -7,6 +7,7 @@ import {
   compareSemver,
   createGraphAdapter,
   createClaudeCodeLlm,
+  createAzureOpenAiLlm,
   createCodexLlm,
   createAppleFoundationLlm,
   createLmStudioLlm,
@@ -28,6 +29,7 @@ import {
   noSecrets,
   noopLlm,
   parseAgentTemplate,
+  probeAzureOpenAi,
   removeAccount,
   runInteractiveFlow,
   setAgentUpdatesDir,
@@ -54,6 +56,7 @@ import type {
   StartRunOptions,
   TenantRecord,
   TenantSession,
+  AzureOpenAIProviderConfig,
   GraphCacheRefreshResult,
   GraphCacheRefreshScheduleSettings,
   GraphCacheStatus,
@@ -76,6 +79,7 @@ import type {
   ResetSelfTrainingInput,
   RunMultiTenantChatInput,
   SavedMultiTenantQuery,
+  SetAzureOpenAIProviderConfigInput,
   SetGraphCacheRefreshScheduleInput,
   SelfTrainingSettings,
   SelfTrainingSuggestion,
@@ -94,6 +98,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import {
   deriveTrustState,
+  DEFAULT_AZURE_OPENAI_API_VERSION,
   providerCatalog,
   resolveProviderDefaultModel,
   resolveRunModel,
@@ -123,6 +128,7 @@ import {
 
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
+import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import { searchEndpoints } from "./graph-catalog.js";
 
@@ -194,6 +200,7 @@ import {
 } from "./agent-draft-helpers.js";
 import {
   checkAppleFoundation,
+  checkAzureOpenAI,
   checkClaudeCode,
   checkCodex,
   checkLmStudio,
@@ -263,6 +270,17 @@ interface PersistedState {
       lastTestMessage?: string;
     }
   >;
+  /**
+   * Per-provider persisted configuration. Secret values are never stored here;
+   * Azure OpenAI's API key lives in provider safeStorage under userData.
+   */
+  providerConfigs?: {
+    azureOpenAI?: {
+      endpoint: string;
+      deployment: string;
+      apiVersion: string;
+    };
+  };
   /**
    * Durable, local queue for post-run connector delivery. Items are
    * enqueued when a run first reaches a terminal state and retried on
@@ -360,6 +378,11 @@ export interface AppStateStoreOptions {
    */
   connectorSecretsFor?(connectorId: string): SecretAccessor;
   /**
+   * Test hook for hosted provider secrets. Production stores these
+   * under Electron safeStorage, outside persisted JSON state.
+   */
+  providerSecretsFor?(providerId: ProviderId): SecretAccessor;
+  /**
    * Allows localhost/private registry sources for tests and explicit
    * development workflows. Packaged builds must leave this false.
    */
@@ -391,6 +414,10 @@ export class AppStateStore {
     | AppStateStoreOptions["connectorSecretsFor"]
     | undefined;
   private readonly connectorSecretStore: SafeStorageConnectorSecretStore | undefined;
+  private readonly providerSecretsForOverride:
+    | AppStateStoreOptions["providerSecretsFor"]
+    | undefined;
+  private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
   private msalClient: PublicClientApplication | undefined;
   // Soft-cancel set. While a run id is here, progress snapshots from
@@ -426,6 +453,8 @@ export class AppStateStore {
       this.whatsAppWebClientFactory = undefined;
       this.connectorSecretsForOverride = undefined;
       this.connectorSecretStore = undefined;
+      this.providerSecretsForOverride = undefined;
+      this.providerSecretStore = undefined;
       this.allowDevRegistrySource = false;
     } else {
       this.filePath = options.filePath;
@@ -451,6 +480,12 @@ export class AppStateStore {
       this.connectorSecretStore = options.userDataPath
         ? new SafeStorageConnectorSecretStore(
             join(options.userDataPath, "connectors", "secrets"),
+          )
+        : undefined;
+      this.providerSecretsForOverride = options.providerSecretsFor;
+      this.providerSecretStore = options.userDataPath
+        ? new SafeStorageProviderSecretStore(
+            join(options.userDataPath, "providers", "secrets"),
           )
         : undefined;
       this.allowDevRegistrySource = options.allowDevRegistrySource === true;
@@ -533,6 +568,43 @@ export class AppStateStore {
       this.connectorSecretsForOverride?.(connectorId) ??
       this.connectorSecretStore?.forConnector(connectorId) ??
       noSecrets
+    );
+  }
+
+  private providerSecretsFor(providerId: ProviderId): SecretAccessor {
+    return (
+      this.providerSecretsForOverride?.(providerId) ??
+      this.providerSecretStore?.forProvider(providerId) ??
+      noSecrets
+    );
+  }
+
+  private emptyAzureOpenAIConfig(): AzureOpenAIProviderConfig {
+    return {
+      endpoint: "",
+      deployment: "",
+      apiVersion: DEFAULT_AZURE_OPENAI_API_VERSION,
+      hasKey: false,
+    };
+  }
+
+  private azureOpenAIConfigFromState(
+    persisted: PersistedState,
+  ): Omit<AzureOpenAIProviderConfig, "hasKey"> {
+    const config = persisted.providerConfigs?.azureOpenAI;
+    return {
+      endpoint: config?.endpoint ?? "",
+      deployment: config?.deployment ?? "",
+      apiVersion: config?.apiVersion ?? DEFAULT_AZURE_OPENAI_API_VERSION,
+    };
+  }
+
+  private providerCanRun(
+    provider: ProviderSummary | undefined,
+  ): provider is ProviderSummary & { status: "connected" | "available" } {
+    return (
+      provider?.status === "connected" ||
+      (provider?.id === "azure-openai" && provider.status === "available")
     );
   }
 
@@ -801,7 +873,62 @@ export class AppStateStore {
     return persisted.installedAgents;
   }
 
+  async getAzureOpenAIConfig(): Promise<AzureOpenAIProviderConfig> {
+    const persisted = await this.read();
+    const config = this.azureOpenAIConfigFromState(persisted);
+    const apiKey = await this.providerSecretsFor("azure-openai").get("api-key");
+    return {
+      ...config,
+      hasKey: Boolean(apiKey),
+    };
+  }
+
+  async setAzureOpenAIConfig(
+    input: SetAzureOpenAIProviderConfigInput,
+  ): Promise<AzureOpenAIProviderConfig> {
+    const endpoint = input.endpoint.trim();
+    const deployment = input.deployment.trim();
+    const apiVersion =
+      input.apiVersion.trim() || DEFAULT_AZURE_OPENAI_API_VERSION;
+    const hasApiKeyInput = Object.prototype.hasOwnProperty.call(input, "apiKey");
+    if (hasApiKeyInput) {
+      const normalized =
+        typeof input.apiKey === "string" ? input.apiKey.trim() : null;
+      const accessor = this.providerSecretsFor("azure-openai");
+      if (normalized && normalized.length > 0) {
+        await accessor.set("api-key", normalized);
+      } else {
+        await accessor.remove("api-key");
+      }
+    }
+
+    await this.serialize(async () => {
+      const current = await this.read();
+      await this.write({
+        ...current,
+        providerConfigs: {
+          ...(current.providerConfigs ?? {}),
+          azureOpenAI: {
+            endpoint,
+            deployment,
+            apiVersion,
+          },
+        },
+      });
+    });
+
+    return this.getAzureOpenAIConfig();
+  }
+
   async listProviders(): Promise<ProviderSummary[]> {
+    let azureOpenAIConfig: AzureOpenAIProviderConfig | undefined;
+    let azureOpenAIConfigError: string | undefined;
+    try {
+      azureOpenAIConfig = await this.getAzureOpenAIConfig();
+    } catch (error) {
+      azureOpenAIConfigError = error instanceof Error ? error.message : String(error);
+    }
+
     return Promise.all(
       providerCatalog.map(async (provider) => {
         if (provider.id === "ollama") return checkOllama(provider);
@@ -809,6 +936,20 @@ export class AppStateStore {
         if (provider.id === "lm-studio") return checkLmStudio(provider);
         if (provider.id === "anthropic") return checkClaudeCode(provider);
         if (provider.id === "openai") return checkCodex(provider);
+        if (provider.id === "azure-openai") {
+          if (azureOpenAIConfigError) {
+            return {
+              ...provider,
+              status: "error",
+              detail: azureOpenAIConfigError,
+              models: [],
+            };
+          }
+          return checkAzureOpenAI(
+            provider,
+            azureOpenAIConfig ?? this.emptyAzureOpenAIConfig(),
+          );
+        }
         return provider;
       }),
     );
@@ -826,7 +967,10 @@ export class AppStateStore {
     if (!provider) {
       throw new Error(`Provider not found: ${providerId}`);
     }
-    if (provider.status !== "connected") {
+    const providerReady =
+      provider.status === "connected" ||
+      (provider.id === "azure-openai" && provider.status === "available");
+    if (!providerReady) {
       return {
         providerId,
         ok: false,
@@ -841,6 +985,30 @@ export class AppStateStore {
     }
 
     const startedAt = Date.now();
+    if (providerId === "azure-openai") {
+      try {
+        const probe = await probeAzureOpenAi(
+          await this.azureOpenAIRuntimeOptions(selectedModel),
+        );
+        return {
+          providerId,
+          ok: probe.ready,
+          model: probe.model,
+          durationMs: probe.durationMs,
+          message: probe.ready
+            ? `${provider.name} returned a minimal chat completion.`
+            : probe.detail,
+        };
+      } catch (error) {
+        return {
+          providerId,
+          ok: false,
+          durationMs: Date.now() - startedAt,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+
     const llm = await this.buildLlm(providerId, selectedModel);
     if (!llm.available) {
       return {
@@ -2212,7 +2380,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       (candidate) => candidate.id === persisted.activeProviderId,
     );
     checks.push(
-      provider?.status === "connected"
+      this.providerCanRun(provider)
         ? {
             id: "provider",
             label: "LLM provider",
@@ -3373,7 +3541,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // Preflight the LLM provider so a clearly-actionable error is
       // returned to the renderer synchronously instead of a queued
       // run that fails moments later when the runtime can't reach it.
-      if (activeProvider && activeProvider.status !== "connected") {
+      if (activeProvider && !this.providerCanRun(activeProvider)) {
         if (activeProvider.id === "ollama") {
           throw new Error(
             "Ollama isn't reachable. Start it with `ollama serve`, then try again.",
@@ -3626,7 +3794,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     const providers = await this.listProviders();
     const provider = providers.find((entry) => entry.id === providerId);
-    if (!provider || provider.status !== "connected") {
+    const providerReady =
+      provider?.status === "connected" ||
+      (provider?.id === "azure-openai" && provider.status === "available");
+    if (!provider || !providerReady) {
       return noopLlm;
     }
 
@@ -3654,7 +3825,47 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (providerId === "openai") {
       return createCodexLlm({ defaultModel });
     }
+    if (providerId === "azure-openai") {
+      try {
+        return createAzureOpenAiLlm(
+          await this.azureOpenAIRuntimeOptions(defaultModel),
+        );
+      } catch {
+        return noopLlm;
+      }
+    }
     return noopLlm;
+  }
+
+  private async azureOpenAIRuntimeOptions(defaultModel?: string): Promise<{
+    endpoint: string;
+    deployment: string;
+    apiVersion: string;
+    apiKey: string;
+    defaultModel?: string;
+  }> {
+    const persisted = await this.read();
+    const config = this.azureOpenAIConfigFromState(persisted);
+    const apiKey = await this.providerSecretsFor("azure-openai").get("api-key");
+    if (!config.endpoint || !config.deployment || !config.apiVersion || !apiKey) {
+      throw new Error(
+        "Azure OpenAI is not configured. Add your endpoint, deployment, API version, and key in Settings.",
+      );
+    }
+    const options: {
+      endpoint: string;
+      deployment: string;
+      apiVersion: string;
+      apiKey: string;
+      defaultModel?: string;
+    } = {
+      endpoint: config.endpoint,
+      deployment: config.deployment,
+      apiVersion: config.apiVersion,
+      apiKey,
+    };
+    if (defaultModel) options.defaultModel = defaultModel;
+    return options;
   }
 
   private async buildGraph(
@@ -5210,6 +5421,35 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
         if (Object.keys(sanitized).length > 0) {
           state.connectors = sanitized;
+        }
+      }
+      const rawProviderConfigs = (parsed as { providerConfigs?: unknown })
+        .providerConfigs;
+      if (
+        rawProviderConfigs &&
+        typeof rawProviderConfigs === "object" &&
+        !Array.isArray(rawProviderConfigs)
+      ) {
+        const rawAzureOpenAI = (rawProviderConfigs as Record<string, unknown>)
+          .azureOpenAI;
+        if (
+          rawAzureOpenAI &&
+          typeof rawAzureOpenAI === "object" &&
+          !Array.isArray(rawAzureOpenAI)
+        ) {
+          const obj = rawAzureOpenAI as Record<string, unknown>;
+          state.providerConfigs = {
+            azureOpenAI: {
+              endpoint:
+                typeof obj.endpoint === "string" ? obj.endpoint.trim() : "",
+              deployment:
+                typeof obj.deployment === "string" ? obj.deployment.trim() : "",
+              apiVersion:
+                typeof obj.apiVersion === "string" && obj.apiVersion.trim()
+                  ? obj.apiVersion.trim()
+                  : DEFAULT_AZURE_OPENAI_API_VERSION,
+            },
+          };
         }
       }
       const rawDeliveryQueue = (parsed as { runDeliveryQueue?: unknown })

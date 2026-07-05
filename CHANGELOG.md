@@ -8,6 +8,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Added a Vitest and Testing Library renderer test baseline for write confirmation, hosted-provider consent, and provider settings.
 - Added Anthropic via the local Claude Code CLI and LM Studio via its local OpenAI-compatible server as runnable LLM providers.
+- Added Azure OpenAI provider configuration in Settings with endpoint, deployment, API version, write-only encrypted key storage, and renderer coverage for key replacement.
 - Added `docs/agent-sdk.md`, a practical author guide for manifest fields, step kinds, write confirmation, local QA, and community submission.
 - Added a marketing examples gallery with copyable Build your own Agent prompts for read, write, and connector-backed agents.
 

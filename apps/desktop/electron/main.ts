@@ -66,6 +66,7 @@ import type {
   SaveTextFileArgs,
   SchedulerLaunchSettings,
   SelfTrainingSuggestionStatus,
+  SetAzureOpenAIProviderConfigInput,
   SetGraphCacheRefreshScheduleInput,
   SendIntuneChatMessageInput,
   SupportBundleInput,
@@ -2232,6 +2233,41 @@ function optionalTextString(
   return value;
 }
 
+function boundedTextString(
+  value: unknown,
+  name: string,
+  maxLength: number,
+): string {
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be a string.`);
+  }
+  if (value.length > maxLength) {
+    throw new Error(`${name} is too long.`);
+  }
+  return value;
+}
+
+function validateAzureOpenAIConfigInput(
+  value: unknown,
+): SetAzureOpenAIProviderConfigInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Azure OpenAI config must be an object.");
+  }
+  const input: SetAzureOpenAIProviderConfigInput = {
+    endpoint: boundedTextString(value.endpoint, "Azure OpenAI endpoint", 500),
+    deployment: boundedTextString(value.deployment, "Azure OpenAI deployment", 200),
+    apiVersion: boundedTextString(value.apiVersion, "Azure OpenAI API version", 64),
+  };
+  if (Object.prototype.hasOwnProperty.call(value, "apiKey")) {
+    if (value.apiKey === null) {
+      input.apiKey = null;
+    } else {
+      input.apiKey = boundedTextString(value.apiKey, "Azure OpenAI API key", 20_000);
+    }
+  }
+  return input;
+}
+
 function validateSetRegistrySourceOptions(
   value: unknown,
 ): { confirmExternalSource?: boolean } {
@@ -3819,6 +3855,16 @@ function registerIpcHandlers() {
         validateProviderId(providerId),
         optionalBoundedString(model, "model", 256),
       ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-azure-openai-config",
+    handleTrusted(() => store.getAzureOpenAIConfig()),
+  );
+  ipcMain.handle(
+    "openadminos:set-azure-openai-config",
+    handleTrusted((_event, input: unknown) =>
+      store.setAzureOpenAIConfig(validateAzureOpenAIConfigInput(input)),
     ),
   );
   ipcMain.handle(

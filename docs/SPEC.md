@@ -233,6 +233,17 @@ than stored in OpenAdminOS. This preserves the "no vendor API keys in
 OpenAdminOS" boundary, but tenant prompts still leave the device because the
 selected Claude model is hosted by Anthropic.
 
+Azure OpenAI support is a direct API-key provider, not a local CLI bridge.
+Settings -> LLM Providers collects the Azure OpenAI endpoint URL, deployment
+name, API version, and a write-only API key. The renderer can read only
+non-secret configuration plus a `hasKey` boolean; stored keys are never
+displayed back to the renderer. The host stores the key encrypted with the
+desktop OS secure-storage backend and sends it only to the configured Azure
+OpenAI endpoint when Azure OpenAI is the active hosted provider. The provider
+status becomes available after endpoint, deployment, API version, and key are
+present; the Settings test action runs a minimal chat completion before admins
+send tenant context.
+
 Local-provider trust is endpoint-sensitive. Ollama is local only when the
 configured endpoint is loopback (`localhost`, `127.0.0.0/8`, IPv6 loopback, or
 IPv4-mapped loopback) or a Unix socket. If `OPENAGENTS_OLLAMA_URL` points at a

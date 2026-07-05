@@ -22,6 +22,8 @@ import {
 } from "../components/icons";
 import {
   resolveProviderDefaultModel,
+  DEFAULT_AZURE_OPENAI_API_VERSION,
+  type AzureOpenAIProviderConfig,
   type CompanionLaunchSettings,
   type GraphCacheStatus,
   type LocalDataSummary,
@@ -33,6 +35,7 @@ import {
   type SchedulerLaunchSettings,
   type SelfTrainingSettings,
   type SelfTrainingSuggestion,
+  type SetAzureOpenAIProviderConfigInput,
   type TenantRecord,
   type TrustState,
 } from "../shared/openAdminOS";
@@ -64,6 +67,7 @@ export default function Settings() {
     disconnectTenant,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
+    refresh,
   } = useAppState();
   const [tenantBusy, setTenantBusy] = useState(false);
   const [tenantError, setTenantError] = useState<string | null>(null);
@@ -107,6 +111,7 @@ export default function Settings() {
               activeModelByProviderId={state.activeModelByProviderId}
               onSetActiveProvider={setActiveProvider}
               onSetActiveModel={setActiveModel}
+              onProviderConfigSaved={refresh}
             />
           )}
           {section === "tenants" && (
@@ -146,33 +151,39 @@ function ProvidersSection({
   activeModelByProviderId,
   onSetActiveProvider,
   onSetActiveModel,
+  onProviderConfigSaved,
 }: {
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
   activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined;
   onSetActiveProvider: (id: ProviderId) => Promise<void>;
   onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
+  onProviderConfigSaved: () => Promise<void>;
 }) {
+  const localProviders = providers.filter((p) => p.isLocal);
+  const cliHostedProviders = providers.filter(
+    (p) => !p.isLocal && p.id !== "azure-openai",
+  );
+  const azureOpenAIProvider = providers.find((p) => p.id === "azure-openai");
+
   return (
     <div className="max-w-[820px]">
       <SectionTitle
         title="LLM Providers"
-        subtitle="OpenAdminOS never stores API keys. For hosted providers, we piggyback on your installed CLI's authentication so usage runs against your existing subscription."
+        subtitle="Local providers keep tenant prompts on this device. Hosted providers send prompts to the selected service; CLI-backed providers use the vendor CLI, while Azure OpenAI stores one encrypted key locally."
       />
 
       <div className="mt-6 grid grid-cols-1 gap-3">
-        {providers
-          .filter((p) => p.isLocal)
-          .map((p) => (
-            <ProviderRow
-              key={p.id}
-              provider={p}
-              activeProviderId={activeProviderId}
-              activeModel={activeModelByProviderId?.[p.id]}
-              onSetActiveProvider={onSetActiveProvider}
-              onSetActiveModel={onSetActiveModel}
-            />
-          ))}
+        {localProviders.map((p) => (
+          <ProviderRow
+            key={p.id}
+            provider={p}
+            activeProviderId={activeProviderId}
+            activeModel={activeModelByProviderId?.[p.id]}
+            onSetActiveProvider={onSetActiveProvider}
+            onSetActiveModel={onSetActiveModel}
+          />
+        ))}
       </div>
 
       <div className="mt-10 mb-3 flex items-center gap-3">
@@ -187,19 +198,43 @@ function ProvidersSection({
         key.
       </p>
       <div className="grid grid-cols-1 gap-3">
-        {providers
-          .filter((p) => !p.isLocal)
-          .map((p) => (
+        {cliHostedProviders.map((p) => (
+          <ProviderRow
+            key={p.id}
+            provider={p}
+            activeProviderId={activeProviderId}
+            activeModel={activeModelByProviderId?.[p.id]}
+            onSetActiveProvider={onSetActiveProvider}
+            onSetActiveModel={onSetActiveModel}
+          />
+        ))}
+      </div>
+
+      {azureOpenAIProvider && (
+        <>
+          <div className="mt-10 mb-3 flex items-center gap-3">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Hosted via Azure API key
+            </span>
+            <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
+          </div>
+          <p className="mb-4 max-w-[640px] text-[12px] text-[var(--color-text-muted)]">
+            Azure OpenAI uses your Azure resource endpoint and deployment. The
+            API key is encrypted with OS secure storage and is write-only in the
+            renderer.
+          </p>
+          <div className="grid grid-cols-1 gap-3">
             <ProviderRow
-              key={p.id}
-              provider={p}
+              provider={azureOpenAIProvider}
               activeProviderId={activeProviderId}
-              activeModel={activeModelByProviderId?.[p.id]}
+              activeModel={activeModelByProviderId?.[azureOpenAIProvider.id]}
               onSetActiveProvider={onSetActiveProvider}
               onSetActiveModel={onSetActiveModel}
             />
-          ))}
-      </div>
+            <AzureOpenAIConfigForm onSaved={onProviderConfigSaved} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -226,11 +261,15 @@ function ProviderRow({
     provider,
     activeModel ? { [provider.id]: activeModel } : undefined,
   ).model;
+  const providerReadyForTest =
+    provider.status === "connected" ||
+    (provider.id === "azure-openai" && provider.status === "available");
   const canTest =
     implemented &&
-    provider.status === "connected" &&
+    providerReadyForTest &&
     (provider.id === "openai" ||
       provider.id === "ollama" ||
+      provider.id === "azure-openai" ||
       provider.id === "apple-foundation");
 
   const handleTest = async () => {
@@ -430,6 +469,337 @@ function ProviderRow({
         </div>
       </div>
     </Card>
+  );
+}
+
+function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
+  const [config, setConfig] = useState<AzureOpenAIProviderConfig | null>(null);
+  const [endpoint, setEndpoint] = useState("");
+  const [deployment, setDeployment] = useState("");
+  const [apiVersion, setApiVersion] = useState(
+    DEFAULT_AZURE_OPENAI_API_VERSION,
+  );
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [replacingKey, setReplacingKey] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const applyConfig = (next: AzureOpenAIProviderConfig) => {
+    setConfig(next);
+    setEndpoint(next.endpoint);
+    setDeployment(next.deployment);
+    setApiVersion(next.apiVersion || DEFAULT_AZURE_OPENAI_API_VERSION);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = window.openAdminOS;
+    if (!api) {
+      setLoading(false);
+      setError("Azure OpenAI settings are unavailable outside the desktop app.");
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    api
+      .getAzureOpenAIConfig()
+      .then((next) => {
+        if (!cancelled) applyConfig(next);
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const hasStoredKey = config?.hasKey ?? false;
+  const showKeyInput = !hasStoredKey || replacingKey;
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (saving) return;
+
+    const trimmedEndpoint = endpoint.trim();
+    const trimmedDeployment = deployment.trim();
+    const trimmedApiVersion =
+      apiVersion.trim() || DEFAULT_AZURE_OPENAI_API_VERSION;
+    const trimmedApiKey = apiKeyDraft.trim();
+
+    if (!trimmedEndpoint) {
+      setError("Endpoint URL is required.");
+      setNotice(null);
+      return;
+    }
+    try {
+      new URL(trimmedEndpoint);
+    } catch {
+      setError("Endpoint URL must be a valid Azure OpenAI resource URL.");
+      setNotice(null);
+      return;
+    }
+    if (!trimmedDeployment) {
+      setError("Deployment name is required.");
+      setNotice(null);
+      return;
+    }
+    if (!trimmedApiVersion) {
+      setError("API version is required.");
+      setNotice(null);
+      return;
+    }
+    if (!hasStoredKey && !trimmedApiKey) {
+      setError("Enter an Azure OpenAI API key before saving.");
+      setNotice(null);
+      return;
+    }
+    if (hasStoredKey && replacingKey && !trimmedApiKey) {
+      setError("Enter a replacement key, or cancel replacement before saving.");
+      setNotice(null);
+      return;
+    }
+
+    const input: SetAzureOpenAIProviderConfigInput = {
+      endpoint: trimmedEndpoint,
+      deployment: trimmedDeployment,
+      apiVersion: trimmedApiVersion,
+    };
+    if (showKeyInput) {
+      input.apiKey = trimmedApiKey;
+    }
+
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const next = await window.openAdminOS?.setAzureOpenAIConfig(input);
+      if (!next) {
+        throw new Error("Azure OpenAI settings are unavailable outside the desktop app.");
+      }
+      applyConfig(next);
+      setApiKeyDraft("");
+      setReplacingKey(false);
+      await onSaved();
+      setNotice(
+        "Azure OpenAI settings saved. Use Test on the provider row before sending tenant context.",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="p-5 text-[12px] text-[var(--color-text-muted)]">
+          Loading Azure OpenAI settings.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <form onSubmit={(event) => void handleSubmit(event)} className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <IconLock size={13} className="text-[var(--color-text-muted)]" />
+              <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                Azure OpenAI configuration
+              </h3>
+            </div>
+            <p className="mt-1 max-w-[620px] text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+              Your key is encrypted with the OS secure storage and never leaves
+              this device except to call your Azure endpoint.
+            </p>
+          </div>
+          <Pill tone={hasStoredKey ? "success" : "warning"}>
+            <StatusDot tone={hasStoredKey ? "success" : "warning"} />
+            {hasStoredKey ? "Key stored" : "Key required"}
+          </Pill>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-4">
+          <AzureConfigField label="Endpoint URL" htmlFor="azure-openai-endpoint">
+            <input
+              id="azure-openai-endpoint"
+              value={endpoint}
+              onChange={(event) => {
+                setEndpoint(event.target.value);
+                setError(null);
+                setNotice(null);
+              }}
+              placeholder="https://contoso.openai.azure.com"
+              spellCheck={false}
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            />
+          </AzureConfigField>
+          <AzureConfigField label="Deployment name" htmlFor="azure-openai-deployment">
+            <input
+              id="azure-openai-deployment"
+              value={deployment}
+              onChange={(event) => {
+                setDeployment(event.target.value);
+                setError(null);
+                setNotice(null);
+              }}
+              placeholder="gpt-4o-admin"
+              spellCheck={false}
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            />
+          </AzureConfigField>
+          <AzureConfigField label="API version" htmlFor="azure-openai-api-version">
+            <input
+              id="azure-openai-api-version"
+              value={apiVersion}
+              onChange={(event) => {
+                setApiVersion(event.target.value);
+                setError(null);
+                setNotice(null);
+              }}
+              placeholder={DEFAULT_AZURE_OPENAI_API_VERSION}
+              spellCheck={false}
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            />
+          </AzureConfigField>
+
+          <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                  API key
+                </div>
+                <div className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                  Stored keys are never displayed. Replace writes a new key over
+                  the existing encrypted value.
+                </div>
+              </div>
+              {hasStoredKey && !replacingKey && (
+                <div className="flex items-center gap-2">
+                  <Pill tone="success">
+                    <IconCheck size={10} /> Key stored
+                  </Pill>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setReplacingKey(true);
+                      setApiKeyDraft("");
+                      setError(null);
+                      setNotice(null);
+                    }}
+                  >
+                    Replace
+                  </Button>
+                </div>
+              )}
+            </div>
+            {showKeyInput && (
+              <div className="mt-3">
+                <label
+                  htmlFor="azure-openai-api-key"
+                  className="sr-only"
+                >
+                  API key
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="azure-openai-api-key"
+                    type="password"
+                    value={apiKeyDraft}
+                    onChange={(event) => {
+                      setApiKeyDraft(event.target.value);
+                      setError(null);
+                      setNotice(null);
+                    }}
+                    placeholder={
+                      hasStoredKey
+                        ? "Paste a replacement key"
+                        : "Paste Azure OpenAI API key"
+                    }
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+                  />
+                  {hasStoredKey && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setReplacingKey(false);
+                        setApiKeyDraft("");
+                        setError(null);
+                        setNotice(null);
+                      }}
+                    >
+                      Cancel replace
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div className="mt-4 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30">
+            {notice}
+          </div>
+        )}
+
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--color-border-soft)] pt-4">
+          <div className="text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+            Azure OpenAI is hosted. Tenant prompts are sent to the configured
+            Azure endpoint when this provider is active.
+          </div>
+          <Button type="submit" size="sm" variant="primary" disabled={saving}>
+            {saving ? "Saving" : "Save Azure OpenAI"}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+function AzureConfigField({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[150px_1fr] sm:items-center">
+      <label
+        htmlFor={htmlFor}
+        className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+      >
+        {label}
+      </label>
+      {children}
+    </div>
   );
 }
 

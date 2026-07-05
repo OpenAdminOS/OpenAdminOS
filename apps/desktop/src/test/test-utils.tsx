@@ -6,11 +6,13 @@ import { vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
 import { AppStateProvider } from "../state";
 import {
+  DEFAULT_AZURE_OPENAI_API_VERSION,
   deriveTrustState,
   type AgentDraft,
   type AgentDraftPreflightResult,
   type AgentSummary,
   type AppState,
+  type AzureOpenAIProviderConfig,
   type CompanionLaunchSettings,
   type CompanionSnapshot,
   type GraphCacheStatus,
@@ -206,6 +208,12 @@ export function makeMockBridge(
   initialState: AppState = createMockAppState(),
 ): OpenAdminOSApi {
   let appState = initialState;
+  let azureOpenAIConfig: AzureOpenAIProviderConfig = {
+    endpoint: "",
+    deployment: "",
+    apiVersion: DEFAULT_AZURE_OPENAI_API_VERSION,
+    hasKey: false,
+  };
   const updateState = (nextState: AppState) => {
     appState = nextState;
     return appState;
@@ -262,6 +270,21 @@ export function makeMockBridge(
       message: "Provider test passed.",
       durationMs: 125,
     })),
+    getAzureOpenAIConfig: vi.fn(async () => azureOpenAIConfig),
+    setAzureOpenAIConfig: vi.fn(async (input) => {
+      azureOpenAIConfig = {
+        endpoint: input.endpoint,
+        deployment: input.deployment,
+        apiVersion: input.apiVersion || DEFAULT_AZURE_OPENAI_API_VERSION,
+        hasKey:
+          input.apiKey === null
+            ? false
+            : typeof input.apiKey === "string"
+              ? input.apiKey.trim().length > 0
+              : azureOpenAIConfig.hasKey,
+      };
+      return azureOpenAIConfig;
+    }),
     listIntuneChatConversations: vi.fn(async () => []),
     searchIntuneChatConversations: vi.fn(async () => []),
     renameIntuneChatConversation: vi.fn(async (conversationId: string, title: string) => ({

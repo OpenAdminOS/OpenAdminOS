@@ -27,6 +27,26 @@ export interface ProviderTestResult {
   durationMs?: number;
 }
 
+export const DEFAULT_AZURE_OPENAI_API_VERSION = "2024-10-21";
+
+export interface AzureOpenAIProviderConfig {
+  endpoint: string;
+  deployment: string;
+  apiVersion: string;
+  hasKey: boolean;
+}
+
+export interface SetAzureOpenAIProviderConfigInput {
+  endpoint: string;
+  deployment: string;
+  apiVersion: string;
+  /**
+   * Write-only. Undefined keeps the existing stored key, a string replaces it,
+   * and null clears it.
+   */
+  apiKey?: string | null;
+}
+
 export type AgentMode = "read" | "write";
 
 export type AgentCategory =
@@ -1498,6 +1518,10 @@ export interface OpenAdminOSApi {
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
+  getAzureOpenAIConfig(): Promise<AzureOpenAIProviderConfig>;
+  setAzureOpenAIConfig(
+    input: SetAzureOpenAIProviderConfigInput,
+  ): Promise<AzureOpenAIProviderConfig>;
   listIntuneChatConversations(): Promise<IntuneChatConversation[]>;
   searchIntuneChatConversations(query: string): Promise<IntuneChatConversation[]>;
   renameIntuneChatConversation(
@@ -2556,9 +2580,8 @@ export interface WriteAgentModule extends AgentDefinition {
 
 export type AgentModule = ReadAgentModule | WriteAgentModule;
 
-// TODO(ugur): Azure OpenAI is kept in the catalog as a forward-compat
-// placeholder until its adapter lands. OpenAI and Anthropic use locally
-// installed vendor CLIs, so OpenAdminOS never stores vendor API keys.
+// TODO(ugur): Entra ID token auth variant for Azure OpenAI is deferred to v0.4
+// (needs app registration + scope design).
 export const providerCatalog: readonly ProviderSummary[] = [
   {
     id: "ollama",
@@ -2614,10 +2637,10 @@ export const providerCatalog: readonly ProviderSummary[] = [
     id: "azure-openai",
     name: "Azure OpenAI",
     description:
-      "Hosted Azure OpenAI deployments using the organization's Azure boundary.",
+      "Use your Azure OpenAI deployment. Tenant prompts are sent to your Azure resource's endpoint.",
     isLocal: false,
-    status: "not-installed",
-    detail: "Hosted provider setup is not implemented yet",
+    status: "available",
+    detail: "Waiting for Azure OpenAI configuration",
     models: [],
   },
 ];

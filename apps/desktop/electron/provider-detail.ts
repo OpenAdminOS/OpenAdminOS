@@ -9,6 +9,7 @@ import {
   resolveOllamaEndpoint,
 } from "@openadminos/runtime";
 import {
+  type AzureOpenAIProviderConfig,
   providerCatalog,
   type ProviderId,
   type ProviderSummary,
@@ -174,6 +175,46 @@ export async function checkLmStudio(provider: ProviderSummary): Promise<Provider
     ),
     models: probe.models,
     defaultModel: probe.defaultModel,
+  };
+}
+
+
+
+export function checkAzureOpenAI(
+  provider: ProviderSummary,
+  config: AzureOpenAIProviderConfig,
+): ProviderSummary {
+  const endpoint = config.endpoint.trim();
+  const deployment = config.deployment.trim();
+  const apiVersion = config.apiVersion.trim();
+  if (!endpoint || !deployment || !apiVersion || !config.hasKey) {
+    return {
+      ...provider,
+      status: "not-installed",
+      detail: "Add your Azure OpenAI endpoint, deployment, and key in Settings.",
+      models: [],
+    };
+  }
+
+  let host: string;
+  try {
+    host = new URL(endpoint).host;
+  } catch {
+    return {
+      ...provider,
+      status: "error",
+      detail: "Azure OpenAI endpoint is not a valid URL. Check Settings.",
+      models: [deployment],
+      defaultModel: deployment,
+    };
+  }
+
+  return {
+    ...provider,
+    status: "available",
+    detail: `Configured for ${host} · deployment ${deployment} · API ${apiVersion}. Use Test to verify the key before sending tenant context.`,
+    models: [deployment],
+    defaultModel: deployment,
   };
 }
 

@@ -7,6 +7,7 @@ import type {
   PendingConnectorDecision,
   ProviderId,
   SaveTextFileArgs,
+  SetAzureOpenAIProviderConfigInput,
   SupportBundleInput,
   SupportIssueSubmissionInput,
   StartRunOptions,
@@ -68,6 +69,10 @@ const api: OpenAdminOSApi = {
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
   testProvider: (providerId: ProviderId, model?: string) =>
     ipcRenderer.invoke("openadminos:test-provider", providerId, model),
+  getAzureOpenAIConfig: () =>
+    ipcRenderer.invoke("openadminos:get-azure-openai-config"),
+  setAzureOpenAIConfig: (input: SetAzureOpenAIProviderConfigInput) =>
+    ipcRenderer.invoke("openadminos:set-azure-openai-config", input),
   listIntuneChatConversations: () =>
     ipcRenderer.invoke("openadminos:list-intune-chat-conversations"),
   searchIntuneChatConversations: (query: string) =>
