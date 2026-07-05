@@ -5,6 +5,8 @@ import { join } from "node:path";
 import {
   resolveProviderDefaultModel,
   type AgentSummary,
+  type ChatInvestigationMode,
+  type ChatInvestigationSettings,
   type GraphCacheRefreshResult,
   type GraphCacheRefreshResourceResult,
   type GraphCacheRefreshScheduleSettings,
@@ -87,6 +89,7 @@ import {
   updateJobTenantProgress,
 } from "../state-helpers.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
+import { runAgenticChat } from "./agentic-loop.js";
 import {
   GRAPH_CACHE_RESOURCES,
   buildAnswerPack,
@@ -98,6 +101,7 @@ import {
   requiredScopesForResources,
   selfTrainingCandidateFromPrompt,
 } from "./planner.js";
+import type { IntuneChatToolContext } from "./tools.js";
 
 type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
@@ -1305,48 +1309,99 @@ export class IntuneChatService {
       refreshedResources,
     });
 
-    const llm = await this.host.buildLlm(providerId, selectedModel);
     let assistantContent: string;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
+    let responseModel = selectedModel;
+    let toolTrace: IntuneChatMessage["toolTrace"];
 
-    if (!llm.available) {
-      assistantStatus = "failed";
-      assistantError =
-        "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
-      assistantContent = assistantError;
+    if (planned.hasWriteIntent) {
+      assistantContent = writeIntentBlockedMessage(agentSuggestions);
     } else {
+      const llm = await this.host.buildLlm(providerId, selectedModel);
       const modelQuestion = workspaceContext
         ? `${content}\n\n${workspaceContext.promptBlock}`
         : content;
-      const answerPack = buildAnswerPack({
-        question: modelQuestion,
-        tenant,
-        cacheStatus,
-        rows,
-        hasWriteIntent: planned.hasWriteIntent,
-        agentSuggestions,
-        generatedAt: answerGeneratedAt,
-        limits: chatBudget.answerPackLimits,
-      });
-      try {
+      const buildDeterministicAnswer = async (
+        notice?: string,
+      ): Promise<{ content: string; model?: string }> => {
+        const answerPack = buildAnswerPack({
+          question: modelQuestion,
+          tenant,
+          cacheStatus,
+          rows,
+          hasWriteIntent: false,
+          agentSuggestions,
+          generatedAt: answerGeneratedAt,
+          limits: chatBudget.answerPackLimits,
+        });
         const completion = await llm.complete({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
           prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
+          ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
         });
-        assistantContent = completion.text.trim();
-        if (planned.hasWriteIntent) {
-          assistantContent = `${assistantContent}\n\nI cannot perform tenant changes directly from chat. Use an installed write agent so the existing plan and confirmation flow stays in force.`;
-        }
+        let content = completion.text.trim();
         if (agentSuggestions.length > 0) {
-          assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
+          content = `${content}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
         }
-      } catch (caught) {
+        return {
+          content: [notice, content].filter((part): part is string => Boolean(part)).join("\n\n"),
+          model: completion.model,
+        };
+      };
+
+      if (!llm.available) {
         assistantStatus = "failed";
-        assistantError = caught instanceof Error ? caught.message : String(caught);
-        assistantContent = `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+        assistantError =
+          "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
+        assistantContent = assistantError;
+      } else {
+        try {
+          const investigationSettings = store.getChatInvestigationSettings();
+          const capability = resolveAgenticCapability({
+            mode: investigationSettings.mode,
+            provider,
+            providerId,
+            model: selectedModel ?? llm.defaultModel,
+          });
+          if (capability.enabled) {
+            const agentic = await runAgenticChat({
+              question: modelQuestion,
+              tenant,
+              providerId,
+              providerIsLocal: provider?.isLocal === true,
+              ...(selectedModel ? { model: selectedModel } : {}),
+              llm,
+              tools: this.buildChatToolContext(tenant.id),
+              plannedResources: planned.resources,
+              agentSuggestions,
+              generatedAt: answerGeneratedAt,
+              maxTokens: chatBudget.maxTokens,
+            });
+            responseModel = agentic.model ?? responseModel;
+            toolTrace = agentic.toolTrace;
+            if (agentic.ok) {
+              assistantContent = agentic.answer;
+              if (agentSuggestions.length > 0) {
+                assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
+              }
+            } else {
+              const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
+              assistantContent = deterministic.content;
+              responseModel = deterministic.model ?? responseModel;
+            }
+          } else {
+            const deterministic = await buildDeterministicAnswer(capability.notice);
+            assistantContent = deterministic.content;
+            responseModel = deterministic.model ?? responseModel;
+          }
+        } catch (caught) {
+          assistantStatus = "failed";
+          assistantError = caught instanceof Error ? caught.message : String(caught);
+          assistantContent = `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+        }
       }
     }
 
@@ -1358,12 +1413,20 @@ export class IntuneChatService {
       status: assistantStatus,
       createdAt: new Date().toISOString(),
       providerId,
-      model: selectedModel,
+      model: responseModel,
       sources,
+      ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
     };
     store.insertMessage(assistantMessage);
+    if (toolTrace && toolTrace.length > 0) {
+      this.persistToolTrace({
+        conversationId: conversation.id,
+        messageId: assistantMessage.id,
+        toolTrace,
+      });
+    }
     store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
 
     await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -1378,7 +1441,7 @@ export class IntuneChatService {
       assistantMessage,
       cacheStatus: {
         tenantId: tenant.id,
-        resources: cacheStatus,
+        resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
         schedule: store.getGraphCacheRefreshSchedule(tenant.id),
       },
     };
@@ -1513,6 +1576,7 @@ export class IntuneChatService {
     let progressRefreshResources: GraphCacheResourceKind[] = [];
     let progressRefreshResults: GraphCacheRefreshResourceResult[] = [];
     let progressActiveResource: GraphCacheResourceKind | undefined;
+    let progressToolSteps: IntuneChatProgressStep[] = [];
     const sendProgress = (input: {
       message: string;
       stage: IntuneChatStreamStage;
@@ -1529,6 +1593,14 @@ export class IntuneChatService {
         contextStatus: input.contextStatus ?? "pending",
         modelStatus: input.modelStatus ?? "pending",
       });
+      if (progressToolSteps.length > 0) {
+        const modelIndex = progressSteps.findIndex((step) => step.id === "model-answer");
+        progressSteps.splice(
+          modelIndex >= 0 ? modelIndex : progressSteps.length,
+          0,
+          ...progressToolSteps,
+        );
+      }
       onEvent({
         type: "status",
         conversationId: conversation.id,
@@ -1648,43 +1720,48 @@ export class IntuneChatService {
       refreshedResources,
     });
 
-    const llm = await this.host.buildLlm(providerId, selectedModel);
     let assistantContent = "";
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
     let responseModel = selectedModel;
+    let toolTrace: IntuneChatMessage["toolTrace"];
 
-    if (!llm.available) {
-      assistantStatus = "failed";
-      assistantError =
-        "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
-      assistantContent = assistantError;
+    const emitDelta = (content: string, delta: string = content) => {
+      onEvent({
+        type: "delta",
+        conversationId: conversation.id,
+        assistantMessageId: assistantId,
+        delta,
+        content,
+        providerId,
+        model: responseModel,
+      });
+    };
+
+    if (planned.hasWriteIntent) {
+      assistantContent = writeIntentBlockedMessage(agentSuggestions);
+      emitDelta(assistantContent);
     } else {
+      const llm = await this.host.buildLlm(providerId, selectedModel);
       const modelQuestion = workspaceContext
         ? `${content}\n\n${workspaceContext.promptBlock}`
         : content;
-      const answerPack = buildAnswerPack({
-        question: modelQuestion,
-        tenant,
-        cacheStatus,
-        rows,
-        hasWriteIntent: planned.hasWriteIntent,
-        agentSuggestions,
-        generatedAt: answerGeneratedAt,
-        limits: chatBudget.answerPackLimits,
-      });
-      try {
-        sendProgress({
-          message: "Model response started.",
-          stage: "generating-answer",
-          contextStatus: "completed",
-          modelStatus: "active",
-          cacheStatus: {
-            tenantId: tenant.id,
-            resources: cacheStatus,
-            schedule: store.getGraphCacheRefreshSchedule(tenant.id),
-          },
+      const streamDeterministicAnswer = async (notice?: string) => {
+        const answerPack = buildAnswerPack({
+          question: modelQuestion,
+          tenant,
+          cacheStatus,
+          rows,
+          hasWriteIntent: false,
+          agentSuggestions,
+          generatedAt: answerGeneratedAt,
+          limits: chatBudget.answerPackLimits,
         });
+        const prefix = notice ? `${notice}\n\n` : "";
+        if (prefix) {
+          assistantContent = prefix;
+          emitDelta(assistantContent, prefix);
+        }
         for await (const chunk of llm.stream({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
           prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
@@ -1697,51 +1774,164 @@ export class IntuneChatService {
             break;
           }
           responseModel = chunk.model;
-          assistantContent = chunk.accumulated;
-          onEvent({
-            type: "delta",
-            conversationId: conversation.id,
-            assistantMessageId: assistantId,
-            delta: chunk.delta,
-            content: assistantContent,
-            providerId,
-            model: responseModel,
-          });
+          assistantContent = `${prefix}${chunk.accumulated}`;
+          emitDelta(assistantContent, chunk.delta);
         }
         assistantContent = assistantContent.trim();
-        if (planned.hasWriteIntent) {
-          assistantContent = `${assistantContent}\n\nI cannot perform tenant changes directly from chat. Use an installed write agent so the existing plan and confirmation flow stays in force.`;
-        }
         if (agentSuggestions.length > 0) {
           assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
         }
-        onEvent({
-          type: "delta",
-          conversationId: conversation.id,
-          assistantMessageId: assistantId,
-          delta: "",
-          content: assistantContent,
-          providerId,
-          model: responseModel,
-        });
-      } catch (caught) {
-        if (isCancelled()) {
-          const result = finishCancelled();
-          sendProgress({
-            message: "Response stopped.",
-            stage: "failed",
-            contextStatus: "completed",
-            modelStatus: "failed",
-            cacheStatus: result.cacheStatus,
-          });
-          onEvent({ type: "cancelled", result });
-          return result;
-        }
+        emitDelta(assistantContent, "");
+      };
+
+      if (!llm.available) {
         assistantStatus = "failed";
-        assistantError = caught instanceof Error ? caught.message : String(caught);
-        assistantContent = assistantContent.trim()
-          ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
-          : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+        assistantError =
+          "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.";
+        assistantContent = assistantError;
+      } else {
+        try {
+          const investigationSettings = store.getChatInvestigationSettings();
+          const capability = resolveAgenticCapability({
+            mode: investigationSettings.mode,
+            provider,
+            providerId,
+            model: selectedModel ?? llm.defaultModel,
+          });
+          if (capability.enabled) {
+            sendProgress({
+              message: "Investigative mode started.",
+              stage: "running-tools",
+              contextStatus: "completed",
+              modelStatus: "active",
+              cacheStatus: {
+                tenantId: tenant.id,
+                resources: cacheStatus,
+                schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+              },
+            });
+            const agentic = await runAgenticChat({
+              question: modelQuestion,
+              tenant,
+              providerId,
+              providerIsLocal: provider?.isLocal === true,
+              ...(selectedModel ? { model: selectedModel } : {}),
+              llm,
+              tools: this.buildChatToolContext(tenant.id),
+              plannedResources: planned.resources,
+              agentSuggestions,
+              generatedAt: answerGeneratedAt,
+              maxTokens: chatBudget.maxTokens,
+              signal: options.signal,
+              onToolStart: (event) => {
+                const stepId = `tool-${progressToolSteps.length + 1}-${event.tool}`;
+                progressToolSteps = [
+                  ...progressToolSteps,
+                  {
+                    id: stepId,
+                    label: event.message,
+                    status: "active",
+                  },
+                ];
+                onEvent({
+                  type: "tool-step-start",
+                  conversationId: conversation.id,
+                  assistantMessageId: assistantId,
+                  tool: event.tool,
+                  params: event.params,
+                  message: event.message,
+                  startedAt: event.startedAt,
+                });
+                sendProgress({
+                  message: event.message,
+                  stage: "running-tools",
+                  contextStatus: "completed",
+                  modelStatus: "active",
+                });
+              },
+              onToolFinish: (event) => {
+                progressToolSteps = progressToolSteps.map((step, index) =>
+                  index === progressToolSteps.length - 1
+                    ? {
+                        ...step,
+                        status: event.traceEntry.error ? "failed" : "completed",
+                        detail: event.traceEntry.resultSummary,
+                      }
+                    : step,
+                );
+                onEvent({
+                  type: "tool-step-finish",
+                  conversationId: conversation.id,
+                  assistantMessageId: assistantId,
+                  traceEntry: event.traceEntry,
+                  message: event.message,
+                });
+                sendProgress({
+                  message: event.message,
+                  stage: "running-tools",
+                  contextStatus: "completed",
+                  modelStatus: "active",
+                });
+              },
+            });
+            responseModel = agentic.model ?? responseModel;
+            toolTrace = agentic.toolTrace;
+            if (agentic.ok) {
+              sendProgress({
+                message: "Model response started.",
+                stage: "generating-answer",
+                contextStatus: "completed",
+                modelStatus: "active",
+                cacheStatus: {
+                  tenantId: tenant.id,
+                  resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+                  schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+                },
+              });
+              assistantContent = agentic.answer.trim();
+              if (agentSuggestions.length > 0) {
+                assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
+              }
+              emitDelta(assistantContent);
+            } else {
+              sendProgress({
+                message: agentic.fallbackNotice,
+                stage: "building-context",
+                contextStatus: "active",
+                modelStatus: "pending",
+              });
+              await streamDeterministicAnswer(agentic.fallbackNotice);
+            }
+          } else {
+            if (capability.reason === "capability-fallback" && capability.notice) {
+              sendProgress({
+                message: capability.notice,
+                stage: "building-context",
+                contextStatus: "active",
+                modelStatus: "pending",
+              });
+            }
+            await streamDeterministicAnswer(capability.notice);
+          }
+        } catch (caught) {
+          if (isCancelled()) {
+            const result = finishCancelled();
+            sendProgress({
+              message: "Response stopped.",
+              stage: "failed",
+              contextStatus: "completed",
+              modelStatus: "failed",
+              cacheStatus: result.cacheStatus,
+            });
+            onEvent({ type: "cancelled", result });
+            return result;
+          }
+          assistantStatus = "failed";
+          assistantError = caught instanceof Error ? caught.message : String(caught);
+          assistantContent = assistantContent.trim()
+            ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
+            : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+        }
       }
     }
     if (isCancelled()) {
@@ -1767,10 +1957,18 @@ export class IntuneChatService {
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
       sources,
+      ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
     };
     store.insertMessage(assistantMessage);
+    if (toolTrace && toolTrace.length > 0) {
+      this.persistToolTrace({
+        conversationId: conversation.id,
+        messageId: assistantMessage.id,
+        toolTrace,
+      });
+    }
     store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
 
     await this.maybeCreateSelfTrainingSuggestionFromChat({
@@ -1785,7 +1983,7 @@ export class IntuneChatService {
       assistantMessage,
       cacheStatus: {
         tenantId: tenant.id,
-        resources: cacheStatus,
+        resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
         schedule: store.getGraphCacheRefreshSchedule(tenant.id),
       },
     };
@@ -1811,6 +2009,66 @@ export class IntuneChatService {
       onEvent({ type: "completed", result });
     }
     return result;
+  }
+
+  private buildChatToolContext(tenantId: string): IntuneChatToolContext {
+    const store = this.host.requireIntelligenceStore();
+    const log = (
+      level: RunLogLevel,
+      message: string,
+      metadata?: Record<string, unknown>,
+    ) => {
+      console.info("[intune-chat][tool-graph]", level, message, metadata ?? "");
+    };
+    return {
+      tenantId,
+      store,
+      graphForScopes: async (scopes) => {
+        const uniqueScopes = [...new Set(scopes)].sort();
+        return this.host.graphFactory
+          ? this.host.graphFactory({ tenantId, scopes: uniqueScopes, log })
+          : (await this.host.buildGraph(tenantId, uniqueScopes)).createGraph(log);
+      },
+      refreshResource: async (resource) => {
+        const result = await this.refreshGraphCacheInternal({
+          tenantId,
+          resources: [resource],
+        });
+        const resourceResult = result.resources[0];
+        if (resourceResult) return resourceResult;
+        const definition = definitionForResource(resource);
+        return {
+          resource,
+          label: definition.label,
+          rows: 0,
+          refreshedAt: result.finishedAt,
+          ok: false,
+          error: "Refresh did not return a resource result.",
+        };
+      },
+    };
+  }
+
+  private persistToolTrace(input: {
+    conversationId: string;
+    messageId: string;
+    toolTrace: NonNullable<IntuneChatMessage["toolTrace"]>;
+  }): void {
+    const store = this.host.requireIntelligenceStore();
+    for (const trace of input.toolTrace) {
+      store.insertToolCall({
+        id: trace.id,
+        conversationId: input.conversationId,
+        messageId: input.messageId,
+        type: trace.tool,
+        status: trace.error ? "failed" : "completed",
+        createdAt: trace.createdAt,
+        completedAt: trace.completedAt,
+        input: trace.params,
+        output: trace,
+        ...(trace.error ? { error: trace.error } : {}),
+      });
+    }
   }
 
   private requireHostedChatConsent(
@@ -1870,6 +2128,19 @@ export class IntuneChatService {
 
   async getSelfTrainingSettings(): Promise<SelfTrainingSettings> {
     return this.host.requireIntelligenceStore().getSelfTrainingSettings();
+  }
+
+  async getChatInvestigationSettings(): Promise<ChatInvestigationSettings> {
+    return this.host.requireIntelligenceStore().getChatInvestigationSettings();
+  }
+
+  async setChatInvestigationMode(
+    mode: ChatInvestigationMode,
+  ): Promise<ChatInvestigationSettings> {
+    return this.host.requireIntelligenceStore().setChatInvestigationMode(
+      mode,
+      new Date().toISOString(),
+    );
   }
 
   async setSelfTrainingEnabled(enabled: boolean): Promise<SelfTrainingSettings> {
@@ -1952,4 +2223,61 @@ export class IntuneChatService {
       }
     }
   }
+}
+
+type AgenticCapabilityDecision = {
+  enabled: boolean;
+  reason: "setting" | "capable" | "capability-fallback";
+  notice?: string;
+};
+
+function resolveAgenticCapability(input: {
+  mode: ChatInvestigationMode;
+  provider: ProviderSummary | undefined;
+  providerId: ProviderId;
+  model?: string;
+}): AgenticCapabilityDecision {
+  if (input.mode === "always-agentic") {
+    return { enabled: true, reason: "setting" };
+  }
+  if (input.mode === "always-deterministic") {
+    return { enabled: false, reason: "setting" };
+  }
+  if (input.provider?.isLocal === false) {
+    return { enabled: true, reason: "capable" };
+  }
+  const model = input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0];
+  if (modelSuggestsSmallLocalModel(model)) {
+    return {
+      enabled: false,
+      reason: "capability-fallback",
+      notice: `Deterministic retrieval — ${model ?? input.provider?.name ?? input.providerId} doesn't support investigative mode.`,
+    };
+  }
+  return { enabled: true, reason: "capable" };
+}
+
+function modelSuggestsSmallLocalModel(model: string | undefined): boolean {
+  if (!model) return false;
+  const lower = model.toLowerCase();
+  if (/^(mock|test)(?:[-_:]|$)/.test(lower)) {
+    return true;
+  }
+  if (/\b(tiny|small|mini|nano|phi|gemma:2b|gemma2:2b)\b/.test(lower)) {
+    return true;
+  }
+  const match = lower.match(/(?:^|[^0-9])([1-6](?:\.\d+)?)\s*b(?:$|[^a-z0-9])/);
+  return Boolean(match);
+}
+
+function writeIntentBlockedMessage(
+  agentSuggestions: NonNullable<IntuneChatMessage["agentSuggestions"]>,
+): string {
+  const writeAgent = agentSuggestions.find((suggestion) => suggestion.mode === "write");
+  return [
+    "I cannot perform tenant changes directly from chat.",
+    writeAgent
+      ? `This looks like work for ${writeAgent.agentName}. Use the installed write agent so the normal plan and confirmation flow stays in force.`
+      : "Use an installed write agent so the normal plan and confirmation flow stays in force.",
+  ].join("\n\n");
 }

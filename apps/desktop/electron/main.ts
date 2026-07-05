@@ -45,6 +45,7 @@ import type {
   AgentSlackDelivery,
   AgentTeamsDelivery,
   AgentWhatsAppWebDelivery,
+  ChatInvestigationMode,
   CompanionRunDueReadSchedulesResult,
   CompanionSnapshot,
   CreateWorkspaceInput,
@@ -173,6 +174,11 @@ const selfTrainingSuggestionStatuses = new Set<SelfTrainingSuggestionStatus>([
   "accepted",
   "rejected",
   "reset",
+]);
+const chatInvestigationModes = new Set<ChatInvestigationMode>([
+  "auto",
+  "always-agentic",
+  "always-deterministic",
 ]);
 const workspaceStatuses = new Set<WorkspaceStatus>(["active", "archived"]);
 const workspaceEvidenceSourceTypes = new Set<WorkspaceEvidenceSourceType>([
@@ -3243,6 +3249,14 @@ function validateSelfTrainingSuggestionStatus(
   return status as SelfTrainingSuggestionStatus;
 }
 
+function validateChatInvestigationMode(value: unknown): ChatInvestigationMode {
+  const mode = requireBoundedString(value, "chat investigation mode", 32);
+  if (!chatInvestigationModes.has(mode as ChatInvestigationMode)) {
+    throw new Error("Unknown chat investigation mode.");
+  }
+  return mode as ChatInvestigationMode;
+}
+
 function validateResetSelfTrainingInput(value: unknown): ResetSelfTrainingInput {
   if (!isPlainRecord(value)) {
     throw new Error("Self-training reset input must be an object.");
@@ -4088,6 +4102,16 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:get-self-training-settings",
     handleTrusted(() => store.getSelfTrainingSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:get-chat-investigation-settings",
+    handleTrusted(() => store.getChatInvestigationSettings()),
+  );
+  ipcMain.handle(
+    "openadminos:set-chat-investigation-mode",
+    handleTrusted((_event, mode: unknown) =>
+      store.setChatInvestigationMode(validateChatInvestigationMode(mode)),
+    ),
   );
   ipcMain.handle(
     "openadminos:set-self-training-enabled",

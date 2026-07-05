@@ -648,7 +648,25 @@ export interface IntuneChatMessage {
   providerId?: ProviderId;
   model?: string;
   sources?: IntuneChatSource[];
+  toolTrace?: IntuneChatToolTraceEntry[];
   agentSuggestions?: IntuneChatAgentSuggestion[];
+  error?: string;
+}
+
+export type IntuneChatInvestigationToolName =
+  | "list_cached_resources"
+  | "query_cache"
+  | "graph_get"
+  | "refresh_resource";
+
+export interface IntuneChatToolTraceEntry {
+  id: string;
+  tool: IntuneChatInvestigationToolName;
+  params: unknown;
+  resultSummary: string;
+  durationMs: number;
+  createdAt: string;
+  completedAt: string;
   error?: string;
 }
 
@@ -656,7 +674,12 @@ export interface IntuneChatToolCall {
   id: string;
   conversationId: string;
   messageId?: string;
-  type: "graph-cache-refresh" | "agent-suggestion" | "agent-run" | "self-training-suggestion";
+  type:
+    | "graph-cache-refresh"
+    | "agent-suggestion"
+    | "agent-run"
+    | "self-training-suggestion"
+    | IntuneChatInvestigationToolName;
   status: "pending" | "completed" | "failed";
   createdAt: string;
   completedAt?: string;
@@ -1159,6 +1182,7 @@ export type IntuneChatStreamStage =
   | "checking-cache"
   | "refreshing-cache"
   | "building-context"
+  | "running-tools"
   | "generating-answer"
   | "completed"
   | "failed";
@@ -1188,6 +1212,22 @@ export type IntuneChatStreamEvent =
       cacheStatus?: GraphCacheStatus;
     }
   | {
+      type: "tool-step-start";
+      conversationId: string;
+      assistantMessageId: string;
+      tool: IntuneChatInvestigationToolName;
+      params: unknown;
+      message: string;
+      startedAt: string;
+    }
+  | {
+      type: "tool-step-finish";
+      conversationId: string;
+      assistantMessageId: string;
+      traceEntry: IntuneChatToolTraceEntry;
+      message: string;
+    }
+  | {
       type: "delta";
       conversationId: string;
       assistantMessageId: string;
@@ -1209,6 +1249,13 @@ export type IntuneChatStreamEvent =
       type: "cancelled";
       result: SendIntuneChatMessageResult;
     };
+
+export type ChatInvestigationMode = "auto" | "always-agentic" | "always-deterministic";
+
+export interface ChatInvestigationSettings {
+  mode: ChatInvestigationMode;
+  updatedAt?: string;
+}
 
 export interface SelfTrainingSettings {
   enabled: boolean;
@@ -1573,6 +1620,8 @@ export interface OpenAdminOSApi {
   getLocalDataSummary(tenantId?: string): Promise<LocalDataSummary>;
   clearIntuneChatHistory(): Promise<LocalDataSummary>;
   clearGraphCache(tenantId?: string): Promise<LocalDataSummary>;
+  getChatInvestigationSettings(): Promise<ChatInvestigationSettings>;
+  setChatInvestigationMode(mode: ChatInvestigationMode): Promise<ChatInvestigationSettings>;
   getSelfTrainingSettings(): Promise<SelfTrainingSettings>;
   setSelfTrainingEnabled(enabled: boolean): Promise<SelfTrainingSettings>;
   listSelfTrainingSuggestions(status?: SelfTrainingSuggestionStatus): Promise<SelfTrainingSuggestion[]>;

@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added single-tenant Intune Chat investigative mode with bounded read-only tool calls, streamed tool progress, persisted "What ran" traces, deterministic fallback, and a Settings mode control.
 - Added a Vitest and Testing Library renderer test baseline for write confirmation, hosted-provider consent, and provider settings.
 - Added Anthropic via the local Claude Code CLI and LM Studio via its local OpenAI-compatible server as runnable LLM providers.
 - Added Azure OpenAI provider configuration in Settings with endpoint, deployment, API version, write-only encrypted key storage, and renderer coverage for key replacement.

@@ -2,13 +2,17 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
+  ChatInvestigationMode,
+  ChatInvestigationSettings,
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
   GraphCacheRefreshScheduleSettings,
   ImportMultiTenantResultToWorkspacesResult,
   IntuneChatConversation,
+  IntuneChatInvestigationToolName,
   IntuneChatMessage,
   IntuneChatToolCall,
+  IntuneChatToolTraceEntry,
   LocalDataSummary,
   MultiTenantAgentBatch,
   MultiTenantChatJob,
@@ -68,9 +72,26 @@ interface ResourceRow {
   refreshed_at?: string;
 }
 
+interface QueryCacheRow extends ResourceRow {
+  total_count: number;
+}
+
 interface SettingRow {
   value: string;
   updated_at: string;
+}
+
+interface ToolCallRow {
+  id: string;
+  conversation_id: string;
+  message_id: string | null;
+  type: string;
+  status: IntuneChatToolCall["status"];
+  input_json: string | null;
+  output_json: string | null;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
 }
 
 interface SuggestionRow {
@@ -188,6 +209,31 @@ export interface GraphCacheResourceDefinition {
   resource: GraphCacheResourceKind;
   label: string;
   scopes: string[];
+}
+
+export type GraphCacheQueryOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "startsWith"
+  | "in"
+  | "lt"
+  | "lte"
+  | "gt"
+  | "gte";
+
+export interface GraphCacheQueryPredicate {
+  field: string;
+  op: GraphCacheQueryOperator;
+  value: string | number | boolean | Array<string | number | boolean>;
+}
+
+export interface GraphCacheQueryResult {
+  resource: GraphCacheResourceKind;
+  totalCount: number;
+  returnedRows: number;
+  limit: number;
+  rows: { row: unknown; refreshedAt?: string }[];
 }
 
 export class IntelligenceSqliteStore {
@@ -398,7 +444,25 @@ export class IntelligenceSqliteStore {
          ORDER BY created_at ASC`,
       )
       .all(conversationId) as unknown as MessageRow[];
-    return rows.map(readMessage);
+    const messages = rows.map(readMessage);
+    const traceByMessage = this.listInvestigationToolTraces(conversationId);
+    return messages.map((message) => {
+      const toolTrace = traceByMessage.get(message.id);
+      return toolTrace && toolTrace.length > 0 ? { ...message, toolTrace } : message;
+    });
+  }
+
+  listToolCalls(conversationId: string): IntuneChatToolCall[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, conversation_id, message_id, type, status, input_json, output_json,
+                error, created_at, completed_at
+         FROM chat_tool_calls
+         WHERE conversation_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .all(conversationId) as unknown as ToolCallRow[];
+    return rows.map(readToolCall);
   }
 
   insertToolCall(toolCall: IntuneChatToolCall): void {
@@ -655,6 +719,48 @@ export class IntelligenceSqliteStore {
       out[resource] = parsed;
     }
     return out;
+  }
+
+  queryGraphCache(input: {
+    tenantId: string;
+    resource: GraphCacheResourceKind;
+    filters?: GraphCacheQueryPredicate[];
+    sort?: { field: string; direction?: "asc" | "desc" };
+    limit?: number;
+  }): GraphCacheQueryResult {
+    const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 25)));
+    const where: string[] = ["tenant_id = ?", "resource = ?"];
+    const args: Array<string | number> = [input.tenantId, input.resource];
+
+    for (const predicate of input.filters ?? []) {
+      const built = buildGraphCachePredicateSql(predicate);
+      where.push(built.sql);
+      args.push(...built.args);
+    }
+
+    const sortField = input.sort?.field
+      ? graphCacheFieldSql(input.sort.field)
+      : "COALESCE(last_seen_at, refreshed_at)";
+    const sortDirection = input.sort?.direction === "asc" ? "ASC" : "DESC";
+    const sql = `
+      SELECT raw_json, refreshed_at, COUNT(*) OVER () AS total_count
+      FROM graph_resources
+      WHERE ${where.join(" AND ")}
+      ORDER BY ${sortField} ${sortDirection}
+      LIMIT ?`;
+    const rows = this.db
+      .prepare(sql)
+      .all(...args, limit) as unknown as QueryCacheRow[];
+    return {
+      resource: input.resource,
+      totalCount: rows[0]?.total_count ?? 0,
+      returnedRows: rows.length,
+      limit,
+      rows: rows.map((row) => ({
+        row: readJson<unknown>(row.raw_json, {}),
+        ...(row.refreshed_at ? { refreshedAt: row.refreshed_at } : {}),
+      })),
+    };
   }
 
   readManagedDevicesLastSyncBefore(input: {
@@ -1221,6 +1327,17 @@ export class IntelligenceSqliteStore {
     return { enabled: row.value === "true", updatedAt: row.updated_at };
   }
 
+  getChatInvestigationSettings(): ChatInvestigationSettings {
+    const row = this.db
+      .prepare(`SELECT value, updated_at FROM app_settings WHERE key = 'chatInvestigationMode'`)
+      .get() as SettingRow | undefined;
+    const mode = isChatInvestigationMode(row?.value) ? row.value : "auto";
+    return {
+      mode,
+      ...(row?.updated_at ? { updatedAt: row.updated_at } : {}),
+    };
+  }
+
   getGraphCacheRefreshSchedule(
     tenantId: string,
     now: string = new Date().toISOString(),
@@ -1341,6 +1458,25 @@ export class IntelligenceSqliteStore {
       )
       .run(enabled ? "true" : "false", now);
     return { enabled, updatedAt: now };
+  }
+
+  setChatInvestigationMode(
+    mode: ChatInvestigationMode,
+    now: string,
+  ): ChatInvestigationSettings {
+    if (!isChatInvestigationMode(mode)) {
+      throw new Error(`Unknown chat investigation mode: ${mode}`);
+    }
+    this.db
+      .prepare(
+        `INSERT INTO app_settings (key, value, updated_at)
+         VALUES ('chatInvestigationMode', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at`,
+      )
+      .run(mode, now);
+    return { mode, updatedAt: now };
   }
 
   recordLearningEvent(input: {
@@ -1894,6 +2030,30 @@ export class IntelligenceSqliteStore {
     return rows.map(readWorkspaceLink);
   }
 
+  private listInvestigationToolTraces(
+    conversationId: string,
+  ): Map<string, IntuneChatToolTraceEntry[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, conversation_id, message_id, type, status, input_json, output_json,
+                error, created_at, completed_at
+         FROM chat_tool_calls
+         WHERE conversation_id = ?
+           AND message_id IS NOT NULL
+         ORDER BY created_at ASC`,
+      )
+      .all(conversationId) as unknown as ToolCallRow[];
+    const byMessage = new Map<string, IntuneChatToolTraceEntry[]>();
+    for (const row of rows) {
+      if (!isInvestigationToolName(row.type) || !row.message_id) continue;
+      const trace = readToolTrace(row);
+      const existing = byMessage.get(row.message_id) ?? [];
+      existing.push(trace);
+      byMessage.set(row.message_id, existing);
+    }
+    return byMessage;
+  }
+
   private insertWorkspaceLink(input: {
     id: string;
     workspaceId: string;
@@ -2198,6 +2358,148 @@ function readJson<T>(value: string, fallback: T): T {
 
 function escapeSqlLike(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function readToolCall(row: ToolCallRow): IntuneChatToolCall {
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    messageId: row.message_id ?? undefined,
+    type: row.type as IntuneChatToolCall["type"],
+    status: row.status,
+    input: row.input_json ? readJson<unknown>(row.input_json, undefined) : undefined,
+    output: row.output_json ? readJson<unknown>(row.output_json, undefined) : undefined,
+    error: row.error ?? undefined,
+    createdAt: row.created_at,
+    completedAt: row.completed_at ?? undefined,
+  };
+}
+
+function readToolTrace(row: ToolCallRow): IntuneChatToolTraceEntry {
+  const output = row.output_json
+    ? readJson<Partial<IntuneChatToolTraceEntry>>(row.output_json, {})
+    : {};
+  return {
+    id: typeof output.id === "string" ? output.id : row.id,
+    tool: isInvestigationToolName(output.tool) ? output.tool : row.type as IntuneChatInvestigationToolName,
+    params:
+      output.params !== undefined
+        ? output.params
+        : row.input_json
+          ? readJson<unknown>(row.input_json, {})
+          : {},
+    resultSummary:
+      typeof output.resultSummary === "string"
+        ? output.resultSummary
+        : row.error ?? "Tool call completed.",
+    durationMs:
+      typeof output.durationMs === "number" && Number.isFinite(output.durationMs)
+        ? output.durationMs
+        : durationBetween(row.created_at, row.completed_at ?? row.created_at),
+    createdAt: typeof output.createdAt === "string" ? output.createdAt : row.created_at,
+    completedAt:
+      typeof output.completedAt === "string"
+        ? output.completedAt
+        : row.completed_at ?? row.created_at,
+    error:
+      typeof output.error === "string"
+        ? output.error
+        : row.error ?? undefined,
+  };
+}
+
+function durationBetween(start: string, finish: string): number {
+  const startMs = new Date(start).getTime();
+  const finishMs = new Date(finish).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(finishMs)) return 0;
+  return Math.max(0, Math.round(finishMs - startMs));
+}
+
+function isInvestigationToolName(value: unknown): value is IntuneChatInvestigationToolName {
+  return (
+    value === "list_cached_resources" ||
+    value === "query_cache" ||
+    value === "graph_get" ||
+    value === "refresh_resource"
+  );
+}
+
+function isChatInvestigationMode(value: unknown): value is ChatInvestigationMode {
+  return value === "auto" || value === "always-agentic" || value === "always-deterministic";
+}
+
+function buildGraphCachePredicateSql(predicate: GraphCacheQueryPredicate): {
+  sql: string;
+  args: Array<string | number>;
+} {
+  const field = graphCacheFieldSql(predicate.field);
+  const value = predicate.value;
+  switch (predicate.op) {
+    case "eq":
+      return { sql: `${field} = ?`, args: [sqlScalar(value)] };
+    case "neq":
+      return { sql: `${field} != ?`, args: [sqlScalar(value)] };
+    case "contains":
+      return {
+        sql: `CAST(${field} AS TEXT) LIKE ? ESCAPE '\\'`,
+        args: [`%${escapeSqlLike(String(sqlScalar(value)))}%`],
+      };
+    case "startsWith":
+      return {
+        sql: `CAST(${field} AS TEXT) LIKE ? ESCAPE '\\'`,
+        args: [`${escapeSqlLike(String(sqlScalar(value)))}%`],
+      };
+    case "lt":
+      return { sql: `${field} < ?`, args: [sqlScalar(value)] };
+    case "lte":
+      return { sql: `${field} <= ?`, args: [sqlScalar(value)] };
+    case "gt":
+      return { sql: `${field} > ?`, args: [sqlScalar(value)] };
+    case "gte":
+      return { sql: `${field} >= ?`, args: [sqlScalar(value)] };
+    case "in": {
+      if (!Array.isArray(value)) {
+        throw new Error("query_cache predicate 'in' requires an array value.");
+      }
+      const values = value.slice(0, 20).map(sqlScalar);
+      if (values.length === 0) return { sql: "1 = 0", args: [] };
+      return {
+        sql: `${field} IN (${values.map(() => "?").join(", ")})`,
+        args: values,
+      };
+    }
+    default:
+      throw new Error(`Unsupported query_cache operator: ${String(predicate.op)}`);
+  }
+}
+
+function sqlScalar(value: unknown): string | number {
+  if (Array.isArray(value)) return sqlScalar(value[0]);
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function graphCacheFieldSql(field: string): string {
+  const normalized = field.trim();
+  const mapped: Record<string, string> = {
+    graphId: "graph_id",
+    id: "graph_id",
+    searchText: "search_text",
+    displayName: "display_name",
+    userPrincipalName: "user_principal_name",
+    operatingSystem: "operating_system",
+    complianceState: "compliance_state",
+    lastSeenAt: "last_seen_at",
+    refreshedAt: "refreshed_at",
+  };
+  if (mapped[normalized]) return mapped[normalized];
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(normalized)) {
+    throw new Error(`Unsupported cache field: ${field}`);
+  }
+  return `json_extract(raw_json, '$.${normalized}')`;
 }
 
 function ensureColumn(

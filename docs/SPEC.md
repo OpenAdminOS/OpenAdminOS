@@ -805,6 +805,29 @@ cannot leave a send in "Thinking" without a visible prompt and progress card.
 Live Graph refreshes triggered by chat write successful rows back into the same
 local SQLite cache used by manual and scheduled refresh.
 
+Single-tenant Intune Chat can run a bounded read-only investigative loop before
+answering. The loop keeps the keyword planner as a cache-warming prefetch hint
+and deterministic fallback, then asks the selected provider to use a prompt
+protocol with one fenced JSON tool call per iteration:
+`{"tool":"query_cache","params":{...}}` or a final
+`{"final":true,"answer":"..."}` object. The host parses the response, executes
+only host-owned read tools, appends observations, and stops after at most six
+iterations. Malformed tool JSON gets one repair prompt; a second malformed
+response or the iteration cap produces a visible fallback notice and answers
+through the deterministic planner path. The toolset is strictly read-only:
+`list_cached_resources`, `query_cache`, `graph_get`, and `refresh_resource`.
+`graph_get` accepts only GET, validates paths against the chat Graph cache
+declarations and bundled Graph catalog read scopes, caps `$top` and returned rows
+at 50, and truncates large live payloads before they return to the model. Every
+tool call streams as a visible progress step and is persisted in `chat_tool_calls`
+with the completed assistant message; the renderer shows a collapsible "What
+ran" trace with tool name, parameters summary, result summary, duration, and
+errors. Settings -> Intune Chat exposes **Chat investigation mode** with `auto`
+(default), `always agentic`, and `always deterministic`. In auto mode, hosted
+providers and known-capable local models use investigative mode; local models
+whose names indicate a tiny/small/mini/<7B class fall back to deterministic
+retrieval with honest copy.
+
 Chat does not run without an active tenant. The status strip shows the active
 tenant, provider, model, and data freshness. When the selected provider is local,
 Graph data, prompts, chat history, answer packs, and optional self-training data

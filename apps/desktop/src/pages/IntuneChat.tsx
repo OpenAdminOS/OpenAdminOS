@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
-import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
+import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
 import { Pill, StatusDot } from "../components/Pill";
 import {
   IconBolt,
@@ -34,6 +34,7 @@ import {
   type IntuneChatProgressStep,
   type IntuneChatSource,
   type IntuneChatStreamEvent,
+  type IntuneChatToolTraceEntry,
   type MultiTenantChatJob,
   type MultiTenantChatStreamEvent,
   type SavedMultiTenantQuery,
@@ -3217,12 +3218,20 @@ function fallbackProgressSteps(
     {
       id: "context-pack",
       label: "Build answer context",
-      status: stage === "building-context" ? "active" : "pending",
+      status:
+        stage === "building-context"
+          ? "active"
+          : stage === "running-tools" || stage === "generating-answer"
+            ? "completed"
+            : "pending",
     },
     {
       id: "model-answer",
       label: "Generate response",
-      status: stage === "generating-answer" ? "active" : "pending",
+      status:
+        stage === "running-tools" || stage === "generating-answer"
+          ? "active"
+          : "pending",
     },
   ];
 }
@@ -3461,6 +3470,9 @@ function ChatMessageBubble({
             <SourceDetails sources={message.sources} />
           </>
         )}
+        {!isUser && message.toolTrace && message.toolTrace.length > 0 && (
+          <ToolTraceDetails trace={message.toolTrace} />
+        )}
         {!isUser && message.agentSuggestions && message.agentSuggestions.length > 0 && (
           <div className="mt-4 flex flex-col gap-2">
             {message.agentSuggestions.map((suggestion) => (
@@ -3606,6 +3618,57 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
   );
 }
 
+function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
+  return (
+    <div className="mt-2">
+      <OutputPaneSection
+        title="What ran"
+        subtitle={`${trace.length} read-only tool call${trace.length === 1 ? "" : "s"}`}
+        defaultCollapsed
+        bodyClassName="p-2"
+      >
+        <div className="grid gap-2">
+          {trace.map((entry, index) => (
+            <div
+              key={entry.id}
+              className="rounded-md bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] text-[var(--color-text)]">
+                    {index + 1}. {entry.tool}
+                  </div>
+                  <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                    {summarizeToolParams(entry.params)}
+                  </div>
+                </div>
+                <Pill tone={entry.error ? "warning" : "success"}>
+                  {entry.durationMs} ms
+                </Pill>
+              </div>
+              <div className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                {entry.resultSummary}
+              </div>
+              {entry.error && (
+                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-[11px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                  {entry.error}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </OutputPaneSection>
+    </div>
+  );
+}
+
+function summarizeToolParams(params: unknown): string {
+  if (!params || typeof params !== "object") return "{}";
+  const json = JSON.stringify(params);
+  if (!json) return "{}";
+  return json.length > 180 ? `${json.slice(0, 180)}...` : json;
+}
+
 function SourceFact({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -3717,6 +3780,16 @@ function buildConversationExportMarkdown(input: {
         lines.push(`  - Capped: ${source.pageLimitReached ? "yes" : "no"}`);
         lines.push(`  - Refreshed: ${source.refreshedAt ?? "not refreshed"}`);
         if (source.error) lines.push(`  - Error: ${source.error}`);
+      }
+      lines.push("");
+    }
+
+    if (message.toolTrace?.length) {
+      lines.push("### What Ran", "");
+      for (const entry of message.toolTrace) {
+        lines.push(`- \`${entry.tool}\` · ${entry.resultSummary} · ${entry.durationMs} ms`);
+        lines.push(`  - Params: \`${summarizeToolParams(entry.params)}\``);
+        if (entry.error) lines.push(`  - Error: ${entry.error}`);
       }
       lines.push("");
     }

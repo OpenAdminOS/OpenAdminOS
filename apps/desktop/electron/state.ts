@@ -46,6 +46,8 @@ import type {
   ExportAgentBundleResult,
   AgentManifestPreview,
   AgentUpdateReview,
+  ChatInvestigationMode,
+  ChatInvestigationSettings,
   ConnectorSummary,
   RequestedScope,
   RunGraphApi,
@@ -1192,6 +1194,16 @@ export class AppStateStore {
 
   async getSelfTrainingSettings(): Promise<SelfTrainingSettings> {
     return this.chatService.getSelfTrainingSettings();
+  }
+
+  async getChatInvestigationSettings(): Promise<ChatInvestigationSettings> {
+    return this.chatService.getChatInvestigationSettings();
+  }
+
+  async setChatInvestigationMode(
+    mode: ChatInvestigationMode,
+  ): Promise<ChatInvestigationSettings> {
+    return this.chatService.setChatInvestigationMode(mode);
   }
 
   async setSelfTrainingEnabled(enabled: boolean): Promise<SelfTrainingSettings> {

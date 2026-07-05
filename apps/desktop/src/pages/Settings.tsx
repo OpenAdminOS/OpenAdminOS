@@ -24,6 +24,8 @@ import {
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type AzureOpenAIProviderConfig,
+  type ChatInvestigationMode,
+  type ChatInvestigationSettings,
   type CompanionLaunchSettings,
   type GraphCacheStatus,
   type LocalDataSummary,
@@ -1001,6 +1003,8 @@ function ChatSettingsSection() {
     useState<LocalDataSummary | null>(null);
   const [learningSettings, setLearningSettings] =
     useState<SelfTrainingSettings>({ enabled: false });
+  const [investigationSettings, setInvestigationSettings] =
+    useState<ChatInvestigationSettings>({ mode: "auto" });
   const [suggestions, setSuggestions] = useState<SelfTrainingSuggestion[]>([]);
   const [refreshingCache, setRefreshingCache] = useState(false);
   const [clearingLocalData, setClearingLocalData] =
@@ -1039,14 +1043,22 @@ function ChatSettingsSection() {
   const loadChatSettings = async () => {
     const api = window.openAdminOS;
     if (!api) return;
-    const [nextCache, nextLearning, nextSuggestions, nextLocalData] = await Promise.all([
+    const [
+      nextCache,
+      nextLearning,
+      nextInvestigation,
+      nextSuggestions,
+      nextLocalData,
+    ] = await Promise.all([
       api.getGraphCacheStatus().catch(() => null),
       api.getSelfTrainingSettings(),
+      api.getChatInvestigationSettings(),
       api.listSelfTrainingSuggestions(),
       api.getLocalDataSummary().catch(() => null),
     ]);
     setCacheStatus(nextCache);
     setLearningSettings(nextLearning);
+    setInvestigationSettings(nextInvestigation);
     setSuggestions(nextSuggestions);
     setLocalDataSummary(nextLocalData);
     if (nextCache?.schedule?.intervalMinutes) {
@@ -1113,6 +1125,17 @@ function ChatSettingsSection() {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setScheduleBusy(false);
+    }
+  };
+
+  const handleInvestigationModeChange = async (mode: ChatInvestigationMode) => {
+    const api = window.openAdminOS;
+    if (!api || mode === investigationSettings.mode) return;
+    setError(null);
+    try {
+      setInvestigationSettings(await api.setChatInvestigationMode(mode));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
@@ -1203,6 +1226,56 @@ function ChatSettingsSection() {
       )}
 
       <div className="mt-6 flex flex-col gap-3">
+        <SettingRow
+          label="Chat investigation mode"
+          description="Controls whether single-tenant Intune Chat can run read-only tool calls before answering. Multi-tenant chat stays deterministic."
+          control={
+            <div className="grid min-w-[360px] grid-cols-3 gap-1 rounded-lg bg-[var(--color-bg)] p-1 ring-1 ring-[var(--color-border-soft)]">
+              {([
+                {
+                  value: "auto",
+                  label: "Auto",
+                  detail: "Hosted and capable local models investigate.",
+                },
+                {
+                  value: "always-agentic",
+                  label: "Investigative",
+                  detail: "Always allow read-only tool calls.",
+                },
+                {
+                  value: "always-deterministic",
+                  label: "Deterministic",
+                  detail: "Use keyword-planned cache retrieval.",
+                },
+              ] satisfies Array<{
+                value: ChatInvestigationMode;
+                label: string;
+                detail: string;
+              }>).map((option) => {
+                const active = investigationSettings.mode === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => void handleInvestigationModeChange(option.value)}
+                    className={`rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+                      active
+                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                        : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                    }`}
+                    aria-pressed={active}
+                  >
+                    <span className="block text-[11.5px] font-medium">{option.label}</span>
+                    <span className="mt-0.5 block text-[10px] leading-4 text-[var(--color-text-muted)]">
+                      {option.detail}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          }
+        />
+
         <SettingRow
           label="Tenant cache"
           description={

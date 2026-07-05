@@ -359,6 +359,8 @@ export function makeMockBridge(
     getLocalDataSummary: vi.fn(async () => createLocalDataSummary(appState.activeTenantId)),
     clearIntuneChatHistory: vi.fn(async () => createLocalDataSummary(appState.activeTenantId)),
     clearGraphCache: vi.fn(async () => createLocalDataSummary(appState.activeTenantId)),
+    getChatInvestigationSettings: vi.fn(async () => ({ mode: "auto" as const })),
+    setChatInvestigationMode: vi.fn(async (mode) => ({ mode, updatedAt: now })),
     getSelfTrainingSettings: vi.fn(async () => ({ enabled: false })),
     setSelfTrainingEnabled: vi.fn(async (enabled: boolean) => ({ enabled, updatedAt: now })),
     listSelfTrainingSuggestions: vi.fn(async () => []),
