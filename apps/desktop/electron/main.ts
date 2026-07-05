@@ -740,18 +740,27 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     await waitFor(() => textarea.value === value, "chat input value");
   };
-  const selectFirstOption = async (ariaLabel: string) => {
-    await waitFor(
-      () => Boolean(document.querySelector(`select[aria-label="${ariaLabel}"]`)),
-      `${ariaLabel} select`,
+  const findSelectByAccessibleName = (name: string): HTMLSelectElement | undefined => {
+    const byAriaLabel = document.querySelector(`select[aria-label="${name}"]`);
+    if (byAriaLabel instanceof HTMLSelectElement) return byAriaLabel;
+    const label = Array.from(document.querySelectorAll("label")).find(
+      (candidate) => candidate.textContent?.trim() === name && candidate.htmlFor,
     );
-    const select = document.querySelector(`select[aria-label="${ariaLabel}"]`);
+    const byLabel = label ? document.getElementById(label.htmlFor) : null;
+    return byLabel instanceof HTMLSelectElement ? byLabel : undefined;
+  };
+  const selectFirstOption = async (accessibleName: string) => {
+    await waitFor(
+      () => Boolean(findSelectByAccessibleName(accessibleName)),
+      `${accessibleName} select`,
+    );
+    const select = findSelectByAccessibleName(accessibleName);
     if (!(select instanceof HTMLSelectElement)) {
-      throw new Error(`${ariaLabel} select was not found.`);
+      throw new Error(`${accessibleName} select was not found.`);
     }
     const option = Array.from(select.options).find((candidate) => candidate.value);
     if (!option) {
-      throw new Error(`${ariaLabel} has no selectable option.`);
+      throw new Error(`${accessibleName} has no selectable option.`);
     }
     const setter = Object.getOwnPropertyDescriptor(
       HTMLSelectElement.prototype,
@@ -759,7 +768,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     )?.set;
     setter?.call(select, option.value);
     select.dispatchEvent(new Event("change", { bubbles: true }));
-    await waitFor(() => select.value === option.value, `${ariaLabel} selected`);
+    await waitFor(() => select.value === option.value, `${accessibleName} selected`);
   };
   const clickFirstEnabledCheckbox = async (label: string) => {
     await waitFor(
@@ -893,8 +902,10 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   ];
 
   let responseCount = 0;
+  let sawAgentSuggestion = false;
   const smokeAnswer =
     "WIN-01 is stale based on cached Intune and Entra device evidence.";
+  const writeBlockedAnswer = "I cannot perform tenant changes directly from chat.";
   for (const [index, prompt] of testPrompts.entries()) {
     if (index === 1) {
       await clickButton("New");
@@ -915,6 +926,21 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       2500,
     );
     await waitFor(() => bodyText().includes(prompt), "optimistic user prompt", 2500);
+    if (index === 0) {
+      // Write-intent prompts are blocked before any LLM call; expect the
+      // designed refusal plus a write-agent handoff instead of a model answer.
+      await waitFor(
+        () => bodyText().includes(writeBlockedAnswer),
+        "write-intent blocked response",
+      );
+      await waitFor(
+        () => bodyText().includes("Offboarding agent"),
+        "write-intent agent handoff",
+      );
+      sawAgentSuggestion = bodyText().includes("Offboarding agent");
+      await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
+      continue;
+    }
     await waitFor(
       () => textOccurrenceCount(smokeAnswer) >= expectedResponseCount,
       `chat response ${expectedResponseCount}`,
@@ -923,12 +949,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     responseCount = expectedResponseCount;
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
-  await waitFor(() => bodyText().includes("Offboarding agent"), "agent suggestion");
-  const sawAgentSuggestion = bodyText().includes("Offboarding agent");
   await clickSummary("Source details");
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
+  );
+  // The agent suggestion card lives in the write-intent conversation; switch
+  // to it for the details assertions, then return to the read conversation.
+  await clickButton("Always retire stale Windows devices");
+  await waitFor(
+    () => bodyText().includes(writeBlockedAnswer),
+    "write-intent conversation transcript",
   );
   await clickButton("Details");
   await waitFor(
@@ -939,6 +970,11 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
         bodyText().includes("DeviceManagementManagedDevices.Read.All") &&
         bodyText().includes("Write actions still use the normal plan and confirmation flow."),
     "agent suggestion details",
+  );
+  await clickButton("Which managed devices have not synced in the last 7");
+  await waitFor(
+    () => bodyText().includes(smokeAnswer),
+    "read conversation transcript restored",
   );
   await clickButton("Workspace");
   await waitFor(
