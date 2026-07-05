@@ -138,6 +138,21 @@ The marketing navbar keeps a compact primary set: Blog, Documentation, GitHub,
 and Download. The Intune use-case page, registry page, and trust-model page
 remain published and indexable even though they are no longer primary navbar
 items, because they target durable admin search and product-evaluation topics.
+The marketing homepage uses a seven-section structure: hero ("AI agents for
+your Microsoft 365 tenant. Run locally, approved by you."), a pre-rendered
+product demo video, a traction strip, a three-step "How it works" section, the
+write-gate diff demo, the top most-installed registry agents, and open
+source + FAQ + final CTA. The traction strip and CTA star count only render
+real numbers — GitHub stars from the unauthenticated repo API (revalidated
+hourly) and agent/install counts from the synced `public/stats/agents.json`;
+when either source is unavailable the cell is omitted, never faked. Registry
+agent display metadata (names, descriptions, mode, scopes) is curated in
+`web/src/lib/stats/summary.ts` because repo-root `agents/index.json` is not
+available inside the `web/` Vercel build. The demo video is rendered offline
+from the top-level `remotion/` project (not part of the npm workspace, never
+installed on Vercel) into committed `web/public/videos/` assets; the embed is
+a muted autoplay loop that falls back to a static poster when
+`prefers-reduced-motion` is set.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
