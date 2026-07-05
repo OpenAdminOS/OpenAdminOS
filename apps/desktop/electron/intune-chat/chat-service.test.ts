@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { AppStateStore } from "../state.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
@@ -12,6 +12,21 @@ const tokenStore: TokenCacheStorage = {
   read: async () => "",
   write: async () => undefined,
 };
+
+let originalOllamaUrl: string | undefined;
+
+before(() => {
+  originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
+  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+});
+
+after(() => {
+  if (originalOllamaUrl === undefined) {
+    delete process.env.OPENAGENTS_OLLAMA_URL;
+    return;
+  }
+  process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
+});
 
 describe("Intune Chat host service", () => {
   it("refreshes Graph cache, builds an answer pack, and persists chat messages", async () => {
@@ -23,6 +38,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [
             {
               id: "offboarding-agent",
@@ -393,6 +409,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -552,6 +569,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -661,6 +679,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -741,6 +760,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
@@ -839,6 +859,7 @@ describe("Intune Chat host service", () => {
       JSON.stringify(
         {
           activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
           installedAgents: [],
           runs: [],
           tenants: [
