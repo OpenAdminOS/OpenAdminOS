@@ -2,7 +2,10 @@ import Image from "next/image";
 import { type Metadata } from "next";
 import Link from "next/link";
 
+import { getAgentStatsSummary } from "~/lib/stats/summary";
+
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
+import { getGitHubRepoStats } from "./github-repo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
 import { getLatestReleaseDownloads } from "./release-downloads";
 import {
@@ -109,8 +112,42 @@ const COMMON_QUESTIONS = [
   },
 ];
 
+function formatStat(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
 export default async function HomePage() {
-  const latestRelease = await getLatestReleaseDownloads();
+  const [latestRelease, githubRepoStats, agentStatsSummary] = await Promise.all([
+    getLatestReleaseDownloads(),
+    getGitHubRepoStats(),
+    getAgentStatsSummary(),
+  ]);
+  const tractionItems = [
+    ...(githubRepoStats
+      ? [
+          {
+            value: formatStat(githubRepoStats.stars),
+            label: "GitHub stars",
+          },
+        ]
+      : []),
+    ...(agentStatsSummary
+      ? [
+          {
+            value: formatStat(agentStatsSummary.agentCount),
+            label: "Community agents",
+          },
+          {
+            value: formatStat(agentStatsSummary.totalInstalls),
+            label: "Agent installs",
+          },
+        ]
+      : []),
+    {
+      value: "MIT",
+      label: "Licensed, open source",
+    },
+  ];
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -301,6 +338,21 @@ export default async function HomePage() {
             sizes="(min-width: 1408px) 1408px, 100vw"
             className="h-auto w-full drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)]"
           />
+        </section>
+
+        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-white/10 bg-[#070709]/75 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
+          <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-x-6 gap-y-5 px-6 py-5 text-left sm:grid-cols-4 sm:px-10">
+            {tractionItems.map((item) => (
+              <div key={item.label} className="min-w-0">
+                <p className="font-mono text-2xl font-semibold tabular-nums text-white sm:text-3xl">
+                  {item.value}
+                </p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                  {item.label}
+                </p>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="w-full max-w-7xl py-20">
@@ -575,7 +627,9 @@ export default async function HomePage() {
               rel="noreferrer"
               className="rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/72 transition hover:border-white/20 hover:text-white"
             >
-              Star on GitHub
+              {githubRepoStats
+                ? `Star on GitHub · ${formatStat(githubRepoStats.stars)}`
+                : "Star on GitHub"}
             </Link>
           </div>
         </section>
