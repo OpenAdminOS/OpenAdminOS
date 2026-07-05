@@ -199,6 +199,14 @@ const WRITE_INTENT_TERMS = [
   "assign",
 ] as const;
 
+// Write intent must match the imperative verb as a whole word. Substring
+// matching flagged read questions about state ("assigned", "enabled",
+// "deleted") and, since the block now fires before any LLM call, would
+// suppress legitimate read answers entirely.
+function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
+  return new RegExp(`\\b${term}\\b`).test(lowerQuestion);
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const AGENT_CATEGORY_LABELS: Record<AgentSummary["category"], string> = {
@@ -367,7 +375,9 @@ export function planChatContext(question: string): PlannedChatContext {
   return {
     resources: [...resources],
     searchTerms: extractSearchTerms(question),
-    hasWriteIntent: matchesAny(lower, [...WRITE_INTENT_TERMS]),
+    hasWriteIntent: WRITE_INTENT_TERMS.some((term) =>
+      matchesWriteIntentTerm(lower, term),
+    ),
   };
 }
 
@@ -691,7 +701,7 @@ export function matchAgentsToQuestion(
   const terms = extractSearchTerms(question);
   const lower = question.toLowerCase();
   const writeIntentTerms = [...WRITE_INTENT_TERMS].filter((term) =>
-    lower.includes(term),
+    matchesWriteIntentTerm(lower, term),
   );
   const inferredCategories = inferQuestionAgentCategories(lower);
   const suggestions = agents

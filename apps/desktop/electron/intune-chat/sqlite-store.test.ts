@@ -511,6 +511,35 @@ describe("Intune Chat SQLite store", () => {
 });
 
 describe("Intune Chat planner", () => {
+  it("only flags write intent for whole-word imperative verbs", () => {
+    const readQuestions = [
+      "Which required apps are assigned but not installed on targeted devices?",
+      "Which endpoint security policies are assigned to all devices?",
+      "Which devices have BitLocker enabled?",
+      "Which accounts were disabled last week?",
+      "Show recently deleted devices.",
+    ];
+    for (const question of readQuestions) {
+      assert.equal(
+        planChatContext(question).hasWriteIntent,
+        false,
+        `expected no write intent for: ${question}`,
+      );
+    }
+    const writeQuestions = [
+      "Retire stale Intune devices that have not synced",
+      "Disable the accounts of departed users",
+      "Assign the sales app to the field team",
+    ];
+    for (const question of writeQuestions) {
+      assert.equal(
+        planChatContext(question).hasWriteIntent,
+        true,
+        `expected write intent for: ${question}`,
+      );
+    }
+  });
+
   it("plans device context and suggests matching agents", () => {
     const plan = planChatContext("Retire stale Intune devices that have not synced");
     assert.deepEqual(plan.resources.slice(0, 2), ["managedDevices", "entraDevices"]);
