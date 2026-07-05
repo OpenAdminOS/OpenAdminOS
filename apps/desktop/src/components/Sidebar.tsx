@@ -4,6 +4,7 @@ import {
   IconAgents,
   IconHub,
   IconActivity,
+  IconChanges,
   IconChat,
   IconConnectors,
   IconHardDrive,
@@ -109,6 +110,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     },
     { to: "/hub", label: "Agent Hub", icon: <IconHub size={16} /> },
     { to: "/chat", label: "Intune Chat", icon: <IconChat size={16} /> },
+    { to: "/changes", label: "Changes", icon: <IconChanges size={16} /> },
     { to: "/workspaces", label: "Workspaces", icon: <IconHardDrive size={16} /> },
     { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },
     {
