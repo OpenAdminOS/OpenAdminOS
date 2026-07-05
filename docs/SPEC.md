@@ -720,6 +720,7 @@ SQLite via Electron's built-in `node:sqlite` for:
 - Run history (full structured logs; the current desktop host persists `RunRecord[]` in profile `state.json` until the storage package migration moves it behind SQLite)
 - LLM provider configurations (with hosted-provider API keys in OS keychain)
 - Intune Chat conversations, tool calls, Graph cache snapshots, and per-tenant cache refresh schedules
+- Tenant drift snapshot/version history for config-tier Graph cache resources; high-churn inventory resources stay out of drift tracking
 - Optional local self-training events and approved suggestions
 
 Run history retention is configurable in Settings -> General. The default policy

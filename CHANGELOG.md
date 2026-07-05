@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added tenant drift D1 snapshot storage, config-resource content hashing, a pure field diff engine, SQLite drift query/prune APIs, and focused host tests.
+
 ### Changed
 
 ### Removed
