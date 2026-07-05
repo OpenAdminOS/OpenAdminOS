@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { type Metadata } from "next";
 import Link from "next/link";
 
@@ -8,6 +7,7 @@ import {
   getTopDisplayAgents,
 } from "~/lib/stats/summary";
 
+import { AmbientVideo } from "./AmbientVideo";
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
 import { getGitHubRepoStats } from "./github-repo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
@@ -312,14 +312,11 @@ export default async function HomePage() {
         </section>
 
         <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
-          <Image
-            src="/openadminos-app.png"
-            alt="OpenAdminOS app showing Microsoft 365 agent runs"
-            width={2400}
-            height={1500}
-            priority
-            sizes="(min-width: 1408px) 1408px, 100vw"
-            className="h-auto w-full drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)]"
+          <AmbientVideo
+            src="/videos/hero-demo.mp4"
+            poster="/videos/hero-demo-poster.jpg"
+            alt="OpenAdminOS agent run: manifest scopes, local run log, results, and a write-change diff awaiting confirmation"
+            className="aspect-video h-auto w-full object-cover drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)]"
           />
         </section>
 
