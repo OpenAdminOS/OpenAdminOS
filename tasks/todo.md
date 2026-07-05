@@ -1,3 +1,45 @@
+# v0.3 — "Ask anything, run it anywhere"
+
+**Status: implemented on `v0.3-dev`; release gate partially complete (see below).** The theme: Intune Chat becomes agentic, and every advertised LLM provider actually works. Supporting work (retention, audit export, honest docs, accessibility) serves one story — a tool you can trust to think about your tenant, locally.
+
+## Phase 0 — Foundations
+- [x] Doc honesty pass: README shipped-vs-coming table, agent count, `web/` path, `docs/agent-sdk.md` authored, dead renderer `types.ts` removed.
+- [x] Write-plan safety test hardening: typed-phrase enforcement, plan/apply mismatch rejection, tenant pinning, run-confirmation host tests.
+- [x] `state.ts` decomposition, four verbatim stages: module helpers → `intune-chat/service.ts` → `run-delivery.ts` → `runs.ts`. 10,036 → 4,678 lines; `confirmRun` verified byte-identical.
+
+## Phase 1 — Provider completeness (6/6)
+- [x] Anthropic via local Claude Code CLI (no stored API key, scrubbed spawn env, min version 2.1.200).
+- [x] LM Studio via local OpenAI-compatible server (loopback trust classification).
+- [x] Azure OpenAI API-key variant: endpoint/deployment/api-version in state, key in safeStorage only, write-only Settings form, `hasKey` boolean to renderer. Entra ID auth variant deferred to v0.4.
+
+## Phase 2 — Agentic Intune Chat (flagship)
+- [x] Read-only tool layer: `list_cached_resources`, `query_cache`, `graph_get` (GET-only, catalog/scope validated), `refresh_resource`; every call streamed and persisted to `chat_tool_calls`.
+- [x] Bounded prompt-JSON loop: 6 iterations, 50-row caps, 24 KB Graph payloads, one repair attempt, visible deterministic fallback.
+- [x] Rollout: three-state investigation mode (auto / always agentic / always deterministic) with a conservative small-model heuristic; multi-tenant chat stays deterministic.
+
+## Phase 3 — Trust & safety
+- [x] Run-history retention: keep-last-500 / 180-day defaults, never-prune option, startup + scheduler + manual pruning; workspace-pinned, live, and awaiting-confirmation runs are never pruned.
+- [x] Audit log export: JSON/CSV with SHA-256 hash chain over run lifecycle, write confirmations, connector deliveries, and hosted-provider consent events. Signed timestamps deferred.
+- [x] Renderer test baseline (Vitest + Testing Library) for write confirmation, hosted consent, provider settings.
+
+## Phase 4 — UX polish
+- [x] Mockups `09-registry.html` + `10-empty-states.html` and empty-state sweep.
+- [x] Reusable output panes shared by chat artifacts, run results, and the tool trace.
+- [x] Examples gallery on the marketing site (`/examples`).
+- [x] Accessibility basics pass across v0.3 surfaces + clear existing offenders.
+
+## Release gate — remaining before tagging v0.3.0
+These need a desktop session (this cycle's automation ran on a display-less machine):
+- [ ] Hub screenshots per registry entry (`npm run dev`, capture screens).
+- [ ] Smoke scripts on a machine with a display: `npm run smoke:intune-chat`, `npm run smoke:report-issue` (they launch Electron; blocked headless).
+- [ ] Live provider matrix: probe → models → chat → agent run → investigative chat per installed provider (Ollama/LM Studio/Azure need local installs or a real Azure resource; Claude Code and Codex CLIs verified present).
+- [ ] `git tag v0.3.0` + release once the above pass.
+
+## Deferred to v0.4+
+- Agentic multi-tenant chat; Azure OpenAI Entra-auth variant; Windows signing; light theme; localization; full WCAG audit; agent signing/verification; cost budgets; signed audit timestamps.
+
+---
+
 # v0.2.5 — Workspaces + multi-tenant Intune Chat
 
 **Status: implemented and verified.** Follow-up release after v0.2.4. The theme is making OpenAdminOS better for MSP-style investigation without weakening tenant boundaries: Intune Chat can explicitly answer read-only questions across selected tenants, while Workspaces keep a single tenant problem, its evidence, related conversations, agent runs, notes, and approved local instructions together.

@@ -1,7 +1,7 @@
 {
   "name": "@openadminos/desktop",
   "private": true,
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Open-source, local-first agents for Microsoft 365 admins.",
   "author": {
     "name": "OpenAdminOS",
@@ -28,9 +28,9 @@
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
     "@microsoft/mxc-sdk": "0.6.1",
-    "@openadminos/agent-sdk": "0.2.5",
-    "@openadminos/connector-whatsapp-web": "0.2.5",
-    "@openadminos/runtime": "0.2.5",
+    "@openadminos/agent-sdk": "0.3.0",
+    "@openadminos/connector-whatsapp-web": "0.3.0",
+    "@openadminos/runtime": "0.3.0",
     "electron-updater": "^6.6.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

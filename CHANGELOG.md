@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.3.0] - 2026-07-05
+
+### Added
+
 - Added single-tenant Intune Chat investigative mode with bounded read-only tool calls, streamed tool progress, persisted "What ran" traces, deterministic fallback, and a Settings mode control.
 - Added a Vitest and Testing Library renderer test baseline for write confirmation, hosted-provider consent, and provider settings.
 - Added Anthropic via the local Claude Code CLI and LM Studio via its local OpenAI-compatible server as runnable LLM providers.
@@ -14,6 +26,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Added a marketing examples gallery with copyable Build your own Agent prompts for read, write, and connector-backed agents.
 - Added configurable run-history retention in Settings with 500-run/180-day defaults, never-prune support, startup/scheduler/manual pruning, workspace/live/confirmation exclusions, last-prune reporting, IPC coverage, and focused host/renderer tests.
 - Added explicit local JSON/CSV audit log export with retained run history, write-confirmation events, connector delivery audit entries, recorded hosted-provider consent events, retention metadata, and a SHA-256 hash chain.
+- Added `docs/mockups/09-registry.html` and `docs/mockups/10-empty-states.html` design references and swept implemented screens against the empty-state patterns.
+- Added reusable output pane components shared by chat answer artifacts, run results, and the investigation tool trace.
+- Added write-plan and run-confirmation invariant tests covering typed-phrase enforcement, plan/apply mismatch rejection, and tenant pinning.
 
 ### Changed
 
