@@ -6,9 +6,6 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 - Added deterministic local related-agent hints in Chat, with conservative keyword/synonym matching against installed agents and a dismissible transcript card.
-- Marketing landing page rework: new hero ("AI agents for your Microsoft 365 tenant. Run locally, approved by you."), pre-rendered Remotion hero demo video with reduced-motion poster fallback, traction strip with live GitHub stars and real agent/install stats, three-step "How it works" section replacing four overlapping sections, top-5 real registry agents with install counts, and a trimmed FAQ; plus a new top-level `remotion/` video project.
-
-- Added the tenant drift timeline with versioned configuration snapshots, field-level diffs, audit attribution, a Changes page, the read-only `query_drift` chat tool, and local retention controls.
 
 ### Changed
 - Collapsed the desktop sidebar into Home, Chat, Agents, Changes, and Settings, with Agent Hub and Schedules moved under Agents tabs.
@@ -24,6 +21,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added the tenant drift timeline with versioned configuration snapshots, field-level diffs, audit attribution, a Changes page, the read-only `query_drift` chat tool, and local retention controls.
+- Marketing landing page rework: new hero ("AI agents for your Microsoft 365 tenant. Run locally, approved by you."), pre-rendered Remotion hero demo video with reduced-motion poster fallback, traction strip with live GitHub stars and real agent/install stats, three-step "How it works" section replacing four overlapping sections, top-5 real registry agents with install counts, and a trimmed FAQ; plus a new top-level `remotion/` video project.
 - Added single-tenant Intune Chat investigative mode with bounded read-only tool calls, streamed tool progress, persisted "What ran" traces, deterministic fallback, and a Settings mode control.
 - Added a Vitest and Testing Library renderer test baseline for write confirmation, hosted-provider consent, and provider settings.
 - Added Anthropic via the local Claude Code CLI and LM Studio via its local OpenAI-compatible server as runnable LLM providers.
