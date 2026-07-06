@@ -1,8 +1,8 @@
 {
-  "updatedAt": "2026-07-01T23:01:21.786Z",
+  "updatedAt": "2026-07-06T01:01:04.635Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 17,
+      "installs": 18,
       "installs7d": 2
     },
     "intune-device-posture-auditor": {
@@ -10,31 +10,31 @@
       "installs7d": 0
     },
     "offboarding-agent": {
-      "installs": 12,
-      "installs7d": 1
+      "installs": 13,
+      "installs7d": 2
     },
     "compliance-overview": {
       "installs": 19,
-      "installs7d": 2
+      "installs7d": 0
     },
     "os-update-posture": {
       "installs": 11,
-      "installs7d": 2
+      "installs7d": 1
     },
     "tenant-health-report": {
       "installs": 18,
-      "installs7d": 1
+      "installs7d": 0
     },
     "user-license-overview": {
       "installs": 17,
       "installs7d": 1
     },
     "conditional-access-explainer": {
-      "installs": 27,
-      "installs7d": 2
+      "installs": 28,
+      "installs7d": 1
     },
     "dormant-app-registrations": {
-      "installs": 17,
+      "installs": 18,
       "installs7d": 1
     },
     "risky-sign-in-triage": {
@@ -47,15 +47,15 @@
     },
     "sign-in-failure-explainer": {
       "installs": 14,
-      "installs7d": 1
+      "installs7d": 0
     },
     "stale-guest-cleanup": {
       "installs": 11,
       "installs7d": 0
     },
     "tenant-change-audit": {
-      "installs": 9,
-      "installs7d": 0
+      "installs": 10,
+      "installs7d": 1
     }
   }
 }
