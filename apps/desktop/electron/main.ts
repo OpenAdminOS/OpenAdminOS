@@ -877,21 +877,27 @@ async function runScreenshotCapture(): Promise<void> {
   const appShots = [
     {
       route: "/",
-      name: "agents-home",
-      file: "app/agents-home.png",
-      waitFor: ["Agents", "Browse hub", "Contoso Demo"],
+      name: "home",
+      file: "app/home.png",
+      waitFor: ["Start with one result", "Ask your first question", "Contoso Demo"],
     },
     {
-      route: "/hub",
+      route: "/agents",
+      name: "agents-home",
+      file: "app/agents-home.png",
+      waitFor: ["Installed", "Schedules", "Search installed agents"],
+    },
+    {
+      route: "/agents/hub",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Agent Hub", `${entries.length} agents`],
+      waitFor: ["Hub", `${entries.length} shown`],
     },
     {
       route: "/chat",
       name: "chat-empty",
       file: "app/chat-empty.png",
-      waitFor: ["Intune Chat", "What do you want to inspect?", "New conversation"],
+      waitFor: ["Chat", "What do you want to inspect?", "New conversation"],
     },
     {
       route: "/changes",
@@ -922,7 +928,7 @@ async function runScreenshotCapture(): Promise<void> {
     try {
       await runScreenshotCaptureStep(window, {
         kind: "hub-detail",
-        route: "/hub",
+        route: "/agents/hub",
         slug: entry.slug,
         name: entry.name,
         expectedCount: entries.length,
@@ -1061,8 +1067,7 @@ async function screenshotCaptureStepScript(
 
   await waitFor(
     () =>
-      bodyText().includes("Agent Hub") &&
-      bodyText().includes(`${step.expectedCount} agents`) &&
+      bodyText().includes(`${step.expectedCount} shown`) &&
       bodyText().includes(step.name),
     `Hub grid for ${step.slug}`,
   );
