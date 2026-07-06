@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
@@ -122,7 +122,7 @@ type OptimisticChatDraft = {
 
 type HostedChatConsentPrompt = {
   content: string;
-  conversationId?: string;
+  conversationId?: string | null;
   tenantId: string;
   tenantName: string;
   providerId: ProviderId;
@@ -159,6 +159,10 @@ type HostedBatchConsentPrompt = {
   content: string;
 };
 
+type IntuneChatRouteState = {
+  initialQuestion?: unknown;
+};
+
 const focusRingClass =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
 const collapsedRailControlClass =
@@ -166,7 +170,8 @@ const collapsedRailControlClass =
 
 export default function IntuneChat() {
   const navigate = useNavigate();
-  const { state, startRun, refresh } = useAppState();
+  const location = useLocation();
+  const { state, startRun, refresh, loading } = useAppState();
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<IntuneChatMessage[]>([]);
@@ -231,6 +236,7 @@ export default function IntuneChat() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
+  const initialQuestionConsumedRef = useRef(false);
   const progressClearTimerRef = useRef<number | null>(null);
   const copiedClearTimerRef = useRef<number | null>(null);
 
@@ -513,7 +519,10 @@ export default function IntuneChat() {
     }
   };
 
-  const handleSend = async (contentOverride?: string, conversationIdOverride?: string) => {
+  const handleSend = async (
+    contentOverride?: string,
+    conversationIdOverride?: string | null,
+  ) => {
     const content = (contentOverride ?? input).trim();
     const api = window.openAdminOS;
     if (!api || !content || sending) return;
@@ -531,7 +540,9 @@ export default function IntuneChat() {
     ) {
       setHostedConsentPrompt({
         content,
-        ...(conversationIdOverride ? { conversationId: conversationIdOverride } : {}),
+        ...(conversationIdOverride !== undefined
+          ? { conversationId: conversationIdOverride }
+          : {}),
         tenantId: activeTenant.id,
         tenantName: activeTenant.displayName,
         providerId: provider.id,
@@ -654,12 +665,15 @@ export default function IntuneChat() {
   const executeSend = async (
     content: string,
     hostedProviderConsent?: HostedProviderConsentInput,
-    conversationIdOverride?: string,
+    conversationIdOverride?: string | null,
     workspaceContext?: WorkspacePromptContextInput,
   ) => {
     const api = window.openAdminOS;
     if (!api || !content || sending) return;
-    const targetConversationId = conversationIdOverride ?? activeConversationId;
+    const targetConversationId =
+      conversationIdOverride === null
+        ? null
+        : conversationIdOverride ?? activeConversationId;
     const pendingConversationId = targetConversationId ?? `pending_${window.crypto.randomUUID()}`;
     const pendingUserId = `pending_user_${window.crypto.randomUUID()}`;
     const pendingAssistantId = `pending_assistant_${window.crypto.randomUUID()}`;
@@ -862,6 +876,28 @@ export default function IntuneChat() {
       remember: true,
     });
   };
+
+  useEffect(() => {
+    const routeState = location.state as IntuneChatRouteState | null;
+    const initialQuestion =
+      typeof routeState?.initialQuestion === "string"
+        ? routeState.initialQuestion.trim()
+        : "";
+    if (
+      !initialQuestion ||
+      initialQuestionConsumedRef.current ||
+      loading ||
+      !activeTenant
+    ) {
+      return;
+    }
+
+    initialQuestionConsumedRef.current = true;
+    navigate(location.pathname, { replace: true, state: null });
+    setActiveConversationId(null);
+    setMessages([]);
+    void handleSend(initialQuestion, null);
+  }, [activeTenant, handleSend, loading, location.pathname, location.state, navigate]);
 
   const applySavedQuery = (query: SavedMultiTenantQuery) => {
     setSelectedSavedQueryId(query.id);

@@ -1452,6 +1452,8 @@ Until the user has one completed run or one answered chat question, Home shows a
 2. Local model active ✓ / ▸ Review providers
 3. Ask your first question ▸ (chat quick-ask input, submits into `/chat`) — or run a suggested read-only agent
 
+Answered chat question means the local chat store contains at least one completed assistant message. Empty draft conversations, failed responses, and stopped responses do not count.
+
 North-star metric: time from install to first successful result, target under 5 minutes. Measured locally only (no telemetry — consistent with constraint 1).
 
 ### Glossary (naming decisions)

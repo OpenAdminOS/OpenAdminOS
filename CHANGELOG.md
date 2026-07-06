@@ -11,6 +11,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 - Collapsed the desktop sidebar into Home, Chat, Agents, Changes, and Settings, with Agent Hub and Schedules moved under Agents tabs.
+- Home now shows a first-run checklist until the first completed run or completed chat answer, with quick-ask handoff into Chat.
 
 ### Removed
 
