@@ -1427,6 +1427,14 @@ v0.3 shipped with ten sidebar destinations and two equally-weighted primary para
 
 Chat is the primary paradigm. "Ask a question about your tenant in plain language" requires zero new vocabulary from a Microsoft admin. Agents are the packaged, repeatable form of the same work and get suggested *from* chat when a question matches an installed agent's domain. Agents remain a first-class nav item; they are no longer the default landing surface.
 
+Chat related-agent hints are deterministic and presentation-only. The renderer
+matches each sent question against installed agent name, category, description,
+simple bigrams, and a small local Microsoft admin synonym table. The matcher
+uses a conservative score threshold of 8 and requires either two matched
+tokens/bigrams or one strong name/category/synonym-domain hit. Hints render only
+after the assistant message completes, can be dismissed, never persist to chat
+messages, and never suggest the same agent twice in one conversation.
+
 ### Navigation (locked for v0.4)
 
 Five workspace destinations plus Settings:

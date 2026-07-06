@@ -23,7 +23,9 @@ import {
   IconStar,
 } from "../components/icons";
 import { useAppState } from "../state";
+import { suggestAgentForQuestion } from "../shared/agent-suggestions";
 import {
+  type AgentSummary,
   resolveProviderDefaultModel,
   type GraphCacheStatus,
   type GraphCacheResourceKind,
@@ -120,6 +122,16 @@ type OptimisticChatDraft = {
   assistantMessage: IntuneChatMessage;
 };
 
+type RelatedAgentSuggestion = {
+  agent: AgentSummary;
+  score: number;
+};
+
+type RelatedAgentState = {
+  suggestionsByMessageId: Record<string, RelatedAgentSuggestion>;
+  suggestedSlugsByConversationId: Record<string, string[]>;
+};
+
 type HostedChatConsentPrompt = {
   content: string;
   conversationId?: string | null;
@@ -186,6 +198,10 @@ export default function IntuneChat() {
   const [chatProgress, setChatProgress] = useState<ChatProgressState | null>(null);
   const [progressAssistantMessageId, setProgressAssistantMessageId] = useState<string | null>(null);
   const [optimisticDraft, setOptimisticDraft] = useState<OptimisticChatDraft | null>(null);
+  const [relatedAgentState, setRelatedAgentState] = useState<RelatedAgentState>({
+    suggestionsByMessageId: {},
+    suggestedSlugsByConversationId: {},
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pinnedSectionOpen, setPinnedSectionOpen] = useState(true);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -662,6 +678,45 @@ export default function IntuneChat() {
   };
 
 
+  const recordRelatedAgentSuggestion = (
+    conversationId: string,
+    assistantMessageId: string,
+    suggestion: { agent: AgentSummary; score: number } | null,
+  ) => {
+    if (!suggestion) return;
+    setRelatedAgentState((current) => {
+      const existingSlugs = current.suggestedSlugsByConversationId[conversationId] ?? [];
+      if (
+        existingSlugs.includes(suggestion.agent.slug) ||
+        current.suggestionsByMessageId[assistantMessageId]
+      ) {
+        return current;
+      }
+      return {
+        suggestionsByMessageId: {
+          ...current.suggestionsByMessageId,
+          [assistantMessageId]: suggestion,
+        },
+        suggestedSlugsByConversationId: {
+          ...current.suggestedSlugsByConversationId,
+          [conversationId]: [...existingSlugs, suggestion.agent.slug],
+        },
+      };
+    });
+  };
+
+  const dismissRelatedAgentSuggestion = (assistantMessageId: string) => {
+    setRelatedAgentState((current) => {
+      if (!current.suggestionsByMessageId[assistantMessageId]) return current;
+      const nextSuggestions = { ...current.suggestionsByMessageId };
+      delete nextSuggestions[assistantMessageId];
+      return {
+        ...current,
+        suggestionsByMessageId: nextSuggestions,
+      };
+    });
+  };
+
   const executeSend = async (
     content: string,
     hostedProviderConsent?: HostedProviderConsentInput,
@@ -674,6 +729,15 @@ export default function IntuneChat() {
       conversationIdOverride === null
         ? null
         : conversationIdOverride ?? activeConversationId;
+    const previouslySuggestedSlugs = targetConversationId
+      ? relatedAgentState.suggestedSlugsByConversationId[targetConversationId] ?? []
+      : [];
+    const relatedAgentSuggestion = suggestAgentForQuestion(
+      content,
+      state.installedAgents.filter(
+        (agent) => !previouslySuggestedSlugs.includes(agent.slug),
+      ),
+    );
     const pendingConversationId = targetConversationId ?? `pending_${window.crypto.randomUUID()}`;
     const pendingUserId = `pending_user_${window.crypto.randomUUID()}`;
     const pendingAssistantId = `pending_assistant_${window.crypto.randomUUID()}`;
@@ -791,6 +855,13 @@ export default function IntuneChat() {
               failed = true;
               setError(event.error);
             }
+            if (event.type === "completed") {
+              recordRelatedAgentSuggestion(
+                event.result.conversation.id,
+                event.result.assistantMessage.id,
+                relatedAgentSuggestion,
+              );
+            }
             if (event.type === "cancelled") {
               cancelled = true;
               setChatProgress(createStoppedChatProgress("Response stopped."));
@@ -800,6 +871,13 @@ export default function IntuneChat() {
       );
       setActiveConversationId(result.conversation.id);
       setCacheStatus(result.cacheStatus);
+      if (result.assistantMessage.status === "completed") {
+        recordRelatedAgentSuggestion(
+          result.conversation.id,
+          result.assistantMessage.id,
+          relatedAgentSuggestion,
+        );
+      }
       await loadShell(result.conversation.id);
     } catch (caught) {
       failed = true;
@@ -1643,6 +1721,11 @@ export default function IntuneChat() {
               <div className="flex flex-1 flex-col gap-6">
                 {displayedMessages.map((message) => {
                   const job = multiTenantJobsByConversationId[message.conversationId];
+                  const relatedAgentSuggestion =
+                    message.role === "assistant" &&
+                    message.status === "completed"
+                      ? relatedAgentState.suggestionsByMessageId[message.id]
+                      : undefined;
                   return (
                     <div key={message.id} className="space-y-4">
                       <ChatMessageBubble
@@ -1669,6 +1752,13 @@ export default function IntuneChat() {
                           setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
                         }}
                       />
+                      {relatedAgentSuggestion && (
+                        <RelatedAgentHint
+                          suggestion={relatedAgentSuggestion}
+                          onOpen={() => navigate(`/agents/${relatedAgentSuggestion.agent.slug}`)}
+                          onDismiss={() => dismissRelatedAgentSuggestion(message.id)}
+                        />
+                      )}
                       {message.role === "assistant" && job && (
                         <MultiTenantResultArtifact
                           job={job}
@@ -4013,6 +4103,61 @@ function safeFileName(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
   return cleaned || "intune-chat-conversation";
+}
+
+function RelatedAgentHint({
+  suggestion,
+  onOpen,
+  onDismiss,
+}: {
+  suggestion: RelatedAgentSuggestion;
+  onOpen: () => void;
+  onDismiss: () => void;
+}) {
+  const modeLabel = suggestion.agent.mode === "write" ? "Write" : "Read-only";
+  return (
+    <div className="flex justify-start">
+      <div className="w-full max-w-[760px] rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                Related agent · {suggestion.agent.name}
+              </span>
+              <Pill tone={suggestion.agent.mode === "write" ? "warning" : "success"}>
+                {modeLabel}
+              </Pill>
+              <span className="text-[11px] text-[var(--color-text-muted)]">
+                covers this as a repeatable run.
+              </span>
+            </div>
+            <div
+              className="mt-1 truncate text-[11.5px] text-[var(--color-text-muted)]"
+              title={suggestion.agent.description}
+            >
+              {suggestion.agent.description}
+            </div>
+            <button
+              type="button"
+              onClick={onOpen}
+              className={`mt-2 inline-flex h-6 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-soft)] ${focusRingClass}`}
+            >
+              Open agent →
+            </button>
+          </div>
+          <button
+            type="button"
+            title="Dismiss related agent"
+            aria-label={`Dismiss related agent ${suggestion.agent.name}`}
+            onClick={onDismiss}
+            className={`grid h-6 w-6 shrink-0 place-items-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
+          >
+            <IconClose size={12} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AgentSuggestionCard({
