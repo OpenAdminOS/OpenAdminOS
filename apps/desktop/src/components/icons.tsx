@@ -32,6 +32,14 @@ export const IconHub = ({ size = 18, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconHome = ({ size = 18, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M4 10.5 L12 4 L20 10.5" />
+    <path d="M6.5 9.5 V20 H17.5 V9.5" />
+    <path d="M10 20 V14 H14 V20" />
+  </svg>
+);
+
 export const IconActivity = ({ size = 18, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <path d="M3 12 H7 L9.5 5 L14 19 L16.5 12 H21" />

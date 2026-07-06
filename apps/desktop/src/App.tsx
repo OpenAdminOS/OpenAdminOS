@@ -5,6 +5,8 @@ import { Button } from "./components/Button";
 import { Card } from "./components/Card";
 import { useAppState } from "./state";
 
+const Home = lazy(() => import("./pages/Home"));
+const Agents = lazy(() => import("./pages/Agents"));
 const AgentsHome = lazy(() => import("./pages/AgentsHome"));
 const AgentDetail = lazy(() => import("./pages/AgentDetail"));
 const AgentHub = lazy(() => import("./pages/AgentHub"));
@@ -77,11 +79,15 @@ export default function App() {
     <AppShell>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/" element={<AgentsHome />} />
-          <Route path="/agents/schedules" element={<Schedules />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/agents" element={<Agents />}>
+            <Route index element={<AgentsHome />} />
+            <Route path="hub" element={<AgentHub embedded />} />
+            <Route path="schedules" element={<Schedules embedded />} />
+          </Route>
           <Route path="/agents/:slug/confirm" element={<AgentDetail startRunOnOpen />} />
           <Route path="/agents/:slug" element={<AgentDetail />} />
-          <Route path="/hub" element={<AgentHub />} />
+          <Route path="/hub" element={<Navigate to="/agents/hub" replace />} />
           <Route path="/chat" element={<IntuneChat />} />
           <Route path="/changes" element={<Changes />} />
           <Route path="/workspaces" element={<Workspaces />} />

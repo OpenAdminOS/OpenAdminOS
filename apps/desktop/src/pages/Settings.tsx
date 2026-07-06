@@ -56,7 +56,7 @@ import { useAppState } from "../state";
 const sections = [
   { id: "providers", label: "LLM Providers" },
   { id: "tenants", label: "Tenants" },
-  { id: "chat", label: "Intune Chat" },
+  { id: "chat", label: "Chat" },
   { id: "general", label: "General" },
   { id: "privacy", label: "Privacy" },
   { id: "about", label: "About" },
@@ -81,6 +81,7 @@ const OFFICIAL_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
 export default function Settings() {
+  const navigate = useNavigate();
   const [section, setSection] = useState<SectionId>("providers");
   const {
     state,
@@ -126,6 +127,29 @@ export default function Settings() {
               {s.label}
             </button>
           ))}
+          <div className="mt-auto border-t border-[var(--color-border-soft)] pt-4">
+            <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              More
+            </div>
+            <button
+              onClick={() => navigate("/workspaces")}
+              className="w-full rounded-lg px-3 py-2 text-left transition-colors text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+            >
+              <span className="block text-[13px] font-medium">Workspaces</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                Saved multi-tenant working sets
+              </span>
+            </button>
+            <button
+              onClick={() => navigate("/connectors")}
+              className="mt-1 w-full rounded-lg px-3 py-2 text-left transition-colors text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+            >
+              <span className="block text-[13px] font-medium">Connectors</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                External integrations
+              </span>
+            </button>
+          </div>
         </nav>
         <PageBody>
           {section === "providers" && (
@@ -1253,7 +1277,7 @@ function ChatSettingsSection() {
     <div className="max-w-[820px]">
       <div className="flex items-start justify-between gap-6">
         <SectionTitle
-          title="Intune Chat"
+          title="Chat"
           subtitle="Chat stays simple. Cache refresh, scheduled updates, and local self-training approvals live here."
         />
         <Button
@@ -1275,7 +1299,7 @@ function ChatSettingsSection() {
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
           label="Chat investigation mode"
-          description="Controls whether single-tenant Intune Chat can run read-only tool calls before answering. Multi-tenant chat stays deterministic."
+          description="Controls whether single-tenant Chat can run read-only tool calls before answering. Multi-tenant chat stays deterministic."
           control={
             <div
               role="group"
@@ -1681,7 +1705,7 @@ function ClearLocalDataModal({
     target === "chat" ? "Clear chat history" : "Clear active tenant cache";
   const detail =
     target === "chat"
-      ? "This removes all local Intune Chat conversations, messages, and chat tool-call records. It does not clear Graph cache rows, disconnect tenants, or alter agent run history."
+      ? "This removes all local Chat conversations, messages, and chat tool-call records. It does not clear Graph cache rows, disconnect tenants, or alter agent run history."
       : `This removes cached Graph rows and cache status for ${activeTenantName ?? "the active tenant"}. The next chat that needs tenant context will refresh the required resources again.`;
 
   return (
@@ -2004,7 +2028,7 @@ function GeneralSection() {
           description={
             companionLaunch?.supported
               ? companionLaunch.status === "requires-approval"
-                ? `${companionLaunch.detail} The companion uses the same local store, active tenant, provider, schedules, and Intune Chat path as the full app.`
+                ? `${companionLaunch.detail} The companion uses the same local store, active tenant, provider, schedules, and Chat path as the full app.`
                 : `${companionLaunch.detail} It opens as a compact macOS status item and routes setup, hosted-provider confirmation, and write review back to the full app.`
               : (companionLaunch?.detail ?? "The menu bar companion is available on macOS only.")
           }

@@ -26,7 +26,7 @@ const QUICK_INTERVALS: { label: string; seconds: number }[] = [
   { label: "24h", seconds: 24 * 60 * 60 },
 ];
 
-export default function Schedules() {
+export default function Schedules({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const toast = useToast();
   const { state, updateAgentSchedule, startRun, refresh } = useAppState();
@@ -87,50 +87,40 @@ export default function Schedules() {
     }
   };
 
-  return (
-    <>
-      <PageHeader
-        eyebrow="Agents"
-        title="Schedules"
-        subtitle={
-          <span>
-            {scheduledAgents.length} active {scheduledAgents.length === 1 ? "schedule" : "schedules"}
-          </span>
-        }
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="secondary"
-              leadingIcon={<IconPlay size={14} />}
-              disabled={bulkRunning !== null || dueAgents.length === 0}
-              onClick={() => {
-                void runScheduledBatch(dueAgents, "due");
-              }}
-            >
-              {bulkRunning === "due" ? "Queueing…" : `Run due (${dueAgents.length})`}
-            </Button>
-            <Button
-              variant="secondary"
-              leadingIcon={<IconPlay size={14} />}
-              disabled={bulkRunning !== null || scheduledAgents.length === 0}
-              onClick={() => {
-                void runScheduledBatch(scheduledAgents, "all");
-              }}
-            >
-              {bulkRunning === "all" ? "Queueing…" : "Run all"}
-            </Button>
-            <Button
-              variant="secondary"
-              leadingIcon={<IconHub size={14} />}
-              onClick={() => navigate("/hub")}
-            >
-              Browse hub
-            </Button>
-          </div>
-        }
-      />
-      <PageBody>
-        <div className="space-y-6">
+  const scheduleActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="secondary"
+        leadingIcon={<IconPlay size={14} />}
+        disabled={bulkRunning !== null || dueAgents.length === 0}
+        onClick={() => {
+          void runScheduledBatch(dueAgents, "due");
+        }}
+      >
+        {bulkRunning === "due" ? "Queueing…" : `Run due (${dueAgents.length})`}
+      </Button>
+      <Button
+        variant="secondary"
+        leadingIcon={<IconPlay size={14} />}
+        disabled={bulkRunning !== null || scheduledAgents.length === 0}
+        onClick={() => {
+          void runScheduledBatch(scheduledAgents, "all");
+        }}
+      >
+        {bulkRunning === "all" ? "Queueing…" : "Run all"}
+      </Button>
+      <Button
+        variant="secondary"
+        leadingIcon={<IconHub size={14} />}
+        onClick={() => navigate("/agents/hub")}
+      >
+        Browse hub
+      </Button>
+    </div>
+  );
+
+  const content = (
+    <div className="space-y-6">
         {scheduledAgents.length > 0 && schedulerRegistered === false && (
           <ScheduleNotice
             tone="warning"
@@ -242,8 +232,41 @@ export default function Schedules() {
           agents={state.installedAgents}
           onOpenRun={(id) => navigate(`/runs/${id}`)}
         />
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <>
+        <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 className="text-[13px] font-medium text-[var(--color-text)]">
+              Schedules
+            </h2>
+            <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+              {scheduledAgents.length} active {scheduledAgents.length === 1 ? "schedule" : "schedules"}
+            </p>
+          </div>
+          {scheduleActions}
         </div>
-      </PageBody>
+        {content}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Agents"
+        title="Schedules"
+        subtitle={
+          <span>
+            {scheduledAgents.length} active {scheduledAgents.length === 1 ? "schedule" : "schedules"}
+          </span>
+        }
+        actions={scheduleActions}
+      />
+      <PageBody>{content}</PageBody>
     </>
   );
 }

@@ -72,7 +72,7 @@ export default function Activity() {
   return (
     <>
       <PageHeader
-        title="Activity"
+        title="Run history"
         subtitle="A local, append-only history of every agent run on this device."
         actions={
           <div className="relative">

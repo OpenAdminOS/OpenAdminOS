@@ -71,7 +71,7 @@ function CompatibilityBadge({
   );
 }
 
-export default function AgentHub() {
+export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   const { state, registryAgents, installAgent, refreshRegistry } = useAppState();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -188,56 +188,45 @@ export default function AgentHub() {
     navigate(`/agents/${agent.slug}`);
   };
 
-  return (
+  const hubActions = (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={async () => {
+          setRefreshing(true);
+          await refreshRegistry().catch(() => undefined);
+          setRefreshing(false);
+        }}
+        disabled={refreshing}
+        title="Refresh agent catalog"
+        className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] transition-colors hover:text-[var(--color-text)] disabled:opacity-50"
+      >
+        <IconRefresh size={14} className={refreshing ? "animate-spin" : ""} />
+      </button>
+      <div className="relative">
+        <IconSearch
+          size={14}
+          aria-hidden="true"
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+        />
+        <label htmlFor="agent-hub-search" className="sr-only">
+          Search agents, authors, scopes
+        </label>
+        <input
+          id="agent-hub-search"
+          name="agent-hub-search"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search agents, authors, scopes"
+          autoComplete="off"
+          className="h-9 w-[300px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+        />
+      </div>
+    </div>
+  );
+
+  const content = (
     <>
-      <PageHeader
-        eyebrow="Store"
-        title="Agent Hub"
-        subtitle={
-          <span className="inline-flex items-center gap-2">
-            <span>
-              {registryAgents.length} agents · {installedCount} installed
-            </span>
-          </span>
-        }
-        actions={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async () => {
-                setRefreshing(true);
-                await refreshRegistry().catch(() => undefined);
-                setRefreshing(false);
-              }}
-              disabled={refreshing}
-              title="Refresh agent catalog"
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] transition-colors hover:text-[var(--color-text)] disabled:opacity-50"
-            >
-              <IconRefresh size={14} className={refreshing ? "animate-spin" : ""} />
-            </button>
-            <div className="relative">
-              <IconSearch
-                size={14}
-                aria-hidden="true"
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-              />
-              <label htmlFor="agent-hub-search" className="sr-only">
-                Search agents, authors, scopes
-              </label>
-              <input
-                id="agent-hub-search"
-                name="agent-hub-search"
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search agents, authors, scopes"
-                autoComplete="off"
-                className="h-9 w-[300px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
-              />
-            </div>
-          </div>
-        }
-      />
-      <PageBody>
         {registryAgents.length === 0 ? (
           <EmptyRegistry />
         ) : (
@@ -323,7 +312,10 @@ export default function AgentHub() {
           </>
         )}
 
-      </PageBody>
+    </>
+  );
+
+  const modal = (
       <Modal
         open={manifestAgent !== null}
         onClose={() => setManifestAgent(null)}
@@ -357,6 +349,44 @@ export default function AgentHub() {
           )}
         </div>
       </Modal>
+  );
+
+  if (embedded) {
+    return (
+      <>
+        <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 className="text-[13px] font-medium text-[var(--color-text)]">
+              Agent Hub
+            </h2>
+            <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+              {registryAgents.length} agents · {installedCount} installed
+            </p>
+          </div>
+          {hubActions}
+        </div>
+        {content}
+        {modal}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Store"
+        title="Agent Hub"
+        subtitle={
+          <span className="inline-flex items-center gap-2">
+            <span>
+              {registryAgents.length} agents · {installedCount} installed
+            </span>
+          </span>
+        }
+        actions={hubActions}
+      />
+      <PageBody>{content}</PageBody>
+      {modal}
     </>
   );
 }

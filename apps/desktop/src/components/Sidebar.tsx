@@ -2,20 +2,14 @@ import { NavLink } from "react-router";
 import type { ReactNode } from "react";
 import {
   IconAgents,
-  IconHub,
-  IconActivity,
   IconChanges,
   IconChat,
-  IconConnectors,
-  IconHardDrive,
+  IconHome,
   IconSettings,
   IconLogo,
   IconCommand,
-  IconClock,
   IconWarning,
 } from "./icons";
-import { StatusDot } from "./Pill";
-import { Sparkline } from "./Sparkline";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { useAppState } from "../state";
 import { useReportIssue } from "./ReportIssueModal";
@@ -90,44 +84,29 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       run.status === "running" ||
       run.status === "awaiting-confirmation",
   ).length;
-  const scheduledAgentCount = state.installedAgents.filter(
-    (agent) => agent.schedule?.enabled === true,
-  ).length;
   const mainNav: NavItem[] = [
     {
       to: "/",
-      label: "Agents",
-      icon: <IconAgents size={16} />,
+      label: "Home",
+      icon: <IconHome size={16} />,
       end: true,
-      badge: state.installedAgents.length,
-    },
-    {
-      to: "/agents/schedules",
-      label: "Schedules",
-      icon: <IconClock size={14} />,
-      badge: scheduledAgentCount > 0 ? scheduledAgentCount : undefined,
-      indent: true,
-    },
-    { to: "/hub", label: "Agent Hub", icon: <IconHub size={16} /> },
-    { to: "/chat", label: "Intune Chat", icon: <IconChat size={16} /> },
-    { to: "/changes", label: "Changes", icon: <IconChanges size={16} /> },
-    { to: "/workspaces", label: "Workspaces", icon: <IconHardDrive size={16} /> },
-    { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },
-    {
-      to: "/activity",
-      label: "Activity",
-      icon: <IconActivity size={16} />,
       badge: activeRunCount > 0 ? activeRunCount : undefined,
       badgeTone: activeRunCount > 0 ? "warning" : undefined,
     },
+    {
+      to: "/chat",
+      label: "Chat",
+      icon: <IconChat size={16} />,
+    },
+    {
+      to: "/agents",
+      label: "Agents",
+      icon: <IconAgents size={16} />,
+      badge: state.installedAgents.length,
+    },
+    { to: "/changes", label: "Changes", icon: <IconChanges size={16} /> },
     { to: "/settings", label: "Settings", icon: <IconSettings size={16} /> },
   ];
-
-  const runsByDay = runsForLastSevenDays(state.runs.map((run) => run.queuedAt));
-  const runsByDayLabels = ["M", "T", "W", "T", "F", "S", "S"];
-  const runsThisWeek = runsByDay.reduce((a, b) => a + b, 0);
-  const peak = Math.max(0, ...runsByDay);
-  const peakIdx = peak > 0 ? runsByDay.indexOf(peak) : -1;
 
   return (
     <aside className="flex h-full w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]">
@@ -183,43 +162,6 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
         ))}
       </nav>
 
-      {/* Activity sparkline card */}
-      <div className="mx-2.5 mt-5 rounded-xl bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            Runs · last 7d
-          </span>
-          <span className="font-mono text-[10.5px] tabular-nums text-[var(--color-text-soft)]">
-            {runsThisWeek}
-          </span>
-        </div>
-        <div className="mt-2">
-          <Sparkline data={runsByDay} height={28} />
-        </div>
-        <div className="mt-1 grid grid-cols-7 text-center font-mono text-[9px] text-[var(--color-text-faint)]">
-          {runsByDayLabels.map((d, i) => (
-            <span
-              key={i}
-              className={
-                i === peakIdx
-                  ? "font-medium text-[var(--color-accent)]"
-                  : i === runsByDay.length - 1
-                    ? "text-[var(--color-text-soft)]"
-                    : ""
-              }
-            >
-              {d}
-            </span>
-          ))}
-        </div>
-        <div className="mt-2 flex items-center gap-1.5 text-[10.5px] text-[var(--color-text-muted)]">
-          <StatusDot tone="warning" />
-          <span className="truncate">
-            {runsThisWeek === 0 ? "No runs recorded yet" : "Recent run activity"}
-          </span>
-        </div>
-      </div>
-
       <div className="mt-auto px-2.5 pb-3 pt-4">
         <button
           onClick={() => openReportIssue({ source: "sidebar" })}
@@ -236,35 +178,6 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           </span>
         </button>
       </div>
-
     </aside>
   );
-}
-
-function runsForLastSevenDays(startedAtValues: string[]) {
-  const days = Array.from({ length: 7 }, () => 0);
-  const now = new Date();
-
-  for (const startedAt of startedAtValues) {
-    const started = new Date(startedAt);
-    if (Number.isNaN(started.getTime())) {
-      continue;
-    }
-
-    const ageDays = Math.floor(
-      (startOfDay(now).getTime() - startOfDay(started).getTime()) / 86_400_000,
-    );
-
-    if (ageDays >= 0 && ageDays < 7) {
-      days[6 - ageDays] += 1;
-    }
-  }
-
-  return days;
-}
-
-function startOfDay(date: Date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
 }
