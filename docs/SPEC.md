@@ -1419,6 +1419,63 @@ macOS notification caveat: Electron 42 uses Apple's `UNNotification` framework. 
 
 ---
 
+## 4a. UX simplification (v0.4)
+
+v0.3 shipped with ten sidebar destinations and two equally-weighted primary paradigms (Agents and Chat). A fresh install presented the surface area of a mature product with no guided path. These decisions reduce day-one complexity without removing capability.
+
+### Front door: Chat
+
+Chat is the primary paradigm. "Ask a question about your tenant in plain language" requires zero new vocabulary from a Microsoft admin. Agents are the packaged, repeatable form of the same work and get suggested *from* chat when a question matches an installed agent's domain. Agents remain a first-class nav item; they are no longer the default landing surface.
+
+### Navigation (locked for v0.4)
+
+Five workspace destinations plus Settings:
+
+| Nav item | Route | Contains |
+|---|---|---|
+| Home | `/` | First-run checklist until first completed run; then dashboard (stats, recent runs, trust card) |
+| Chat | `/chat` | Tenant Q&A (formerly "Intune Chat" in nav; covers Intune + Entra) |
+| Agents | `/agents` | Tabs: Installed · Hub · Schedules |
+| Changes | `/changes` | Tenant drift timeline |
+| Settings | `/settings` | Providers, tenants, workspaces, connectors, general, privacy |
+
+Demoted from top-level nav (routes remain, reachable via Settings and the command palette):
+- **Workspaces** and **Connectors** — power-user surfaces; irrelevant until a user has more than one tenant or an external integration. Linked from Settings.
+- **Activity** — run history lives on Home ("Recent runs → View all"). The sidebar "Runs · last 7d" sparkline card is removed; run history now has one canonical home instead of three.
+- **Agent Hub** — a tab inside Agents, not a sibling of it.
+
+### First-run checklist
+
+Until the user has one completed run or one answered chat question, Home shows a checklist instead of zeroed dashboard stats:
+
+1. Tenant connected ✓ (always true post-onboarding)
+2. Local model active ✓ / ▸ Review providers
+3. Ask your first question ▸ (chat quick-ask input, submits into `/chat`) — or run a suggested read-only agent
+
+North-star metric: time from install to first successful result, target under 5 minutes. Measured locally only (no telemetry — consistent with constraint 1).
+
+### Glossary (naming decisions)
+
+| Term | Status | Meaning |
+|---|---|---|
+| Chat | Nav label (was "Intune Chat") | Plain-language tenant Q&A. Internal ids keep `intune-chat`. |
+| Agent | Unchanged | Installable module with declared scopes and read/write mode |
+| Hub | Tab inside Agents (was "Agent Hub" nav item) | Community agent store |
+| Schedule | Tab inside Agents | Recurring agent runs |
+| Workspace | Demoted to Settings | Saved multi-tenant working set |
+| Connector | Demoted to Settings | External integration (non-Graph) |
+| Run history | Replaces "Activity" as user-facing term | Past and active runs |
+| Tenant | Unchanged | The Microsoft 365 tenant |
+| Provider | Unchanged | LLM backend |
+
+### Deliberately not done in v0.4
+
+- No merge of Workspaces/Connectors page code into Settings.tsx — they stay separate routes, only nav placement changes (cheap, reversible).
+- No LLM-driven agent suggestions in chat — matching is deterministic, local keyword/category matching against installed manifests.
+- Usability validation with 3–5 external Intune admins is still owed; these decisions are the best pre-validation guess and should be revisited against real hesitation points.
+
+---
+
 ## 5a. v0.1 — Public preview foundation
 
 The first public-preview milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest while establishing the public preview path toward real-tenant deployment.
