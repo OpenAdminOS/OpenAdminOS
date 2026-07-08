@@ -11,7 +11,7 @@ Connectors do not turn those services into agent control channels. OpenAdminOS d
 
 ## Delivery Flow
 
-1. Configure the service on the **Connectors** page.
+1. Configure the service on the **Connectors** page, opened from Settings or from an installed agent's delivery settings.
 2. Test the connector so OpenAdminOS can verify consent, credentials, or local tooling.
 3. Set a default target, such as a Teams channel, email recipients, Slack conversation, or Signal recipient.
 4. Open an installed agent and enable delivery for that connector.

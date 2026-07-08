@@ -5,7 +5,7 @@ description: "How OpenAdminOS treats public agent registry updates."
 
 # Registry Trust
 
-The public Agent Hub is backed by the OpenAdminOS repository. Public agents are reviewed manifests, not arbitrary TypeScript from an untrusted source.
+The public Agent Hub, reached from the Hub tab under Agents, is backed by the OpenAdminOS repository. Public agents are reviewed manifests, not arbitrary TypeScript from an untrusted source.
 
 ## Install Provenance
 
