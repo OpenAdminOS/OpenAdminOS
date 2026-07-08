@@ -15,4 +15,4 @@ Run history, tenant configuration, installed agents, and app state are stored lo
 
 ## Local Providers
 
-Ollama is the current local provider. LM Studio is planned but not enabled in the current preview.
+Ollama, LM Studio, and Apple Foundation (on compatible Macs) are the local providers. Each keeps tenant prompts and responses on this device. See the LLM provider matrix for the full lineup and data-flow messaging.

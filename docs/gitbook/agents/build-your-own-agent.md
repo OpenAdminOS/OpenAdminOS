@@ -16,7 +16,7 @@ Build your own Agent creates local user-authored agents from inside the desktop 
 5. The manifest opens in an editable YAML review pane.
 6. Test draft runs a preflight check before Save and install is enabled.
 
-Drafting follows the active provider's data-flow rules. Ollama keeps the drafting prompt local. OpenAI Codex uses the local Codex CLI, but the prompt is sent to OpenAI because the selected model is hosted.
+Drafting follows the active provider's data-flow rules. Local providers such as Ollama, LM Studio, and Apple Foundation keep the drafting prompt on the device. Hosted providers such as OpenAI Codex, Anthropic through Claude Code, and Azure OpenAI send the prompt off the device because the selected model is hosted. See the LLM provider matrix for the full lineup.
 
 ## Preflight
 

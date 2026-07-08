@@ -52,5 +52,5 @@ Service. KDE users can use KWallet. OpenAdminOS refuses Electron's unprotected
 ## Requirements
 
 - A Microsoft 365 tenant where you can approve the required Graph permissions.
-- An LLM provider: Ollama locally, or OpenAI Codex through the local Codex CLI in the current preview.
+- An LLM provider: a local option (Ollama, LM Studio, or Apple Foundation on compatible Macs) or a hosted option (OpenAI through the Codex CLI, Anthropic through the Claude Code CLI, or Azure OpenAI). See the LLM provider matrix for data-flow details.
 - Network access to Microsoft Graph and the GitHub-hosted agent registry.

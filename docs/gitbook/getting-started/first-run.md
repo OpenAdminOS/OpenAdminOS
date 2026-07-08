@@ -16,6 +16,6 @@ There is no demo tenant mode. If no tenant is connected, OpenAdminOS keeps you i
 
 ## Provider Choice
 
-Ollama keeps prompts and tenant data on the device. OpenAI Codex uses the locally installed Codex CLI and the user's existing Codex authentication, but prompts are sent to OpenAI because the selected model is hosted.
+Local providers (Ollama, LM Studio, Apple Foundation) keep prompts and tenant data on the device. Hosted providers (OpenAI through the Codex CLI, Anthropic through the Claude Code CLI, Azure OpenAI) send prompts off the device because the selected model is hosted. The CLI-backed providers reuse the vendor CLI's existing authentication instead of storing an API key.
 
 The UI changes its data-residency messaging based on the active provider.
