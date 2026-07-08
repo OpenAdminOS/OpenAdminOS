@@ -10,6 +10,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 - Collapsed the desktop sidebar into Home, Chat, Agents, Changes, and Settings, with Agent Hub and Schedules moved under Agents tabs.
 - Home now shows a first-run checklist until the first completed run or completed chat answer, with quick-ask handoff into Chat.
+- Refreshed GitBook docs for the 0.3.0 surface: corrected the LLM provider lineup (Anthropic, LM Studio, Azure OpenAI, Apple Foundation now shipped), fixed stale v0.2.1 version pins, published a Features section for Intune Chat/Workspaces/Changes with new Intune Chat and drift pages, and aligned nav references with the collapsed sidebar.
 
 ### Removed
 
