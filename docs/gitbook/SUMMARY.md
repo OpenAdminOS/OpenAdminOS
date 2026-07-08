@@ -7,6 +7,13 @@
 - [First run](getting-started/first-run.md)
 - [Connect a tenant](getting-started/connect-tenant.md)
 
+## Features
+
+- [Intune Chat](features/intune-chat.md)
+- [Multi-tenant Intune Chat](features/multi-tenant-intune-chat.md)
+- [Workspaces](features/workspaces.md)
+- [Changes and drift](features/changes.md)
+
 ## Trust Model
 
 - [Local-first guarantee](trust/local-first.md)

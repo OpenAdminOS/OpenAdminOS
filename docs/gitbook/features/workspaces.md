@@ -1,3 +1,8 @@
+---
+title: "Workspaces"
+description: "Local, tenant-scoped containers for investigation evidence."
+---
+
 # Workspaces
 
 Workspaces are local, tenant-scoped investigation containers. They keep pinned evidence, linked Intune Chat conversations, linked agent runs, notes, and workspace-local instructions together for one tenant problem.
