@@ -22,6 +22,7 @@
     "build:electron": "node ../../scripts/clean-desktop-electron-build.mjs && tsc -p tsconfig.electron.json",
     "dist": "npm run build && electron-builder",
     "preview": "vite preview",
+    "pretest": "node -e \"require('electron')\"",
     "test": "node --import tsx --test \"electron/**/*.test.ts\"",
     "test:renderer": "vitest run --config vitest.config.ts",
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.electron.test.json --noEmit"
