@@ -36,11 +36,13 @@ import {
   type WriteAction,
   type WritePlan,
 } from "../shared/openAdminOS";
+import { formatAgentDisplayName } from "../shared/agent-display";
 import {
   runReportJson,
   runReportMarkdown,
   runReportPlaintext,
 } from "../shared/runReport";
+import { userFacingErrorReason } from "../copy";
 
 export default function RunResult() {
   const navigate = useNavigate();
@@ -145,7 +147,7 @@ export default function RunResult() {
             <IconArrowLeft size={12} aria-hidden="true" /> Run history
           </button>
         }
-        title={agent?.name ?? run.agentSlug}
+        title={agent ? formatAgentDisplayName(agent) : run.agentSlug}
         subtitle={
           <div className="flex flex-col gap-1">
             <span className="inline-flex flex-wrap items-center gap-2">
@@ -161,7 +163,7 @@ export default function RunResult() {
                 >
                   <span
                     aria-hidden="true"
-                    className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-warning)]"
+                    className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-info)]"
                   />
                   Streaming updates
                 </span>
@@ -238,14 +240,6 @@ export default function RunResult() {
             </Button>
             <ShareMenu
               contextLabel="run"
-              onCopyLink={() => {
-                void copyTextToClipboard(`openadminos://run/${run.id}`)
-                  .then(() => toast.success("Run link copied."))
-                  .catch((error) =>
-                    toast.error(error instanceof Error ? error.message : String(error)),
-                  );
-              }}
-              copyLinkHint={`openadminos://run/${run.id}`}
               onExportMarkdown={() => {
                 void window.openAdminOS?.saveTextFile({
                   suggestedName: `${run.agentSlug}-${run.id}.md`,
@@ -263,7 +257,7 @@ export default function RunResult() {
                 <Button
                   variant="secondary"
                   size="md"
-                  onClick={() => navigate("/")}
+                  onClick={() => navigate("/agents")}
                   title="Run continues in the background"
                 >
                   Run in background
@@ -518,7 +512,7 @@ function LiveReportPreview({
         >
           <span
             aria-hidden="true"
-            className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-accent)]"
+            className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-info)]"
           />
           generating report
         </span>
@@ -708,9 +702,10 @@ function DiffConfirmPanel({
             <IconWarning size={14} className="mt-0.5 shrink-0" />
             <span>
               <span className="font-semibold">Approving will call Microsoft Graph.</span>{" "}
-              {plan.actions.length} {plan.actions.length === 1 ? "device" : "devices"} in{" "}
-              <span className="font-mono">{tenantDisplayName ?? "the active tenant"}</span>{" "}
-              will be retired. There is no undo at the Graph level.
+              {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will
+              be applied to{" "}
+              <span className="font-mono">{tenantDisplayName ?? "the active tenant"}</span>.
+              Review every operation below. Microsoft Graph changes may not be reversible.
             </span>
           </div>
         </div>
@@ -720,9 +715,8 @@ function DiffConfirmPanel({
             <IconShield size={14} className="mt-0.5 shrink-0" />
             <span>
               <span className="font-semibold">Apply will be simulated.</span>{" "}
-              No Graph writes. The agent will emit a trace of what it would have
-              retired. Connect a real tenant in Settings → Tenants to perform
-              real changes.
+              No Graph writes. The agent will emit a trace of the planned changes.
+              Connect a real tenant in Settings → Tenants to apply them.
             </span>
           </div>
         </div>
@@ -790,7 +784,7 @@ function DiffConfirmPanel({
                   placeholder="Type here to enable Apply"
                   autoComplete="off"
                   disabled={busy}
-                  className={`h-11 rounded-lg bg-[var(--color-bg)] px-4 font-mono text-[13px] text-[var(--color-text)] ring-1 placeholder:text-[var(--color-text-muted)] focus:outline-none ${
+                  className={`h-11 rounded-lg bg-[var(--color-bg)] px-4 font-mono text-[13px] text-[var(--color-text)] ring-1 placeholder:text-[var(--color-text-placeholder)] focus:outline-none ${
                     armed
                       ? "ring-[var(--color-warning)]/55 focus:ring-[var(--color-warning)]"
                       : "ring-[var(--color-border)] focus:ring-[var(--color-accent)]/50"
@@ -807,7 +801,7 @@ function DiffConfirmPanel({
                     leadingIcon={<IconBolt size={11} />}
                     className={
                       armed
-                        ? "!bg-[var(--color-warning)] !text-[#1a120c] hover:!bg-[var(--color-warning)]/90"
+                        ? "!bg-[var(--color-warning)] !text-[var(--color-on-accent)] hover:!bg-[var(--color-warning)]/90"
                         : ""
                     }
                   >
@@ -818,7 +812,8 @@ function DiffConfirmPanel({
 
               {error && (
                 <div role="alert" className="mt-3 text-[12px] text-[var(--color-danger)]">
-                  {error}
+                  {userFacingErrorReason(error) ??
+                    "The confirmation action could not be completed. Review the tenant connection, then try again."}
                 </div>
               )}
             </div>

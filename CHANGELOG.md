@@ -5,18 +5,43 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+- Added a standalone interactive HTML review of the implemented v0.4 desktop navigation, Chat history drawer, primary routes, and persistent trust status.
+- Added the implemented v0.4 quality pass: typed UX/trust/error copy, shared native and renderer shortcuts, accessible overlay and command-palette behavior, Chat send-state/retry/draft handling, searchable Settings deep links, contrast and motion invariants, and a 42-artifact responsive screenshot matrix including write confirmation.
+- Added restorable conversation and Settings routes, including explicit recovery for deleted or unknown local conversation links.
+- Added a Claude Code Fable-informed v0.4 quality gap-closure companion plan with measurable UX-writing, interaction-polish, and accessibility targets.
+- Added and refined with Claude Code Fable an interactive v0.4 UX concept mockup centered on the composer, with a Chat-first front door, single contextual rail, progressive context controls, searchable Settings, and outcome-first agent cards.
+- Added an implementation-ready v0.4 UX simplification round-two plan focused on a Chat-first surface, stable navigation, progressive disclosure, and a moderated usability gate.
 - Added deterministic local related-agent hints in Chat, with conservative keyword/synonym matching against installed agents and a dismissible transcript card.
 
 ### Changed
-- Collapsed the desktop sidebar into Home, Chat, Agents, Changes, and Settings, with Agent Hub and Schedules moved under Agents tabs.
-- Home now shows a first-run checklist until the first completed run or completed chat answer, with quick-ask handoff into Chat.
+- Centered the Chat empty-state guidance and suggested questions directly above the composer in both the desktop UI and interactive v0.4 review.
+- Refined the desktop color system: warm near-black sidebar token, an explicit on-accent foreground token replacing hardcoded ink literals, split placeholder and decorative faint text tokens, semantic foreground/background pairs with a more distinguishable danger red, and reduced copper allocation (neutral Chat user bubble with a copper edge, info-toned activity meters and pulses, neutral pins), with `_design.css` and the v0.4 review mockup aligned to the same warm palette.
+- Hosted multi-tenant consent audit records now describe the one-response acknowledgement truthfully instead of recording an unavailable remembered-consent choice.
+- Aligned the design-system specification with the warm stone and amber tokens already used by the desktop app and v0.4 concept.
+- Stabilized the v0.4 rail with Chat, Agents, Changes, and Settings grouped directly below the active tenant, while route-specific context stays inside the active workspace.
+- Collapsed the desktop sidebar into Chat, Agents, Changes, and Settings, with Agent Hub and Schedules moved under Agents tabs.
+- Chat history now closes completely at constrained widths and opens as a readable full-text drawer instead of leaving a numbered mini-rail.
 - Refreshed GitBook docs for the 0.3.0 surface: corrected the LLM provider lineup (Anthropic, LM Studio, Azure OpenAI, Apple Foundation now shipped), fixed stale v0.2.1 version pins, published a Features section for Intune Chat/Workspaces/Changes with new Intune Chat and drift pages, and aligned nav references with the collapsed sidebar.
 
 ### Removed
+- Removed platform-specific screen-reader release gates and evidence requirements; general keyboard, focus, semantic, contrast, and reduced-motion accessibility remains in scope.
+- Removed the redundant Home destination and its duplicate checklist/dashboard; `/` now redirects to Chat. Removed the permanent sidebar issue-report card because issue reporting remains available in Settings → About and contextual recovery.
+- Removed inert `openadminos://` copy-link actions until the desktop app registers and handles that protocol.
 
 ### Fixed
+- Fixed Linux release packaging with an explicit executable and desktop identity, aligned the packaged Electron runtime with the audited lockfile, refreshed desktop and website dependencies to zero known audit findings, and made smoke/capture runners resolve hoisted tooling reliably.
+- Made tagged macOS and Linux releases fail closed before publication when signing or notarization secrets are missing, while preserving unsigned manual packaging validation.
+- Completed the v0.4 functional hardening pass: full beta Graph pagination, non-idempotent retry safety, Autopilot projection compatibility, server-side Changes search, capped-cache drift correctness, schedule activation anchoring, tenant-data purge on disconnect, connector permission/confirmation fixes, updater error recovery, and a missing-route recovery state.
+- Closed the independent Opus 5 review findings: Graph `$top` remains a page-size hint while all continuation pages are read, Changes search is debounced, disconnect/MSAL failures are visible and stop deletion, retry delays are bounded, schedule re-enables get a fresh anchor, Chat recovers from failed cancellation, and Electron test modules are excluded from release packages.
+- Made remote agent installs and updates verify the signed official registry plus per-manifest SHA-256 digests, persist with rollback-safe atomic writes, and remove downloaded manifests on uninstall.
+- Enforced OS secure storage for provider and connector credentials on Linux, owner-only local data file modes, and collision-safe atomic state writes.
+- Added release-source gates for typechecking, tests, Graph/registry QA, generated documentation, builds, and Electron smoke flows, and aligned OpenAdminOS-owned package metadata to 0.4.0.
+- Fixed a Chat cancellation race where a late stream-start event after Stop could violate the send-state transition model, and made Electron smoke/screenshot runners ignore an inherited `ELECTRON_RUN_AS_NODE` shell setting.
+- Sanitized user-visible Chat, Settings, and write-confirmation error details, completed command-palette focus trapping and zoom controls, and made the remaining scheduled-section scroll respect reduced motion.
+- Kept conversation-rail search and tenant refreshes from switching the URL-owned open transcript as a side effect.
 
 ### Security
+- Added detached Ed25519 verification and monotonic replay protection for the official agent index, manifest digest pinning, stronger typed destructive-confirmation phrases, and fail-closed connector capability dispatch.
 
 ## [0.3.0] - 2026-07-05
 
@@ -295,7 +320,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Privacy, terms, README, and marketing copy now disclose production registry install counts where needed, remove stale email-capture references, and keep the no-tenant-telemetry guarantee precise.
 - Settings → Privacy now has a Registry install counts toggle; when enabled, public agent installs report only slug, app version, platform, and a yearly per-agent hash.
-- Marketing landing page now uses a fuller t3.codes-style product narrative with trust/provider proof, registry preview, write-confirmation showcase, open-source proof, and a final download CTA.
+- Marketing landing page now uses a fuller product narrative with trust/provider proof, registry preview, write-confirmation showcase, open-source proof, and a final download CTA.
 - Marketing release badge and macOS download CTA now resolve from the latest GitHub release instead of requiring a manual version bump.
 - Marketing footer now keeps the OpenAdminOS wordmark as plain text and links to the company LinkedIn page with an icon.
 - Marketing and legal pages now pass mobile-width overflow checks, and reduced-motion users see the diff confirmation content without animation.
@@ -646,7 +671,7 @@ Versioned packages: root `0.1.0`, `@openadminos/agent-sdk@0.1.0`, `@openadminos/
 - MSAL interactive authorization-code + PKCE flow (read path) via `@azure/msal-node` `acquireTokenInteractive` against the public Microsoft Graph CLI client id. Opens the system browser to login.microsoftonline.com and uses a loopback redirect (registered against the CLI client) so the user only ever signs in on the real Microsoft login page in their own browser. Token cache encrypted via Electron `safeStorage` and persisted to `tokens.bin`. New Settings → Tenants surface (connect / set-active / disconnect) and a `RunGraphApi` adapter against `https://graph.microsoft.com/v1.0` with `@odata.nextLink` paging and 429 / 5xx retry. Runs are stamped with `dataSource: "graph" | "synthetic"`; the synthetic fixture remains the default when no tenant is connected. Write-path remains synthetic — `POST /retire` calls deferred to a future slice.
 
 ### Changed
-- Desktop framework: Tauri → Electron. Reasoning recorded in SPEC.md §2 ("Why Electron, not Tauri"). Trade: larger binaries (~80–150MB) and higher idle memory accepted in exchange for developer velocity, contributor accessibility, UI fidelity, and parity with the t3code reference architecture.
+- Desktop framework: Tauri → Electron. Reasoning recorded in SPEC.md §2 ("Why Electron, not Tauri"). Trade: larger binaries (~80–150MB) and higher idle memory accepted in exchange for developer velocity, contributor accessibility, UI fidelity, and direct support for the chosen runtime model.
 - Renderer: Next.js 14 App Router → Vite + React + React Router for the Electron renderer. Next.js retained only for `apps/marketing/`.
 - Distribution surface narrowed: dropped the `npx openadminos` CLI. Desktop app is the only end-user surface.
 

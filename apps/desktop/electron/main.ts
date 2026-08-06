@@ -26,6 +26,7 @@ import { AppStateStore } from "./state.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import {
   applyUpdateNow,
+  checkForUpdatesNow,
   getUpdateState,
   startAutoUpdater,
   subscribeToUpdateState,
@@ -100,6 +101,7 @@ import {
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
 import { DRIFT_TRACKED_RESOURCES } from "./intune-chat/drift/tracked-resources.js";
 import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
+import { electronAccelerator } from "../src/shared/shortcuts.js";
 
 // Set the app name BEFORE anything else that could touch the macOS
 // Keychain. Electron's safeStorage uses `app.getName()` to construct
@@ -209,6 +211,7 @@ const COMPANION_WINDOW_WIDTH = 390;
 const COMPANION_WINDOW_HEIGHT = 520;
 const SCREENSHOT_CAPTURE_WIDTH = 1600;
 const SCREENSHOT_CAPTURE_HEIGHT = 1000;
+const SCREENSHOT_CAPTURE_WIDTHS = [900, 1100, 1600] as const;
 const launchSandboxedCodeDefault = process.env[OPENADMINOS_MXC_FLAG] === "1";
 
 const smokeUserData = isIntuneChatSmokeLaunch
@@ -535,13 +538,57 @@ function seedScreenshotCaptureState(userDataDir: string): void {
     JSON.stringify(
       {
         activeProviderId: "ollama",
-        activeModelByProviderId: { ollama: "screenshot-local-model" },
+        activeModelByProviderId: {
+          ollama: "screenshot-local-model-with-a-deliberately-long-identifier",
+        },
         installedAgents,
-        runs: [],
+        runs: [
+          {
+            id: "screenshot-write-run",
+            agentSlug: "offboarding-agent",
+            status: "awaiting-confirmation",
+            queuedAt: now,
+            startedAt: now,
+            providerId: "ollama",
+            model: "screenshot-local-model-with-a-deliberately-long-identifier",
+            tenantId: "contoso-demo-tenant",
+            summary: "Write plan is ready for review.",
+            steps: [],
+            logs: [],
+            plan: {
+              summary: "Retire two stale Windows devices after offboarding review.",
+              confirmationPhrase: "RETIRE 2 DEVICES",
+              actions: [
+                {
+                  id: "screenshot-action-1",
+                  kind: "retire-device",
+                  label: "Retire WIN-OLD-001",
+                  description: "Last synced 96 days ago.",
+                  severity: "destructive",
+                  request: {
+                    method: "POST",
+                    path: "/deviceManagement/managedDevices/device-1/retire",
+                  },
+                },
+                {
+                  id: "screenshot-action-2",
+                  kind: "retire-device",
+                  label: "Retire WIN-OLD-002",
+                  description: "Last synced 104 days ago.",
+                  severity: "destructive",
+                  request: {
+                    method: "POST",
+                    path: "/deviceManagement/managedDevices/device-2/retire",
+                  },
+                },
+              ],
+            },
+          },
+        ],
         tenants: [
           {
             id: "contoso-demo-tenant",
-            displayName: "Contoso Demo",
+            displayName: "Contoso Demo — European Endpoint Administration and Security",
             username: "admin@contoso-demo.invalid",
             homeAccountId: "contoso-demo-home-account",
             addedAt: now,
@@ -869,75 +916,167 @@ async function runScreenshotCapture(): Promise<void> {
     throw new Error("Screenshot capture window was not available.");
   }
 
-  window.setSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
   window.show();
   window.focus();
 
   const entries = loadScreenshotRegistryEntries();
-  const appShots = [
-    {
-      route: "/",
-      name: "home",
-      file: "app/home.png",
-      waitFor: ["Start with one result", "Ask your first question", "Contoso Demo"],
-    },
+  const appShots: Array<{
+    route: string;
+    name: string;
+    file: string;
+    waitFor: string[];
+    prepare?: "chat-empty" | "chat-transcript" | "write-confirmation";
+    heading?: string;
+    selector?: string;
+  }> = [
     {
       route: "/agents",
       name: "agents-home",
       file: "app/agents-home.png",
       waitFor: ["Installed", "Schedules", "Search installed agents"],
+      heading: "Agents",
     },
     {
       route: "/agents/hub",
       name: "hub-grid",
       file: "app/hub-grid.png",
       waitFor: ["Hub", `${entries.length} shown`],
+      heading: "Agent Hub",
     },
     {
       route: "/chat",
       name: "chat-empty",
       file: "app/chat-empty.png",
-      waitFor: ["Chat", "What do you want to inspect?", "New conversation"],
+      waitFor: ["Chat", "Ollama"],
+      prepare: "chat-empty",
+      selector: "#intune-chat-composer",
+    },
+    {
+      route: "/chat",
+      name: "chat-transcript",
+      file: "app/chat-transcript.png",
+      waitFor: ["Chat", "Ollama"],
+      prepare: "chat-transcript",
+      selector: "#intune-chat-composer",
     },
     {
       route: "/changes",
       name: "changes",
       file: "app/changes.png",
       waitFor: ["Changes"],
+      heading: "Changes",
+    },
+    {
+      route: "/runs/screenshot-write-run",
+      name: "write-confirmation",
+      file: "app/write-confirmation.png",
+      waitFor: [
+        "Write operation paused for confirmation",
+        "RETIRE 2 DEVICES",
+        "Microsoft Graph changes may not be reversible",
+      ],
+      prepare: "write-confirmation",
     },
     {
       route: "/settings",
       name: "settings",
       file: "app/settings.png",
       waitFor: ["Settings", "LLM Providers"],
+      heading: "Settings",
     },
   ];
 
   let count = 0;
-  for (const shot of appShots) {
-    await runScreenshotCaptureStep(window, {
+  const chatEmptyShot = appShots.find((shot) => shot.name === "chat-empty");
+  if (!chatEmptyShot) {
+    throw new Error("Screenshot matrix is missing the Chat empty-state fixture.");
+  }
+  const remainingShots = appShots.filter((shot) => shot !== chatEmptyShot);
+  let transcriptRoute: string | undefined;
+
+  const captureAppShot = async (
+    shot: (typeof appShots)[number],
+    width: (typeof SCREENSHOT_CAPTURE_WIDTHS)[number],
+    reducedMotion: boolean,
+  ) => {
+    const height = width === 900 ? 800 : width === 1100 ? 850 : SCREENSHOT_CAPTURE_HEIGHT;
+    let actualWidth = window.getContentSize()[0];
+    for (let attempt = 0; attempt < 20 && actualWidth !== width; attempt += 1) {
+      window.setContentSize(width, height);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      actualWidth = window.getContentSize()[0];
+    }
+    if (actualWidth !== width) {
+      throw new Error(`Screenshot width mismatch: requested ${width}px, received ${actualWidth}px.`);
+    }
+    const reuseTranscript = shot.prepare === "chat-transcript" && transcriptRoute;
+    const prepare = reuseTranscript ? undefined : shot.prepare;
+    const waitFor = reuseTranscript
+        ? [
+            ...shot.waitFor,
+            "WIN-01 is stale based on cached Intune and Entra device evidence.",
+          ]
+        : shot.waitFor;
+    const finalHash = await runScreenshotCaptureStep(window, {
       kind: "route",
-      route: shot.route,
-      waitFor: shot.waitFor,
+      route: reuseTranscript ? transcriptRoute! : shot.route,
+      waitFor,
+      ...(prepare ? { prepare } : {}),
+      ...(shot.heading ? { heading: shot.heading } : {}),
+      ...(shot.selector ? { selector: shot.selector } : {}),
+      reducedMotion,
     });
-    await captureScreenshotPng(window, shot.file);
+    if (prepare === "chat-transcript" && finalHash.startsWith("#/chat/")) {
+      transcriptRoute = finalHash.slice(1);
+    }
+    const mode = reducedMotion ? "reduced-motion" : "default";
+    await captureScreenshotPng(
+      window,
+      `app/width-${width}/${mode}/${shot.name}.png`,
+    );
+    if (width === SCREENSHOT_CAPTURE_WIDTH && !reducedMotion) {
+      await captureScreenshotPng(window, shot.file);
+    }
     count += 1;
+  };
+
+  // Record every empty-state width before transcript capture creates local history.
+  for (const width of SCREENSHOT_CAPTURE_WIDTHS) {
+    const height = width === 900 ? 800 : width === 1100 ? 850 : SCREENSHOT_CAPTURE_HEIGHT;
+    window.setContentSize(width, height);
+    for (const reducedMotion of [false, true]) {
+      await captureAppShot(chatEmptyShot, width, reducedMotion);
+    }
   }
 
-  for (const entry of entries) {
-    try {
-      await runScreenshotCaptureStep(window, {
-        kind: "hub-detail",
-        route: "/agents/hub",
-        slug: entry.slug,
-        name: entry.name,
-        expectedCount: entries.length,
-      });
-      await captureScreenshotPng(window, `hub/${entry.slug}.png`);
-      count += 1;
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`Hub detail failed for ${entry.slug}: ${detail}`);
+  for (const width of SCREENSHOT_CAPTURE_WIDTHS) {
+    const height = width === 900 ? 800 : width === 1100 ? 850 : SCREENSHOT_CAPTURE_HEIGHT;
+    window.setContentSize(width, height);
+    for (const reducedMotion of [false, true]) {
+      for (const shot of remainingShots) {
+        await captureAppShot(shot, width, reducedMotion);
+      }
+    }
+  }
+
+  window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
+
+  if (process.env.OPENADMINOS_SCREENSHOT_HUB_DETAILS === "1") {
+    for (const entry of entries) {
+      try {
+        await runScreenshotCaptureStep(window, {
+          kind: "hub-detail",
+          route: "/agents/hub",
+          slug: entry.slug,
+          name: entry.name,
+          expectedCount: entries.length,
+        });
+        await captureScreenshotPng(window, `hub/${entry.slug}.png`);
+        count += 1;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Hub detail failed for ${entry.slug}: ${detail}`);
+      }
     }
   }
 
@@ -948,8 +1087,8 @@ async function runScreenshotCapture(): Promise<void> {
 async function runScreenshotCaptureStep(
   window: BrowserWindow,
   step: ScreenshotCaptureStep,
-): Promise<void> {
-  await window.webContents.executeJavaScript(
+): Promise<string> {
+  return window.webContents.executeJavaScript(
     `(${screenshotCaptureStepScript.toString()})(${JSON.stringify(step)})`,
     true,
   );
@@ -962,11 +1101,22 @@ async function captureScreenshotPng(
   if (!screenshotCaptureOutDir) {
     throw new Error("OPENADMINOS_SCREENSHOT_OUT_DIR is required.");
   }
-  if (!/^(app|hub)\/[a-z0-9-]+\.png$/.test(relativePath)) {
+  if (
+    !/^(?:app\/(?:width-(?:900|1100|1600)\/(?:default|reduced-motion)\/)?|hub\/)[a-z0-9-]+\.png$/.test(
+      relativePath,
+    )
+  ) {
     throw new Error(`Invalid screenshot output path: ${relativePath}`);
   }
   const outputPath = join(screenshotCaptureOutDir, relativePath);
   mkdirSync(dirname(outputPath), { recursive: true });
+  // Chromium can return the previous compositor frame immediately after a
+  // client-side route change under Xvfb. Force and discard one frame so the
+  // persisted artifact always reflects the route whose DOM was verified.
+  window.webContents.invalidate();
+  await window.webContents.capturePage();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  window.webContents.invalidate();
   const image = await window.webContents.capturePage();
   await writeFile(outputPath, image.toPNG());
   console.log(`[screenshot-capture] wrote ${outputPath}`);
@@ -977,6 +1127,10 @@ type ScreenshotCaptureStep =
       kind: "route";
       route: string;
       waitFor: string[];
+      prepare?: "chat-empty" | "chat-transcript" | "write-confirmation";
+      reducedMotion?: boolean;
+      heading?: string;
+      selector?: string;
     }
   | {
       kind: "hub-detail";
@@ -988,7 +1142,7 @@ type ScreenshotCaptureStep =
 
 async function screenshotCaptureStepScript(
   step: ScreenshotCaptureStep,
-): Promise<void> {
+): Promise<string> {
   const waitFor = async (
     predicate: () => boolean,
     label: string,
@@ -1030,27 +1184,30 @@ async function screenshotCaptureStepScript(
   };
   const textIncludesAll = (needles: string[]) =>
     needles.every((needle) => bodyText().includes(needle));
-  const elementHasNearbyAncestorText = (element: Element, text: string) => {
-    let current: Element | null = element;
-    let depth = 0;
-    while (current && current !== document.body && depth < 7) {
-      if (
-        (current.textContent ?? "").includes(text) &&
-        current.querySelectorAll("button").length <= 4
-      ) {
-        return true;
-      }
-      current = current.parentElement;
-      depth += 1;
-    }
-    return false;
-  };
-  const findDetailsButton = (agentName: string): HTMLButtonElement | undefined =>
+  const findButton = (label: string): HTMLButtonElement | undefined =>
     Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
       (button) =>
-        button.textContent?.trim() === "Details" &&
-        elementHasNearbyAncestorText(button, agentName),
+        button.textContent?.trim() === label ||
+        button.getAttribute("aria-label") === label,
     );
+  const setTextarea = (value: string) => {
+    const textarea = document.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("Chat textarea was not found for screenshot capture.");
+    }
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(textarea, value);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    return textarea;
+  };
+
+  document.documentElement.toggleAttribute(
+    "data-reduced-motion",
+    "reducedMotion" in step && step.reducedMotion === true,
+  );
 
   await closeModal();
   await navigateHash(step.route);
@@ -1058,11 +1215,90 @@ async function screenshotCaptureStepScript(
 
   if (step.kind === "route") {
     await waitFor(
-      () => textIncludesAll(step.waitFor),
+      () =>
+        textIncludesAll(step.waitFor) &&
+        (!step.heading ||
+          Array.from(document.querySelectorAll("h1, h2")).some((heading) =>
+            heading.textContent?.trim().includes(step.heading!),
+          )) &&
+        (!step.selector || Boolean(document.querySelector(step.selector))),
       `${step.route} route content`,
     );
+    if (step.prepare === "chat-empty") {
+      await waitFor(
+        () =>
+          Boolean(
+            (findButton("New") ?? findButton("New conversation")) &&
+              !(findButton("New") ?? findButton("New conversation"))?.disabled,
+          ),
+        "enabled New conversation action",
+      );
+      const newConversation = findButton("New") ?? findButton("New conversation");
+      newConversation?.click();
+      window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
+      await waitFor(
+        () => bodyText().includes("What do you want to inspect?"),
+        "empty Chat state",
+      );
+    } else if (step.prepare === "chat-transcript") {
+      const newConversation = findButton("New") ?? findButton("New conversation");
+      newConversation?.click();
+      window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
+      await waitFor(
+        () => bodyText().includes("What do you want to inspect?"),
+        "new Chat transcript fixture",
+      );
+      const textarea = setTextarea(
+        "Which managed devices have not synced in the last 7 days, and what evidence supports the answer?",
+      );
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "Enter",
+        }),
+      );
+      await waitFor(
+        () => bodyText().includes("WIN-01 is stale based on cached Intune and Entra device evidence."),
+        "Chat transcript answer",
+      );
+      await waitFor(
+        () => Boolean(findButton("Send")) && !findButton("Stop"),
+        "settled Chat transcript",
+      );
+      await waitFor(
+        () => !bodyText().includes("Chat answer ready."),
+        "completed Chat progress cleared",
+        4500,
+      );
+    } else if (step.prepare === "write-confirmation") {
+      await waitFor(
+        () => Boolean(document.querySelector('input[placeholder="Type here to enable Apply"]')),
+        "write confirmation phrase input",
+      );
+      document
+        .querySelector('input[placeholder="Type here to enable Apply"]')
+        ?.scrollIntoView({ block: "center", behavior: "auto" });
+      await delay(150);
+    }
     await delay(250);
-    return;
+    for (const animation of document.getAnimations()) {
+      try {
+        if (animation.effect?.getTiming().iterations !== Infinity) {
+          animation.finish();
+        }
+      } catch {
+        // Infinite progress indicators cannot be finished; route readiness is
+        // asserted separately and their motion is disabled in reduced mode.
+      }
+    }
+    await delay(50);
+    if (document.documentElement.scrollWidth > document.documentElement.clientWidth) {
+      throw new Error(
+        `Horizontal overflow at ${step.route}: ${document.documentElement.scrollWidth}px > ${document.documentElement.clientWidth}px.`,
+      );
+    }
+    return location.hash;
   }
 
   await waitFor(
@@ -1071,17 +1307,7 @@ async function screenshotCaptureStepScript(
       bodyText().includes(step.name),
     `Hub grid for ${step.slug}`,
   );
-  await waitFor(
-    () => Boolean(findDetailsButton(step.name)),
-    `Details button for ${step.slug}`,
-  );
-  const detailsButton = findDetailsButton(step.name);
-  if (!detailsButton) {
-    throw new Error(`Details button was not found for ${step.slug}.`);
-  }
-  detailsButton.scrollIntoView({ block: "center", inline: "nearest" });
-  await delay(150);
-  detailsButton.click();
+  await navigateHash(`${step.route}?agent=${encodeURIComponent(step.slug)}`);
   await waitFor(
     () => {
       const modal = document.querySelector(".fixed");
@@ -1095,6 +1321,7 @@ async function screenshotCaptureStepScript(
     `Hub detail modal for ${step.slug}`,
   );
   await delay(300);
+  return location.hash;
 }
 
 async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
@@ -1296,10 +1523,11 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await clickButton("Open Intune Chat");
   await waitFor(() => location.hash === "#/chat", "onboarding chat navigation");
 
-  location.hash = "/settings";
-  await waitFor(() => bodyText().includes("Settings"), "Settings route");
-  await clickButton("Intune Chat");
-  await waitFor(() => bodyText().includes("Tenant cache"), "Intune Chat settings");
+  location.hash = "/settings/chat";
+  await waitFor(
+    () => bodyText().includes("Settings") && bodyText().includes("Tenant cache"),
+    "Chat settings route",
+  );
   await clickButton("Enable");
   await waitFor(() => bodyText().includes("Next cache refresh"), "periodic refresh enabled");
   await clickButton("Enable");
@@ -1539,10 +1767,11 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       textarea.value.includes("Use the attached workspace context");
   })();
 
-  location.hash = "/settings";
-  await waitFor(() => bodyText().includes("Settings"), "Settings route");
-  await clickButton("Intune Chat");
-  await waitFor(() => bodyText().includes("Accept"), "self-training suggestion");
+  location.hash = "/settings/chat";
+  await waitFor(
+    () => bodyText().includes("Settings") && bodyText().includes("Accept"),
+    "self-training suggestion",
+  );
   await clickButton("Accept");
   await waitFor(() => bodyText().includes("Active overlays"), "accepted self-training overlay");
   await waitFor(
@@ -1669,10 +1898,18 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   };
 
   await waitFor(
-    () => bodyText().includes("Report issue") && bodyText().includes("Public GitHub issue"),
-    "sidebar report issue action",
+    () => bodyText().includes("What do you want to inspect?"),
+    "initial Chat route",
   );
-  await clickButton("Report issue");
+  location.hash = "/settings/about";
+  await waitFor(() => location.hash === "#/settings/about", "About settings hash");
+  await waitFor(
+    () =>
+      bodyText().includes("Settings") &&
+      bodyText().includes("OpenAdminOS is open-source and community-driven."),
+    "About settings",
+  );
+  await clickButton("Create issue");
   await waitFor(
     () =>
       bodyText().includes("Submit a public GitHub issue") &&
@@ -1684,7 +1921,7 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   await setTextarea(0, "The report issue smoke flow should submit a public GitHub issue.");
   await setTextarea(
     1,
-    "1. Open the sidebar report action.\n2. Fill the modal.\n3. Confirm public issue creation.",
+    "1. Open Settings and select About.\n2. Select Create issue and fill the modal.\n3. Confirm public issue creation.",
   );
   await setTextarea(
     2,
@@ -1706,7 +1943,7 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   );
 
   return {
-    hasSidebarAction: bodyText().includes("Public GitHub issue"),
+    hasSettingsAction: bodyText().includes("Public GitHub issue"),
     hasModalPrivacyCopy: bodyText().includes("This creates a public GitHub issue"),
     hasPublicConfirmation: bodyText().includes("I understand this creates a public GitHub issue"),
     hasCreatedIssueNotice: bodyText().includes("Public GitHub issue #12345 created"),
@@ -3737,8 +3974,11 @@ function validateDriftTimelineInput(value: unknown): DriftTimelineInput {
   if (value.resources !== undefined) {
     input.resources = validateDriftResourceArray(value.resources, "resources");
   }
+  if (value.query !== undefined) {
+    input.query = requireBoundedString(value.query, "drift timeline query", 200);
+  }
   if (value.limit !== undefined) {
-    input.limit = requireBoundedInteger(value.limit, "drift timeline limit", 1, 500);
+    input.limit = requireBoundedInteger(value.limit, "drift timeline limit", 1, 5_000);
   }
   return input;
 }
@@ -4036,7 +4276,7 @@ function buildAppMenu(): Menu {
           { type: "separator" },
           {
             label: "Settings…",
-            accelerator: "Cmd+,",
+            accelerator: electronAccelerator("settings"),
             click: () => {
               void openMainWindow("/settings");
             },
@@ -4070,43 +4310,43 @@ function buildAppMenu(): Menu {
     label: "View",
     submenu: [
       {
-        label: "Agents",
+        label: "Chat",
         accelerator: "CmdOrCtrl+1",
-        click: () => {
-          void openMainWindow("/");
-        },
-      },
-      {
-        label: "Agent Hub",
-        accelerator: "CmdOrCtrl+2",
-        click: () => {
-          void openMainWindow("/hub");
-        },
-      },
-      {
-        label: "Intune Chat",
-        accelerator: "CmdOrCtrl+3",
         click: () => {
           void openMainWindow("/chat");
         },
       },
       {
-        label: "Workspaces",
-        accelerator: "CmdOrCtrl+4",
+        label: "Agents",
+        accelerator: "CmdOrCtrl+2",
         click: () => {
-          void openMainWindow("/workspaces");
+          void openMainWindow("/agents");
         },
       },
       {
-        label: "Activity",
-        accelerator: "CmdOrCtrl+5",
+        label: "Changes",
+        accelerator: "CmdOrCtrl+3",
         click: () => {
-          void openMainWindow("/activity");
+          void openMainWindow("/changes");
+        },
+      },
+      {
+        label: "New conversation",
+        accelerator: electronAccelerator("newConversation"),
+        click: () => {
+          void openMainWindow("/chat?new=1");
+        },
+      },
+      {
+        label: "Command Palette",
+        accelerator: electronAccelerator("commandPalette"),
+        click: () => {
+          mainWindow?.webContents.send("openadminos:open-command-palette");
         },
       },
       {
         label: "Settings",
-        accelerator: "CmdOrCtrl+,",
+        accelerator: electronAccelerator("settings"),
         click: () => {
           void openMainWindow("/settings");
         },
@@ -4120,6 +4360,10 @@ function buildAppMenu(): Menu {
           void toggleCompanionWindow();
         },
       },
+      { type: "separator" },
+      { role: "resetZoom" },
+      { role: "zoomIn" },
+      { role: "zoomOut" },
       { type: "separator" },
       { role: "reload" },
       { role: "togglefullscreen" },
@@ -4228,13 +4472,11 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
       : {}),
     width: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_WIDTH : persisted.width,
     height: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : persisted.height,
-    minWidth: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_WIDTH : 960,
+    minWidth: isScreenshotCaptureLaunch ? 800 : 960,
     minHeight: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : 680,
     ...(isScreenshotCaptureLaunch
       ? {
-          maxWidth: SCREENSHOT_CAPTURE_WIDTH,
-          maxHeight: SCREENSHOT_CAPTURE_HEIGHT,
-          resizable: false,
+          resizable: true,
         }
       : {}),
     title: "OpenAdminOS",
@@ -5352,6 +5594,7 @@ function registerIpcHandlers() {
     openExternalUrl(requireBoundedString(url, "url", 12_000));
   }));
   ipcMain.handle("openadminos:get-update-state", handleTrusted(() => getUpdateState()));
+  ipcMain.handle("openadminos:check-for-updates-now", handleTrusted(() => checkForUpdatesNow()));
   ipcMain.handle("openadminos:apply-update-now", handleTrusted(() => applyUpdateNow()));
   subscribeToUpdateState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) {

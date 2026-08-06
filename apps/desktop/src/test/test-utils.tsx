@@ -653,9 +653,11 @@ export function makeMockBridge(
     openExternal: vi.fn(async () => undefined),
     saveTextFile: vi.fn(async () => ({ canceled: true })),
     getUpdateState: vi.fn(async () => createUpdateState()),
+    checkForUpdatesNow: vi.fn(async () => ({ status: "checking" as const })),
     onUpdateStateChanged: vi.fn(() => () => undefined),
     onFocusRun: vi.fn(() => () => undefined),
     onNavigate: vi.fn(() => () => undefined),
+    onOpenCommandPalette: vi.fn(() => () => undefined),
     applyUpdateNow: vi.fn(async () => undefined),
   };
 

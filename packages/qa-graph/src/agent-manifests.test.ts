@@ -167,13 +167,20 @@ describe("agent manifests", () => {
           );
         });
 
-        it("every write skill declares a non-empty confirmationPhrase", () => {
+        it("every write skill declares a count-bound uppercase confirmationPhrase", () => {
           for (const s of skills) {
             if (s.format !== "write") continue;
             const phrase = s.settings?.confirmationPhrase;
+            const rendered =
+              typeof phrase === "string"
+                ? phrase.replace(/\{\{[\s\S]*?\}\}/g, "1").trim()
+                : "";
             assert.ok(
-              typeof phrase === "string" && phrase.trim().length > 0,
-              `${m.slug} has a write skill without confirmationPhrase — violates the human-in-the-loop guarantee`,
+              rendered.length >= 12 &&
+                /^[A-Z][A-Z0-9 -]*$/.test(rendered) &&
+                /\d/.test(rendered) &&
+                rendered.split(/\s+/).length >= 3,
+              `${m.slug} has an unsafe confirmationPhrase — it must identify the operation, count, and target in uppercase`,
             );
           }
         });

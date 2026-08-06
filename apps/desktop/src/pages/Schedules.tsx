@@ -593,7 +593,7 @@ function ScheduleMetric({
       </div>
       <div className="mt-1 flex min-h-4 items-center gap-1.5 font-mono text-[11.5px] text-[var(--color-text-soft)]">
         {state === "running" && (
-          <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-accent)]" />
+          <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-info)]" />
         )}
         {state === "completed" && (
           <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">

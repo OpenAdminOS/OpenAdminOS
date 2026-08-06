@@ -447,6 +447,8 @@ const api: OpenAdminOSApi = {
   saveTextFile: (args: SaveTextFileArgs) =>
     ipcRenderer.invoke("openadminos:save-text-file", args),
   getUpdateState: () => ipcRenderer.invoke("openadminos:get-update-state"),
+  checkForUpdatesNow: () =>
+    ipcRenderer.invoke("openadminos:check-for-updates-now"),
   applyUpdateNow: () => ipcRenderer.invoke("openadminos:apply-update-now"),
   onUpdateStateChanged: (listener: (state: UpdateState) => void) => {
     const wrapped = (_event: unknown, state: UpdateState) => listener(state);
@@ -462,6 +464,11 @@ const api: OpenAdminOSApi = {
     const wrapped = (_event: unknown, path: string) => listener(path);
     ipcRenderer.on("openadminos:navigate", wrapped);
     return () => ipcRenderer.off("openadminos:navigate", wrapped);
+  },
+  onOpenCommandPalette: (listener: () => void) => {
+    const wrapped = () => listener();
+    ipcRenderer.on("openadminos:open-command-palette", wrapped);
+    return () => ipcRenderer.off("openadminos:open-command-palette", wrapped);
   },
 };
 

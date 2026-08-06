@@ -11,7 +11,7 @@ I'm handing you a fresh repo for a project called **OpenAdminOS**. Before you wr
 1. Read `CLAUDE.md` in the root. It tells you how to work in this codebase.
 2. Read `docs/SPEC.md` end-to-end. This is the source of truth for the product.
 3. Open every file in `docs/mockups/` (start with `index.html`) so you understand the design language before building anything.
-4. Read the t3code reference architecture at https://github.com/pingdotgg/t3code — our monorepo shape should follow that pattern.
+4. Review the established Electron + Vite + React monorepo boundaries in the repository before proposing structural changes.
 
 Once you've done that, propose a phased plan for the initial scaffolding (monorepo setup, shared tooling, the empty shells of `apps/desktop`, `apps/web`, `apps/cli`, and the core `packages/`). Don't start scaffolding until I've reviewed the plan. Phase the work so each phase ends in something I can run and see.
 
@@ -34,7 +34,7 @@ Ready when you are.
 
 Review it for:
 
-- Does it match the t3code architecture pattern, or did Claude Code propose something else? If it deviated, ask why.
+- Does it preserve the established desktop, contracts, and provider-adapter boundaries? If it deviated, ask why.
 - Does Phase 1 produce something runnable? It should — even if it's just `pnpm dev` opening an empty Next.js page in a Tauri window.
 - Is the LLM abstraction the actual first feature? It should be — it validates the most important design decision in the codebase.
 - Did Claude Code surface any open questions? It should have at least 2-3.

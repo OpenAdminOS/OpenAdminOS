@@ -21,6 +21,59 @@ import type {
 } from "@openadminos/agent-sdk";
 
 describe("Intune Chat SQLite store", () => {
+  it("does not infer removals from a capped Graph cache window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-capped-drift-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      const common = {
+        tenantId: "tenant-1",
+        resource: "configurationPolicies" as const,
+        label: "Settings catalog policies",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"],
+      };
+      store.replaceGraphResources({
+        ...common,
+        refreshedAt: "2026-08-01T10:00:00.000Z",
+        rows: [
+          { id: "policy-1", displayName: "One", setting: "A" },
+          { id: "policy-2", displayName: "Two", setting: "B" },
+        ],
+      });
+      store.replaceGraphResources({
+        ...common,
+        refreshedAt: "2026-08-01T10:05:00.000Z",
+        pageLimitReached: true,
+        rows: [{ id: "policy-1", displayName: "One", setting: "A2" }],
+      });
+
+      const cappedSnapshot = store.listDriftSnapshots("tenant-1", {
+        resource: "configurationPolicies",
+      })[0];
+      assert.ok(cappedSnapshot);
+      assert.equal(cappedSnapshot.changesModified, 1);
+      assert.equal(cappedSnapshot.changesRemoved, 0);
+
+      store.replaceGraphResources({
+        ...common,
+        refreshedAt: "2026-08-01T10:10:00.000Z",
+        rows: [
+          { id: "policy-1", displayName: "One", setting: "A2" },
+          { id: "policy-2", displayName: "Two", setting: "B" },
+        ],
+      });
+      const history = store.getDriftObjectHistory(
+        "tenant-1",
+        "configurationPolicies",
+        "policy-2",
+      );
+      assert.equal(history.length, 1);
+      assert.equal(history[0]?.removedAt, undefined);
+      store.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("persists conversations, messages, cache rows, and self-training decisions", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-"));
     try {

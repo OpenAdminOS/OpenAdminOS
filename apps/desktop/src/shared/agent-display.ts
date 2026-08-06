@@ -32,3 +32,13 @@ export interface AgentDisplay {
     reason?: string;
   };
 }
+
+export function formatAgentDisplayName(agent: Pick<AgentDisplay, "name" | "slug">): string {
+  const name = agent.name.trim();
+  if (name) return name;
+  return agent.slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part[0]?.toLocaleUpperCase() + part.slice(1))
+    .join(" ");
+}

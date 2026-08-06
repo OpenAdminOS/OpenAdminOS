@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "./Button";
-import { IconCheck, IconClose } from "./icons";
+import { IconCheck, IconClose, IconRefresh, IconWarning } from "./icons";
 import type { UpdateState } from "../shared/openAdminOS";
 
 export function UpdateBanner() {
@@ -30,16 +30,36 @@ export function UpdateBanner() {
   }, []);
 
   if (dismissed) return null;
-  if (state.status !== "ready" && state.status !== "downloading") return null;
+  if (
+    state.status !== "ready" &&
+    state.status !== "downloading" &&
+    state.status !== "error"
+  ) {
+    return null;
+  }
 
   const isReady = state.status === "ready";
+  const isError = state.status === "error";
 
   return (
-    <div className="flex shrink-0 items-center justify-between gap-4 border-b border-[var(--color-accent)]/25 bg-[var(--color-accent-soft)] px-6 py-2.5">
+    <div
+      role={isError ? "alert" : "status"}
+      className={`flex shrink-0 items-center justify-between gap-4 border-b px-6 py-2.5 ${
+        isError
+          ? "border-[var(--color-danger)]/25 bg-[var(--color-danger-soft)]"
+          : "border-[var(--color-accent)]/25 bg-[var(--color-accent-soft)]"
+      }`}
+    >
       <div className="flex items-center gap-2 text-[12.5px] text-[var(--color-text)]">
-        <IconCheck size={12} className="text-[var(--color-accent)]" />
+        {isError ? (
+          <IconWarning size={12} className="text-[var(--color-danger)]" />
+        ) : (
+          <IconCheck size={12} className="text-[var(--color-accent)]" />
+        )}
         <span className="font-medium">
-          {isReady
+          {isError
+            ? state.message ?? "The update check failed."
+            : isReady
             ? `OpenAdminOS ${state.version ?? ""} is ready to install`
             : `Downloading OpenAdminOS ${state.version ?? "update"}…`}
         </span>
@@ -50,6 +70,18 @@ export function UpdateBanner() {
         )}
       </div>
       <div className="flex items-center gap-2">
+        {isError && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              void window.openAdminOS?.checkForUpdatesNow();
+            }}
+          >
+            <IconRefresh size={12} />
+            Retry
+          </Button>
+        )}
         {isReady && (
           <Button
             variant="primary"

@@ -348,7 +348,7 @@ function TextField({
         <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
           {label}
         </span>
-        <span className="font-mono text-[10px] text-[var(--color-text-faint)]">
+        <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
           {value.length}/{maxLength}
         </span>
       </div>
@@ -357,7 +357,7 @@ function TextField({
         maxLength={maxLength}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]"
+        className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
       />
     </label>
   );
@@ -384,7 +384,7 @@ function TextArea({
         <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
           {label}
         </span>
-        <span className="font-mono text-[10px] text-[var(--color-text-faint)]">
+        <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
           {value.length}/{maxLength}
         </span>
       </div>
@@ -394,7 +394,7 @@ function TextArea({
         maxLength={maxLength}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full resize-none rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] leading-relaxed text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-faint)] focus:border-[var(--color-accent)]"
+        className="w-full resize-none rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] leading-relaxed text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
       />
     </label>
   );

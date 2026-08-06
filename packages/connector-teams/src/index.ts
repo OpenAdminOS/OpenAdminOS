@@ -199,7 +199,7 @@ function buildCapabilities(
       const payload = await client.fetch<TeamsChatMessageResponse>({
         method: "POST",
         path: `/chats/${encodeURIComponent(chatId)}/messages`,
-        scopes: [TEAMS_SCOPES.ChatReadWrite],
+        scopes: [TEAMS_SCOPES.ChatMessageSend],
         capabilityId: "post-chat-message",
         body: {
           body: {

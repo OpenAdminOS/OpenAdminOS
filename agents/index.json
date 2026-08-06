@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "revision": 1,
   "agents": [
     {
       "id": "compliance-overview",
@@ -20,7 +21,8 @@
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/compliance-overview/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/compliance-overview/manifest.yaml",
+      "manifestSha256": "642d6d4fb7797f1a95425a3ee5f75a7cbd13ede7fb10774731e0220302878d9c"
     },
     {
       "id": "conditional-access-explainer",
@@ -41,7 +43,8 @@
         "Policy.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml",
+      "manifestSha256": "2413d28485f94c8b258749829992b63f941ef1a2bffd14f56da6237dbad79ad6"
     },
     {
       "id": "dormant-app-registrations",
@@ -62,7 +65,8 @@
         "Application.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/dormant-app-registrations/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/dormant-app-registrations/manifest.yaml",
+      "manifestSha256": "88b8c588ae70d4627298a1e09e813e0ae2bc1fb1a58bb75015757b8d513ce6de"
     },
     {
       "id": "find-inactive-devices",
@@ -83,7 +87,8 @@
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/find-inactive-devices/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/find-inactive-devices/manifest.yaml",
+      "manifestSha256": "cd222f69430596218129b280378b8765d2746945028c1e411c8e7f0022e1d64c"
     },
     {
       "id": "intune-device-posture-auditor",
@@ -111,7 +116,8 @@
         "containment": "process",
         "timeoutMs": 45000
       },
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/intune-device-posture-auditor/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/intune-device-posture-auditor/manifest.yaml",
+      "manifestSha256": "2371a9a8ef22ba4e116a4bec67fa791bee80b27fca7b1866740f0fb865e03756"
     },
     {
       "id": "offboarding-agent",
@@ -134,7 +140,8 @@
         "DeviceManagementManagedDevices.PrivilegedOperations.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml",
+      "manifestSha256": "2ca22be2f81828bfb43132caf967ceeaac8b98d573049866ef4b5e39fd094ef0"
     },
     {
       "id": "os-update-posture",
@@ -155,7 +162,8 @@
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml",
+      "manifestSha256": "5af5e9932f1c34c7726b07066bdf04b1edcf4d50fe77c0e0629f325104bd4ff8"
     },
     {
       "id": "risky-sign-in-triage",
@@ -176,7 +184,8 @@
         "IdentityRiskyUser.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/risky-sign-in-triage/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/risky-sign-in-triage/manifest.yaml",
+      "manifestSha256": "1b6ad7a0b409cfb4d358c366abcffa9f2b9990d7335a7f1a87464d755705b5fa"
     },
     {
       "id": "secure-score-prioritizer",
@@ -197,7 +206,8 @@
         "SecurityEvents.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/secure-score-prioritizer/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/secure-score-prioritizer/manifest.yaml",
+      "manifestSha256": "dcee2840ee7a8d870217a8be267517d1d69252482c9071971f3577c554989d4f"
     },
     {
       "id": "sign-in-failure-explainer",
@@ -218,7 +228,8 @@
         "AuditLog.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/sign-in-failure-explainer/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/sign-in-failure-explainer/manifest.yaml",
+      "manifestSha256": "a9f95dd9d1ad061e48ee57a01adb953f857a590665d2e604b100ef0fe66b75f4"
     },
     {
       "id": "stale-guest-cleanup",
@@ -241,7 +252,8 @@
         "User.ReadWrite.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/stale-guest-cleanup/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/stale-guest-cleanup/manifest.yaml",
+      "manifestSha256": "4f9a0e5ceec07e83913215ef4aee5f242a88430ca4671329f2a9d7cffd9f2851"
     },
     {
       "id": "tenant-change-audit",
@@ -263,7 +275,8 @@
         "Directory.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml",
+      "manifestSha256": "6d94f4fe9e1393eee3d531712e2571d92e314bb237ed492a5d4e714c7a0676f7"
     },
     {
       "id": "tenant-health-report",
@@ -284,7 +297,8 @@
         "DeviceManagementManagedDevices.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-health-report/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-health-report/manifest.yaml",
+      "manifestSha256": "a331e2e21e33c7798fb80ab2552b5b85378418c37cafeccea743a3be31143b54"
     },
     {
       "id": "user-license-overview",
@@ -305,7 +319,8 @@
         "User.Read.All"
       ],
       "minAppVersion": "0.1.0",
-      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/user-license-overview/manifest.yaml"
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/user-license-overview/manifest.yaml",
+      "manifestSha256": "65bbf2b0c3de73a41a9525bf675c72b675945f0ad1b7e24d86a65456553eea67"
     }
   ]
 }

@@ -190,7 +190,7 @@ function SettingField({
           placeholder={
             setting.default !== undefined ? `default: ${String(setting.default)}` : undefined
           }
-          className="h-9 rounded-md bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+          className="h-9 rounded-md bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
         />
       )}
       {setting.hint && (

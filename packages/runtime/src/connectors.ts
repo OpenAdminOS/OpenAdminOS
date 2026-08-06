@@ -352,11 +352,19 @@ interface InvokeCapabilityInput {
 }
 
 async function invokeCapability(input: InvokeCapabilityInput): Promise<unknown> {
+  if (!input.capabilityDescriptor) {
+    throw new ConnectorValidationError(
+      `Connector '${input.connectorId}' exposed method '${input.methodName}' without a matching capability descriptor. Invocation was blocked.`,
+      {
+        connectorId: input.connectorId,
+        capabilityId: camelToKebab(input.methodName),
+      },
+    );
+  }
   const stepId = input.options.currentStepId() ?? "(no-step)";
-  const capabilityId =
-    input.capabilityDescriptor?.id ?? camelToKebab(input.methodName);
-  const capabilityVersion = input.capabilityDescriptor?.version ?? 1;
-  const kind: CapabilityKind = input.capabilityDescriptor?.kind ?? "read";
+  const capabilityId = input.capabilityDescriptor.id;
+  const capabilityVersion = input.capabilityDescriptor.version;
+  const kind: CapabilityKind = input.capabilityDescriptor.kind;
 
   const iteration = input.options.nextIteration(stepId, capabilityId);
   const idempotencyKey = `${input.options.runId}:${stepId}:${capabilityId}:${iteration}`;
@@ -370,8 +378,7 @@ async function invokeCapability(input: InvokeCapabilityInput): Promise<unknown> 
       info: {
         connectorId: input.connectorId,
         capability:
-          input.capabilityDescriptor ??
-          synthesizeDescriptor(input.methodName, kind),
+          input.capabilityDescriptor,
         args,
         egressTarget,
         idempotencyKey,
@@ -461,7 +468,10 @@ async function runConfirmation(input: {
   confirmInvocation?: WrapConnectorOptions["confirmInvocation"];
 }): Promise<ConfirmationDecision> {
   if (!input.confirmInvocation) {
-    return { approved: true };
+    return {
+      approved: false,
+      reason: "No confirmation handler is attached to this connector invocation.",
+    };
   }
   return await input.confirmInvocation(input.info);
 }
@@ -472,18 +482,6 @@ function lookupCapabilityDescriptor(
 ): CapabilityDescriptor | undefined {
   const kebab = camelToKebab(methodName);
   return descriptor.capabilities.find((cap) => cap.id === kebab);
-}
-
-function synthesizeDescriptor(
-  methodName: string,
-  kind: CapabilityKind,
-): CapabilityDescriptor {
-  return {
-    id: camelToKebab(methodName),
-    version: 1,
-    kind,
-    scopes: [],
-  };
 }
 
 function camelToKebab(value: string): string {

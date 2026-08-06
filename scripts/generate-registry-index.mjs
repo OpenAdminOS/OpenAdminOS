@@ -8,6 +8,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,7 +28,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 const agentsRoot = join(repoRoot, "agents");
 const outPath = join(agentsRoot, "index.json");
+const revisionPath = join(agentsRoot, "registry-revision.txt");
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+const registryRevision = Number.parseInt(readFileSync(revisionPath, "utf8").trim(), 10);
+if (!Number.isSafeInteger(registryRevision) || registryRevision < 1) {
+  console.error("agents/registry-revision.txt must contain a positive integer.");
+  process.exit(1);
+}
 
 function parseManifest(manifestPath) {
   const raw = parseYaml(readFileSync(manifestPath, "utf8"));
@@ -61,6 +69,9 @@ function parseManifest(manifestPath) {
     },
     scopes: [...scopes],
     minAppVersion: descriptor.minAppVersion ?? "",
+    ...(Array.isArray(descriptor.connectors)
+      ? { connectors: descriptor.connectors }
+      : {}),
     ...(raw?.execution ? { execution: raw.execution } : {}),
   };
 }
@@ -75,10 +86,13 @@ const entries = readdirSync(agentsRoot)
   })
   .map((agentDir) => {
     const slug = agentDir.split(/[\\/]/).pop();
-    const manifest = parseManifest(join(agentDir, "manifest.yaml"));
+    const manifestPath = join(agentDir, "manifest.yaml");
+    const manifestBytes = readFileSync(manifestPath);
+    const manifest = parseManifest(manifestPath);
     return {
       ...manifest,
       manifestUrl: `${baseUrl}/agents/${slug}/manifest.yaml`,
+      manifestSha256: createHash("sha256").update(manifestBytes).digest("hex"),
     };
   })
   .filter((e) => e.id.length > 0)
@@ -98,6 +112,9 @@ for (const entry of entries) {
   if (!entry.name || !entry.description) {
     errors.push(`${entry.slug}: descriptor.name and descriptor.description are required`);
   }
+  if (!/^[a-f0-9]{64}$/.test(entry.manifestSha256)) {
+    errors.push(`${entry.slug}: manifestSha256 must be a SHA-256 hex digest`);
+  }
   if (!existsSync(join(agentsRoot, entry.slug, "README.md"))) {
     errors.push(`${entry.slug}: README.md is required`);
   }
@@ -109,15 +126,31 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-// `generatedAt` is deliberately omitted. We tried a Date.now() value
-// and a CI verify-against-checked-in step, but the live timestamp
-// guarantees CI rebuilds drift from the committed file every run.
-// Nothing in the app or registry-client actually consumes the field —
-// git history is the authoritative "when did this last change". If we
-// ever need a freshness signal, derive it from `git log -1` against
-// agents/ so the value is deterministic per commit.
+// `revision` is deliberately explicit rather than time-based so index
+// generation stays deterministic. The client remembers the highest
+// verified revision and refuses older signed indexes. Force maintainers
+// to bump it whenever the generated agent set changes.
+if (existsSync(outPath)) {
+  try {
+    const previous = JSON.parse(readFileSync(outPath, "utf8"));
+    if (
+      previous?.revision === registryRevision &&
+      JSON.stringify(previous.agents) !== JSON.stringify(entries)
+    ) {
+      console.error(
+        "Registry entries changed without a revision bump. Increment agents/registry-revision.txt, then regenerate and sign the index.",
+      );
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error(`Unable to compare the previous registry index: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
 const index = {
   schemaVersion: 1,
+  revision: registryRevision,
   agents: entries,
 };
 

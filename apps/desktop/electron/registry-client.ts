@@ -11,11 +11,13 @@
  * Cache location: <userData>/registry-cache/index.json
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { verify } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 
 import type {
+  AgentConnectorRequirement,
   AgentExecution,
   AgentTier,
   RequiredEntraTier,
@@ -25,6 +27,10 @@ export const DEFAULT_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
 const FETCH_TIMEOUT_MS = 10_000;
+
+const OFFICIAL_REGISTRY_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAI6Ms2SvvonYIFVxK5Vb9YqnnIdlLowM/JLKbmOb+5N0=
+-----END PUBLIC KEY-----`;
 
 export interface RegistrySourceValidationOptions {
   allowDevSource?: boolean;
@@ -55,22 +61,23 @@ export interface RegistryIndexEntry {
   };
   scopes: string[];
   execution?: AgentExecution;
+  connectors?: AgentConnectorRequirement[];
   minAppVersion: string;
   manifestUrl: string;
+  manifestSha256: string;
 }
 
 interface RegistryIndex {
   schemaVersion: number;
-  /** Optional. Older indexes carried a Date.now() string here; dropped
-   *  to keep generator output deterministic across CI runs. Kept
-   *  optional on the interface so existing cached payloads parse. */
-  generatedAt?: string;
+  /** Monotonic for the signed official registry. Custom registries may omit it. */
+  revision?: number;
   agents: RegistryIndexEntry[];
 }
 
 interface CachedIndex extends RegistryIndex {
   cachedAt: string;
   sourceUrl: string;
+  signatureVerified: boolean;
 }
 
 export interface RefreshResult {
@@ -88,7 +95,11 @@ function cachePath(userDataPath: string): string {
   return join(cacheDir(userDataPath), "index.json");
 }
 
-function readCache(userDataPath: string, sourceUrl?: string): CachedIndex | null {
+function readCache(
+  userDataPath: string,
+  sourceUrl?: string,
+  requireVerified = false,
+): CachedIndex | null {
   const path = cachePath(userDataPath);
   if (!existsSync(path)) return null;
   try {
@@ -103,6 +114,15 @@ function readCache(userDataPath: string, sourceUrl?: string): CachedIndex | null
       if (sourceUrl && cached.sourceUrl !== sourceUrl) {
         return null;
       }
+      if (requireVerified && cached.signatureVerified !== true) {
+        return null;
+      }
+      if (
+        requireVerified &&
+        (!Number.isSafeInteger(cached.revision) || (cached.revision ?? 0) < 1)
+      ) {
+        return null;
+      }
       return cached;
     }
     return null;
@@ -111,15 +131,35 @@ function readCache(userDataPath: string, sourceUrl?: string): CachedIndex | null
   }
 }
 
-function writeCache(userDataPath: string, index: RegistryIndex, sourceUrl: string): void {
+function writeCache(
+  userDataPath: string,
+  index: RegistryIndex,
+  sourceUrl: string,
+  signatureVerified: boolean,
+): void {
   const dir = cacheDir(userDataPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    // Windows does not implement POSIX mode bits; ACLs remain authoritative.
+  }
   const cached: CachedIndex = {
     ...index,
     cachedAt: new Date().toISOString(),
     sourceUrl,
+    signatureVerified,
   };
-  writeFileSync(cachePath(userDataPath), JSON.stringify(cached, null, 2) + "\n");
+  writeFileSync(
+    cachePath(userDataPath),
+    JSON.stringify(cached, null, 2) + "\n",
+    { mode: 0o600 },
+  );
+  try {
+    chmodSync(cachePath(userDataPath), 0o600);
+  } catch {
+    // See directory note above.
+  }
 }
 
 export function validateRegistrySource(
@@ -192,37 +232,71 @@ export async function refreshRegistry(
     return { entries: [], fromCache: false, cachedAt: null, error: message };
   }
   const indexUrl = `${sourceUrl}/index.json`;
+  const sourceValidation = validateRegistrySource(registrySource, options);
+  const requireSignature = sourceValidation.isOfficial;
+  const trustedCache = readCache(userDataPath, sourceUrl, requireSignature);
 
   let fetchedIndex: RegistryIndex | null = null;
   let fetchError: string | null = null;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     const response = await fetch(indexUrl, { signal: controller.signal });
-    clearTimeout(timer);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const body = (await response.json()) as unknown;
+    const indexText = await response.text();
+    if (requireSignature) {
+      const signatureResponse = await fetch(`${sourceUrl}/index.sig`, {
+        signal: controller.signal,
+      });
+      if (!signatureResponse.ok) {
+        throw new Error(`HTTP ${signatureResponse.status} while fetching registry signature`);
+      }
+      const signature = (await signatureResponse.text()).trim();
+      if (!verifyOfficialRegistrySignature(indexText, signature)) {
+        throw new Error("Registry signature verification failed");
+      }
+    }
+    const body = JSON.parse(indexText) as unknown;
     if (
       body &&
       typeof body === "object" &&
       "agents" in body &&
       Array.isArray((body as { agents: unknown }).agents)
     ) {
-      fetchedIndex = body as RegistryIndex;
+      const candidate = body as RegistryIndex;
+      if (
+        requireSignature &&
+        (!Number.isSafeInteger(candidate.revision) || (candidate.revision ?? 0) < 1)
+      ) {
+        throw new Error("Official registry index is missing a valid revision");
+      }
+      if (
+        requireSignature &&
+        trustedCache?.revision !== undefined &&
+        (candidate.revision ?? 0) < trustedCache.revision
+      ) {
+        throw new Error(
+          `Official registry replay rejected: revision ${candidate.revision ?? 0} is older than verified revision ${trustedCache.revision}.`,
+        );
+      }
+      validateRegistryEntries(candidate.agents);
+      fetchedIndex = candidate;
     } else {
       throw new Error("Invalid index shape");
     }
   } catch (err) {
     fetchError = err instanceof Error ? err.message : String(err);
+  } finally {
+    clearTimeout(timer);
   }
 
   if (fetchedIndex) {
-    writeCache(userDataPath, fetchedIndex, sourceUrl);
+    writeCache(userDataPath, fetchedIndex, sourceUrl, requireSignature);
     return { entries: fetchedIndex.agents, fromCache: false, cachedAt: new Date().toISOString(), error: null };
   }
 
-  const cached = readCache(userDataPath, sourceUrl);
+  const cached = trustedCache;
   if (cached) {
     return { entries: cached.agents, fromCache: true, cachedAt: cached.cachedAt, error: fetchError };
   }
@@ -246,11 +320,45 @@ export function readCachedRegistry(
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  const cached = readCache(userDataPath, sourceUrl);
+  const validation = validateRegistrySource(registrySource);
+  const cached = readCache(userDataPath, sourceUrl, validation.isOfficial);
   if (cached) {
     return { entries: cached.agents, fromCache: true, cachedAt: cached.cachedAt, error: null };
   }
   return { entries: [], fromCache: false, cachedAt: null, error: null };
+}
+
+export function verifyOfficialRegistrySignature(
+  indexText: string,
+  signatureBase64: string,
+): boolean {
+  try {
+    const signature = Buffer.from(signatureBase64, "base64");
+    return (
+      signature.length === 64 &&
+      verify(
+        null,
+        Buffer.from(indexText, "utf8"),
+        OFFICIAL_REGISTRY_PUBLIC_KEY,
+        signature,
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateRegistryEntries(entries: RegistryIndexEntry[]): void {
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("Invalid registry agent entry");
+    }
+    if (!/^[a-f0-9]{64}$/.test(entry.manifestSha256)) {
+      throw new Error(
+        `Registry entry "${String(entry.slug ?? "unknown")}" has no valid manifest SHA-256 digest`,
+      );
+    }
+  }
 }
 
 function normalizeRegistrySource(url: URL): string {

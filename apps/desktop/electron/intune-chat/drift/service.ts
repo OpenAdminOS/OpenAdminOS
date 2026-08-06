@@ -29,7 +29,8 @@ import {
 import { DRIFT_TRACKED_RESOURCES } from "./tracked-resources.js";
 
 const DEFAULT_TIMELINE_LIMIT = 200;
-const MAX_TIMELINE_LIMIT = 500;
+const MAX_TIMELINE_LIMIT = 5_000;
+const MAX_SNAPSHOTS_PER_RESOURCE = 5_000;
 const DETAIL_RAW_LIMIT_BYTES = 48 * 1024;
 const TRACKED_RESOURCES = [...DRIFT_TRACKED_RESOURCES];
 const INTUNE_AUDIT_EVENTS_RESOURCE: GraphCacheResourceKind = "intuneAuditEvents";
@@ -88,14 +89,19 @@ export class DriftService {
     const auditCache = this.readAuditCache(tenant.id);
     const entries: DriftTimelineEntry[] = [];
 
-    const snapshots = resources.flatMap((resource) =>
-      this.host.listDriftSnapshots(tenant.id, {
+    let historyTruncated = false;
+    const snapshots = resources.flatMap((resource) => {
+      const resourceSnapshots = this.host.listDriftSnapshots(tenant.id, {
         resource,
         ...(input.from ? { from: input.from } : {}),
         ...(input.to ? { to: input.to } : {}),
-        limit: MAX_TIMELINE_LIMIT,
-      }),
-    );
+        limit: MAX_SNAPSHOTS_PER_RESOURCE + 1,
+      });
+      if (resourceSnapshots.length > MAX_SNAPSHOTS_PER_RESOURCE) {
+        historyTruncated = true;
+      }
+      return resourceSnapshots.slice(0, MAX_SNAPSHOTS_PER_RESOURCE);
+    });
     snapshots.sort(compareSnapshotsDesc);
 
     for (const snapshot of snapshots) {
@@ -147,11 +153,15 @@ export class DriftService {
     }
 
     entries.sort(compareTimelineEntriesDesc);
+    const filteredEntries = input.query
+      ? entries.filter((entry) => timelineEntryMatches(entry, input.query ?? ""))
+      : entries;
     return {
       tenantId: tenant.id,
-      entries: entries.slice(0, limit),
-      hasMore: entries.length > limit,
+      entries: filteredEntries.slice(0, limit),
+      hasMore: filteredEntries.length > limit,
       limit,
+      ...(historyTruncated ? { historyTruncated: true } : {}),
     };
   }
 
@@ -235,6 +245,11 @@ export class DriftService {
   async getDriftStatus(tenantId: string): Promise<DriftStatus> {
     const tenant = await this.resolveTenant(tenantId);
     const stats = this.host.getDriftResourceStats(tenant.id, TRACKED_RESOURCES);
+    const cacheStatus = new Map(
+      this.host
+        .getGraphCacheStatus(tenant.id, TRACKED_RESOURCES)
+        .map((entry) => [entry.resource, entry]),
+    );
     return {
       tenantId: tenant.id,
       resources: stats.map((stat) => ({
@@ -248,6 +263,9 @@ export class DriftService {
         snapshotCount: stat.snapshotCount,
         totalTrackedVersions: stat.totalTrackedVersions,
         currentObjectCount: stat.currentObjectCount,
+        ...(cacheStatus.get(stat.resource)?.pageLimitReached
+          ? { pageLimitReached: true }
+          : {}),
       })),
     };
   }
@@ -306,6 +324,25 @@ export class DriftService {
     }
     return out;
   }
+}
+
+function timelineEntryMatches(entry: DriftTimelineEntry, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return true;
+  return [
+    entry.displayName,
+    entry.graphId,
+    entry.resource,
+    entry.resourceLabel,
+    entry.changeKind,
+    entry.attribution?.actor?.userPrincipalName,
+    entry.attribution?.actor?.appDisplayName,
+    entry.attribution?.activity,
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLocaleLowerCase()
+    .includes(needle);
 }
 
 function fieldChangesFor(change: DriftSnapshotChangeRecord): DriftFieldChange[] {

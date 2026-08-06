@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenAdminOS · v0.4 interactive app review</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1c1917;
+      --bg-deep: #151311;
+      --sidebar: #191614;
+      --surface: #24211f;
+      --surface-2: #2b2724;
+      --line: #37312c;
+      --line-soft: #2b2723;
+      --text: #f5f1eb;
+      --soft: #bbb1a6;
+      --muted: #8f8479;
+      --accent: #e8a87c;
+      --accent-soft: rgba(232, 168, 124, .13);
+      --success: #9cc88f;
+      --success-soft: rgba(156, 200, 143, .12);
+      --warning: #e5c678;
+      --danger: #e58888;
+      --on-accent: #1a120c;
+      --placeholder: #9c9186;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: var(--bg-deep); color: var(--text); font: 14px/1.45 var(--sans); }
+    button, input, textarea { font: inherit; }
+    input::placeholder, textarea::placeholder { color: var(--placeholder); }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .window {
+      display: grid;
+      grid-template-rows: 32px minmax(0, 1fr) 28px;
+      width: 100vw;
+      height: 100vh;
+      min-width: 880px;
+      min-height: 620px;
+      border: 1px solid #0d0c0b;
+      background: var(--bg);
+    }
+    .titlebar {
+      display: grid;
+      grid-template-columns: 120px 1fr 120px;
+      align-items: center;
+      border-bottom: 1px solid var(--line-soft);
+      background: #161412;
+      color: var(--muted);
+      user-select: none;
+    }
+    .traffic { display: flex; gap: 7px; padding-left: 13px; }
+    .traffic i { width: 10px; height: 10px; border-radius: 50%; background: #665d55; }
+    .traffic i:first-child { background: #d96b62; }
+    .traffic i:nth-child(2) { background: #cba456; }
+    .traffic i:last-child { background: #6eaf6d; }
+    .window-title { text-align: center; font: 10px var(--mono); letter-spacing: .04em; }
+    .review-label { justify-self: end; padding-right: 12px; font: 9px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+
+    .app { display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 0; }
+    .sidebar {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--line-soft);
+      background: var(--sidebar);
+    }
+    .brand { display: flex; height: 48px; align-items: center; gap: 9px; padding: 0 14px; }
+    .brand-mark { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 7px; background: var(--accent-soft); color: var(--accent); }
+    .brand-name { font-size: 12px; font-weight: 700; }
+    .version { margin-left: 2px; border-radius: 4px; background: var(--surface); padding: 2px 5px; color: var(--muted); font: 9px var(--mono); }
+    .provider-dot { width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+
+    .tenant {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      margin: 0 11px;
+      padding: 9px;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+    }
+    .tenant:hover { background: var(--surface-2); }
+    .avatar { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; background: #76936c; color: #151b13; font-size: 10px; font-weight: 800; }
+    .tenant strong, .tenant small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tenant strong { font-size: 12px; }
+    .tenant small { margin-top: 1px; color: var(--muted); font-size: 10px; }
+
+    .quick-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 11px 12px;
+      padding: 7px 9px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #201d1b;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .quick-search span { flex: 1; text-align: left; font-size: 11px; }
+    kbd { color: var(--muted); font: 9px var(--mono); }
+    .divider { height: 1px; margin: 0 12px 10px; background: var(--line-soft); }
+    .nav-label { padding: 0 15px 6px; color: var(--muted); font-size: 9px; font-weight: 650; letter-spacing: .11em; text-transform: uppercase; }
+    .nav { display: grid; gap: 2px; padding: 0 9px; }
+    .nav-button {
+      position: relative;
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      min-height: 34px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--soft);
+      padding: 0 10px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .nav-button:hover { background: var(--surface); color: var(--text); }
+    .nav-button.active { background: linear-gradient(90deg, var(--surface-2), var(--surface)); color: var(--text); }
+    .nav-button.active::before { content: ""; position: absolute; left: 0; width: 2px; height: 17px; border-radius: 0 2px 2px 0; background: var(--accent); }
+    .nav-button.active svg { color: var(--accent); }
+    .badge { border-radius: 5px; background: #302a26; padding: 2px 6px; color: var(--muted); font: 9px var(--mono); }
+    .sidebar-note { margin-top: auto; padding: 18px 15px; color: var(--muted); font: 9px/1.5 var(--mono); }
+
+    .workspace { min-width: 0; min-height: 0; overflow: hidden; }
+    .view { width: 100%; height: 100%; }
+    .chat-view { position: relative; display: flex; min-width: 0; min-height: 0; }
+    .history {
+      display: flex;
+      width: 284px;
+      min-width: 284px;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--line-soft);
+      background: var(--sidebar);
+      transition: width .16s ease, min-width .16s ease;
+    }
+    .chat-view:not(.history-open) .history { width: 0; min-width: 0; overflow: hidden; border-right: 0; }
+    .history-head { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; }
+    .history-head small { display: block; color: var(--muted); font: 9px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    .history-head strong { display: block; max-width: 150px; margin-top: 3px; overflow: hidden; color: var(--soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .history-controls { display: flex; gap: 5px; }
+    .icon-button, .small-button {
+      display: inline-flex;
+      min-height: 29px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--soft);
+      cursor: pointer;
+    }
+    .icon-button { width: 29px; padding: 0; }
+    .small-button { padding: 0 9px; font-size: 11px; }
+    .icon-button:hover, .small-button:hover { border-color: #514940; background: var(--surface-2); color: var(--text); }
+    .history-search { position: relative; margin: 0 10px 10px; }
+    .history-search svg { position: absolute; left: 9px; top: 9px; width: 13px; height: 13px; color: var(--muted); }
+    .history-search input { width: 100%; height: 32px; border: 1px solid var(--line-soft); border-radius: 7px; background: #211e1b; color: var(--text); padding: 0 9px 0 29px; font-size: 11px; }
+    .history-list { min-height: 0; flex: 1; overflow: auto; padding: 0 8px 12px; }
+    .history-kicker { padding: 8px 8px 5px; color: var(--muted); font: 9px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    .conversation {
+      width: 100%;
+      min-height: 46px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      padding: 7px 9px;
+      color: var(--soft);
+      text-align: left;
+      cursor: pointer;
+    }
+    .conversation:hover, .conversation.active { background: var(--surface); color: var(--text); }
+    .conversation.active { border-color: var(--line); }
+    .conversation strong, .conversation small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation strong { font-size: 11.5px; }
+    .conversation small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .chat-settings { border-top: 1px solid var(--line-soft); padding: 10px; }
+    .chat-settings button { width: 100%; }
+    .history-toggle { display: none; }
+    .chat-view:not(.history-open) .history-toggle { display: inline-flex; }
+    .history-scrim { display: none; }
+
+    .chat-main { display: grid; min-width: 0; min-height: 0; flex: 1; grid-template-rows: 56px minmax(0, 1fr) auto; }
+    .chat-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 22px; border-bottom: 1px solid var(--line-soft); }
+    .chat-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
+    .chat-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+    .chat-title strong, .chat-title small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-title strong { font-size: 12px; }
+    .chat-title small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .local-pill { border-radius: 999px; background: var(--success-soft); padding: 4px 8px; color: var(--success); font-size: 9px; font-weight: 650; }
+    .messages { min-height: 0; overflow: auto; }
+    .empty { display: flex; width: min(680px, calc(100% - 48px)); min-height: 100%; margin: 0 auto; flex-direction: column; justify-content: flex-end; padding: 40px 0 28px; text-align: center; }
+    .empty h1 { margin: 0; font-size: 25px; font-weight: 650; letter-spacing: -.025em; }
+    .empty > p { margin: 7px 0 16px; color: var(--soft); font-size: 13px; }
+    .prompts { display: grid; gap: 3px; }
+    .prompt { border: 0; border-radius: 8px; background: transparent; padding: 9px 10px; color: var(--muted); text-align: center; cursor: pointer; }
+    .prompt:hover { background: var(--surface); color: var(--text); }
+    .transcript { width: min(790px, calc(100% - 48px)); margin: 0 auto; padding: 38px 0; }
+    .message-label { margin-bottom: 6px; color: var(--muted); font: 9px var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    .user-message { width: min(580px, 88%); margin-left: auto; border: 1px solid var(--line); border-right: 2px solid var(--accent); border-radius: 11px; background: var(--surface); padding: 12px 14px; }
+    .answer { margin-top: 24px; border-left: 2px solid var(--accent); padding-left: 16px; color: var(--soft); }
+    .answer h2 { margin: 0 0 7px; color: var(--text); font-size: 15px; }
+    .answer p { margin: 0 0 14px; }
+    .finding { display: grid; grid-template-columns: 1fr auto; gap: 12px; border-top: 1px solid var(--line-soft); padding: 10px 0; }
+    .finding strong { color: var(--text); font-size: 11px; }
+    .finding span { color: var(--warning); font: 10px var(--mono); }
+    .source { margin-top: 13px; color: var(--muted); font: 9px var(--mono); }
+    .composer-wrap { border-top: 1px solid var(--line-soft); padding: 13px 22px 15px; }
+    .composer { width: min(790px, 100%); margin: 0 auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 7px; }
+    .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+    .composer textarea { display: block; width: 100%; min-height: 58px; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); padding: 7px 8px; font-size: 13px; }
+    .composer-row { display: flex; align-items: center; gap: 8px; }
+    .boundary { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .send { border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 700; }
+    .send:hover { background: #efb88f; color: var(--on-accent); }
+
+    .page-view { overflow: auto; }
+    .page-header { border-bottom: 1px solid var(--line-soft); padding: 30px 38px 22px; }
+    .page-header h1 { margin: 0; font-size: 22px; letter-spacing: -.025em; }
+    .page-header p { margin: 5px 0 0; color: var(--soft); font-size: 12px; }
+    .page-body { width: min(1050px, calc(100% - 76px)); margin: 0 auto; padding: 28px 0 50px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 24px; }
+    .metric { border-top: 2px solid var(--line); background: var(--surface); padding: 15px; }
+    .metric strong { display: block; font-size: 25px; }
+    .metric span { color: var(--muted); font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+    .card { min-height: 160px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px; }
+    .card h2 { margin: 0 0 8px; font-size: 14px; }
+    .card p { margin: 0; color: var(--soft); font-size: 12px; }
+    .card-footer { display: flex; align-items: center; margin-top: 22px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+    .card-footer .small-button { margin-left: auto; }
+    .mode { border-radius: 999px; background: var(--success-soft); padding: 3px 7px; color: var(--success); font: 9px var(--mono); }
+    .settings-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 28px; }
+    .settings-nav { display: grid; align-content: start; gap: 3px; }
+    .settings-search { width: 100%; height: 34px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); padding: 0 10px; font-size: 11px; }
+    .settings-section { border: 0; border-radius: 7px; background: transparent; color: var(--soft); padding: 8px 10px; text-align: left; cursor: pointer; }
+    .settings-section:hover, .settings-section.active { background: var(--surface); color: var(--text); }
+    .provider-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 14px; }
+    .provider-row .chat-icon { width: 38px; height: 38px; color: var(--success); background: var(--success-soft); }
+    .provider-row strong, .provider-row small { display: block; }
+    .provider-row small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    .statusbar { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 18px; border-top: 1px solid var(--line-soft); background: #161412; padding: 0 12px; color: var(--muted); font: 10px var(--mono); }
+    .statusbar strong { color: var(--soft); font-weight: 500; }
+    .trust { justify-self: end; color: var(--success); }
+
+    .overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: start center; padding-top: 13vh; background: rgba(11, 9, 8, .68); }
+    .palette { width: min(560px, calc(100% - 40px)); overflow: hidden; border: 1px solid #554a41; border-radius: 13px; background: #211e1b; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+    .palette input { width: 100%; height: 48px; border: 0; border-bottom: 1px solid var(--line); outline: 0; background: transparent; color: var(--text); padding: 0 16px; font-size: 13px; }
+    .palette-results { padding: 8px; }
+    .palette-item { display: flex; width: 100%; align-items: center; gap: 10px; border: 0; border-radius: 8px; background: transparent; padding: 9px; color: var(--soft); text-align: left; cursor: pointer; }
+    .palette-item:first-child, .palette-item:hover { background: var(--surface-2); color: var(--text); }
+    .palette-item small { margin-left: auto; color: var(--muted); font: 9px var(--mono); }
+
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 232px minmax(0, 1fr); }
+      .history,
+      .chat-view:not(.history-open) .history {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 30;
+        width: 284px;
+        min-width: 284px;
+        overflow: hidden;
+        border-right: 1px solid var(--line-soft);
+        box-shadow: 18px 0 48px rgba(0,0,0,.44);
+        transform: translateX(-102%);
+      }
+      .chat-view.history-open .history { transform: translateX(0); }
+      .history-toggle { display: inline-flex; }
+      .chat-view.history-open .history-scrim { position: absolute; inset: 0; z-index: 20; display: block; border: 0; background: rgba(8,7,6,.56); }
+      .cards { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 920px) {
+      .app { grid-template-columns: 210px minmax(0, 1fr); }
+      .page-body { width: calc(100% - 36px); }
+      .page-header { padding-inline: 18px; }
+      .statusbar { grid-template-columns: 1fr auto; }
+      .statusbar .provider-status { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="chat" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></symbol>
+    <symbol id="agents" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></symbol>
+    <symbol id="changes" viewBox="0 0 24 24"><path d="M7 3v14M7 7h8a3 3 0 0 1 3 3v1M17 21V7M17 17H9a3 3 0 0 1-3-3v-1"/></symbol>
+    <symbol id="settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5a7 7 0 0 0 0-3l2-1.5-2-3.4-2.4 1A8 8 0 0 0 14 5l-.4-2.6H9.7L9.3 5a8 8 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 3l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 9.3 19l.4 2.6h3.9L14 19a8 8 0 0 0 2.6-1.5l2.4 1 2-3.4z"/></symbol>
+    <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="warning" viewBox="0 0 24 24"><path d="m12 3 10 18H2z"/><path d="M12 9v5M12 18h.01"/></symbol>
+    <symbol id="database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+  </svg>
+
+  <div class="window">
+    <header class="titlebar">
+      <div class="traffic" aria-label="Window controls"><i></i><i></i><i></i></div>
+      <div class="window-title" id="windowTitle">OpenAdminOS · Chat</div>
+      <div class="review-label">v0.4 review</div>
+    </header>
+
+    <div class="app">
+      <aside class="sidebar" aria-label="Application navigation">
+        <div class="brand">
+          <div class="brand-mark"><svg><use href="#agents"/></svg></div>
+          <span class="brand-name">OpenAdminOS</span><span class="version">0.4</span><span class="provider-dot" title="Provider reachable"></span>
+        </div>
+        <button class="tenant" type="button" title="Switch active tenant">
+          <span class="avatar">CD</span><span><strong>Contoso Demo</strong><small>Active tenant</small></span><span>⌄</span>
+        </button>
+        <button class="quick-search" id="openPalette" type="button"><svg><use href="#search"/></svg><span>Quick search</span><kbd>⌘K</kbd></button>
+        <div class="divider"></div>
+        <div class="nav-label">Workspace</div>
+        <nav class="nav" aria-label="Primary">
+          <button class="nav-button active" type="button" data-view-target="chat"><svg><use href="#chat"/></svg><span>Chat</span></button>
+          <button class="nav-button" type="button" data-view-target="agents"><svg><use href="#agents"/></svg><span>Agents</span><span class="badge">4</span></button>
+          <button class="nav-button" type="button" data-view-target="changes"><svg><use href="#changes"/></svg><span>Changes</span></button>
+          <button class="nav-button" type="button" data-view-target="settings"><svg><use href="#settings"/></svg><span>Settings</span></button>
+        </nav>
+        <div class="sidebar-note">Local desktop workspace</div>
+      </aside>
+
+      <main class="workspace">
+        <section class="view chat-view history-open" data-view="chat">
+          <button class="history-scrim" id="historyScrim" type="button" aria-label="Close chat history"></button>
+          <aside class="history" id="historyRail" aria-label="Chat history">
+            <div class="history-head">
+              <div class="expanded-only"><small>Chat</small><strong>Contoso Demo</strong></div>
+              <div class="history-controls">
+                <button class="icon-button" id="toggleHistory" type="button" aria-label="Hide chat history" title="Hide chat history"><svg><use href="#left"/></svg></button>
+                <button class="small-button expanded-only" id="newChat" type="button"><svg><use href="#plus"/></svg>New</button>
+              </div>
+            </div>
+            <div class="history-search"><svg><use href="#search"/></svg><input type="search" aria-label="Search conversations" placeholder="Search conversations"></div>
+            <div class="history-list">
+              <div class="history-kicker">Pinned · 1</div>
+              <button class="conversation" type="button" data-conversation="Windows compliance gaps"><strong>Windows compliance gaps</strong><small>Yesterday</small></button>
+              <div class="history-kicker">Recent</div>
+              <button class="conversation" type="button" data-conversation="Stale managed devices"><strong>Stale managed devices</strong><small>2 days ago</small></button>
+              <button class="conversation" type="button" data-conversation="Conditional Access exclusions"><strong>Conditional Access exclusions</strong><small>Last week</small></button>
+            </div>
+          </aside>
+
+          <div class="chat-main">
+            <header class="chat-header">
+              <div class="chat-title"><button class="small-button history-toggle" id="openHistory" type="button"><svg><use href="#right"/></svg>History</button><button class="small-button history-toggle" id="newChatHeader" type="button"><svg><use href="#plus"/></svg>New</button><span class="chat-icon"><svg><use href="#chat"/></svg></span><span><strong id="chatTitle">New conversation</strong><small>Local provider · cache refreshed 12 min ago</small></span></div>
+              <span class="local-pill">Ollama</span>
+            </header>
+            <div class="messages">
+              <div class="empty" id="emptyChat">
+                <h1>What do you need to know?</h1>
+                <p>Ask about devices, users, apps, policies, or sign-ins in the active tenant.</p>
+                <div class="prompts">
+                  <button class="prompt" type="button" data-prompt="Which Windows devices have not synced in 30 days?">Which Windows devices have not synced in 30 days?</button>
+                  <button class="prompt" type="button" data-prompt="Which required apps are failing to install?">Which required apps are failing to install?</button>
+                  <button class="prompt" type="button" data-prompt="Explain the most common sign-in failures this week.">Explain the most common sign-in failures this week.</button>
+                </div>
+              </div>
+              <div class="transcript" id="transcript" hidden>
+                <div class="message-label">You</div><div class="user-message" id="questionText"></div>
+                <div class="answer"><div class="message-label">OpenAdminOS</div><h2>Three areas need review</h2><p>The local tenant cache shows a small set of devices outside the expected sync window. No changes were made.</p><div class="finding"><strong>Windows devices without a sync in 30 days</strong><span>7 devices</span></div><div class="finding"><strong>Devices with unknown compliance state</strong><span>3 devices</span></div><div class="finding"><strong>Devices with inactive primary users</strong><span>2 devices</span></div><div class="source">source · local Graph cache · refreshed 12 min ago</div></div>
+              </div>
+            </div>
+            <footer class="composer-wrap">
+              <div class="composer"><textarea id="composer" aria-label="Chat prompt" placeholder="Ask about your Microsoft 365 tenant…"></textarea><div class="composer-row"><button class="icon-button" type="button" title="Scope and context"><svg><use href="#database"/></svg></button><span class="boundary">Local-only · no data leaves this device</span><button class="small-button send" id="send" type="button">Send</button></div></div>
+            </footer>
+          </div>
+        </section>
+
+        <section class="view page-view" data-view="agents" hidden>
+          <header class="page-header"><h1>Agents</h1><p>Repeatable workflows, described by the admin outcome they produce.</p></header>
+          <div class="page-body"><div class="cards"><article class="card"><h2>Explain failed sign-ins</h2><p>Find the policy, device, or identity condition behind repeated sign-in failures.</p><div class="card-footer"><span class="mode">Read-only</span><button class="small-button send">Run</button></div></article><article class="card"><h2>Review stale devices before offboarding</h2><p>Build a conservative offboarding plan from sync, sign-in, ownership, and compliance evidence.</p><div class="card-footer"><span class="mode" style="color:var(--warning);background:rgba(229,198,120,.12)">Write · review required</span><button class="small-button">Review</button></div></article><article class="card"><h2>Prioritize Secure Score work</h2><p>Rank recommendations by likely impact, effort, and relevance to this tenant.</p><div class="card-footer"><span class="mode">Read-only</span><button class="small-button send">Run</button></div></article></div></div>
+        </section>
+
+        <section class="view page-view" data-view="changes" hidden>
+          <header class="page-header"><h1>Changes</h1><p>Configuration drift from local snapshots, with attribution only when evidence supports it.</p></header>
+          <div class="page-body"><div class="cards"><article class="card"><h2>Conditional Access · Require MFA for admins</h2><p>Excluded group added · actor unknown · today at 09:42</p><div class="card-footer"><span class="mode" style="color:var(--warning);background:rgba(229,198,120,.12)">Modified</span><button class="small-button">Inspect</button></div></article><article class="card"><h2>Settings catalog · Windows baseline</h2><p>Two values changed · admin@contoso.invalid · today at 08:17</p><div class="card-footer"><span class="mode" style="color:var(--warning);background:rgba(229,198,120,.12)">Modified</span><button class="small-button">Inspect</button></div></article></div></div>
+        </section>
+
+        <section class="view page-view" data-view="settings" hidden>
+          <header class="page-header"><h1>Settings</h1><p>Configure providers, tenants, retained local data, and integrations.</p></header>
+          <div class="page-body settings-layout"><nav class="settings-nav" aria-label="Settings sections"><input class="settings-search" type="search" placeholder="Search settings" aria-label="Search settings"><button class="settings-section active">Providers</button><button class="settings-section">Tenants</button><button class="settings-section">Chat</button><button class="settings-section">Workspaces</button><button class="settings-section">Connectors</button><button class="settings-section">General</button><button class="settings-section">Privacy</button><button class="settings-section">About</button></nav><div><h2 style="margin:0;font-size:17px">Providers</h2><p style="margin:5px 0 18px;color:var(--soft);font-size:12px">Choose where prompts run and verify the active model.</p><div class="provider-row"><span class="chat-icon"><svg><use href="#database"/></svg></span><span><strong>Ollama</strong><small>Local · qwen2.5:7b · connected</small></span><button class="small-button">Configure</button></div><div class="provider-row"><span class="chat-icon" style="color:var(--warning);background:rgba(229,198,120,.12)"><svg><use href="#database"/></svg></span><span><strong>Hosted providers</strong><small>Tenant context leaves this device only after confirmation</small></span><button class="small-button">Review</button></div></div></div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="statusbar" aria-label="Current tenant and provider status"><span>tenant · <strong>Contoso Demo</strong></span><span class="provider-status">provider · <strong>Ollama / qwen2.5:7b</strong></span><span class="trust">local-only · no data leaves this device</span></footer>
+  </div>
+
+  <div class="overlay" id="palette" hidden>
+    <div class="palette" role="dialog" aria-modal="true" aria-label="Quick search"><input id="paletteInput" placeholder="Search pages and actions…"><div class="palette-results"><button class="palette-item" type="button" data-palette-view="chat"><svg><use href="#chat"/></svg>New conversation<small>⌘N</small></button><button class="palette-item" type="button" data-palette-view="settings"><svg><use href="#settings"/></svg>Open Settings<small>⌘,</small></button><button class="palette-item" type="button" data-palette-view="agents"><svg><use href="#agents"/></svg>Browse installed agents</button></div></div>
+  </div>
+
+  <script>
+    const views = [...document.querySelectorAll("[data-view]")];
+    const navButtons = [...document.querySelectorAll(".sidebar [data-view-target]")];
+    const palette = document.querySelector("#palette");
+    const paletteInput = document.querySelector("#paletteInput");
+    const chatView = document.querySelector(".chat-view");
+    const toggleHistory = document.querySelector("#toggleHistory");
+    const openHistory = document.querySelector("#openHistory");
+    const historyScrim = document.querySelector("#historyScrim");
+    const composer = document.querySelector("#composer");
+    const emptyChat = document.querySelector("#emptyChat");
+    const transcript = document.querySelector("#transcript");
+    const questionText = document.querySelector("#questionText");
+    const chatTitle = document.querySelector("#chatTitle");
+    const titles = { chat: "Chat", agents: "Agents", changes: "Changes", settings: "Settings" };
+
+    function switchView(name) {
+      views.forEach((view) => { view.hidden = view.dataset.view !== name; });
+      navButtons.forEach((button) => button.classList.toggle("active", button.dataset.viewTarget === name));
+      document.querySelector("#windowTitle").textContent = `OpenAdminOS · ${titles[name]}`;
+      palette.hidden = true;
+    }
+    document.querySelectorAll("[data-view-target]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.viewTarget)));
+
+    function closeHistory() { chatView.classList.remove("history-open"); openHistory.focus(); }
+    function showHistory() { chatView.classList.add("history-open"); requestAnimationFrame(() => document.querySelector(".history-search input").focus()); }
+    toggleHistory.addEventListener("click", closeHistory);
+    openHistory.addEventListener("click", showHistory);
+    historyScrim.addEventListener("click", closeHistory);
+    if (window.matchMedia("(max-width: 1100px)").matches) chatView.classList.remove("history-open");
+
+    function newConversation() {
+      switchView("chat");
+      emptyChat.hidden = false;
+      transcript.hidden = true;
+      chatTitle.textContent = "New conversation";
+      composer.value = "";
+      document.querySelectorAll(".conversation").forEach((item) => item.classList.remove("active"));
+      composer.focus();
+    }
+    document.querySelector("#newChat").addEventListener("click", newConversation);
+    document.querySelector("#newChatHeader").addEventListener("click", newConversation);
+
+    function showAnswer(question) {
+      if (!question.trim()) return;
+      emptyChat.hidden = true;
+      transcript.hidden = false;
+      questionText.textContent = question.trim();
+      chatTitle.textContent = question.trim().length > 38 ? `${question.trim().slice(0, 38)}…` : question.trim();
+      composer.value = "";
+    }
+    document.querySelector("#send").addEventListener("click", () => showAnswer(composer.value));
+    composer.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); showAnswer(composer.value); } });
+    document.querySelectorAll("[data-prompt]").forEach((button) => button.addEventListener("click", () => { composer.value = button.dataset.prompt; composer.focus(); }));
+    document.querySelectorAll("[data-conversation]").forEach((button) => button.addEventListener("click", () => { document.querySelectorAll(".conversation").forEach((item) => item.classList.toggle("active", item === button)); showAnswer(button.dataset.conversation); if (window.matchMedia("(max-width: 1100px)").matches) closeHistory(); }));
+
+    function openPalette() { palette.hidden = false; requestAnimationFrame(() => paletteInput.focus()); }
+    document.querySelector("#openPalette").addEventListener("click", openPalette);
+    palette.addEventListener("click", (event) => { if (event.target === palette) palette.hidden = true; });
+    document.querySelectorAll("[data-palette-view]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.paletteView)));
+    document.addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openPalette(); }
+      if (event.key === "Escape" && !palette.hidden) { palette.hidden = true; document.querySelector("#openPalette").focus(); }
+      else if (event.key === "Escape" && chatView.classList.contains("history-open") && window.matchMedia("(max-width: 1100px)").matches) closeHistory();
+    });
+  </script>
+</body>
+</html>

@@ -45,7 +45,7 @@ export function RunTelemetry({
       <TelemetryCell
         label="Elapsed"
         value={elapsed}
-        valueClass={isLive ? "text-[var(--color-accent)]" : undefined}
+        valueClass={isLive ? "text-[var(--color-info)]" : undefined}
         accent={isLive}
       />
       <TelemetryCell label="Steps" value={stepLabel} caption={stepCaption} />
@@ -91,7 +91,7 @@ function TelemetryCell({
         {accent && (
           <span className="ml-2 inline-block h-1 w-12 align-middle">
             <span className="block h-full w-full overflow-hidden rounded-full bg-[var(--color-bg-raised)]">
-              <span className="block h-full w-1/3 animate-pulse-soft rounded-full bg-[var(--color-accent)]" />
+              <span className="block h-full w-1/3 animate-pulse-soft rounded-full bg-[var(--color-info)]" />
             </span>
           </span>
         )}

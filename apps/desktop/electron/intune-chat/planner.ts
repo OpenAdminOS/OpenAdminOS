@@ -621,18 +621,9 @@ export function pathForResource(resource: GraphCacheResourceKind): {
     case "windowsAutopilotDevices":
       return {
         path: "/deviceManagement/windowsAutopilotDeviceIdentities",
-        select: [
-          "id",
-          "displayName",
-          "serialNumber",
-          "manufacturer",
-          "model",
-          "enrollmentState",
-          "lastContactedDateTime",
-          "userPrincipalName",
-          "groupTag",
-          "managedDeviceId",
-        ],
+        // This beta collection currently returns HTTP 500 whenever `$select`
+        // is supplied. Request the default projection and normalize the fields
+        // locally until Microsoft fixes endpoint-side projection support.
       };
     case "autopilotEvents":
       return {

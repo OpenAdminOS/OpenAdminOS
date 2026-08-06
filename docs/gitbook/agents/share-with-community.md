@@ -25,4 +25,4 @@ Secret-like values block submission. Tenant identifiers and personal data are re
 
 The created GitHub issue is public. Agent Hub only changes after maintainers accept the submission through the normal repository review path and the generated registry index includes the agent.
 
-Private registry forks and private agent sharing are not part of the 0.3.0 preview.
+Custom registry forks are supported through Settings with an explicit trust review. Private sharing and source authentication remain deployment responsibilities for the registry operator.

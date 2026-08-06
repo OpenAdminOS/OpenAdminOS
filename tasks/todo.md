@@ -1,3 +1,9 @@
+# Current active plan
+
+The v0.4 UX simplification round-two direction is tracked in [v0.4-ux-simplification-round-2.md](./v0.4-ux-simplification-round-2.md). Its measurement companion, [v0.4-quality-gap-closure.md](./v0.4-quality-gap-closure.md), now has an implemented production pass covering typed copy, shortcuts and overlays, restorable Chat and Settings routes, Chat recovery and drafts, Settings search, responsive/accessibility invariants, and a 42-artifact screenshot matrix including write confirmation. The follow-up usability correction removes Home, keeps Settings with primary navigation, removes the permanent issue-report card, and replaces the numbered compact Chat rail with a readable overlay drawer. The functional hardening pass now also covers full Graph paging, beta-only connector calls, non-idempotent retry safety, tenant-data purge, capped-cache drift semantics, signed, revision-protected, and digest-pinned agent delivery, fail-closed connector confirmation, secure-store enforcement, updater error UX, version 0.4.0 metadata, and CI/release smoke gates. An independent Claude Opus 5 pass found no blockers; its actionable paging, disconnect, search, registry-test, retry, scheduling, cancellation, and packaging findings were closed locally. External Intune-admin sessions plus Windows High Contrast and cross-platform zoom checks remain release evidence, not completed implementation claims.
+
+---
+
 # v0.3 — "Ask anything, run it anywhere"
 
 **Status: implemented on `v0.3-dev`; release gate partially complete (see below).** The theme: Intune Chat becomes agentic, and every advertised LLM provider actually works. Supporting work (retention, audit export, honest docs, accessibility) serves one story — a tool you can trust to think about your tenant, locally.

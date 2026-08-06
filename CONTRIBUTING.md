@@ -31,7 +31,7 @@ The runtime hard-fails any LLM step reached without a connected provider (no sil
 
 ## Quality gate for agents
 
-Every built-in agent declares its Graph contract in `manifest.json` under `graphOperations` (method, path, optional `select` fields). Before opening a PR for an agent change, run:
+Every registry agent declares its Graph contract in `manifest.yaml` through its Graph skills (method, path, scopes, and optional selected fields). Before opening a PR for an agent change, run:
 
 ```
 eval $(scripts/setup-qa.sh)
@@ -54,6 +54,15 @@ npm run qa
 - Every agent includes at least one `format: llm` step (`uses-llm` check, hard fail).
 
 The synthetic Graph fixture in `@openadminos/runtime` is also cross-checked against the real `managedDevice` schema. Adding a field to the fixture that doesn't exist on Graph fails the gate.
+
+Agent changes also regenerate `agents/index.json`, whose entries pin the exact
+manifest SHA-256 digest. Increment `agents/registry-revision.txt` whenever the
+generated entries change; clients retain the highest verified revision they
+have seen and reject older signed indexes. A maintainer must then create the detached Ed25519
+signature with `npm run registry:sign -- --key /secure/path/to/private.pem`.
+The private key must remain outside the repository; only
+`agents/registry-public-key.pem` and `agents/index.sig` are committed. Registry
+QA fails if the index, signature, or manifest digests do not agree.
 
 ## Code of conduct
 

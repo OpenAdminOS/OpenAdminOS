@@ -260,7 +260,7 @@ export default function Workspaces() {
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search workspaces"
               autoComplete="off"
-              className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:ring-[var(--color-accent)]"
+              className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
             />
           </div>
         </div>
@@ -390,7 +390,7 @@ export default function Workspaces() {
                       value={noteText}
                       onChange={(event) => setNoteText(event.target.value)}
                       placeholder="Add a local investigation note"
-                      className="min-h-20 flex-1 resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:ring-[var(--color-accent)]"
+                      className="min-h-20 flex-1 resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
                     />
                     <Button variant="secondary" disabled={!noteText.trim()} onClick={() => void handleAddNote()}>
                       Add
@@ -464,7 +464,7 @@ export default function Workspaces() {
                     value={instructions}
                     onChange={(event) => setInstructions(event.target.value)}
                     placeholder="Approved local instructions for this workspace"
-                    className="min-h-40 w-full resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12.5px] leading-5 text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:ring-[var(--color-accent)]"
+                    className="min-h-40 w-full resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12.5px] leading-5 text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
                   />
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">

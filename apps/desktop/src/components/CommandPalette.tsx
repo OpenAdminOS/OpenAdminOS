@@ -9,7 +9,6 @@ import {
   IconClock,
   IconConnectors,
   IconHardDrive,
-  IconHome,
   IconHub,
   IconPlay,
   IconSearch,
@@ -17,6 +16,9 @@ import {
   IconShield,
 } from "./icons";
 import { useAppState } from "../state";
+import { SETTINGS_ITEMS, SETTINGS_SECTIONS } from "../copy";
+import { formatAgentDisplayName } from "../shared/agent-display";
+import { registerOverlay } from "../shared/overlay-stack";
 
 interface PaletteItem {
   id: string;
@@ -25,7 +27,7 @@ interface PaletteItem {
   group: "Agents" | "Hub" | "Navigate" | "Actions";
   icon: React.ReactNode;
   shortcut?: string;
-  action: () => void;
+  action: () => void | Promise<void>;
 }
 
 export function CommandPalette({
@@ -39,7 +41,13 @@ export function CommandPalette({
   const { state, registryAgents, startRun } = useAppState();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const overlayIdRef = useRef(`command-palette-${window.crypto.randomUUID()}`);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const items: PaletteItem[] = useMemo(() => {
     const go = (path: string) => () => {
@@ -49,7 +57,7 @@ export function CommandPalette({
     return [
       ...state.installedAgents.map((a) => ({
         id: `agent-${a.id}`,
-        label: a.name,
+        label: formatAgentDisplayName(a),
         hint: `${a.mode === "write" ? "Write" : "Read-only"} · ${a.version}`,
         group: "Agents" as const,
         icon:
@@ -63,19 +71,12 @@ export function CommandPalette({
       })),
       ...registryAgents.map((a) => ({
         id: `hub-${a.id}`,
-        label: a.name,
+        label: formatAgentDisplayName(a),
         hint: `Hub · ${a.author.name}`,
         group: "Hub" as const,
         icon: <IconHub size={13} className="text-[var(--color-text-soft)]" />,
         action: go("/agents/hub"),
       })),
-      {
-        id: "nav-home",
-        label: "Go to Home",
-        group: "Navigate",
-        icon: <IconHome size={13} className="text-[var(--color-accent)]" />,
-        action: go("/"),
-      },
       {
         id: "nav-chat",
         label: "Go to Chat",
@@ -140,6 +141,22 @@ export function CommandPalette({
         icon: <IconSettings size={13} className="text-[var(--color-accent)]" />,
         action: go("/settings"),
       },
+      ...SETTINGS_SECTIONS.map((entry) => ({
+        id: `settings-section-${entry.id}`,
+        label: `Settings: ${entry.title}`,
+        hint: entry.description,
+        group: "Navigate" as const,
+        icon: <IconSettings size={13} className="text-[var(--color-accent)]" />,
+        action: go(`/settings/${entry.id}`),
+      })),
+      ...Object.entries(SETTINGS_ITEMS).map(([id, entry]) => ({
+        id: `settings-item-${id}`,
+        label: entry.title,
+        hint: `Settings · ${entry.description}`,
+        group: "Navigate" as const,
+        icon: <IconSettings size={13} className="text-[var(--color-text-soft)]" />,
+        action: go(`/settings/${entry.section}?target=${id}`),
+      })),
       ...(state.installedAgents.length > 0
         ? ([
             {
@@ -198,35 +215,80 @@ export function CommandPalette({
 
   useEffect(() => {
     if (open) {
+      returnFocusRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setQuery("");
       setActiveIndex(0);
+      setActionError(null);
       setTimeout(() => inputRef.current?.focus(), 0);
+      const unregister = registerOverlay({
+        id: overlayIdRef.current,
+        onEscape: () => onCloseRef.current(),
+      });
+      return () => {
+        unregister();
+        window.requestAnimationFrame(() => returnFocusRef.current?.focus());
+      };
     }
+    return undefined;
   }, [open]);
 
   useEffect(() => {
     setActiveIndex(0);
+    setActionError(null);
   }, [query]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!open) return;
-      if (e.key === "Escape") {
-        onClose();
-      } else if (e.key === "ArrowDown") {
+  const runAction = (item: PaletteItem) => {
+    setActionError(null);
+    void Promise.resolve(item.action()).catch((error: unknown) => {
+      setActionError(error instanceof Error ? error.message : String(error));
+    });
+  };
+
+  const onPaletteKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Tab") {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      const first = focusable[0] ?? dialog;
+      const last = focusable.at(-1) ?? dialog;
+      const active = document.activeElement;
+      if (
+        focusable.length <= 1 ||
+        (e.shiftKey && active === first) ||
+        (!e.shiftKey && active === last)
+      ) {
         e.preventDefault();
-        setActiveIndex((i) => Math.min(i + 1, flatList.length - 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActiveIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        flatList[activeIndex]?.action();
+        (e.shiftKey ? last : first).focus();
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, flatList, activeIndex, onClose]);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, flatList.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIndex(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActiveIndex(Math.max(0, flatList.length - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const item = flatList[activeIndex];
+      if (item) runAction(item);
+    }
+  };
+
+  useEffect(() => {
+    const activeId = flatList[activeIndex]?.id;
+    if (!activeId) return;
+    document.getElementById(`command-option-${activeId}`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, flatList]);
 
   if (!open) return null;
 
@@ -237,8 +299,14 @@ export function CommandPalette({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command Palette"
+        tabIndex={-1}
         className="w-full max-w-[640px] overflow-hidden rounded-2xl bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in-scale"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={onPaletteKeyDown}
       >
         <div className="flex items-center gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
           <IconSearch size={15} className="text-[var(--color-text-muted)]" />
@@ -254,17 +322,38 @@ export function CommandPalette({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Type a command, agent name, or page…"
             autoComplete="off"
-            className="flex-1 bg-transparent text-[14px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="command-palette-results"
+            aria-autocomplete="list"
+            aria-activedescendant={
+              flatList[activeIndex] ? `command-option-${flatList[activeIndex]!.id}` : undefined
+            }
+            className="flex-1 bg-transparent text-[14px] text-[var(--color-text)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none"
           />
           <kbd className="rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-            ESC
+            esc
           </kbd>
         </div>
 
-        <div className="max-h-[440px] overflow-y-auto py-1">
+        {actionError && (
+          <div
+            role="alert"
+            className="mx-3 mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+          >
+            {actionError}
+          </div>
+        )}
+
+        <div
+          id="command-palette-results"
+          role="listbox"
+          aria-label="Command results"
+          className="max-h-[440px] overscroll-contain overflow-y-auto py-1"
+        >
           {grouped.length === 0 && (
-            <div className="px-4 py-8 text-center text-[13px] text-[var(--color-text-muted)]">
-              No matches for "{query}"
+            <div role="status" className="px-4 py-8 text-center text-[13px] text-[var(--color-text-muted)]">
+              No matches for “{query}”. Try a page, setting, or agent name.
             </div>
           )}
           {grouped.map((g) => (
@@ -278,8 +367,12 @@ export function CommandPalette({
                 return (
                   <button
                     key={it.id}
+                    id={`command-option-${it.id}`}
+                    role="option"
+                    aria-selected={isActive}
+                    tabIndex={-1}
                     onMouseEnter={() => setActiveIndex(flatIdx)}
-                    onClick={() => it.action()}
+                    onClick={() => runAction(it)}
                     className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
                       isActive
                         ? "bg-[var(--color-surface-hover)]"

@@ -8,6 +8,8 @@ import {
 
 import { OUTLOOK_CONNECTOR_ID, qualifyGraphScope } from "./descriptor.js";
 
+const MAX_RETRY_AFTER_SECONDS = 60;
+
 interface OutlookGraphFetchInput {
   method: "POST";
   path: string;
@@ -32,7 +34,7 @@ export interface CreateOutlookGraphClientOptions {
 export function createOutlookGraphClient(
   options: CreateOutlookGraphClientOptions,
 ): OutlookGraphClient {
-  const baseUrl = options.baseUrl ?? "https://graph.microsoft.com/v1.0";
+  const baseUrl = options.baseUrl ?? "https://graph.microsoft.com/beta";
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxRetries = options.maxRetries ?? 3;
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -139,10 +141,6 @@ export function createOutlookGraphClient(
             },
           );
         }
-        if (response.status >= 500 && attempt < maxRetries) {
-          await sleep((parseRetryAfter(response.headers.get("retry-after")) ?? 2) * 1000);
-          continue;
-        }
         const body = await response.text().catch(() => "");
         throw new ConnectorRemoteError(
           `Microsoft Graph responded with HTTP ${response.status} for ${input.path}: ${truncate(body, 200)}`,
@@ -161,10 +159,15 @@ export function createOutlookGraphClient(
 function parseRetryAfter(value: string | null): number | undefined {
   if (!value) return undefined;
   const asNumber = Number.parseFloat(value);
-  if (Number.isFinite(asNumber)) return asNumber;
+  if (Number.isFinite(asNumber)) {
+    return Math.min(Math.max(asNumber, 0), MAX_RETRY_AFTER_SECONDS);
+  }
   const asDate = Date.parse(value);
   if (Number.isFinite(asDate)) {
-    return Math.max(1, Math.ceil((asDate - Date.now()) / 1000));
+    return Math.min(
+      Math.max(0, Math.ceil((asDate - Date.now()) / 1000)),
+      MAX_RETRY_AFTER_SECONDS,
+    );
   }
   return undefined;
 }

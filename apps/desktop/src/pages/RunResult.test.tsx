@@ -83,4 +83,45 @@ describe("RunResult write confirmation", () => {
       expect(bridge.rejectRun).toHaveBeenCalledWith(run.id);
     });
   });
+
+  it("describes arbitrary Graph writes without inventing a device-retirement impact", async () => {
+    const run = createAwaitingConfirmationRun({
+      id: "run-disable-user",
+      plan: {
+        summary: "Block one compromised user after review.",
+        confirmationPhrase: "BLOCK 1 USER",
+        actions: [
+          {
+            id: "action-disable-user",
+            kind: "disable-user",
+            label: "Block sign-in for Alex Wilber",
+            description: "Sets accountEnabled to false.",
+            severity: "destructive",
+            request: {
+              method: "PATCH",
+              path: "/users/user-1",
+              body: { accountEnabled: false },
+            },
+          },
+        ],
+      },
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        installedAgents: [createMockAgent({ slug: run.agentSlug })],
+        runs: [run],
+      }),
+    );
+
+    renderRoute(<RunResult />, {
+      path: "/runs/:id",
+      route: `/runs/${run.id}`,
+      bridge,
+    });
+
+    expect(await screen.findByText(/1 planned change will be applied/)).toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Graph changes may not be reversible/)).toBeInTheDocument();
+    expect(screen.queryByText(/will be retired/i)).not.toBeInTheDocument();
+  });
 });

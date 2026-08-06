@@ -22,6 +22,35 @@ function provider(id: string) {
 }
 
 describe("Settings provider section", () => {
+  it("restores a Settings section from its URL", async () => {
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/privacy",
+      bridge: makeMockBridge(),
+    });
+
+    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
+  });
+
+  it("finds a setting from the shared catalog and focuses the rendered row", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge();
+
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge,
+    });
+
+    const search = await screen.findByRole("combobox", { name: "Search settings" });
+    await user.type(search, "tenant cache");
+    const result = screen.getByRole("option", { name: /Tenant cache/ });
+    await user.click(result);
+
+    const row = await screen.findByText("Tenant cache");
+    await waitFor(() => expect(row.closest(".setting-row")).toHaveFocus());
+  });
+
   it("renders implemented and coming-soon providers and sets the active provider", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge(
@@ -39,8 +68,8 @@ describe("Settings provider section", () => {
     );
 
     renderRoute(<Settings />, {
-      path: "/settings",
-      route: "/settings",
+      path: "/settings/:section?",
+      route: "/settings/providers",
       bridge,
     });
 
@@ -86,8 +115,8 @@ describe("Settings provider section", () => {
     );
 
     renderRoute(<Settings />, {
-      path: "/settings",
-      route: "/settings",
+      path: "/settings/:section?",
+      route: "/settings/providers",
       bridge,
     });
 
@@ -201,8 +230,8 @@ describe("Settings provider section", () => {
     );
 
     renderRoute(<Settings />, {
-      path: "/settings",
-      route: "/settings",
+      path: "/settings/:section?",
+      route: "/settings/providers",
       bridge,
     });
 
@@ -255,5 +284,31 @@ describe("Settings provider section", () => {
       screen.getAllByText(/Pruned 3 snapshots and 7 object versions older than 90 days/i).length,
     ).toBeGreaterThan(0);
     expect(screen.getByText(/10 local history rows removed/i)).toBeInTheDocument();
+  });
+
+  it("keeps the disconnect confirmation open and surfaces deletion failures", async () => {
+    const user = userEvent.setup();
+    const disconnectTenant = vi.fn(async () => {
+      throw new Error("The local state file could not be written.");
+    });
+    const bridge = makeMockBridge({ disconnectTenant }, createMockAppState());
+
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/tenants",
+      bridge,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Disconnect" }));
+    await user.click(
+      screen.getByRole("button", { name: "Disconnect and delete local data" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The local state file could not be written.",
+    );
+    expect(
+      screen.getByRole("dialog", { name: /Disconnect Contoso IT/i }),
+    ).toBeInTheDocument();
   });
 });

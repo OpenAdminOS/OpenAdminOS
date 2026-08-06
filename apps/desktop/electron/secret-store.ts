@@ -2,7 +2,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-interface SafeStorageApi {
+export interface SafeStorageApi {
   isEncryptionAvailable(): boolean;
   encryptString(plaintext: string): Buffer;
   decryptString(encrypted: Buffer): string;
@@ -76,20 +76,24 @@ export class SafeStorageTokenCacheStore implements TokenCacheStorage {
 
   private async requireSafeStorage(): Promise<SafeStorageApi> {
     const safeStorage = await this.loadSafeStorage();
-    const backend =
-      this.platform === "linux"
-        ? safeStorage.getSelectedStorageBackend?.()
-        : undefined;
-    if (!safeStorage.isEncryptionAvailable() || backend === "basic_text") {
-      throw new SecureStorageUnavailableError(
-        secureStorageUnavailableMessage({
-          backend,
-          platform: this.platform,
-        }),
-      );
-    }
-    return safeStorage;
+    return requireOsSecureStorage(safeStorage, this.platform);
   }
+}
+
+export function requireOsSecureStorage(
+  safeStorage: SafeStorageApi,
+  platform: NodeJS.Platform = process.platform,
+): SafeStorageApi {
+  const backend =
+    platform === "linux"
+      ? safeStorage.getSelectedStorageBackend?.()
+      : undefined;
+  if (!safeStorage.isEncryptionAvailable() || backend === "basic_text") {
+    throw new SecureStorageUnavailableError(
+      secureStorageUnavailableMessage({ backend, platform }),
+    );
+  }
+  return safeStorage;
 }
 
 export function secureStorageUnavailableMessage(input: {

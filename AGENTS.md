@@ -16,7 +16,7 @@ The product lets a Microsoft 365 admin:
 
 The trust story is **local-first**: tenant data and prompts never leave the device when a local LLM is used. UI messaging changes honestly when a hosted provider is selected.
 
-The reference architecture is t3.gg's **t3code** project (https://github.com/pingdotgg/t3code) — Electron + Vite + React monorepo with a clean provider-adapter pattern. Study its shape before structuring this one. Don't copy the Effect runtime adoption wholesale; do copy the directory layout, contracts package, and adapter pattern.
+The architecture is an Electron + Vite + React monorepo with a clean provider-adapter pattern, shared contracts, and one desktop surface. Keep those boundaries intact when extending the project.
 
 ---
 

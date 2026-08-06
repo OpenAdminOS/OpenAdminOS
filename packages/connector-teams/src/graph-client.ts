@@ -8,6 +8,8 @@ import {
 
 import { TEAMS_CONNECTOR_ID, qualifyGraphScope } from "./descriptor.js";
 
+const MAX_RETRY_AFTER_SECONDS = 60;
+
 interface TeamsGraphFetchInput {
   method: "GET" | "POST";
   path: string;
@@ -31,7 +33,7 @@ export interface CreateTeamsGraphClientOptions {
 /**
  * Lightweight Graph fetch wrapper specific to Teams endpoints. Mints a
  * scoped token per call via `tenant.acquireTokenForScopes`, applies
- * bounded exponential-backoff retries for 429/5xx, and translates
+ * bounded retries for Graph throttling and idempotent GET failures, and translates
  * Graph error responses into the typed `ConnectorError` subclasses the
  * runtime expects.
  *
@@ -44,7 +46,7 @@ export interface CreateTeamsGraphClientOptions {
 export function createTeamsGraphClient(
   options: CreateTeamsGraphClientOptions,
 ): TeamsGraphClient {
-  const baseUrl = options.baseUrl ?? "https://graph.microsoft.com/v1.0";
+  const baseUrl = options.baseUrl ?? "https://graph.microsoft.com/beta";
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxRetries = options.maxRetries ?? 3;
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -165,7 +167,7 @@ export function createTeamsGraphClient(
           );
         }
 
-        if (response.status >= 500 && attempt < maxRetries) {
+        if (input.method === "GET" && response.status >= 500 && attempt < maxRetries) {
           const retryAfter = parseRetryAfter(response.headers.get("retry-after")) ?? 2;
           await sleep(retryAfter * 1000);
           continue;
@@ -201,10 +203,15 @@ async function extractMissingScopes(
 function parseRetryAfter(value: string | null): number | undefined {
   if (!value) return undefined;
   const asNumber = Number.parseFloat(value);
-  if (Number.isFinite(asNumber)) return asNumber;
+  if (Number.isFinite(asNumber)) {
+    return Math.min(Math.max(asNumber, 0), MAX_RETRY_AFTER_SECONDS);
+  }
   const asDate = Date.parse(value);
   if (Number.isFinite(asDate)) {
-    return Math.max(1, Math.ceil((asDate - Date.now()) / 1000));
+    return Math.min(
+      Math.max(0, Math.ceil((asDate - Date.now()) / 1000)),
+      MAX_RETRY_AFTER_SECONDS,
+    );
   }
   return undefined;
 }

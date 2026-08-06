@@ -17,7 +17,7 @@ import {
   outlookDescriptor,
 } from "./descriptor.js";
 import { createOutlookGraphClient, type OutlookGraphClient } from "./graph-client.js";
-import { renderMarkdownForEmail, escapeHtml } from "./markdown.js";
+import { renderMarkdownForEmail } from "./markdown.js";
 
 export * from "./capabilities.js";
 export {
@@ -110,7 +110,7 @@ function buildCapabilities(
         capabilityId: "send-mail",
         body: {
           message: {
-            subject: escapeHtml(buildSubject(args, config)),
+            subject: buildSubject(args, config),
             body,
             toRecipients: recipientPayload(to),
             ...(cc.length > 0 ? { ccRecipients: recipientPayload(cc) } : {}),

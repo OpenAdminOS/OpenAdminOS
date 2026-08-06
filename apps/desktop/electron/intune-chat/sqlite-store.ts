@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
   ChatInvestigationMode,
@@ -359,10 +359,18 @@ export class IntelligenceSqliteStore {
   private readonly dbPath: string;
 
   constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
+    const root = dirname(dbPath);
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    chmodSync(root, 0o700);
     this.dbPath = dbPath;
     this.db = new DatabaseSync(dbPath);
-    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+    chmodSync(dbPath, 0o600);
+    this.db.exec(
+      "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON;",
+    );
+    for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+      if (existsSync(sidecar)) chmodSync(sidecar, 0o600);
+    }
     this.migrate();
   }
 
@@ -631,6 +639,7 @@ export class IntelligenceSqliteStore {
           rows: normalizedRows,
           snapshotId,
           refreshedAt: input.refreshedAt,
+          pageLimitReached: input.pageLimitReached === true,
         });
       }
       this.db
@@ -702,26 +711,8 @@ export class IntelligenceSqliteStore {
     rows: NormalizedGraphResourceRow[];
     snapshotId: string;
     refreshedAt: string;
+    pageLimitReached: boolean;
   }): void {
-    const previousRows = this.db
-      .prepare(
-        `SELECT graph_id, raw_json, display_name
-         FROM graph_resources
-         WHERE tenant_id = ? AND resource = ?`,
-      )
-      .all(input.tenantId, input.resource) as unknown as Array<{
-        graph_id: string;
-        raw_json: string;
-        display_name: string | null;
-      }>;
-    const previousById = new Map<string, { rawJson: string; contentHash: string }>();
-    for (const row of previousRows) {
-      previousById.set(row.graph_id, {
-        rawJson: row.raw_json,
-        contentHash: driftContentHash(readJson<unknown>(row.raw_json, row.raw_json), input.resource),
-      });
-    }
-
     const currentById = new Map<
       string,
       { rawJson: string; contentHash: string; displayName: string | null }
@@ -772,18 +763,20 @@ export class IntelligenceSqliteStore {
     const removed: string[] = [];
     const modified: string[] = [];
     for (const graphId of currentById.keys()) {
-      if (!previousById.has(graphId)) {
+      const previous = latestById.get(graphId);
+      if (!previous || previous.removed_at) {
         added.push(graphId);
         continue;
       }
-      const previous = previousById.get(graphId);
       const current = currentById.get(graphId);
-      if (previous && current && previous.contentHash !== current.contentHash) {
+      if (current && previous.content_hash !== current.contentHash) {
         modified.push(graphId);
       }
     }
-    for (const graphId of previousById.keys()) {
-      if (!currentById.has(graphId)) removed.push(graphId);
+    if (!input.pageLimitReached) {
+      for (const [graphId, previous] of latestById) {
+        if (!previous.removed_at && !currentById.has(graphId)) removed.push(graphId);
+      }
     }
 
     // The first refresh is a baseline snapshot. Later zero-change refreshes are
@@ -1273,6 +1266,108 @@ export class IntelligenceSqliteStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  purgeTenant(tenantId: string): void {
+    const multiTenantJobs = this.db
+      .prepare(
+        `SELECT id, conversation_id, resolved_tenant_ids_json
+         FROM multi_tenant_jobs`,
+      )
+      .all() as unknown as Array<{
+        id: string;
+        conversation_id: string | null;
+        resolved_tenant_ids_json: string;
+      }>;
+    const jobIds = multiTenantJobs
+      .filter((row) => readJson<string[]>(row.resolved_tenant_ids_json, []).includes(tenantId))
+      .map((row) => row.id);
+    const jobConversationIds = multiTenantJobs
+      .filter((row) => jobIds.includes(row.id) && row.conversation_id)
+      .map((row) => row.conversation_id as string);
+    const batchIds = (
+      this.db
+        .prepare(`SELECT id, resolved_tenant_ids_json FROM multi_tenant_agent_batches`)
+        .all() as unknown as Array<{ id: string; resolved_tenant_ids_json: string }>
+    )
+      .filter((row) => readJson<string[]>(row.resolved_tenant_ids_json, []).includes(tenantId))
+      .map((row) => row.id);
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const table of [
+        "graph_resources",
+        "graph_cache_status",
+        "drift_object_versions",
+        "drift_snapshots",
+        "learning_events",
+        "audit_events",
+        "self_training_suggestions",
+      ]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(tenantId);
+      }
+
+      // Workspace children are removed by their ON DELETE CASCADE relationships.
+      this.db.prepare(`DELETE FROM workspaces WHERE tenant_id = ?`).run(tenantId);
+      this.db.prepare(`DELETE FROM workspace_evidence WHERE tenant_id = ?`).run(tenantId);
+      this.db.prepare(`DELETE FROM workspace_notes WHERE tenant_id = ?`).run(tenantId);
+      this.db.prepare(`DELETE FROM workspace_links WHERE tenant_id = ?`).run(tenantId);
+
+      this.db.prepare(`DELETE FROM chat_conversations WHERE tenant_id = ?`).run(tenantId);
+      for (const conversationId of jobConversationIds) {
+        this.db.prepare(`DELETE FROM chat_conversations WHERE id = ?`).run(conversationId);
+      }
+      for (const jobId of jobIds) {
+        this.db.prepare(`DELETE FROM chat_conversations WHERE multi_tenant_job_id = ?`).run(jobId);
+        this.db.prepare(`DELETE FROM multi_tenant_jobs WHERE id = ?`).run(jobId);
+      }
+      for (const batchId of batchIds) {
+        this.db.prepare(`DELETE FROM multi_tenant_agent_batches WHERE id = ?`).run(batchId);
+      }
+
+      const groups = this.db
+        .prepare(`SELECT id, tenant_ids_json FROM tenant_groups`)
+        .all() as unknown as Array<{ id: string; tenant_ids_json: string }>;
+      for (const group of groups) {
+        const tenantIds = readJson<string[]>(group.tenant_ids_json, []).filter(
+          (id) => id !== tenantId,
+        );
+        if (tenantIds.length === 0) {
+          this.db.prepare(`DELETE FROM tenant_groups WHERE id = ?`).run(group.id);
+        } else {
+          this.db
+            .prepare(`UPDATE tenant_groups SET tenant_ids_json = ?, updated_at = ? WHERE id = ?`)
+            .run(JSON.stringify(tenantIds), new Date().toISOString(), group.id);
+        }
+      }
+
+      const queries = this.db
+        .prepare(`SELECT id, default_scope_json FROM saved_multi_tenant_queries WHERE default_scope_json IS NOT NULL`)
+        .all() as unknown as Array<{ id: string; default_scope_json: string }>;
+      for (const query of queries) {
+        const scope = readJson<{ kind?: string; tenantIds?: string[] }>(
+          query.default_scope_json,
+          {},
+        );
+        if (!Array.isArray(scope.tenantIds) || !scope.tenantIds.includes(tenantId)) continue;
+        this.db
+          .prepare(`UPDATE saved_multi_tenant_queries SET default_scope_json = ?, updated_at = ? WHERE id = ?`)
+          .run(
+            JSON.stringify({ ...scope, tenantIds: scope.tenantIds.filter((id) => id !== tenantId) }),
+            new Date().toISOString(),
+            query.id,
+          );
+      }
+
+      this.db
+        .prepare(`DELETE FROM app_settings WHERE key = ?`)
+        .run(graphCacheScheduleKey(tenantId));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
 
   getLocalDataSummary(input: {
@@ -3071,7 +3166,7 @@ function groupDriftVersions(
 
 function normalizeDriftLimit(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return Math.max(1, Math.min(500, Math.floor(value)));
+  return Math.max(1, Math.min(5_001, Math.floor(value)));
 }
 
 function normalizeCachedRowLimit(value: unknown, fallback: number): number {

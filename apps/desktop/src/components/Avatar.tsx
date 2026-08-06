@@ -37,7 +37,7 @@ export function Avatar({
   const angle = (hash % 360);
   return (
     <div
-      className={`inline-flex shrink-0 items-center justify-center font-medium text-[#1a120c] select-none ${
+      className={`inline-flex shrink-0 items-center justify-center font-medium text-[var(--color-on-accent)] select-none ${
         ring ? "ring-2 ring-[var(--color-bg)]" : ""
       } ${className}`}
       style={{

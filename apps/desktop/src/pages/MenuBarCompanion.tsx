@@ -429,8 +429,8 @@ function AskPanel({
           </div>
         </div>
         {sending && (
-          <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-[var(--color-accent)]">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />
+          <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-[var(--color-info)]">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-info)]" />
             streaming
           </span>
         )}
@@ -620,9 +620,9 @@ function ActivitySection({
           >
             <span className="min-w-0">
               <span className="block truncate text-[11.5px] font-semibold text-[var(--color-text)]">{item.label}</span>
-              <span className="mt-0.5 block text-[10px] text-[var(--color-accent)]">{item.status}</span>
+              <span className="mt-0.5 block text-[10px] text-[var(--color-info)]">{item.status}</span>
             </span>
-            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[var(--color-accent)]" />
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[var(--color-info)]" />
           </button>
         ))}
         {snapshot.recentActivity.slice(0, 3 - Math.min(snapshot.inFlight.length, 2)).map((item, index) => (
@@ -697,7 +697,7 @@ function ProgressLine({ label, active }: { label: string; active?: boolean }) {
   return (
     <div className="flex items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]">
       {active ? (
-        <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-accent)]" />
+        <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-info)]" />
       ) : (
         <IconCheck size={12} />
       )}

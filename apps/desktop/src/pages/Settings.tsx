@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
@@ -18,6 +18,7 @@ import {
   IconLock,
   IconPlus,
   IconRefresh,
+  IconSearch,
   IconShield,
   IconWarning,
 } from "../components/icons";
@@ -52,17 +53,14 @@ import {
 } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
-
-const sections = [
-  { id: "providers", label: "LLM Providers" },
-  { id: "tenants", label: "Tenants" },
-  { id: "chat", label: "Chat" },
-  { id: "general", label: "General" },
-  { id: "privacy", label: "Privacy" },
-  { id: "about", label: "About" },
-] as const;
-
-type SectionId = (typeof sections)[number]["id"];
+import {
+  SETTINGS_ITEMS,
+  SETTINGS_SECTIONS,
+  searchSettings,
+  userFacingErrorReason,
+  type SettingsItemId,
+  type SettingsSectionId,
+} from "../copy";
 
 interface RunHistoryRetentionDraft {
   neverPrune: boolean;
@@ -82,7 +80,18 @@ const OFFICIAL_REGISTRY_SOURCE =
 
 export default function Settings() {
   const navigate = useNavigate();
-  const [section, setSection] = useState<SectionId>("providers");
+  const { section: sectionPath } = useParams<{ section?: string }>();
+  const [searchParams] = useSearchParams();
+  const legacySectionParam = searchParams.get("section");
+  const sectionParam = sectionPath ?? legacySectionParam;
+  const initialSection = SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)
+    ? (sectionParam as SettingsSectionId)
+    : "providers";
+  const [section, setSection] = useState<SettingsSectionId>(initialSection);
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const settingsSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const settingsResults = useMemo(() => searchSettings(settingsQuery), [settingsQuery]);
   const {
     state,
     setActiveProvider,
@@ -96,6 +105,75 @@ export default function Settings() {
   } = useAppState();
   const [tenantBusy, setTenantBusy] = useState(false);
   const [tenantError, setTenantError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)) {
+      setSection(sectionParam as SettingsSectionId);
+      return;
+    }
+    if (sectionPath !== undefined) {
+      setSection("providers");
+      navigate("/settings/providers", { replace: true });
+    }
+  }, [navigate, sectionParam, sectionPath]);
+
+  useEffect(() => {
+    setActiveSearchIndex(0);
+  }, [settingsQuery]);
+
+  useEffect(() => {
+    const target = searchParams.get("target");
+    if (!target) return;
+    const frame = window.requestAnimationFrame(() => {
+      const row = document.getElementById(`setting-${target}`);
+      if (!(row instanceof HTMLElement)) return;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      row.scrollIntoView({ block: "center", behavior: reducedMotion ? "auto" : "smooth" });
+      row.focus({ preventScroll: true });
+      row.dataset.highlighted = "true";
+      window.setTimeout(() => delete row.dataset.highlighted, 1800);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [searchParams, section]);
+
+  const selectSettingsTarget = (target: {
+    section: SettingsSectionId;
+    id?: string;
+  }) => {
+    setSection(target.section);
+    navigate(
+      target.id
+        ? `/settings/${target.section}?target=${encodeURIComponent(target.id)}`
+        : `/settings/${target.section}`,
+    );
+  };
+
+  const onSettingsSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveSearchIndex((index) => Math.min(index + 1, settingsResults.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveSearchIndex((index) => Math.max(0, index - 1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setActiveSearchIndex(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setActiveSearchIndex(Math.max(0, settingsResults.length - 1));
+    } else if (event.key === "Enter") {
+      const result = settingsResults[activeSearchIndex];
+      if (!result) return;
+      event.preventDefault();
+      selectSettingsTarget({
+        section: result.section,
+        ...(result.kind === "setting" ? { id: result.id } : {}),
+      });
+      setSettingsQuery("");
+    } else if (event.key === "Escape") {
+      setSettingsQuery("");
+    }
+  };
 
   const handleConnectTenant = async () => {
     setTenantBusy(true);
@@ -111,20 +189,96 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Configure how OpenAdminOS talks to LLMs and your tenant." />
+      <PageHeader title="Settings" subtitle="Search first. Detailed configuration stays out of the daily Chat surface." />
       <div className="flex h-full min-h-0 flex-1">
-        <nav className="flex w-[200px] shrink-0 flex-col gap-0.5 border-r border-[var(--color-border-soft)] px-3 py-6">
-          {sections.map((s) => (
+        <nav aria-label="Settings sections" className="relative flex w-[232px] shrink-0 flex-col gap-0.5 border-r border-[var(--color-border-soft)] px-3 py-6">
+          <div className="relative mb-3">
+            <IconSearch
+              size={13}
+              aria-hidden="true"
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+            />
+            <label htmlFor="settings-search" className="sr-only">
+              Search settings
+            </label>
+            <input
+              id="settings-search"
+              ref={settingsSearchInputRef}
+              name="settings-search"
+              type="search"
+              role="combobox"
+              aria-expanded={settingsQuery.trim().length > 0}
+              aria-controls="settings-search-results"
+              aria-autocomplete="list"
+              aria-activedescendant={
+                settingsResults[activeSearchIndex]
+                  ? `settings-search-result-${settingsResults[activeSearchIndex]!.id}`
+                  : undefined
+              }
+              autoComplete="off"
+              value={settingsQuery}
+              onChange={(event) => setSettingsQuery(event.target.value)}
+              onKeyDown={onSettingsSearchKeyDown}
+              placeholder="Search settings…"
+              className="h-8 w-full rounded-lg bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]"
+            />
+            {settingsQuery.trim() && (
+              <div
+                id="settings-search-results"
+                role="listbox"
+                aria-label="Settings search results"
+                className="absolute inset-x-0 top-10 z-20 max-h-[320px] overscroll-contain overflow-y-auto rounded-lg bg-[var(--color-bg-elevated)] p-1 shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)]"
+              >
+                {settingsResults.length === 0 ? (
+                  <div role="status" className="px-3 py-4 text-[12px] leading-5 text-[var(--color-text-muted)]">
+                    No matching setting. Try “provider”, “cache”, or “privacy”.
+                  </div>
+                ) : (
+                  settingsResults.map((result, index) => (
+                    <button
+                      key={result.id}
+                      id={`settings-search-result-${result.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeSearchIndex}
+                      tabIndex={-1}
+                      onMouseEnter={() => setActiveSearchIndex(index)}
+                      onClick={() => {
+                        selectSettingsTarget({
+                          section: result.section,
+                          ...(result.kind === "setting" ? { id: result.id } : {}),
+                        });
+                        setSettingsQuery("");
+                      }}
+                      className={`block w-full rounded-md px-2.5 py-2 text-left ${
+                        index === activeSearchIndex
+                          ? "bg-[var(--color-surface-hover)]"
+                          : "hover:bg-[var(--color-surface)]"
+                      }`}
+                    >
+                      <span className="block text-[12px] font-medium text-[var(--color-text)]">
+                        {result.title}
+                      </span>
+                      <span className="mt-0.5 block line-clamp-2 text-[11px] leading-4 text-[var(--color-text-muted)]">
+                        {result.description}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          {SETTINGS_SECTIONS.map((s) => (
             <button
               key={s.id}
-              onClick={() => setSection(s.id)}
+              onClick={() => selectSettingsTarget({ section: s.id })}
               className={`rounded-lg px-3 py-1.5 text-left text-[13px] font-medium transition-colors ${
                 s.id === section
                   ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
                   : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
               }`}
             >
-              {s.label}
+              {s.title}
             </button>
           ))}
           <div className="mt-auto border-t border-[var(--color-border-soft)] pt-4">
@@ -821,7 +975,8 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
             role="alert"
             className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
           >
-            {error}
+            {userFacingErrorReason(error) ??
+              "Provider settings could not be updated. Review the provider connection, then try again."}
           </div>
         )}
         {notice && (
@@ -942,7 +1097,8 @@ function TenantsSection({
 
       {error && (
         <div className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-          {error}
+          {userFacingErrorReason(error) ??
+            "The tenant connection could not be updated. Review the sign-in state, then try again."}
         </div>
       )}
 
@@ -981,6 +1137,9 @@ function TenantRow({
   onSetActive: (id: string) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const entraLicenseName =
     tenant.entraTier && tenant.entraTier !== "unknown"
       ? tenant.entraTier === "free"
@@ -1002,6 +1161,7 @@ function TenantRow({
       ]
     : skuLicenses;
   return (
+    <>
     <Card>
       <div className="flex items-start gap-4 p-5">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
@@ -1051,13 +1211,80 @@ function TenantRow({
             variant="ghost"
             size="sm"
             leadingIcon={<IconClose size={11} />}
-            onClick={() => void onDisconnect(tenant.id)}
+            onClick={() => {
+              setDisconnectError(null);
+              setConfirmDisconnect(true);
+            }}
           >
             Disconnect
           </Button>
         </div>
       </div>
     </Card>
+    <Modal
+      open={confirmDisconnect}
+      onClose={() => {
+        if (!disconnecting) setConfirmDisconnect(false);
+      }}
+      size="md"
+    >
+      <ModalHeader
+        title={`Disconnect ${tenant.displayName}`}
+        subtitle="Remove the connection and its local tenant data"
+        badge={<Pill tone="danger">Permanent local deletion</Pill>}
+        onClose={() => {
+          if (!disconnecting) setConfirmDisconnect(false);
+        }}
+      />
+      <div className="space-y-4 p-6">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          This removes the Microsoft sign-in connection and permanently deletes this
+          tenant&apos;s local Graph cache, change history, chats, workspaces, run history,
+          learning records, and queued deliveries from this device.
+        </div>
+        <p className="text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+          Microsoft 365 data in the tenant is not changed. Reconnecting later starts with
+          an empty local cache.
+        </p>
+        {disconnectError && (
+          <div
+            role="alert"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+          >
+            {userFacingErrorReason(disconnectError) ??
+              "The tenant could not be fully disconnected. Some local cleanup may already have completed. Restart OpenAdminOS, check that secure storage is available, then try again."}
+          </div>
+        )}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button
+            variant="ghost"
+            disabled={disconnecting}
+            onClick={() => setConfirmDisconnect(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            disabled={disconnecting}
+            onClick={() => {
+              setDisconnecting(true);
+              setDisconnectError(null);
+              void onDisconnect(tenant.id)
+                .then(() => setConfirmDisconnect(false))
+                .catch((caught) =>
+                  setDisconnectError(
+                    caught instanceof Error ? caught.message : String(caught),
+                  ),
+                )
+                .finally(() => setDisconnecting(false));
+            }}
+          >
+            {disconnecting ? "Disconnecting" : "Disconnect and delete local data"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }
 
@@ -1292,13 +1519,14 @@ function ChatSettingsSection() {
 
       {error && (
         <div className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-          {error}
+          {userFacingErrorReason(error) ??
+            "Chat settings could not be updated. Review the current values, then try again."}
         </div>
       )}
 
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
-          label="Chat investigation mode"
+          id="chat-investigation-mode"
           description="Controls whether single-tenant Chat can run read-only tool calls before answering. Multi-tenant chat stays deterministic."
           control={
             <div
@@ -1352,7 +1580,7 @@ function ChatSettingsSection() {
         />
 
         <SettingRow
-          label="Tenant cache"
+          id="tenant-cache"
           description={
             latestRefresh
               ? `Latest refresh ${formatDateTime(latestRefresh)}. Chat uses compact answer packs from these local cache rows.`
@@ -1485,7 +1713,7 @@ function ChatSettingsSection() {
         </Card>
 
         <SettingRow
-          label="Periodic cache refresh"
+          id="periodic-cache-refresh"
           description="Refreshes the active tenant cache through the local scheduler while the user is signed in."
           control={
             <div className="flex items-center gap-2">
@@ -1540,7 +1768,7 @@ function ChatSettingsSection() {
         )}
 
         <SettingRow
-          label="Local self-training"
+          id="local-self-training"
           description="Approved suggestions write local agent overlay files. They cannot add scopes, change mode, alter connector egress, or bypass confirmation."
           control={
             <Button
@@ -2024,7 +2252,7 @@ function GeneralSection() {
       />
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
-          label="Menu bar companion"
+          id="menu-bar-companion"
           description={
             companionLaunch?.supported
               ? companionLaunch.status === "requires-approval"
@@ -2056,7 +2284,7 @@ function GeneralSection() {
           </div>
         )}
         <SettingRow
-          label="Experimental sandboxed code"
+          id="experimental-sandboxed-code"
           description={
             sandboxSettings?.enabled
               ? `${formatSandboxValue(sandboxSettings.diagnostics)}. Only code-backed preview agents use MXC; YAML agents keep using the manifest interpreter.`
@@ -2090,7 +2318,7 @@ function GeneralSection() {
           </div>
         )}
         <SettingRow
-          label="OS scheduler"
+          id="os-scheduler"
           description={
             schedulerLaunch?.supported
               ? schedulerLaunch.requiresTenant
@@ -2141,7 +2369,7 @@ function GeneralSection() {
           </div>
         )}
         <SettingRow
-          label="Default tenant scope"
+          id="default-tenant-scope"
           description={
             activeTenant
               ? "Agents use this tenant unless overridden at run time. Change in Settings → Tenants."
@@ -2156,7 +2384,7 @@ function GeneralSection() {
           }
         />
         <SettingRow
-          label="Confirm typed phrase for destructive writes"
+          id="destructive-confirmation"
           description="Always on. Cannot be disabled. See the spec for why."
           control={
             <Pill tone="success">
@@ -2165,7 +2393,7 @@ function GeneralSection() {
           }
         />
         <SettingRow
-          label="Theme"
+          id="theme"
           description="OpenAdminOS is dark-only today. A light theme is on the v1.x list."
           control={
             <Pill>
@@ -2174,7 +2402,7 @@ function GeneralSection() {
           }
         />
         <SettingRow
-          label="Run history retention"
+          id="run-history-retention"
           description="Pruning removes old run records from local history. Workspace-linked or workspace-pinned runs, queued/running runs, and runs awaiting confirmation are kept. The job runs at startup and on the scheduler tick."
           control={
             <RunHistoryRetentionControls
@@ -2190,7 +2418,7 @@ function GeneralSection() {
           }
         />
         <SettingRow
-          label="Change history"
+          id="change-history"
           description="Pruning removes old local drift snapshots and historical object versions. Current object state is never deleted. The job runs at startup and on the scheduler tick."
           control={
             <DriftRetentionControls
@@ -2205,7 +2433,7 @@ function GeneralSection() {
           }
         />
         <SettingRow
-          label="Audit log export"
+          id="audit-log-export"
           description="Exports retained run history, write-confirmation events, connector delivery audit entries, and recorded hosted-provider consent acknowledgements. Old run records may already be absent because of retention."
           control={
             <AuditLogExportControls
@@ -2632,6 +2860,7 @@ function PrivacySection({
   ) => Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   onSetRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
 }) {
+  const platform = window.openAdminOS?.platform ?? "unknown";
   const [savingInstallCounts, setSavingInstallCounts] = useState(false);
   const [installCountsError, setInstallCountsError] = useState<string | null>(null);
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
@@ -2657,8 +2886,8 @@ function PrivacySection({
       />
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
-          label="Tenant telemetry"
-          description="No tenant data, prompts, run results, analytics events, or error-reporting data are collected. Crash logs stay on this device."
+          id="tenant-telemetry"
+          description="No tenant data, prompts, run results, analytics events, or error-reporting data are collected. Optional aggregate agent-install counts are controlled separately below. Crash logs stay on this device."
           control={
             <Pill tone="success">
               <StatusDot tone="success" /> Not collected
@@ -2666,7 +2895,7 @@ function PrivacySection({
           }
         />
         <SettingRow
-          label="Registry install counts"
+          id="registry-install-counts"
           description="When enabled, installing a public registry agent sends only agent slug, app version, platform, and a yearly per-agent hash for aggregate counts. No tenant data, prompts, run results, or Graph data are sent."
           control={
             <button
@@ -2693,7 +2922,7 @@ function PrivacySection({
           </div>
         )}
         <SettingRow
-          label="Agent registry source"
+          id="agent-registry-source"
           description={
             registryRefreshError
               ? `Using cache or bundled agents after the last refresh failed. Source: ${formatRegistrySource(registrySource)}.`
@@ -2723,7 +2952,7 @@ function PrivacySection({
           </div>
         )}
         <SettingRow
-          label="Crash reporting"
+          id="crash-reporting"
           description="No crash reports are sent. Errors stay local."
           control={
             <Pill tone="success">
@@ -2732,7 +2961,7 @@ function PrivacySection({
           }
         />
         <SettingRow
-          label="Tenant data residency"
+          id="tenant-data-residency"
           description="Where the active provider sends prompts and tenant data."
           control={
             <Pill tone={trust.isLocal ? "success" : "warning"}>
@@ -2741,7 +2970,7 @@ function PrivacySection({
           }
         />
         <SettingRow
-          label="Graph writes"
+          id="graph-writes"
           description="Write-mode agents always call Microsoft Graph for real when a tenant is connected. There is no global toggle — every write run pauses for a typed-phrase confirmation against the live diff, which is the only place to authorize a change."
           control={
             <Pill tone="warning">
@@ -2750,8 +2979,14 @@ function PrivacySection({
           }
         />
         <SettingRow
-          label="Update channel"
-          description="Stable-only for now. The auto-updater checks signed GitHub releases on launch and every four hours. No silent updates — you'll see a banner with a Restart button when an update is ready."
+          id="update-channel"
+          description={
+            platform === "linux"
+              ? "Stable-only. Linux updates are installed through the signed apt repository or by downloading the next package; the app does not replace unsigned Linux executables automatically."
+              : platform === "windows"
+                ? "Stable-only. Microsoft Store builds update through the Store. Other signed builds check the release channel and ask before restarting."
+                : "Stable-only. Signed builds check the release channel on launch and every four hours, then ask before restarting."
+          }
           control={
             <Pill tone="success">
               <StatusDot tone="success" /> Stable
@@ -2937,7 +3172,8 @@ function RegistrySourceModal({
 
         {error && (
           <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-            {error}
+            {userFacingErrorReason(error) ??
+              "Registry settings could not be updated. Review the source, then try again."}
           </div>
         )}
         {notice && (
@@ -3260,23 +3496,32 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) 
 }
 
 function SettingRow({
+  id,
   label,
   description,
   control,
 }: {
-  label: string;
-  description: string;
+  id?: SettingsItemId;
+  label?: string;
+  description?: string;
   control: React.ReactNode;
 }) {
+  const catalogEntry = id ? SETTINGS_ITEMS[id] : undefined;
+  const renderedLabel = catalogEntry?.title ?? label;
+  const renderedDescription = description ?? catalogEntry?.description;
   return (
-    <Card>
+    <Card
+      id={id ? `setting-${id}` : undefined}
+      tabIndex={id ? -1 : undefined}
+      className="setting-row scroll-mt-6 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+    >
       <div className="flex items-center justify-between gap-6 p-4 px-5">
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-[var(--color-text)]">
-            {label}
+            {renderedLabel}
           </div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
-            {description}
+            {renderedDescription}
           </div>
         </div>
         <div className="shrink-0">{control}</div>

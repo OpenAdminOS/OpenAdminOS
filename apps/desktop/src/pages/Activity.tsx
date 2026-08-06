@@ -92,7 +92,7 @@ export default function Activity() {
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search runs"
               autoComplete="off"
-              className="h-9 w-[260px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+              className="h-9 w-[260px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
             />
           </div>
         }

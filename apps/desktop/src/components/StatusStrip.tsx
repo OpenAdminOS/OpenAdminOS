@@ -2,6 +2,8 @@ import { Link } from "react-router";
 import { useAppState } from "../state";
 import { resolveProviderDefaultModel } from "../shared/openAdminOS";
 import { IconCloud, IconHardDrive } from "./icons";
+import { deriveTrustCopy } from "../copy";
+import { TruncatedText } from "./TruncatedText";
 
 export function StatusStrip() {
   const { state } = useAppState();
@@ -21,19 +23,28 @@ export function StatusStrip() {
       run.status === "running" ||
       run.status === "awaiting-confirmation",
   ).length;
+  const trustCopy = deriveTrustCopy({
+    provider: activeProvider,
+    ...(activeModel ? { model: activeModel } : {}),
+    scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+  });
 
   return (
-    <footer className="flex shrink-0 items-center justify-between border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] px-4 py-1.5 font-mono text-[10.5px] text-[var(--color-text-muted)]">
-      <div className="flex items-center gap-3">
-        {activeTenant && (
-          <span className="inline-flex items-center gap-1.5">
+    <footer
+      aria-label="Current tenant, provider, and data boundary"
+      className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] px-4 py-1.5 font-mono text-[11px] text-[var(--color-text-muted)] min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="inline-flex min-w-0 items-center gap-1.5">
             <IconCloud size={10} className="text-[var(--color-info)]" />
-            <span className="text-[var(--color-text-soft)]">
-              tenant: {activeTenant.displayName}
-            </span>
-            {activeTenant.entraTier && activeTenant.entraTier !== "unknown" && (
+            <span className="shrink-0 text-[var(--color-text-muted)]">tenant:</span>
+            <TruncatedText
+              value={activeTenant?.displayName ?? "No active tenant"}
+              className={activeTenant ? "text-[var(--color-text-soft)]" : "text-[var(--color-warning)]"}
+            />
+            {activeTenant?.entraTier && activeTenant.entraTier !== "unknown" && (
               <span
-                className="ml-0.5 rounded px-1 text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                className="ml-0.5 rounded px-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
                 title="Detected from /subscribedSkus — used to badge incompatible agents."
               >
                 {activeTenant.entraTier === "free"
@@ -42,11 +53,9 @@ export function StatusStrip() {
               </span>
             )}
           </span>
-        )}
+      </div>
 
-        {activeTenant && <span className="opacity-40">·</span>}
-
-        <span className="inline-flex items-center gap-1.5">
+      <span className="hidden min-w-0 items-center gap-1.5 min-[1100px]:inline-flex">
           <IconHardDrive
             size={10}
             className={
@@ -55,14 +64,13 @@ export function StatusStrip() {
                 : "text-[var(--color-warning)]"
             }
           />
-          <span className="text-[var(--color-text-soft)]">
-            {activeProvider?.name ?? "no provider"}
-            {activeModel ? ` · ${activeModel}` : ""}
-          </span>
+          <TruncatedText
+            value={`${activeProvider?.name ?? "No provider"}${activeModel ? ` · ${activeModel}` : ""}`}
+            className="text-[var(--color-text-soft)]"
+          />
         </span>
-      </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center justify-end gap-3">
         {runningCount > 0 && (
           <Link
             to="/activity"
@@ -74,9 +82,10 @@ export function StatusStrip() {
             </span>
           </Link>
         )}
-        <span className="text-[var(--color-text-faint)]">
-          v{__APP_VERSION__} · local-first
-        </span>
+        <TruncatedText
+          value={trustCopy.strip}
+          className={trustCopy.isLocal ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}
+        />
       </div>
     </footer>
   );

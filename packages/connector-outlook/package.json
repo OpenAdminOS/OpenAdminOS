@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/connector-outlook",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Outlook connector for OpenAdminOS. Sends outbound notification email through Microsoft Graph using the active tenant's delegated MSAL token.",
@@ -21,7 +21,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@openadminos/agent-sdk": "0.3.0"
+    "@openadminos/agent-sdk": "0.4.0"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",
