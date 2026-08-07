@@ -35,6 +35,20 @@ describe("drift service", () => {
       assert.equal(baseline.rowCount, 2);
       assert.equal(baseline.resourceLabel, "Settings catalog policies");
       assert.equal(baseline.graphId, undefined);
+
+      const searched = await service.getDriftTimeline({
+        tenantId: "tenant-1",
+        resources: ["configurationPolicies"],
+        query: "policy two",
+        limit: 10,
+      });
+      assert.ok(searched.entries.length > 0);
+      assert.ok(
+        searched.entries.every((entry) =>
+          `${entry.displayName ?? ""} ${entry.graphId ?? ""}`.toLowerCase().includes("policy-2") ||
+          (entry.displayName ?? "").toLowerCase().includes("policy two"),
+        ),
+      );
     });
   });
 
@@ -119,6 +133,15 @@ describe("drift service", () => {
   it("reports per-resource drift status for tracked resources", async () => {
     await withDriftService(async ({ service, store }) => {
       seedTimeline(store);
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "deviceCompliancePolicies",
+        label: "Device compliance policies",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"],
+        refreshedAt: "2026-07-05T10:20:00.000Z",
+        pageLimitReached: true,
+        rows: [{ id: "compliance-1", displayName: "Compliance policy" }],
+      });
 
       const status = await service.getDriftStatus("tenant-1");
       const configurationPolicies = status.resources.find(
@@ -137,9 +160,13 @@ describe("drift service", () => {
       assert.equal(configurationPolicies.totalTrackedVersions, 4);
       assert.equal(configurationPolicies.currentObjectCount, 2);
 
-      const untouched = status.resources.find(
+      const capped = status.resources.find(
         (entry) => entry.resource === "deviceCompliancePolicies",
       );
+      assert.equal(capped?.baselineCaptured, true);
+      assert.equal(capped?.pageLimitReached, true);
+
+      const untouched = status.resources.find((entry) => entry.resource === "roleScopeTags");
       assert.equal(untouched?.baselineCaptured, false);
       assert.equal(untouched?.totalTrackedVersions, 0);
     });

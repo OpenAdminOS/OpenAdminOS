@@ -133,7 +133,7 @@ export function AgentScheduleCard({
             value={customValue}
             disabled={busy}
             onChange={(event) => setCustomValue(event.target.value)}
-            className="h-8 w-20 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2.5 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-8 w-20 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2.5 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
           />
           <label className="sr-only" htmlFor="custom-schedule-unit">
             Custom schedule unit

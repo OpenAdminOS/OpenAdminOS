@@ -20,9 +20,9 @@ env:
 
 jobs:
   verify:
-    name: typecheck, qa, build
+    name: typecheck, tests, qa, docs, build, smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       OPENAGENTS_QA_SKILL_REPO: https://github.com/merill/msgraph.git
       OPENAGENTS_QA_SKILL_REF: main
@@ -30,6 +30,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Generated agent docs include path-specific commit metadata.
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -63,6 +66,12 @@ jobs:
       - name: Graph QA gate
         run: npm run qa
 
+      - name: Verify generated documentation
+        run: npm run docs:check
+
+      - name: Verify release and upgrade compatibility
+        run: npm run release:check
+
       - name: Regenerate registry index
         run: npm run registry:index
 
@@ -73,3 +82,12 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Build Electron main process for smoke tests
+        run: npm run build:electron -w @openadminos/desktop
+
+      - name: Intune Chat smoke test
+        run: xvfb-run -a node scripts/smoke-intune-chat.mjs
+
+      - name: Support issue smoke test
+        run: xvfb-run -a node scripts/smoke-report-issue.mjs

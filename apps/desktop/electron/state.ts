@@ -375,6 +375,11 @@ function sanitizeNonNegativeInteger(value: unknown): number | undefined {
   return Math.round(value);
 }
 
+function scheduleFallbackAnchor(installedAt: string, nowMs: number): number {
+  const installedMs = Date.parse(installedAt);
+  return Number.isFinite(installedMs) ? installedMs : nowMs;
+}
+
 function runHistorySortMs(run: RunRecord): number {
   const parsed = Date.parse(run.queuedAt || run.startedAt || run.finishedAt || "");
   return Number.isFinite(parsed) ? parsed : 0;
@@ -939,6 +944,12 @@ export interface AppStateStoreOptions {
     ) => void;
   }): RunGraphApi;
   /**
+   * Test hook for deterministic provider detection in host-level smoke tests.
+   * Production leaves this unset so provider readiness always comes from the
+   * real local and hosted provider adapters.
+   */
+  providerListFactory?(): Promise<ProviderSummary[]> | ProviderSummary[];
+  /**
    * Test hook for host-level chat/cache smoke tests. Production code
    * leaves this unset so provider availability and trust messaging still
    * come from the configured provider adapters.
@@ -989,6 +1000,9 @@ export class AppStateStore {
   private readonly runService: RunService;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
+  private readonly providerListFactory:
+    | AppStateStoreOptions["providerListFactory"]
+    | undefined;
   private readonly llmFactory: AppStateStoreOptions["llmFactory"] | undefined;
   private readonly whatsAppWebClientFactory:
     | AppStateStoreOptions["whatsAppWebClientFactory"]
@@ -1026,6 +1040,7 @@ export class AppStateStore {
       this.userDataPath = undefined;
       this.intelligenceStore = undefined;
       this.graphFactory = undefined;
+      this.providerListFactory = undefined;
       this.llmFactory = undefined;
       this.whatsAppWebClientFactory = undefined;
       this.connectorSecretsForOverride = undefined;
@@ -1051,6 +1066,7 @@ export class AppStateStore {
         ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"))
         : undefined;
       this.graphFactory = options.graphFactory;
+      this.providerListFactory = options.providerListFactory;
       this.llmFactory = options.llmFactory;
       this.whatsAppWebClientFactory = options.whatsAppWebClientFactory;
       this.connectorSecretsForOverride = options.connectorSecretsFor;
@@ -1748,6 +1764,10 @@ export class AppStateStore {
   }
 
   async listProviders(): Promise<ProviderSummary[]> {
+    if (this.providerListFactory) {
+      return this.providerListFactory();
+    }
+
     let azureOpenAIConfig: AzureOpenAIProviderConfig | undefined;
     let azureOpenAIConfigError: string | undefined;
     try {
@@ -3010,6 +3030,7 @@ export class AppStateStore {
     slug: string,
     schedule: AgentSchedule | null,
   ): Promise<AppState> {
+    const updatedAt = new Date().toISOString();
     if (schedule !== null) {
       if (typeof schedule !== "object") {
         throw new Error("updateAgentSchedule: schedule must be an object or null.");
@@ -3047,6 +3068,10 @@ export class AppStateStore {
         const { schedule: _, ...rest } = existing;
         next[idx] = rest;
       } else {
+        const activationAnchor =
+          schedule.enabled && existing.schedule?.enabled !== true
+            ? updatedAt
+            : undefined;
         next[idx] = {
           ...existing,
           schedule: {
@@ -3056,11 +3081,13 @@ export class AppStateStore {
             notifyOnFailure: schedule.notifyOnFailure ?? existing.schedule?.notifyOnFailure ?? true,
             notifyOnChangeOnly:
               schedule.notifyOnChangeOnly ?? existing.schedule?.notifyOnChangeOnly ?? false,
-            ...(schedule.lastScheduledRunAt
-              ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
-              : existing.schedule?.lastScheduledRunAt
-                ? { lastScheduledRunAt: existing.schedule.lastScheduledRunAt }
-                : {}),
+            ...(activationAnchor
+              ? { lastScheduledRunAt: activationAnchor }
+              : schedule.lastScheduledRunAt
+                ? { lastScheduledRunAt: schedule.lastScheduledRunAt }
+                : existing.schedule?.lastScheduledRunAt
+                  ? { lastScheduledRunAt: existing.schedule.lastScheduledRunAt }
+                  : {}),
           },
         };
       }
@@ -3128,7 +3155,7 @@ export class AppStateStore {
       if (!schedule?.enabled) continue;
       const lastFired = schedule.lastScheduledRunAt
         ? new Date(schedule.lastScheduledRunAt).getTime()
-        : 0;
+        : scheduleFallbackAnchor(agent.installedAt, nowMs);
       const dueAtMs = lastFired + schedule.intervalSeconds * 1000;
       if (nowMs < dueAtMs) continue;
 
@@ -3659,6 +3686,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   async uninstallAgent(slug: string): Promise<AppState> {
     let userAuthoredDir: string | undefined;
+    let downloadedManifestDir: string | undefined;
 
     await this.serialize(async () => {
       const persisted = await this.read();
@@ -3679,6 +3707,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           userAuthoredDir = target.registryPath;
         }
       }
+      const updatesRoot = this.agentUpdatesRoot();
+      if (updatesRoot) {
+        downloadedManifestDir = join(updatesRoot, target.slug);
+      }
 
       await this.write({
         ...persisted,
@@ -3695,6 +3727,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         console.error("[uninstall] failed to remove user-authored dir", error);
       }
     }
+    if (downloadedManifestDir) {
+      try {
+        await rm(downloadedManifestDir, { recursive: true, force: true });
+      } catch (error) {
+        console.error("[uninstall] failed to remove downloaded manifest", error);
+      }
+    }
 
     return this.getAppState();
   }
@@ -3706,6 +3745,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async installAgent(agentId: string): Promise<AppState> {
     let installedSlug: string | undefined;
     let installIdForReport: string | undefined;
+    const initialCandidate = this.listRegistryAgents().find(
+      (agent) =>
+        agent.id === agentId ||
+        agent.slug === agentId ||
+        agent.registryId === agentId,
+    );
+    if (!initialCandidate) {
+      throw new Error(`Unknown registry agent: ${agentId}`);
+    }
+    const downloaded = initialCandidate.manifestUrl
+      ? await this.fetchAgentUpdateManifest(agentId, "installAgent")
+      : undefined;
 
     await this.serialize(async () => {
       const persisted = await this.read();
@@ -3720,15 +3771,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         return;
       }
 
-      const registryAgent = this.listRegistryAgents().find(
-        (agent) =>
-          agent.id === agentId ||
-          agent.slug === agentId ||
-          agent.registryId === agentId,
-      );
-      if (!registryAgent) {
-        throw new Error(`Unknown registry agent: ${agentId}`);
-      }
+      const registryAgent = downloaded?.target ?? initialCandidate;
       const compatibleRegistryAgent = withAgentCompatibility(
         registryAgent,
         this.appVersion,
@@ -3746,13 +3789,29 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       installed.provenance = buildAgentProvenance({
         agent: compatibleRegistryAgent,
         installedAt: installed.installedAt,
+        ...(downloaded
+          ? {
+              manifestText: downloaded.manifestText,
+              manifestSha256: downloaded.manifestSha256,
+            }
+          : {}),
       });
 
-      await this.write({
-        ...persisted,
-        ...(installId ? { installId } : {}),
-        installedAgents: [...persisted.installedAgents, installed],
-      });
+      const commitState = () =>
+        this.write({
+          ...persisted,
+          ...(installId ? { installId } : {}),
+          installedAgents: [...persisted.installedAgents, installed],
+        });
+      if (downloaded) {
+        await this.commitDownloadedAgentManifest(
+          installed.slug,
+          downloaded.manifestText,
+          commitState,
+        );
+      } else {
+        await commitState();
+      }
 
       installedSlug = compatibleRegistryAgent.slug;
       installIdForReport = registryInstallCountsEnabled ? installId : undefined;
@@ -3793,13 +3852,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         },
         this.appVersion,
       );
-      if (!candidate || !candidate.manifestUrl) return compatibleAgent;
+      if (!candidate || !candidate.manifestUrl || !candidate.manifestSha256) {
+        return compatibleAgent;
+      }
       if (compareSemver(candidate.version, agent.version) <= 0) return compatibleAgent;
       return {
         ...compatibleAgent,
         updateAvailable: {
           version: candidate.version,
           manifestUrl: candidate.manifestUrl,
+          manifestSha256: candidate.manifestSha256,
           minAppVersion: candidate.minAppVersion,
         },
       };
@@ -3883,21 +3945,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // Persist the new manifest only after trust-boundary confirmation
       // has passed. Otherwise an unconfirmed update could still shadow the
       // installed manifest through the agent-updates override directory.
-      const updatesRoot = this.agentUpdatesRoot();
-      if (!updatesRoot) {
-        throw new Error("updateAgent: agent-updates root is unavailable.");
-      }
-      const agentDir = join(updatesRoot, slug);
-      await mkdir(agentDir, { recursive: true });
-      const finalPath = join(agentDir, "manifest.yaml");
-      const tmpPath = `${finalPath}.tmp`;
-      await writeFile(
-        tmpPath,
-        manifestText.endsWith("\n") ? manifestText : `${manifestText}\n`,
-        "utf8",
-      );
-      await rename(tmpPath, finalPath);
-
       // Prune any settings whose keys the new manifest no longer declares.
       // When the new manifest declares zero settings (or all previous keys
       // were dropped), we explicitly clear `settings` rather than spreading
@@ -3937,7 +3984,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
       const installedAgents = [...persisted.installedAgents];
       installedAgents[idx] = next;
-      await this.write({ ...persisted, installedAgents });
+      await this.commitDownloadedAgentManifest(slug, manifestText, () =>
+        this.write({ ...persisted, installedAgents }),
+      );
     });
 
     return this.getAppState();
@@ -3945,7 +3994,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   private async fetchAgentUpdateManifest(
     slug: string,
-    context: "getAgentUpdateReview" | "updateAgent",
+    context: "installAgent" | "getAgentUpdateReview" | "updateAgent",
   ): Promise<{
     target: RegistryAgentSummary;
     manifestText: string;
@@ -3961,6 +4010,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (!target.manifestUrl) {
       throw new Error(
         `${context}: agent "${slug}" has no manifestUrl; nothing to fetch.`,
+      );
+    }
+    if (!target.manifestSha256 || !/^[a-f0-9]{64}$/.test(target.manifestSha256)) {
+      throw new Error(
+        `${context}: agent "${slug}" has no verified manifest digest; refresh the registry before updating.`,
       );
     }
     assertAgentCompatible(target, context === "updateAgent" ? "update" : "review");
@@ -3998,13 +4052,93 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         `${context}: fetched manifest declares id "${parsedManifest.descriptor.id}" but registry expected "${target.id}".`,
       );
     }
+    if (
+      parsedManifest.descriptor.version !== target.version ||
+      parsedManifest.descriptor.mode !== target.mode ||
+      parsedManifest.descriptor.category !== target.category
+    ) {
+      throw new Error(
+        `${context}: fetched manifest metadata does not match the verified registry entry.`,
+      );
+    }
+    const manifestScopes = [...new Set(collectManifestScopes(parsedManifest))].sort();
+    const registryScopes = [...new Set(target.scopes)].sort();
+    if (JSON.stringify(manifestScopes) !== JSON.stringify(registryScopes)) {
+      throw new Error(
+        `${context}: fetched manifest Graph scopes do not match the verified registry entry.`,
+      );
+    }
+    const manifestConnectorIds = (parsedManifest.descriptor.connectors ?? [])
+      .map((connector) => connector.id)
+      .sort();
+    const registryConnectorIds = (target.connectors ?? [])
+      .map((connector) => connector.id)
+      .sort();
+    if (JSON.stringify(manifestConnectorIds) !== JSON.stringify(registryConnectorIds)) {
+      throw new Error(
+        `${context}: fetched manifest connector access does not match the verified registry entry.`,
+      );
+    }
+
+    const manifestSha256 = sha256(manifestText);
+    if (manifestSha256 !== target.manifestSha256) {
+      throw new Error(
+        `${context}: fetched manifest digest did not match the verified registry index. The update was not applied.`,
+      );
+    }
 
     return {
       target,
       manifestText,
       parsedManifest,
-      manifestSha256: sha256(manifestText),
+      manifestSha256,
     };
+  }
+
+  private async commitDownloadedAgentManifest(
+    slug: string,
+    manifestText: string,
+    commitState: () => Promise<void>,
+  ): Promise<void> {
+    const updatesRoot = this.agentUpdatesRoot();
+    if (!updatesRoot) {
+      throw new Error("Agent manifest storage is unavailable.");
+    }
+    const agentDir = join(updatesRoot, slug);
+    await mkdir(agentDir, { recursive: true, mode: 0o700 });
+    const finalPath = join(agentDir, "manifest.yaml");
+    const tmpPath = `${finalPath}.${randomUUID()}.tmp`;
+    let previousManifest: string | undefined;
+    try {
+      previousManifest = await readFile(finalPath, "utf8");
+    } catch (error) {
+      if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    }
+
+    const normalized = manifestText.endsWith("\n")
+      ? manifestText
+      : `${manifestText}\n`;
+    await writeFile(tmpPath, normalized, { encoding: "utf8", mode: 0o600 });
+    try {
+      await rename(tmpPath, finalPath);
+      try {
+        await commitState();
+      } catch (stateError) {
+        if (previousManifest === undefined) {
+          await rm(finalPath, { force: true });
+        } else {
+          const rollbackPath = `${finalPath}.${randomUUID()}.rollback`;
+          await writeFile(rollbackPath, previousManifest, {
+            encoding: "utf8",
+            mode: 0o600,
+          });
+          await rename(rollbackPath, finalPath);
+        }
+        throw stateError;
+      }
+    } finally {
+      await rm(tmpPath, { force: true });
+    }
   }
 
   /**
@@ -4157,7 +4291,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         const schedule = agent.schedule;
         const last = schedule?.lastScheduledRunAt
           ? new Date(schedule.lastScheduledRunAt).getTime()
-          : Date.now();
+          : scheduleFallbackAnchor(agent.installedAt, Date.now());
         return {
           agent,
           dueAt: last + (schedule?.intervalSeconds ?? 3600) * 1000,
@@ -4353,27 +4487,41 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async disconnectTenant(id: string): Promise<AppState> {
-    const client = this.getMsalClient();
-    const persistedBefore = await this.read();
-    const target = persistedBefore.tenants.find((tenant) => tenant.id === id);
-    if (target) {
-      try {
-        await removeAccount({ client, homeAccountId: target.homeAccountId });
-      } catch {
-        // best-effort; we still clear the tenant entry below.
-      }
-    }
-
     await this.serialize(async () => {
       const persisted = await this.read();
+      const target = persisted.tenants.find((tenant) => tenant.id === id);
+      if (target) {
+        try {
+          await removeAccount({
+            client: this.getMsalClient(),
+            homeAccountId: target.homeAccountId,
+          });
+        } catch (cause) {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          throw new Error(
+            `The Microsoft sign-in connection could not be removed, so local tenant deletion was not started. ${detail}`,
+            { cause },
+          );
+        }
+      }
       const nextTenants = persisted.tenants.filter((tenant) => tenant.id !== id);
+      const removedRunIds = new Set(
+        persisted.runs.filter((run) => run.tenantId === id).map((run) => run.id),
+      );
       const next: PersistedState = {
         ...persisted,
         tenants: nextTenants,
+        runs: persisted.runs.filter((run) => run.tenantId !== id),
       };
+      const deliveryQueue = (persisted.runDeliveryQueue ?? []).filter(
+        (item) => !removedRunIds.has(item.runId),
+      );
+      if (deliveryQueue.length > 0) next.runDeliveryQueue = deliveryQueue;
+      else delete next.runDeliveryQueue;
       if (persisted.activeTenantId === id) {
         delete next.activeTenantId;
       }
+      this.intelligenceStore?.purgeTenant(id);
       await this.write(next);
     });
 
@@ -4927,7 +5075,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /**
-   * Atomic write: serialize the new state to `state.json.tmp`, then
+   * Atomic write: serialize the new state to a unique sibling temp file, then
    * `rename` it over `state.json`. Rename is atomic on every
    * filesystem we target (APFS, ext4, NTFS), so a concurrent reader
    * either sees the previous file content or the new one — never a
@@ -4935,11 +5083,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * root cause of the "redirected to onboarding mid-action" bug.
    */
   private async write(state: PersistedState): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
+    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
-    const tmpPath = `${this.filePath}.tmp`;
-    await writeFile(tmpPath, serialized, "utf8");
-    await rename(tmpPath, this.filePath);
-    this.lastReadSnapshot = state;
+    const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(tmpPath, serialized, { encoding: "utf8", mode: 0o600 });
+      await rename(tmpPath, this.filePath);
+      this.lastReadSnapshot = state;
+    } finally {
+      await rm(tmpPath, { force: true });
+    }
   }
 }

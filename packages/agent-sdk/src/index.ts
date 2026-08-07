@@ -184,6 +184,8 @@ export interface AgentUpdateInfo {
   version: string;
   /** Raw GitHub URL of the new manifest.yaml. */
   manifestUrl: string;
+  /** SHA-256 digest committed into the verified registry index. */
+  manifestSha256: string;
   /** Minimum OpenAdminOS version required by the registry entry. */
   minAppVersion?: string;
 }
@@ -365,6 +367,8 @@ export interface RegistryAgentSummary extends AgentContract {
    * Used by the per-agent OTA update flow.
    */
   manifestUrl?: string;
+  /** SHA-256 digest of the exact manifest bytes advertised by the registry. */
+  manifestSha256?: string;
 }
 
 export type RunStatus =
@@ -886,6 +890,7 @@ export interface DriftTimelineInput {
   from?: string;
   to?: string;
   resources?: GraphCacheResourceKind[];
+  query?: string;
   limit?: number;
 }
 
@@ -909,6 +914,7 @@ export interface DriftTimelineResult {
   entries: DriftTimelineEntry[];
   hasMore: boolean;
   limit: number;
+  historyTruncated?: boolean;
 }
 
 export interface DriftEntryDetailInput {
@@ -960,6 +966,7 @@ export interface DriftResourceStatus {
   snapshotCount: number;
   totalTrackedVersions: number;
   currentObjectCount: number;
+  pageLimitReached?: boolean;
 }
 
 export interface DriftStatus {
@@ -2201,6 +2208,8 @@ export interface OpenAdminOSApi {
    * "update ready" banner without waiting for the native dialog.
    */
   getUpdateState(): Promise<UpdateState>;
+  /** Retry the signed desktop update check immediately. */
+  checkForUpdatesNow(): Promise<UpdateState>;
   /**
    * Subscribe to auto-updater state changes. The supplied callback
    * fires whenever the main-process updater transitions states. The
@@ -2218,6 +2227,8 @@ export interface OpenAdminOSApi {
    * when the user picks an item from the native application menu.
    */
   onNavigate(listener: (path: string) => void): () => void;
+  /** Subscribe to native-menu requests to open the renderer command palette. */
+  onOpenCommandPalette(listener: () => void): () => void;
   /**
    * Trigger an immediate quit + install when the updater has a
    * downloaded update on disk. No-op otherwise.

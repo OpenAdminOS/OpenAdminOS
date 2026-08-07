@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.electron.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["electron/**/*.test.ts"],
+  "exclude": []
+}

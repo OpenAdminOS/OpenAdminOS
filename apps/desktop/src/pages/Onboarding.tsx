@@ -453,7 +453,7 @@ function PickLLM({
                   }`}
                 >
                   {active && implemented && (
-                    <IconCheck size={12} className="text-[#1a120c]" />
+                    <IconCheck size={12} className="text-[var(--color-on-accent)]" />
                   )}
                 </div>
               </div>
@@ -916,7 +916,7 @@ function StartWorkspace({
                           : "ring-[var(--color-border-strong)]"
                       }`}
                     >
-                      {active && <IconCheck size={12} className="text-[#1a120c]" />}
+                      {active && <IconCheck size={12} className="text-[var(--color-on-accent)]" />}
                     </div>
                   </div>
                 </Card>

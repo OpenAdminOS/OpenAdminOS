@@ -27,6 +27,7 @@ import type {
   WriteAgentModule,
   WritePlan,
 } from "@openadminos/agent-sdk";
+import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
@@ -894,8 +895,11 @@ function validatePlan(plan: WritePlan, agentSlug: string): void {
   if (!plan || typeof plan.summary !== "string" || plan.summary.length === 0) {
     throw new Error(`Agent "${agentSlug}" returned a plan without a summary.`);
   }
-  if (typeof plan.confirmationPhrase !== "string" || plan.confirmationPhrase.length === 0) {
-    throw new Error(`Agent "${agentSlug}" returned a plan without a confirmation phrase.`);
+  const phraseProblem = confirmationPhraseProblem(plan.confirmationPhrase);
+  if (phraseProblem) {
+    throw new Error(
+      `Agent "${agentSlug}" returned an unsafe confirmation phrase: ${phraseProblem}.`,
+    );
   }
   if (!Array.isArray(plan.actions)) {
     throw new Error(`Agent "${agentSlug}" returned a plan without an actions array.`);

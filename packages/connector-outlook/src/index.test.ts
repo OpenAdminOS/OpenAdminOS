@@ -29,7 +29,35 @@ test("Outlook Graph client sends mail with delegated Mail.Send token", async () 
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.url, "https://graph.microsoft.com/v1.0/me/sendMail");
+  assert.equal(calls[0]?.url, "https://graph.microsoft.com/beta/me/sendMail");
   assert.equal((calls[0]?.init.headers as Record<string, string>).authorization, "Bearer token-1");
   assert.equal(calls[0]?.init.method, "POST");
+});
+
+test("Outlook Graph client does not retry sendMail after a 5xx response", async () => {
+  let calls = 0;
+  const client = createOutlookGraphClient({
+    tenant: {
+      tenantId: "tenant-1",
+      username: "admin@example.com",
+      async acquireTokenForScopes() { return "token-1"; },
+    },
+    maxRetries: 5,
+    fetchImpl: (async () => {
+      calls += 1;
+      return new Response("failed", { status: 503 });
+    }) as typeof fetch,
+  });
+
+  await assert.rejects(
+    () => client.fetch({
+      method: "POST",
+      path: "/me/sendMail",
+      scopes: ["Mail.Send"],
+      capabilityId: "send-mail",
+      body: { message: { subject: "Test" } },
+    }),
+    /HTTP 503/,
+  );
+  assert.equal(calls, 1);
 });

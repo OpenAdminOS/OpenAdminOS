@@ -1,10 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { ConnectorConfirmModal } from "./ConnectorConfirmModal";
 import { StatusStrip } from "./StatusStrip";
 import { UpdateBanner } from "./UpdateBanner";
 import { ReportIssueProvider } from "./ReportIssueModal";
+import { matchesShortcut, OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
+import { overlayStackSize } from "../shared/overlay-stack";
 
 // Reserve space at the top of the window for the macOS traffic-light buttons
 // (titleBarStyle: "hiddenInset" leaves them floating over the renderer) and
@@ -24,26 +27,49 @@ export function TitleBarInset() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    return api.onOpenCommandPalette(() => setPaletteOpen(true));
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (matchesShortcut(e, "commandPalette")) {
+        if (!paletteOpen && overlayStackSize() > 0) return;
         e.preventDefault();
         setPaletteOpen((o) => !o);
+      } else if (matchesShortcut(e, "newConversation") && overlayStackSize() === 0) {
+        e.preventDefault();
+        navigate("/chat");
+        window.requestAnimationFrame(() =>
+          window.dispatchEvent(new CustomEvent(OPEN_NEW_CONVERSATION_EVENT)),
+        );
+      } else if (matchesShortcut(e, "settings") && overlayStackSize() === 0) {
+        e.preventDefault();
+        navigate("/settings");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [navigate, paletteOpen]);
 
   return (
     <ReportIssueProvider>
       <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+        <a
+          href="#main-content"
+          className="fixed left-3 top-3 z-[200] -translate-y-24 rounded-md bg-[var(--color-accent)] px-3 py-2 text-[12px] font-semibold text-[var(--color-on-accent)] transition-transform focus:translate-y-0"
+        >
+          Skip to main content
+        </a>
         <TitleBarInset />
         <UpdateBanner />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
-          <main className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+          <main id="main-content" tabIndex={-1} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
             {children}
           </main>
         </div>

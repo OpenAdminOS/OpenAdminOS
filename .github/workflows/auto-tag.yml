@@ -3,7 +3,7 @@ name: Auto-tag release commits
 # When a "release: vX.Y.Z" marker lands on main (typically via the
 # release-prep PR), this workflow extracts the version from the commit
 # message and pushes the matching tag. The push triggers release.yml,
-# which builds and uploads the signed artifacts to a draft GitHub
+# which builds and uploads the signed artifacts to a public GitHub
 # release. Squash merges put the marker in the subject; normal merge
 # commits can put the release PR title in the commit body.
 #

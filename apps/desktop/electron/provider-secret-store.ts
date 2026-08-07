@@ -2,9 +2,32 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { SecretAccessor } from "@openadminos/agent-sdk";
+import {
+  requireOsSecureStorage,
+  type SafeStorageApi,
+} from "./secret-store.js";
+
+interface ProviderSecretStoreOptions {
+  loadSafeStorage?: () => Promise<SafeStorageApi>;
+  platform?: NodeJS.Platform;
+}
 
 export class SafeStorageProviderSecretStore {
-  constructor(private readonly rootDir: string) {}
+  private readonly loadSafeStorage: () => Promise<SafeStorageApi>;
+  private readonly platform: NodeJS.Platform;
+
+  constructor(
+    private readonly rootDir: string,
+    options: ProviderSecretStoreOptions = {},
+  ) {
+    this.loadSafeStorage =
+      options.loadSafeStorage ??
+      (async () => {
+        const { safeStorage } = await import("electron");
+        return safeStorage;
+      });
+    this.platform = options.platform ?? process.platform;
+  }
 
   forProvider(providerId: string): SecretAccessor {
     const safeProviderId = sanitizePathSegment(providerId);
@@ -14,10 +37,10 @@ export class SafeStorageProviderSecretStore {
         try {
           const encrypted = await readFile(path);
           if (encrypted.length === 0) return undefined;
-          const { safeStorage } = await import("electron");
-          if (!safeStorage.isEncryptionAvailable()) {
-            throw new Error("OS secure storage is unavailable.");
-          }
+          const safeStorage = requireOsSecureStorage(
+            await this.loadSafeStorage(),
+            this.platform,
+          );
           return safeStorage.decryptString(encrypted);
         } catch (error) {
           if (isMissingFile(error)) return undefined;
@@ -29,10 +52,10 @@ export class SafeStorageProviderSecretStore {
         }
       },
       set: async (key: string, value: string) => {
-        const { safeStorage } = await import("electron");
-        if (!safeStorage.isEncryptionAvailable()) {
-          throw new Error("OS secure storage is unavailable.");
-        }
+        const safeStorage = requireOsSecureStorage(
+          await this.loadSafeStorage(),
+          this.platform,
+        );
         const path = this.pathFor(safeProviderId, key);
         await mkdir(join(this.rootDir, safeProviderId), { recursive: true });
         await writeFile(path, safeStorage.encryptString(value), { mode: 0o600 });

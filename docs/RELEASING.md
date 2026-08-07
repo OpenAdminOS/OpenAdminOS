@@ -6,9 +6,9 @@ The release surface currently publishes macOS and Linux binaries:
 
 - **macOS → GitHub Releases + electron-updater** (signed + notarized `.dmg` and `.pkg` in CI; `.zip` is published for electron-updater).
 - **Linux → GitHub Releases + apt** (unsigned x64 AppImage, `.deb`, and `.rpm` with SHA-256 checksums; the `.deb` is also published into a signed GitHub Pages-backed apt repository).
-- **Windows → build validation only**. CI still creates the AppX package to keep the packaging path exercised, but it is not uploaded as a workflow artifact or attached to GitHub Releases until the signing/distribution path is ready.
+- **Windows → manual validation only**. Tagged releases do not schedule a Windows job. A maintainer can opt into AppX packaging validation during a manual workflow run, but the package is not uploaded as a workflow artifact or attached to GitHub Releases until the signing/distribution path is ready.
 
-A single tag push builds all three platform jobs. CI publishes macOS and Linux release files, refreshes the apt repository from the latest `.deb`, and keeps Windows runner-local.
+A single tag push builds the macOS and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`. Windows is excluded from tagged releases.
 
 The macOS job also verifies the two bundled native helpers inside the packaged
 app before uploading artifacts:
@@ -68,7 +68,7 @@ The values in `apps/desktop/package.json` `build.appx` are the Partner Center-as
 | `publisherDisplayName` | `OpenAdminOS` |
 | Seller ID | `82025760` |
 
-These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them without updating the Windows distribution plan. The release workflow currently runs `electron-builder --win --publish never`, verifies that an `.appx` was produced under `apps/desktop/release/`, and leaves it on the runner.
+These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them without updating the Windows distribution plan. To validate this path, run the **Release** workflow manually with `build_windows` enabled. The workflow runs `electron-builder --win --publish never`, verifies that an `.appx` was produced under `apps/desktop/release/`, and leaves it on the runner. Version tags never schedule this job.
 
 ### Linux — apt repository
 
@@ -118,7 +118,7 @@ The full flow is **two clicks in GitHub**. No local terminal needed.
    - Merge the release PR. Squash merges put `release: vX.Y.Z (#NN)` in the commit subject; normal merge commits are also supported as long as the commit body contains a `release: vX.Y.Z` line.
 3. **The rest is automatic.**
    - `auto-tag.yml` fires when the merge commit message contains a `release: v*` marker → pushes the matching `vX.Y.Z` tag.
-   - `release.yml` fires on the tag → builds macOS release files, Linux x64 packages, and the Windows AppX validation package.
+   - `release.yml` fires on the tag → builds macOS release files and Linux x64 packages. Windows remains manual-only.
    - The GitHub release receives macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
    - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.
 
@@ -130,6 +130,13 @@ branch, and leave `build_windows` off unless you also need AppX validation. The
 manual branch run uploads macOS and Linux artifacts as workflow artifacts only;
 it does not create or publish a GitHub Release because publishing is still gated
 to `refs/tags/v*`.
+
+Every CI and tagged release run also executes `npm run release:check`. The gate
+keeps the macOS application/update identity and Linux package/executable
+identity stable, requires every versioned workspace to match the release
+version, and requires matching release notes. The desktop host test suite opens
+legacy JSON and SQLite fixtures and verifies that additive migrations preserve
+tenant, run, agent, chat, and cache data.
 
 ### Manual fallback (if the workflow ever breaks)
 
@@ -197,13 +204,13 @@ the standard `release.yml` path.
 
 ### Windows — no published package yet
 
-Do not upload AppX files to GitHub Releases until the Windows signing/distribution path is ready. The CI build output is intentionally runner-local.
+Do not upload AppX files to GitHub Releases until the Windows signing/distribution path is ready. Windows packaging validation is explicit and manual; the build output is intentionally runner-local.
 
 ---
 
 ## Why this shape
 
-- **Build AppX, don't publish it yet.** Keeping the AppX build in CI catches packaging regressions early. With no current Windows signing path, publishing the file would create an unusable release asset.
+- **Validate AppX only when requested.** Keeping the AppX job available catches packaging regressions when maintainers need it. Tagged releases stay focused on supported platforms, and no unsigned Windows package is published.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.
 - **GitHub Pages is enough for apt.** The apt repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS under `repo.openadminos.com` without a package-hosting vendor.

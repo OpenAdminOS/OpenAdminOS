@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router";
 import type { AgentDisplay } from "../shared/agent-display";
+import { formatAgentDisplayName } from "../shared/agent-display";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
 import { Button } from "./Button";
@@ -61,7 +62,7 @@ export function AgentCard({
                   onClick={() => navigate(`/agents/${agent.slug}`)}
                   className="max-w-full truncate rounded text-left transition-colors hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
                 >
-                  {agent.name}
+                  {formatAgentDisplayName(agent)}
                 </button>
               </h3>
             </div>

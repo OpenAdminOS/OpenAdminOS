@@ -397,8 +397,8 @@
                 },
                 "confirmationPhrase": {
                   "type": "string",
-                  "minLength": 1,
-                  "description": "The exact phrase the user must type to approve the plan. Usually templated on actions count, e.g. \"RETIRE {{ actions | size }} DEVICES\"."
+                  "minLength": 12,
+                  "description": "The exact uppercase phrase the user must type to approve the plan. It must name the operation, include the rendered action count, and name the target, e.g. \"RETIRE {{ actions | size }} DEVICES\"."
                 },
                 "summary": { "type": "string" },
                 "scopes": {

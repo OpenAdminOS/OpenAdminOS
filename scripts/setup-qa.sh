@@ -7,8 +7,8 @@
 #   3. Clones github.com/microsoft/msgraph-mcp-skill into .qa-cache/msgraph
 #      (override via $OPENAGENTS_QA_SKILL_REPO and $OPENAGENTS_QA_SKILL_REF).
 #
-# The script prints `MSGRAPH_SKILL_DIR=<resolved-path>` on stdout so a caller
-# can `eval $(scripts/setup-qa.sh)` to export the variable.
+# The script prints an exported `MSGRAPH_SKILL_DIR=<resolved-path>` assignment
+# on stdout so a caller can `eval "$(bash scripts/setup-qa.sh)"` before QA.
 
 set -euo pipefail
 
@@ -49,4 +49,4 @@ if ! is_valid "$resolved"; then
   exit 1
 fi
 
-echo "MSGRAPH_SKILL_DIR=$resolved"
+printf 'export MSGRAPH_SKILL_DIR=%q\n' "$resolved"

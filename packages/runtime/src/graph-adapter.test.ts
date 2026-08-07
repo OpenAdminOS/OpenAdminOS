@@ -105,6 +105,18 @@ describe("createGraphAdapter", () => {
     assert.equal(calls.length, 1, "POST 500 must fail fast — retry would double-apply the write");
   });
 
+  it("does NOT retry the retire helper on 5xx", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      maxRetries: 5,
+      fetchImpl: mockFetch([new Response("boom", { status: 503 })], calls),
+    });
+
+    await assert.rejects(() => adapter.retireManagedDevice("device-1"), /HTTP 503/);
+    assert.equal(calls.length, 1, "retire must never retry a possibly-applied POST");
+  });
+
   it("retries idempotent GET on 5xx and eventually succeeds", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({

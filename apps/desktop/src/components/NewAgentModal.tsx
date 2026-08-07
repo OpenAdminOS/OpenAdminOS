@@ -727,7 +727,7 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
           value={prompt}
           onChange={(event) => onPromptChange(event.currentTarget.value)}
           disabled={drafting}
-          className="mt-2 w-full resize-y rounded-lg bg-[var(--color-surface)] p-3 font-mono text-[12.5px] leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50 disabled:opacity-60"
+          className="mt-2 w-full resize-y rounded-lg bg-[var(--color-surface)] p-3 font-mono text-[12.5px] leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50 disabled:opacity-60"
         />
 
         {!llmReady && (

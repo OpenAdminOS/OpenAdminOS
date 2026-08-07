@@ -68,8 +68,10 @@ export function entryToRegistrySummary(
     scopes: entry.scopes,
     author: entry.author,
     manifestUrl: entry.manifestUrl,
+    manifestSha256: entry.manifestSha256,
     minAppVersion: entry.minAppVersion,
     execution: entry.execution,
+    connectors: entry.connectors,
   }, appVersion);
 }
 
@@ -709,8 +711,14 @@ export function graphCacheRequestFromNextLink(
   nextLink: string,
   headers: Record<string, string> | undefined,
 ): GraphCacheRequestPage {
-  const url = new URL(nextLink, "https://graph.microsoft.com");
-  const path = url.pathname.replace(/^\/(?:beta|v1\.0)(?=\/)/, "");
+  const url = new URL(nextLink);
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "graph.microsoft.com") {
+    throw new Error("Graph returned an unsafe cache paging URL outside graph.microsoft.com.");
+  }
+  if (url.pathname !== "/beta" && !url.pathname.startsWith("/beta/")) {
+    throw new Error("Graph returned a cache paging URL that is not on the required beta endpoint.");
+  }
+  const path = url.pathname.slice("/beta".length) || "/";
   const query: Record<string, string> = {};
   for (const [key, value] of url.searchParams.entries()) {
     query[key] = value;

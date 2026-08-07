@@ -3,25 +3,28 @@
    Shared tokens & components for all screens
    ============================================ */
 
+/* Legacy variable names, mapped to the warm production palette
+   (apps/desktop/src/styles/globals.css) so the older mockups keep
+   working while showing the shipped color system. */
 :root {
-  --bg-0: #0a0c10;
-  --bg-1: #0e1117;
-  --bg-2: #151a22;
-  --bg-3: #1c222c;
-  --bg-4: #232a36;
-  --border: #232a36;
-  --border-strong: #2e3744;
-  --text-0: #e6e9ef;
-  --text-1: #a8b0bd;
-  --text-2: #6c7484;
-  --text-3: #4a5160;
-  --accent: #00d4ff;
-  --accent-dim: #0891a8;
-  --accent-bg: rgba(0, 212, 255, 0.08);
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --purple: #a78bfa;
+  --bg-0: #1c1917;
+  --bg-1: #191614;
+  --bg-2: #232120;
+  --bg-3: #2a2724;
+  --bg-4: #2d2926;
+  --border: #322e2a;
+  --border-strong: #403a35;
+  --text-0: #f5f1eb;
+  --text-1: #b5ada3;
+  --text-2: #9a9085;
+  --text-3: #6b6157;
+  --accent: #e8a87c;
+  --accent-dim: #d99868;
+  --accent-bg: rgba(232, 168, 124, 0.12);
+  --success: #9cc88f;
+  --warning: #e5c678;
+  --danger: #e58888;
+  --purple: #c4a5d9;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -86,9 +89,9 @@ html, body {
   animation: pulse 2s infinite;
 }
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6); }
-  70% { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(156, 200, 143, 0.6); }
+  70% { box-shadow: 0 0 0 6px rgba(156, 200, 143, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(156, 200, 143, 0); }
 }
 
 /* ============================================
@@ -174,7 +177,7 @@ html, body {
   border-radius: 4px;
   font-weight: 500;
 }
-.nav-item.active .nav-badge { background: rgba(0, 212, 255, 0.15); color: var(--accent); }
+.nav-item.active .nav-badge { background: rgba(232, 168, 124, 0.15); color: var(--accent); }
 
 .tenant-switcher {
   margin-top: auto;
@@ -308,19 +311,19 @@ html, body {
   border-color: var(--accent);
   font-weight: 600;
 }
-.btn-primary:hover { background: #2ee0ff; border-color: #2ee0ff; }
+.btn-primary:hover { background: #efb88f; border-color: #efb88f; }
 .btn-danger {
   color: var(--danger);
-  border-color: rgba(248, 113, 113, 0.2);
+  border-color: rgba(229, 136, 136, 0.2);
 }
-.btn-danger:hover { background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.4); }
+.btn-danger:hover { background: rgba(229, 136, 136, 0.08); border-color: rgba(229, 136, 136, 0.4); }
 .btn-warning {
   background: var(--warning);
-  color: var(--bg-0);
+  color: #1a120c;
   border-color: var(--warning);
   font-weight: 600;
 }
-.btn-warning:hover { background: #ffcb47; border-color: #ffcb47; }
+.btn-warning:hover { background: #ecd28f; border-color: #ecd28f; }
 .btn-icon { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; }
 .btn-large { padding: 9px 16px; font-size: 13px; }
 .btn-ghost {
@@ -360,9 +363,9 @@ html, body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.tag-read { background: rgba(74, 222, 128, 0.1); color: var(--success); border: 1px solid rgba(74, 222, 128, 0.2); }
-.tag-write { background: rgba(251, 191, 36, 0.1); color: var(--warning); border: 1px solid rgba(251, 191, 36, 0.2); }
-.tag-verified { background: rgba(0, 212, 255, 0.1); color: var(--accent); border: 1px solid rgba(0, 212, 255, 0.2); }
+.tag-read { background: rgba(156, 200, 143, 0.1); color: var(--success); border: 1px solid rgba(156, 200, 143, 0.2); }
+.tag-write { background: rgba(229, 198, 120, 0.1); color: var(--warning); border: 1px solid rgba(229, 198, 120, 0.2); }
+.tag-verified { background: rgba(232, 168, 124, 0.1); color: var(--accent); border: 1px solid rgba(232, 168, 124, 0.2); }
 .tag-community { background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border); }
 
 /* ============================================
@@ -492,7 +495,7 @@ html, body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 7, 10, 0.7);
+  background: rgba(11, 9, 8, 0.7);
   backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
@@ -504,7 +507,7 @@ html, body {
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   box-shadow:
-    0 0 0 1px rgba(0, 212, 255, 0.06),
+    0 0 0 1px rgba(232, 168, 124, 0.06),
     0 30px 80px rgba(0, 0, 0, 0.6);
   overflow: hidden;
   display: flex;

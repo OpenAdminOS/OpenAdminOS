@@ -8,9 +8,9 @@ name: Release
 #   - workflow_dispatch (one-time branch build without publishing)
 #
 # Outputs:
-#   - Windows: an unsigned .appx build for packaging validation only.
-#     It is not uploaded as a workflow artifact or GitHub release asset
-#     until the Windows signing/distribution path is ready.
+#   - Windows: no tagged build. Maintainers can opt into an unsigned .appx
+#     packaging validation job from workflow_dispatch. It is never uploaded
+#     as a workflow artifact or GitHub release asset.
 #   - macOS (Apple Silicon): notarized + signed .dmg + .pkg,
 #     plus .zip/latest-mac.yml for electron-updater auto-update.
 #   - Linux x64: unsigned AppImage, .deb, and .rpm packages, plus
@@ -21,8 +21,8 @@ name: Release
 #   macOS:  CSC_LINK, CSC_KEY_PASSWORD, CSC_INSTALLER_LINK,
 #           CSC_INSTALLER_KEY_PASSWORD, APPLE_API_KEY,
 #           APPLE_API_KEY_ID, APPLE_API_ISSUER
-#   Linux apt repo: APT_GPG_PRIVATE_KEY, optional APT_GPG_PASSPHRASE
-#   (Windows AppX is unsigned in CI and is not published. Linux artifacts
+#   Linux apt repo: APT_GPG_PRIVATE_KEY, APT_GPG_PASSPHRASE
+#   (Windows AppX validation is manual-only and is not published. Linux artifacts
 #   are unsigned packages and are published with SHA-256 checksums.)
 #
 # All `GITHUB_TOKEN` use comes from the auto-provided actions token.
@@ -59,9 +59,59 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  release-gate:
+    name: Verify release source
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OPENAGENTS_QA_SKILL_REPO: https://github.com/merill/msgraph.git
+      OPENAGENTS_QA_SKILL_REF: main
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Generated agent docs include path-specific commit metadata.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck and unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Resolve msgraph skill
+        run: |
+          eval "$(bash scripts/setup-qa.sh)"
+          echo "MSGRAPH_SKILL_DIR=$MSGRAPH_SKILL_DIR" >> "$GITHUB_ENV"
+
+      - name: Graph, registry, and documentation gates
+        run: |
+          npm run qa
+          npm run docs:check
+
+      - name: Verify release and upgrade compatibility
+        run: npm run release:check
+
+      - name: Build and run Electron smoke tests
+        run: |
+          npm run build
+          npm run build:electron -w @openadminos/desktop
+          xvfb-run -a node scripts/smoke-intune-chat.mjs
+          xvfb-run -a node scripts/smoke-report-issue.mjs
+
   windows-appx:
-    name: Windows AppX (build only)
-    if: ${{ (startsWith(github.ref, 'refs/tags/v') || github.event_name != 'workflow_dispatch' || inputs.build_windows) && !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
+    name: Windows AppX (manual validation only)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_windows && inputs.backfill_apt_tag == '' }}
+    needs: release-gate
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -96,6 +146,7 @@ jobs:
   macos-arm64:
     name: macOS (Apple Silicon) — signed + notarized
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
+    needs: release-gate
     runs-on: macos-26
     timeout-minutes: 30
     env:
@@ -125,6 +176,31 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Verify macOS release signing and notarization secrets
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          APPLE_API_KEY_CONTENTS: ${{ secrets.APPLE_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in \
+            CSC_LINK \
+            CSC_KEY_PASSWORD \
+            CSC_INSTALLER_LINK \
+            CSC_INSTALLER_KEY_PASSWORD \
+            APPLE_API_KEY_CONTENTS \
+            APPLE_API_KEY_ID \
+            APPLE_API_ISSUER; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Tagged macOS releases require these signing/notarization secrets: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
       - name: Write App Store Connect API key
         # electron-builder expects APPLE_API_KEY to be a path to a .p8
         # file on disk. We materialize the secret contents to a tempfile
@@ -141,7 +217,7 @@ jobs:
         # Lets the release workflow run end-to-end on a forked or
         # secrets-less repo for verification. Artifacts won't be
         # publishable but the build path itself is exercised.
-        if: ${{ env.CSC_LINK == '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && env.CSC_LINK == '' }}
         run: |
           echo "CSC_LINK=" >> "$GITHUB_ENV"
           echo "CSC_KEY_PASSWORD=" >> "$GITHUB_ENV"
@@ -253,6 +329,7 @@ jobs:
   linux-x64:
     name: Linux x64 — AppImage, deb, rpm
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
+    needs: release-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -272,6 +349,25 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Verify Linux repository signing secrets
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in APT_GPG_PRIVATE_KEY APT_GPG_PASSPHRASE; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Tagged Linux releases require these apt-repository signing secrets: %s\n' "${missing[*]}"
+            exit 1
+          fi
 
       - name: Build AppImage + deb + rpm
         run: npm run dist -w @openadminos/desktop -- --linux --x64 --publish never
@@ -317,7 +413,7 @@ jobs:
 
   publish-release:
     name: Publish release
-    needs: [windows-appx, macos-arm64, linux-x64]
+    needs: [macos-arm64, linux-x64]
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:

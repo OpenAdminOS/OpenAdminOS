@@ -6,6 +6,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const viteBin = resolve(
+  dirname(fileURLToPath(import.meta.resolve("vite/package.json"))),
+  "bin/vite.js",
+);
 const port = process.env.OPENADMINOS_REPORT_SMOKE_PORT ?? "5175";
 const rendererUrl = `http://127.0.0.1:${port}`;
 const issueUrl = "https://github.com/OpenAdminOS/OpenAdminOS/issues/12345";
@@ -16,6 +20,8 @@ const receivedSupportIssues = [];
 let renderer;
 let electron;
 let supportServer;
+const electronEnv = { ...process.env };
+delete electronEnv.ELECTRON_RUN_AS_NODE;
 
 try {
   supportServer = createServer(async (req, res) => {
@@ -43,8 +49,8 @@ try {
   const supportApiUrl = await listen(supportServer);
 
   renderer = spawn(
-    resolve(root, "apps/desktop/node_modules/.bin/vite"),
-    ["--host", "127.0.0.1", "--port", port, "--strictPort"],
+    process.execPath,
+    [viteBin, "--host", "127.0.0.1", "--port", port, "--strictPort"],
     {
       cwd: join(root, "apps/desktop"),
       env: { ...process.env, BROWSER: "none" },
@@ -54,10 +60,14 @@ try {
   pipeProcess(renderer, "renderer");
   await waitForHttp(rendererUrl, 20_000);
 
-  electron = spawn(resolve(root, "node_modules/.bin/electron"), ["apps/desktop"], {
+  const electronArgs = ["apps/desktop"];
+  // Linux CI containers cannot install Electron's helper as root-owned setuid.
+  // This flag is confined to the synthetic smoke process, never the packaged app.
+  if (process.platform === "linux") electronArgs.push("--no-sandbox");
+  electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,
     env: {
-      ...process.env,
+      ...electronEnv,
       VITE_DEV_SERVER_URL: rendererUrl,
       OPENADMINOS_REPORT_ISSUE_SMOKE: "1",
       OPENADMINOS_REPORT_ISSUE_SMOKE_USER_DATA: userDataDir,
@@ -92,7 +102,7 @@ try {
   if (submission.issue?.title !== "Smoke report issue") {
     throw new Error("Support issue submission did not preserve the title.");
   }
-  if (submission.issue?.source !== "sidebar") {
+  if (submission.issue?.source !== "settings-about") {
     throw new Error("Support issue submission did not include the expected source.");
   }
   if (!submission.diagnostics) {

@@ -1,3 +1,4 @@
+import { verify } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,9 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 export function runRegistryIndexChecks(): CheckResult[] {
   const agentsRoot = findAgentsRoot();
   const indexPath = join(agentsRoot, "index.json");
+  const signaturePath = join(agentsRoot, "index.sig");
+  const publicKeyPath = join(agentsRoot, "registry-public-key.pem");
+  const revisionPath = join(agentsRoot, "registry-revision.txt");
   const results: CheckResult[] = [];
 
   if (!existsSync(indexPath)) {
@@ -25,6 +29,7 @@ export function runRegistryIndexChecks(): CheckResult[] {
 
   const index = JSON.parse(readFileSync(indexPath, "utf8")) as {
     schemaVersion?: unknown;
+    revision?: unknown;
     agents?: unknown;
   };
   const entries = Array.isArray(index.agents)
@@ -34,6 +39,44 @@ export function runRegistryIndexChecks(): CheckResult[] {
     name: "registry-index-present",
     severity: "pass",
     message: `agents/index.json contains ${entries.length} entries.`,
+  });
+
+  const declaredRevision = Number.parseInt(
+    existsSync(revisionPath) ? readFileSync(revisionPath, "utf8").trim() : "",
+    10,
+  );
+  const revisionValid =
+    Number.isSafeInteger(declaredRevision) &&
+    declaredRevision > 0 &&
+    index.revision === declaredRevision;
+  results.push({
+    name: "registry-revision-valid",
+    severity: revisionValid ? "pass" : "fail",
+    message: revisionValid
+      ? `Registry revision ${declaredRevision} matches the signed index.`
+      : "agents/registry-revision.txt must contain the positive integer written to index.json.",
+  });
+
+  let signatureValid = false;
+  try {
+    const signature = Buffer.from(readFileSync(signaturePath, "utf8").trim(), "base64");
+    signatureValid =
+      signature.length === 64 &&
+      verify(
+        null,
+        readFileSync(indexPath),
+        readFileSync(publicKeyPath),
+        signature,
+      );
+  } catch {
+    signatureValid = false;
+  }
+  results.push({
+    name: "registry-signature-valid",
+    severity: signatureValid ? "pass" : "fail",
+    message: signatureValid
+      ? "agents/index.json has a valid detached Ed25519 signature."
+      : "agents/index.sig is missing or does not verify against registry-public-key.pem.",
   });
 
   const manifestDirs = readdirSync(agentsRoot)
@@ -56,6 +99,7 @@ export function runRegistryIndexChecks(): CheckResult[] {
   const missingFromIndex: string[] = [];
   const missingReadme: string[] = [];
   const invalidVersions: string[] = [];
+  const invalidManifestHashes: string[] = [];
 
   for (const agentDir of manifestDirs) {
     const manifestPath = join(agentDir, "manifest.yaml");
@@ -74,6 +118,13 @@ export function runRegistryIndexChecks(): CheckResult[] {
     }
   }
 
+  for (const entry of entries) {
+    const hash = String(entry.manifestSha256 ?? "");
+    if (!/^[a-f0-9]{64}$/.test(hash)) {
+      invalidManifestHashes.push(`${String(entry.slug ?? "unknown")}: ${hash || "missing"}`);
+    }
+  }
+
   results.push({
     name: "index-covers-manifests",
     severity: missingFromIndex.length > 0 ? "fail" : "pass",
@@ -82,6 +133,18 @@ export function runRegistryIndexChecks(): CheckResult[] {
         ? "Some manifests are missing from agents/index.json."
         : "agents/index.json covers every manifest.",
     ...(missingFromIndex.length > 0 ? { details: missingFromIndex } : {}),
+  });
+
+  results.push({
+    name: "manifest-digests-present",
+    severity: invalidManifestHashes.length > 0 ? "fail" : "pass",
+    message:
+      invalidManifestHashes.length > 0
+        ? "Every registry entry must pin its manifest SHA-256 digest."
+        : "Every registry entry pins its manifest SHA-256 digest.",
+    ...(invalidManifestHashes.length > 0
+      ? { details: invalidManifestHashes }
+      : {}),
   });
 
   results.push({

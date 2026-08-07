@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
@@ -74,6 +74,7 @@ function CompatibilityBadge({
 export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   const { state, registryAgents, installAgent, refreshRegistry } = useAppState();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [installFilter, setInstallFilter] = useState<InstallFilter>("all");
@@ -98,6 +99,25 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   // mount. Falls back silently to the bundled values on `agent.installs`
   // when the fetch fails (offline, network error, etc.).
   const liveInstalls = useLiveInstalls();
+  const detailSlug = searchParams.get("agent");
+
+  useEffect(() => {
+    if (!detailSlug) return;
+    const selected = registryAgents.find((agent) => agent.slug === detailSlug);
+    if (selected && manifestAgent?.slug !== selected.slug) {
+      setConfirmInstall(false);
+      setManifestAgent(selected);
+    }
+  }, [detailSlug, manifestAgent?.slug, registryAgents]);
+
+  const closeManifest = () => {
+    setManifestAgent(null);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("agent");
+      return next;
+    }, { replace: true });
+  };
 
   useEffect(() => {
     if (!manifestAgent) {
@@ -219,7 +239,7 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search agents, authors, scopes"
           autoComplete="off"
-          className="h-9 w-[300px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+          className="h-9 w-[300px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
         />
       </div>
     </div>
@@ -318,13 +338,13 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   const modal = (
       <Modal
         open={manifestAgent !== null}
-        onClose={() => setManifestAgent(null)}
+        onClose={closeManifest}
         size="lg"
       >
         <ModalHeader
           title={manifestAgent?.name ?? "Agent details"}
           subtitle={manifestAgent ? `${manifestAgent.category} · v${manifestAgent.version}` : undefined}
-          onClose={() => setManifestAgent(null)}
+          onClose={closeManifest}
         />
         <div className="overflow-y-auto p-6">
           {manifestAgent && (

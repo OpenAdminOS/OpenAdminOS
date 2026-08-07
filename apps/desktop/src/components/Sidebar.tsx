@@ -1,18 +1,16 @@
 import { NavLink } from "react-router";
-import type { ReactNode } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import {
   IconAgents,
   IconChanges,
   IconChat,
-  IconHome,
   IconSettings,
   IconLogo,
   IconCommand,
-  IconWarning,
 } from "./icons";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { useAppState } from "../state";
-import { useReportIssue } from "./ReportIssueModal";
+import { shortcutLabel } from "../shared/shortcuts";
 
 interface NavItem {
   to: string;
@@ -76,23 +74,8 @@ function NavRow({ item }: { item: NavItem }) {
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
-  const openReportIssue = useReportIssue();
   const active = state.providers.find((p) => p.id === state.activeProviderId);
-  const activeRunCount = state.runs.filter(
-    (run) =>
-      run.status === "queued" ||
-      run.status === "running" ||
-      run.status === "awaiting-confirmation",
-  ).length;
   const mainNav: NavItem[] = [
-    {
-      to: "/",
-      label: "Home",
-      icon: <IconHome size={16} />,
-      end: true,
-      badge: activeRunCount > 0 ? activeRunCount : undefined,
-      badgeTone: activeRunCount > 0 ? "warning" : undefined,
-    },
     {
       to: "/chat",
       label: "Chat",
@@ -108,8 +91,31 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     { to: "/settings", label: "Settings", icon: <IconSettings size={16} /> },
   ];
 
+  const focusAdjacentNav = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const links = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled])'),
+    );
+    const index = links.indexOf(document.activeElement as HTMLElement);
+    if (index < 0 || links.length === 0) return;
+    event.preventDefault();
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? links.length - 1
+          : event.key === "ArrowDown"
+            ? (index + 1) % links.length
+            : (index - 1 + links.length) % links.length;
+    links[next]?.focus();
+  };
+
   return (
-    <aside className="flex h-full w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]">
+    <aside
+      aria-label="Application navigation"
+      className="flex h-full w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
+      onKeyDown={focusAdjacentNav}
+    >
       {/* Brand row — small */}
       <div className="flex h-12 items-center gap-2 px-3.5">
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
@@ -147,13 +153,13 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       >
         <IconCommand size={12} />
         <span className="flex-1 text-left">Quick search</span>
-        <kbd className="font-mono text-[10px]">⌘K</kbd>
+        <kbd className="font-mono text-[10px]">{shortcutLabel("commandPalette")}</kbd>
       </button>
 
       <div className="mx-3 mb-2 mt-3 h-px bg-[var(--color-border-soft)]" />
 
       {/* Main nav */}
-      <nav className="flex flex-col gap-0.5 px-2">
+      <nav aria-label="Primary" className="flex flex-col gap-0.5 px-2">
         <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
           Workspace
         </div>
@@ -162,21 +168,8 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
         ))}
       </nav>
 
-      <div className="mt-auto px-2.5 pb-3 pt-4">
-        <button
-          onClick={() => openReportIssue({ source: "sidebar" })}
-          className="group flex w-full items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-raised)] px-2.5 py-2 text-left text-[12px] font-medium text-[var(--color-text-soft)] transition-colors hover:border-[var(--color-warning)]/45 hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-        >
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-warning-soft)] text-[var(--color-warning)]">
-            <IconWarning size={13} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block">Report issue</span>
-            <span className="block truncate text-[10.5px] font-normal text-[var(--color-text-muted)]">
-              Public GitHub issue
-            </span>
-          </span>
-        </button>
+      <div className="mt-auto px-4 pb-4 pt-6 font-mono text-[10px] leading-4 text-[var(--color-text-muted)]">
+        Local desktop workspace
       </div>
     </aside>
   );

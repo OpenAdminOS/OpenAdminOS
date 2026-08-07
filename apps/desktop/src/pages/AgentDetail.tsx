@@ -26,7 +26,6 @@ import {
   IconShield,
 } from "../components/icons";
 import { useAppState } from "../state";
-import { copyTextToClipboard } from "../shared/clipboard";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   resolveRunModel,
@@ -114,7 +113,7 @@ export default function AgentDetail({
       await uninstallAgent(agent.slug);
       toast.success(`${agent.name} uninstalled.`);
       setUninstallOpen(false);
-      navigate("/");
+      navigate("/agents");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -244,7 +243,7 @@ export default function AgentDetail({
           Agent not found.{" "}
           <button
             className="text-[var(--color-accent)] underline"
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/agents")}
           >
             Back to agents
           </button>
@@ -258,7 +257,7 @@ export default function AgentDetail({
       <PageHeader
         eyebrow={
           <button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/agents")}
             className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
           >
             <IconArrowLeft size={12} /> Agents
@@ -302,14 +301,6 @@ export default function AgentDetail({
           <>
             <ShareMenu
               contextLabel="agent"
-              onCopyLink={() => {
-                void copyTextToClipboard(`openadminos://agent/${agent.slug}`)
-                  .then(() => toast.success("Agent link copied."))
-                  .catch((error) =>
-                    toast.error(error instanceof Error ? error.message : String(error)),
-                  );
-              }}
-              copyLinkHint={`openadminos://agent/${agent.slug}`}
               onOpenInBrowser={() => {
                 void window.openAdminOS?.openExternal(
                   `https://github.com/OpenAdminOS/OpenAdminOS/tree/main/agents/${agent.slug}`,
@@ -367,7 +358,12 @@ export default function AgentDetail({
               onClick={() =>
                 document
                   .getElementById("agent-schedule")
-                  ?.scrollIntoView({ block: "center", behavior: "smooth" })
+                  ?.scrollIntoView({
+                    block: "center",
+                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                      ? "auto"
+                      : "smooth",
+                  })
               }
             >
               Schedule

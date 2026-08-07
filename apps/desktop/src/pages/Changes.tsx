@@ -67,6 +67,7 @@ export default function Changes() {
   >("all");
   const [dateRange, setDateRange] = useState<DateRangeValue>("all");
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [limit, setLimit] = useState(INITIAL_LIMIT);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -83,6 +84,16 @@ export default function Changes() {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [pinOpen, setPinOpen] = useState(false);
   const [pinWorkspaceId, setPinWorkspaceId] = useState("");
+
+  useEffect(() => {
+    const normalized = query.trim();
+    if (!normalized) {
+      setDebouncedQuery("");
+      return;
+    }
+    const timer = window.setTimeout(() => setDebouncedQuery(normalized), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -119,6 +130,7 @@ export default function Changes() {
         ...(bounds.from ? { from: bounds.from } : {}),
         ...(bounds.to ? { to: bounds.to } : {}),
         ...(resources ? { resources } : {}),
+        ...(debouncedQuery ? { query: debouncedQuery } : {}),
       }),
     ])
       .then(([nextStatus, nextTimeline]) => {
@@ -143,7 +155,7 @@ export default function Changes() {
     return () => {
       cancelled = true;
     };
-  }, [activeTenant, dateRange, limit, reloadNonce, selectedResource]);
+  }, [activeTenant, dateRange, debouncedQuery, limit, reloadNonce, selectedResource]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -257,24 +269,13 @@ export default function Changes() {
 
   const visibleEntries = useMemo(() => {
     const entries = timeline?.entries ?? [];
-    const needle = query.trim().toLowerCase();
     return entries.filter((entry) => {
       if (selectedResource !== "all" && entry.resource !== selectedResource) {
         return false;
       }
-      if (!needle) return true;
-      return [
-        entry.displayName,
-        entry.graphId,
-        entry.resourceLabel,
-        entry.resource,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
+      return true;
     });
-  }, [query, selectedResource, timeline]);
+  }, [selectedResource, timeline]);
 
   const groupedEntries = useMemo(() => groupEntriesByDay(visibleEntries), [
     visibleEntries,
@@ -403,6 +404,20 @@ export default function Changes() {
             ) : null}
             {notice ? (
               <InlineState tone="success" title="Done" message={notice} />
+            ) : null}
+            {status?.resources.some((resource) => resource.pageLimitReached) ? (
+              <InlineState
+                tone="info"
+                title="Change coverage is capped"
+                message="At least one Graph collection exceeded the local 1,000-row cache limit. Objects outside the cached window are not inferred as removed."
+              />
+            ) : null}
+            {timeline?.historyTruncated ? (
+              <InlineState
+                tone="info"
+                title="Older history is not included"
+                message="This view searched the newest 5,000 snapshots per resource. Narrow the resource or date range to search older retained history."
+              />
             ) : null}
 
             <FiltersRow
@@ -553,7 +568,7 @@ function FiltersRow({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="Filter by display name"
           autoComplete="off"
-          className="h-9 w-full rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+          className="h-9 w-full rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
         />
       </div>
     </div>
@@ -691,7 +706,7 @@ function TimelineRow({
         <span className="truncate text-[12px] text-[var(--color-text-soft)]">
           {entry.resourceLabel}
         </span>
-        <span className="text-[var(--color-text-faint)]">·</span>
+        <span aria-hidden="true" className="text-[var(--color-text-faint)]">·</span>
         <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
           {formatShortDateTime(entry.capturedAt)}
         </span>
@@ -723,7 +738,7 @@ function TimelineRow({
               ) : null}
               {entry.changeKind === "modified" ? (
                 <>
-                  <span className="text-[var(--color-text-faint)]">·</span>
+                  <span aria-hidden="true" className="text-[var(--color-text-faint)]">·</span>
                   <span>{entry.fieldChangeCount.toLocaleString()} fields changed</span>
                 </>
               ) : null}

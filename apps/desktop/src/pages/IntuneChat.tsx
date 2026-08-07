@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useEffect, useId, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
@@ -19,7 +19,6 @@ import {
   IconPlay,
   IconPlus,
   IconSearch,
-  IconSettings,
   IconStar,
 } from "../components/icons";
 import { useAppState } from "../state";
@@ -53,6 +52,15 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
+import { CHAT_COPY, COMMON_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import {
+  chatSendReducer,
+  initialChatSendState,
+  shouldSubmitComposerKey,
+} from "../shared/chat-send-state";
+import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
+import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
+import { formatAgentDisplayName } from "../shared/agent-display";
 
 const promptGroups = [
   {
@@ -122,6 +130,11 @@ type OptimisticChatDraft = {
   assistantMessage: IntuneChatMessage;
 };
 
+type FailedChatRequest = {
+  content: string;
+  conversationId: string | null;
+};
+
 type RelatedAgentSuggestion = {
   agent: AgentSummary;
   score: number;
@@ -177,15 +190,17 @@ type IntuneChatRouteState = {
 
 const focusRingClass =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
-const collapsedRailControlClass =
-  `grid h-9 w-9 place-items-center rounded-full text-center leading-none transition-colors ${focusRingClass}`;
 
 export default function IntuneChat() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { conversationId: routeConversationId } = useParams<{ conversationId?: string }>();
   const { state, startRun, refresh, loading } = useAppState();
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    routeConversationId ?? null,
+  );
+  const [shellLoaded, setShellLoaded] = useState(false);
   const [messages, setMessages] = useState<IntuneChatMessage[]>([]);
   const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
   const [input, setInput] = useState("");
@@ -193,6 +208,8 @@ export default function IntuneChat() {
   const [conversationSearch, setConversationSearch] = useState("");
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [sendState, dispatchSend] = useReducer(chatSendReducer, initialChatSendState);
+  const [failedRequest, setFailedRequest] = useState<FailedChatRequest | null>(null);
   const [runningAgentSlug, setRunningAgentSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatProgress, setChatProgress] = useState<ChatProgressState | null>(null);
@@ -202,12 +219,15 @@ export default function IntuneChat() {
     suggestionsByMessageId: {},
     suggestedSlugsByConversationId: {},
   });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(true);
+  const [historyIsOverlay, setHistoryIsOverlay] = useState(false);
+  const historyToggleRef = useRef<HTMLButtonElement | null>(null);
+  const historySearchRef = useRef<HTMLInputElement | null>(null);
   const [pinnedSectionOpen, setPinnedSectionOpen] = useState(true);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [hostedConsentPrompt, setHostedConsentPrompt] =
     useState<HostedChatConsentPrompt | null>(null);
-  const [rememberHostedConsent, setRememberHostedConsent] = useState(true);
+  const [rememberHostedConsent, setRememberHostedConsent] = useState(false);
   const [tenantGroups, setTenantGroups] = useState<TenantGroup[]>([]);
   const [savedQueries, setSavedQueries] = useState<SavedMultiTenantQuery[]>([]);
   const [scopeMode, setScopeMode] = useState<MultiTenantScopeMode>("active");
@@ -255,6 +275,21 @@ export default function IntuneChat() {
   const initialQuestionConsumedRef = useRef(false);
   const progressClearTimerRef = useRef<number | null>(null);
   const copiedClearTimerRef = useRef<number | null>(null);
+  const draftConversationRef = useRef<string | null | undefined>(undefined);
+  const skipDraftWriteRef = useRef(false);
+
+  const openConversation = (
+    conversationId: string | null,
+    options: { replace?: boolean } = {},
+  ) => {
+    setActiveConversationId(conversationId);
+    const destination = conversationId
+      ? `/chat/${encodeURIComponent(conversationId)}`
+      : "/chat";
+    if (`${location.pathname}${location.search}` !== destination) {
+      navigate(destination, { replace: options.replace });
+    }
+  };
 
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -321,6 +356,18 @@ export default function IntuneChat() {
   }, []);
 
   useEffect(() => {
+    if (!historyIsOverlay || !historyOpen) return;
+    const onHistoryKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setHistoryOpen(false);
+      window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+    };
+    window.addEventListener("keydown", onHistoryKeyDown);
+    return () => window.removeEventListener("keydown", onHistoryKeyDown);
+  }, [historyIsOverlay, historyOpen]);
+
+  useEffect(() => {
     const api = window.openAdminOS;
     if (!api || !state.activeTenantId) {
       setWorkspaces([]);
@@ -374,6 +421,26 @@ export default function IntuneChat() {
     }
   }, [scopeMode, selectedTenantIds.length, state.activeTenantId]);
 
+  useEffect(() => {
+    const narrowWindow = window.matchMedia("(max-width: 1100px)");
+    const updateHistoryLayout = (matches: boolean) => {
+      setHistoryIsOverlay(matches);
+      setHistoryOpen(!matches);
+    };
+    const onBreakpointChange = (event: MediaQueryListEvent) => {
+      updateHistoryLayout(event.matches);
+    };
+
+    updateHistoryLayout(narrowWindow.matches);
+    narrowWindow.addEventListener("change", onBreakpointChange);
+    return () => narrowWindow.removeEventListener("change", onBreakpointChange);
+  }, []);
+
+  useEffect(() => {
+    const nextConversationId = routeConversationId ?? null;
+    setActiveConversationId(nextConversationId);
+  }, [routeConversationId]);
+
   const loadShell = async (
     preferredActiveConversationId?: string | null,
     searchOverride = conversationSearch,
@@ -387,25 +454,33 @@ export default function IntuneChat() {
         : api.listIntuneChatConversations(),
       api.getGraphCacheStatus().catch(() => null),
     ]);
-    setConversations(nextConversations);
+    setConversations((current) => {
+      if (!query || !activeConversationId) return nextConversations;
+      const activeConversation = current.find(
+        (conversation) => conversation.id === activeConversationId,
+      );
+      return activeConversation &&
+        !nextConversations.some((conversation) => conversation.id === activeConversationId)
+        ? [activeConversation, ...nextConversations]
+        : nextConversations;
+    });
     setCacheStatus(nextCache);
+    setShellLoaded(true);
     if (sendInFlightRef.current && preferredActiveConversationId === undefined) {
       return;
     }
     if (preferredActiveConversationId !== undefined) {
-      setActiveConversationId(
-        preferredActiveConversationId ?? nextConversations[0]?.id ?? null,
-      );
+      const nextConversationId =
+        preferredActiveConversationId ?? nextConversations[0]?.id ?? null;
+      openConversation(nextConversationId, { replace: true });
       return;
     }
-    setActiveConversationId((current) =>
-      current && nextConversations.some((conversation) => conversation.id === current)
-        ? current
-        : nextConversations[0]?.id ?? null,
-    );
+    // Conversation selection is route-owned. Refreshing or filtering the rail
+    // must never switch the open transcript without updating the URL.
   };
 
   useEffect(() => {
+    setShellLoaded(false);
     void loadShell().catch((caught) =>
       setError(caught instanceof Error ? caught.message : String(caught)),
     );
@@ -454,7 +529,26 @@ export default function IntuneChat() {
   }, [activeConversationId, conversations, sending]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    if (draftConversationRef.current === activeConversationId) return;
+    draftConversationRef.current = activeConversationId;
+    skipDraftWriteRef.current = true;
+    setInput(readChatDraft(activeConversationId));
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    if (skipDraftWriteRef.current) {
+      skipDraftWriteRef.current = false;
+      return;
+    }
+    writeChatDraft(activeConversationId, input);
+  }, [activeConversationId, input]);
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    messagesEndRef.current?.scrollIntoView({
+      block: "end",
+      behavior: reducedMotion ? "auto" : "smooth",
+    });
   }, [messages.length, sending, chatProgress?.message]);
 
   useEffect(
@@ -501,10 +595,10 @@ export default function IntuneChat() {
     }, delayMs);
   };
 
-  const startNewConversation = () => {
+  const startNewConversation = (replace = false) => {
     if (sending) return;
     clearProgressTimer();
-    setActiveConversationId(null);
+    openConversation(null, { replace });
     setMessages([]);
     setInput("");
     setError(null);
@@ -513,6 +607,9 @@ export default function IntuneChat() {
     setChatProgress(null);
     setProgressAssistantMessageId(null);
     setOptimisticDraft(null);
+    setFailedRequest(null);
+    clearChatDraft(null);
+    dispatchSend({ type: "reset" });
     setScopeMode("active");
     setSelectedSavedQueryId("");
     setMultiTenantPreflight(null);
@@ -521,16 +618,31 @@ export default function IntuneChat() {
     setBatchNotice(null);
   };
 
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("new") !== "1" || sending) return;
+    startNewConversation(true);
+    // The one-shot query is intentionally removed after resetting Chat.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, navigate, sending]);
+
+  useEffect(() => {
+    const onNewConversation = () => startNewConversation();
+    window.addEventListener(OPEN_NEW_CONVERSATION_EVENT, onNewConversation);
+    return () => window.removeEventListener(OPEN_NEW_CONVERSATION_EVENT, onNewConversation);
+  });
+
   const handleStopGeneration = async () => {
     const api = window.openAdminOS;
     if (!api || !sending || stopping) return;
     setStopping(true);
+    dispatchSend({ type: "request-stop" });
     setError(null);
     setChatProgress(createStoppedChatProgress("Stopping response."));
     try {
       await api.cancelIntuneChatStream();
     } catch (caught) {
       setStopping(false);
+      dispatchSend({ type: "stop-failed" });
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
@@ -567,7 +679,7 @@ export default function IntuneChat() {
         ...(workspaceContext ? { workspaceContext } : {}),
         ...(contextSummary ? { workspaceContextSummary: contextSummary } : {}),
       });
-      setRememberHostedConsent(true);
+      setRememberHostedConsent(false);
       return;
     }
     await executeSend(
@@ -667,7 +779,7 @@ export default function IntuneChat() {
       setPreflightPrompt("");
       setInput("");
       setMessages([result.userMessage, result.assistantMessage]);
-      setActiveConversationId(result.conversation.id);
+      openConversation(result.conversation.id, { replace: true });
       await loadShell(result.conversation.id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -763,7 +875,9 @@ export default function IntuneChat() {
     };
 
     sendInFlightRef.current = true;
+    dispatchSend({ type: "send" });
     setSending(true);
+    setFailedRequest(null);
     setError(null);
     setNotice(null);
     clearProgressTimer();
@@ -779,8 +893,10 @@ export default function IntuneChat() {
       pendingAssistantMessage,
     ]);
     setInput("");
+    clearChatDraft(targetConversationId);
     let failed = false;
     let cancelled = false;
+    let reachedTerminal = false;
     try {
       const result = await api.streamIntuneChatMessage(
         {
@@ -792,8 +908,9 @@ export default function IntuneChat() {
         },
         (event) => {
           if (event.type === "started") {
+            dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
-            setActiveConversationId(event.conversation.id);
+            openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
             setMessages((current) => {
@@ -852,10 +969,16 @@ export default function IntuneChat() {
               return upsertMessage(withUser, event.result.assistantMessage);
             });
             if (event.type === "failed") {
+              reachedTerminal = true;
               failed = true;
+              dispatchSend({ type: "fail" });
               setError(event.error);
+              setFailedRequest({ content, conversationId: targetConversationId });
+              setInput(content);
             }
             if (event.type === "completed") {
+              reachedTerminal = true;
+              dispatchSend({ type: "complete" });
               recordRelatedAgentSuggestion(
                 event.result.conversation.id,
                 event.result.assistantMessage.id,
@@ -863,13 +986,15 @@ export default function IntuneChat() {
               );
             }
             if (event.type === "cancelled") {
+              reachedTerminal = true;
               cancelled = true;
+              dispatchSend({ type: "stopped" });
               setChatProgress(createStoppedChatProgress("Response stopped."));
             }
           }
         },
       );
-      setActiveConversationId(result.conversation.id);
+      openConversation(result.conversation.id, { replace: true });
       setCacheStatus(result.cacheStatus);
       if (result.assistantMessage.status === "completed") {
         recordRelatedAgentSuggestion(
@@ -883,7 +1008,10 @@ export default function IntuneChat() {
       failed = true;
       setOptimisticDraft(null);
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
+      if (!reachedTerminal) dispatchSend({ type: "fail" });
       setError(errorMessage);
+      setFailedRequest({ content, conversationId: targetConversationId });
+      setInput(content);
       setChatProgress({
         message: "Chat answer failed.",
         progressPercent: 100,
@@ -923,6 +1051,13 @@ export default function IntuneChat() {
     }
   };
 
+  const handleRetryFailedSend = async () => {
+    const request = failedRequest;
+    if (!request || sending) return;
+    setError(null);
+    await handleSend(request.content, request.conversationId);
+  };
+
   const confirmHostedConsentAndSend = async () => {
     const pending = hostedConsentPrompt;
     if (!pending) return;
@@ -947,12 +1082,9 @@ export default function IntuneChat() {
     const prompt = hostedBatchConsentPrompt;
     if (!prompt) return;
     setHostedBatchConsentPrompt(null);
-    await runMultiTenantQuery({
-      tenantIds: prompt.preflight.resolvedTenantIds,
-      providerId: prompt.preflight.providerId,
-      acknowledgedAt: new Date().toISOString(),
-      remember: true,
-    });
+    await runMultiTenantQuery(
+      createHostedBatchProviderConsent(prompt.preflight, new Date().toISOString()),
+    );
   };
 
   useEffect(() => {
@@ -972,7 +1104,7 @@ export default function IntuneChat() {
 
     initialQuestionConsumedRef.current = true;
     navigate(location.pathname, { replace: true, state: null });
-    setActiveConversationId(null);
+    openConversation(null, { replace: true });
     setMessages([]);
     void handleSend(initialQuestion, null);
   }, [activeTenant, handleSend, loading, location.pathname, location.state, navigate]);
@@ -1144,7 +1276,8 @@ export default function IntuneChat() {
       setDeleteTarget(null);
       if (target.id === activeConversationId) {
         setMessages([]);
-        await loadShell(null);
+        openConversation(null, { replace: true });
+        await loadShell();
       } else {
         await loadShell(activeConversationId);
       }
@@ -1183,7 +1316,7 @@ export default function IntuneChat() {
 
   const handleEditPrompt = (message: IntuneChatMessage) => {
     if (sending || message.role !== "user") return;
-    setActiveConversationId(message.conversationId);
+    openConversation(message.conversationId);
     setInput(message.content);
     setError(null);
     setNotice(null);
@@ -1197,7 +1330,7 @@ export default function IntuneChat() {
       setError("Cannot regenerate this response because the previous prompt was not found.");
       return;
     }
-    setActiveConversationId(message.conversationId);
+    openConversation(message.conversationId);
     setError(null);
     setNotice(null);
     await handleSend(previousPrompt, message.conversationId);
@@ -1331,6 +1464,12 @@ export default function IntuneChat() {
   const activeConversation = conversations.find(
     (conversation) => conversation.id === activeConversationId,
   );
+  const unknownConversation = Boolean(
+    shellLoaded &&
+      routeConversationId &&
+      conversationSearch.trim() === "" &&
+      !activeConversation,
+  );
   const pinnedConversations = conversations.filter(
     (conversation) => conversation.pinnedAt,
   );
@@ -1363,7 +1502,15 @@ export default function IntuneChat() {
     <button
       key={conversation.id}
       type="button"
-      onClick={() => setActiveConversationId(conversation.id)}
+      aria-label={`Open conversation ${conversation.title}. Updated ${formatDateTime(conversation.updatedAt)}`}
+      title={conversation.title}
+      onClick={() => {
+        openConversation(conversation.id);
+        if (historyIsOverlay) {
+          setHistoryOpen(false);
+          window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+        }
+      }}
       onContextMenu={(event) => openConversationContextMenu(event, conversation)}
       className={`mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors ${focusRingClass} ${
         activeConversationId === conversation.id
@@ -1375,7 +1522,7 @@ export default function IntuneChat() {
         {conversation.pinnedAt && (
           <IconStar
             size={10}
-            className="mr-1 inline align-[-1px] text-[var(--color-accent)]"
+            className="mr-1 inline align-[-1px] text-[var(--color-text-muted)]"
           />
         )}
         {conversation.title}
@@ -1387,209 +1534,154 @@ export default function IntuneChat() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
+    <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
+      {historyIsOverlay && historyOpen && (
+        <button
+          type="button"
+          aria-label="Close chat history"
+          onClick={() => {
+            setHistoryOpen(false);
+            window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+          }}
+          className="absolute inset-0 z-20 border-0 bg-black/55"
+        />
+      )}
       <aside
-        className={`flex shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)] transition-[width] duration-150 ${
-          sidebarCollapsed ? "w-16" : "w-[284px]"
+        aria-label="Chat history"
+        aria-hidden={!historyOpen}
+        inert={!historyOpen}
+        className={`flex min-h-0 flex-col bg-[var(--color-sidebar-solid)] transition-[transform,width] duration-150 ${
+          historyIsOverlay
+            ? `absolute inset-y-0 left-0 z-30 w-[284px] border-r border-[var(--color-border-soft)] shadow-[18px_0_48px_rgba(0,0,0,0.42)] ${historyOpen ? "translate-x-0" : "-translate-x-full"}`
+            : historyOpen
+              ? "relative w-[284px] shrink-0 border-r border-[var(--color-border-soft)]"
+              : "relative w-0 shrink-0 overflow-hidden border-r-0"
         }`}
       >
-        <div className={sidebarCollapsed ? "flex flex-col items-center gap-2 px-0 pt-5 pb-3" : "px-4 pt-5 pb-3"}>
-          {sidebarCollapsed ? (
-            <>
-              <button
-                type="button"
-                title="Show chat history"
-                aria-label="Show chat history"
-                onClick={() => setSidebarCollapsed(false)}
-                className={`${collapsedRailControlClass} bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25 hover:bg-[var(--color-accent-soft)]/80`}
-              >
-                <IconChevronRight size={15} />
-              </button>
-              <button
-                type="button"
-                title="New conversation"
-                aria-label="New conversation"
-                disabled={sending}
-                onClick={startNewConversation}
-                className={`${collapsedRailControlClass} ${
-                  draftConversationActive
-                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25"
-                    : "bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] hover:text-[var(--color-text)]"
-                } disabled:cursor-not-allowed disabled:opacity-50`}
-              >
-                <IconPlus size={14} />
-              </button>
-            </>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                  Chat
-                </div>
-                <div className="mt-1 truncate text-[13px] text-[var(--color-text-soft)]">
-                  {activeTenant?.displayName ?? "No tenant"}
-                </div>
+        <div className="px-4 pb-3 pt-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                Conversations
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  title="Hide chat history"
-                  aria-label="Hide chat history"
-                  onClick={() => setSidebarCollapsed(true)}
-                  className={`flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
-                >
-                  <IconArrowLeft size={13} />
-                </button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  leadingIcon={<IconPlus size={12} />}
-                  disabled={sending}
-                  onClick={startNewConversation}
-                >
-                  New
-                </Button>
+              <div className="mt-1 truncate text-[13px] text-[var(--color-text-soft)]">
+                {activeTenant?.displayName ?? "No tenant"}
               </div>
             </div>
-          )}
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                title="Hide chat history"
+                aria-label="Hide chat history"
+                onClick={() => {
+                  setHistoryOpen(false);
+                  window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+                }}
+                className={`flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
+              >
+                <IconArrowLeft size={13} />
+              </button>
+              <Button
+                size="sm"
+                variant="secondary"
+                leadingIcon={<IconPlus size={12} />}
+                disabled={sending}
+                onClick={() => {
+                  startNewConversation();
+                  if (historyIsOverlay) setHistoryOpen(false);
+                }}
+              >
+                New
+              </Button>
+            </div>
+          </div>
         </div>
 
-        {!sidebarCollapsed && (
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-            <div className="sticky top-0 z-10 bg-[var(--color-sidebar-solid)] pb-2">
-              <div className="relative">
-                <IconSearch
-                  size={13}
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-                />
-                <label htmlFor="conversation-search" className="sr-only">
-                  Search conversations
-                </label>
-                <input
-                  id="conversation-search"
-                  name="conversation-search"
-                  type="search"
-                  value={conversationSearch}
-                  onChange={(event) => setConversationSearch(event.target.value)}
-                  placeholder="Search conversations"
-                  autoComplete="off"
-                  className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-muted)] focus:ring-[var(--color-accent)]"
-                />
-              </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <div className="sticky top-0 z-10 bg-[var(--color-sidebar-solid)] pb-2">
+            <div className="relative">
+              <IconSearch
+                size={13}
+                aria-hidden="true"
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+              />
+              <label htmlFor="conversation-search" className="sr-only">
+                Search conversations
+              </label>
+              <input
+                id="conversation-search"
+                ref={historySearchRef}
+                name="conversation-search"
+                type="search"
+                value={conversationSearch}
+                onChange={(event) => setConversationSearch(event.target.value)}
+                placeholder="Search conversations"
+                autoComplete="off"
+                className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
+              />
             </div>
-            {draftConversationActive && (
-              <button
-                type="button"
-                disabled={sending}
-                onClick={startNewConversation}
-                className="mb-1 w-full rounded-lg bg-[var(--color-surface-hover)] px-3 py-2.5 text-left text-[var(--color-text)] transition-colors disabled:cursor-not-allowed"
-              >
-                <div className="truncate text-[12.5px] font-medium">
-                  New conversation
-                </div>
-                <div className="mt-1 text-[10.5px] text-[var(--color-text-muted)]">
-                  {sending ? "Thinking" : input.trim() ? "Draft" : "Ready"}
-                </div>
-              </button>
-            )}
-            {conversations.length === 0 ? (
-              <div className="rounded-lg px-3 py-4 text-[12px] leading-5 text-[var(--color-text-muted)]">
-                {conversationSearch.trim()
-                  ? "No matching conversations."
-                  : "Chat history will appear here."}
-              </div>
-            ) : (
-              <>
-                {pinnedConversations.length > 0 && (
-                  <div className="mb-2">
-                    <button
-                      type="button"
-                      onClick={() => setPinnedSectionOpen((open) => !open)}
-                      className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                      aria-expanded={pinnedSectionOpen}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <IconStar size={10} className="text-[var(--color-accent)]" />
-                        Pinned
-                        <span className="font-mono text-[10px] tabular-nums opacity-70">
-                          {pinnedConversations.length}
-                        </span>
-                      </span>
-                      {pinnedSectionOpen ? (
-                        <IconChevronDown size={11} />
-                      ) : (
-                        <IconChevronRight size={11} />
-                      )}
-                    </button>
-                    {pinnedSectionOpen && pinnedConversations.map(renderConversationRow)}
-                  </div>
-                )}
-                {recentConversations.length > 0 && (
-                  <div>
-                    {pinnedConversations.length > 0 && (
-                      <div className="mb-1 px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                        Recent
-                      </div>
-                    )}
-                    {recentConversations.map(renderConversationRow)}
-                  </div>
-                )}
-              </>
-            )}
           </div>
-        )}
-
-        {sidebarCollapsed && (
-          <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-0 pb-3">
-            {conversations.slice(0, 12).map((conversation, index) => (
-              <button
-                key={conversation.id}
-                type="button"
-                title={conversation.title}
-                aria-label={`Open conversation ${conversation.title}`}
-                onClick={() => {
-                  setActiveConversationId(conversation.id);
-                  setSidebarCollapsed(false);
-                }}
-                onContextMenu={(event) => openConversationContextMenu(event, conversation)}
-                className={`${collapsedRailControlClass} font-mono text-[10.5px] ${
-                  activeConversationId === conversation.id
-                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-                    : "bg-transparent text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                }`}
-              >
-                {String(index + 1).padStart(2, "0")}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div
-          className={`border-t border-[var(--color-border-soft)] ${
-            sidebarCollapsed ? "flex h-14 items-center justify-center p-0" : "p-3"
-          }`}
-        >
-          {sidebarCollapsed ? (
+          {draftConversationActive && (
             <button
               type="button"
-              title="Chat settings"
-              aria-label="Chat settings"
-              onClick={() => navigate("/settings")}
-              className={`${collapsedRailControlClass} text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]`}
+              disabled={sending}
+              onClick={() => {
+                startNewConversation();
+                if (historyIsOverlay) setHistoryOpen(false);
+              }}
+              className="mb-1 w-full rounded-lg bg-[var(--color-surface-hover)] px-3 py-2.5 text-left text-[var(--color-text)] transition-colors disabled:cursor-not-allowed"
             >
-              <IconSettings size={14} />
+              <div className="truncate text-[12.5px] font-medium">
+                New conversation
+              </div>
+              <div className="mt-1 text-[10.5px] text-[var(--color-text-muted)]">
+                {sending ? "Thinking" : input.trim() ? "Draft" : "Ready"}
+              </div>
             </button>
+          )}
+          {conversations.length === 0 ? (
+            <div className="rounded-lg px-3 py-4 text-[12px] leading-5 text-[var(--color-text-muted)]">
+              {conversationSearch.trim()
+                ? "No matching conversations."
+                : "Chat history will appear here."}
+            </div>
           ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="w-full justify-start"
-              leadingIcon={<IconSettings size={13} />}
-              onClick={() => navigate("/settings")}
-            >
-              Chat settings
-            </Button>
+            <>
+              {pinnedConversations.length > 0 && (
+                <div className="mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setPinnedSectionOpen((open) => !open)}
+                    className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                    aria-expanded={pinnedSectionOpen}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <IconStar size={10} className="text-[var(--color-text-muted)]" />
+                      Pinned
+                      <span className="font-mono text-[10px] tabular-nums opacity-70">
+                        {pinnedConversations.length}
+                      </span>
+                    </span>
+                    {pinnedSectionOpen ? (
+                      <IconChevronDown size={11} />
+                    ) : (
+                      <IconChevronRight size={11} />
+                    )}
+                  </button>
+                  {pinnedSectionOpen && pinnedConversations.map(renderConversationRow)}
+                </div>
+              )}
+              {recentConversations.length > 0 && (
+                <div>
+                  {pinnedConversations.length > 0 && (
+                    <div className="mb-1 px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Recent
+                    </div>
+                  )}
+                  {recentConversations.map(renderConversationRow)}
+                </div>
+              )}
+            </>
           )}
         </div>
       </aside>
@@ -1597,6 +1689,34 @@ export default function IntuneChat() {
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] px-6">
           <div className="flex min-w-0 items-center gap-3">
+            {!historyOpen && (
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  ref={historyToggleRef}
+                  title="Show chat history"
+                  aria-label="Show chat history"
+                  onClick={() => {
+                    setHistoryOpen(true);
+                    window.requestAnimationFrame(() => historySearchRef.current?.focus());
+                  }}
+                  className={`flex h-8 items-center gap-1.5 rounded-lg bg-[var(--color-bg-raised)] px-2.5 text-[11px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
+                >
+                  <IconChevronRight size={13} />
+                  History
+                </button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  aria-label="New conversation"
+                  leadingIcon={<IconPlus size={12} />}
+                  disabled={sending}
+                  onClick={() => startNewConversation()}
+                >
+                  New
+                </Button>
+              </div>
+            )}
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
               <IconChat size={16} />
             </div>
@@ -1605,10 +1725,12 @@ export default function IntuneChat() {
                 {activeConversation?.pinnedAt && (
                   <IconStar
                     size={11}
-                    className="mr-1.5 inline align-[-1px] text-[var(--color-accent)]"
+                    className="mr-1.5 inline align-[-1px] text-[var(--color-text-muted)]"
                   />
                 )}
-                {activeConversation?.title ?? "New conversation"}
+                {unknownConversation
+                  ? "Conversation not found"
+                  : activeConversation?.title ?? "New conversation"}
               </div>
               <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
                 <StatusDot tone={provider?.isLocal ? "success" : "warning"} />
@@ -1683,7 +1805,33 @@ export default function IntuneChat() {
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-6 py-8">
-            {multiTenantPreflight ? (
+            {unknownConversation ? (
+              <div className="flex flex-1 items-center justify-center py-16">
+                <div
+                  role="status"
+                  className="w-full max-w-[520px] rounded-xl bg-[var(--color-bg-raised)] p-6 text-center ring-1 ring-[var(--color-border)]"
+                >
+                  <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
+                    <IconChat size={18} />
+                  </div>
+                  <h1 className="text-[17px] font-semibold text-[var(--color-text)]">
+                    Conversation not found
+                  </h1>
+                  <p className="mx-auto mt-2 max-w-[420px] text-[12.5px] leading-5 text-[var(--color-text-muted)]">
+                    It may have been deleted, or this link belongs to another local profile.
+                    No tenant data was changed.
+                  </p>
+                  <Button
+                    className="mt-5"
+                    variant="primary"
+                    leadingIcon={<IconPlus size={12} />}
+                    onClick={() => startNewConversation(true)}
+                  >
+                    Start a new conversation
+                  </Button>
+                </div>
+              </div>
+            ) : multiTenantPreflight ? (
               <div className="flex flex-1 flex-col justify-center gap-6 py-8">
                 <ScopeReviewCard
                   preflight={multiTenantPreflight}
@@ -1794,8 +1942,24 @@ export default function IntuneChat() {
         <div className="shrink-0 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] px-6 py-4">
           <div className="mx-auto w-full max-w-[860px]">
             {error && (
-              <div className="mb-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-                {error}
+              <div
+                role="alert"
+                className="mb-3 flex items-start justify-between gap-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {failedRequest ? chatErrorCopy(error).what : "The requested action could not be completed."}
+                  </div>
+                  <div className="mt-0.5 break-words text-[var(--color-text-soft)]">
+                    {chatErrorCopy(error).why ??
+                      "Retry the action. If it still fails, review the provider and tenant connection in Settings."}
+                  </div>
+                </div>
+                {failedRequest && (
+                  <Button size="sm" variant="secondary" onClick={() => void handleRetryFailedSend()}>
+                    {chatErrorCopy(error).action.label}
+                  </Button>
+                )}
               </div>
             )}
             {notice && (
@@ -1816,7 +1980,7 @@ export default function IntuneChat() {
               savedQueries={savedQueries}
               selectedSavedQueryId={selectedSavedQueryId}
               onSavedQuery={applySavedQuery}
-              disabled={sending || runningMultiTenant}
+              disabled={unknownConversation || sending || runningMultiTenant}
             />
             <WorkspaceContextControls
               workspaces={workspaces}
@@ -1841,38 +2005,35 @@ export default function IntuneChat() {
               }
               includeInstructions={includeWorkspaceInstructions}
               onIncludeInstructionsChange={setIncludeWorkspaceInstructions}
-              disabled={sending || runningMultiTenant}
+              disabled={unknownConversation || sending || runningMultiTenant}
             />
             <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
               <label htmlFor="intune-chat-composer" className="sr-only">
-                Chat prompt
+                {CHAT_COPY.composerLabel}
               </label>
               <textarea
                 id="intune-chat-composer"
                 name="intune-chat-composer"
                 ref={composerRef}
+                disabled={unknownConversation}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    !event.shiftKey &&
-                    !event.nativeEvent.isComposing
-                  ) {
+                  if (shouldSubmitComposerKey(event.nativeEvent)) {
                     event.preventDefault();
                     void handleSend();
                   }
                 }}
-                placeholder="Ask about devices, users, policies, sign-ins, or an installed agent workflow."
-                className="max-h-[180px] min-h-[72px] w-full resize-none bg-transparent px-2 py-2 text-[13.5px] leading-6 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-muted)] focus:outline-none focus-visible:outline-none"
+                placeholder={CHAT_COPY.composerPlaceholder}
+                className="max-h-[180px] min-h-[72px] w-full resize-none bg-transparent px-2 py-2 text-[13.5px] leading-6 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
               />
               <div className="flex items-center justify-between gap-3 px-1 pb-1">
                 <div className="truncate text-[11px] text-[var(--color-text-muted)]">
                   {workspaceContextSummary
                     ? `Workspace context selected: ${workspaceContextSummary.evidenceCount} evidence, ${workspaceContextSummary.noteCount} notes.`
                     : provider?.isLocal
-                      ? "Tenant context stays on this device with the selected local provider."
-                      : "Retrieved tenant context is sent to the selected hosted provider."}
+                      ? CHAT_COPY.localBoundary
+                      : CHAT_COPY.hostedBoundary}
                 </div>
                 {sending ? (
                   <Button
@@ -1882,19 +2043,26 @@ export default function IntuneChat() {
                     disabled={stopping}
                     onClick={() => void handleStopGeneration()}
                   >
-                    {stopping ? "Stopping" : "Stop"}
+                    {stopping ? COMMON_COPY.actions.stopping : COMMON_COPY.actions.stop}
                   </Button>
                 ) : (
                   <Button
                     variant="primary"
                     size="sm"
-                    disabled={input.trim().length === 0 || !activeTenant}
+                    disabled={unknownConversation || input.trim().length === 0 || !activeTenant}
                     onClick={() => void handleSend()}
                   >
-                    Send
+                    {COMMON_COPY.actions.send}
                   </Button>
                 )}
               </div>
+            </div>
+            <div
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {sendState.phase === "failed" ? "" : sendState.announcement}
             </div>
           </div>
         </div>
@@ -2482,7 +2650,7 @@ function ScopeReviewCard({
                 <option value="">Select agent</option>
                 {installedAgents.map((agent) => (
                   <option key={agent.slug} value={agent.slug}>
-                    {agent.name} · {agent.mode}
+                    {formatAgentDisplayName(agent)} · {agent.mode}
                   </option>
                 ))}
               </select>
@@ -3062,24 +3230,40 @@ function HostedChatConsentModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const trustCopy = deriveTrustCopy({
+    provider: prompt
+      ? { name: prompt.providerName, isLocal: false }
+      : { name: "Hosted provider", isLocal: false },
+    ...(prompt?.model ? { model: prompt.model } : {}),
+    scope: { tenantNames: prompt ? [prompt.tenantName] : [] },
+    ...(prompt?.workspaceContextSummary
+      ? {
+          attachments: {
+            workspaceTitle: prompt.workspaceContextSummary.workspaceTitle,
+            evidenceCount: prompt.workspaceContextSummary.evidenceCount,
+            noteCount: prompt.workspaceContextSummary.noteCount,
+            includesInstructions: prompt.workspaceContextSummary.includesInstructions,
+          },
+        }
+      : {}),
+  });
   return (
     <Modal open={Boolean(prompt)} onClose={onClose} size="md">
       <ModalHeader
-        title="Send tenant context to hosted provider"
+        title={trustCopy.confirmTitle}
         subtitle={prompt?.providerName ?? "Hosted provider"}
         badge={<Pill tone="warning">Hosted</Pill>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
         <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-          This chat answer will use retrieved tenant context with {prompt?.providerName}.
-          The answer prompt leaves this device.
+          {trustCopy.confirmBody}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <ConsentFact label="Tenant" value={prompt?.tenantName ?? "Active tenant"} />
           <ConsentFact label="Provider" value={prompt?.providerName ?? "Hosted provider"} />
           <ConsentFact label="Model" value={prompt?.model ?? "Provider default"} />
-          <ConsentFact label="Stored data" value="Chat history and Graph cache stay local" />
+          <ConsentFact label="Stored data" value={trustCopy.storage} />
           {prompt?.workspaceContextSummary && (
             <ConsentFact
               label="Workspace"
@@ -3312,6 +3496,17 @@ function createHostedProviderConsent(
   };
 }
 
+export function createHostedBatchProviderConsent(
+  preflight: TenantScopePreflight,
+  acknowledgedAt: string,
+): NonNullable<RunMultiTenantChatInput["hostedProviderConsent"]> {
+  return {
+    tenantIds: preflight.resolvedTenantIds,
+    providerId: preflight.providerId,
+    acknowledgedAt,
+  };
+}
+
 function hostedChatConsentKey(tenantId: string, providerId: ProviderId): string {
   return `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`;
 }
@@ -3466,7 +3661,7 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
                 ? "bg-[var(--color-danger)]"
                 : isComplete
                   ? "bg-[var(--color-success)]"
-                  : "bg-[var(--color-accent)]"
+                  : "bg-[var(--color-info)]"
             }`}
             style={{ width: `${percent}%` }}
           />
@@ -3528,7 +3723,7 @@ function ProgressStepGlyph({
     return (
       <span
         aria-hidden="true"
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--color-accent)]"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--color-info)]"
       >
         <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
       </span>
@@ -3558,17 +3753,16 @@ function EmptyChat({
     [];
 
   return (
-    <div className="flex flex-1 items-center justify-center py-16">
+    <div className="flex flex-1 flex-col items-center justify-end px-6 pb-8 pt-12">
       <div className="w-full max-w-[680px] text-center">
         <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
           <IconChat size={21} />
         </div>
-        <h1 className="mt-5 text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
-          What do you want to inspect?
+        <h1 className="mt-5 text-pretty text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
+          {CHAT_COPY.emptyTitle}
         </h1>
         <p className="mx-auto mt-2 max-w-[520px] text-[13px] leading-6 text-[var(--color-text-soft)]">
-          Ask a tenant question in plain language. Chat will use Graph cache or live
-          reads, then keep any write action inside agent confirmation flows.
+          {CHAT_COPY.emptySubtitle}
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-1.5">
           {promptGroups.map((group) => (
@@ -3639,7 +3833,7 @@ function ChatMessageBubble({
         <div
           className={
             isUser
-              ? "rounded-2xl bg-[var(--color-accent)] px-4 py-2.5 text-[13.5px] leading-6 text-[#1a120c]"
+              ? "rounded-2xl border border-[var(--color-border)] border-r-2 border-r-[var(--color-accent)] bg-[var(--color-bg-raised)] px-4 py-2.5 text-[13.5px] leading-6 text-[var(--color-text)]"
               : "text-[13.5px] leading-6 text-[var(--color-text)]"
           }
         >
@@ -4122,7 +4316,7 @@ function RelatedAgentHint({
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="truncate text-[12px] font-medium text-[var(--color-text)]">
-                Related agent · {suggestion.agent.name}
+                Related agent · {formatAgentDisplayName(suggestion.agent)}
               </span>
               <Pill tone={suggestion.agent.mode === "write" ? "warning" : "success"}>
                 {modeLabel}
@@ -4148,7 +4342,7 @@ function RelatedAgentHint({
           <button
             type="button"
             title="Dismiss related agent"
-            aria-label={`Dismiss related agent ${suggestion.agent.name}`}
+            aria-label={`Dismiss related agent ${formatAgentDisplayName(suggestion.agent)}`}
             onClick={onDismiss}
             className={`grid h-6 w-6 shrink-0 place-items-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
           >
@@ -4231,7 +4425,7 @@ function AgentSuggestionCard({
                 <ul className="space-y-1 text-[11px] text-[var(--color-text-soft)]">
                   {matchedConcepts.map((concept) => (
                     <li key={concept} className="flex gap-2">
-                      <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-[var(--color-accent)]" />
+                      <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-[var(--color-text-faint)]" />
                       <span>{concept}</span>
                     </li>
                   ))}

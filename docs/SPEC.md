@@ -12,7 +12,7 @@ The product is local-first: by default, tenant data and LLM prompts never leave 
 
 ### Distribution surface
 
-- **Desktop app** (Electron; macOS signed/notarized, Linux x64 packages, Windows build-only until signing is ready) — the only end-user surface
+- **Desktop app** (Electron; macOS signed/notarized, Linux x64 packages, Windows packaging validation is manual-only until signing is ready) — the only end-user surface
 
 There is no separate CLI. Power users get the same GUI; contributor tooling (agent scaffold, dev/test commands) lives in repo scripts, not in a published `npx` binary.
 
@@ -71,19 +71,19 @@ We previously planned for Tauri (smaller binaries, native webview). After analyz
 - **Open-source contributor pool.** Community contributions (agents and UI) come from JS/TS devs. Tauri's Rust shell raises the bar for any contributor who wants to fix more than an agent.
 - **UI fidelity.** Chromium everywhere = identical rendering on Win/Mac/Linux. The design language (dense, dark, custom scrollbars, GPU-accelerated transitions) is more reliable on Chromium than on platform-native webviews.
 - **Proven path for this category.** Claude Desktop, VS Code, Linear, Slack, Figma, 1Password — all Electron. The "Electron is bloated" critique mattered more on 8GB-RAM machines than on modern admin workstations.
-- **t3code is Electron.** Our reference architecture uses Electron with `node-pty` and long-lived subprocess work — patterns port directly.
+- **Electron fits the runtime model.** The architecture supports `node-pty`, long-lived subprocess work, and Node-based provider adapters directly.
 
 The cost we accept: ~80–150MB installer size (vs ~5–10MB Tauri), ~150–250MB idle memory per window. For an IT-admin tool on managed devices this can pinch corporate deployment limits, but it's not a blocker. Trust posture is *architectural* (no tenant-content telemetry, local-first, write confirmation), not framework-derived.
 
-### Reference architecture: t3code
+### Desktop architecture
 
-Study https://github.com/pingdotgg/t3code before structuring the monorepo. The shape we want is the same: **one TypeScript monorepo that ships a polished Electron desktop app**, with a clean provider-adapter pattern and shared schema package. Don't copy `apps/desktop` wholesale (Effect adoption is a deeper commitment than we need yet), but the directory shape, contracts package, and adapter abstraction all transfer.
+OpenAdminOS is **one TypeScript monorepo that ships a polished Electron desktop app**, with a clean provider-adapter pattern and shared schema package. Preserve the directory boundaries, contracts package, and adapter abstraction when extending the runtime or renderer.
 
 ### Public documentation model
 
 Public documentation is GitBook-synced from `docs/gitbook`, with the repository root `.gitbook.yaml` setting `root: ./docs/gitbook`. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the GitBook root.
 
-Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/index.json` and regenerates GitBook pages under `docs/gitbook/generated` from `agents/*/manifest.yaml` plus the registry index. Generated pages include the agent catalog, per-agent pages, the Microsoft Graph scope matrix, the write safety matrix, and the LLM provider matrix. Generated pages should not be edited manually; update the manifest or generator instead.
+Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/index.json` and regenerates GitBook pages under `docs/gitbook/generated` from `agents/*/manifest.yaml` plus the registry index. Generated pages include the agent catalog, per-agent pages, the Microsoft Graph scope matrix, the write safety matrix, and the LLM provider matrix. Generated pages should not be edited manually; update the manifest or generator instead. CI jobs that verify generated docs must check out full Git history because the generated `Last changed` fields use path-specific commit metadata.
 
 The docs GitHub Action checks generated docs on pull requests and, after commits to `main`, opens a documentation update PR if generated output changed. It does not silently publish LLM-authored documentation to `main`.
 
@@ -316,6 +316,18 @@ Concretely:
 - Write agents use the LLM to *explain* the plan in plain language before the typed-confirmation prompt — they don't get a pass.
 - If a write agent produces zero actions after applying its filters, the run completes as a no-op result. Typed confirmation is required for every non-empty write plan, but an empty plan must not be reported as a failure.
 - If you genuinely don't need an LLM (e.g. a pure data export), this product is the wrong tool; reach for `Get-MgDeviceManagementManagedDevice | Export-Csv` or a similar deterministic script instead.
+
+Microsoft Graph execution is beta-only for this project. The runtime and all
+Graph-backed connectors call `https://graph.microsoft.com/beta`; continuation
+URLs must remain on that exact HTTPS origin and beta path. Collection agent
+steps treat an explicit manifest `$top` as a Graph page-size request and still
+follow `@odata.nextLink` until completion or a hard safety ceiling is exceeded. Exceeding a safety
+ceiling fails the run instead of presenting partial rows as tenant-wide
+evidence. Idempotent reads can retry throttling and transient service errors;
+non-idempotent POST operations never retry a generic 5xx response because the
+server may already have applied the side effect. Server-directed retry delays
+are capped at 60 seconds per attempt so a malformed header cannot park a run
+indefinitely.
 
 An agent is a TypeScript module with a default-exported manifest and a `run` function:
 
@@ -589,7 +601,7 @@ descriptor:
   authSource: graph-delegated
   scopes:
     - ChannelMessage.Send
-    - Chat.ReadWrite
+    - ChatMessage.Send
     - Team.ReadBasic.All
     - Channel.ReadBasic.All
   capabilities:
@@ -608,7 +620,7 @@ descriptor:
     - id: post-chat-message
       version: 1
       kind: notify
-      scopes: [Chat.ReadWrite]
+      scopes: [ChatMessage.Send]
   trust:
     label: "Microsoft Teams · {tenant}"
     detail: "Posts via Microsoft Graph as the signed-in admin. Data stays inside the tenant."
@@ -714,8 +726,8 @@ The app binary ships with **zero agents**. At runtime the desktop app fetches th
 Distribution semantics:
 
 - **Source of truth:** `https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/`
-- **Index:** `agents/index.json` is generated by CI from `agents/*/manifest.yaml` after the agent QA gate (schema, scopes, endpoints, fixture coverage) passes. Broken agents never reach users.
-- **Per-agent install:** fetch manifest → write to userData → version-pin. The same Agent Hub install flow as today, just fetching from HTTP instead of reading the binary.
+- **Index:** `agents/index.json` is generated from `agents/*/manifest.yaml` after the agent QA gate and carries a SHA-256 digest for every exact manifest. The official index has a detached Ed25519 signature (`agents/index.sig`) verified against the public key pinned in the app. It also carries an explicit monotonic revision; the generator requires a revision bump when entries change, and the client rejects a revision older than its highest verified cache. An unsigned, modified, or replayed older official index is never cached or used.
+- **Per-agent install:** verify index signature → fetch manifest → verify SHA-256 and trust metadata → validate schema → atomically write to userData → version-pin. Updates use the same chain, roll the manifest back if state persistence fails, and remove downloaded manifest files on uninstall.
 - **Forkable:** Settings exposes a "Registry source" field under Privacy. Enterprises can fork this repo, curate `/agents/`, and point the app at their fork. Custom sources open a trust-review modal and require explicit acknowledgement before persistence.
 - **App↔manifest version coupling:** each `index.json` entry carries `minAppVersion`. The app hides agents it can't run with a "Update OpenAdminOS to use this agent" note. This is how the DSL can evolve without orphaning users on older app versions.
 
@@ -724,7 +736,7 @@ Cache lifecycle:
 - Onboarding already requires network (MSAL, provider probe), so the first index fetch piggybacks on that flow — no offline-first complexity for first-run.
 - On every subsequent launch (online): refresh `index.json` in the background. Compare to cached per-agent versions, surface per-agent update badges.
 - Registry source URLs must use HTTPS, must not include credentials, query strings, fragments, or an `index.json` suffix, and are normalized before persistence. Localhost/private registry sources are blocked unless an explicit dev-only override is enabled (`OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE=1` in an unpackaged app).
-- Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source, so a failed custom source cannot silently fall back to agents fetched from another source.
+- Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source. Official cached indexes must also record a successful signature verification, so legacy unsigned cache content is not trusted.
 - Failed refresh is silent — keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
 - App works fully offline against the cached set after the first successful fetch.
 
@@ -768,12 +780,21 @@ and chain metadata columns. Signed or third-party cryptographic timestamps are
 deferred.
 
 Linux tenant sign-in requires a real OS secret-store backend. OpenAdminOS uses
-Electron `safeStorage` for the MSAL token cache and refuses Electron's
+Electron `safeStorage` for the MSAL token cache, hosted-provider credentials,
+and connector credentials, and refuses Electron's
 unprotected Linux `basic_text` backend. Debian/Ubuntu packages recommend
 `gnome-keyring`; KDE users can satisfy the same requirement with KWallet. If no
 Secret Service/KWallet session is installed and unlocked, tenant connection
 fails before storing tokens and shows recovery copy instead of silently writing
 refresh tokens to weak local storage.
+
+The local profile directory is created with owner-only permissions where the
+platform supports POSIX modes. `state.json`, SQLite, its WAL/SHM sidecars,
+downloaded agent manifests, registry cache, and encrypted credential blobs use
+owner-only file modes. SQLite enables foreign-key enforcement, WAL, and secure
+deletion. Tenant data in SQLite is not application-level encrypted; the product
+relies on operating-system account isolation and full-disk encryption for those
+local records and does not describe them as keychain-encrypted.
 
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
 error-reporting telemetry. Packaged production builds may send a minimal public
@@ -785,8 +806,8 @@ must never include tenant identifiers, user identifiers, prompts, run results,
 or Microsoft Graph data.
 
 User-initiated support bundles are a separate explicit action, not telemetry.
-The sidebar `Report issue` entry, failure-state action, and Settings → About
-action open an in-app support form. OpenAdminOS may export a local diagnostics
+The Settings → About action and contextual failure-state actions open an in-app
+support form; issue reporting is not permanent sidebar navigation. OpenAdminOS may export a local diagnostics
 JSON file only after the admin chooses that option. After the admin checks an
 explicit public-issue confirmation and clicks submit, the desktop app posts a
 bounded support report to the OpenAdminOS web API; the server creates the public
@@ -1130,6 +1151,11 @@ Collection refresh follows Microsoft Graph `@odata.nextLink` pagination up to a
 bounded page/row cap. Cache status records row count, page count, and whether the
 cap was reached, so chat can disclose partial source coverage instead of treating
 the first Graph page as tenant-wide evidence.
+The Changes timeline searches the bounded local history in the host rather than
+only filtering the currently rendered page. It scans at most the newest 5,000
+snapshots and labels that boundary when reached. A capped Graph cache refresh
+never infers that unseen objects were removed; removal detection resumes only
+after a complete refresh, and the UI discloses partial source coverage.
 Settings -> Intune Chat can clear the active tenant's cached Graph rows and cache
 status through an explicit local-deletion modal. Clearing cache does not
 disconnect the tenant, change provider settings, remove chat history, or alter
@@ -1186,13 +1212,23 @@ a never-prune option. Pruning runs at startup, on the scheduler tick, and throug
 the manual Settings action. Current object state is never deleted by drift
 retention; only old historical snapshots and stale object versions are removed.
 
+Disconnecting a tenant is an explicit destructive local-data operation. After
+confirmation, the host removes the tenant record, tenant-pinned runs and queued
+deliveries, Graph cache/status, conversations and messages, workspaces and
+evidence, drift history, self-training/audit records, saved-query tenant
+references, tenant-group membership, multi-tenant jobs/batches that include the
+tenant, and its cache schedule before removing the MSAL account. Failure is
+surfaced and never presented as a successful disconnect.
+
 Verification for the chat surface includes `npm run smoke:intune-chat`. The smoke
 test launches Electron in a dev-only fixture mode, seeds a local tenant, drives
 the real preload/IPC chat path through a 10-prompt pass, verifies a grounded
 answer, Stop, Regenerate, agent suggestion, collapsible history rail, copy
 response action, accepts a local self-training suggestion, and confirms scheduled
 cache refresh UI state.
-This fixture does not replace a final live-tenant pilot run, but it guards the
+The fixture injects deterministic local-provider readiness plus Graph and LLM
+adapters, so it never depends on Ollama or another provider being installed on
+the CI host. It does not replace a final live-tenant pilot run, but it guards the
 desktop path without requiring tenant credentials in CI or local automation.
 The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
 capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.
@@ -1312,16 +1348,19 @@ Electron window.
 ### Code signing
 
 Required before public v1 release:
-- **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, CI may build AppX packages for validation, but AppX files are not published as workflow artifacts or release assets.
+- **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, tagged releases do not schedule Windows jobs. Maintainers may explicitly request a manual AppX packaging-validation job, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr), a Developer ID Application certificate for the app/DMG/ZIP, a Developer ID Installer certificate for the PKG, and notarization. Without notarization, Gatekeeper blocks the app.
 - **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu and other Debian-family systems, plus RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://repo.openadminos.com/debian`; apt trust is repository-metadata signing, not per-file executable signing. The apt repository script validates `.deb` architecture from control metadata rather than Debian filename suffixes because Electron Builder release assets use `*-linux-amd64.deb` names. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
+- Linux packages use `openadminos` as the executable and `com.openadminos.desktop.desktop` as the desktop-entry filename, with Electron Builder desktop-name synchronization enabled so GNOME/KDE window association matches the application ID.
 - Packaged Linux desktop builds use Chromium software rendering by default and avoid VAAPI/GPU initialization. AppImages must tolerate Debian/Ubuntu VMs and desktops without working 3D acceleration; the main window also has a load/timeout reveal fallback so a missing `ready-to-show` event cannot leave the app invisible.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
-The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured.
+The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured. Manual packaging validation may run without release secrets, but a tagged release fails closed before publishing when any macOS signing/notarization secret or Linux apt-repository private-key/passphrase secret is absent.
 Release automation treats `release: vX.Y.Z` as the canonical marker and parses it from the full merge commit message, so both squash merges and normal merge commits can cut the corresponding tag.
+Tagged releases build and publish only the supported macOS Apple Silicon and Linux x64 packages. Windows AppX validation is an opt-in manual workflow job and is not a dependency of release publication.
 Release prep must bump every OpenAdminOS-owned package manifest and matching lockfile metadata that carries the product release version, including desktop, runtime, connector packages, QA packages, and the marketing website package.
 Release publishing must use the matching `CHANGELOG.md` section as the GitHub Release body and fail if that section is missing; generated PR summaries are not an acceptable fallback for release notes.
+Release gates preserve upgrade identities from v0.3: `com.openadminos.desktop` and the GitHub update publisher for macOS, plus the `openadminos` package/executable and stable desktop identity for Linux. Automated compatibility coverage must also open legacy JSON and SQLite state, apply additive migrations, and prove tenant, run, agent, chat, and cache records survive before packaging.
 When deliberately backfilling an existing release tag, release publishing may overwrite same-name GitHub Release assets so installers, updater metadata, and checksums can be replaced without inventing a new product version.
 
 The macOS menu bar companion must be created during any interactive app launch, including the case where a hidden background scheduler process already owns the Electron single-instance lock and receives the visible launch through the `second-instance` path.
@@ -1330,39 +1369,58 @@ The macOS menu bar companion must be created during any interactive app launch, 
 
 ## 3. Design system
 
-### Tokens (from `docs/mockups/_design.css`)
+### Tokens (from `apps/desktop/src/styles/globals.css`)
 
 ```
---bg-0: #0a0c10        Background base (darkest)
---bg-1: #0e1117        Sidebar, titlebar
---bg-2: #151a22        Cards, panels
---bg-3: #1c222c        Hover, raised
---bg-4: #232a36        Highest elevation
+--color-bg: #1c1917              Background base
+--color-bg-elevated: #252220     Elevated background
+--color-bg-raised: #2d2926       Highest elevation
+--color-sidebar-solid: #191614   Sidebar and rail (warm near-black, no cool cast)
+--color-surface: #232120         Cards and controls
+--color-surface-hover: #2a2724   Hovered surface
 
---text-0: #e6e9ef      Primary text
---text-1: #a8b0bd      Secondary text
---text-2: #6c7484      Tertiary / labels
---text-3: #4a5160      Disabled / hints
+--color-text: #f5f1eb           Primary text
+--color-text-soft: #b5ada3      Secondary text
+--color-text-muted: #9a9085     Metadata and labels (≥ 4.6:1 on production surfaces)
+--color-text-placeholder: #9c9186  Form and composer placeholders (≥ 4.5:1 on every input surface, including bg-raised)
+--color-text-faint: #6b6157     Decorative marks only (dots, dividers, disabled ornament); never readable copy
 
---border: #232a36
---border-strong: #2e3744
+--color-border: #322e2a
+--color-border-strong: #403a35
+--color-border-soft: #2a2622
 
---accent: #00d4ff      Electric cyan — interactive, focus, active states
---accent-dim: #0891a8
---accent-bg: rgba(0, 212, 255, 0.08)
+--color-accent: #e8a87c         Warm copper; reserved for primary actions, focus, and active navigation
+--color-accent-hover: #efb88f
+--color-accent-soft: #e8a87c1f
+--color-on-accent: #1a120c      Foreground on accent- and warning-filled controls (no hardcoded literals)
 
---success: #4ade80     Green — success, "local" indicators
---warning: #fbbf24     Amber — write operations, attention
---danger: #f87171      Red — errors, destructive
---purple: #a78bfa      LLM reasoning, "thinking" blocks
+--color-success-fg: #9cc88f     Success and the local-only trust line (paired bg: #9cc88f1f)
+--color-warning-fg: #e5c678     Write operations and attention (paired bg: #e5c6781f)
+--color-danger-fg: #e58888      Errors and destructive actions (paired bg: #e588881f)
+--color-info-fg: #a3bfd9        Informational and live-activity states: meters, pulses, spinners (paired bg: #a3bfd91f)
+--color-think-fg: #c4a5d9       LLM reasoning blocks (paired bg: #c4a5d91f)
+
+Legacy names (--color-success/-warning/-danger/-info/-think and their -soft
+variants) remain defined and byte-identical to the -fg/-bg pairs above.
+
+--radius-sm: 6px
+--radius-md: 10px
+--radius-lg: 14px
+--radius-xl: 18px
 ```
+
+Accent allocation: copper marks what the user can act on (primary buttons, focus
+rings, active navigation, selected scope). Live activity uses info, pins and
+decorative bullets use neutral text tokens, and the Chat user message is a
+neutral raised bubble with a 2px copper right edge instead of a solid copper
+fill. Destructive approval controls stay danger-coded; they are never copper.
 
 ### Typography
 
 - **UI:** system UI stack (`ui-sans-serif`, `system-ui`, `-apple-system`, `Segoe UI`, sans-serif)
 - **Code, IDs, telemetry, run IDs, JSON:** system monospace stack (`ui-monospace`, `SF Mono`, `Menlo`, `Consolas`, monospace)
-- Base size: 13px (denser than typical web — admins want information density)
-- Line-height: 1.5
+- Base size: 14px, with 12–13px controls and 11px metadata for admin-focused density
+- Line-height: 1.55
 - Letter-spacing: 0
 
 ### Density principle
@@ -1437,11 +1495,10 @@ messages, and never suggest the same agent twice in one conversation.
 
 ### Navigation (locked for v0.4)
 
-Five workspace destinations plus Settings:
+Three workspace destinations plus Settings. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
 
 | Nav item | Route | Contains |
 |---|---|---|
-| Home | `/` | First-run checklist until first completed run; then dashboard (stats, recent runs, trust card) |
 | Chat | `/chat` | Tenant Q&A (formerly "Intune Chat" in nav; covers Intune + Entra) |
 | Agents | `/agents` | Tabs: Installed · Hub · Schedules |
 | Changes | `/changes` | Tenant drift timeline |
@@ -1449,16 +1506,20 @@ Five workspace destinations plus Settings:
 
 Demoted from top-level nav (routes remain, reachable via Settings and the command palette):
 - **Workspaces** and **Connectors** — power-user surfaces; irrelevant until a user has more than one tenant or an external integration. Linked from Settings.
-- **Activity** — run history lives on Home ("Recent runs → View all"). The sidebar "Runs · last 7d" sparkline card is removed; run history now has one canonical home instead of three.
+- **Activity** — run history remains available through search, run links, and agent surfaces without adding another daily destination.
 - **Agent Hub** — a tab inside Agents, not a sibling of it.
 
-### First-run checklist
+Removed from navigation:
+- **Home** — its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
+- **Report issue** — available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
-Until the user has one completed run or one answered chat question, Home shows a checklist instead of zeroed dashboard stats:
+### First-run guidance
 
-1. Tenant connected ✓ (always true post-onboarding)
-2. Local model active ✓ / ▸ Review providers
-3. Ask your first question ▸ (chat quick-ask input, submits into `/chat`) — or run a suggested read-only agent
+Chat is the first-run surface. Before the first successful answer, its empty state keeps the composer central and shows compact readiness guidance only when tenant or provider setup is incomplete. The empty-state heading, explanation, and suggested questions are centered as one block immediately above the composer rather than floating in the middle of the transcript area:
+
+1. Confirm an active tenant.
+2. Confirm a reachable provider.
+3. Ask the first question or open a suggested read-only agent.
 
 Answered chat question means the local chat store contains at least one completed assistant message. Empty draft conversations, failed responses, and stopped responses do not count.
 
@@ -1478,10 +1539,29 @@ North-star metric: time from install to first successful result, target under 5 
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
 
+### Quality implementation decisions (locked for v0.4)
+
+- Stable wording introduced by the v0.4 pass lives in typed copy modules. Trust messaging, Settings search entries, recoverable Chat errors, and agent display names have one derivation or formatting path rather than per-surface variants.
+- StatusStrip is the canonical persistent tenant/provider/data-boundary surface. Local Chat does not need a second long trust explanation; hosted and attached-context sends retain explicit boundary confirmation.
+- `Mod+K`, `Mod+N`, and `Mod+,` are defined once and shared by visible labels, renderer handling, and the native application menu.
+- Dialogs and the Command Palette use one topmost-Escape model, dialog/combobox semantics, initial focus, focus trapping, and focus return. Escape never confirms an action.
+- Chat send/stream/stop/fail/retry behavior is an explicit tested state machine. A failed question remains available to Retry, and retry re-enters the same tenant, hosted-provider, and workspace-context checks.
+- Conversation drafts use per-conversation `sessionStorage` for v0.4. Drafts remain on the device, survive route changes within the session, clear after a successful send, and are never sent without the user action.
+- Persisted conversations use `/chat/:conversationId` and Settings sections use `/settings/:section`. Reload and browser history restore those selections; `/chat` remains a new draft, and deleted or unknown conversation links render an explicit local recovery state instead of silently selecting another conversation.
+- User-visible error details pass through the typed copy sanitizer before rendering. Stack frames, local paths, multiline exceptions, and oversized implementation details stay out of Chat, Settings, and write confirmation surfaces while short actionable provider or tenant messages remain visible.
+- Hosted multi-tenant consent is recorded as a one-response acknowledgement. The batch modal does not offer a remembered-consent choice, so its audit payload must not claim one; every later hosted batch prompts again.
+- At 1100 px and below, Chat history closes into a full-text overlay drawer; it never becomes a numbered mini-rail. The primary navigation frame remains fixed. Production screenshot evidence covers seven states, including typed write confirmation, at 900, 1100, and 1600 px with long tenant/model fixtures, default and reduced-motion lanes, and page-level overflow failure.
+- Informative metadata uses at least 11 px and a minimum 4.5:1 token contrast on production surfaces. Placeholder text uses `--color-text-placeholder` and holds 4.5:1 on every input surface; `--color-text-faint` is decorative-only. Accent-filled controls use `--color-on-accent` rather than hardcoded ink literals. Semantic foreground tokens hold 4.5:1 on their paired soft backgrounds over every production surface. Reduced-motion and forced-colors fallbacks are global.
+- Newly enabled schedules anchor their first due time at the enable action; enabling an interval never creates an immediate surprise run.
+- Destructive write plans require a count-bound uppercase phrase that names the operation and target. The same grammar is enforced for declarative manifests, sandboxed plans, and runtime plans before the confirmation UI can appear.
+- Connector execution fails closed: undeclared capabilities are rejected, and side-effect capabilities cannot run when the confirmation bridge is absent.
+- Desktop release metadata is `0.4.0`. CI and tag-release workflows run typecheck, unit/renderer tests, Graph/registry QA, generated-doc checks, upgrade-compatibility checks, build, and both Electron smoke flows before packaging. Linux self-update is disabled while executable packages remain unsigned; apt repository trust or an explicit package install is required. Signed supported builds surface update failures in a retryable in-app banner.
+
 ### Deliberately not done in v0.4
 
 - No merge of Workspaces/Connectors page code into Settings.tsx — they stay separate routes, only nav placement changes (cheap, reversible).
 - No LLM-driven agent suggestions in chat — matching is deterministic, local keyword/category matching against installed manifests.
+- No platform-specific screen-reader integration or release-evidence gate. Platform-neutral keyboard, focus, semantic, contrast, forced-colors, and reduced-motion support remains part of the production UI.
 - Usability validation with 3–5 external Intune admins is still owed; these decisions are the best pre-validation guess and should be revisited against real hesitation points.
 
 ---
@@ -1585,7 +1665,7 @@ These must exist and work well before any public release.
 - Manual agent runs open a preflight review before queueing. It shows the active tenant, provider residency, model, mode, and Graph scopes. It blocks when no tenant is active, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
 - Provider trust messaging is scoped to the surface: overview/settings/chat/status surfaces use the current active tenant/provider/default model, while queued run reports use the run's pinned tenant, provider, and model rather than the current global tenant/provider selection.
 - Settings -> About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, menu bar launch state, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
-- Support issue reporting is visible from the sidebar footer, failed-run remediation cards, and Settings → About. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
+- Support issue reporting is visible from failed-run remediation cards and Settings → About, not as permanent sidebar navigation. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.
 - Agent report streaming is part of the run experience. LLM providers should expose `RunLlmApi.stream()` where possible; the runtime publishes best-effort `RunRecord.liveSummary` while the current LLM step is generating, and clears it when the terminal `summary` is written. Ollama streams through its native chat API. OpenAI Codex runs through `codex exec --json` and consumes message deltas when the installed CLI emits them, falling back to the final assistant message when the CLI only emits completion events.
 - Run history with filters (agent, tenant, date, status) and configurable
   retention for old eligible records
@@ -1684,6 +1764,8 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `10-empty-states.html` | First-time user empty states | ✅ Done |
 | `11-multi-tenant-chat.html` | Multi-tenant Intune Chat scope review and result artifact | ✅ Done |
 | `12-workspaces.html` | Single-tenant Workspaces investigation surface | ✅ Done |
+| `13-v0.4-one-surface.html` | Interactive Chat-first, single-contextual-rail UX exploration | 🟡 Proposed |
+| `14-v0.4-implemented-review.html` | Interactive review of the implemented three-destination navigation and full-text Chat history drawer | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
 

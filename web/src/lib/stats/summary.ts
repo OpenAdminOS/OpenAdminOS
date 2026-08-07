@@ -43,20 +43,14 @@ export async function getAgentStatsSummary(): Promise<AgentStatsSummary | null> 
 }
 
 async function readAgentStatsFile(): Promise<string | null> {
-  const candidates = [
-    join(process.cwd(), "public", "stats", "agents.json"),
-    join(process.cwd(), "web", "public", "stats", "agents.json"),
-  ];
-
-  for (const filePath of candidates) {
-    try {
-      return await readFile(filePath, "utf8");
-    } catch {
-      continue;
-    }
+  try {
+    return await readFile(
+      join(process.cwd(), "public", "stats", "agents.json"),
+      "utf8",
+    );
+  } catch {
+    return null;
   }
-
-  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

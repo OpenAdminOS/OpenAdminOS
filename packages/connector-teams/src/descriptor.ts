@@ -14,7 +14,7 @@ export const TEAMS_SCOPES = {
   /** Required to post a channel message via `/teams/{id}/channels/{id}/messages`. */
   ChannelMessageSend: "ChannelMessage.Send",
   /** Required to post a chat message via `/chats/{id}/messages`. */
-  ChatReadWrite: "Chat.ReadWrite",
+  ChatMessageSend: "ChatMessage.Send",
 } as const;
 
 export const TEAMS_SCOPE_LIST = Object.values(TEAMS_SCOPES);
@@ -60,7 +60,7 @@ export const teamsDescriptor: ConnectorDescriptor = {
       id: "post-chat-message",
       version: 1,
       kind: "notify",
-      scopes: [TEAMS_SCOPES.ChatReadWrite],
+      scopes: [TEAMS_SCOPES.ChatMessageSend],
     },
   ],
   configSchema: {

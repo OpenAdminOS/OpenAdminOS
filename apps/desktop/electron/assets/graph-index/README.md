@@ -18,9 +18,9 @@ by OpenAdminOS for three purposes:
   parameters, and required headers.
 
 Both files cover the Graph **beta** surface. OpenAdminOS calls
-`https://graph.microsoft.com/v1.0` by default; manifests can opt into
-`beta` per step (future work). Endpoints listed only in beta will 404
-against v1.0 at runtime — that surfaces as a normal Graph error.
+`https://graph.microsoft.com/beta` for runtime, Chat, and Graph-backed
+connector requests. Continuation URLs are accepted only from that same HTTPS
+origin and beta path.
 
 ## Provenance
 

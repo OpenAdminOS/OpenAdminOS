@@ -308,10 +308,10 @@ describe("write plan validation", () => {
     }
   });
 
-  it("rejects plans rendered without a confirmation phrase", async () => {
+  it("rejects plans rendered without a count-bound confirmation phrase", async () => {
     const fixture = makeWriteAgentFixture({
       devices: [managedDevice("device-1", "Pilot laptop 1", "SERIAL-1")],
-      confirmationPhraseTemplate: "{{ missing.output }}",
+      confirmationPhraseTemplate: "OFFBOARD {{ missing.output }} DEVICES",
     });
     try {
       const planned = await executePlan({
@@ -331,7 +331,7 @@ describe("write plan validation", () => {
       assert.equal(planned.status, "failed");
       assert.match(
         planned.error ?? "",
-        /returned a plan without a confirmation phrase/,
+        /unsafe confirmation phrase/,
       );
     } finally {
       fixture.cleanup();
@@ -437,7 +437,7 @@ definition:
   });
 
   it("rejects brokered write plans missing an actions array", async () => {
-    const response = await brokerWritePlan({ summary: "Bad plan.", confirmationPhrase: "BAD 1" });
+    const response = await brokerWritePlan({ summary: "Bad plan.", confirmationPhrase: "EXECUTE 1 ACTION" });
 
     assert.equal(response.ok, false);
     assert.match(response.error.message, /without an actions array/);
@@ -447,7 +447,7 @@ definition:
   it("rejects brokered write plans whose actions are missing required fields", async () => {
     const response = await brokerWritePlan({
       summary: "Bad plan.",
-      confirmationPhrase: "BAD 1",
+      confirmationPhrase: "EXECUTE 1 ACTION",
       actions: [{ id: "bad-action", kind: "retire-managed-device" }],
     });
 
@@ -529,6 +529,214 @@ definition:
       assert.match(completed.error ?? "", /read-mode agents cannot declare a write step/);
       assert.ok(!progress.includes("awaiting-confirmation"));
       assert.equal(completed.plan, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("manifest Graph paging", () => {
+  it("follows beta nextLink pages before rendering a result", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openadminos-paged-read-agent-"));
+    const agent = agentSummary({
+      slug: "paged-read-agent",
+      name: "Paged read agent",
+      description: "Pagination regression fixture.",
+      registryPath: dir,
+      mode: "read",
+    });
+    writeFileSync(
+      join(dir, "manifest.yaml"),
+      `descriptor:
+  id: paged-read-agent
+  name: Paged read agent
+  description: Pagination regression fixture.
+  version: 1.0.0
+  author:
+    name: OpenAdminOS
+    verified: true
+  category: devices
+  mode: read
+skills:
+  - id: load
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /deviceManagement/managedDevices
+      select: [id, deviceName]
+      query:
+        $top: 1
+definition:
+  triggers:
+    - id: manual
+      kind: manual
+  result:
+    summary: "Loaded {{ load.output | size }} devices."
+`,
+      "utf8",
+    );
+    const requests: Array<{ path: string; query?: Record<string, string> }> = [];
+    const graph: RunGraphApi = {
+      async listManagedDevices() {
+        throw new Error("generic path expected");
+      },
+      async retireManagedDevice() {},
+      async request(input) {
+        requests.push({ path: input.path, ...(input.query ? { query: input.query } : {}) });
+        if (requests.length === 1) {
+          return {
+            value: [{ id: "device-1", deviceName: "One" }],
+            "@odata.nextLink":
+              "https://graph.microsoft.com/beta/deviceManagement/managedDevices?%24skiptoken=next",
+          };
+        }
+        return { value: [{ id: "device-2", deviceName: "Two" }] };
+      },
+    };
+
+    try {
+      const completed = await executeRun({
+        run: createQueuedRun({ agent, providerId: "ollama", model: "test-model" }),
+        agent,
+        providerId: "ollama",
+        model: "test-model",
+        llm: makeLlm().llm,
+        createGraph: () => graph,
+        onProgress() {},
+      });
+
+      assert.equal(completed.status, "completed");
+      assert.equal(completed.summary, "Loaded 2 devices.");
+      assert.equal(requests.length, 2);
+      assert.equal(requests[0]?.query?.$top, "1");
+      assert.deepEqual(requests[1], {
+        path: "/deviceManagement/managedDevices",
+        query: { $skiptoken: "next" },
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails instead of presenting a collection truncated by the item safety ceiling", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openadminos-item-cap-agent-"));
+    const agent = agentSummary({
+      slug: "item-cap-agent",
+      name: "Item cap agent",
+      description: "Item safety ceiling regression fixture.",
+      registryPath: dir,
+      mode: "read",
+    });
+    writeFileSync(
+      join(dir, "manifest.yaml"),
+      `descriptor:
+  id: item-cap-agent
+  name: Item cap agent
+  description: Item safety ceiling regression fixture.
+  version: 1.0.0
+  author: { name: OpenAdminOS, verified: true }
+  category: devices
+  mode: read
+skills:
+  - id: load
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /devices
+      query: { $top: 999 }
+definition:
+  triggers: [{ id: manual, kind: manual }]
+  result: { summary: "Loaded {{ load.output | size }} devices." }
+`,
+      "utf8",
+    );
+    let requestCount = 0;
+    const graph: RunGraphApi = {
+      async listManagedDevices() { return []; },
+      async retireManagedDevice() {},
+      async request() {
+        requestCount += 1;
+        return {
+          value: Array.from({ length: 100_000 }, (_, index) => ({ id: `device-${index}` })),
+          "@odata.nextLink": "https://graph.microsoft.com/beta/devices?%24skiptoken=more",
+        };
+      },
+    };
+    try {
+      const completed = await executeRun({
+        run: createQueuedRun({ agent, providerId: "ollama", model: "test-model" }),
+        agent,
+        providerId: "ollama",
+        model: "test-model",
+        llm: makeLlm().llm,
+        createGraph: () => graph,
+        onProgress() {},
+      });
+      assert.equal(completed.status, "failed");
+      assert.match(completed.error ?? "", /exceeded the safe paging limit/);
+      assert.equal(requestCount, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects paging URLs that leave the beta Graph origin", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openadminos-unsafe-page-agent-"));
+    const agent = agentSummary({
+      slug: "unsafe-page-agent",
+      name: "Unsafe page agent",
+      description: "Unsafe nextLink fixture.",
+      registryPath: dir,
+      mode: "read",
+    });
+    writeFileSync(
+      join(dir, "manifest.yaml"),
+      `descriptor:
+  id: unsafe-page-agent
+  name: Unsafe page agent
+  description: Unsafe nextLink fixture.
+  version: 1.0.0
+  author: { name: OpenAdminOS, verified: true }
+  category: devices
+  mode: read
+skills:
+  - id: load
+    format: graph
+    label: Load devices
+    settings:
+      method: GET
+      path: /devices
+      select: [id]
+definition:
+  triggers: [{ id: manual, kind: manual }]
+  result: { summary: "Done" }
+`,
+      "utf8",
+    );
+    const graph: RunGraphApi = {
+      async listManagedDevices() { return []; },
+      async retireManagedDevice() {},
+      async request() {
+        return {
+          value: [{ id: "device-1" }],
+          "@odata.nextLink": "https://example.invalid/beta/devices?page=2",
+        };
+      },
+    };
+    try {
+      const completed = await executeRun({
+        run: createQueuedRun({ agent, providerId: "ollama", model: "test-model" }),
+        agent,
+        providerId: "ollama",
+        model: "test-model",
+        llm: makeLlm().llm,
+        createGraph: () => graph,
+        onProgress() {},
+      });
+      assert.equal(completed.status, "failed");
+      assert.match(completed.error ?? "", /unsafe paging URL/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

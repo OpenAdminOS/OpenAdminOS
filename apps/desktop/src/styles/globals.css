@@ -9,8 +9,7 @@
   --color-bg: #1c1917;
   --color-bg-elevated: #252220;
   --color-bg-raised: #2d2926;
-  --color-sidebar: #18161423;
-  --color-sidebar-solid: #18161e;
+  --color-sidebar-solid: #191614;
 
   --color-surface: #232120;
   --color-surface-hover: #2a2724;
@@ -21,20 +20,37 @@
 
   --color-text: #f5f1eb;
   --color-text-soft: #b5ada3;
-  --color-text-muted: #7a7167;
-  --color-text-faint: #524a44;
+  --color-text-muted: #9a9085;
+  /* Placeholders are informative: must hold 4.5:1 on every input surface,
+   * including the lightest (--color-bg-raised). Faint is decorative only
+   * (dividers, dots, disabled ornament), never readable copy. */
+  --color-text-placeholder: #9c9186;
+  --color-text-faint: #6b6157;
 
   --color-accent: #e8a87c;
   --color-accent-hover: #efb88f;
   --color-accent-soft: #e8a87c1f;
   --color-accent-strong: #d99868;
+  --color-on-accent: #1a120c;
 
+  --color-success-fg: #9cc88f;
+  --color-success-bg: #9cc88f1f;
+  --color-warning-fg: #e5c678;
+  --color-warning-bg: #e5c6781f;
+  --color-danger-fg: #e58888;
+  --color-danger-bg: #e588881f;
+  --color-info-fg: #a3bfd9;
+  --color-info-bg: #a3bfd91f;
+  --color-think-fg: #c4a5d9;
+  --color-think-bg: #c4a5d91f;
+
+  /* Legacy semantic names: keep byte-identical to the -fg/-bg pairs above. */
   --color-success: #9cc88f;
   --color-success-soft: #9cc88f1f;
   --color-warning: #e5c678;
   --color-warning-soft: #e5c6781f;
-  --color-danger: #dd9090;
-  --color-danger-soft: #dd90901f;
+  --color-danger: #e58888;
+  --color-danger-soft: #e588881f;
   --color-info: #a3bfd9;
   --color-info-soft: #a3bfd91f;
   --color-think: #c4a5d9;
@@ -63,6 +79,10 @@ body,
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+html {
+  color-scheme: dark;
 }
 
 body {
@@ -101,6 +121,7 @@ body {
 button {
   font-family: inherit;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 button:disabled {
@@ -247,7 +268,7 @@ button:disabled {
 }
 
 .companion-primary-button {
-  color: #1c1917;
+  color: var(--color-on-accent);
   background: var(--color-accent);
 }
 
@@ -291,7 +312,7 @@ button:disabled {
 }
 
 .companion-textarea::placeholder {
-  color: var(--color-text-faint);
+  color: var(--color-text-placeholder);
 }
 
 .companion-textarea:focus,
@@ -364,10 +385,22 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .animate-fade-in,
+  .animate-fade-in-scale,
+  .animate-pulse-soft,
   .animate-companion-rise,
   .companion-action-card,
   .companion-list-row {
-    animation: none;
+    animation: none !important;
   }
 
   .companion-icon-button,
@@ -377,6 +410,59 @@ button:disabled {
   .companion-action-card,
   .companion-list-row {
     transition: none;
+  }
+
+  .companion-icon-button:hover,
+  .companion-primary-button:hover,
+  .companion-danger-button:hover,
+  .companion-quiet-button:hover,
+  .companion-action-card:hover,
+  .companion-list-row:hover {
+    transform: none !important;
+  }
+}
+
+html[data-reduced-motion] *,
+html[data-reduced-motion] *::before,
+html[data-reduced-motion] *::after {
+  scroll-behavior: auto !important;
+  animation: none !important;
+  transition-duration: 0.01ms !important;
+}
+
+.setting-row[data-highlighted="true"] {
+  background: var(--color-accent-soft);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+
+@media (forced-colors: active) {
+  *:focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select,
+  [role="option"],
+  [role="dialog"] {
+    forced-color-adjust: auto;
+  }
+
+  [aria-current="page"],
+  [aria-selected="true"],
+  [aria-pressed="true"],
+  .setting-row[data-highlighted="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .text-\[var\(--color-success\)\],
+  .text-\[var\(--color-warning\)\],
+  .text-\[var\(--color-danger\)\] {
+    color: CanvasText;
   }
 }
 

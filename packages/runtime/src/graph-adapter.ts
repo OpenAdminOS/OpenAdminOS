@@ -39,6 +39,7 @@ export interface GraphAdapterOptions {
 const PREVIEW_BYTE_CAP = 4_000;
 /** First N array items included in the raw response preview. */
 const PREVIEW_ITEM_CAP = 3;
+const MAX_RETRY_AFTER_SECONDS = 60;
 
 interface ManagedDeviceResponseItem {
   id?: unknown;
@@ -130,6 +131,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         maxRetries,
         timeoutMs,
         expectJson: false,
+        idempotent: false,
         baseUrl,
         log: options.log,
       });
@@ -567,10 +569,15 @@ function readString(value: unknown): string | undefined {
 function parseRetryAfter(value: string | null): number | undefined {
   if (!value) return undefined;
   const asNumber = Number.parseFloat(value);
-  if (Number.isFinite(asNumber)) return asNumber;
+  if (Number.isFinite(asNumber)) {
+    return Math.min(Math.max(asNumber, 0), MAX_RETRY_AFTER_SECONDS);
+  }
   const asDate = Date.parse(value);
   if (Number.isFinite(asDate)) {
-    return Math.max(1, Math.ceil((asDate - Date.now()) / 1000));
+    return Math.min(
+      Math.max(0, Math.ceil((asDate - Date.now()) / 1000)),
+      MAX_RETRY_AFTER_SECONDS,
+    );
   }
   return undefined;
 }

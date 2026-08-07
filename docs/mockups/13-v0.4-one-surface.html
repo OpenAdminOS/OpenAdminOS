@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenAdminOS · v0.4 one-surface UX concept</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1c1917;
+      --bg-deep: #151311;
+      --rail: #18161e;
+      --surface: #232120;
+      --surface-2: #2a2724;
+      --surface-3: #2d2926;
+      --line: #322e2a;
+      --line-soft: #2a2622;
+      --line-strong: #403a35;
+      --text: #f5f1eb;
+      --text-soft: #b5ada3;
+      --text-muted: #7a7167;
+      --text-faint: #524a44;
+      --accent: #e8a87c;
+      --accent-hover: #efb88f;
+      --accent-soft: #e8a87c1f;
+      --success: #9cc88f;
+      --success-soft: #9cc88f1f;
+      --warning: #e5c678;
+      --danger: #dd9090;
+      --info: #a3bfd9;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      --shadow-soft: 0 1px 2px rgba(0, 0, 0, .18), 0 4px 16px rgba(0, 0, 0, .22);
+      --shadow-modal: 0 8px 32px rgba(0, 0, 0, .5), 0 2px 8px rgba(0, 0, 0, .3);
+      --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg-deep);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.75;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .icon-sm { width: 13px; height: 13px; }
+    .icon-lg { width: 20px; height: 20px; }
+
+    .window {
+      display: grid;
+      grid-template-rows: 38px minmax(0, 1fr) 28px;
+      width: 100vw;
+      height: 100vh;
+      min-width: 760px;
+      min-height: 560px;
+      overflow: hidden;
+      border: 1px solid #0f0e0d;
+      background: var(--bg);
+    }
+
+    .titlebar {
+      display: grid;
+      grid-template-columns: 160px 1fr 160px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      background: #161412;
+      color: var(--text-muted);
+      user-select: none;
+    }
+    .titlebar-left { display: flex; align-items: center; gap: 10px; }
+    .traffic { display: flex; gap: 7px; padding-left: 13px; }
+    .traffic span { width: 11px; height: 11px; border-radius: 999px; }
+    .traffic span:nth-child(1) { background: #e16e65; }
+    .traffic span:nth-child(2) { background: #d9ad58; }
+    .traffic span:nth-child(3) { background: #72b870; }
+    .titlebar-title {
+      text-align: center;
+      font: 10px var(--font-mono);
+      letter-spacing: .035em;
+    }
+    .concept-label {
+      justify-self: end;
+      margin-right: 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      color: var(--text-muted);
+      font: 10px var(--font-mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .rail-trigger {
+      display: none;
+      width: 28px;
+      height: 28px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      cursor: pointer;
+    }
+
+    .app-frame {
+      position: relative;
+      display: grid;
+      grid-template-columns: 264px minmax(0, 1fr);
+      min-height: 0;
+      overflow: hidden;
+    }
+    .rail-scrim { display: none; }
+
+    .context-rail {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+      background: var(--rail);
+    }
+
+    .rail-contexts {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .rail-context-panel {
+      display: flex;
+      min-height: 0;
+      height: 100%;
+      flex-direction: column;
+    }
+    .rail-context-panel[data-rail-context="settings"] { overflow: auto; }
+    .rail-scroll-section { min-height: 0; margin-top: 10px; overflow: auto; }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 56px;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand-mark {
+      position: relative;
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border: 1px solid rgba(232, 168, 124, .42);
+      border-radius: 50%;
+      color: var(--accent);
+    }
+    .brand-mark::after {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .brand-name { font-weight: 650; letter-spacing: -.01em; }
+    .brand-version {
+      margin-left: 5px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: var(--surface);
+      color: var(--text-muted);
+      font: 10px var(--font-mono);
+    }
+
+    .tenant-button {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      width: calc(100% - 24px);
+      margin: 12px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      text-align: left;
+      cursor: pointer;
+    }
+    .tenant-button:hover { background: var(--surface-2); }
+    .tenant-avatar {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border-radius: 50%;
+      background: #6f9968;
+      color: #162014;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .tenant-copy { min-width: 0; }
+    .tenant-name { display: block; overflow: hidden; font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .tenant-meta { display: block; color: var(--text-muted); font-size: 10px; }
+
+    .rail-section { padding: 0 12px; }
+    .rail-kicker {
+      margin: 3px 0 8px;
+      color: var(--text-faint);
+      font: 10px var(--font-mono);
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+    .rail-heading-row { display: flex; align-items: center; justify-content: space-between; margin: 1px 0 8px; }
+    .rail-title { color: var(--text-soft); font-size: 12px; font-weight: 650; }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--text-soft);
+      font-size: 12px;
+      font-weight: 550;
+      cursor: pointer;
+    }
+    .button:hover { border-color: var(--line-strong); background: var(--surface-2); color: var(--text); }
+    .button-primary { border-color: var(--accent); background: var(--accent); color: #201711; }
+    .button-primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); color: #201711; }
+    .button-quiet { border-color: transparent; background: transparent; }
+    .button-icon { width: 32px; padding: 0; }
+    .button-wide { width: 100%; }
+
+    .search {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 9px;
+      color: var(--text-muted);
+    }
+    .search input {
+      width: 100%;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--text);
+      padding: 0 34px 0 32px;
+      font-size: 11px;
+    }
+    .search input::placeholder { color: var(--text-muted); }
+    .search > .icon { position: absolute; left: 10px; z-index: 1; }
+    .search-kbd { position: absolute; right: 8px; font: 10px var(--font-mono); }
+
+    .conversation-list, .settings-list, .primary-nav { display: grid; gap: 3px; }
+    .settings-list { gap: 2px; }
+    .settings-list .rail-link { min-height: 32px; padding-block: 6px; }
+    .conversation-list { overflow: auto; }
+    .conversation-row, .rail-link {
+      display: grid;
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-soft);
+      text-align: left;
+      cursor: pointer;
+    }
+    .conversation-row { min-height: 42px; gap: 1px; padding: 6px 10px; }
+    .conversation-row:hover, .conversation-row.active { background: var(--surface); color: var(--text); }
+    .conversation-row.active { border-color: var(--line); }
+    .conversation-title { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-meta { color: var(--text-muted); font-size: 11px; }
+    .rail-link {
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 9px;
+      font-size: 12px;
+    }
+    .rail-link:hover, .rail-link.active { background: var(--surface); color: var(--text); }
+    .rail-link.active { box-shadow: inset 2px 0 var(--accent); }
+    .rail-link-meta { color: var(--text-muted); font: 10px var(--font-mono); }
+
+    .rail-spacer { flex: 1; min-height: 10px; }
+    .rail-primary-nav {
+      display: grid;
+      gap: 3px;
+      margin: 0 12px 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .rail-footer {
+      display: grid;
+      gap: 3px;
+      padding: 8px 12px 10px;
+      border-top: 1px solid var(--line);
+    }
+    .rail-footer .button { justify-content: flex-start; padding: 0 10px; }
+
+    .workspace { position: relative; min-width: 0; overflow: hidden; background: var(--bg); }
+    .view { width: 100%; height: 100%; min-width: 0; }
+
+    .chat-view { display: grid; grid-template-rows: 48px minmax(0, 1fr) auto; }
+    .chat-view.is-empty {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding-bottom: 6vh;
+    }
+    .content-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      min-height: 48px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(28, 25, 23, .96);
+    }
+    .chat-view.is-empty .content-header { display: none; }
+    .header-title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .header-title { font-size: 13px; font-weight: 650; }
+    .header-actions { display: flex; align-items: center; gap: 7px; }
+    .state-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+    .state-pill.local { border-color: rgba(156, 200, 143, .25); background: var(--success-soft); color: var(--success); }
+
+    .messages {
+      min-height: 0;
+      overflow: auto;
+    }
+    .chat-view.is-empty .messages { min-height: 0; overflow: visible; }
+    .empty-chat {
+      padding: 0 24px;
+    }
+    .empty-inner { width: min(640px, 100%); margin: 0 auto; text-align: left; }
+    .empty-chat h1 { margin: 0 0 6px; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; }
+    .empty-chat p { margin: 0; color: var(--text-soft); font-size: 13px; }
+    .suggestions { display: grid; width: min(640px, 100%); gap: 2px; margin: 14px auto 0; }
+    .suggestion {
+      min-height: 36px;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 12.5px;
+      text-align: left;
+      cursor: pointer;
+      transition: background .12s ease, color .12s ease;
+    }
+    .suggestion:hover { background: var(--surface); color: var(--text); }
+    .chat-view:not(.is-empty) .suggestions { display: none; }
+
+    .transcript { width: min(800px, calc(100% - 48px)); margin: 0 auto; padding: 42px 0; }
+    .message { margin-bottom: 22px; }
+    .message-label { margin-bottom: 6px; color: var(--text-muted); font: 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+    .user-message { margin-left: auto; width: min(580px, 86%); padding: 12px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--text); }
+    .answer { padding-left: 17px; border-left: 2px solid var(--accent); color: var(--text-soft); }
+    .answer h2 { margin: 0 0 8px; color: var(--text); font-size: 15px; }
+    .answer p { margin: 0 0 12px; }
+    .result-row { display: grid; grid-template-columns: 1fr auto; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+    .result-row strong { color: var(--text); font-size: 12px; }
+    .result-row span { color: var(--text-muted); font-size: 11px; }
+    .source-line { display: flex; gap: 8px; margin-top: 14px; color: var(--text-muted); font: 10px var(--font-mono); }
+
+    .composer-wrap { position: relative; padding: 12px 22px 14px; border-top: 1px solid var(--line); background: var(--bg); }
+    .chat-view.is-empty .composer-wrap { border-top: 0; background: transparent; padding: 20px 24px 0; }
+    .composer { position: relative; width: min(760px, 100%); margin: 0 auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); }
+    .chat-view.is-empty .composer { width: min(640px, 100%); }
+    .composer:focus-within { border-color: rgba(232, 168, 124, .72); box-shadow: 0 0 0 1px var(--accent-soft); }
+    .composer textarea {
+      display: block;
+      width: 100%;
+      min-height: 52px;
+      max-height: 132px;
+      resize: none;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      padding: 12px 14px 8px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .composer textarea::placeholder { color: var(--text-muted); }
+    .composer-footer { display: flex; min-height: 38px; align-items: center; gap: 7px; padding: 3px 8px 7px; }
+    .context-button { width: 32px; padding: 0; }
+    .context-button[aria-expanded="true"] { border-color: rgba(232, 168, 124, .4); background: var(--accent-soft); color: var(--accent); }
+    .context-chips { display: flex; min-width: 0; align-items: center; gap: 6px; }
+    .composer-spacer { flex: 1; }
+    .send-button { width: 32px; padding: 0; }
+    .context-panel {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 8px;
+      z-index: 15;
+      width: 320px;
+      padding: 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      background: #211e1b;
+      box-shadow: var(--shadow-modal);
+    }
+    .context-panel h3 { margin: 0 0 3px; font-size: 12px; }
+    .context-panel > p { margin: 0 0 12px; color: var(--text-muted); font-size: 11px; }
+    .context-row { display: grid; grid-template-columns: 27px 1fr auto; align-items: center; gap: 9px; padding: 9px 0; border-top: 1px solid var(--line); }
+    .context-row-icon { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 7px; background: var(--surface); color: var(--text-muted); }
+    .context-row-title { color: var(--text-soft); font-size: 11px; font-weight: 600; }
+    .context-row-meta { color: var(--text-muted); font-size: 11px; }
+    .context-value { color: var(--success); font: 10px var(--font-mono); }
+
+    .page-view { overflow: auto; }
+    .page-header { padding: 28px 34px 20px; border-bottom: 1px solid var(--line); }
+    .page-header h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.025em; }
+    .page-header p { margin: 0; color: var(--text-soft); font-size: 12px; }
+    .page-content { width: min(1040px, calc(100% - 68px)); margin: 0 auto; padding: 28px 0 48px; }
+    .section-label { margin-bottom: 12px; color: var(--text-muted); font: 10px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+
+    .settings-intro { max-width: 780px; margin-bottom: 21px; }
+    .settings-intro h2 { margin: 0 0 5px; font-size: 17px; }
+    .settings-intro p { margin: 0; color: var(--text-soft); font-size: 12px; }
+    .provider-stack { display: grid; gap: 10px; }
+    .provider-row {
+      display: grid;
+      grid-template-columns: 40px minmax(0, 1fr) auto;
+      align-items: start;
+      gap: 13px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+    }
+    .provider-icon { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 11px; background: var(--success-soft); color: var(--success); }
+    .provider-row h3 { display: flex; align-items: center; gap: 7px; margin: 1px 0 3px; font-size: 13px; }
+    .provider-row p { margin: 0; color: var(--text-soft); font-size: 11px; }
+    .provider-detail { margin-top: 6px; color: var(--text-muted); font: 11px var(--font-mono); }
+
+    .agent-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+    .agent-tabs { display: flex; gap: 3px; }
+    .tab { min-height: 30px; padding: 0 10px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 11px; }
+    .tab.active { border-color: rgba(232, 168, 124, .35); background: var(--accent-soft); color: var(--accent); }
+    .agent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+    .agent-card { display: flex; min-height: 190px; flex-direction: column; padding: 17px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+    .agent-card-head { display: flex; align-items: start; gap: 11px; }
+    .agent-card-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px; background: var(--surface-3); color: var(--text-soft); }
+    .agent-card h3 { margin: 0 0 3px; font-size: 14px; }
+    .agent-outcome { margin: 14px 0; color: var(--text-soft); font-size: 12px; line-height: 1.55; }
+    .agent-card-footer { display: flex; align-items: center; gap: 7px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+    .mode { padding: 2px 7px; border-radius: 999px; background: var(--success-soft); color: var(--success); font: 10px var(--font-mono); }
+    .mode.write { background: rgba(229,198,120,.12); color: var(--warning); }
+    .agent-card-footer .button { margin-left: auto; padding: 0 10px; }
+
+    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 24px; }
+    .metric { padding: 15px; border-top: 2px solid var(--line-strong); background: var(--surface); }
+    .metric-value { margin-bottom: 3px; font-size: 24px; font-weight: 680; letter-spacing: -.03em; }
+    .metric-label { color: var(--text-muted); font: 10px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+    .run-list { border-top: 1px solid var(--line); }
+    .run-row { display: grid; grid-template-columns: minmax(0, 1fr) 130px 100px; gap: 14px; padding: 13px 4px; border-bottom: 1px solid var(--line); }
+    .run-title { font-size: 12px; font-weight: 600; }
+    .run-meta { color: var(--text-muted); font-size: 10px; }
+    .run-status { color: var(--success); font: 10px var(--font-mono); text-transform: uppercase; }
+
+    .statusbar {
+      display: grid;
+      grid-template-columns: auto auto 1fr;
+      align-items: center;
+      gap: 18px;
+      padding: 0 12px;
+      border-top: 1px solid var(--line);
+      background: #161412;
+      color: var(--text-muted);
+      font: 11px var(--font-mono);
+    }
+    .status-item { display: inline-flex; min-width: 0; align-items: center; gap: 6px; white-space: nowrap; }
+    .status-item strong { max-width: 210px; overflow: hidden; color: var(--text-soft); font-weight: 500; text-overflow: ellipsis; }
+    .status-local { justify-self: end; color: var(--success); }
+
+    @media (max-width: 1020px) {
+      .app-frame { grid-template-columns: 240px minmax(0, 1fr); }
+      .agent-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 900px) {
+      .window { min-width: 0; }
+      .titlebar { grid-template-columns: 150px 1fr 150px; }
+      .rail-trigger { display: inline-flex; }
+      .app-frame { grid-template-columns: minmax(0, 1fr); }
+      .context-rail {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 30;
+        width: 264px;
+        box-shadow: 18px 0 48px rgba(0,0,0,.4);
+        transform: translateX(-102%);
+        transition: transform .18s ease;
+      }
+      body.rail-open .context-rail { transform: translateX(0); }
+      body.rail-open .rail-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 25;
+        display: block;
+        border: 0;
+        background: rgba(10, 8, 7, .58);
+        cursor: default;
+      }
+      .page-content { width: calc(100% - 36px); }
+      .page-header { padding-inline: 18px; }
+      .statusbar { grid-template-columns: 1fr auto; }
+      .status-provider { display: none; }
+      .provider-row { grid-template-columns: 34px minmax(0, 1fr); }
+      .provider-row > .button { grid-column: 2; justify-self: start; }
+    }
+
+    @media (max-width: 680px) {
+      .concept-label { display: none; }
+      .titlebar { grid-template-columns: 140px 1fr 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></symbol>
+    <symbol id="i-agent" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-change" viewBox="0 0 24 24"><path d="M7 3v14M7 7h8a3 3 0 0 1 3 3v1M17 21V7M17 17H9a3 3 0 0 1-3-3v-1"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.2 4.8L18 9l-4.8 1.2L12 15l-1.2-4.8L6 9l4.8-1.2zM18 15l.7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7z"/></symbol>
+    <symbol id="i-device" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 18h6"/></symbol>
+    <symbol id="i-app" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  </svg>
+
+  <div class="window">
+    <header class="titlebar">
+      <div class="titlebar-left">
+        <div class="traffic" aria-label="Window controls"><span></span><span></span><span></span></div>
+        <button class="rail-trigger" id="railTrigger" type="button" aria-label="Open sidebar" aria-expanded="false"><svg class="icon icon-sm"><use href="#i-menu"/></svg></button>
+      </div>
+      <div class="titlebar-title" id="titlebarTitle">OpenAdminOS · Chat</div>
+      <div class="concept-label">v0.4 concept</div>
+    </header>
+
+    <div class="app-frame">
+      <aside class="context-rail" aria-label="Contextual sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div><span class="brand-name">OpenAdminOS</span><span class="brand-version">0.4</span></div>
+        </div>
+        <button class="tenant-button" type="button" title="Switch active tenant">
+          <span class="tenant-avatar">CD</span>
+          <span class="tenant-copy"><span class="tenant-name">Contoso Demo</span><span class="tenant-meta">Active tenant</span></span>
+          <svg class="icon icon-sm"><use href="#i-down"/></svg>
+        </button>
+
+        <nav class="rail-primary-nav" aria-label="Primary navigation">
+          <button class="rail-link" type="button" data-view-target="home"><svg class="icon"><use href="#i-home"/></svg><span>Home</span></button>
+          <button class="rail-link active" type="button" data-view-target="chat"><svg class="icon"><use href="#i-chat"/></svg><span>Chat</span><span class="rail-link-meta">⌘1</span></button>
+          <button class="rail-link" type="button" data-view-target="agents"><svg class="icon"><use href="#i-agent"/></svg><span>Agents</span></button>
+          <button class="rail-link" type="button" data-view-target="changes"><svg class="icon"><use href="#i-change"/></svg><span>Changes</span></button>
+        </nav>
+
+        <div class="rail-contexts">
+          <section class="rail-context-panel" data-rail-context="chat">
+            <div class="rail-section">
+              <div class="rail-heading-row"><span class="rail-title">Conversations</span></div>
+              <button class="button button-wide" id="newConversation" type="button"><svg class="icon icon-sm"><use href="#i-plus"/></svg>New conversation</button>
+            </div>
+            <div class="rail-section rail-scroll-section">
+              <div class="conversation-list">
+                <button class="conversation-row" type="button" data-open-answer>
+                  <span class="conversation-title">Windows compliance gaps</span>
+                  <span class="conversation-meta">Pinned · yesterday</span>
+                </button>
+                <button class="conversation-row" type="button" data-open-answer>
+                  <span class="conversation-title">Stale managed devices</span>
+                  <span class="conversation-meta">2 days ago</span>
+                </button>
+                <button class="conversation-row" type="button">
+                  <span class="conversation-title">Conditional Access exclusions</span>
+                  <span class="conversation-meta">Last week</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-context-panel" data-rail-context="settings" hidden>
+            <div class="rail-section">
+              <div class="rail-heading-row"><span class="rail-title">Settings</span></div>
+              <div class="search"><svg class="icon icon-sm"><use href="#i-search"/></svg><input id="settingsSearch" aria-label="Search settings" placeholder="Search settings"><span class="search-kbd">⌘/</span></div>
+              <div class="settings-list" id="settingsList">
+                <button class="rail-link active" type="button" data-setting="providers" data-terms="models ollama anthropic openai local hosted"><svg class="icon"><use href="#i-database"/></svg><span>Providers</span></button>
+                <button class="rail-link" type="button" data-setting="tenants" data-terms="microsoft entra account connection"><svg class="icon"><use href="#i-shield"/></svg><span>Tenants</span></button>
+                <button class="rail-link" type="button" data-setting="chat" data-terms="cache refresh investigation history"><svg class="icon"><use href="#i-chat"/></svg><span>Chat</span></button>
+                <button class="rail-link" type="button" data-setting="workspaces" data-terms="evidence notes investigation"><svg class="icon"><use href="#i-database"/></svg><span>Workspaces</span></button>
+                <button class="rail-link" type="button" data-setting="connectors" data-terms="teams slack whatsapp outlook delivery"><svg class="icon"><use href="#i-change"/></svg><span>Connectors</span></button>
+                <button class="rail-link" type="button" data-setting="general" data-terms="retention export notifications scheduler"><svg class="icon"><use href="#i-sliders"/></svg><span>General</span></button>
+                <button class="rail-link" type="button" data-setting="privacy" data-terms="telemetry registry local data clear"><svg class="icon"><use href="#i-lock"/></svg><span>Privacy</span></button>
+                <button class="rail-link" type="button" data-setting="about" data-terms="version diagnostics support issue"><svg class="icon"><use href="#i-agent"/></svg><span>About</span></button>
+              </div>
+            </div>
+          </section>
+
+          <section class="rail-context-panel" data-rail-context="primary" hidden></section>
+        </div>
+
+        <div class="rail-footer">
+          <button class="rail-link" type="button" data-view-target="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
+        </div>
+      </aside>
+      <button class="rail-scrim" id="railScrim" type="button" aria-label="Close sidebar"></button>
+
+      <main class="workspace">
+        <section class="view chat-view is-empty" data-view="chat">
+          <header class="content-header">
+            <div class="header-title-row">
+              <div class="header-title" id="chatTitle">New conversation</div>
+            </div>
+            <div class="header-actions"><button class="button button-icon button-quiet" title="Conversation actions" aria-label="Conversation actions"><svg class="icon"><use href="#i-more"/></svg></button></div>
+          </header>
+          <div class="messages">
+            <div class="empty-chat" id="emptyChat">
+              <div class="empty-inner">
+                <h1>What do you want to inspect?</h1>
+                <p>Answers come from your tenant's own Graph data, with sources shown.</p>
+              </div>
+            </div>
+            <div class="transcript" id="transcript" hidden>
+              <div class="message"><div class="message-label">You</div><div class="user-message" id="sentPrompt">Which managed devices have not synced in the last 7 days?</div></div>
+              <div class="message"><div class="message-label">OpenAdminOS</div><div class="answer">
+                <h2>12 devices have not synced in the last 7 days</h2>
+                <p>Eight are Windows devices. Four of those are also noncompliant, which makes them the first group to review.</p>
+                <div class="result-row"><div><strong>WIN-FIN-042</strong><br><span>Windows 11 · noncompliant · corporate</span></div><span>23 days</span></div>
+                <div class="result-row"><div><strong>WIN-SALES-118</strong><br><span>Windows 10 · noncompliant · corporate</span></div><span>18 days</span></div>
+                <div class="result-row"><div><strong>MAC-DESIGN-07</strong><br><span>macOS · compliant · personal</span></div><span>11 days</span></div>
+                <div class="source-line"><svg class="icon icon-sm"><use href="#i-database"/></svg><span>managedDevices · refreshed just now · 284 rows</span></div>
+              </div></div>
+            </div>
+          </div>
+          <footer class="composer-wrap">
+            <div class="composer">
+              <div class="context-panel" id="contextPanel" hidden>
+                <h3>Scope &amp; context</h3>
+                <p>Review what this question can use before sending.</p>
+                <div class="context-row"><span class="context-row-icon"><svg class="icon icon-sm"><use href="#i-shield"/></svg></span><span><span class="context-row-title">Tenant scope</span><br><span class="context-row-meta">One tenant connected</span></span><span class="context-value">Contoso Demo</span></div>
+                <div class="context-row"><span class="context-row-icon"><svg class="icon icon-sm"><use href="#i-database"/></svg></span><span><span class="context-row-title">Workspace evidence</span><br><span class="context-row-meta">Attach saved evidence when needed</span></span><button class="button button-quiet" type="button">Choose</button></div>
+              </div>
+              <textarea id="promptInput" aria-label="Chat prompt" placeholder="Ask about devices, users, apps, policies, or sign-ins…" autofocus></textarea>
+              <div class="composer-footer">
+                <button class="button context-button" id="contextToggle" type="button" aria-label="Scope and context" title="Scope &amp; context" aria-expanded="false"><svg class="icon icon-sm"><use href="#i-sliders"/></svg></button>
+                <div class="context-chips" aria-live="polite"></div>
+                <span class="composer-spacer"></span>
+                <button class="button button-primary send-button" id="sendPrompt" type="button" title="Send message" aria-label="Send message"><svg class="icon icon-sm"><use href="#i-send"/></svg></button>
+              </div>
+            </div>
+            <div class="suggestions" id="emptyExamples" aria-label="Example questions">
+              <button class="suggestion" type="button" data-prompt="Which managed devices haven't synced in the last 7 days?">Which managed devices haven't synced in the last 7 days?</button>
+              <button class="suggestion" type="button" data-prompt="Which required apps are assigned but not installed?">Which required apps are assigned but not installed?</button>
+              <button class="suggestion" type="button" data-prompt="Which Conditional Access policies have broad exclusions?">Which Conditional Access policies have broad exclusions?</button>
+            </div>
+          </footer>
+        </section>
+
+        <section class="view page-view" data-view="settings" hidden>
+          <header class="page-header"><h1>Settings</h1><p>Search first. Detailed configuration stays out of the daily Chat surface.</p></header>
+          <div class="page-content">
+            <div class="settings-intro"><h2 id="settingsHeading">Providers</h2><p id="settingsDescription">Choose where answers are generated. Local providers keep tenant prompts on this device.</p></div>
+            <div class="provider-stack" id="providerStack">
+              <article class="provider-row"><span class="provider-icon"><svg class="icon icon-lg"><use href="#i-database"/></svg></span><div><h3>Ollama <span class="state-pill local">Active</span></h3><p>Runs open-source models locally. Tenant data and prompts stay on this device.</p><div class="provider-detail">127.0.0.1:11434 · qwen2.5:7b</div></div><button class="button" type="button">Test</button></article>
+              <article class="provider-row"><span class="provider-icon" style="background:rgba(163,191,217,.12);color:var(--info)"><svg class="icon icon-lg"><use href="#i-spark"/></svg></span><div><h3>Anthropic <span class="state-pill">Connected</span></h3><p>Uses Claude through the local Claude Code CLI. Tenant prompts are sent to Anthropic when active.</p><div class="provider-detail">Claude Code 2.1.223 · 4 models</div></div><button class="button" type="button">Set active</button></article>
+            </div>
+          </div>
+        </section>
+
+        <section class="view page-view" data-view="agents" hidden>
+          <header class="page-header"><h1>Agents</h1><p>Repeatable workflows, described by the admin outcome they produce.</p></header>
+          <div class="page-content">
+            <div class="agent-toolbar"><div class="agent-tabs"><button class="tab active">Installed</button><button class="tab">Hub</button><button class="tab">Schedules</button></div><button class="button"><svg class="icon icon-sm"><use href="#i-search"/></svg>Find an agent</button></div>
+            <div class="agent-grid">
+              <article class="agent-card"><div class="agent-card-head"><span class="agent-card-icon"><svg class="icon"><use href="#i-shield"/></svg></span><div><h3>Explain failed sign-ins</h3></div></div><p class="agent-outcome">Find the policy, device, or identity condition behind repeated Entra sign-in failures.</p><div class="agent-card-footer"><span class="mode">Read-only</span><span class="conversation-meta">Last run 2d ago</span><button class="button button-primary">Run</button></div></article>
+              <article class="agent-card"><div class="agent-card-head"><span class="agent-card-icon"><svg class="icon"><use href="#i-device"/></svg></span><div><h3>Review stale devices before offboarding</h3></div></div><p class="agent-outcome">Build a conservative device offboarding plan from Intune sync, Entra sign-in, ownership, and compliance evidence.</p><div class="agent-card-footer"><span class="mode write">Write</span><span class="conversation-meta">Always review changes</span><button class="button">Review</button></div></article>
+              <article class="agent-card"><div class="agent-card-head"><span class="agent-card-icon"><svg class="icon"><use href="#i-lock"/></svg></span><div><h3>Prioritize Secure Score work</h3></div></div><p class="agent-outcome">Rank security recommendations by likely impact, effort, and relevance to this tenant.</p><div class="agent-card-footer"><span class="mode">Read-only</span><span class="conversation-meta">Never run</span><button class="button button-primary">Run</button></div></article>
+            </div>
+          </div>
+        </section>
+
+        <section class="view page-view" data-view="home" hidden>
+          <header class="page-header"><h1>Home</h1><p>A secondary operational summary after the first useful result.</p></header>
+          <div class="page-content">
+            <div class="section-label">Last 30 days</div>
+            <div class="metric-grid"><div class="metric"><div class="metric-value">24</div><div class="metric-label">Completed runs</div></div><div class="metric"><div class="metric-value">7</div><div class="metric-label">Chat answers</div></div><div class="metric"><div class="metric-value">0</div><div class="metric-label">Pending confirmations</div></div></div>
+            <div class="agent-toolbar"><div><div class="section-label" style="margin:0">Recent runs</div></div><button class="button button-quiet">View all <svg class="icon icon-sm"><use href="#i-chevron"/></svg></button></div>
+            <div class="run-list"><div class="run-row"><div><div class="run-title">Sign-in failure explainer</div><div class="run-meta">Contoso Demo · 18 findings</div></div><span class="run-meta">12 min ago</span><span class="run-status">Completed</span></div><div class="run-row"><div><div class="run-title">Device posture auditor</div><div class="run-meta">Contoso Demo · 4 review items</div></div><span class="run-meta">Yesterday</span><span class="run-status">Completed</span></div></div>
+          </div>
+        </section>
+
+        <section class="view page-view" data-view="changes" hidden>
+          <header class="page-header"><h1>Changes</h1><p>Configuration drift from local snapshots, with honest attribution.</p></header>
+          <div class="page-content">
+            <div class="section-label">Today</div>
+            <div class="run-list"><div class="run-row"><div><div class="run-title">Conditional Access · Require MFA for admins</div><div class="run-meta">Excluded group added · actor unknown</div></div><span class="run-meta">09:42</span><span class="state-pill">Modified</span></div><div class="run-row"><div><div class="run-title">Settings catalog · Windows baseline</div><div class="run-meta">Two values changed · admin@contoso.invalid</div></div><span class="run-meta">08:17</span><span class="state-pill">Modified</span></div></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="statusbar" aria-label="Current tenant and provider status">
+      <span class="status-item"><svg class="icon icon-sm"><use href="#i-shield"/></svg>tenant: <strong>Contoso Demo</strong></span>
+      <span class="status-item status-provider"><svg class="icon icon-sm"><use href="#i-database"/></svg>ollama · <strong>qwen2.5:7b</strong></span>
+      <span class="status-item status-local"><svg class="icon icon-sm"><use href="#i-lock"/></svg>local-only · no data leaves this device</span>
+    </footer>
+  </div>
+
+  <script>
+    const viewTitles = { chat: "Chat", settings: "Settings", agents: "Agents", home: "Home", changes: "Changes" };
+    const settingsCopy = {
+      providers: ["Providers", "Choose where answers are generated. Local providers keep tenant prompts on this device."],
+      tenants: ["Tenants", "Manage Microsoft 365 connections and review delegated permissions."],
+      chat: ["Chat", "Control investigation mode, Graph cache refresh, history, and local data."],
+      workspaces: ["Workspaces", "Open tenant-scoped evidence and notes without adding a daily navigation item."],
+      connectors: ["Connectors", "Configure optional delivery destinations and inspect their egress boundaries."],
+      general: ["General", "Configure retention, schedules, notifications, and local exports."],
+      privacy: ["Privacy", "Review local storage, registry counting, and deletion boundaries."],
+      about: ["About", "Inspect version, local diagnostics, and support options."]
+    };
+
+    const contextPanel = document.querySelector("#contextPanel");
+    const contextToggle = document.querySelector("#contextToggle");
+    const promptInput = document.querySelector("#promptInput");
+    const emptyChat = document.querySelector("#emptyChat");
+    const transcript = document.querySelector("#transcript");
+    const chatView = document.querySelector(".chat-view");
+    const chatTitle = document.querySelector("#chatTitle");
+    const railTrigger = document.querySelector("#railTrigger");
+    const railScrim = document.querySelector("#railScrim");
+    const contextRail = document.querySelector(".context-rail");
+    const narrowRailQuery = window.matchMedia("(max-width: 900px)");
+
+    function syncRailAccessibility() {
+      const hidden = narrowRailQuery.matches && !document.body.classList.contains("rail-open");
+      contextRail.inert = hidden;
+      contextRail.setAttribute("aria-hidden", String(hidden));
+    }
+
+    function closeRail() {
+      document.body.classList.remove("rail-open");
+      railTrigger.setAttribute("aria-expanded", "false");
+      syncRailAccessibility();
+    }
+
+    function switchView(next) {
+      document.querySelectorAll("[data-view]").forEach((view) => { view.hidden = view.dataset.view !== next; });
+      const rail = next === "chat" ? "chat" : next === "settings" ? "settings" : "primary";
+      document.querySelectorAll("[data-rail-context]").forEach((item) => { item.hidden = item.dataset.railContext !== rail; });
+      document.querySelectorAll("[data-view-target]").forEach((button) => button.classList.toggle("active", button.dataset.viewTarget === next));
+      document.querySelector("#titlebarTitle").textContent = `OpenAdminOS · ${viewTitles[next]}`;
+      closeRail();
+      if (next === "chat") requestAnimationFrame(() => promptInput.focus());
+    }
+
+    document.querySelectorAll("[data-view-target]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.viewTarget)));
+
+    railTrigger.addEventListener("click", () => {
+      const open = document.body.classList.toggle("rail-open");
+      railTrigger.setAttribute("aria-expanded", String(open));
+      syncRailAccessibility();
+    });
+    railScrim.addEventListener("click", closeRail);
+    narrowRailQuery.addEventListener("change", () => {
+      if (!narrowRailQuery.matches) document.body.classList.remove("rail-open");
+      syncRailAccessibility();
+    });
+
+    contextToggle.addEventListener("click", () => {
+      contextPanel.hidden = !contextPanel.hidden;
+      contextToggle.setAttribute("aria-expanded", String(!contextPanel.hidden));
+    });
+
+    document.querySelectorAll("[data-prompt]").forEach((button) => button.addEventListener("click", () => {
+      promptInput.value = button.dataset.prompt;
+      promptInput.focus();
+    }));
+
+    function showAnswer(question) {
+      emptyChat.hidden = true;
+      transcript.hidden = false;
+      chatView.classList.remove("is-empty");
+      document.querySelector("#sentPrompt").textContent = question;
+      chatTitle.textContent = question.includes("apps") ? "Required app gaps" : question.includes("Conditional") ? "Conditional Access exclusions" : "Device sync gaps";
+      let active = document.querySelector(".conversation-row.active");
+      if (active) active.classList.remove("active");
+      promptInput.value = "";
+    }
+
+    document.querySelector("#sendPrompt").addEventListener("click", () => {
+      const question = promptInput.value.trim();
+      if (question) showAnswer(question);
+    });
+    promptInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        const question = promptInput.value.trim();
+        if (question) showAnswer(question);
+      }
+    });
+
+    document.querySelector("#newConversation").addEventListener("click", () => {
+      emptyChat.hidden = false;
+      transcript.hidden = true;
+      chatView.classList.add("is-empty");
+      chatTitle.textContent = "New conversation";
+      document.querySelectorAll(".conversation-row").forEach((row) => row.classList.remove("active"));
+      promptInput.value = "";
+      promptInput.focus();
+    });
+    document.querySelectorAll("[data-open-answer]").forEach((button) => button.addEventListener("click", () => {
+      showAnswer(button.querySelector(".conversation-title").textContent);
+      document.querySelectorAll(".conversation-row").forEach((row) => row.classList.toggle("active", row === button));
+    }));
+
+    document.querySelectorAll("[data-setting]").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll("[data-setting]").forEach((item) => item.classList.toggle("active", item === button));
+      const [heading, description] = settingsCopy[button.dataset.setting];
+      document.querySelector("#settingsHeading").textContent = heading;
+      document.querySelector("#settingsDescription").textContent = description;
+      document.querySelector("#providerStack").hidden = button.dataset.setting !== "providers";
+    }));
+
+    document.querySelector("#settingsSearch").addEventListener("input", (event) => {
+      const query = event.target.value.trim().toLowerCase();
+      document.querySelectorAll("[data-setting]").forEach((button) => {
+        const haystack = `${button.textContent} ${button.dataset.terms}`.toLowerCase();
+        button.hidden = Boolean(query) && !haystack.includes(query);
+      });
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        if (!contextPanel.hidden) {
+          contextPanel.hidden = true;
+          contextToggle.setAttribute("aria-expanded", "false");
+          contextToggle.focus();
+        } else if (document.body.classList.contains("rail-open")) {
+          closeRail();
+          railTrigger.focus();
+        }
+      }
+    });
+    syncRailAccessibility();
+  </script>
+</body>
+</html>

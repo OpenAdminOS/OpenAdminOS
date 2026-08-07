@@ -1273,7 +1273,9 @@ export function buildAgentProvenance(input: {
       ? { manifestSha256: input.manifestSha256 }
       : input.manifestText
         ? { manifestSha256: sha256(input.manifestText) }
-        : {}),
+        : input.agent.manifestSha256
+          ? { manifestSha256: input.agent.manifestSha256 }
+          : {}),
     installedVersion: input.agent.version,
     installedAt: input.installedAt,
     ...(input.updatedAt ? { updatedAt: input.updatedAt } : {}),

@@ -39,8 +39,36 @@ export async function applyUpdateNow(): Promise<void> {
   autoUpdater.quitAndInstall();
 }
 
+export async function checkForUpdatesNow(): Promise<UpdateState> {
+  if (!app.isPackaged) return currentState;
+  if (process.platform === "linux") {
+    setUpdateState({
+      status: "error",
+      message:
+        "Automatic updates are unavailable for unsigned Linux packages. Update through the signed apt repository or install the next package manually.",
+    });
+    return currentState;
+  }
+  if (process.platform === "win32" && isWindowsStoreBuild()) {
+    return currentState;
+  }
+
+  setUpdateState({ status: "checking" });
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[updater] checkForUpdates failed", error);
+    setUpdateState({
+      status: "error",
+      message: `Update check failed. ${message}`,
+    });
+  }
+  return currentState;
+}
+
 /**
- * Update polling cadence. Mirrors t3code: a 15-second startup delay
+ * Update polling cadence: a 15-second startup delay
  * (so first-run UX isn't dominated by a network round-trip) plus a
  * 4-hour poll while the app is open.
  */
@@ -65,6 +93,10 @@ let pollTimer: NodeJS.Timeout | undefined;
 export function startAutoUpdater(getMainWindow: () => BrowserWindow | undefined): void {
   if (!app.isPackaged) return;
   if (process.platform === "win32" && isWindowsStoreBuild()) return;
+  // Linux packages are not executable-signed. Updates flow through the
+  // signed apt repository or an explicit package download instead of
+  // electron-updater replacing an executable without package trust.
+  if (process.platform === "linux") return;
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -116,11 +148,7 @@ export function startAutoUpdater(getMainWindow: () => BrowserWindow | undefined)
     });
   });
 
-  const check = () => {
-    autoUpdater.checkForUpdates().catch((error: unknown) => {
-      console.error("[updater] checkForUpdates failed", error);
-    });
-  };
+  const check = () => void checkForUpdatesNow();
 
   setTimeout(check, STARTUP_DELAY_MS);
   pollTimer = setInterval(check, POLL_INTERVAL_MS);

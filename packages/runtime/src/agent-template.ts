@@ -29,6 +29,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { renderDeep, renderTemplate, type TemplateContext } from "./template-engine.js";
+import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 export class ManifestValidationError extends Error {
   readonly path: string;
@@ -354,8 +355,11 @@ function validateWriteStepSettings(
   if (typeof settings.source !== "string" || settings.source.length === 0) {
     throw new ManifestValidationError(`${path}.source`, "must be a non-empty string");
   }
-  if (typeof settings.confirmationPhrase !== "string" || settings.confirmationPhrase.length === 0) {
-    throw new ManifestValidationError(`${path}.confirmationPhrase`, "must be a non-empty string");
+  const phraseProblem = confirmationPhraseProblem(settings.confirmationPhrase, {
+    template: true,
+  });
+  if (phraseProblem) {
+    throw new ManifestValidationError(`${path}.confirmationPhrase`, phraseProblem);
   }
   if (!settings.actionTemplate || typeof settings.actionTemplate !== "object") {
     throw new ManifestValidationError(`${path}.actionTemplate`, "must be an object");
@@ -576,6 +580,12 @@ export async function runAgentTemplatePlan(
     const confirmationPhrase = String(
       renderTemplate(writeStep.settings.confirmationPhrase, planCtx) ?? "",
     );
+    const phraseProblem = confirmationPhraseProblem(confirmationPhrase);
+    if (phraseProblem) {
+      throw new Error(
+        `Agent "${manifest.descriptor.id}" returned an unsafe confirmation phrase: ${phraseProblem}.`,
+      );
+    }
     const summary = writeStep.settings.summary
       ? String(renderTemplate(writeStep.settings.summary, planCtx) ?? "")
       : `${manifest.descriptor.name} prepared ${actions.length} action${actions.length === 1 ? "" : "s"}.`;
@@ -929,16 +939,16 @@ async function runGraphSkill(
     }
   }
 
-  const response = (await ctx.graph.request({
-    method: "GET",
+  const response = await requestGraphPages({
+    graph: ctx.graph,
     path: settings.path,
     query: Object.keys(query).length > 0 ? query : undefined,
     headers: settings.headers,
-  })) as unknown;
+  });
 
-  // Graph collection endpoints wrap items in `{ value: [...] }`. Unwrap
-  // so downstream transforms operate on the array directly. Single-
-  // entity responses (e.g. `GET /me`) return the entity object as-is.
+  // Graph collection endpoints wrap items in `{ value: [...] }`. The
+  // paginator returns the complete bounded collection; single-entity
+  // responses (for example `GET /me`) still pass through unchanged.
   const unwrapped = unwrapGraphResponse(response);
   if (Array.isArray(unwrapped)) {
     ctx.log(
@@ -949,6 +959,93 @@ async function runGraphSkill(
     ctx.log("info", `Loaded ${settings.method} ${settings.path}.`);
   }
   return unwrapped;
+}
+
+const MAX_GRAPH_AGENT_PAGES = 1_000;
+const MAX_GRAPH_AGENT_ITEMS = 100_000;
+
+async function requestGraphPages(input: {
+  graph: RunContext["graph"];
+  path: string;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+}): Promise<unknown> {
+  const first = await input.graph.request({
+    method: "GET",
+    path: input.path,
+    query: input.query,
+    headers: input.headers,
+  });
+  const firstPage = graphCollectionPage(first);
+  if (!firstPage) return first;
+
+  // `$top` controls the Graph page size. It is not a declaration that the
+  // agent only needs that many objects: Graph can still return a nextLink,
+  // and silently discarding it would make reports incomplete. Bound the
+  // fully-paged collection with our own safety limits instead.
+  const rows = firstPage.rows.slice(0, MAX_GRAPH_AGENT_ITEMS);
+  let itemLimitExceeded = firstPage.rows.length > MAX_GRAPH_AGENT_ITEMS;
+  let nextLink = firstPage.nextLink;
+  let pageCount = 1;
+
+  while (
+    nextLink &&
+    rows.length < MAX_GRAPH_AGENT_ITEMS &&
+    pageCount < MAX_GRAPH_AGENT_PAGES
+  ) {
+    const next = graphRequestFromNextLink(nextLink);
+    const payload = await input.graph.request({
+      method: "GET",
+      path: next.path,
+      query: next.query,
+      headers: input.headers,
+    });
+    const page = graphCollectionPage(payload);
+    if (!page) {
+      throw new Error(`Graph paging for ${input.path} returned a non-collection response.`);
+    }
+    pageCount += 1;
+    const remaining = MAX_GRAPH_AGENT_ITEMS - rows.length;
+    if (page.rows.length > remaining) itemLimitExceeded = true;
+    rows.push(...page.rows.slice(0, remaining));
+    nextLink = page.nextLink;
+  }
+
+  if (itemLimitExceeded || nextLink) {
+    throw new Error(
+      `Graph collection ${input.path} exceeded the safe paging limit (${MAX_GRAPH_AGENT_PAGES} pages / ${MAX_GRAPH_AGENT_ITEMS} items). Refine the agent query instead of acting on partial data.`,
+    );
+  }
+  return { value: rows };
+}
+
+function graphCollectionPage(payload: unknown): { rows: unknown[]; nextLink?: string } | undefined {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const record = payload as Record<string, unknown>;
+  if (!Array.isArray(record.value)) return undefined;
+  const nextLink = record["@odata.nextLink"];
+  return {
+    rows: record.value,
+    ...(typeof nextLink === "string" && nextLink.length > 0 ? { nextLink } : {}),
+  };
+}
+
+function graphRequestFromNextLink(nextLink: string): {
+  path: string;
+  query?: Record<string, string>;
+} {
+  const url = new URL(nextLink);
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "graph.microsoft.com") {
+    throw new Error("Graph returned an unsafe paging URL outside graph.microsoft.com.");
+  }
+  const prefix = "/beta";
+  if (url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`)) {
+    throw new Error("Graph returned a paging URL that is not on the required beta endpoint.");
+  }
+  const path = url.pathname.slice(prefix.length) || "/";
+  const query: Record<string, string> = {};
+  for (const [key, value] of url.searchParams.entries()) query[key] = value;
+  return { path, ...(Object.keys(query).length > 0 ? { query } : {}) };
 }
 
 function unwrapGraphResponse(payload: unknown): unknown {

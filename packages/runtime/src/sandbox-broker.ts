@@ -10,6 +10,7 @@ import type {
   WriteHttpMethod,
   WritePlan,
 } from "@openadminos/agent-sdk";
+import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 export interface SandboxBrokerAgentPolicy {
   slug: string;
@@ -413,12 +414,10 @@ function validateWritePlan(
       "invalid_request",
     );
   }
-  if (
-    typeof plan.confirmationPhrase !== "string" ||
-    plan.confirmationPhrase.length === 0
-  ) {
+  const phraseProblem = confirmationPhraseProblem(plan.confirmationPhrase);
+  if (phraseProblem) {
     throw new SandboxBrokerError(
-      `Agent "${agent.slug}" returned a plan without a confirmation phrase.`,
+      `Agent "${agent.slug}" returned an unsafe confirmation phrase: ${phraseProblem}.`,
       "invalid_request",
     );
   }

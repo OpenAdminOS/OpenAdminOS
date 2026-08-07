@@ -1,7 +1,7 @@
 {
   "name": "@openadminos/desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Open-source, local-first agents for Microsoft 365 admins.",
   "author": {
     "name": "OpenAdminOS",
@@ -9,6 +9,7 @@
   },
   "homepage": "https://www.openadminos.com",
   "license": "MIT",
+  "desktopName": "com.openadminos.desktop.desktop",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -18,23 +19,24 @@
     "build:menu-bar-helper": "node ../../scripts/build-menu-bar-helper.mjs",
     "build:apple-foundation-helper": "node ../../scripts/build-apple-foundation-helper.mjs",
     "build:packages": "npm run build -w @openadminos/agent-sdk && npm run build -w @openadminos/runtime",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "node ../../scripts/clean-desktop-electron-build.mjs && tsc -p tsconfig.electron.json",
     "dist": "npm run build && electron-builder",
     "preview": "vite preview",
+    "pretest": "node -e \"require('electron')\"",
     "test": "node --import tsx --test \"electron/**/*.test.ts\"",
     "test:renderer": "vitest run --config vitest.config.ts",
-    "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit"
+    "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.electron.test.json --noEmit"
   },
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
     "@microsoft/mxc-sdk": "0.6.1",
-    "@openadminos/agent-sdk": "0.3.0",
-    "@openadminos/connector-whatsapp-web": "0.3.0",
-    "@openadminos/runtime": "0.3.0",
+    "@openadminos/agent-sdk": "0.4.0",
+    "@openadminos/connector-whatsapp-web": "0.4.0",
+    "@openadminos/runtime": "0.4.0",
     "electron-updater": "^6.6.2",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-router": "^7.1.1"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router": "^8.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
@@ -58,13 +60,15 @@
   "build": {
     "appId": "com.openadminos.desktop",
     "productName": "OpenAdminOS",
-    "electronVersion": "42.3.0",
+    "electronVersion": "42.8.1",
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "!dist-electron/**/*.test.js",
+      "!dist-electron/**/*.test.js.map",
       "package.json"
     ],
     "extraResources": [
@@ -166,6 +170,8 @@
       "showNameOnTiles": true
     },
     "linux": {
+      "executableName": "openadminos",
+      "syncDesktopName": true,
       "target": [
         "AppImage",
         "deb",

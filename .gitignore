@@ -23,6 +23,8 @@ tokens.bin
 .env
 .env.local
 .env.*.local
+*private-key*.pem
+*private*.pem
 
 # OS
 .DS_Store
