@@ -43,11 +43,14 @@ import {
   runReportPlaintext,
 } from "../shared/runReport";
 import { userFacingErrorReason } from "../copy";
+import { createPendingIntent } from "../setup/pending-intent";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 
 export default function RunResult() {
   const navigate = useNavigate();
   const { id } = useParams();
   const { state, startRun, confirmRun, rejectRun, cancelRun } = useAppState();
+  const { requireTenantAndProvider } = useSetupFlow();
   const toast = useToast();
   const run = state.runs.find((candidate) => candidate.id === id);
   const agent = run
@@ -119,6 +122,20 @@ export default function RunResult() {
   }
 
   const reRun = () => {
+    if (
+      !requireTenantAndProvider(
+        createPendingIntent({
+          kind: "agent-run",
+          slug: run.agentSlug,
+          ...(run.tenantId ? { tenantId: run.tenantId } : {}),
+          ...(run.providerId ? { providerId: run.providerId } : {}),
+          ...(run.model ? { model: run.model } : {}),
+          returnTo: `/runs/${encodeURIComponent(run.id)}`,
+        }),
+      )
+    ) {
+      return;
+    }
     // Preserve the run's tenant pinning, provider override, AND model
     // override so re-runs don't silently drift to whatever's currently
     // active globally.
@@ -294,6 +311,18 @@ export default function RunResult() {
           activeTenantId={state.activeTenantId}
           tenants={state.tenants}
           onRetargetCurrent={() => {
+            if (
+              !requireTenantAndProvider(
+                createPendingIntent({
+                  kind: "agent-run",
+                  slug: run.agentSlug,
+                  ...(state.activeTenantId ? { tenantId: state.activeTenantId } : {}),
+                  returnTo: `/runs/${encodeURIComponent(run.id)}`,
+                }),
+              )
+            ) {
+              return;
+            }
             const options: { tenantId?: string } = {};
             if (state.activeTenantId) options.tenantId = state.activeTenantId;
             void startRun(run.agentSlug, options).then((nextRun) =>

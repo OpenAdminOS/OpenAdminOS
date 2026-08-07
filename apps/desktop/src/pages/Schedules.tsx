@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
@@ -18,6 +18,8 @@ import type {
   AgentSummary,
   RunRecord,
 } from "../shared/openAdminOS";
+import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 
 const QUICK_INTERVALS: { label: string; seconds: number }[] = [
   { label: "15m", seconds: 15 * 60 },
@@ -28,11 +30,14 @@ const QUICK_INTERVALS: { label: string; seconds: number }[] = [
 
 export default function Schedules({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const { state, updateAgentSchedule, startRun, refresh } = useAppState();
+  const { requireTenantAndProvider } = useSetupFlow();
   const [bulkRunning, setBulkRunning] = useState<"due" | "all" | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [schedulerRegistered, setSchedulerRegistered] = useState<boolean | null>(null);
+  const resumedBatchRef = useRef<string | null>(null);
   const scheduledAgents = state.installedAgents
     .filter((agent) => agent.schedule?.enabled === true)
     .sort((a, b) => nextRunTime(a) - nextRunTime(b));
@@ -65,9 +70,23 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
     };
   }, [refresh]);
 
-  const runScheduledBatch = async (agents: AgentSummary[], mode: "due" | "all") => {
+  const runScheduledBatch = useCallback(async (
+    agents: AgentSummary[],
+    mode: "due" | "all",
+  ) => {
     if (agents.length === 0) {
       toast.info(mode === "due" ? "No schedules are due." : "No schedules are enabled.");
+      return;
+    }
+    if (
+      !requireTenantAndProvider(
+        createPendingIntent({
+          kind: "scheduled-batch",
+          mode,
+          returnTo: "/agents/schedules",
+        }),
+      )
+    ) {
       return;
     }
     setBulkRunning(mode);
@@ -85,7 +104,24 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
     } finally {
       setBulkRunning(null);
     }
-  };
+  }, [requireTenantAndProvider, startRun, toast]);
+
+  useEffect(() => {
+    const routeState = location.state as { resumePendingIntent?: PendingIntent } | null;
+    const resumed = routeState?.resumePendingIntent;
+    if (
+      resumed?.kind !== "scheduled-batch" ||
+      resumedBatchRef.current === resumed.createdAt
+    ) {
+      return;
+    }
+    resumedBatchRef.current = resumed.createdAt;
+    navigate(location.pathname, { replace: true, state: null });
+    void runScheduledBatch(
+      resumed.mode === "due" ? dueAgents : scheduledAgents,
+      resumed.mode,
+    );
+  }, [dueAgents, location.pathname, location.state, navigate, runScheduledBatch, scheduledAgents]);
 
   const scheduleActions = (
     <div className="flex flex-wrap items-center gap-2">
@@ -163,6 +199,17 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
                 runs={state.runs}
                 onOpen={() => navigate(`/agents/${agent.slug}`)}
                 onRunNow={async () => {
+                  if (
+                    !requireTenantAndProvider(
+                      createPendingIntent({
+                        kind: "agent-run",
+                        slug: agent.slug,
+                        returnTo: "/agents/schedules",
+                      }),
+                    )
+                  ) {
+                    return;
+                  }
                   try {
                     const run = await startRun(agent.slug);
                     navigate(`/runs/${run.id}`);

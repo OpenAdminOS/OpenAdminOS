@@ -126,7 +126,7 @@ describe("accessibility design tokens", () => {
       "src/components/AppShell.tsx",
       "src/components/ConnectorConfirmModal.tsx",
       "src/pages/IntuneChat.tsx",
-      "src/pages/Onboarding.tsx",
+      "src/setup/TenantSetupDialog.tsx",
       "src/pages/RunResult.tsx",
     ];
     for (const file of files) {

@@ -6,13 +6,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Added a shared contextual tenant-activation dialog with grouped Graph permission review, cancellable browser sign-in, provider readiness, safe pending-action restoration, and explicit resume controls.
+
 ### Changed
 
+- Fresh installs now open the real Chat-first app shell. Suggested questions fill an editable local draft, and tenant setup starts only when a tenant-backed action is attempted.
 - Updated the README product screenshot to the current Chat-first desktop interface with sourced findings and a matching-agent recommendation.
 
 ### Removed
 
+- Removed the blocking multi-step onboarding page; the legacy `/onboarding` route now redirects to Chat.
+
 ### Fixed
+
+- Made Chat cancellation reliable when Stop is pressed before the host has finished registering the new stream.
 
 ### Security
 

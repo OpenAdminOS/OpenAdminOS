@@ -733,7 +733,7 @@ Distribution semantics:
 
 Cache lifecycle:
 
-- Onboarding already requires network (MSAL, provider probe), so the first index fetch piggybacks on that flow — no offline-first complexity for first-run.
+- The first registry refresh starts in the background when the desktop host initializes. Browsing Chat does not wait for network, MSAL, or provider detection.
 - On every subsequent launch (online): refresh `index.json` in the background. Compare to cached per-agent versions, surface per-agent update badges.
 - Registry source URLs must use HTTPS, must not include credentials, query strings, fragments, or an `index.json` suffix, and are normalized before persistence. Localhost/private registry sources are blocked unless an explicit dev-only override is enabled (`OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE=1` in an unpackaged app).
 - Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source. Official cached indexes must also record a successful signature verification, so legacy unsigned cache content is not trusted.
@@ -1339,9 +1339,9 @@ or clearing local data should use product modal components with explicit impact
 copy and success/failure feedback. Native browser dialogs (`alert`, `confirm`,
 `prompt`) are not acceptable for shipped desktop UX because they bypass the
 design system and hide recovery context.
-If the renderer is opened without the Electron desktop bridge, non-onboarding
-routes should show a designed bridge-unavailable diagnostic state instead of
-silently redirecting to onboarding or logging noisy console warnings. That state
+If the renderer is opened without the Electron desktop bridge, app routes should
+show a designed bridge-unavailable diagnostic state instead of silently failing
+or logging noisy console warnings. That state
 is for renderer-only development; tenant-connected testing belongs in the
 Electron window.
 
@@ -1513,13 +1513,20 @@ Removed from navigation:
 - **Home** — its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
 - **Report issue** — available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
-### First-run guidance
+### First run and contextual activation (locked for v0.4)
 
-Chat is the first-run surface. Before the first successful answer, its empty state keeps the composer central and shows compact readiness guidance only when tenant or provider setup is incomplete. The empty-state heading, explanation, and suggested questions are centered as one block immediately above the composer rather than floating in the middle of the transcript area:
+Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`. Users can inspect Chat, Agents, Changes, and Settings, select a suggested question, and edit a local draft before granting tenant access. The empty-state heading, explanation, and suggested questions stay centered as one block immediately above the composer rather than floating in the middle of the transcript area.
 
-1. Confirm an active tenant.
-2. Confirm a reachable provider.
-3. Ask the first question or open a suggested read-only agent.
+Setup opens only when an action needs tenant context: sending Chat, starting or rerunning an agent, opening tenant Changes from its empty state, refreshing tenant cache data, or explicitly choosing Connect tenant. The shared setup dialog follows this order:
+
+1. Review grouped read-only Microsoft Graph permissions and their exact rationales.
+2. Complete Microsoft sign-in in the system browser.
+3. Pick or repair an LLM provider when the pending action needs one.
+4. Review an explicit resume action. Nothing sends or runs automatically after sign-in.
+
+Pending setup intent is safe session metadata only: action kind, local return route, conversation id, agent slug, validated resource kind, optional run pinning or scheduled batch mode, and creation time. Chat text remains in its separately namespaced per-conversation session draft record and is never copied into the pending-intent record. Pending intents expire after 30 minutes. Cancel clears the intent but preserves the Chat draft. Sign-in exposes cancel, a three-minute soft waiting state, and a five-minute host timeout; the local loopback listener closes on cancel or timeout.
+
+The persistent status strip and tenant switcher are the canonical Connect tenant entry points. Disconnecting the last tenant leaves the shell available and never destroys unrelated provider, registry, or local draft state. Agents still cannot run, Graph cache refreshes still cannot start, and Changes still cannot load tenant data without an active tenant.
 
 Answered chat question means the local chat store contains at least one completed assistant message. Empty draft conversations, failed responses, and stopped responses do not count.
 
@@ -1644,7 +1651,7 @@ Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent 
 
 These must exist and work well before any public release.
 
-1. **First-run onboarding** — 3 steps: tenant connection → LLM provider → workspace start. The final setup screen offers Intune Chat as the primary first action and Agent Hub as the repeatable-workflow path; installing a first agent is optional, not required before chat has value. <90 seconds from installer to first grounded chat answer or first successful agent run.
+1. **Contextual first-run activation** — the real Chat-first shell opens immediately. Tenant permissions, browser sign-in, and provider readiness appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
 2. **MSAL consent flow** — Lawyer-grade transparency about Graph scopes requested. Read scopes only by default; write scopes requested per-agent at install time.
 3. **LLM provider configuration** — All 5 providers, test connection, model dropdowns populated by querying the provider, per-agent overrides.
 4. **Diff confirmation for write agents** — Side-by-side before/after, scope summary, typed confirmation for destructive actions.
@@ -1752,7 +1759,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 
 | File | Screen | Status |
 |---|---|---|
-| `01-onboarding.html` | First-run setup (tenant → LLM → first agent) | ✅ Done |
+| `01-onboarding.html` | Historical blocking first-run setup | ⚪ Superseded |
 | `02-msal-consent.html` | Graph permissions screen | ✅ Done |
 | `03-agents-grid.html` | Home / agents list | ✅ Done |
 | `04-live-run.html` | Live run modal overlay | ✅ Done |
@@ -1766,6 +1773,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `12-workspaces.html` | Single-tenant Workspaces investigation surface | ✅ Done |
 | `13-v0.4-one-surface.html` | Interactive Chat-first, single-contextual-rail UX exploration | 🟡 Proposed |
 | `14-v0.4-implemented-review.html` | Interactive review of the implemented three-destination navigation and full-text Chat history drawer | ✅ Done |
+| `15-contextual-setup.html` | Chat-first contextual tenant and provider activation | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
 

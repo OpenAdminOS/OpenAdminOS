@@ -116,6 +116,8 @@ export {
   DEFAULT_SCOPES,
   DEFAULT_SCOPE_METADATA,
   GRAPH_CLI_CLIENT_ID,
+  TenantConnectCancelledError,
+  TenantConnectTimeoutError,
   removeAccount,
   runInteractiveFlow,
   type RequestedScopeMetadata,

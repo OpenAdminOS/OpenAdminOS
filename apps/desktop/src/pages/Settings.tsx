@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
@@ -53,6 +53,8 @@ import {
 } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
+import { useSetupFlow } from "../setup/SetupFlowContext";
+import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import {
   SETTINGS_ITEMS,
   SETTINGS_SECTIONS,
@@ -96,15 +98,13 @@ export default function Settings() {
     state,
     setActiveProvider,
     setActiveModel,
-    connectTenant,
     setActiveTenant,
     disconnectTenant,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
     refresh,
   } = useAppState();
-  const [tenantBusy, setTenantBusy] = useState(false);
-  const [tenantError, setTenantError] = useState<string | null>(null);
+  const { openSetup } = useSetupFlow();
 
   useEffect(() => {
     if (SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)) {
@@ -172,18 +172,6 @@ export default function Settings() {
       setSettingsQuery("");
     } else if (event.key === "Escape") {
       setSettingsQuery("");
-    }
-  };
-
-  const handleConnectTenant = async () => {
-    setTenantBusy(true);
-    setTenantError(null);
-    try {
-      await connectTenant();
-    } catch (error) {
-      setTenantError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTenantBusy(false);
     }
   };
 
@@ -320,9 +308,9 @@ export default function Settings() {
             <TenantsSection
               tenants={state.tenants}
               activeTenantId={state.activeTenantId}
-              busy={tenantBusy}
-              error={tenantError}
-              onConnect={handleConnectTenant}
+              busy={false}
+              error={null}
+              onConnect={async () => openSetup()}
               onSetActive={setActiveTenant}
               onDisconnect={disconnectTenant}
             />
@@ -1078,7 +1066,7 @@ function TenantsSection({
     <div className="max-w-[820px]">
       <SectionTitle
         title="Tenants"
-        subtitle="Connect Microsoft 365 tenants. Sign-in opens your system browser to Microsoft's login page. Agents read Graph data from the active tenant; disconnecting the last tenant returns you to onboarding."
+        subtitle="Connect Microsoft 365 tenants. Sign-in opens Microsoft in your system browser. Disconnecting the last tenant leaves the app available for browsing and drafting."
       />
 
       <div className="mt-6 flex items-center gap-3">
@@ -1290,6 +1278,7 @@ function TenantRow({
 
 function ChatSettingsSection() {
   const { state } = useAppState();
+  const { requireTenant } = useSetupFlow();
   const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
   const [localDataSummary, setLocalDataSummary] =
     useState<LocalDataSummary | null>(null);
@@ -1306,6 +1295,8 @@ function ChatSettingsSection() {
   const [scheduleInterval, setScheduleInterval] = useState(360);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const resumedIntentRef = useRef<string | null>(null);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -1365,9 +1356,19 @@ function ChatSettingsSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.activeTenantId, state.runs.length]);
 
-  const handleRefreshCache = async () => {
+  const handleRefreshCache = useCallback(async () => {
     const api = window.openAdminOS;
     if (!api || refreshingCache) return;
+    if (
+      !requireTenant(
+        createPendingIntent({
+          kind: "refresh-cache",
+          returnTo: `${location.pathname}${location.search}`,
+        }),
+      )
+    ) {
+      return;
+    }
     setRefreshingCache(true);
     setError(null);
     try {
@@ -1379,7 +1380,21 @@ function ChatSettingsSection() {
     } finally {
       setRefreshingCache(false);
     }
-  };
+  }, [location.pathname, location.search, refreshingCache, requireTenant]);
+
+  useEffect(() => {
+    const routeState = location.state as { resumePendingIntent?: PendingIntent } | null;
+    const resumed = routeState?.resumePendingIntent;
+    if (
+      resumed?.kind !== "refresh-cache" ||
+      resumedIntentRef.current === resumed.createdAt
+    ) {
+      return;
+    }
+    resumedIntentRef.current = resumed.createdAt;
+    navigate(location.pathname + location.search, { replace: true, state: null });
+    void handleRefreshCache();
+  }, [handleRefreshCache, location.pathname, location.search, location.state, navigate]);
 
   const handleClearLocalData = async () => {
     const api = window.openAdminOS;
@@ -1591,7 +1606,7 @@ function ChatSettingsSection() {
               size="sm"
               variant="secondary"
               leadingIcon={<IconRefresh size={12} />}
-              disabled={refreshingCache || !activeTenant}
+              disabled={refreshingCache}
               onClick={() => void handleRefreshCache()}
             >
               {refreshingCache ? "Refreshing" : "Refresh now"}
@@ -3213,7 +3228,7 @@ function RegistrySourceModal({
 }
 
 function AboutSection() {
-  const navigate = useNavigate();
+  const { openSetup } = useSetupFlow();
   const { state } = useAppState();
   const openReportIssue = useReportIssue();
   const [diagnostics, setDiagnostics] = useState<ReleaseDiagnostics | null>(null);
@@ -3258,9 +3273,9 @@ function AboutSection() {
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => navigate("/onboarding")}
+          onClick={openSetup}
         >
-          Run setup again
+          Connect tenant
         </Button>
         <Button
           variant="ghost"

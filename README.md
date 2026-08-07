@@ -91,14 +91,14 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 
 - **Tenant data never leaves the device** when a local LLM is selected. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry.
 - **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed-phrase confirmation against the live diff, every time.
-- **No tenant, no run.** The desktop shell is gated behind Microsoft 365 tenant connection. With no active tenant, the app stays on onboarding; agents do not run against fallback demo data.
+- **No tenant, no run.** The desktop shell remains available for browsing and drafting, but tenant-backed Chat, Graph refreshes, Changes, and agents pause for contextual connection. Agents never run against fallback demo data.
 - **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. There is no separate global "enable writes" toggle — the typed-phrase confirmation per run is the only gate.
 
 ### What's shipped vs what's coming
 
 | Area | Shipped in v0.2.5 | Coming next |
 |---|---|---|
-| Tenant connect | MSAL interactive sign-in is required before the app shell. Multi-tenant switching, tenant groups, and explicit multi-tenant chat scope review are implemented. | Further tenant readiness polish as live pilots find gaps. |
+| Tenant connect | The Chat-first shell opens immediately. MSAL sign-in and grouped permission review appear contextually when an action needs a tenant. Multi-tenant switching, tenant groups, and explicit multi-tenant chat scope review are implemented. | Further tenant readiness polish as live pilots find gaps. |
 | Intune Chat | Single-tenant chat, explicit multi-tenant read aggregation, saved queries, readiness preflight, local exports, and hosted-provider confirmations are implemented. | Broader answer panes and more resource-specific investigation views. |
 | Workspaces | Single-tenant investigation workspaces with pinned evidence, notes, linked chats, linked runs, local instructions, and local dossier export are implemented. | More workspace import/export polish. |
 | Agent registry | Agent Hub fetches `agents/index.json`, caches locally, version-pins installs, reviews scope-diff updates, and supports custom registry sources. | More maintainer workflow automation. |
@@ -146,7 +146,7 @@ npm run qa          # JSON Schema + Graph QA
 npm run build       # production bundle
 ```
 
-On first launch, the app routes to onboarding until a Microsoft 365 tenant is connected. After tenant connection, Agent Hub fetches the registry index from this repo, caches it locally, and lets you install agents against the active tenant. Agents only run with an active tenant.
+On first launch, the app opens directly to Chat. You can browse the interface, choose a suggested question, and edit a local draft before connecting anything. Sending a question or starting an agent opens the permission review and Microsoft sign-in flow, then asks you to resume explicitly. Agent Hub refreshes the registry in the background, and agents only run with an active tenant.
 
 ## Architecture
 

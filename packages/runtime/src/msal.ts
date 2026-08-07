@@ -1,14 +1,21 @@
 import {
+  AuthError,
+  type AuthorizeResponse,
   InteractionRequiredAuthError,
   LogLevel,
   PublicClientApplication,
   type AuthenticationResult,
   type ICachePlugin,
+  type ILoopbackClient,
   type InteractiveRequest,
   type SilentFlowRequest,
   type TokenCacheContext,
 } from "@azure/msal-node";
-import type { TenantSession } from "@openadminos/agent-sdk";
+import { createServer, type Server } from "node:http";
+import {
+  DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  type TenantSession,
+} from "@openadminos/agent-sdk";
 
 export const GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
 export const DEFAULT_AUTHORITY = "https://login.microsoftonline.com/common";
@@ -18,27 +25,12 @@ export const DEFAULT_AUTHORITY = "https://login.microsoftonline.com/common";
 // without discovering missing scopes during an answer. Audited against
 // every agent manifest under /agents plus the Intune Chat Graph cache
 // planner (see `DEFAULT_SCOPE_METADATA` for which feature uses which scope).
-// Write scopes are deliberately excluded — each write-mode agent
+// Write scopes are deliberately excluded. Each write-mode agent
 // requests its specific scope at install/run time, with a separate
 // consent screen, per the project's trust policy.
-export const DEFAULT_SCOPES = [
-  "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All",
-  "https://graph.microsoft.com/DeviceManagementConfiguration.Read.All",
-  "https://graph.microsoft.com/DeviceManagementApps.Read.All",
-  "https://graph.microsoft.com/DeviceManagementServiceConfig.Read.All",
-  "https://graph.microsoft.com/DeviceManagementScripts.Read.All",
-  "https://graph.microsoft.com/DeviceManagementRBAC.Read.All",
-  "https://graph.microsoft.com/Device.Read.All",
-  "https://graph.microsoft.com/GroupMember.Read.All",
-  "https://graph.microsoft.com/Organization.Read.All",
-  "https://graph.microsoft.com/Directory.Read.All",
-  "https://graph.microsoft.com/User.Read.All",
-  "https://graph.microsoft.com/Policy.Read.All",
-  "https://graph.microsoft.com/Application.Read.All",
-  "https://graph.microsoft.com/AuditLog.Read.All",
-  "https://graph.microsoft.com/IdentityRiskyUser.Read.All",
-  "https://graph.microsoft.com/SecurityEvents.Read.All",
-];
+export const DEFAULT_SCOPES = DEFAULT_GRAPH_READ_SCOPE_NAMES.map(
+  (name) => `https://graph.microsoft.com/${name}`,
+);
 
 export interface RequestedScopeMetadata {
   name: string;
@@ -54,7 +46,7 @@ export interface RequestedScopeMetadata {
 // scope NOT in this set will trigger an incremental MSAL consent
 // prompt at install time. MSAL also adds the reserved scopes
 // `openid`, `profile`, and `offline_access` on every interactive
-// request — those are not admin-consent permissions and are surfaced
+// request. Those are not admin-consent permissions and are surfaced
 // in the UI as a small footnote, not as separate rows.
 export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
   {
@@ -121,7 +113,7 @@ export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
     name: "User.Read.All",
     mode: "read",
     rationale:
-      "Reads user profile data — license assignment, location, last sign-in. Used by User license overview and as a prerequisite read for Stale guest cleanup.",
+      "Reads user profile data: license assignment, location, and last sign-in. Used by User license overview and as a prerequisite read for Stale guest cleanup.",
   },
   {
     name: "Policy.Read.All",
@@ -145,7 +137,7 @@ export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
     name: "IdentityRiskyUser.Read.All",
     mode: "read",
     rationale:
-      "Reads Entra ID Protection's risky-user signals so the Risky sign-in triage agent can group and explain risk events. Requires Entra ID P2 to return data — the scope can still be consented on Free/P1 tenants but the agent will surface no results.",
+      "Reads Entra ID Protection's risky-user signals so the Risky sign-in triage agent can group and explain risk events. Requires Entra ID P2 to return data; the scope can still be consented on Free/P1 tenants but the agent will surface no results.",
   },
   {
     name: "SecurityEvents.Read.All",
@@ -239,6 +231,146 @@ export interface InteractiveFlowInput {
   scopes?: string[];
   openBrowser(url: string): Promise<void>;
   redirectUri?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export class TenantConnectCancelledError extends Error {
+  constructor() {
+    super("Tenant sign-in was cancelled.");
+    this.name = "TenantConnectCancelledError";
+  }
+}
+
+export class TenantConnectTimeoutError extends Error {
+  constructor() {
+    super("Tenant sign-in timed out while waiting for Microsoft.");
+    this.name = "TenantConnectTimeoutError";
+  }
+}
+
+class AbortableLoopbackClient implements ILoopbackClient {
+  private server: Server | undefined;
+  private settled = false;
+  private rejectListener: ((reason: Error) => void) | undefined;
+  private timeout: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    private readonly signal?: AbortSignal,
+    private readonly timeoutMs?: number,
+  ) {}
+
+  listenForAuthCode(
+    successTemplate?: string,
+    errorTemplate?: string,
+  ): Promise<AuthorizeResponse> {
+    if (this.server) throw new Error("A tenant sign-in listener is already running.");
+
+    return new Promise<AuthorizeResponse>((resolve, reject) => {
+      this.rejectListener = reject;
+      const finish = (result: AuthorizeResponse) => {
+        if (this.settled) return;
+        this.settled = true;
+        this.cleanupWaiters();
+        resolve(result);
+      };
+      const fail = (error: Error) => {
+        if (this.settled) return;
+        this.settled = true;
+        this.cleanupWaiters();
+        this.closeServer();
+        reject(error);
+      };
+
+      this.server = createServer((request, response) => {
+        const requestUrl = request.url;
+        if (!requestUrl) {
+          response.end(errorTemplate ?? "Microsoft sign-in did not return a redirect URL.");
+          fail(new Error("Microsoft sign-in did not return a redirect URL."));
+          return;
+        }
+        if (requestUrl === "/") {
+          response.setHeader("content-type", "text/html; charset=utf-8");
+          response.end(successTemplate ?? "Sign-in complete. You can close this window.");
+          return;
+        }
+
+        const parsed = new URL(requestUrl, this.getRedirectUri());
+        const result = Object.fromEntries(parsed.searchParams.entries()) as AuthorizeResponse;
+        if (result.code) {
+          response.writeHead(302, { location: this.getRedirectUri() });
+          response.end();
+          finish(result);
+        } else if (result.error) {
+          response.setHeader("content-type", "text/html; charset=utf-8");
+          response.end(errorTemplate ?? "Microsoft sign-in did not complete.");
+          finish(result);
+        } else {
+          // Browsers often request /favicon.ico while the authorization tab is
+          // open. It is not an OAuth response and must not settle the flow.
+          response.writeHead(204);
+          response.end();
+        }
+      });
+      this.server.once("error", (error) => fail(error));
+      this.server.listen(0, "localhost");
+
+      if (this.signal?.aborted) {
+        fail(new TenantConnectCancelledError());
+        return;
+      }
+      this.signal?.addEventListener("abort", this.handleAbort, { once: true });
+      if (this.timeoutMs && this.timeoutMs > 0) {
+        this.timeout = setTimeout(
+          () => fail(new TenantConnectTimeoutError()),
+          this.timeoutMs,
+        );
+        this.timeout.unref?.();
+      }
+    });
+  }
+
+  getRedirectUri(): string {
+    const address = this.server?.address();
+    if (!this.server?.listening || !address) {
+      // MSAL polls getRedirectUri while the ephemeral listener starts and only
+      // retries this documented error code.
+      throw new AuthError(
+        "no_loopback_server_exists",
+        "",
+        "The local Microsoft sign-in listener is not ready.",
+      );
+    }
+    if (typeof address === "string") {
+      throw new Error("The local Microsoft sign-in listener did not bind to a TCP port.");
+    }
+    return `http://localhost:${address.port}`;
+  }
+
+  closeServer(): void {
+    this.cleanupWaiters();
+    if (!this.server) return;
+    if (this.server.listening) this.server.close();
+    this.server.closeAllConnections?.();
+    this.server.unref();
+    this.server = undefined;
+  }
+
+  private readonly handleAbort = () => {
+    if (this.settled) return;
+    const reject = this.rejectListener;
+    this.settled = true;
+    this.cleanupWaiters();
+    this.closeServer();
+    reject?.(new TenantConnectCancelledError());
+  };
+
+  private cleanupWaiters(): void {
+    this.signal?.removeEventListener("abort", this.handleAbort);
+    if (this.timeout) clearTimeout(this.timeout);
+    this.timeout = undefined;
+    this.rejectListener = undefined;
+  }
 }
 
 export async function runInteractiveFlow(
@@ -251,6 +383,7 @@ export async function runInteractiveFlow(
     openBrowser: input.openBrowser,
     successTemplate: SUCCESS_TEMPLATE,
     errorTemplate: ERROR_TEMPLATE,
+    loopbackClient: new AbortableLoopbackClient(input.signal, input.timeoutMs),
   };
   if (input.redirectUri) {
     request.redirectUri = input.redirectUri;
@@ -307,7 +440,7 @@ export interface CreateTenantSessionInput {
    * scope set the cache cannot satisfy (typically because the user has
    * not yet consented to those scopes). When supplied, the session
    * delegates to it to trigger an interactive consent flow. When
-   * omitted, the session throws — Phase 3 connectors surface this as
+   * omitted, the session throws. Phase 3 connectors surface this as
    * a `ConnectorAuthError` and the host catches it to drive the
    * Connectors UI re-consent state.
    */

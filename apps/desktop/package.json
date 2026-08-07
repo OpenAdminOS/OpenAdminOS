@@ -24,6 +24,7 @@
     "preview": "vite preview",
     "pretest": "node -e \"require('electron')\"",
     "test": "node --import tsx --test \"electron/**/*.test.ts\"",
+    "pretest:renderer": "npm run build -w @openadminos/agent-sdk",
     "test:renderer": "vitest run --config vitest.config.ts",
     "typecheck": "npm run build:packages && tsc -b --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.electron.test.json --noEmit"
   },

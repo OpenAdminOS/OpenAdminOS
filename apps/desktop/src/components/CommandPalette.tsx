@@ -19,6 +19,8 @@ import { useAppState } from "../state";
 import { SETTINGS_ITEMS, SETTINGS_SECTIONS } from "../copy";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { registerOverlay } from "../shared/overlay-stack";
+import { createPendingIntent } from "../setup/pending-intent";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 
 interface PaletteItem {
   id: string;
@@ -39,6 +41,7 @@ export function CommandPalette({
 }) {
   const navigate = useNavigate();
   const { state, registryAgents, startRun } = useAppState();
+  const { requireTenantAndProvider } = useSetupFlow();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -170,6 +173,18 @@ export function CommandPalette({
               icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
               action: async () => {
                 const agent = state.installedAgents[0]!;
+                if (
+                  !requireTenantAndProvider(
+                    createPendingIntent({
+                      kind: "agent-run",
+                      slug: agent.slug,
+                      returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
+                    }),
+                  )
+                ) {
+                  onClose();
+                  return;
+                }
                 const run = await startRun(agent.slug);
                 navigate(`/runs/${run.id}`);
                 onClose();
@@ -187,7 +202,7 @@ export function CommandPalette({
             },
           ] as PaletteItem[])),
     ];
-  }, [navigate, onClose, registryAgents, startRun, state.installedAgents]);
+  }, [navigate, onClose, registryAgents, requireTenantAndProvider, startRun, state.installedAgents]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;

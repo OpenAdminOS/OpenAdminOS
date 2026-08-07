@@ -60,6 +60,7 @@ interface AppStateContextValue {
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: () => Promise<TenantRecord | undefined>;
+  cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
   disconnectTenant: (id: string) => Promise<void>;
@@ -468,6 +469,12 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setError(tenantError);
       throw tenantError;
     }
+  }, []);
+
+  const cancelConnectTenant = useCallback(async () => {
+    const api = getOpenAdminOSApi();
+    if (!api) return;
+    await api.cancelConnectTenant();
   }, []);
 
   const setActiveTenant = useCallback(async (id: string) => {
@@ -989,6 +996,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       rejectRun,
       cancelRun,
       connectTenant,
+      cancelConnectTenant,
       getRequestedScopes,
       setActiveTenant,
       disconnectTenant,
@@ -1011,6 +1019,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }),
     [
       cancelRun,
+      cancelConnectTenant,
       confirmRun,
       connectTenant,
       disconnectTenant,

@@ -5,14 +5,16 @@ description: "What happens the first time OpenAdminOS starts."
 
 # First Run
 
-On first launch, OpenAdminOS guides you through the minimum setup required before an agent can run.
+On first launch, OpenAdminOS opens directly to Chat. You can browse the app, inspect Agents and Settings, and draft a question before connecting anything.
 
-1. Review the local-first trust model.
-2. Connect a Microsoft 365 tenant.
-3. Pick an LLM provider.
-4. Install and run a first agent.
+When you send a question or start an agent for the first time:
 
-There is no demo tenant mode. If no tenant is connected, OpenAdminOS keeps you in onboarding and agents cannot start.
+1. Review the exact read-only Microsoft Graph permissions.
+2. Complete Microsoft sign-in in your system browser.
+3. Pick or repair an LLM provider if the action needs one.
+4. Review and explicitly resume the original action.
+
+Canceling keeps a Chat draft but discards the pending action. OpenAdminOS never sends a question or starts an agent automatically after sign-in. There is no demo tenant mode, and agents cannot start without an active tenant.
 
 ## Provider Choice
 

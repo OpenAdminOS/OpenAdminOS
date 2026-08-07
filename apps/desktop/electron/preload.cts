@@ -382,6 +382,7 @@ const api: OpenAdminOSApi = {
   getRequestedScopes: () =>
     ipcRenderer.invoke("openadminos:get-requested-scopes"),
   connectTenant: () => ipcRenderer.invoke("openadminos:connect-tenant"),
+  cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:set-active-tenant", id),
   disconnectTenant: (id: string) =>

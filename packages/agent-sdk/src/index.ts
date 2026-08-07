@@ -421,15 +421,33 @@ export interface StartRunOptions {
   };
 }
 
+export const DEFAULT_GRAPH_READ_SCOPE_NAMES = [
+  "DeviceManagementManagedDevices.Read.All",
+  "DeviceManagementConfiguration.Read.All",
+  "DeviceManagementApps.Read.All",
+  "DeviceManagementServiceConfig.Read.All",
+  "DeviceManagementScripts.Read.All",
+  "DeviceManagementRBAC.Read.All",
+  "Device.Read.All",
+  "GroupMember.Read.All",
+  "Organization.Read.All",
+  "Directory.Read.All",
+  "User.Read.All",
+  "Policy.Read.All",
+  "Application.Read.All",
+  "AuditLog.Read.All",
+  "IdentityRiskyUser.Read.All",
+  "SecurityEvents.Read.All",
+] as const;
+
 /**
- * One Microsoft Graph permission scope the host will request — surfaced
+ * One Microsoft Graph permission scope the host will request, surfaced
  * to the renderer so the pre-consent scope preview can list exactly
  * what MSAL is about to ask for, with a plain-English rationale.
  *
- * Today the host only requests one scope at sign-in
- * (`DeviceManagementManagedDevices.Read.All`). Additional read scopes
- * are requested incrementally via `acquireTokenForScopes` the first
- * time an agent needs them. Write scopes are never requested by default.
+ * The default read set is requested together so Chat and bundled read
+ * agents do not discover missing consent mid-answer. Write scopes are
+ * never requested by default.
  */
 export interface RequestedScope {
   name: string;
@@ -811,39 +829,42 @@ export interface IntuneChatToolCall {
   error?: string;
 }
 
-export type GraphCacheResourceKind =
-  | "managedDevices"
-  | "entraDevices"
-  | "users"
-  | "groups"
-  | "deviceCompliancePolicies"
-  | "deviceConfigurations"
-  | "configurationPolicies"
-  | "signIns"
-  | "directoryAudits"
-  | "intuneAuditEvents"
-  | "conditionalAccessPolicies"
-  | "mobileApps"
-  | "detectedApps"
-  | "managedAppPolicies"
-  | "iosManagedAppProtections"
-  | "androidManagedAppProtections"
-  | "mobileAppConfigurations"
-  | "deviceHealthScripts"
-  | "deviceManagementScripts"
-  | "windowsAutopilotDevices"
-  | "autopilotEvents"
-  | "windowsAutopilotProfiles"
-  | "deviceEnrollmentConfigurations"
-  | "windowsQualityUpdateProfiles"
-  | "windowsFeatureUpdateProfiles"
-  | "endpointSecurityIntents"
-  | "groupPolicyConfigurations"
-  | "assignmentFilters"
-  | "roleScopeTags"
-  | "managedDeviceOverview"
-  | "managedDeviceEncryptionStates"
-  | "troubleshootingEvents";
+export const GRAPH_CACHE_RESOURCE_KINDS = [
+  "managedDevices",
+  "entraDevices",
+  "users",
+  "groups",
+  "deviceCompliancePolicies",
+  "deviceConfigurations",
+  "configurationPolicies",
+  "signIns",
+  "directoryAudits",
+  "intuneAuditEvents",
+  "conditionalAccessPolicies",
+  "mobileApps",
+  "detectedApps",
+  "managedAppPolicies",
+  "iosManagedAppProtections",
+  "androidManagedAppProtections",
+  "mobileAppConfigurations",
+  "deviceHealthScripts",
+  "deviceManagementScripts",
+  "windowsAutopilotDevices",
+  "autopilotEvents",
+  "windowsAutopilotProfiles",
+  "deviceEnrollmentConfigurations",
+  "windowsQualityUpdateProfiles",
+  "windowsFeatureUpdateProfiles",
+  "endpointSecurityIntents",
+  "groupPolicyConfigurations",
+  "assignmentFilters",
+  "roleScopeTags",
+  "managedDeviceOverview",
+  "managedDeviceEncryptionStates",
+  "troubleshootingEvents",
+] as const;
+
+export type GraphCacheResourceKind = (typeof GRAPH_CACHE_RESOURCE_KINDS)[number];
 
 export interface GraphCacheResourceStatus {
   resource: GraphCacheResourceKind;
@@ -2067,6 +2088,7 @@ export interface OpenAdminOSApi {
    */
   getRequestedScopes(): Promise<RequestedScope[]>;
   connectTenant(): Promise<AppState>;
+  cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
   getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined>;

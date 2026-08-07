@@ -35,6 +35,8 @@ import type {
   WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
+import { createPendingIntent } from "../setup/pending-intent";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 
 type DateRangeValue = "24h" | "7d" | "30d" | "all";
 
@@ -56,6 +58,7 @@ const focusRingClass =
 
 export default function Changes() {
   const navigate = useNavigate();
+  const { requireTenant } = useSetupFlow();
   const { state } = useAppState();
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -379,7 +382,13 @@ export default function Changes() {
         </div>
 
         {!activeTenant ? (
-          <NoTenantState onConnect={() => navigate("/onboarding")} />
+          <NoTenantState
+            onConnect={() =>
+              requireTenant(
+                createPendingIntent({ kind: "view-changes", returnTo: "/changes" }),
+              )
+            }
+          />
         ) : (
           <div className="space-y-4">
             {error ? (
