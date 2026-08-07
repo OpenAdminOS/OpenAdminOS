@@ -17,7 +17,7 @@
 
 [**Download**](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) · [**Website**](https://openadminos.com) · [**Docs**](docs/SPEC.md) · [**Contributing**](CONTRIBUTING.md) · [**Changelog**](CHANGELOG.md)
 
-![OpenAdminOS desktop app](docs/demo.png)
+![OpenAdminOS Intune Chat with sourced device findings and a matching agent](docs/screenshots/app/chat-transcript.png)
 
 </div>
 
