@@ -14,6 +14,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+## [0.4.2] - 2026-08-07
+
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+- Kept the apt repository passphrase optional for the existing unencrypted signing key while still requiring the private signing key for tagged Linux releases.
+
+### Security
+
 ## [0.4.1] - 2026-08-07
 
 ### Added

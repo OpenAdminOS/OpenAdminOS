@@ -21,7 +21,7 @@ name: Release
 #   macOS:  CSC_LINK, CSC_KEY_PASSWORD, CSC_INSTALLER_LINK,
 #           CSC_INSTALLER_KEY_PASSWORD, APPLE_API_KEY,
 #           APPLE_API_KEY_ID, APPLE_API_ISSUER
-#   Linux apt repo: APT_GPG_PRIVATE_KEY, APT_GPG_PASSPHRASE
+#   Linux apt repo: APT_GPG_PRIVATE_KEY, optional APT_GPG_PASSPHRASE
 #   (Windows AppX validation is manual-only and is not published. Linux artifacts
 #   are unsigned packages and are published with SHA-256 checksums.)
 #
@@ -354,18 +354,11 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
-          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
         shell: bash
         run: |
           set -euo pipefail
-          missing=()
-          for name in APT_GPG_PRIVATE_KEY APT_GPG_PASSPHRASE; do
-            if [ -z "${!name:-}" ]; then
-              missing+=("$name")
-            fi
-          done
-          if [ "${#missing[@]}" -ne 0 ]; then
-            printf '::error::Tagged Linux releases require these apt-repository signing secrets: %s\n' "${missing[*]}"
+          if [ -z "${APT_GPG_PRIVATE_KEY:-}" ]; then
+            echo "::error::Tagged Linux releases require the APT_GPG_PRIVATE_KEY repository-signing secret."
             exit 1
           fi
 

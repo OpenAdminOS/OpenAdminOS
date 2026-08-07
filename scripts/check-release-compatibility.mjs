@@ -96,6 +96,17 @@ if (!changelog.includes(`## [${releaseVersion}]`)) {
   fail(`CHANGELOG.md must contain a ## [${releaseVersion}] release section.`);
 }
 
+const releaseWorkflow = readFileSync(".github/workflows/release.yml", "utf8");
+if (
+  releaseWorkflow.includes(
+    "for name in APT_GPG_PRIVATE_KEY APT_GPG_PASSPHRASE",
+  )
+) {
+  fail(
+    "APT_GPG_PASSPHRASE must remain optional because the repository signing key may be unencrypted.",
+  );
+}
+
 if (!process.exitCode) {
   process.stdout.write(
     `Release ${releaseVersion} keeps the macOS updater identity and Linux package identities used by ${BASELINE_VERSION}.\n`,
