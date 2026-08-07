@@ -1,18 +1,19 @@
-name: Auto-tag release commits
+name: Auto-tag release versions
 
-# When a "release: vX.Y.Z" marker lands on main (typically via the
-# release-prep PR), this workflow extracts the version from the commit
-# message and pushes the matching tag. The push triggers release.yml,
-# which builds and uploads the signed artifacts to a public GitHub
-# release. Squash merges put the marker in the subject; normal merge
-# commits can put the release PR title in the commit body.
+# After CI succeeds on main, this workflow reads the repository version and
+# pushes the matching tag when it does not exist yet. Waiting for green CI is
+# important because a squash merge can change path-specific generated-doc
+# metadata; the documentation workflow may need to land its reconciliation PR
+# before the release source is ready to tag.
 #
-# Gated on the release marker so day-to-day merges don't tag.
+# Day-to-day merges are harmless because their package version already has a
+# tag. A release-prep merge introduces the next untagged version.
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -27,39 +28,48 @@ env:
 
 jobs:
   tag:
-    if: "${{ contains(github.event.head_commit.message, 'release: v') }}"
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
+
+      - name: Verify the green commit is still current
+        id: current
+        run: |
+          set -euo pipefail
+          git fetch origin refs/heads/main:refs/remotes/origin/main
+          green_sha="$(git rev-parse HEAD)"
+          main_sha="$(git rev-parse origin/main)"
+          if [ "$green_sha" != "$main_sha" ]; then
+            echo "::notice::Skipping $green_sha because main has advanced to $main_sha; its CI run will decide tagging."
+            echo "matches=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "matches=true" >> "$GITHUB_OUTPUT"
 
       - name: Resolve tag
         id: tag
-        env:
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        if: ${{ steps.current.outputs.matches == 'true' }}
         run: |
           set -euo pipefail
-          # Squash-merge commit subject: "release: vX.Y.Z (#NN)".
-          # Normal merge commit body: "release: vX.Y.Z".
-          release_line="$(printf '%s\n' "$COMMIT_MESSAGE" \
-            | grep -m1 -E '^release: v[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?([[:space:]].*)?$' || true)"
-          if [ -z "$release_line" ]; then
-            echo "::error::Commit message contains 'release: v' but no valid release marker line: $COMMIT_MESSAGE" >&2
-            exit 1
-          fi
-          version="$(printf '%s\n' "$release_line" \
-            | sed -E 's/^release: v([0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?).*$/\1/')"
-          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            echo "::error::Could not parse version from commit message: $COMMIT_MESSAGE" >&2
+          version="$(node -p "require('./package.json').version")"
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?$'; then
+            echo "::error::package.json contains an invalid release version: $version" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag doesn't already exist
         id: existing
+        if: ${{ steps.current.outputs.matches == 'true' }}
         env:
           TAG: v${{ steps.tag.outputs.version }}
         run: |
@@ -76,7 +86,7 @@ jobs:
           echo "exists=false" >> "$GITHUB_OUTPUT"
 
       - name: Push tag
-        if: ${{ steps.existing.outputs.exists != 'true' }}
+        if: ${{ steps.current.outputs.matches == 'true' && steps.existing.outputs.exists != 'true' }}
         env:
           TAG: v${{ steps.tag.outputs.version }}
         run: |
@@ -88,7 +98,7 @@ jobs:
           echo "Pushed $TAG."
 
       - name: Dispatch release workflow
-        if: ${{ steps.existing.outputs.exists != 'true' }}
+        if: ${{ steps.current.outputs.matches == 'true' && steps.existing.outputs.exists != 'true' }}
         # The tag push above does NOT trigger release.yml on its own —
         # GitHub deliberately suppresses workflow chaining when one
         # workflow's GITHUB_TOKEN is the actor that pushed (anti-loop

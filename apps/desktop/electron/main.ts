@@ -5778,7 +5778,15 @@ if (!gotLock) {
         void createCompanionWindow();
         debugStartupLog("created hidden companion window");
       } else {
-        void createWindow({ show: true });
+        const smokeRoute = isIntuneChatSmokeLaunch
+          ? "/onboarding"
+          : isReportIssueSmokeLaunch
+            ? "/chat"
+            : undefined;
+        void createWindow({
+          show: true,
+          ...(smokeRoute ? { route: smokeRoute } : {}),
+        });
         debugStartupLog("created main window");
       }
     }
