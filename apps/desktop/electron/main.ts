@@ -61,6 +61,7 @@ import type {
   PinWorkspaceEvidenceInput,
   PreflightMultiTenantChatInput,
   ProviderId,
+  ProviderSummary,
   QueueMultiTenantAgentBatchInput,
   RefreshGraphCacheOptions,
   ReleaseDiagnostics,
@@ -809,6 +810,20 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
       };
     },
   };
+}
+
+function createIntuneChatSmokeProviders(): ProviderSummary[] {
+  return providerCatalog.map((provider) =>
+    provider.id === "ollama"
+      ? {
+          ...provider,
+          status: "connected",
+          detail: "Deterministic local provider fixture for Electron smoke tests.",
+          models: ["smoke-local-model"],
+          defaultModel: "smoke-local-model",
+        }
+      : { ...provider },
+  );
 }
 
 function failIntuneChatSmoke(error: unknown): void {
@@ -5729,6 +5744,7 @@ if (!gotLock) {
         ? {
             graphFactory: () => createIntuneChatSmokeGraph(),
             llmFactory: () => createIntuneChatSmokeLlm(),
+            providerListFactory: () => createIntuneChatSmokeProviders(),
           }
         : {}),
     });

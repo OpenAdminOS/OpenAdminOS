@@ -1226,7 +1226,9 @@ the real preload/IPC chat path through a 10-prompt pass, verifies a grounded
 answer, Stop, Regenerate, agent suggestion, collapsible history rail, copy
 response action, accepts a local self-training suggestion, and confirms scheduled
 cache refresh UI state.
-This fixture does not replace a final live-tenant pilot run, but it guards the
+The fixture injects deterministic local-provider readiness plus Graph and LLM
+adapters, so it never depends on Ollama or another provider being installed on
+the CI host. It does not replace a final live-tenant pilot run, but it guards the
 desktop path without requiring tenant credentials in CI or local automation.
 The v0.3 release gate also includes `npm run screenshots`, a dev-only Electron
 capture harness gated by `OPENADMINOS_SCREENSHOT_CAPTURE=1` and `!app.isPackaged`.

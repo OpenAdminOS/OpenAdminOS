@@ -944,6 +944,12 @@ export interface AppStateStoreOptions {
     ) => void;
   }): RunGraphApi;
   /**
+   * Test hook for deterministic provider detection in host-level smoke tests.
+   * Production leaves this unset so provider readiness always comes from the
+   * real local and hosted provider adapters.
+   */
+  providerListFactory?(): Promise<ProviderSummary[]> | ProviderSummary[];
+  /**
    * Test hook for host-level chat/cache smoke tests. Production code
    * leaves this unset so provider availability and trust messaging still
    * come from the configured provider adapters.
@@ -994,6 +1000,9 @@ export class AppStateStore {
   private readonly runService: RunService;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
+  private readonly providerListFactory:
+    | AppStateStoreOptions["providerListFactory"]
+    | undefined;
   private readonly llmFactory: AppStateStoreOptions["llmFactory"] | undefined;
   private readonly whatsAppWebClientFactory:
     | AppStateStoreOptions["whatsAppWebClientFactory"]
@@ -1031,6 +1040,7 @@ export class AppStateStore {
       this.userDataPath = undefined;
       this.intelligenceStore = undefined;
       this.graphFactory = undefined;
+      this.providerListFactory = undefined;
       this.llmFactory = undefined;
       this.whatsAppWebClientFactory = undefined;
       this.connectorSecretsForOverride = undefined;
@@ -1056,6 +1066,7 @@ export class AppStateStore {
         ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"))
         : undefined;
       this.graphFactory = options.graphFactory;
+      this.providerListFactory = options.providerListFactory;
       this.llmFactory = options.llmFactory;
       this.whatsAppWebClientFactory = options.whatsAppWebClientFactory;
       this.connectorSecretsForOverride = options.connectorSecretsFor;
@@ -1753,6 +1764,10 @@ export class AppStateStore {
   }
 
   async listProviders(): Promise<ProviderSummary[]> {
+    if (this.providerListFactory) {
+      return this.providerListFactory();
+    }
+
     let azureOpenAIConfig: AzureOpenAIProviderConfig | undefined;
     let azureOpenAIConfigError: string | undefined;
     try {
