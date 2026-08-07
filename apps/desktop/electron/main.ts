@@ -384,7 +384,7 @@ function seedIntuneChatSmokeState(userDataDir: string): void {
     JSON.stringify(
       {
         activeProviderId: "ollama",
-        activeModelByProviderId: { ollama: "smoke-local-model" },
+        activeModelByProviderId: { ollama: "test-smoke-local-model" },
         installedAgents: [
           {
             id: "offboarding-agent",
@@ -774,11 +774,11 @@ function createIntuneChatSmokeGraph(): RunGraphApi {
 function createIntuneChatSmokeLlm(): RunLlmApi {
   return {
     available: true,
-    defaultModel: "smoke-local-model",
+    defaultModel: "test-smoke-local-model",
     async complete() {
       return {
         text: "WIN-01 is stale based on cached Intune and Entra device evidence.",
-        model: "smoke-local-model",
+        model: "test-smoke-local-model",
       };
     },
     async *stream(options) {
@@ -787,7 +787,7 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
           delta: "Partial response",
           accumulated: "Partial response",
           done: false,
-          model: "smoke-local-model",
+          model: "test-smoke-local-model",
         };
         const started = Date.now();
         while (!options.signal?.aborted && Date.now() - started < 5000) {
@@ -801,13 +801,13 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
         delta: "WIN-01 is stale",
         accumulated: "WIN-01 is stale",
         done: false,
-        model: "smoke-local-model",
+        model: "test-smoke-local-model",
       };
       yield {
         delta: " based on cached Intune and Entra device evidence.",
         accumulated: "WIN-01 is stale based on cached Intune and Entra device evidence.",
         done: true,
-        model: "smoke-local-model",
+        model: "test-smoke-local-model",
       };
     },
   };
@@ -820,8 +820,8 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
           ...provider,
           status: "connected",
           detail: "Deterministic local provider fixture for Electron smoke tests.",
-          models: ["smoke-local-model"],
-          defaultModel: "smoke-local-model",
+          models: ["test-smoke-local-model"],
+          defaultModel: "test-smoke-local-model",
         }
       : { ...provider },
   );
