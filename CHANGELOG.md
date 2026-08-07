@@ -43,6 +43,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Removed inert `openadminos://` copy-link actions until the desktop app registers and handles that protocol.
 
 ### Fixed
+- Removed a provider-fixture cleanup race that could make Linux CI fail after all assertions passed.
 - Fixed the local Graph QA setup helper so its documented `eval` invocation exports the resolved reference-data path to child processes.
 - Made the Electron Intune Chat smoke fixture inject deterministic provider readiness instead of depending on Ollama being installed on the CI host.
 - Made CI and release-source documentation gates fetch full Git history so path-specific generated metadata stays deterministic on GitHub runners.

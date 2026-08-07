@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -17,6 +17,17 @@ const tokenStore: TokenCacheStorage = {
 describe("provider list fixture", () => {
   it("uses the injected provider list without probing the host", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-provider-list-"));
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        activeProviderId: "ollama",
+        installedAgents: [],
+        runs: [],
+        tenants: [],
+      })}\n`,
+      "utf8",
+    );
     const fixture: ProviderSummary[] = [
       {
         id: "ollama",
@@ -30,8 +41,7 @@ describe("provider list fixture", () => {
     ];
     let calls = 0;
     const store = new AppStateStore({
-      filePath: join(dir, "state.json"),
-      userDataPath: dir,
+      filePath: statePath,
       tokenStore,
       statsApiUrl: "",
       providerListFactory: () => {
