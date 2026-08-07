@@ -25,6 +25,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Delayed automatic version tagging until the exact main-branch commit passes CI, allowing post-merge generated documentation to reconcile before release packaging starts.
+- Pinned Electron smoke launches to their first test route so renderer startup navigation cannot race the onboarding or support-flow assertion.
 
 ### Security
 
