@@ -70,6 +70,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Generated agent docs include path-specific commit metadata.
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4

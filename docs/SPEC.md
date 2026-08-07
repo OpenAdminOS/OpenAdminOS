@@ -83,7 +83,7 @@ OpenAdminOS is **one TypeScript monorepo that ships a polished Electron desktop 
 
 Public documentation is GitBook-synced from `docs/gitbook`, with the repository root `.gitbook.yaml` setting `root: ./docs/gitbook`. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the GitBook root.
 
-Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/index.json` and regenerates GitBook pages under `docs/gitbook/generated` from `agents/*/manifest.yaml` plus the registry index. Generated pages include the agent catalog, per-agent pages, the Microsoft Graph scope matrix, the write safety matrix, and the LLM provider matrix. Generated pages should not be edited manually; update the manifest or generator instead.
+Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/index.json` and regenerates GitBook pages under `docs/gitbook/generated` from `agents/*/manifest.yaml` plus the registry index. Generated pages include the agent catalog, per-agent pages, the Microsoft Graph scope matrix, the write safety matrix, and the LLM provider matrix. Generated pages should not be edited manually; update the manifest or generator instead. CI jobs that verify generated docs must check out full Git history because the generated `Last changed` fields use path-specific commit metadata.
 
 The docs GitHub Action checks generated docs on pull requests and, after commits to `main`, opens a documentation update PR if generated output changed. It does not silently publish LLM-authored documentation to `main`.
 

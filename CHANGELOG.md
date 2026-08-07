@@ -29,6 +29,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Removed inert `openadminos://` copy-link actions until the desktop app registers and handles that protocol.
 
 ### Fixed
+- Made CI and release-source documentation gates fetch full Git history so path-specific generated metadata stays deterministic on GitHub runners.
 - Fixed Linux release packaging with an explicit executable and desktop identity, aligned the packaged Electron runtime with the audited lockfile, refreshed desktop and website dependencies to zero known audit findings, preflighted Electron before parallel host tests, and made smoke/capture runners resolve hoisted tooling reliably.
 - Made tagged macOS and Linux releases fail closed before publication when signing or notarization secrets are missing, while preserving unsigned manual packaging validation.
 - Completed the v0.4 functional hardening pass: full beta Graph pagination, non-idempotent retry safety, Autopilot projection compatibility, server-side Changes search, capped-cache drift correctness, schedule activation anchoring, tenant-data purge on disconnect, connector permission/confirmation fixes, updater error recovery, and a missing-route recovery state.
