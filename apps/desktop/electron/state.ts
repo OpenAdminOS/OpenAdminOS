@@ -1017,6 +1017,7 @@ export class AppStateStore {
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
   private msalClient: PublicClientApplication | undefined;
+  private tenantConnectController: AbortController | undefined;
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
   // Registry cache — populated by initRegistry(), falls back to
@@ -4334,15 +4335,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async connectTenant(): Promise<AppState> {
+    this.tenantConnectController?.abort();
+    const controller = new AbortController();
+    this.tenantConnectController = controller;
     const client = this.getMsalClient();
     let result;
     try {
       result = await runInteractiveFlow({
         client,
         openBrowser: this.openBrowser,
+        signal: controller.signal,
+        timeoutMs: 300_000,
       });
     } catch (error) {
       throw new Error(humanizeMsalError(error));
+    } finally {
+      if (this.tenantConnectController === controller) {
+        this.tenantConnectController = undefined;
+      }
     }
 
     if (!result.account) {
@@ -4390,6 +4400,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     void this.probeEntraTier(tenant).catch(() => undefined);
 
     return this.getAppState();
+  }
+
+  cancelConnectTenant(): void {
+    this.tenantConnectController?.abort();
+    this.tenantConnectController = undefined;
   }
 
   /**

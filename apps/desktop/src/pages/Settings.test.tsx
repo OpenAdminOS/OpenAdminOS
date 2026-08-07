@@ -51,6 +51,37 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(row.closest(".setting-row")).toHaveFocus());
   });
 
+  it("opens contextual tenant setup before refreshing an empty tenant cache", async () => {
+    const user = userEvent.setup();
+    const connectedState = createMockAppState();
+    const bridge = makeMockBridge(
+      { connectTenant: vi.fn(async () => connectedState) },
+      createMockAppState({ tenants: [], activeTenantId: undefined }),
+    );
+
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/chat",
+      bridge,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Refresh now" }));
+    expect(
+      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+    ).toBeInTheDocument();
+    expect(bridge.refreshGraphCache).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: "Approve and continue to Microsoft" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Continue refresh" }),
+    ).toBeInTheDocument();
+    expect(bridge.refreshGraphCache).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Continue refresh" }));
+    await waitFor(() => expect(bridge.refreshGraphCache).toHaveBeenCalledOnce());
+  });
+
   it("renders implemented and coming-soon providers and sets the active provider", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge(

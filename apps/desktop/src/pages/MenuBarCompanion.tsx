@@ -112,7 +112,7 @@ export default function MenuBarCompanion() {
     if (!api || sendingRef.current || !content) return;
     if (!snapshot.activeTenant) {
       setNotice("Open the full app to finish tenant setup.");
-      await openMain("/onboarding");
+      await openMain("/chat");
       return;
     }
     if (!snapshot.provider || snapshot.provider.status !== "connected") {

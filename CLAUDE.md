@@ -31,7 +31,8 @@ The architecture is an Electron + Vite + React monorepo with a clean provider-ad
 `docs/mockups/` contains 8 fully-designed HTML mockups using the production design system. When building any UI, open the relevant mockup first. The CSS variables in `docs/mockups/_design.css` are the design tokens — port them directly to the production app's theme system.
 
 Mapping:
-- `01-onboarding.html` → first-run setup flow
+- `01-onboarding.html` → historical blocking first-run flow (superseded)
+- `15-contextual-setup.html` → current Chat-first tenant/provider activation flow
 - `02-msal-consent.html` → Graph permissions screen
 - `03-agents-grid.html` → home / agents list
 - `04-live-run.html` → live run modal

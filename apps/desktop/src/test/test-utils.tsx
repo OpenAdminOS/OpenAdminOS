@@ -5,6 +5,7 @@ import { vi } from "vitest";
 
 import { ToastProvider } from "../components/Toast";
 import { AppStateProvider } from "../state";
+import { SetupFlowProvider } from "../setup/SetupFlowContext";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   DEFAULT_DRIFT_RETENTION_SETTINGS,
@@ -607,6 +608,7 @@ export function makeMockBridge(
     listTenants: vi.fn(async () => appState.tenants),
     getRequestedScopes: vi.fn(async () => []),
     connectTenant: vi.fn(async () => appState),
+    cancelConnectTenant: vi.fn(async () => undefined),
     setActiveTenant: vi.fn(async (id: string) =>
       updateState({ ...appState, activeTenantId: id }),
     ),
@@ -682,7 +684,9 @@ export function renderWithAppState(
     wrapper: ({ children }: { children: ReactNode }) => (
       <AppStateProvider>
         <ToastProvider>
-          <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+          <MemoryRouter initialEntries={[route]}>
+            <SetupFlowProvider>{children}</SetupFlowProvider>
+          </MemoryRouter>
         </ToastProvider>
       </AppStateProvider>
     ),

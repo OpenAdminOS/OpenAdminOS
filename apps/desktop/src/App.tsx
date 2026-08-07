@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router"
 import { AppShell, TitleBarInset } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
-import { useAppState } from "./state";
 
 const Agents = lazy(() => import("./pages/Agents"));
 const AgentsHome = lazy(() => import("./pages/AgentsHome"));
@@ -15,7 +14,6 @@ const Changes = lazy(() => import("./pages/Changes"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Connectors = lazy(() => import("./pages/Connectors"));
 const Settings = lazy(() => import("./pages/Settings"));
-const Onboarding = lazy(() => import("./pages/Onboarding"));
 const RunResult = lazy(() => import("./pages/RunResult"));
 const Schedules = lazy(() => import("./pages/Schedules"));
 const MenuBarCompanion = lazy(() => import("./pages/MenuBarCompanion"));
@@ -23,8 +21,6 @@ const MenuBarCompanion = lazy(() => import("./pages/MenuBarCompanion"));
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { state, loading } = useAppState();
-  const noShell = location.pathname.startsWith("/onboarding");
   const isCompanion = location.pathname.startsWith("/companion");
   const hasDesktopBridge = Boolean(window.openAdminOS);
 
@@ -53,25 +49,8 @@ export default function App() {
     );
   }
 
-  if (!hasDesktopBridge && !noShell) {
-    return <DesktopBridgeUnavailable onOpenOnboarding={() => navigate("/onboarding")} />;
-  }
-
-  // Routing gate: no tenants -> onboarding is the only reachable route.
-  // Defer the gate until initial state has loaded so we don't bounce a
-  // user with persisted tenants through onboarding during cold start.
-  if (!loading && state.tenants.length === 0 && !noShell) {
-    return <Navigate to="/onboarding" replace />;
-  }
-
-  if (noShell) {
-    return (
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/onboarding" element={<Onboarding />} />
-        </Routes>
-      </Suspense>
-    );
+  if (!hasDesktopBridge) {
+    return <DesktopBridgeUnavailable onOpenChat={() => navigate("/chat")} />;
   }
 
   return (
@@ -79,6 +58,7 @@ export default function App() {
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<Navigate to="/chat" replace />} />
+          <Route path="/onboarding" element={<Navigate to="/chat" replace />} />
           <Route path="/agents" element={<Agents />}>
             <Route index element={<AgentsHome />} />
             <Route path="hub" element={<AgentHub embedded />} />
@@ -137,9 +117,9 @@ function RouteFallback({ compact = false }: { compact?: boolean }) {
 }
 
 function DesktopBridgeUnavailable({
-  onOpenOnboarding,
+  onOpenChat,
 }: {
-  onOpenOnboarding: () => void;
+  onOpenChat: () => void;
 }) {
   return (
     <div className="flex h-full w-full flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -163,8 +143,8 @@ function DesktopBridgeUnavailable({
               <Button variant="primary" onClick={() => window.location.reload()}>
                 Reload
               </Button>
-              <Button variant="secondary" onClick={onOpenOnboarding}>
-                View onboarding
+              <Button variant="secondary" onClick={onOpenChat}>
+                View Chat
               </Button>
             </div>
           </div>

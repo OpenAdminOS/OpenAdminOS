@@ -19,6 +19,76 @@ import type {
 } from "../shared/openAdminOS";
 import { CHAT_COPY, deriveTrustCopy } from "../copy";
 
+describe("IntuneChat guest exploration", () => {
+  it("lets a user draft from a suggestion and asks for setup only on Send", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ tenants: [], activeTenantId: undefined }),
+    );
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    const composer = await screen.findByPlaceholderText(
+      "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Which managed devices have not synced in the last 7 days?",
+      }),
+    );
+    expect(composer).toHaveValue(
+      "Which managed devices have not synced in the last 7 days?",
+    );
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(
+      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+    ).toBeInTheDocument();
+    expect(bridge.connectTenant).not.toHaveBeenCalled();
+    expect(composer).toHaveValue(
+      "Which managed devices have not synced in the last 7 days?",
+    );
+  });
+
+  it("sends exactly once after the user explicitly resumes completed setup", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectedState = createMockAppState();
+    const bridge = makeMockBridge(
+      { connectTenant: vi.fn(async () => connectedState) },
+      emptyState,
+    );
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    const composer = await screen.findByPlaceholderText(
+      "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
+    );
+    await user.type(composer, "Which Windows devices are stale?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Send your question" }),
+    ).toBeInTheDocument();
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Send your question" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+  });
+});
+
 describe("IntuneChat hosted-provider consent", () => {
   it("shows consent copy and waits for explicit confirmation before sending tenant context", async () => {
     const user = userEvent.setup();

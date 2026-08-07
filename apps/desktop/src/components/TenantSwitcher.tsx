@@ -13,10 +13,12 @@ import {
 } from "./icons";
 import { useAppState } from "../state";
 import { useToast } from "./Toast";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 
 export function TenantSwitcher() {
   const navigate = useNavigate();
-  const { state, setActiveTenant, connectTenant, disconnectTenant } = useAppState();
+  const { state, setActiveTenant, disconnectTenant } = useAppState();
+  const { openSetup } = useSetupFlow();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -57,16 +59,6 @@ export function TenantSwitcher() {
     setBusy(true);
     try {
       await setActiveTenant(tenantId);
-      setOpen(false);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleConnect = async () => {
-    setBusy(true);
-    try {
-      await connectTenant();
       setOpen(false);
     } finally {
       setBusy(false);
@@ -177,12 +169,15 @@ export function TenantSwitcher() {
 
           <div className="flex items-center gap-1 border-t border-[var(--color-border-soft)] bg-[var(--color-surface)] p-1.5">
             <button
-              onClick={() => void handleConnect()}
+              onClick={() => {
+                setOpen(false);
+                openSetup();
+              }}
               disabled={busy}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
             >
               <IconPlus size={11} />
-              {busy ? "Waiting for sign-in…" : "Connect tenant"}
+              Connect tenant
             </button>
             <button
               onClick={() => {

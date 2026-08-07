@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenAdminOS · Contextual setup</title>
+  <style>
+    :root { color-scheme: dark; --bg:#1c1917; --deep:#151311; --side:#191614; --surface:#24211f; --raised:#2b2724; --line:#37312c; --soft-line:#2b2723; --text:#f5f1eb; --soft:#bbb1a6; --muted:#8f8479; --accent:#e8a87c; --accent-soft:rgba(232,168,124,.13); --success:#9cc88f; --success-soft:rgba(156,200,143,.12); --warning:#e5c678; --warning-soft:rgba(229,198,120,.12); --danger:#e58888; --mono:ui-monospace,"SFMono-Regular",Menlo,monospace; --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; }
+    body { background:var(--deep); color:var(--text); font:14px/1.45 var(--sans); }
+    button { color:inherit; font:inherit; }
+    button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+    .window { display:grid; grid-template-rows:32px minmax(0,1fr) 28px; width:100vw; height:100vh; min-width:760px; min-height:620px; border:1px solid #0d0c0b; background:var(--bg); }
+    .titlebar { display:grid; grid-template-columns:110px 1fr 110px; align-items:center; border-bottom:1px solid var(--soft-line); background:#161412; color:var(--muted); font:10px var(--mono); }
+    .traffic { display:flex; gap:7px; padding-left:13px; } .traffic i { width:10px; height:10px; border-radius:50%; background:#665d55; } .traffic i:first-child{background:#d96b62}.traffic i:nth-child(2){background:#cba456}.traffic i:last-child{background:#6eaf6d}
+    .titlebar span { text-align:center; } .titlebar small { justify-self:end; padding-right:12px; text-transform:uppercase; letter-spacing:.08em; }
+    .app { display:grid; grid-template-columns:252px minmax(0,1fr); min-height:0; }
+    aside { display:flex; min-height:0; flex-direction:column; border-right:1px solid var(--soft-line); background:var(--side); }
+    .brand { display:flex; align-items:center; gap:9px; height:49px; padding:0 14px; font-weight:700; }
+    .mark { display:grid; width:26px; height:26px; place-items:center; border-radius:8px; background:var(--accent-soft); color:var(--accent); }
+    .version { border-radius:4px; background:var(--surface); padding:2px 5px; color:var(--muted); font:9px var(--mono); }
+    .tenant { margin:3px 11px 12px; border:1px solid var(--soft-line); border-radius:10px; background:var(--surface); padding:11px; }
+    .tenant strong { display:block; font-size:12px; } .tenant small { display:block; margin-top:2px; color:var(--warning); font-size:10px; }
+    nav { display:grid; gap:3px; padding:0 9px; }
+    nav button { border:0; border-radius:8px; background:transparent; padding:9px 11px; color:var(--soft); text-align:left; cursor:pointer; }
+    nav button.active { border-left:2px solid var(--accent); background:var(--surface); color:var(--text); }
+    .side-note { margin-top:auto; padding:15px; color:var(--muted); font:9px/1.55 var(--mono); }
+    main { display:grid; min-width:0; min-height:0; grid-template-rows:58px minmax(0,1fr) auto; }
+    .head { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--soft-line); padding:0 22px; }
+    .head strong { display:block; font-size:13px; } .head small { display:block; margin-top:2px; color:var(--muted); font-size:10px; }
+    .badge { border-radius:999px; background:var(--warning-soft); padding:5px 9px; color:var(--warning); font-size:10px; }
+    .empty { display:flex; width:min(680px,calc(100% - 48px)); min-height:0; margin:0 auto; flex-direction:column; justify-content:flex-end; padding:35px 0 24px; text-align:center; }
+    .empty h1 { margin:0; font-size:25px; letter-spacing:-.025em; } .empty p { margin:7px 0 18px; color:var(--soft); }
+    .prompts { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .prompts button { border:1px solid var(--soft-line); border-radius:10px; background:var(--surface); padding:11px; color:var(--soft); cursor:pointer; text-align:left; }
+    .composer { width:min(720px,calc(100% - 48px)); margin:0 auto 18px; border:1px solid var(--line); border-radius:12px; background:var(--raised); padding:9px; }
+    .guest { margin-bottom:8px; border:1px solid rgba(229,198,120,.24); border-radius:8px; background:var(--warning-soft); padding:8px 10px; color:var(--warning); font-size:11px; }
+    textarea { width:100%; min-height:70px; resize:none; border:0; outline:0; background:transparent; color:var(--text); font:13px/1.55 var(--sans); }
+    .compose-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; color:var(--muted); font-size:10px; }
+    .primary,.secondary,.ghost { min-height:34px; border-radius:8px; padding:0 13px; cursor:pointer; }
+    .primary { border:1px solid var(--accent); background:var(--accent); color:#1a120c; font-weight:650; } .secondary { border:1px solid var(--line); background:var(--surface); } .ghost { border:0; background:transparent; color:var(--soft); }
+    footer { display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--soft-line); padding:0 13px; color:var(--muted); font:9px var(--mono); }
+    footer button { border:0; background:transparent; color:var(--warning); cursor:pointer; font:inherit; }
+    .scrim { position:fixed; inset:0; display:grid; place-items:center; background:rgba(10,8,6,.67); padding:28px; }
+    .dialog { display:flex; width:min(680px,100%); max-height:min(760px,100%); flex-direction:column; overflow:hidden; border:1px solid #514940; border-radius:16px; background:#211e1c; box-shadow:0 22px 70px rgba(0,0,0,.5); }
+    .dialog-head { display:flex; align-items:flex-start; justify-content:space-between; border-bottom:1px solid var(--soft-line); padding:17px 20px; }
+    .dialog-head h2 { margin:0; font-size:16px; } .dialog-head p { margin:3px 0 0; color:var(--muted); font-size:11px; }
+    .step-tabs { display:flex; gap:5px; padding:10px 20px 0; }
+    .step-tabs button { border:1px solid var(--soft-line); border-radius:999px; background:transparent; padding:5px 9px; color:var(--muted); font:9px var(--mono); cursor:pointer; }
+    .step-tabs button.active { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
+    .panel { min-height:0; overflow:auto; padding:18px 20px 20px; }
+    .intent { border:1px solid rgba(232,168,124,.24); border-radius:9px; background:var(--accent-soft); padding:10px 12px; font-size:11px; }
+    .signin { display:flex; gap:11px; margin-top:12px; border:1px solid var(--soft-line); border-radius:11px; background:var(--surface); padding:13px; }
+    .icon { display:grid; width:32px; height:32px; flex:0 0 32px; place-items:center; border-radius:8px; background:var(--success-soft); color:var(--success); }
+    .signin strong { font-size:12px; } .signin p { margin:3px 0 0; color:var(--soft); font-size:11px; }
+    .scope-label { margin:18px 0 8px; color:var(--muted); font:9px var(--mono); text-transform:uppercase; letter-spacing:.1em; }
+    details { margin-top:7px; border:1px solid var(--soft-line); border-radius:10px; background:var(--surface); }
+    summary { padding:11px 13px; cursor:pointer; font-size:11.5px; } details p { margin:0; border-top:1px solid var(--soft-line); padding:10px 13px; color:var(--soft); font:10px/1.6 var(--mono); }
+    .note { margin-top:13px; border-radius:9px; background:var(--raised); padding:10px 12px; color:var(--muted); font-size:10px; line-height:1.65; }
+    .center { display:grid; min-height:310px; place-items:center; text-align:center; } .center h3 { margin:13px 0 4px; font-size:16px; } .center p { max-width:450px; margin:0; color:var(--soft); font-size:12px; }
+    .spinner { width:38px; height:38px; border:3px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; } @keyframes spin{to{transform:rotate(360deg)}}
+    .providers { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:15px; } .provider { border:1px solid var(--line); border-radius:10px; background:var(--surface); padding:13px; } .provider.selected{border-color:var(--accent);background:var(--accent-soft)} .provider strong{display:block;font-size:12px}.provider small{color:var(--muted);font-size:10px}
+    .ready { border:1px solid rgba(156,200,143,.25); border-radius:11px; background:var(--success-soft); padding:15px; } .ready strong{display:block}.ready small{color:var(--soft)}
+    .dialog-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; border-top:1px solid var(--soft-line); padding:14px 20px; }
+    [hidden] { display:none!important; }
+    @media(max-width:900px){.app{grid-template-columns:210px minmax(0,1fr)}.prompts{grid-template-columns:1fr}.dialog{width:min(620px,100%)}}
+    @media(max-width:720px){.dialog-foot{flex-direction:column-reverse;align-items:stretch}.dialog-foot button{width:100%}.providers{grid-template-columns:1fr}}
+    @media(prefers-reduced-motion:reduce){*{animation:none!important;scroll-behavior:auto!important}}
+  </style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar"><div class="traffic"><i></i><i></i><i></i></div><span>OpenAdminOS · Chat</span><small>v0.4 reference</small></div>
+    <div class="app">
+      <aside>
+        <div class="brand"><span class="mark">O</span>OpenAdminOS <span class="version">0.4</span></div>
+        <div class="tenant"><strong>No tenant</strong><small>Connect when you need tenant data</small></div>
+        <nav><button class="active">Chat</button><button>Agents</button><button>Changes</button><button>Settings</button></nav>
+        <div class="side-note">Browse first. Connect only when an action needs Microsoft 365 data.</div>
+      </aside>
+      <main>
+        <div class="head"><div><strong>New conversation</strong><small>Draft locally before connecting</small></div><span class="badge">No tenant connected</span></div>
+        <div class="empty"><h1>What do you want to inspect?</h1><p>Explore the questions OpenAdminOS can answer. Connecting happens when you send.</p><div class="prompts"><button class="draft-prompt">Which managed devices have not synced in 7 days?</button><button class="draft-prompt">Which required apps are failing to install?</button></div></div>
+        <div class="composer"><div class="guest">No tenant connected. You can draft a question now; connecting happens when you send.</div><textarea aria-label="Chat draft">Which managed devices have not synced in 7 days?</textarea><div class="compose-foot"><span>Draft stays on this device</span><button class="primary" id="open-setup">Send</button></div></div>
+      </main>
+    </div>
+    <footer><button id="footer-connect">tenant: No active tenant · Connect</button><span>Ollama · local-only</span></footer>
+  </div>
+
+  <div class="scrim" id="scrim">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <header class="dialog-head"><div><h2 id="dialog-title">Connect a Microsoft 365 tenant</h2><p id="dialog-subtitle">Review the read access OpenAdminOS requests before Microsoft sign-in.</p></div><button class="ghost" id="close" aria-label="Close">×</button></header>
+      <div class="step-tabs" aria-label="Preview setup states"><button data-step="permissions" class="active">Permissions</button><button data-step="waiting">Waiting</button><button data-step="provider">Provider</button><button data-step="ready">Ready</button></div>
+      <div class="panel" data-panel="permissions">
+        <div class="intent">After connecting, your question will be ready to send.</div>
+        <div class="signin"><span class="icon">⌁</span><div><strong>Sign in through your system browser</strong><p>Use a Microsoft 365 admin account. Tokens stay in the operating system’s protected credential store.</p></div></div>
+        <div class="scope-label">Read permissions · 16 scopes</div>
+        <details><summary>Devices and configuration · 6 read scopes</summary><p>DeviceManagementManagedDevices.Read.All<br>DeviceManagementConfiguration.Read.All<br>DeviceManagementServiceConfig.Read.All<br>DeviceManagementScripts.Read.All<br>DeviceManagementRBAC.Read.All<br>Device.Read.All</p></details>
+        <details><summary>Apps · 2 read scopes</summary><p>DeviceManagementApps.Read.All<br>Application.Read.All</p></details>
+        <details><summary>Users, groups, and directory · 4 read scopes</summary><p>User.Read.All<br>GroupMember.Read.All<br>Directory.Read.All<br>Organization.Read.All</p></details>
+        <details><summary>Security and sign-ins · 4 read scopes</summary><p>Policy.Read.All<br>AuditLog.Read.All<br>IdentityRiskyUser.Read.All<br>SecurityEvents.Read.All</p></details>
+        <div class="note">All requested permissions are read-only. Graph reads use Microsoft’s beta endpoint. Write agents request their own scope separately and still pause for confirmation.</div>
+      </div>
+      <div class="panel center" data-panel="waiting" hidden><div><div class="spinner" aria-hidden="true"></div><h3>Waiting for Microsoft sign-in…</h3><p>Complete sign-in in your browser, then return here. Cancel closes the local sign-in listener.</p></div></div>
+      <div class="panel" data-panel="provider" hidden><div class="intent">Your pending question needs a working provider before it can run.</div><div class="providers"><div class="provider selected"><strong>Ollama</strong><small>Local · needs setup</small></div><div class="provider"><strong>Apple Foundation</strong><small>Local · unavailable on this device</small></div><div class="provider"><strong>OpenAI Codex</strong><small>Hosted · connected</small></div><div class="provider"><strong>Claude Code</strong><small>Hosted · needs login</small></div></div><div class="note">Local providers keep tenant data and prompts on this device. Hosted providers show a separate data-boundary confirmation before sending.</div></div>
+      <div class="panel" data-panel="ready" hidden><div class="ready"><strong>Contoso IT connected</strong><small>admin@contoso.example · active tenant</small></div><div class="note">Your original question is ready. It has not been sent. Continuing runs the normal tenant, provider, and hosted-data checks.</div></div>
+      <footer class="dialog-foot"><button class="ghost" id="cancel">Cancel</button><button class="primary" id="continue">Approve and continue to Microsoft</button></footer>
+    </section>
+  </div>
+  <script>
+    const scrim = document.querySelector('#scrim');
+    const title = document.querySelector('#dialog-title');
+    const subtitle = document.querySelector('#dialog-subtitle');
+    const action = document.querySelector('#continue');
+    const labels = {
+      permissions:['Connect a Microsoft 365 tenant','Review the read access OpenAdminOS requests before Microsoft sign-in.','Approve and continue to Microsoft'],
+      waiting:['Connect a Microsoft 365 tenant','Microsoft sign-in is open in your browser.','Keep waiting'],
+      provider:['Pick an LLM provider','Choose where answers are generated.','Recheck providers'],
+      ready:['Tenant connected','Review the next action before continuing.','Send your question']
+    };
+    function show(step){
+      document.querySelectorAll('[data-panel]').forEach(el=>el.hidden=el.dataset.panel!==step);
+      document.querySelectorAll('[data-step]').forEach(el=>el.classList.toggle('active',el.dataset.step===step));
+      [title.textContent,subtitle.textContent,action.textContent]=labels[step];
+    }
+    document.querySelectorAll('[data-step]').forEach(button=>button.addEventListener('click',()=>show(button.dataset.step)));
+    document.querySelectorAll('.draft-prompt').forEach(button=>button.addEventListener('click',()=>{document.querySelector('textarea').value=button.textContent;document.querySelector('textarea').focus()}));
+    document.querySelectorAll('#open-setup,#footer-connect').forEach(button=>button.addEventListener('click',()=>{scrim.hidden=false;show('permissions')}));
+    document.querySelectorAll('#close,#cancel').forEach(button=>button.addEventListener('click',()=>{scrim.hidden=true}));
+    action.addEventListener('click',()=>show(action.textContent.includes('Approve')?'waiting':action.textContent.includes('waiting')?'provider':action.textContent.includes('Recheck')?'ready':'ready'));
+  </script>
+</body>
+</html>

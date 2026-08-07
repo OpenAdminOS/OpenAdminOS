@@ -4,9 +4,12 @@ import { resolveProviderDefaultModel } from "../shared/openAdminOS";
 import { IconCloud, IconHardDrive } from "./icons";
 import { deriveTrustCopy } from "../copy";
 import { TruncatedText } from "./TruncatedText";
+import { SETUP_COPY } from "../copy";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 
 export function StatusStrip() {
   const { state } = useAppState();
+  const { openSetup } = useSetupFlow();
   const activeProvider = state.providers.find(
     (provider) => provider.id === state.activeProviderId,
   );
@@ -38,10 +41,20 @@ export function StatusStrip() {
         <span className="inline-flex min-w-0 items-center gap-1.5">
             <IconCloud size={10} className="text-[var(--color-info)]" />
             <span className="shrink-0 text-[var(--color-text-muted)]">tenant:</span>
-            <TruncatedText
-              value={activeTenant?.displayName ?? "No active tenant"}
-              className={activeTenant ? "text-[var(--color-text-soft)]" : "text-[var(--color-warning)]"}
-            />
+            {activeTenant ? (
+              <TruncatedText
+                value={activeTenant.displayName}
+                className="text-[var(--color-text-soft)]"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={openSetup}
+                className="rounded-sm text-[var(--color-warning)] underline decoration-transparent underline-offset-2 transition-colors hover:decoration-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+              >
+                {SETUP_COPY.statusNoTenant}
+              </button>
+            )}
             {activeTenant?.entraTier && activeTenant.entraTier !== "unknown" && (
               <span
                 className="ml-0.5 rounded px-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"

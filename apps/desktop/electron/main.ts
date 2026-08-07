@@ -179,6 +179,7 @@ const supportIssueSources = new Set([
   "native-menu",
 ]);
 const intuneChatStreamControllers = new Map<string, AbortController>();
+const pendingIntuneChatStreamCancellations = new Set<string>();
 const multiTenantChatStreamControllers = new Map<string, AbortController>();
 const agentSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const agentCategories = new Set([
@@ -1514,29 +1515,14 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     );
   };
 
-  location.hash = "/onboarding";
-  await waitFor(() => bodyText().includes("Welcome to OpenAdminOS."), "onboarding welcome");
-  await clickButton("Get started");
+  location.hash = "/chat";
   await waitFor(
     () =>
-      bodyText().includes("Connect a Microsoft 365 tenant") &&
+      bodyText().includes("What do you want to inspect?") &&
       bodyText().includes("Smoke Tenant"),
-    "onboarding tenant step",
+    "direct Chat front door",
   );
-  await clickButton("Continue with this tenant");
-  await waitFor(() => bodyText().includes("Pick an LLM provider"), "onboarding provider step");
-  await clickButton("Continue");
-  await waitFor(
-    () =>
-      bodyText().includes("Choose where to start") &&
-      bodyText().includes("Ask Intune Chat") &&
-      bodyText().includes("Browse Agent Hub") &&
-      bodyText().includes("Optional starter agent"),
-    "onboarding workspace choice",
-  );
-  const sawOnboardingWorkspaceChoice = bodyText().includes("Open Intune Chat");
-  await clickButton("Open Intune Chat");
-  await waitFor(() => location.hash === "#/chat", "onboarding chat navigation");
+  const sawDirectChatFrontDoor = location.hash === "#/chat";
 
   location.hash = "/settings/chat";
   await waitFor(
@@ -1816,7 +1802,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     hash: location.hash,
     hasAnswer: sawAnswer,
     hasAgentSuggestion: sawAgentSuggestion,
-    hasOnboardingWorkspaceChoice: sawOnboardingWorkspaceChoice,
+    hasDirectChatFrontDoor: sawDirectChatFrontDoor,
     hasConversationLifecycle: sawConversationLifecycle,
     hasSourceDetails: sawSourceDetails,
     hasEditResend: sawEditResend,
@@ -4925,6 +4911,9 @@ function registerIpcHandlers() {
       const safeStreamId = requireBoundedString(streamId, "streamId", 128);
       const controller = new AbortController();
       intuneChatStreamControllers.set(safeStreamId, controller);
+      if (pendingIntuneChatStreamCancellations.delete(safeStreamId)) {
+        controller.abort();
+      }
       return store.streamIntuneChatMessage(
         validateSendIntuneChatMessageInput(input),
         (streamEvent: IntuneChatStreamEvent) => {
@@ -4936,6 +4925,7 @@ function registerIpcHandlers() {
         { signal: controller.signal },
       ).finally(() => {
         intuneChatStreamControllers.delete(safeStreamId);
+        pendingIntuneChatStreamCancellations.delete(safeStreamId);
       });
     }),
   );
@@ -4943,7 +4933,24 @@ function registerIpcHandlers() {
     "openadminos:cancel-intune-chat-stream",
     handleTrusted((_event, streamId: unknown) => {
       const safeStreamId = requireBoundedString(streamId, "streamId", 128);
-      intuneChatStreamControllers.get(safeStreamId)?.abort();
+      const controller = intuneChatStreamControllers.get(safeStreamId);
+      if (controller) {
+        controller.abort();
+        return;
+      }
+      // The renderer exposes Stop as soon as it dispatches a stream. Its
+      // cancellation IPC can arrive before the stream handler has registered
+      // the AbortController, so remember that bounded request briefly.
+      if (pendingIntuneChatStreamCancellations.size >= 128) {
+        const oldest = pendingIntuneChatStreamCancellations.values().next().value;
+        if (oldest) pendingIntuneChatStreamCancellations.delete(oldest);
+      }
+      pendingIntuneChatStreamCancellations.add(safeStreamId);
+      const expiry = setTimeout(
+        () => pendingIntuneChatStreamCancellations.delete(safeStreamId),
+        10_000,
+      );
+      expiry.unref();
     }),
   );
   ipcMain.handle(
@@ -5436,6 +5443,10 @@ function registerIpcHandlers() {
     void registerSchedulerIfReady("tenant");
     return state;
   }));
+  ipcMain.handle(
+    "openadminos:cancel-connect-tenant",
+    handleTrusted(() => store.cancelConnectTenant()),
+  );
   ipcMain.handle("openadminos:set-active-tenant", handleTrusted((_event, id: unknown) =>
     store.setActiveTenant(requireBoundedString(id, "tenantId", 256)),
   ),
@@ -5779,7 +5790,7 @@ if (!gotLock) {
         debugStartupLog("created hidden companion window");
       } else {
         const smokeRoute = isIntuneChatSmokeLaunch
-          ? "/onboarding"
+          ? "/chat"
           : isReportIssueSmokeLaunch
             ? "/chat"
             : undefined;

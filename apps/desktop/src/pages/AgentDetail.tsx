@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
@@ -26,6 +26,8 @@ import {
   IconShield,
 } from "../components/icons";
 import { useAppState } from "../state";
+import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   resolveRunModel,
@@ -55,6 +57,8 @@ export default function AgentDetail({
 }) {
   const { slug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { requireTenantAndProvider } = useSetupFlow();
   const {
     state,
     startRun,
@@ -87,14 +91,18 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { providerId?: ProviderId; model?: string } | null
+    { tenantId?: string; providerId?: ProviderId; model?: string } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
+  const resumedIntentRef = useRef<string | null>(null);
   const pendingDeliverySaves = useRef(new Set<Promise<void>>());
   const [pendingDeliverySaveCount, setPendingDeliverySaveCount] = useState(0);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
+  const pendingTenant = pendingRunChoice?.tenantId
+    ? state.tenants.find((tenant) => tenant.id === pendingRunChoice.tenantId)
+    : activeTenant;
   const pendingProviderId = pendingRunChoice?.providerId ?? state.activeProviderId;
   const pendingProvider = state.providers.find(
     (provider) => provider.id === pendingProviderId,
@@ -121,10 +129,29 @@ export default function AgentDetail({
     }
   };
 
-  const queueRunPreflight = (choice?: { providerId?: ProviderId; model?: string }) => {
+  const queueRunPreflight = useCallback((choice?: {
+    tenantId?: string;
+    providerId?: ProviderId;
+    model?: string;
+  }) => {
+    if (
+      agent &&
+      !requireTenantAndProvider(
+        createPendingIntent({
+          kind: "agent-run",
+          slug: agent.slug,
+          ...(choice?.tenantId ? { tenantId: choice.tenantId } : {}),
+          ...(choice?.providerId ? { providerId: choice.providerId } : {}),
+          ...(choice?.model ? { model: choice.model } : {}),
+          returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
+        }),
+      )
+    ) {
+      return;
+    }
     setRunError(null);
     setPendingRunChoice(choice ?? {});
-  };
+  }, [agent, requireTenantAndProvider]);
 
   const trackDeliverySave = (save: Promise<void>): Promise<void> => {
     const tracked = save.finally(() => {
@@ -146,7 +173,46 @@ export default function AgentDetail({
     if (!startRunOnOpen || consumedStartRunOnOpen.current || !agent) return;
     consumedStartRunOnOpen.current = true;
     queueRunPreflight();
-  }, [agent, startRunOnOpen]);
+  }, [agent, queueRunPreflight, startRunOnOpen]);
+
+  useEffect(() => {
+    const routeState = location.state as { resumePendingIntent?: PendingIntent } | null;
+    const resumed = routeState?.resumePendingIntent;
+    if (
+      resumed?.kind !== "agent-run" ||
+      resumed.slug !== agent?.slug ||
+      resumedIntentRef.current === resumed.createdAt
+    ) {
+      return;
+    }
+    resumedIntentRef.current = resumed.createdAt;
+    navigate(location.pathname, { replace: true, state: null });
+    const restoredTenantId = resumed.tenantId
+      ? state.tenants.some((tenant) => tenant.id === resumed.tenantId)
+        ? resumed.tenantId
+        : state.activeTenantId
+      : undefined;
+    if (resumed.tenantId && restoredTenantId !== resumed.tenantId && activeTenant) {
+      toast.info(
+        `The original tenant is no longer connected. Review this run against ${activeTenant.displayName}.`,
+      );
+    }
+    queueRunPreflight({
+      ...(restoredTenantId ? { tenantId: restoredTenantId } : {}),
+      ...(resumed.providerId ? { providerId: resumed.providerId } : {}),
+      ...(resumed.model ? { model: resumed.model } : {}),
+    });
+  }, [
+    activeTenant,
+    agent,
+    location.pathname,
+    location.state,
+    navigate,
+    queueRunPreflight,
+    state.activeTenantId,
+    state.tenants,
+    toast,
+  ]);
 
   const reviewAndApplyUpdate = async () => {
     if (!agent) return;
@@ -180,14 +246,19 @@ export default function AgentDetail({
     }
   };
 
-  const handleStartRun = async (choice?: { providerId?: ProviderId; model?: string }) => {
+  const handleStartRun = async (choice?: {
+    tenantId?: string;
+    providerId?: ProviderId;
+    model?: string;
+  }) => {
     if (!agent) return;
     setRunError(null);
     try {
       await waitForDeliverySaves();
       const options =
-        choice && (choice.providerId || choice.model)
+        choice && (choice.tenantId || choice.providerId || choice.model)
           ? {
+              ...(choice.tenantId ? { tenantId: choice.tenantId } : {}),
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : {}),
             }
@@ -811,7 +882,7 @@ export default function AgentDetail({
         <RunPreflightModal
           open={pendingRunChoice !== null}
           agent={agent}
-          activeTenantName={activeTenant?.displayName}
+          activeTenantName={pendingTenant?.displayName}
           providerName={pendingProvider?.name ?? pendingProviderId}
           providerIsLocal={pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}

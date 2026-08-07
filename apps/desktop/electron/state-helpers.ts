@@ -115,6 +115,12 @@ export function humanizeScheduledRunError(message: string): string {
 export function humanizeMsalError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
+  if (error instanceof Error && error.name === "TenantConnectCancelledError") {
+    return "Sign-in was cancelled. Nothing was connected.";
+  }
+  if (error instanceof Error && error.name === "TenantConnectTimeoutError") {
+    return "Microsoft sign-in timed out after five minutes. Start again when you are ready.";
+  }
   if (lower.includes("user_cancelled") || lower.includes("cancelled by user")) {
     return "Sign-in was cancelled in the browser. Try again from Settings → Tenants.";
   }

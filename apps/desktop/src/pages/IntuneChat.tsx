@@ -61,6 +61,9 @@ import {
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
+import { SETUP_COPY } from "../copy";
+import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
+import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 
 const promptGroups = [
   {
@@ -186,6 +189,7 @@ type HostedBatchConsentPrompt = {
 
 type IntuneChatRouteState = {
   initialQuestion?: unknown;
+  resumePendingIntent?: PendingIntent;
 };
 
 const focusRingClass =
@@ -196,6 +200,7 @@ export default function IntuneChat() {
   const location = useLocation();
   const { conversationId: routeConversationId } = useParams<{ conversationId?: string }>();
   const { state, startRun, refresh, loading } = useAppState();
+  const { requireTenantAndProvider } = useSetupFlow();
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     routeConversationId ?? null,
@@ -273,6 +278,7 @@ export default function IntuneChat() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
   const initialQuestionConsumedRef = useRef(false);
+  const resumedIntentRef = useRef<string | null>(null);
   const progressClearTimerRef = useRef<number | null>(null);
   const copiedClearTimerRef = useRef<number | null>(null);
   const draftConversationRef = useRef<string | null | undefined>(undefined);
@@ -654,6 +660,23 @@ export default function IntuneChat() {
     const content = (contentOverride ?? input).trim();
     const api = window.openAdminOS;
     if (!api || !content || sending) return;
+    const targetConversationId =
+      conversationIdOverride !== undefined
+        ? conversationIdOverride
+        : activeConversationId;
+    if (
+      !requireTenantAndProvider(
+        createPendingIntent({
+          kind: "chat-send",
+          conversationId: targetConversationId,
+          returnTo: currentReturnTo(location.pathname, location.search),
+        }),
+      )
+    ) {
+      writeChatDraft(targetConversationId, content);
+      setInput(content);
+      return;
+    }
     if (shouldUseMultiTenantFlow(content, scopeMode)) {
       await prepareMultiTenantReview(content);
       return;
@@ -1089,6 +1112,22 @@ export default function IntuneChat() {
 
   useEffect(() => {
     const routeState = location.state as IntuneChatRouteState | null;
+    const resumed = routeState?.resumePendingIntent;
+    if (
+      resumed?.kind === "chat-send" &&
+      resumedIntentRef.current !== resumed.createdAt &&
+      !loading &&
+      activeTenant
+    ) {
+      resumedIntentRef.current = resumed.createdAt;
+      const draft = readChatDraft(resumed.conversationId).trim();
+      navigate(location.pathname, { replace: true, state: null });
+      if (draft) {
+        setInput(draft);
+        void handleSend(draft, resumed.conversationId);
+      }
+      return;
+    }
     const initialQuestion =
       typeof routeState?.initialQuestion === "string"
         ? routeState.initialQuestion.trim()
@@ -1291,6 +1330,17 @@ export default function IntuneChat() {
     conversationId: string,
     messageId: string,
   ) => {
+    if (
+      !requireTenantAndProvider(
+        createPendingIntent({
+          kind: "agent-run",
+          slug,
+          returnTo: currentReturnTo(location.pathname, location.search),
+        }),
+      )
+    ) {
+      return;
+    }
     setRunningAgentSlug(slug);
     setError(null);
     setNotice(null);
@@ -1861,8 +1911,12 @@ export default function IntuneChat() {
                 </div>
               ) : (
               <EmptyChat
-                disabled={!activeTenant || sending}
-                onPrompt={(prompt) => void handleSend(prompt)}
+                disabled={sending}
+                onPrompt={(prompt) => {
+                  setInput(prompt);
+                  writeChatDraft(activeConversationId, prompt);
+                  window.requestAnimationFrame(() => composerRef.current?.focus());
+                }}
               />
               )
             ) : (
@@ -2008,6 +2062,11 @@ export default function IntuneChat() {
               disabled={unknownConversation || sending || runningMultiTenant}
             />
             <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
+              {!activeTenant && (
+                <div className="mx-1 mb-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                  {SETUP_COPY.guestChatHint}
+                </div>
+              )}
               <label htmlFor="intune-chat-composer" className="sr-only">
                 {CHAT_COPY.composerLabel}
               </label>
@@ -2024,7 +2083,7 @@ export default function IntuneChat() {
                     void handleSend();
                   }
                 }}
-                placeholder={CHAT_COPY.composerPlaceholder}
+                placeholder={activeTenant ? CHAT_COPY.composerPlaceholder : SETUP_COPY.guestComposerPlaceholder}
                 className="max-h-[180px] min-h-[72px] w-full resize-none bg-transparent px-2 py-2 text-[13.5px] leading-6 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
               />
               <div className="flex items-center justify-between gap-3 px-1 pb-1">
@@ -2049,7 +2108,7 @@ export default function IntuneChat() {
                   <Button
                     variant="primary"
                     size="sm"
-                    disabled={unknownConversation || input.trim().length === 0 || !activeTenant}
+                    disabled={unknownConversation || input.trim().length === 0}
                     onClick={() => void handleSend()}
                   >
                     {COMMON_COPY.actions.send}

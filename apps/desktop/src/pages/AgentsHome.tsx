@@ -10,10 +10,13 @@ import {
   type AgentSummary,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
+import { createPendingIntent } from "../setup/pending-intent";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 
 export default function AgentsHome() {
   const navigate = useNavigate();
   const { state, startRun } = useAppState();
+  const { requireTenantAndProvider } = useSetupFlow();
   const [query, setQuery] = useState("");
   const [newAgentOpen, setNewAgentOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -117,6 +120,17 @@ export default function AgentsHome() {
               key={agent.id}
               agent={agent}
               onRun={(selected) => {
+                if (
+                  !requireTenantAndProvider(
+                    createPendingIntent({
+                      kind: "agent-run",
+                      slug: selected.slug,
+                      returnTo: `/agents/${encodeURIComponent(selected.slug)}`,
+                    }),
+                  )
+                ) {
+                  return;
+                }
                 if (selected.mode === "write") {
                   navigate(`/agents/${selected.slug}/confirm`);
                   return;

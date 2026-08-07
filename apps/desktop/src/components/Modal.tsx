@@ -48,7 +48,9 @@ export function Modal({
     });
     const frame = window.requestAnimationFrame(() => {
       const dialog = dialogRef.current;
-      const preferred = dialog?.querySelector<HTMLElement>(focusableSelector);
+      const preferred =
+        dialog?.querySelector<HTMLElement>("[data-autofocus]:not([disabled])") ??
+        dialog?.querySelector<HTMLElement>(focusableSelector);
       (preferred ?? dialog)?.focus();
     });
     return () => {
@@ -140,8 +142,9 @@ export function ModalHeader({
         )}
       </div>
       <button
+        type="button"
         onClick={onClose}
-        className="rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+        className="rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
         aria-label={COMMON_COPY.actions.close}
       >
         <IconClose size={16} />
