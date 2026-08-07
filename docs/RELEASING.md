@@ -107,7 +107,9 @@ release tag, for example `v0.2.1`.
 
 ## Cutting a release
 
-The full flow is **two clicks in GitHub**. No local terminal needed.
+The normal flow needs only the release-prep run and PR merge in GitHub. No
+local terminal is needed. A release that changes commit-derived documentation
+can require merging the generated-doc follow-up before CI is green.
 
 1. **Run the Release prep workflow.**
    - Actions tab → **Release prep** → **Run workflow** → branch `main`.
@@ -115,9 +117,11 @@ The full flow is **two clicks in GitHub**. No local terminal needed.
    - On run: the workflow bumps every workspace `package.json`, rolls `CHANGELOG.md` so the `[Unreleased]` section becomes a dated `[X.Y.Z]` section, regenerates `package-lock.json`, and opens a `release: vX.Y.Z` PR.
 2. **Review and merge the release PR.**
    - Skim the CHANGELOG roll (the most important review surface — make sure no entries are stuck under Unreleased that should have been edited).
-   - Merge the release PR. Squash merges put `release: vX.Y.Z (#NN)` in the commit subject; normal merge commits are also supported as long as the commit body contains a `release: vX.Y.Z` line.
-3. **The rest is automatic.**
-   - `auto-tag.yml` fires when the merge commit message contains a `release: v*` marker → pushes the matching `vX.Y.Z` tag.
+   - Merge the `release: vX.Y.Z` PR after its checks pass.
+3. **Let main finish reconciling and pass CI.**
+   - If the squash merge changes commit-derived GitBook metadata, the Documentation workflow opens a one-line generated-doc PR. Review and merge it before release tagging; the failed main CI run is expected to remain red until that generated update lands.
+4. **The rest is automatic.**
+   - After CI succeeds on the current `main` commit, `auto-tag.yml` reads the version from `package.json`. If that version has no tag yet, it tags that exact green commit as `vX.Y.Z`. A stale successful run is ignored when `main` has already advanced.
    - `release.yml` fires on the tag → builds macOS release files and Linux x64 packages. Windows remains manual-only.
    - The GitHub release receives macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
    - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.
@@ -155,7 +159,8 @@ git commit -m "release: v0.1.X"
 git push -u origin release/v0.1.X
 gh pr create --title "release: v0.1.X" --body "Manual release prep."
 
-# 4. After PR merges, auto-tag.yml still picks it up. (If that also
+# 4. After the PR (and any generated-doc follow-up) merges and main CI
+#    passes, auto-tag.yml still picks it up. (If that also
 #    breaks, tag manually: git tag -a v0.1.X && git push origin v0.1.X.)
 ```
 

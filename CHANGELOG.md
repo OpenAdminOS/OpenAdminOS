@@ -14,6 +14,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Security
 
+## [0.4.1] - 2026-08-07
+
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+- Delayed automatic version tagging until the exact main-branch commit passes CI, allowing post-merge generated documentation to reconcile before release packaging starts.
+
+### Security
+
 ## [0.4.0] - 2026-08-07
 
 ### Added
