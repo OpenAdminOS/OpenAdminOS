@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Updated the README product screenshot to the current Chat-first desktop interface with sourced findings and a matching-agent recommendation.
+
 ### Removed
 
 ### Fixed
