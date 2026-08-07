@@ -69,6 +69,9 @@ jobs:
       - name: Verify generated documentation
         run: npm run docs:check
 
+      - name: Verify release and upgrade compatibility
+        run: npm run release:check
+
       - name: Regenerate registry index
         run: npm run registry:index
 

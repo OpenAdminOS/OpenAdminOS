@@ -12,7 +12,7 @@ The product is local-first: by default, tenant data and LLM prompts never leave 
 
 ### Distribution surface
 
-- **Desktop app** (Electron; macOS signed/notarized, Linux x64 packages, Windows build-only until signing is ready) — the only end-user surface
+- **Desktop app** (Electron; macOS signed/notarized, Linux x64 packages, Windows packaging validation is manual-only until signing is ready) — the only end-user surface
 
 There is no separate CLI. Power users get the same GUI; contributor tooling (agent scaffold, dev/test commands) lives in repo scripts, not in a published `npx` binary.
 
@@ -1348,7 +1348,7 @@ Electron window.
 ### Code signing
 
 Required before public v1 release:
-- **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, CI may build AppX packages for validation, but AppX files are not published as workflow artifacts or release assets.
+- **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, tagged releases do not schedule Windows jobs. Maintainers may explicitly request a manual AppX packaging-validation job, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr), a Developer ID Application certificate for the app/DMG/ZIP, a Developer ID Installer certificate for the PKG, and notarization. Without notarization, Gatekeeper blocks the app.
 - **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu and other Debian-family systems, plus RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://repo.openadminos.com/debian`; apt trust is repository-metadata signing, not per-file executable signing. The apt repository script validates `.deb` architecture from control metadata rather than Debian filename suffixes because Electron Builder release assets use `*-linux-amd64.deb` names. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Linux packages use `openadminos` as the executable and `com.openadminos.desktop.desktop` as the desktop-entry filename, with Electron Builder desktop-name synchronization enabled so GNOME/KDE window association matches the application ID.
@@ -1357,8 +1357,10 @@ Required before public v1 release:
 
 The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured. Manual packaging validation may run without release secrets, but a tagged release fails closed before publishing when any macOS signing/notarization secret or Linux apt-repository private-key/passphrase secret is absent.
 Release automation treats `release: vX.Y.Z` as the canonical marker and parses it from the full merge commit message, so both squash merges and normal merge commits can cut the corresponding tag.
+Tagged releases build and publish only the supported macOS Apple Silicon and Linux x64 packages. Windows AppX validation is an opt-in manual workflow job and is not a dependency of release publication.
 Release prep must bump every OpenAdminOS-owned package manifest and matching lockfile metadata that carries the product release version, including desktop, runtime, connector packages, QA packages, and the marketing website package.
 Release publishing must use the matching `CHANGELOG.md` section as the GitHub Release body and fail if that section is missing; generated PR summaries are not an acceptable fallback for release notes.
+Release gates preserve upgrade identities from v0.3: `com.openadminos.desktop` and the GitHub update publisher for macOS, plus the `openadminos` package/executable and stable desktop identity for Linux. Automated compatibility coverage must also open legacy JSON and SQLite state, apply additive migrations, and prove tenant, run, agent, chat, and cache records survive before packaging.
 When deliberately backfilling an existing release tag, release publishing may overwrite same-name GitHub Release assets so installers, updater metadata, and checksums can be replaced without inventing a new product version.
 
 The macOS menu bar companion must be created during any interactive app launch, including the case where a hidden background scheduler process already owns the Electron single-instance lock and receives the visible launch through the `second-instance` path.
@@ -1553,7 +1555,7 @@ North-star metric: time from install to first successful result, target under 5 
 - Newly enabled schedules anchor their first due time at the enable action; enabling an interval never creates an immediate surprise run.
 - Destructive write plans require a count-bound uppercase phrase that names the operation and target. The same grammar is enforced for declarative manifests, sandboxed plans, and runtime plans before the confirmation UI can appear.
 - Connector execution fails closed: undeclared capabilities are rejected, and side-effect capabilities cannot run when the confirmation bridge is absent.
-- Desktop release metadata is `0.4.0`. CI and tag-release workflows run typecheck, unit/renderer tests, Graph/registry QA, generated-doc checks, build, and both Electron smoke flows before packaging. Linux self-update is disabled while executable packages remain unsigned; apt repository trust or an explicit package install is required. Signed supported builds surface update failures in a retryable in-app banner.
+- Desktop release metadata is `0.4.0`. CI and tag-release workflows run typecheck, unit/renderer tests, Graph/registry QA, generated-doc checks, upgrade-compatibility checks, build, and both Electron smoke flows before packaging. Linux self-update is disabled while executable packages remain unsigned; apt repository trust or an explicit package install is required. Signed supported builds surface update failures in a retryable in-app banner.
 
 ### Deliberately not done in v0.4
 

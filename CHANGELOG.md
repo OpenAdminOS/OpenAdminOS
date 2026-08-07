@@ -5,6 +5,19 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.4.0] - 2026-08-07
+
+### Added
+- Added release compatibility gates for stable macOS updater and Linux package identities, aligned workspace versions, release notes, and preservation of legacy JSON and SQLite data during additive migration.
 - Added a standalone interactive HTML review of the implemented v0.4 desktop navigation, Chat history drawer, primary routes, and persistent trust status.
 - Added the implemented v0.4 quality pass: typed UX/trust/error copy, shared native and renderer shortcuts, accessible overlay and command-palette behavior, Chat send-state/retry/draft handling, searchable Settings deep links, contrast and motion invariants, and a 42-artifact responsive screenshot matrix including write confirmation.
 - Added restorable conversation and Settings routes, including explicit recovery for deleted or unknown local conversation links.
@@ -14,6 +27,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Added deterministic local related-agent hints in Chat, with conservative keyword/synonym matching against installed agents and a dismissible transcript card.
 
 ### Changed
+- Tagged releases now build and publish only macOS Apple Silicon and Linux x64 packages; Windows AppX packaging validation is manual-only until its signing path is ready.
 - Centered the Chat empty-state guidance and suggested questions directly above the composer in both the desktop UI and interactive v0.4 review.
 - Refined the desktop color system: warm near-black sidebar token, an explicit on-accent foreground token replacing hardcoded ink literals, split placeholder and decorative faint text tokens, semantic foreground/background pairs with a more distinguishable danger red, and reduced copper allocation (neutral Chat user bubble with a copper edge, info-toned activity meters and pulses, neutral pins), with `_design.css` and the v0.4 review mockup aligned to the same warm palette.
 - Hosted multi-tenant consent audit records now describe the one-response acknowledgement truthfully instead of recording an unavailable remembered-consent choice.
@@ -29,6 +43,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Removed inert `openadminos://` copy-link actions until the desktop app registers and handles that protocol.
 
 ### Fixed
+- Fixed the local Graph QA setup helper so its documented `eval` invocation exports the resolved reference-data path to child processes.
 - Made the Electron Intune Chat smoke fixture inject deterministic provider readiness instead of depending on Ollama being installed on the CI host.
 - Made CI and release-source documentation gates fetch full Git history so path-specific generated metadata stays deterministic on GitHub runners.
 - Fixed Linux release packaging with an explicit executable and desktop identity, aligned the packaged Electron runtime with the audited lockfile, refreshed desktop and website dependencies to zero known audit findings, preflighted Electron before parallel host tests, and made smoke/capture runners resolve hoisted tooling reliably.
