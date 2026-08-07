@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.4.3] - 2026-08-07
+
+### Added
+
 - Added a shared contextual tenant-activation dialog with grouped Graph permission review, cancellable browser sign-in, provider readiness, safe pending-action restoration, and explicit resume controls.
 
 ### Changed

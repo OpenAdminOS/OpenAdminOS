@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/connector-discord",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "description": "Discord connector for OpenAdminOS. Sends outbound notification messages through a Discord channel webhook.",
@@ -21,7 +21,7 @@
     "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@openadminos/agent-sdk": "0.4.2"
+    "@openadminos/agent-sdk": "0.4.3"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",
