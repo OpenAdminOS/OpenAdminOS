@@ -6,7 +6,7 @@ The release surface publishes Windows, macOS, and Linux binaries:
 
 - **macOS → GitHub Releases + electron-updater** (signed + notarized `.dmg` and `.pkg` in CI; `.zip` is published for electron-updater).
 - **Linux → GitHub Releases + apt** (unsigned x64 AppImage, `.deb`, and `.rpm` with SHA-256 checksums; the `.deb` is also published into a signed GitHub Pages-backed apt repository).
-- **Windows → GitHub Releases + electron-updater** (x64 NSIS `.exe` installer, code signed through DigiCert KeyLocker; `latest.yml` is published for electron-updater). AppX packaging validation is still available as an opt-in manual job for the deferred Microsoft Store path, and that AppX is never published.
+- **Windows → GitHub Releases + electron-updater** (x64 NSIS `.exe` installer, code signed through Azure Trusted Signing; `latest.yml` is published for electron-updater). AppX packaging validation is still available as an opt-in manual job for the deferred Microsoft Store path, and that AppX is never published.
 
 A single tag push builds the Windows, macOS, and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`.
 
@@ -57,63 +57,66 @@ openssl req -new -newkey rsa:2048 -nodes \
 
 Upload the CSR to Apple, download the Developer ID Installer `.cer`, convert it to PEM if needed, export a `.p12` with a generated password, then set `CSC_INSTALLER_LINK` to the base64 `.p12` and `CSC_INSTALLER_KEY_PASSWORD` to that generated password.
 
-### Windows: DigiCert KeyLocker signing
+### Windows: Azure Trusted Signing
 
-The Windows installer is signed with an OV code signing certificate whose
-subject organization is `Ugurlabs UG (haftungsbeschränkt)`. The private key is
-held in DigiCert's cloud HSM (KeyLocker) and never reaches the runner: `smctl`
-authenticates to DigiCert ONE and the signing operation happens remotely.
+The Windows installer is signed through Azure Trusted Signing, Microsoft's
+public-trust code signing service. The certificate is short-lived (days),
+issued and rotated automatically by Microsoft for the validated identity
+`Ugurlabs UG (haftungsbeschränkt)`, and the private key never exists outside
+Microsoft's HSM. CI holds only an Entra service principal credential, which is
+revocable in Entra without touching the signing setup. Trusted Signing also
+establishes SmartScreen reputation faster than a conventional OV certificate.
+
+One-time Azure setup:
+
+1. In the Azure portal, create a **Trusted Signing account** (region West
+   Europe, SKU Basic).
+2. Under the account, complete an **Identity validation** of type
+   Organization for Ugurlabs UG (haftungsbeschränkt). This is Microsoft's
+   own vetting and can take several days.
+3. After validation, create a **certificate profile** of type Public Trust
+   linked to that identity validation.
+4. Create an Entra **app registration** with a client secret and grant it the
+   **Trusted Signing Certificate Profile Signer** role on the account (IAM on
+   the Trusted Signing account resource).
 
 Configure these repository secrets:
 
 | Secret | What |
 |---|---|
-| `SM_API_KEY` | DigiCert ONE service account API key. |
-| `SM_CLIENT_CERT_FILE_B64` | Base64 of the KeyLocker client-authentication `.p12`. |
-| `SM_CLIENT_CERT_PASSWORD` | Password for that `.p12`. |
+| `AZURE_TENANT_ID` | Entra tenant id. |
+| `AZURE_CLIENT_ID` | App registration (service principal) client id. |
+| `AZURE_CLIENT_SECRET` | Client secret for that app registration. |
 
 Configure these repository variables:
 
 | Variable | Value |
 |---|---|
-| `SM_HOST` | `https://clientauth.one.nl.digicert.com` for the EU (Netherlands) instance, `https://clientauth.one.digicert.com` for the US one. |
-| `SM_KEYPAIR_ALIAS` | Alias of the KeyLocker keypair to sign with. `smctl keypair list` prints it, and the release job also logs it. |
-| `SM_CERT_FINGERPRINT` | Optional: the certificate's SHA1 thumbprint from the CertCentral order page. The sign hook signs by keypair alias (the field-consensus mode, which does not depend on the runner's certificate store) and uses the fingerprint only as a fallback selector; the workflow also uses it to check the store after certsync. |
-
-Credentials only work against the DigiCert ONE instance that issued them, so
-`SM_HOST` must match the instance where the API key and client authentication
-certificate were created. Confirm it from the browser address bar while signed
-in to DigiCert ONE: `one.nl.digicert.com` is the EU instance,
-`one.digicert.com` is the US one. Pointing it at the wrong region surfaces as
-an authentication error from `smctl healthcheck`.
+| `AZURE_SIGNING_ENDPOINT` | Regional endpoint, e.g. `https://weu.codesigning.azure.net` for West Europe. |
+| `AZURE_SIGNING_ACCOUNT_NAME` | Trusted Signing account name. |
+| `AZURE_CERT_PROFILE_NAME` | Certificate profile name. |
 
 Signing is driven per file by `apps/desktop/scripts/sign-windows.cjs`, which
-electron-builder calls through `win.signtoolOptions.sign`. The hook refuses to
-produce an unsigned build unless `OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` is set
-explicitly, and it treats a zero exit code from `smctl` as insufficient evidence
-because some `smctl` versions report a failed signature on stdout and still exit
-0.
+electron-builder calls through `win.signtoolOptions.sign`. The hook invokes
+the `Invoke-TrustedSigning` PowerShell cmdlet, refuses to produce an unsigned
+build unless `OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` is set explicitly, and
+runs `signtool verify /pa` after each file so a pass means Windows itself
+accepts the signature. Bundled MXC SDK binaries keep Microsoft's vendor
+signature and are verified separately after the build.
 
-`win.signtoolOptions.signingHashAlgorithms` is pinned to `["sha256"]`.
-electron-builder otherwise defaults to `["sha1", "sha256"]` and calls the sign
-hook once per algorithm, which would spend a second KeyLocker signature per file
-and fail on a modern certificate. Each release consumes roughly three signatures
-(app executable, uninstaller, installer) out of the certificate's purchased
-allotment.
+`win.signtoolOptions.publisherName` must match the certificate subject common
+name exactly. electron-builder writes it into the packaged app's
+`app-update.yml`, and electron-updater verifies downloaded updates against
+it; if it is absent, update signature verification is silently skipped. The
+release job asserts that `app-update.yml` contains `publisherName:`, checks
+the Authenticode status, and prints the actual signer subject if the common
+name does not match, which is also how to discover the exact subject
+Microsoft issues after the first signed build.
 
-`win.signtoolOptions.publisherName` must match the certificate subject exactly.
-electron-builder writes it into the packaged app's `app-update.yml`, and
-electron-updater verifies downloaded updates against it; if it is absent,
-update signature verification is silently skipped. (`latest.yml` never carries
-it, that file is only version and hash metadata.) The release job asserts that
-`app-update.yml` contains `publisherName:`, checks the Authenticode status, and
-prints the actual signer subject if the certificate common name does not
-match.
-
-Because this is an OV rather than an EV certificate, Windows SmartScreen builds
-reputation over download volume instead of trusting the signature immediately.
-Early downloads may still show a "Windows protected your PC" prompt. Say so
-plainly in release notes rather than implying a clean first run.
+The previous DigiCert KeyLocker pipeline (OV certificate, order #1504899298,
+valid to Aug 2027) was fully working when replaced; see the git history of
+this file and `apps/desktop/scripts/sign-windows.cjs` before the Azure switch
+if it ever needs to be restored.
 
 ### Windows: AppX build validation
 
@@ -126,7 +129,7 @@ The values in `apps/desktop/package.json` `build.appx` are the Partner Center-as
 | `publisherDisplayName` | `OpenAdminOS` |
 | Seller ID | `82025760` |
 
-These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them without updating the Windows distribution plan. The Store path is deferred, so `appx` is no longer part of `build.win.target`. To validate it, run the **Release** workflow manually with `build_windows` enabled. That job runs `electron-builder --win=appx --publish never` with `OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` (an AppX nobody installs isn't worth a KeyLocker signature), verifies that an `.appx` was produced under `apps/desktop/release/`, and leaves it on the runner. Version tags never schedule this job.
+These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them without updating the Windows distribution plan. The Store path is deferred, so `appx` is no longer part of `build.win.target`. To validate it, run the **Release** workflow manually with `build_windows` enabled. That job runs `electron-builder --win=appx --publish never` with `OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` (an AppX nobody installs isn't worth signing), verifies that an `.appx` was produced under `apps/desktop/release/`, and leaves it on the runner. Version tags never schedule this job.
 
 ### Linux — apt repository
 
@@ -191,7 +194,7 @@ Run the **Release** workflow manually from the Actions tab, choose the feature
 branch, and leave `build_windows` off unless you also need AppX validation. The
 manual branch run uploads Windows, macOS, and Linux artifacts as workflow
 artifacts only; it does not create or publish a GitHub Release because
-publishing is still gated to `refs/tags/v*`. A manual run without the DigiCert
+publishing is still gated to `refs/tags/v*`. A manual run without the Azure
 settings configured produces an explicitly unsigned Windows installer and skips
 signature verification; a tagged run fails outright if any of them is missing.
 
@@ -304,7 +307,7 @@ actually pursued.
 
 - **NSIS installer, not AppX, as the shipped Windows artifact.** An `.exe` installs from a downloaded file without Store enrollment or sideloading policy, and it is the only Windows target electron-updater can auto-update. AppX remains built on request so the Store path doesn't rot.
 - **Per-user install by default.** `nsis.perMachine` is false, so installing and auto-updating never prompt for elevation. An admin tool that demands local admin rights to update itself is a bad trade.
-- **Signing key stays in DigiCert's HSM.** KeyLocker means no `.pfx` and no signing key material in GitHub secrets. The runner holds only an API key and a client-authentication certificate, both revocable from DigiCert ONE without reissuing the code signing certificate.
+- **Signing key stays in Microsoft's HSM.** Azure Trusted Signing means no `.pfx` and no signing key material in GitHub secrets. The runner holds only an Entra service principal credential, revocable without touching the signing setup, and the certificate itself is short-lived and rotated by Microsoft.
 - **Validate AppX only when requested.** Keeping the AppX job available catches packaging regressions when maintainers need it, without spending a signature or publishing an unsigned package.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.

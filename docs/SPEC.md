@@ -1350,7 +1350,7 @@ Electron window.
 ### Code signing
 
 Required before public v1 release:
-- **Windows:** OV code signing certificate issued to `Ugurlabs UG (haftungsbeschränkt)`, provisioned through DigiCert KeyLocker so the private key stays in DigiCert's cloud HSM and CI never holds key material. Tagged releases build, sign, and publish an x64 NSIS `.exe` installer plus `latest.yml` for electron-updater. Maintainers may still request a manual AppX packaging-validation job for the deferred Microsoft Store path, but AppX files are not published as workflow artifacts or release assets.
+- **Windows:** Azure Trusted Signing under the validated identity `Ugurlabs UG (haftungsbeschränkt)`. The certificate is short-lived, issued and rotated by Microsoft, the private key never exists outside Microsoft's HSM, and CI holds only a revocable Entra service principal credential. Tagged releases build, sign, and publish an x64 NSIS `.exe` installer plus `latest.yml` for electron-updater. Maintainers may still request a manual AppX packaging-validation job for the deferred Microsoft Store path, but AppX files are not published as workflow artifacts or release assets. (The original v0.4.4-era pipeline used a DigiCert KeyLocker OV certificate, order #1504899298, valid to Aug 2027; it worked end to end and was replaced by Trusted Signing for faster SmartScreen reputation. It remains restorable from git history as a fallback.)
 - **macOS:** Apple Developer Program ($99/yr), a Developer ID Application certificate for the app/DMG/ZIP, a Developer ID Installer certificate for the PKG, and notarization. Without notarization, Gatekeeper blocks the app.
 - **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu and other Debian-family systems, plus RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://repo.openadminos.com/debian`; apt trust is repository-metadata signing, not per-file executable signing. The apt repository script validates `.deb` architecture from control metadata rather than Debian filename suffixes because Electron Builder release assets use `*-linux-amd64.deb` names. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Linux packages use `openadminos` as the executable and `com.openadminos.desktop.desktop` as the desktop-entry filename, with Electron Builder desktop-name synchronization enabled so GNOME/KDE window association matches the application ID.
@@ -1367,20 +1367,24 @@ Required before public v1 release:
   admin tool is a bad trade.
 - `win.signtoolOptions.signingHashAlgorithms` is pinned to `["sha256"]`.
   electron-builder's default of `["sha1", "sha256"]` invokes the sign hook once
-  per algorithm, which spends a second KeyLocker signature per file and fails
-  against a modern certificate.
-- `win.signtoolOptions.publisherName` must equal the certificate subject exactly.
-  electron-builder writes it into `latest.yml`, and electron-updater
-  verifies downloaded updates against it; when it is absent, verification is
-  skipped silently. The release job asserts the Authenticode status and the
-  signer common name after every build and fails with the actual subject on
-  mismatch, so this can never degrade quietly.
-- The certificate is OV, not EV. SmartScreen accrues reputation over download
-  volume rather than trusting the signature immediately, so early downloads may
-  still show a "Windows protected your PC" prompt. User-facing copy must say so
-  plainly instead of implying a clean first run.
+  per algorithm, doubling signing operations, and a SHA-1 pass fails against a
+  modern certificate.
+- `win.signtoolOptions.publisherName` must equal the certificate subject
+  common name exactly. electron-builder writes it into the packaged app's
+  `app-update.yml`, and electron-updater verifies downloaded updates against
+  it; when it is absent, verification is skipped silently. The release job
+  asserts the Authenticode status and the signer common name after every build
+  and fails with the actual subject on mismatch, so this can never degrade
+  quietly.
+- Bundled third-party Microsoft binaries (MXC SDK) keep their vendor
+  Authenticode signature instead of being re-signed; the release job verifies
+  those vendor signatures after every build.
+- Trusted Signing is Microsoft's own public-trust program and establishes
+  SmartScreen reputation faster than a conventional OV certificate, but a
+  brand-new file hash can still prompt briefly. User-facing copy stays honest
+  about that rather than implying a guaranteed clean first run.
 
-The build pipeline treats signing as a first-class release step. Manual packaging validation may run without release secrets, but a tagged release fails closed before publishing when any Windows KeyLocker credential, macOS signing/notarization secret, or Linux apt-repository private-key secret is absent. The Linux apt passphrase remains optional because the repository signing key may be unencrypted.
+The build pipeline treats signing as a first-class release step. Manual packaging validation may run without release secrets, but a tagged release fails closed before publishing when any Windows Trusted Signing credential, macOS signing/notarization secret, or Linux apt-repository private-key secret is absent. The Linux apt passphrase remains optional because the repository signing key may be unencrypted.
 Release automation treats `release: vX.Y.Z` as the canonical marker and parses it from the full merge commit message, so both squash merges and normal merge commits can cut the corresponding tag.
 Tagged releases build and publish the supported Windows x64 installer, macOS Apple Silicon, and Linux x64 packages. Windows AppX validation is an opt-in manual workflow job and is not a dependency of release publication.
 Release prep must bump every OpenAdminOS-owned package manifest and matching lockfile metadata that carries the product release version, including desktop, runtime, connector packages, QA packages, and the marketing website package.
