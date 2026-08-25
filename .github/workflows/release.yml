@@ -303,16 +303,20 @@ jobs:
             Write-Output "::error::smctl windows certsync reported a failure."
             exit 1
           }
+          # The sign hook signs by keypair alias, which does not depend on the
+          # local store, so an absent certificate here is diagnostic rather
+          # than fatal: the hook's smctl sign verify and the post-build
+          # Authenticode check are the authoritative gates.
           $fp = $env:SM_CERT_FINGERPRINT
           if ($fp) {
             $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $fp }
             if (-not $cert) {
-              Write-Output "::error::Certificate $fp is not in the user certificate store after certsync. Store contents and installed key providers follow."
+              Write-Output "::warning::Certificate $fp is not in the user certificate store after certsync. Store contents and installed key providers follow."
               Get-ChildItem Cert:\CurrentUser\My | ForEach-Object { Write-Output "  $($_.Thumbprint) $($_.Subject)" }
               certutil -csplist
-              exit 1
+            } else {
+              Write-Output "Certificate $fp is present in the user store: $($cert.Subject)"
             }
-            Write-Output "Certificate $fp is present in the user store: $($cert.Subject)"
           }
 
       - name: Report KeyLocker keypairs

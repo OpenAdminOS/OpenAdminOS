@@ -66,28 +66,39 @@ function sign(configuration) {
     );
   }
 
-  // Selecting the certificate by SHA1 fingerprint (CertCentral calls it the
-  // thumbprint) is preferred: it addresses the certificate directly instead
-  // of going through the keypair's default-certificate lookup, which fails
-  // with "no certificate found for the given constraints" while DigiCert has
-  // a certificate provisioned but not yet marked as the keypair default.
+  // Keypair-alias selection is the field consensus for KeyLocker CI signing
+  // (Tabby, Neuron, Opentrons, quarto all sign this way): smctl resolves the
+  // keypair's certificate through DigiCert's own flow, without depending on
+  // the runner's certificate store. Fingerprint selection instead makes
+  // signtool look the certificate up in the local store, which only works
+  // after a successful certsync, so it stays as a fallback.
   const fingerprint = process.env.SM_CERT_FINGERPRINT;
   const keypairAlias = process.env.SM_KEYPAIR_ALIAS;
   let selector;
-  if (fingerprint) {
-    selector = `--fingerprint=${fingerprint}`;
-  } else if (keypairAlias) {
+  if (keypairAlias) {
     selector = `--keypair-alias=${keypairAlias}`;
+  } else if (fingerprint) {
+    selector = `--fingerprint=${fingerprint}`;
   } else {
     throw new Error(
-      "Neither SM_CERT_FINGERPRINT nor SM_KEYPAIR_ALIAS is set. One of them must identify the DigiCert KeyLocker certificate used for Windows signing.",
+      "Neither SM_KEYPAIR_ALIAS nor SM_CERT_FINGERPRINT is set. One of them must identify the DigiCert KeyLocker certificate used for Windows signing.",
     );
   }
 
   console.log(`signing ${file} (${selector.split("=")[0]})`);
+  // --exit-non-zero-on-fail because smctl's default is to exit 0 even when
+  // signing fails; the output grep below stays as a second line of defence.
   const result = spawnSync(
     "smctl",
-    ["sign", selector, "--input", filePath],
+    [
+      "sign",
+      selector,
+      "--input",
+      filePath,
+      "--exit-non-zero-on-fail",
+      "--failfast",
+      "--verbose",
+    ],
     { encoding: "utf8" },
   );
 
@@ -108,11 +119,33 @@ function sign(configuration) {
       `smctl exited ${result.status} while signing ${file}. Output: ${formattedOutput}\nsmctl.log tail:\n${smctlLogTail()}`,
     );
   }
-  if (/fail(ed|ure)?/i.test(output)) {
+  if (/fail(ed|ure)?(?!:?\s*0\b)/i.test(output)) {
     throw new Error(
       `smctl reported a failure while signing ${file} despite exiting 0. Output: ${formattedOutput}\nsmctl.log tail:\n${smctlLogTail()}`,
     );
   }
+
+  // Confirm the signature actually landed. smctl sign verify shells out to
+  // signtool verify, so a pass here means Windows itself accepts the file.
+  const verify = spawnSync(
+    "smctl",
+    ["sign", "verify", "--input", filePath],
+    { encoding: "utf8" },
+  );
+  const verifyOutput = `${verify.stdout ?? ""}${verify.stderr ?? ""}`;
+  if (verifyOutput.trim()) {
+    console.log(verifyOutput.trim());
+  }
+  if (
+    verify.error ||
+    verify.status !== 0 ||
+    /fail(ed|ure)?(?!:?\s*0\b)/i.test(verifyOutput)
+  ) {
+    throw new Error(
+      `smctl sign verify did not confirm a valid signature on ${file}. Output: ${verifyOutput.trim() || "(none)"}\nsmctl.log tail:\n${smctlLogTail()}`,
+    );
+  }
+  console.log(`verified signature on ${file}`);
 }
 
 exports.sign = sign;
