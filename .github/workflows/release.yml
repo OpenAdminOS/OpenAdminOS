@@ -176,6 +176,12 @@ jobs:
       SM_API_KEY: ${{ secrets.SM_API_KEY }}
       SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
       SM_KEYPAIR_ALIAS: ${{ vars.SM_KEYPAIR_ALIAS }}
+      # SHA1 thumbprint of the code signing certificate, as shown on the
+      # CertCentral order page. When set, the sign hook selects the
+      # certificate directly instead of relying on the keypair's
+      # default-certificate lookup, which DigiCert can leave unresolved while
+      # a freshly issued certificate is still propagating into KeyLocker.
+      SM_CERT_FINGERPRINT: ${{ vars.SM_CERT_FINGERPRINT }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

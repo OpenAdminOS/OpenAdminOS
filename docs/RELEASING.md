@@ -78,6 +78,7 @@ Configure these repository variables:
 |---|---|
 | `SM_HOST` | `https://clientauth.one.nl.digicert.com` for the EU (Netherlands) instance, `https://clientauth.one.digicert.com` for the US one. |
 | `SM_KEYPAIR_ALIAS` | Alias of the KeyLocker keypair to sign with. `smctl keypair list` prints it, and the release job also logs it. |
+| `SM_CERT_FINGERPRINT` | Optional but preferred: the certificate's SHA1 thumbprint from the CertCentral order page. When set, the sign hook selects the certificate directly instead of using the keypair's default-certificate lookup, which DigiCert can leave unresolved while a freshly issued certificate propagates into KeyLocker. |
 
 Credentials only work against the DigiCert ONE instance that issued them, so
 `SM_HOST` must match the instance where the API key and client authentication

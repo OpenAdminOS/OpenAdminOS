@@ -66,17 +66,28 @@ function sign(configuration) {
     );
   }
 
+  // Selecting the certificate by SHA1 fingerprint (CertCentral calls it the
+  // thumbprint) is preferred: it addresses the certificate directly instead
+  // of going through the keypair's default-certificate lookup, which fails
+  // with "no certificate found for the given constraints" while DigiCert has
+  // a certificate provisioned but not yet marked as the keypair default.
+  const fingerprint = process.env.SM_CERT_FINGERPRINT;
   const keypairAlias = process.env.SM_KEYPAIR_ALIAS;
-  if (!keypairAlias) {
+  let selector;
+  if (fingerprint) {
+    selector = `--fingerprint=${fingerprint}`;
+  } else if (keypairAlias) {
+    selector = `--keypair-alias=${keypairAlias}`;
+  } else {
     throw new Error(
-      "SM_KEYPAIR_ALIAS is not set. It must name the DigiCert KeyLocker keypair used for Windows signing.",
+      "Neither SM_CERT_FINGERPRINT nor SM_KEYPAIR_ALIAS is set. One of them must identify the DigiCert KeyLocker certificate used for Windows signing.",
     );
   }
 
-  console.log(`signing ${file}`);
+  console.log(`signing ${file} (${selector.split("=")[0]})`);
   const result = spawnSync(
     "smctl",
-    ["sign", `--keypair-alias=${keypairAlias}`, "--input", filePath],
+    ["sign", selector, "--input", filePath],
     { encoding: "utf8" },
   );
 
