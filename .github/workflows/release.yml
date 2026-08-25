@@ -316,6 +316,25 @@ jobs:
               Write-Output "::error::Windows signer certificate CN mismatch. Expected CN '$expectedPublisher'. Actual CN '$actualPublisher'. Actual subject '$actualSubject'. Update win.signtoolOptions.publisherName in apps/desktop/package.json to the actual value."
               exit 1
             }
+
+            # The sign hook deliberately skips the bundled MXC SDK binaries so
+            # they keep Microsoft's Authenticode signature instead of ours.
+            # Prove that assumption here: every one of them must still carry a
+            # valid vendor signature, or the skip would be shipping unsigned
+            # third-party executables.
+            $thirdParty = @(Get-ChildItem -Path 'apps/desktop/release/win-unpacked/resources/native/mxc-sdk' -Recurse -Filter *.exe -File -ErrorAction SilentlyContinue)
+            if ($thirdParty.Count -eq 0) {
+              Write-Output "::error::No MXC SDK executables found in the unpacked app. The sign hook's third-party skip list may be stale relative to the packaged layout."
+              exit 1
+            }
+            foreach ($binary in $thirdParty) {
+              $vendorSig = Get-AuthenticodeSignature -FilePath $binary.FullName
+              if ($vendorSig.Status -ne 'Valid') {
+                Write-Output "::error::$($binary.Name) was skipped by the sign hook but has no valid vendor signature (status '$($vendorSig.Status)'). It must either ship vendor-signed or be removed from the hook's skip list."
+                exit 1
+              }
+            }
+            Write-Output "Verified $($thirdParty.Count) skipped MXC SDK binaries still carry valid vendor signatures."
           } else {
             Write-Output "Built $($installer.Name) UNSIGNED because OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1; skipping Authenticode verification."
           }
