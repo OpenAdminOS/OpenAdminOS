@@ -36,7 +36,7 @@
 | Platform | Asset |
 |---|---|
 | macOS (Apple Silicon) | [`OpenAdminOS-<version>-arm64.dmg`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) — signed with Developer ID, notarized |
-| Windows | Not published while the Windows signing path is pending |
+| Windows (x64) | [`OpenAdminOS-<version>-win-x64.exe`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest): code-signed NSIS installer, per-user install |
 | From source | See [Quickstart](#quickstart) below |
 
 ---
@@ -109,7 +109,7 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 | macOS menu bar | The signed app includes a menu-bar companion for active tenant/provider state, schedules, recent activity, and a compact read-only Intune Chat prompt. | Windows/Linux companion surfaces are not planned for 0.3. |
 | LLM providers | Ollama, Apple Foundation Models on compatible macOS, and OpenAI through the local Codex CLI are implemented. | Anthropic via Claude Code CLI, LM Studio, and Azure OpenAI are planned for 0.3. |
 | MXC sandbox | The Intune Device Posture Auditor uses `execution.kind: script` behind the experimental MXC setting. Normal community agents remain YAML templates. | Hardened sandbox policy before arbitrary community script agents. |
-| Installers | macOS DMG/PKG builds are signed and notarized. Linux x64 AppImage, `.deb`, `.rpm`, and the apt repository are published. Windows builds exist unsigned and are not published while signing is pending. | Signed Windows publishing after the signing path is ready. |
+| Installers | macOS DMG/PKG builds are signed and notarized. Windows x64 ships a code-signed NSIS installer. Linux x64 AppImage, `.deb`, `.rpm`, and the apt repository are published. | Microsoft Store (AppX) distribution. |
 | Local storage | SQLite stores chat, cache, schedules, Workspaces, runs, and local learning state. Secrets stay local through Electron secure storage and platform secret-store requirements. | Keychain hardening continues where platform support needs it. |
 
 ## Reference agents

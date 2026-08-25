@@ -2,13 +2,13 @@
 
 This is the maintainer runbook for cutting a release. Day-to-day work doesn't touch any of this.
 
-The release surface currently publishes macOS and Linux binaries:
+The release surface publishes Windows, macOS, and Linux binaries:
 
 - **macOS → GitHub Releases + electron-updater** (signed + notarized `.dmg` and `.pkg` in CI; `.zip` is published for electron-updater).
 - **Linux → GitHub Releases + apt** (unsigned x64 AppImage, `.deb`, and `.rpm` with SHA-256 checksums; the `.deb` is also published into a signed GitHub Pages-backed apt repository).
-- **Windows → manual validation only**. Tagged releases do not schedule a Windows job. A maintainer can opt into AppX packaging validation during a manual workflow run, but the package is not uploaded as a workflow artifact or attached to GitHub Releases until the signing/distribution path is ready.
+- **Windows → GitHub Releases + electron-updater** (x64 NSIS `.exe` installer, code signed through DigiCert KeyLocker; `latest.yml` is published for electron-updater). AppX packaging validation is still available as an opt-in manual job for the deferred Microsoft Store path, and that AppX is never published.
 
-A single tag push builds the macOS and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`. Windows is excluded from tagged releases.
+A single tag push builds the Windows, macOS, and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`.
 
 The macOS job also verifies the two bundled native helpers inside the packaged
 app before uploading artifacts:
@@ -57,7 +57,59 @@ openssl req -new -newkey rsa:2048 -nodes \
 
 Upload the CSR to Apple, download the Developer ID Installer `.cer`, convert it to PEM if needed, export a `.p12` with a generated password, then set `CSC_INSTALLER_LINK` to the base64 `.p12` and `CSC_INSTALLER_KEY_PASSWORD` to that generated password.
 
-### Windows — AppX build validation
+### Windows: DigiCert KeyLocker signing
+
+The Windows installer is signed with an OV code signing certificate whose
+subject organization is `Ugurlabs UG (haftungsbeschränkt)`. The private key is
+held in DigiCert's cloud HSM (KeyLocker) and never reaches the runner: `smctl`
+authenticates to DigiCert ONE and the signing operation happens remotely.
+
+Configure these repository secrets:
+
+| Secret | What |
+|---|---|
+| `SM_API_KEY` | DigiCert ONE service account API key. |
+| `SM_CLIENT_CERT_FILE_B64` | Base64 of the KeyLocker client-authentication `.p12`. |
+| `SM_CLIENT_CERT_PASSWORD` | Password for that `.p12`. |
+
+Configure these repository variables:
+
+| Variable | Value |
+|---|---|
+| `SM_HOST` | `https://clientauth.one.digicert.eu` |
+| `SM_KEYPAIR_ALIAS` | Alias of the KeyLocker keypair to sign with. `smctl keypair list` prints it, and the release job also logs it. |
+
+This DigiCert ONE tenant is the EU instance, so `SM_HOST` must be the EU
+client-auth endpoint above. Pointing it at the wrong region surfaces as an
+authentication error from `smctl healthcheck`.
+
+Signing is driven per file by `apps/desktop/scripts/sign-windows.cjs`, which
+electron-builder calls through `win.signtoolOptions.sign`. The hook refuses to
+produce an unsigned build unless `OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` is set
+explicitly, and it treats a zero exit code from `smctl` as insufficient evidence
+because some `smctl` versions report a failed signature on stdout and still exit
+0.
+
+`win.signtoolOptions.signingHashAlgorithms` is pinned to `["sha256"]`.
+electron-builder otherwise defaults to `["sha1", "sha256"]` and calls the sign
+hook once per algorithm, which would spend a second KeyLocker signature per file
+and fail on a modern certificate. Each release consumes roughly three signatures
+(app executable, uninstaller, installer) out of the certificate's purchased
+allotment.
+
+`win.signtoolOptions.publisherName` must match the certificate subject exactly.
+electron-builder writes it into `latest.yml`, and electron-updater verifies
+downloaded updates against it; if it is absent, update signature verification is
+silently skipped. The release job asserts that `latest.yml` contains
+`publisherName:`, checks the Authenticode status, and prints the actual signer
+subject if the certificate common name does not match.
+
+Because this is an OV rather than an EV certificate, Windows SmartScreen builds
+reputation over download volume instead of trusting the signature immediately.
+Early downloads may still show a "Windows protected your PC" prompt. Say so
+plainly in release notes rather than implying a clean first run.
+
+### Windows: AppX build validation
 
 The values in `apps/desktop/package.json` `build.appx` are the Partner Center-assigned identity for this app:
 
@@ -68,7 +120,7 @@ The values in `apps/desktop/package.json` `build.appx` are the Partner Center-as
 | `publisherDisplayName` | `OpenAdminOS` |
 | Seller ID | `82025760` |
 
-These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them without updating the Windows distribution plan. To validate this path, run the **Release** workflow manually with `build_windows` enabled. The workflow runs `electron-builder --win --publish never`, verifies that an `.appx` was produced under `apps/desktop/release/`, and leaves it on the runner. Version tags never schedule this job.
+These match the Partner Center reservation for the `OpenAdminOS` Store name. Don't change them without updating the Windows distribution plan. The Store path is deferred, so `appx` is no longer part of `build.win.target`. To validate it, run the **Release** workflow manually with `build_windows` enabled. That job runs `electron-builder --win=appx --publish never` with `OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` (an AppX nobody installs isn't worth a KeyLocker signature), verifies that an `.appx` was produced under `apps/desktop/release/`, and leaves it on the runner. Version tags never schedule this job.
 
 ### Linux — apt repository
 
@@ -122,8 +174,8 @@ can require merging the generated-doc follow-up before CI is green.
    - If the squash merge changes commit-derived GitBook metadata, the Documentation workflow opens a one-line generated-doc PR. Review and merge it before release tagging; the failed main CI run is expected to remain red until that generated update lands.
 4. **The rest is automatic.**
    - After CI succeeds on the current `main` commit, `auto-tag.yml` reads the version from `package.json`. If that version has no tag yet, it tags that exact green commit as `vX.Y.Z`. A stale successful run is ignored when `main` has already advanced.
-   - `release.yml` fires on the tag → builds macOS release files and Linux x64 packages. Windows remains manual-only.
-   - The GitHub release receives macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
+   - `release.yml` fires on the tag → builds the signed Windows x64 installer, macOS release files, and Linux x64 packages.
+   - The GitHub release receives the Windows `.exe` and `latest.yml`, macOS `.dmg`, `.pkg`, `.zip`, `latest-mac.yml`, Linux AppImage/`.deb`/`.rpm`, `latest-linux.yml`, and `SHA256SUMS.txt`. The AppX is not uploaded.
    - The apt repository at `repo.openadminos.com` is regenerated from the release `.deb` and deployed to GitHub Pages.
 
 ### One-time branch packaging test
@@ -131,9 +183,11 @@ can require merging the generated-doc follow-up before CI is green.
 Use this when validating release workflow changes before they land on `main`.
 Run the **Release** workflow manually from the Actions tab, choose the feature
 branch, and leave `build_windows` off unless you also need AppX validation. The
-manual branch run uploads macOS and Linux artifacts as workflow artifacts only;
-it does not create or publish a GitHub Release because publishing is still gated
-to `refs/tags/v*`.
+manual branch run uploads Windows, macOS, and Linux artifacts as workflow
+artifacts only; it does not create or publish a GitHub Release because
+publishing is still gated to `refs/tags/v*`. A manual run without the DigiCert
+settings configured produces an explicitly unsigned Windows installer and skips
+signature verification; a tagged run fails outright if any of them is missing.
 
 Every CI and tagged release run also executes `npm run release:check`. The gate
 keeps the macOS application/update identity and Linux package/executable
@@ -174,6 +228,30 @@ gh pr create --title "release: v0.1.X" --body "Manual release prep."
 
 That's it. electron-updater on existing macOS installs picks up the new `latest-mac.yml` within 4 hours.
 
+### Windows: smoke-test the release
+
+1. Review the published release on GitHub.
+2. Download `OpenAdminOS-<version>-win-x64.exe` and `latest.yml`.
+3. On a Windows test machine, verify the installer signature:
+
+```powershell
+$signature = Get-AuthenticodeSignature .\OpenAdminOS-<version>-win-x64.exe
+$signature.Status
+$signature.SignerCertificate.Subject
+```
+
+The status must be `Valid`, and the signer certificate subject must include
+`CN=Ugurlabs UG (haftungsbeschränkt)`.
+
+4. Run the installer as a normal user. It is a per-user NSIS install and should
+   not require administrator rights.
+5. Launch OpenAdminOS and confirm update metadata reads from GitHub Releases.
+
+Because this is an OV certificate, Windows SmartScreen may still show "Windows
+protected your PC" until the installer builds download reputation. That is not
+the same as an unsigned installer. If the certificate publisher is correct, use
+**More info** → **Run anyway** for the smoke test.
+
 ### Linux — smoke-test the apt repository
 
 After a release, verify the repository metadata is reachable and signed:
@@ -207,15 +285,21 @@ refreshed `SHA256SUMS.txt` plus the checksum block in the release notes. The
 temporary workflow was removed after the successful run; normal releases now use
 the standard `release.yml` path.
 
-### Windows — no published package yet
+### Windows: AppX stays unpublished
 
-Do not upload AppX files to GitHub Releases until the Windows signing/distribution path is ready. Windows packaging validation is explicit and manual; the build output is intentionally runner-local.
+The published Windows artifact is the signed NSIS installer. Do not upload AppX
+files to GitHub Releases; that packaging validation is explicit, manual, and its
+build output is intentionally runner-local until the Microsoft Store path is
+actually pursued.
 
 ---
 
 ## Why this shape
 
-- **Validate AppX only when requested.** Keeping the AppX job available catches packaging regressions when maintainers need it. Tagged releases stay focused on supported platforms, and no unsigned Windows package is published.
+- **NSIS installer, not AppX, as the shipped Windows artifact.** An `.exe` installs from a downloaded file without Store enrollment or sideloading policy, and it is the only Windows target electron-updater can auto-update. AppX remains built on request so the Store path doesn't rot.
+- **Per-user install by default.** `nsis.perMachine` is false, so installing and auto-updating never prompt for elevation. An admin tool that demands local admin rights to update itself is a bad trade.
+- **Signing key stays in DigiCert's HSM.** KeyLocker means no `.pfx` and no signing key material in GitHub secrets. The runner holds only an API key and a client-authentication certificate, both revocable from DigiCert ONE without reissuing the code signing certificate.
+- **Validate AppX only when requested.** Keeping the AppX job available catches packaging regressions when maintainers need it, without spending a signature or publishing an unsigned package.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.
 - **GitHub Pages is enough for apt.** The apt repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS under `repo.openadminos.com` without a package-hosting vendor.

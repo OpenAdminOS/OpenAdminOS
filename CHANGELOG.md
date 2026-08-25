@@ -6,13 +6,23 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.
+- Release publishing verifies the Windows Authenticode signature and signer common name before uploading, and fails with the actual certificate subject when it does not match the configured publisher.
+
 ### Changed
+
+- Windows code signing runs through DigiCert KeyLocker, so the signing key stays in DigiCert's cloud HSM and CI holds no key material.
+- `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
+- Documented Windows installation, including how to verify the publisher and what to expect from SmartScreen while the organization-validated certificate accrues download reputation.
 
 ### Removed
 
 ### Fixed
 
 ### Security
+
+- The Windows release gate fails closed when DigiCert KeyLocker credentials are missing, and the signing hook refuses to emit an unsigned build unless packaging validation opts in explicitly.
+- Windows signing is pinned to SHA-256 only. electron-builder's default also performs a SHA-1 pass, which spends an extra KeyLocker signature per file and fails against a modern certificate.
 
 ## [0.4.3] - 2026-08-07
 
