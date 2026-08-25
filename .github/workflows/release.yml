@@ -8,9 +8,12 @@ name: Release
 #   - workflow_dispatch (one-time branch build without publishing)
 #
 # Outputs:
-#   - Windows: no tagged build. Maintainers can opt into an unsigned .appx
-#     packaging validation job from workflow_dispatch. It is never uploaded
-#     as a workflow artifact or GitHub release asset.
+#   - Windows x64: signed NSIS .exe installer, plus latest.yml for
+#     electron-updater auto-update. Signing goes through DigiCert KeyLocker,
+#     so the private key stays in DigiCert's HSM and never reaches the runner.
+#     Maintainers can still opt into an unsigned .appx packaging validation
+#     job from workflow_dispatch for the deferred Microsoft Store path; that
+#     AppX is never uploaded as an artifact or release asset.
 #   - macOS (Apple Silicon): notarized + signed .dmg + .pkg,
 #     plus .zip/latest-mac.yml for electron-updater auto-update.
 #   - Linux x64: unsigned AppImage, .deb, and .rpm packages, plus
@@ -21,9 +24,15 @@ name: Release
 #   macOS:  CSC_LINK, CSC_KEY_PASSWORD, CSC_INSTALLER_LINK,
 #           CSC_INSTALLER_KEY_PASSWORD, APPLE_API_KEY,
 #           APPLE_API_KEY_ID, APPLE_API_ISSUER
+#   Windows: SM_API_KEY, SM_CLIENT_CERT_FILE_B64, SM_CLIENT_CERT_PASSWORD
+#           plus the repository variables SM_HOST and SM_KEYPAIR_ALIAS.
+#           SM_HOST is the DigiCert ONE EU client-auth endpoint for this tenant;
+#           SM_CLIENT_CERT_FILE_B64 is the base64 of the KeyLocker
+#           client-authentication .p12. See docs/RELEASING.md.
 #   Linux apt repo: APT_GPG_PRIVATE_KEY, optional APT_GPG_PASSPHRASE
-#   (Windows AppX validation is manual-only and is not published. Linux artifacts
-#   are unsigned packages and are published with SHA-256 checksums.)
+#   (Windows AppX validation is manual-only, unsigned, and is not published.
+#   Linux artifacts are unsigned packages and are published with SHA-256
+#   checksums.)
 #
 # All `GITHUB_TOKEN` use comes from the auto-provided actions token.
 
@@ -109,11 +118,17 @@ jobs:
           xvfb-run -a node scripts/smoke-report-issue.mjs
 
   windows-appx:
-    name: Windows AppX (manual validation only)
+    name: Windows AppX (unsigned, manual validation only)
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_windows && inputs.backfill_apt_tag == '' }}
     needs: release-gate
     runs-on: windows-latest
     timeout-minutes: 25
+    env:
+      # The published Windows artifact is the signed NSIS installer built by
+      # the windows-x64 job. This job only proves the Microsoft Store AppX
+      # packaging path still works, so it opts the signing hook out rather
+      # than spending a KeyLocker signature on something nobody installs.
+      OPENADMINOS_ALLOW_UNSIGNED_WINDOWS: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -128,10 +143,11 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Build AppX
-        # --publish never: we don't upload from electron-builder; the
-        # AppX is only built to validate the package path until Windows
-        # signing/distribution is ready.
-        run: npm run dist -w @openadminos/desktop -- --win --publish never
+        # The target is named explicitly because build.win.target is now nsis;
+        # a bare --win would build the installer instead. --publish never: we
+        # don't upload from electron-builder, and this AppX is only ever built
+        # to validate the packaging path for the deferred Store submission.
+        run: npm run dist -w @openadminos/desktop -- --win=appx --publish never
 
       - name: Verify AppX build output
         shell: pwsh
@@ -142,6 +158,275 @@ jobs:
             exit 1
           }
           Write-Host "Built $($appx.Name); not uploading it as an artifact."
+
+  windows-x64:
+    name: Windows x64, signed NSIS installer
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
+    needs: release-gate
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      # The signing key lives in DigiCert's cloud HSM, so unlike the macOS job
+      # there is no certificate blob to import; smctl authenticates to
+      # KeyLocker with an API key plus a client-authentication certificate and
+      # signs remotely. SM_HOST and SM_KEYPAIR_ALIAS are repository variables
+      # rather than secrets: neither is confidential, and keeping the keypair
+      # alias visible makes a rotation obvious in the diff-free settings UI.
+      SM_HOST: ${{ vars.SM_HOST }}
+      SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+      SM_KEYPAIR_ALIAS: ${{ vars.SM_KEYPAIR_ALIAS }}
+      # SHA1 thumbprint of the code signing certificate, as shown on the
+      # CertCentral order page. When set, the sign hook selects the
+      # certificate directly instead of relying on the keypair's
+      # default-certificate lookup, which DigiCert can leave unresolved while
+      # a freshly issued certificate is still propagating into KeyLocker.
+      SM_CERT_FINGERPRINT: ${{ vars.SM_CERT_FINGERPRINT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify Windows signing secrets
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in \
+            SM_HOST \
+            SM_API_KEY \
+            SM_CLIENT_CERT_FILE_B64 \
+            SM_CLIENT_CERT_PASSWORD \
+            SM_KEYPAIR_ALIAS; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Tagged Windows releases require these DigiCert KeyLocker settings: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Allow unsigned build when credentials are absent
+        # Lets the release workflow run end-to-end on a forked or secrets-less
+        # repo for verification. The installer won't be publishable but the
+        # packaging path itself is exercised. Tag builds never reach this step
+        # because the secret check above already failed the job.
+        if: ${{ github.event_name == 'workflow_dispatch' && env.SM_API_KEY == '' }}
+        shell: bash
+        run: echo "OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1" >> "$GITHUB_ENV"
+
+      - name: Write DigiCert client authentication certificate
+        # smctl expects SM_CLIENT_CERT_FILE to be a path to a .p12 on disk. We
+        # materialize the base64 secret to a tempfile, mirroring how the macOS
+        # job handles the App Store Connect .p8 key.
+        if: ${{ env.SM_API_KEY != '' }}
+        env:
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SM_CLIENT_CERT_FILE_B64:-}" ]; then
+            echo "::error::SM_CLIENT_CERT_FILE_B64 is required when SM_API_KEY is set."
+            exit 1
+          fi
+          cert_path="$RUNNER_TEMP/digicert-client-auth.p12"
+          write_path="$cert_path"
+          if command -v cygpath >/dev/null 2>&1; then
+            write_path="$(cygpath -u "$cert_path")"
+            cert_path="$(cygpath -w "$cert_path")"
+          fi
+          printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 --decode > "$write_path"
+          echo "SM_CLIENT_CERT_FILE=$cert_path" >> "$GITHUB_ENV"
+
+      - name: Set up DigiCert Software Trust Manager
+        # Default (non-simple) mode on purpose: it installs the full client
+        # toolset including the DigiCert KSP, which signtool needs to reach
+        # the private key in DigiCert's HSM. simple-signing-mode installs only
+        # the smctl binary, and smctl delegates Authenticode signing to
+        # signtool, which then cannot resolve the certificate's key without
+        # the KSP. No `input`/`keypair-alias` here: this is setup only, and
+        # the actual signing is driven per file by
+        # apps/desktop/scripts/sign-windows.cjs via electron-builder's
+        # Windows sign hook.
+        if: ${{ env.SM_API_KEY != '' }}
+        uses: digicert/code-signing-software-trust-action@v1
+
+      - name: Add Windows SDK signtool to PATH
+        # smctl signs by shelling out to Microsoft signtool, but the runner
+        # image's Windows SDK does not put signtool.exe on PATH. smctl then
+        # fails with a bare FAILED and no output, and its healthcheck reports
+        # "Signtool: Mapped: No". Expose the newest SDK's x64 signtool so both
+        # smctl and the healthcheck can find it.
+        if: ${{ env.SM_API_KEY != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\signtool.exe' -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            Write-Output "::error::signtool.exe was not found under the Windows SDK path on this runner."
+            exit 1
+          }
+          Write-Output "Using $($signtool.FullName)"
+          Add-Content -Path $env:GITHUB_PATH -Value $signtool.DirectoryName
+
+      - name: Sync KeyLocker certificates into the Windows store
+        # smctl signs by delegating to Microsoft signtool with the
+        # certificate's SHA1 thumbprint, and signtool resolves that thumbprint
+        # against the Windows certificate store with private keys mapped
+        # through the DigiCert KSP. A fresh runner's store is empty, so pull
+        # the KeyLocker certificates into it first, then prove the expected
+        # certificate actually arrived: smctl exits 0 even when its
+        # subcommands fail, and signtool's "No certificates were found that
+        # met all the given criteria" two minutes into a build is a much
+        # worse place to learn the sync silently did nothing.
+        if: ${{ env.SM_API_KEY != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = smctl windows certsync 2>&1 | Out-String
+          Write-Output $out
+          if ($out -match 'fail') {
+            Write-Output "::error::smctl windows certsync reported a failure."
+            exit 1
+          }
+          # The sign hook signs by keypair alias, which does not depend on the
+          # local store, so an absent certificate here is diagnostic rather
+          # than fatal: the hook's smctl sign verify and the post-build
+          # Authenticode check are the authoritative gates.
+          $fp = $env:SM_CERT_FINGERPRINT
+          if ($fp) {
+            $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $fp }
+            if (-not $cert) {
+              Write-Output "::warning::Certificate $fp is not in the user certificate store after certsync. Store contents and installed key providers follow."
+              Get-ChildItem Cert:\CurrentUser\My | ForEach-Object { Write-Output "  $($_.Thumbprint) $($_.Subject)" }
+              certutil -csplist
+            } else {
+              Write-Output "Certificate $fp is present in the user store: $($cert.Subject)"
+            }
+          }
+
+      - name: Report KeyLocker keypairs
+        # healthcheck fails the job early with a readable DigiCert error rather
+        # than letting the first smctl sign call fail deep inside an
+        # electron-builder stack trace. The keypair listing is here so a
+        # maintainer can read the alias and certificate subject straight out of
+        # this job's log when configuring SM_KEYPAIR_ALIAS or updating
+        # win.signtoolOptions.publisherName.
+        if: ${{ env.SM_API_KEY != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          smctl healthcheck
+          smctl keypair list
+
+      - name: Build signed NSIS installer
+        run: npm run dist -w @openadminos/desktop -- --win --x64 --publish never
+
+      - name: Verify Windows build output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          $OutputEncoding = [Console]::OutputEncoding
+
+          $installers = @(Get-ChildItem -Path apps/desktop/release -Filter *.exe -File)
+          if ($installers.Count -eq 0) {
+            Write-Output "::error::Windows build completed but no .exe installer was produced."
+            exit 1
+          }
+          if ($installers.Count -ne 1) {
+            Write-Output "::error::Expected exactly one Windows .exe installer, found $($installers.Count): $($installers.Name -join ', ')."
+            exit 1
+          }
+          $installer = $installers[0]
+
+          $latestYml = 'apps/desktop/release/latest.yml'
+          if (-not (Test-Path -Path $latestYml -PathType Leaf)) {
+            Write-Output "::error::Windows build completed but apps/desktop/release/latest.yml is missing. electron-updater needs it for Windows auto-update."
+            exit 1
+          }
+
+          # publisherName lands in the packaged app's app-update.yml, the file
+          # electron-updater reads when verifying a downloaded update, not in
+          # latest.yml, which only carries version and hash metadata. Without
+          # it, update signature verification is silently skipped.
+          $appUpdateYml = 'apps/desktop/release/win-unpacked/resources/app-update.yml'
+          if (-not (Test-Path -Path $appUpdateYml -PathType Leaf)) {
+            Write-Output "::error::$appUpdateYml is missing, so the packaged app has no update configuration."
+            exit 1
+          }
+          $appUpdateText = Get-Content -Path $appUpdateYml -Raw -Encoding UTF8
+          if ($appUpdateText -notmatch '(?m)^publisherName:\s*') {
+            Write-Output "::error::app-update.yml has no publisherName entry. electron-updater would silently skip signature verification for downloaded Windows updates. Check win.signtoolOptions.publisherName in apps/desktop/package.json."
+            exit 1
+          }
+
+          if ($env:OPENADMINOS_ALLOW_UNSIGNED_WINDOWS -ne '1') {
+            $expectedPublisher = 'Ugurlabs UG (haftungsbeschränkt)'
+            $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+            if ($signature.Status -ne 'Valid') {
+              Write-Output "::error::Authenticode signature on $($installer.Name) is '$($signature.Status)': $($signature.StatusMessage)"
+              exit 1
+            }
+
+            $actualSubject = $signature.SignerCertificate.Subject
+            $actualPublisher = $signature.SignerCertificate.GetNameInfo(
+              [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+            if ($actualPublisher -ne $expectedPublisher) {
+              Write-Output "::error::Windows signer certificate CN mismatch. Expected CN '$expectedPublisher'. Actual CN '$actualPublisher'. Actual subject '$actualSubject'. Update win.signtoolOptions.publisherName in apps/desktop/package.json to the actual value."
+              exit 1
+            }
+
+            # The sign hook deliberately skips the bundled MXC SDK binaries so
+            # they keep Microsoft's Authenticode signature instead of ours.
+            # Prove that assumption here: every one of them must still carry a
+            # valid vendor signature, or the skip would be shipping unsigned
+            # third-party executables.
+            $thirdParty = @(Get-ChildItem -Path 'apps/desktop/release/win-unpacked/resources/native/mxc-sdk' -Recurse -Filter *.exe -File -ErrorAction SilentlyContinue)
+            if ($thirdParty.Count -eq 0) {
+              Write-Output "::error::No MXC SDK executables found in the unpacked app. The sign hook's third-party skip list may be stale relative to the packaged layout."
+              exit 1
+            }
+            foreach ($binary in $thirdParty) {
+              $vendorSig = Get-AuthenticodeSignature -FilePath $binary.FullName
+              if ($vendorSig.Status -ne 'Valid') {
+                Write-Output "::error::$($binary.Name) was skipped by the sign hook but has no valid vendor signature (status '$($vendorSig.Status)'). It must either ship vendor-signed or be removed from the hook's skip list."
+                exit 1
+              }
+            }
+            Write-Output "Verified $($thirdParty.Count) skipped MXC SDK binaries still carry valid vendor signatures."
+          } else {
+            Write-Output "Built $($installer.Name) UNSIGNED because OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1; skipping Authenticode verification."
+          }
+
+          Write-Output "Built Windows artifacts:"
+          Get-ChildItem -Path apps/desktop/release -File |
+            Sort-Object Name |
+            ForEach-Object { Write-Output "  $($_.FullName)" }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/latest.yml
+          if-no-files-found: error
+          retention-days: 7
 
   macos-arm64:
     name: macOS (Apple Silicon) — signed + notarized
@@ -406,7 +691,7 @@ jobs:
 
   publish-release:
     name: Publish release
-    needs: [macos-arm64, linux-x64]
+    needs: [windows-x64, macos-arm64, linux-x64]
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
@@ -427,12 +712,14 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           find artifacts -type f \( \
+            -name '*.exe' -o \
             -name '*.dmg' -o \
             -name '*.pkg' -o \
             -name '*.zip' -o \
             -name '*.AppImage' -o \
             -name '*.deb' -o \
             -name '*.rpm' -o \
+            -name 'latest.yml' -o \
             -name 'latest-mac.yml' -o \
             -name 'latest-linux.yml' \
           \) -print0 | while IFS= read -r -d '' file; do

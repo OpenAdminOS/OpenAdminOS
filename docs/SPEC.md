@@ -12,7 +12,7 @@ The product is local-first: by default, tenant data and LLM prompts never leave 
 
 ### Distribution surface
 
-- **Desktop app** (Electron; macOS signed/notarized, Linux x64 packages, Windows packaging validation is manual-only until signing is ready) — the only end-user surface
+- **Desktop app** (Electron; Windows x64 signed NSIS installer, macOS signed/notarized, Linux x64 packages), the only end-user surface
 
 There is no separate CLI. Power users get the same GUI; contributor tooling (agent scaffold, dev/test commands) lives in repo scripts, not in a published `npx` binary.
 
@@ -108,8 +108,10 @@ intentionally shown, so Google is less likely to frame the homepage as a recent
 article-style result. The marketing robots.txt should explicitly allow major AI
 search crawlers while keeping API routes blocked.
 `SoftwareApplication` structured data must match the current downloadable
-platforms and must not advertise Windows availability until signed Windows
-builds are actually published. Marketing download surfaces present macOS as a
+platforms. Signed Windows builds are now produced by release CI, so Windows may
+be advertised; the accompanying copy must stay honest about SmartScreen (see
+"Code signing" below). Marketing download surfaces present Windows as a signed
+x64 NSIS `.exe` installer, macOS as a
 signed/notarized DMG for normal installs plus a signed/notarized PKG for managed
 deployment, and Linux as x64 packages with AppImage for broad desktop use,
 `.deb` for Ubuntu and other Debian-family systems, `.rpm` for Fedora/RHEL-compatible
@@ -1348,16 +1350,39 @@ Electron window.
 ### Code signing
 
 Required before public v1 release:
-- **Windows:** EV certificate (~$400-600/yr), hardware token + cloud HSM for CI signing, or a Microsoft Store signing path. Until one is ready, tagged releases do not schedule Windows jobs. Maintainers may explicitly request a manual AppX packaging-validation job, but AppX files are not published as workflow artifacts or release assets.
+- **Windows:** OV code signing certificate issued to `Ugurlabs UG (haftungsbeschränkt)`, provisioned through DigiCert KeyLocker so the private key stays in DigiCert's cloud HSM and CI never holds key material. Tagged releases build, sign, and publish an x64 NSIS `.exe` installer plus `latest.yml` for electron-updater. Maintainers may still request a manual AppX packaging-validation job for the deferred Microsoft Store path, but AppX files are not published as workflow artifacts or release assets.
 - **macOS:** Apple Developer Program ($99/yr), a Developer ID Application certificate for the app/DMG/ZIP, a Developer ID Installer certificate for the PKG, and notarization. Without notarization, Gatekeeper blocks the app.
 - **Linux:** Release tags publish unsigned x64 artifacts as AppImage, `.deb`, and `.rpm`, plus `SHA256SUMS.txt` and a checksum section in the GitHub Release notes. Treat Linux support as current Ubuntu and other Debian-family systems, plus RHEL/Fedora-compatible desktop coverage, not "any distro" support. The `.deb` is also published into a signed static apt repository on GitHub Pages at `https://repo.openadminos.com/debian`; apt trust is repository-metadata signing, not per-file executable signing. The apt repository script validates `.deb` architecture from control metadata rather than Debian filename suffixes because Electron Builder release assets use `*-linux-amd64.deb` names. RPM repository/package signing remains deferred until OpenAdminOS operates an RPM repository. The v0.2.1 Linux backfill workflow checks out the v0.2.1 tag and patches only CI-local Linux package metadata before uploading artifacts to the existing release.
 - Linux packages use `openadminos` as the executable and `com.openadminos.desktop.desktop` as the desktop-entry filename, with Electron Builder desktop-name synchronization enabled so GNOME/KDE window association matches the application ID.
 - Packaged Linux desktop builds use Chromium software rendering by default and avoid VAAPI/GPU initialization. AppImages must tolerate Debian/Ubuntu VMs and desktops without working 3D acceleration; the main window also has a load/timeout reveal fallback so a missing `ready-to-show` event cannot leave the app invisible.
 - Total: ~$500-700/yr, owned by the OpenAdminOS UG entity.
 
-The build pipeline must accept signing as a step from day one — even if signing certs aren't acquired yet, the GitHub Actions workflow should have placeholder signing steps that no-op until certs are configured. Manual packaging validation may run without release secrets, but a tagged release fails closed before publishing when any macOS signing/notarization secret or Linux apt-repository private-key/passphrase secret is absent.
+#### Windows signing and distribution decisions
+
+- The shipped Windows artifact is an NSIS `.exe` installer, not an AppX. An
+  `.exe` installs from a downloaded file without Store enrollment or sideloading
+  policy, and it is the only Windows target electron-updater can auto-update.
+- The installer is per-user (`nsis.perMachine` false), so neither installing nor
+  auto-updating prompts for elevation. Requiring local admin rights to update an
+  admin tool is a bad trade.
+- `win.signtoolOptions.signingHashAlgorithms` is pinned to `["sha256"]`.
+  electron-builder's default of `["sha1", "sha256"]` invokes the sign hook once
+  per algorithm, which spends a second KeyLocker signature per file and fails
+  against a modern certificate.
+- `win.signtoolOptions.publisherName` must equal the certificate subject exactly.
+  electron-builder writes it into `latest.yml`, and electron-updater
+  verifies downloaded updates against it; when it is absent, verification is
+  skipped silently. The release job asserts the Authenticode status and the
+  signer common name after every build and fails with the actual subject on
+  mismatch, so this can never degrade quietly.
+- The certificate is OV, not EV. SmartScreen accrues reputation over download
+  volume rather than trusting the signature immediately, so early downloads may
+  still show a "Windows protected your PC" prompt. User-facing copy must say so
+  plainly instead of implying a clean first run.
+
+The build pipeline treats signing as a first-class release step. Manual packaging validation may run without release secrets, but a tagged release fails closed before publishing when any Windows KeyLocker credential, macOS signing/notarization secret, or Linux apt-repository private-key secret is absent. The Linux apt passphrase remains optional because the repository signing key may be unencrypted.
 Release automation treats `release: vX.Y.Z` as the canonical marker and parses it from the full merge commit message, so both squash merges and normal merge commits can cut the corresponding tag.
-Tagged releases build and publish only the supported macOS Apple Silicon and Linux x64 packages. Windows AppX validation is an opt-in manual workflow job and is not a dependency of release publication.
+Tagged releases build and publish the supported Windows x64 installer, macOS Apple Silicon, and Linux x64 packages. Windows AppX validation is an opt-in manual workflow job and is not a dependency of release publication.
 Release prep must bump every OpenAdminOS-owned package manifest and matching lockfile metadata that carries the product release version, including desktop, runtime, connector packages, QA packages, and the marketing website package.
 Release publishing must use the matching `CHANGELOG.md` section as the GitHub Release body and fail if that section is missing; generated PR summaries are not an acceptable fallback for release notes.
 Release gates preserve upgrade identities from v0.3: `com.openadminos.desktop` and the GitHub update publisher for macOS, plus the `openadminos` package/executable and stable desktop identity for Linux. Automated compatibility coverage must also open legacy JSON and SQLite state, apply additive migrations, and prove tenant, run, agent, chat, and cache records survive before packaging.

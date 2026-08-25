@@ -15,7 +15,11 @@ Managed deployments can use the signed Apple Silicon `.pkg` from the same releas
 
 ## Windows
 
-Windows packaging is part of the release pipeline. The Windows signing and distribution path is still being hardened, so use release notes for the current installer status.
+Download `OpenAdminOS-<version>-win-x64.exe` from the [latest GitHub release](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) and run it. The installer is per-user, so it does not require local administrator rights, and it lets you change the install directory. Auto-update is handled by electron-updater from GitHub Releases.
+
+The installer is code signed. Before running it, right-click the file, open **Properties → Digital Signatures**, and confirm the signer is `Ugurlabs UG (haftungsbeschränkt)`.
+
+The certificate is organization-validated rather than extended-validation, which means Microsoft SmartScreen builds trust from download volume rather than from the certificate alone. Until enough people have installed a given release, SmartScreen may still show a "Windows protected your PC" prompt. Check the signature as described above, then choose **More info** → **Run anyway**.
 
 ## Linux
 

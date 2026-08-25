@@ -157,9 +157,32 @@
       "hasStrictIdentifier": true
     },
     "win": {
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
       "target": [
-        { "target": "appx", "arch": ["x64"] }
-      ]
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "signtoolOptions": {
+        "sign": "./scripts/sign-windows.cjs",
+        "publisherName": "Ugurlabs UG (haftungsbeschränkt)",
+        "signingHashAlgorithms": [
+          "sha256"
+        ],
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OpenAdminOS",
+      "uninstallDisplayName": "OpenAdminOS ${version}",
+      "deleteAppDataOnUninstall": false
     },
     "appx": {
       "applicationId": "OpenAdminOS",
