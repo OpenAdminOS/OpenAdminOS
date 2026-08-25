@@ -260,6 +260,26 @@ jobs:
         with:
           simple-signing-mode: true
 
+      - name: Add Windows SDK signtool to PATH
+        # smctl signs by shelling out to Microsoft signtool, but the runner
+        # image's Windows SDK does not put signtool.exe on PATH. smctl then
+        # fails with a bare FAILED and no output, and its healthcheck reports
+        # "Signtool: Mapped: No". Expose the newest SDK's x64 signtool so both
+        # smctl and the healthcheck can find it.
+        if: ${{ env.SM_API_KEY != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\signtool.exe' -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            Write-Output "::error::signtool.exe was not found under the Windows SDK path on this runner."
+            exit 1
+          }
+          Write-Output "Using $($signtool.FullName)"
+          Add-Content -Path $env:GITHUB_PATH -Value $signtool.DirectoryName
+
       - name: Sync KeyLocker certificates into the Windows store
         # smctl signs by delegating to Microsoft signtool with the
         # certificate's SHA1 thumbprint, and signtool resolves that thumbprint
