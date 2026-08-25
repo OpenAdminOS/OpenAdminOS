@@ -1,6 +1,8 @@
 "use strict";
 
-// electron-builder Windows signing hook, backed by Azure Trusted Signing.
+// electron-builder Windows signing hook, backed by Azure Artifact Signing
+// (renamed from Trusted Signing in January 2026; the PowerShell module and
+// cmdlet keep the pre-rename name).
 //
 // The signing certificate is issued and rotated by Microsoft's Trusted
 // Signing service (short-lived, HSM-held); nothing secret reaches the

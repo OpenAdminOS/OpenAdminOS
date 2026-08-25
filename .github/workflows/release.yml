@@ -9,7 +9,7 @@ name: Release
 #
 # Outputs:
 #   - Windows x64: signed NSIS .exe installer, plus latest.yml for
-#     electron-updater auto-update. Signing goes through Azure Trusted
+#     electron-updater auto-update. Signing goes through Azure Artifact
 #     Signing, so the certificate is short-lived, Microsoft-issued, and the
 #     private key never exists outside their HSM. Maintainers can still opt
 #     into an unsigned .appx packaging validation job from workflow_dispatch
@@ -26,7 +26,7 @@ name: Release
 #           CSC_INSTALLER_KEY_PASSWORD, APPLE_API_KEY,
 #           APPLE_API_KEY_ID, APPLE_API_ISSUER
 #   Windows: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (an Entra
-#           service principal with the Trusted Signing Certificate Profile
+#           service principal with the Artifact Signing Certificate Profile
 #           Signer role), plus the repository variables
 #           AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT_NAME, and
 #           AZURE_CERT_PROFILE_NAME. See docs/RELEASING.md.
@@ -167,12 +167,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     env:
-      # Azure Trusted Signing: the certificate is short-lived, issued and
-      # rotated by Microsoft, and the private key never exists outside their
-      # HSM. The runner only holds a service principal credential, revocable
-      # in Entra without touching the signing setup. The three non-secret
-      # values are repository variables so a rotation or region change is
-      # visible without decrypting anything.
+      # Azure Artifact Signing (renamed from Trusted Signing in Jan 2026;
+      # same service, resource type, and endpoints): the certificate is
+      # short-lived, issued and rotated by Microsoft, and the private key
+      # never exists outside their HSM. The runner only holds a service
+      # principal credential, revocable in Entra without touching the signing
+      # setup. The three non-secret values are repository variables so a
+      # rotation or region change is visible without decrypting anything.
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -223,9 +224,14 @@ jobs:
         shell: bash
         run: echo "OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1" >> "$GITHUB_ENV"
 
-      - name: Prepare Azure Trusted Signing
-        # Installs the TrustedSigning PowerShell module the sign hook invokes
-        # per file. The PSModulePath pin matters: the hook runs pwsh
+      - name: Prepare Azure Artifact Signing
+        # Installs the PowerShell module the sign hook invokes per file. The
+        # module keeps the service's pre-rename name (TrustedSigning); it is
+        # frozen but not deprecated, talks to the unchanged
+        # *.codesigning.azure.net endpoints, and is what electron-builder and
+        # T3 Code ship with in production today. Its successor module is
+        # ArtifactSigning/Invoke-ArtifactSigning; migrate once it is as
+        # field-proven. The PSModulePath pin matters: the hook runs pwsh
         # -NoProfile from inside electron-builder, and without the pin that
         # child shell can fail to resolve Invoke-TrustedSigning even though
         # this step installed it (T3 Code hit exactly this in production).
@@ -238,7 +244,7 @@ jobs:
           } catch {
             Write-Output "NuGet package provider already available: $($_.Exception.Message)"
           }
-          Install-Module -Name TrustedSigning -MinimumVersion 0.5.0 -Force -Repository PSGallery -Scope CurrentUser
+          Install-Module -Name TrustedSigning -MinimumVersion 0.5.0 -Force -AllowClobber -Repository PSGallery -Scope CurrentUser
           Import-Module TrustedSigning
           if (-not (Get-Command Invoke-TrustedSigning -ErrorAction SilentlyContinue)) {
             Write-Output "::error::Invoke-TrustedSigning is not resolvable after installing the TrustedSigning module."

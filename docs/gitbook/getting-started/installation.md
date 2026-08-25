@@ -19,7 +19,7 @@ Download `OpenAdminOS-<version>-win-x64.exe` from the [latest GitHub release](ht
 
 The installer is code signed. Before running it, right-click the file, open **Properties → Digital Signatures**, and confirm the signer is `Ugurlabs UG (haftungsbeschränkt)`.
 
-The installer is signed through Microsoft's Azure Trusted Signing program, which SmartScreen trusts faster than a conventional certificate. A brand-new release can still show a "Windows protected your PC" prompt briefly until its file hash accrues reputation. Check the signature as described above, then choose **More info** → **Run anyway**.
+The installer is signed through Microsoft's Azure Artifact Signing program, which SmartScreen trusts faster than a conventional certificate. A brand-new release can still show a "Windows protected your PC" prompt briefly until its file hash accrues reputation. Check the signature as described above, then choose **More info** → **Run anyway**.
 
 ## Linux
 

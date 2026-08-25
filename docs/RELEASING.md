@@ -57,28 +57,47 @@ openssl req -new -newkey rsa:2048 -nodes \
 
 Upload the CSR to Apple, download the Developer ID Installer `.cer`, convert it to PEM if needed, export a `.p12` with a generated password, then set `CSC_INSTALLER_LINK` to the base64 `.p12` and `CSC_INSTALLER_KEY_PASSWORD` to that generated password.
 
-### Windows: Azure Trusted Signing
+### Windows: Azure Artifact Signing
 
-The Windows installer is signed through Azure Trusted Signing, Microsoft's
-public-trust code signing service. The certificate is short-lived (days),
-issued and rotated automatically by Microsoft for the validated identity
-`Ugurlabs UG (haftungsbeschränkt)`, and the private key never exists outside
-Microsoft's HSM. CI holds only an Entra service principal credential, which is
-revocable in Entra without touching the signing setup. Trusted Signing also
-establishes SmartScreen reputation faster than a conventional OV certificate.
+The Windows installer is signed through Azure Artifact Signing (renamed from
+"Trusted Signing" in January 2026; same service, same
+`Microsoft.CodeSigning/codeSigningAccounts` resource type, same endpoints),
+Microsoft's public-trust code signing service. The certificate is short-lived
+(72 hours, rotated daily), issued by Microsoft for the validated identity, and
+the private key never exists outside Microsoft's FIPS 140-3 Level 3 HSM. CI
+holds only an Entra service principal credential, revocable without touching
+the signing setup. Being Microsoft's own trust program, it establishes
+SmartScreen reputation faster than a conventional OV certificate.
 
-One-time Azure setup:
+One-time Azure setup (requires a paid subscription; free and trial
+subscriptions are rejected):
 
-1. In the Azure portal, create a **Trusted Signing account** (region West
-   Europe, SKU Basic).
-2. Under the account, complete an **Identity validation** of type
-   Organization for Ugurlabs UG (haftungsbeschränkt). This is Microsoft's
-   own vetting and can take several days.
-3. After validation, create a **certificate profile** of type Public Trust
-   linked to that identity validation.
-4. Create an Entra **app registration** with a client secret and grant it the
-   **Trusted Signing Certificate Profile Signer** role on the account (IAM on
-   the Trusted Signing account resource).
+1. Register the `Microsoft.CodeSigning` resource provider on the subscription.
+2. Portal, search "**Artifact Signing Accounts**", Create: resource group,
+   globally unique account name, region **West Europe**, pricing tier
+   **Basic** ($9.99/month, 5,000 signatures included; a release consumes about
+   four).
+3. Grant yourself the **Artifact Signing Identity Verifier** role on the
+   account (IAM), or the identity-validation button stays greyed out.
+4. Create an **Identity validation** of type Organization (portal only):
+   - Legal entity name exactly as registered: `Ugurlabs UG (haftungsbeschränkt)`.
+     This becomes the certificate CN verbatim and cannot be customized.
+   - Business identifier (for a German UG the Handelsregister number, e.g.
+     `HRB xxxxx`), registered address, company website, and a primary plus
+     secondary email on the company domain (the verification link expires in
+     7 days).
+   - A company representative completes an individual verification (government
+     ID through Microsoft's AU10TIX flow).
+   - Duration is 1 to 20 business days and cannot be expedited. If Microsoft
+     requests documents: they must be issued within the last 12 months, match
+     the entered data exactly, and there are only **3 upload attempts** before
+     the request permanently fails and must be restarted.
+5. After validation, create a **certificate profile** of type Public Trust
+   linked to the validated identity (Objects, Certificate profiles).
+6. Create an Entra **app registration** with a client secret and grant it the
+   **Artifact Signing Certificate Profile Signer** role on the account (IAM on
+   the account resource; the role was renamed from "Trusted Signing
+   Certificate Profile Signer", so name-based scripts must use the new name).
 
 Configure these repository secrets:
 
@@ -92,17 +111,21 @@ Configure these repository variables:
 
 | Variable | Value |
 |---|---|
-| `AZURE_SIGNING_ENDPOINT` | Regional endpoint, e.g. `https://weu.codesigning.azure.net` for West Europe. |
-| `AZURE_SIGNING_ACCOUNT_NAME` | Trusted Signing account name. |
+| `AZURE_SIGNING_ENDPOINT` | Regional endpoint, `https://weu.codesigning.azure.net` for West Europe (the endpoint domain kept its pre-rename name). An endpoint/region mismatch surfaces as 403 SignerSign failures. |
+| `AZURE_SIGNING_ACCOUNT_NAME` | Artifact Signing account name. |
 | `AZURE_CERT_PROFILE_NAME` | Certificate profile name. |
 
 Signing is driven per file by `apps/desktop/scripts/sign-windows.cjs`, which
 electron-builder calls through `win.signtoolOptions.sign`. The hook invokes
-the `Invoke-TrustedSigning` PowerShell cmdlet, refuses to produce an unsigned
-build unless `OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` is set explicitly, and
-runs `signtool verify /pa` after each file so a pass means Windows itself
-accepts the signature. Bundled MXC SDK binaries keep Microsoft's vendor
-signature and are verified separately after the build.
+the `Invoke-TrustedSigning` PowerShell cmdlet (the module keeps the
+pre-rename name; it is frozen but not deprecated, talks to the unchanged
+endpoints, and is what electron-builder and T3 Code ship with in production;
+its successor is `ArtifactSigning`/`Invoke-ArtifactSigning`). The hook
+refuses to produce an unsigned build unless
+`OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1` is set explicitly, and runs
+`signtool verify /pa` after each file so a pass means Windows itself accepts
+the signature. Bundled MXC SDK binaries keep Microsoft's vendor signature and
+are verified separately after the build.
 
 `win.signtoolOptions.publisherName` must match the certificate subject common
 name exactly. electron-builder writes it into the packaged app's
