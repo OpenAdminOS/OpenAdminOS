@@ -260,6 +260,19 @@ jobs:
         with:
           simple-signing-mode: true
 
+      - name: Sync KeyLocker certificates into the Windows store
+        # smctl signs by delegating to Microsoft signtool with the
+        # certificate's SHA1 thumbprint, and signtool resolves that thumbprint
+        # against the Windows certificate store with private keys mapped
+        # through the DigiCert KSP. A fresh runner's store is empty, so pull
+        # the KeyLocker certificates into it first or every signtool
+        # invocation fails to find the certificate.
+        if: ${{ env.SM_API_KEY != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          smctl windows certsync
+
       - name: Report KeyLocker keypairs
         # healthcheck fails the job early with a readable DigiCert error rather
         # than letting the first smctl sign call fail deep inside an
