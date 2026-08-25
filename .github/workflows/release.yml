@@ -160,7 +160,7 @@ jobs:
           Write-Host "Built $($appx.Name); not uploading it as an artifact."
 
   windows-x64:
-    name: Windows x64 (signed NSIS installer)
+    name: Windows x64, signed NSIS installer
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
     needs: release-gate
     runs-on: windows-latest
@@ -236,7 +236,12 @@ jobs:
             exit 1
           fi
           cert_path="$RUNNER_TEMP/digicert-client-auth.p12"
-          printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 --decode > "$cert_path"
+          write_path="$cert_path"
+          if command -v cygpath >/dev/null 2>&1; then
+            write_path="$(cygpath -u "$cert_path")"
+            cert_path="$(cygpath -w "$cert_path")"
+          fi
+          printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 --decode > "$write_path"
           echo "SM_CLIENT_CERT_FILE=$cert_path" >> "$GITHUB_ENV"
 
       - name: Set up DigiCert Software Trust Manager

@@ -76,12 +76,15 @@ Configure these repository variables:
 
 | Variable | Value |
 |---|---|
-| `SM_HOST` | `https://clientauth.one.digicert.eu` |
+| `SM_HOST` | `https://clientauth.one.nl.digicert.com` for the EU (Netherlands) instance, `https://clientauth.one.digicert.com` for the US one. |
 | `SM_KEYPAIR_ALIAS` | Alias of the KeyLocker keypair to sign with. `smctl keypair list` prints it, and the release job also logs it. |
 
-This DigiCert ONE tenant is the EU instance, so `SM_HOST` must be the EU
-client-auth endpoint above. Pointing it at the wrong region surfaces as an
-authentication error from `smctl healthcheck`.
+Credentials only work against the DigiCert ONE instance that issued them, so
+`SM_HOST` must match the instance where the API key and client authentication
+certificate were created. Confirm it from the browser address bar while signed
+in to DigiCert ONE: `one.nl.digicert.com` is the EU instance,
+`one.digicert.com` is the US one. Pointing it at the wrong region surfaces as
+an authentication error from `smctl healthcheck`.
 
 Signing is driven per file by `apps/desktop/scripts/sign-windows.cjs`, which
 electron-builder calls through `win.signtoolOptions.sign`. The hook refuses to

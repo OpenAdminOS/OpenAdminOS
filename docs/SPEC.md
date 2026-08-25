@@ -12,7 +12,7 @@ The product is local-first: by default, tenant data and LLM prompts never leave 
 
 ### Distribution surface
 
-- **Desktop app** (Electron; Windows x64 signed NSIS installer, macOS signed/notarized, Linux x64 packages) — the only end-user surface
+- **Desktop app** (Electron; Windows x64 signed NSIS installer, macOS signed/notarized, Linux x64 packages), the only end-user surface
 
 There is no separate CLI. Power users get the same GUI; contributor tooling (agent scaffold, dev/test commands) lives in repo scripts, not in a published `npx` binary.
 
