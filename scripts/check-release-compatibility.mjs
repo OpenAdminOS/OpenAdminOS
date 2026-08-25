@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const BASELINE_VERSION = "0.3.0";
 const VERSIONED_PACKAGES = [
@@ -85,6 +85,42 @@ for (const target of ["AppImage", "deb", "rpm"]) {
   assertIncludes(build.linux?.target, target, "Linux package targets");
 }
 
+const winTargets = Array.isArray(build.win?.target) ? build.win.target : [];
+const nsisTarget = winTargets.find((candidate) => candidate?.target === "nsis");
+if (!nsisTarget) {
+  fail("Windows targets must include nsis; the published Windows artifact is the NSIS installer.");
+} else {
+  assertIncludes(nsisTarget.arch, "x64", "Windows nsis architectures");
+}
+
+const signtoolOptions = build.win?.signtoolOptions ?? {};
+assertEqual(
+  signtoolOptions.publisherName,
+  "Ugurlabs UG (haftungsbeschränkt)",
+  "Windows publisher identity",
+);
+assertEqual(
+  signtoolOptions.sign,
+  "./scripts/sign-windows.cjs",
+  "Windows signing hook",
+);
+if (!existsSync("apps/desktop/scripts/sign-windows.cjs")) {
+  fail("apps/desktop/scripts/sign-windows.cjs is missing; Windows builds cannot be signed without it.");
+}
+assertIncludes(
+  signtoolOptions.signingHashAlgorithms,
+  "sha256",
+  "Windows signing hash algorithms",
+);
+if (
+  Array.isArray(signtoolOptions.signingHashAlgorithms) &&
+  signtoolOptions.signingHashAlgorithms.includes("sha1")
+) {
+  fail(
+    "Windows signing hash algorithms must not include sha1; it doubles KeyLocker signature usage and fails against a modern code signing certificate.",
+  );
+}
+
 const githubPublisher = (build.publish ?? []).find(
   (entry) => entry?.provider === "github",
 );
@@ -109,6 +145,6 @@ if (
 
 if (!process.exitCode) {
   process.stdout.write(
-    `Release ${releaseVersion} keeps the macOS updater identity and Linux package identities used by ${BASELINE_VERSION}.\n`,
+    `Release ${releaseVersion} keeps the macOS updater identity, Linux package identities, and Windows signing configuration required after ${BASELINE_VERSION}.\n`,
   );
 }
