@@ -251,14 +251,17 @@ jobs:
           echo "SM_CLIENT_CERT_FILE=$cert_path" >> "$GITHUB_ENV"
 
       - name: Set up DigiCert Software Trust Manager
-        # Installs smctl and puts it on PATH. No `input`/`keypair-alias` here
-        # on purpose: this is setup only, and the actual signing is driven per
-        # file by apps/desktop/scripts/sign-windows.cjs when electron-builder
-        # calls its Windows sign hook.
+        # Default (non-simple) mode on purpose: it installs the full client
+        # toolset including the DigiCert KSP, which signtool needs to reach
+        # the private key in DigiCert's HSM. simple-signing-mode installs only
+        # the smctl binary, and smctl delegates Authenticode signing to
+        # signtool, which then cannot resolve the certificate's key without
+        # the KSP. No `input`/`keypair-alias` here: this is setup only, and
+        # the actual signing is driven per file by
+        # apps/desktop/scripts/sign-windows.cjs via electron-builder's
+        # Windows sign hook.
         if: ${{ env.SM_API_KEY != '' }}
         uses: digicert/code-signing-software-trust-action@v1
-        with:
-          simple-signing-mode: true
 
       - name: Add Windows SDK signtool to PATH
         # smctl signs by shelling out to Microsoft signtool, but the runner
@@ -285,13 +288,32 @@ jobs:
         # certificate's SHA1 thumbprint, and signtool resolves that thumbprint
         # against the Windows certificate store with private keys mapped
         # through the DigiCert KSP. A fresh runner's store is empty, so pull
-        # the KeyLocker certificates into it first or every signtool
-        # invocation fails to find the certificate.
+        # the KeyLocker certificates into it first, then prove the expected
+        # certificate actually arrived: smctl exits 0 even when its
+        # subcommands fail, and signtool's "No certificates were found that
+        # met all the given criteria" two minutes into a build is a much
+        # worse place to learn the sync silently did nothing.
         if: ${{ env.SM_API_KEY != '' }}
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          smctl windows certsync
+          $ErrorActionPreference = 'Stop'
+          $out = smctl windows certsync 2>&1 | Out-String
+          Write-Output $out
+          if ($out -match 'fail') {
+            Write-Output "::error::smctl windows certsync reported a failure."
+            exit 1
+          }
+          $fp = $env:SM_CERT_FINGERPRINT
+          if ($fp) {
+            $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $fp }
+            if (-not $cert) {
+              Write-Output "::error::Certificate $fp is not in the user certificate store after certsync. Store contents and installed key providers follow."
+              Get-ChildItem Cert:\CurrentUser\My | ForEach-Object { Write-Output "  $($_.Thumbprint) $($_.Subject)" }
+              certutil -csplist
+              exit 1
+            }
+            Write-Output "Certificate $fp is present in the user store: $($cert.Subject)"
+          }
 
       - name: Report KeyLocker keypairs
         # healthcheck fails the job early with a readable DigiCert error rather
