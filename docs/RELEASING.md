@@ -102,11 +102,13 @@ and fail on a modern certificate. Each release consumes roughly three signatures
 allotment.
 
 `win.signtoolOptions.publisherName` must match the certificate subject exactly.
-electron-builder writes it into `latest.yml`, and electron-updater verifies
-downloaded updates against it; if it is absent, update signature verification is
-silently skipped. The release job asserts that `latest.yml` contains
-`publisherName:`, checks the Authenticode status, and prints the actual signer
-subject if the certificate common name does not match.
+electron-builder writes it into the packaged app's `app-update.yml`, and
+electron-updater verifies downloaded updates against it; if it is absent,
+update signature verification is silently skipped. (`latest.yml` never carries
+it, that file is only version and hash metadata.) The release job asserts that
+`app-update.yml` contains `publisherName:`, checks the Authenticode status, and
+prints the actual signer subject if the certificate common name does not
+match.
 
 Because this is an OV rather than an EV certificate, Windows SmartScreen builds
 reputation over download volume instead of trusting the signature immediately.

@@ -360,9 +360,18 @@ jobs:
             exit 1
           }
 
-          $latestText = Get-Content -Path $latestYml -Raw -Encoding UTF8
-          if ($latestText -notmatch '(?m)^publisherName:\s*') {
-            Write-Output "::error::latest.yml has no publisherName entry. electron-updater would silently skip signature verification for downloaded Windows updates."
+          # publisherName lands in the packaged app's app-update.yml, the file
+          # electron-updater reads when verifying a downloaded update, not in
+          # latest.yml, which only carries version and hash metadata. Without
+          # it, update signature verification is silently skipped.
+          $appUpdateYml = 'apps/desktop/release/win-unpacked/resources/app-update.yml'
+          if (-not (Test-Path -Path $appUpdateYml -PathType Leaf)) {
+            Write-Output "::error::$appUpdateYml is missing, so the packaged app has no update configuration."
+            exit 1
+          }
+          $appUpdateText = Get-Content -Path $appUpdateYml -Raw -Encoding UTF8
+          if ($appUpdateText -notmatch '(?m)^publisherName:\s*') {
+            Write-Output "::error::app-update.yml has no publisherName entry. electron-updater would silently skip signature verification for downloaded Windows updates. Check win.signtoolOptions.publisherName in apps/desktop/package.json."
             exit 1
           }
 
