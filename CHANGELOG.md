@@ -11,7 +11,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
-- Windows code signing runs through DigiCert KeyLocker, so the signing key stays in DigiCert's cloud HSM and CI holds no key material.
+- Windows code signing runs through Azure Artifact Signing (formerly Trusted Signing): the certificate is short-lived and rotated by Microsoft, the key never leaves Microsoft's HSM, CI holds only a revocable service principal credential, and SmartScreen reputation is established faster than with the previous OV certificate.
 - `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
 - Documented Windows installation, including how to verify the publisher and what to expect from SmartScreen while the organization-validated certificate accrues download reputation.
 

@@ -1,42 +1,53 @@
 "use strict";
 
+// electron-builder Windows signing hook, backed by Azure Artifact Signing
+// (renamed from Trusted Signing in January 2026; the PowerShell module and
+// cmdlet keep the pre-rename name).
+//
+// The signing certificate is issued and rotated by Microsoft's Trusted
+// Signing service (short-lived, HSM-held); nothing secret reaches the
+// runner beyond a service principal credential. electron-builder calls this
+// hook once per file and we delegate to the Invoke-TrustedSigning
+// PowerShell cmdlet, the same tool electron-builder's built-in
+// azureSignOptions path uses. We keep the custom hook instead of
+// azureSignOptions because it lets us skip the bundled third-party
+// Microsoft binaries (they keep their vendor Authenticode signature; the
+// release workflow verifies that separately) and fail loudly on every
+// error path.
+//
+// Auth comes from the environment (Azure EnvironmentCredential):
+//   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+// Signing target configuration:
+//   AZURE_SIGNING_ENDPOINT        e.g. https://weu.codesigning.azure.net
+//   AZURE_SIGNING_ACCOUNT_NAME    Trusted Signing account name
+//   AZURE_CERT_PROFILE_NAME       certificate profile name
+
 const { spawnSync } = require("node:child_process");
-const { readFileSync } = require("node:fs");
-const { homedir } = require("node:os");
-const { basename, join, sep } = require("node:path");
+const { basename, sep } = require("node:path");
 
 const SIGNING_ENV_VARS = [
-  "SM_HOST",
-  "SM_API_KEY",
-  "SM_CLIENT_CERT_FILE",
-  "SM_CLIENT_CERT_PASSWORD",
-  "SM_KEYPAIR_ALIAS",
+  "AZURE_TENANT_ID",
+  "AZURE_CLIENT_ID",
+  "AZURE_CLIENT_SECRET",
+  "AZURE_SIGNING_ENDPOINT",
+  "AZURE_SIGNING_ACCOUNT_NAME",
+  "AZURE_CERT_PROFILE_NAME",
 ];
 
 // Bundled third-party binaries that already carry their vendor's Authenticode
 // signature. Re-signing them would replace Microsoft's attestation with ours
-// and claim their code as our own, and DigiCert's pre-sign binary analysis
-// rejects them anyway. electron-builder hands every packaged executable to
-// this hook, so the exclusion lives here; the release workflow separately
-// verifies that every skipped file still has a valid vendor signature.
+// and claim their code as our own. electron-builder hands every packaged
+// executable to this hook, so the exclusion lives here; the release workflow
+// separately verifies that every skipped file still has a valid vendor
+// signature.
 const THIRD_PARTY_SIGNED_DIRS = [
   ["native", "mxc-sdk", "bin"].join(sep) + sep,
 ];
 
-// smctl's console output on failure is a single unhelpful FAILED line; the
-// actual reason only lands in its log file. Surface the tail of that log in
-// the thrown error so a red CI job is diagnosable without a runner.
-function smctlLogTail() {
-  try {
-    const log = readFileSync(
-      join(homedir(), ".signingmanager", "logs", "smctl.log"),
-      "utf8",
-    );
-    const lines = log.trimEnd().split(/\r?\n/);
-    return lines.slice(-15).join("\n");
-  } catch {
-    return "(smctl.log not readable)";
-  }
+function run(command, args) {
+  const result = spawnSync(command, args, { encoding: "utf8" });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  return { result, output };
 }
 
 function sign(configuration) {
@@ -54,7 +65,10 @@ function sign(configuration) {
     );
     return;
   }
-  if (!process.env.SM_API_KEY) {
+
+  if (!process.env.AZURE_CLIENT_SECRET) {
+    // The opt-out exists only for packaging-validation builds (the AppX job,
+    // secretless forks, and local runs). It is never set on a tagged release.
     if (process.env.OPENADMINOS_ALLOW_UNSIGNED_WINDOWS === "1") {
       console.warn(
         `WARNING: OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1, producing an UNSIGNED Windows build. Not signing ${file}.`,
@@ -62,87 +76,61 @@ function sign(configuration) {
       return;
     }
     throw new Error(
-      `Windows signing requires DigiCert KeyLocker credentials: ${SIGNING_ENV_VARS.join(", ")}. Set OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1 only for packaging validation.`,
+      `Refusing to produce an unsigned Windows build. Signing ${file} requires Azure Trusted Signing credentials (${SIGNING_ENV_VARS.join(", ")}). Set OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1 only for packaging validation.`,
     );
   }
 
-  // Keypair-alias selection is the field consensus for KeyLocker CI signing
-  // (Tabby, Neuron, Opentrons, quarto all sign this way): smctl resolves the
-  // keypair's certificate through DigiCert's own flow, without depending on
-  // the runner's certificate store. Fingerprint selection instead makes
-  // signtool look the certificate up in the local store, which only works
-  // after a successful certsync, so it stays as a fallback.
-  const fingerprint = process.env.SM_CERT_FINGERPRINT;
-  const keypairAlias = process.env.SM_KEYPAIR_ALIAS;
-  let selector;
-  if (keypairAlias) {
-    selector = `--keypair-alias=${keypairAlias}`;
-  } else if (fingerprint) {
-    selector = `--fingerprint=${fingerprint}`;
-  } else {
+  const missing = SIGNING_ENV_VARS.filter((name) => !process.env[name]);
+  if (missing.length > 0) {
     throw new Error(
-      "Neither SM_KEYPAIR_ALIAS nor SM_CERT_FINGERPRINT is set. One of them must identify the DigiCert KeyLocker certificate used for Windows signing.",
+      `Azure Trusted Signing configuration is incomplete; missing ${missing.join(", ")}.`,
     );
   }
 
-  console.log(`signing ${file} (${selector.split("=")[0]})`);
-  // --exit-non-zero-on-fail because smctl's default is to exit 0 even when
-  // signing fails; the output grep below stays as a second line of defence.
-  const result = spawnSync(
-    "smctl",
-    [
-      "sign",
-      selector,
-      "--input",
-      filePath,
-      "--exit-non-zero-on-fail",
-      "--failfast",
-      "--verbose",
-    ],
-    { encoding: "utf8" },
-  );
+  // Single quotes are doubled for PowerShell single-quoted strings, matching
+  // how electron-builder's own azureSignOptions path escapes arguments.
+  const psQuote = (value) => `'${String(value).replace(/'/g, "''")}'`;
+  const command = [
+    "Invoke-TrustedSigning",
+    "-Endpoint", psQuote(process.env.AZURE_SIGNING_ENDPOINT),
+    "-CodeSigningAccountName", psQuote(process.env.AZURE_SIGNING_ACCOUNT_NAME),
+    "-CertificateProfileName", psQuote(process.env.AZURE_CERT_PROFILE_NAME),
+    "-FileDigest", "SHA256",
+    "-TimestampRfc3161", "http://timestamp.acs.microsoft.com",
+    "-TimestampDigest", "SHA256",
+    "-Files", psQuote(filePath),
+  ].join(" ");
 
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  const output = `${stdout}${stderr}`;
-  if (stdout) process.stdout.write(stdout);
-  if (stderr) process.stderr.write(stderr);
-
-  const formattedOutput = output.trim() || "(none)";
+  console.log(`signing ${file} (Azure Trusted Signing)`);
+  const { result, output } = run("pwsh", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    command,
+  ]);
+  if (output.trim()) {
+    console.log(output.trim());
+  }
   if (result.error) {
     throw new Error(
-      `Could not run smctl to sign ${file}: ${result.error.message}. smctl is not on PATH; install DigiCert Software Trust Manager before electron-builder runs. Output: ${formattedOutput}`,
+      `Could not run pwsh to sign ${file}: ${result.error.message}.`,
     );
   }
   if (result.status !== 0) {
     throw new Error(
-      `smctl exited ${result.status} while signing ${file}. Output: ${formattedOutput}\nsmctl.log tail:\n${smctlLogTail()}`,
-    );
-  }
-  if (/fail(ed|ure)?(?!:?\s*0\b)/i.test(output)) {
-    throw new Error(
-      `smctl reported a failure while signing ${file} despite exiting 0. Output: ${formattedOutput}\nsmctl.log tail:\n${smctlLogTail()}`,
+      `Invoke-TrustedSigning exited ${result.status} while signing ${file}. Output: ${output.trim() || "(none)"}`,
     );
   }
 
-  // Confirm the signature actually landed. smctl sign verify shells out to
-  // signtool verify, so a pass here means Windows itself accepts the file.
-  const verify = spawnSync(
-    "smctl",
-    ["sign", "verify", "--input", filePath],
-    { encoding: "utf8" },
-  );
-  const verifyOutput = `${verify.stdout ?? ""}${verify.stderr ?? ""}`;
-  if (verifyOutput.trim()) {
-    console.log(verifyOutput.trim());
+  // Confirm the signature actually landed. signtool verify /pa means Windows
+  // itself accepts the file, independent of what the signing service said.
+  const verify = run("signtool", ["verify", "/pa", filePath]);
+  if (verify.output.trim()) {
+    console.log(verify.output.trim());
   }
-  if (
-    verify.error ||
-    verify.status !== 0 ||
-    /fail(ed|ure)?(?!:?\s*0\b)/i.test(verifyOutput)
-  ) {
+  if (verify.result.error || verify.result.status !== 0) {
     throw new Error(
-      `smctl sign verify did not confirm a valid signature on ${file}. Output: ${verifyOutput.trim() || "(none)"}\nsmctl.log tail:\n${smctlLogTail()}`,
+      `signtool verify did not confirm a valid signature on ${file}. Output: ${verify.output.trim() || "(none)"}`,
     );
   }
   console.log(`verified signature on ${file}`);

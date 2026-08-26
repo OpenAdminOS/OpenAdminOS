@@ -9,11 +9,12 @@ name: Release
 #
 # Outputs:
 #   - Windows x64: signed NSIS .exe installer, plus latest.yml for
-#     electron-updater auto-update. Signing goes through DigiCert KeyLocker,
-#     so the private key stays in DigiCert's HSM and never reaches the runner.
-#     Maintainers can still opt into an unsigned .appx packaging validation
-#     job from workflow_dispatch for the deferred Microsoft Store path; that
-#     AppX is never uploaded as an artifact or release asset.
+#     electron-updater auto-update. Signing goes through Azure Artifact
+#     Signing, so the certificate is short-lived, Microsoft-issued, and the
+#     private key never exists outside their HSM. Maintainers can still opt
+#     into an unsigned .appx packaging validation job from workflow_dispatch
+#     for the deferred Microsoft Store path; that AppX is never uploaded as
+#     an artifact or release asset.
 #   - macOS (Apple Silicon): notarized + signed .dmg + .pkg,
 #     plus .zip/latest-mac.yml for electron-updater auto-update.
 #   - Linux x64: unsigned AppImage, .deb, and .rpm packages, plus
@@ -24,11 +25,11 @@ name: Release
 #   macOS:  CSC_LINK, CSC_KEY_PASSWORD, CSC_INSTALLER_LINK,
 #           CSC_INSTALLER_KEY_PASSWORD, APPLE_API_KEY,
 #           APPLE_API_KEY_ID, APPLE_API_ISSUER
-#   Windows: SM_API_KEY, SM_CLIENT_CERT_FILE_B64, SM_CLIENT_CERT_PASSWORD
-#           plus the repository variables SM_HOST and SM_KEYPAIR_ALIAS.
-#           SM_HOST is the DigiCert ONE EU client-auth endpoint for this tenant;
-#           SM_CLIENT_CERT_FILE_B64 is the base64 of the KeyLocker
-#           client-authentication .p12. See docs/RELEASING.md.
+#   Windows: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (an Entra
+#           service principal with the Artifact Signing Certificate Profile
+#           Signer role), plus the repository variables
+#           AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT_NAME, and
+#           AZURE_CERT_PROFILE_NAME. See docs/RELEASING.md.
 #   Linux apt repo: APT_GPG_PRIVATE_KEY, optional APT_GPG_PASSPHRASE
 #   (Windows AppX validation is manual-only, unsigned, and is not published.
 #   Linux artifacts are unsigned packages and are published with SHA-256
@@ -127,7 +128,7 @@ jobs:
       # The published Windows artifact is the signed NSIS installer built by
       # the windows-x64 job. This job only proves the Microsoft Store AppX
       # packaging path still works, so it opts the signing hook out rather
-      # than spending a KeyLocker signature on something nobody installs.
+      # than signing a package nobody installs.
       OPENADMINOS_ALLOW_UNSIGNED_WINDOWS: "1"
     steps:
       - name: Checkout
@@ -166,22 +167,19 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     env:
-      # The signing key lives in DigiCert's cloud HSM, so unlike the macOS job
-      # there is no certificate blob to import; smctl authenticates to
-      # KeyLocker with an API key plus a client-authentication certificate and
-      # signs remotely. SM_HOST and SM_KEYPAIR_ALIAS are repository variables
-      # rather than secrets: neither is confidential, and keeping the keypair
-      # alias visible makes a rotation obvious in the diff-free settings UI.
-      SM_HOST: ${{ vars.SM_HOST }}
-      SM_API_KEY: ${{ secrets.SM_API_KEY }}
-      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-      SM_KEYPAIR_ALIAS: ${{ vars.SM_KEYPAIR_ALIAS }}
-      # SHA1 thumbprint of the code signing certificate, as shown on the
-      # CertCentral order page. When set, the sign hook selects the
-      # certificate directly instead of relying on the keypair's
-      # default-certificate lookup, which DigiCert can leave unresolved while
-      # a freshly issued certificate is still propagating into KeyLocker.
-      SM_CERT_FINGERPRINT: ${{ vars.SM_CERT_FINGERPRINT }}
+      # Azure Artifact Signing (renamed from Trusted Signing in Jan 2026;
+      # same service, resource type, and endpoints): the certificate is
+      # short-lived, issued and rotated by Microsoft, and the private key
+      # never exists outside their HSM. The runner only holds a service
+      # principal credential, revocable in Entra without touching the signing
+      # setup. The three non-secret values are repository variables so a
+      # rotation or region change is visible without decrypting anything.
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
+      AZURE_CERT_PROFILE_NAME: ${{ vars.AZURE_CERT_PROFILE_NAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -197,24 +195,23 @@ jobs:
 
       - name: Verify Windows signing secrets
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        env:
-          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
         shell: bash
         run: |
           set -euo pipefail
           missing=()
           for name in \
-            SM_HOST \
-            SM_API_KEY \
-            SM_CLIENT_CERT_FILE_B64 \
-            SM_CLIENT_CERT_PASSWORD \
-            SM_KEYPAIR_ALIAS; do
+            AZURE_TENANT_ID \
+            AZURE_CLIENT_ID \
+            AZURE_CLIENT_SECRET \
+            AZURE_SIGNING_ENDPOINT \
+            AZURE_SIGNING_ACCOUNT_NAME \
+            AZURE_CERT_PROFILE_NAME; do
             if [ -z "${!name:-}" ]; then
               missing+=("$name")
             fi
           done
           if [ "${#missing[@]}" -ne 0 ]; then
-            printf '::error::Tagged Windows releases require these DigiCert KeyLocker settings: %s\n' "${missing[*]}"
+            printf '::error::Tagged Windows releases require these Azure Trusted Signing settings: %s\n' "${missing[*]}"
             exit 1
           fi
 
@@ -223,53 +220,43 @@ jobs:
         # repo for verification. The installer won't be publishable but the
         # packaging path itself is exercised. Tag builds never reach this step
         # because the secret check above already failed the job.
-        if: ${{ github.event_name == 'workflow_dispatch' && env.SM_API_KEY == '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && env.AZURE_CLIENT_SECRET == '' }}
         shell: bash
         run: echo "OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1" >> "$GITHUB_ENV"
 
-      - name: Write DigiCert client authentication certificate
-        # smctl expects SM_CLIENT_CERT_FILE to be a path to a .p12 on disk. We
-        # materialize the base64 secret to a tempfile, mirroring how the macOS
-        # job handles the App Store Connect .p8 key.
-        if: ${{ env.SM_API_KEY != '' }}
-        env:
-          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
-        shell: bash
+      - name: Prepare Azure Artifact Signing
+        # Installs the PowerShell module the sign hook invokes per file. The
+        # module keeps the service's pre-rename name (TrustedSigning); it is
+        # frozen but not deprecated, talks to the unchanged
+        # *.codesigning.azure.net endpoints, and is what electron-builder and
+        # T3 Code ship with in production today. Its successor module is
+        # ArtifactSigning/Invoke-ArtifactSigning; migrate once it is as
+        # field-proven. The PSModulePath pin matters: the hook runs pwsh
+        # -NoProfile from inside electron-builder, and without the pin that
+        # child shell can fail to resolve Invoke-TrustedSigning even though
+        # this step installed it (T3 Code hit exactly this in production).
+        if: ${{ env.AZURE_CLIENT_SECRET != '' }}
+        shell: pwsh
         run: |
-          set -euo pipefail
-          if [ -z "${SM_CLIENT_CERT_FILE_B64:-}" ]; then
-            echo "::error::SM_CLIENT_CERT_FILE_B64 is required when SM_API_KEY is set."
+          $ErrorActionPreference = 'Stop'
+          try {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+          } catch {
+            Write-Output "NuGet package provider already available: $($_.Exception.Message)"
+          }
+          Install-Module -Name TrustedSigning -MinimumVersion 0.5.0 -Force -AllowClobber -Repository PSGallery -Scope CurrentUser
+          Import-Module TrustedSigning
+          if (-not (Get-Command Invoke-TrustedSigning -ErrorAction SilentlyContinue)) {
+            Write-Output "::error::Invoke-TrustedSigning is not resolvable after installing the TrustedSigning module."
             exit 1
-          fi
-          cert_path="$RUNNER_TEMP/digicert-client-auth.p12"
-          write_path="$cert_path"
-          if command -v cygpath >/dev/null 2>&1; then
-            write_path="$(cygpath -u "$cert_path")"
-            cert_path="$(cygpath -w "$cert_path")"
-          fi
-          printf '%s' "$SM_CLIENT_CERT_FILE_B64" | base64 --decode > "$write_path"
-          echo "SM_CLIENT_CERT_FILE=$cert_path" >> "$GITHUB_ENV"
-
-      - name: Set up DigiCert Software Trust Manager
-        # Default (non-simple) mode on purpose: it installs the full client
-        # toolset including the DigiCert KSP, which signtool needs to reach
-        # the private key in DigiCert's HSM. simple-signing-mode installs only
-        # the smctl binary, and smctl delegates Authenticode signing to
-        # signtool, which then cannot resolve the certificate's key without
-        # the KSP. No `input`/`keypair-alias` here: this is setup only, and
-        # the actual signing is driven per file by
-        # apps/desktop/scripts/sign-windows.cjs via electron-builder's
-        # Windows sign hook.
-        if: ${{ env.SM_API_KEY != '' }}
-        uses: digicert/code-signing-software-trust-action@v1
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "PSModulePath=$env:PSModulePath"
 
       - name: Add Windows SDK signtool to PATH
-        # smctl signs by shelling out to Microsoft signtool, but the runner
-        # image's Windows SDK does not put signtool.exe on PATH. smctl then
-        # fails with a bare FAILED and no output, and its healthcheck reports
-        # "Signtool: Mapped: No". Expose the newest SDK's x64 signtool so both
-        # smctl and the healthcheck can find it.
-        if: ${{ env.SM_API_KEY != '' }}
+        # The sign hook runs signtool verify /pa after each file so a pass
+        # means Windows itself accepts the signature, but the runner image's
+        # Windows SDK does not put signtool.exe on PATH.
+        if: ${{ env.AZURE_CLIENT_SECRET != '' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -282,56 +269,6 @@ jobs:
           }
           Write-Output "Using $($signtool.FullName)"
           Add-Content -Path $env:GITHUB_PATH -Value $signtool.DirectoryName
-
-      - name: Sync KeyLocker certificates into the Windows store
-        # smctl signs by delegating to Microsoft signtool with the
-        # certificate's SHA1 thumbprint, and signtool resolves that thumbprint
-        # against the Windows certificate store with private keys mapped
-        # through the DigiCert KSP. A fresh runner's store is empty, so pull
-        # the KeyLocker certificates into it first, then prove the expected
-        # certificate actually arrived: smctl exits 0 even when its
-        # subcommands fail, and signtool's "No certificates were found that
-        # met all the given criteria" two minutes into a build is a much
-        # worse place to learn the sync silently did nothing.
-        if: ${{ env.SM_API_KEY != '' }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $out = smctl windows certsync 2>&1 | Out-String
-          Write-Output $out
-          if ($out -match 'fail') {
-            Write-Output "::error::smctl windows certsync reported a failure."
-            exit 1
-          }
-          # The sign hook signs by keypair alias, which does not depend on the
-          # local store, so an absent certificate here is diagnostic rather
-          # than fatal: the hook's smctl sign verify and the post-build
-          # Authenticode check are the authoritative gates.
-          $fp = $env:SM_CERT_FINGERPRINT
-          if ($fp) {
-            $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Thumbprint -eq $fp }
-            if (-not $cert) {
-              Write-Output "::warning::Certificate $fp is not in the user certificate store after certsync. Store contents and installed key providers follow."
-              Get-ChildItem Cert:\CurrentUser\My | ForEach-Object { Write-Output "  $($_.Thumbprint) $($_.Subject)" }
-              certutil -csplist
-            } else {
-              Write-Output "Certificate $fp is present in the user store: $($cert.Subject)"
-            }
-          }
-
-      - name: Report KeyLocker keypairs
-        # healthcheck fails the job early with a readable DigiCert error rather
-        # than letting the first smctl sign call fail deep inside an
-        # electron-builder stack trace. The keypair listing is here so a
-        # maintainer can read the alias and certificate subject straight out of
-        # this job's log when configuring SM_KEYPAIR_ALIAS or updating
-        # win.signtoolOptions.publisherName.
-        if: ${{ env.SM_API_KEY != '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          smctl healthcheck
-          smctl keypair list
 
       - name: Build signed NSIS installer
         run: npm run dist -w @openadminos/desktop -- --win --x64 --publish never
