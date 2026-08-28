@@ -1,0 +1,506 @@
+[
+ {
+  "path": "/auditLogs/directoryAudits",
+  "scope": "AuditLog.Read.All"
+ },
+ {
+  "path": "/auditLogs/provisioning",
+  "scope": "AuditLog.Read.All"
+ },
+ {
+  "path": "/auditLogs/signIns",
+  "scope": "AuditLog.Read.All"
+ },
+ {
+  "path": "/deviceManagement/applePushNotificationCertificate",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/auditEvents",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/complianceManagementPartners",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/conditionalAccessSettings",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/detectedApps",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/deviceCategories",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/deviceCompliancePolicies",
+  "scope": "DeviceManagementManagedDevices.Read.All"
+ },
+ {
+  "path": "/deviceManagement/deviceCompliancePolicyDeviceStateSummary",
+  "scope": "DeviceManagementManagedDevices.Read.All"
+ },
+ {
+  "path": "/deviceManagement/deviceCompliancePolicySettingStateSummaries",
+  "scope": "DeviceManagementManagedDevices.Read.All"
+ },
+ {
+  "path": "/deviceManagement/deviceConfigurationDeviceStateSummaries",
+  "scope": "DeviceManagementManagedDevices.Read.All"
+ },
+ {
+  "path": "/deviceManagement/deviceConfigurations",
+  "scope": "DeviceManagementManagedDevices.Read.All"
+ },
+ {
+  "path": "/deviceManagement/deviceManagementPartners",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/exchangeConnectors",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/importedWindowsAutopilotDeviceIdentities",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/iosUpdateStatuses",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/managedDeviceOverview",
+  "scope": "DeviceManagementManagedDevices.Read.All"
+ },
+ {
+  "path": "/deviceManagement/managedDevices",
+  "scope": "DeviceManagementManagedDevices.Read.All"
+ },
+ {
+  "path": "/deviceManagement/mobileAppTroubleshootingEvents",
+  "scope": "DeviceManagementApps.Read.All"
+ },
+ {
+  "path": "/deviceManagement/mobileThreatDefenseConnectors",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/notificationMessageTemplates",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/remoteAssistancePartners",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/reports",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/resourceOperations",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/roleAssignments",
+  "scope": "DeviceManagementRBAC.Read.All"
+ },
+ {
+  "path": "/deviceManagement/roleDefinitions",
+  "scope": "DeviceManagementRBAC.Read.All"
+ },
+ {
+  "path": "/deviceManagement/softwareUpdateStatusSummary",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/termsAndConditions",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/troubleshootingEvents",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthApplicationPerformance",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthApplicationPerformanceByAppVersionDetails",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthApplicationPerformanceByAppVersionDeviceId",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthApplicationPerformanceByOSVersion",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthDeviceModelPerformance",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthDevicePerformance",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthDevicePerformanceDetails",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthOSVersionPerformance",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsAppHealthOverview",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsBaselines",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsCategories",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsDevicePerformance",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsDeviceScores",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsDeviceStartupHistory",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsDeviceStartupProcessPerformance",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsDeviceStartupProcesses",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsMetricHistory",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsModelScores",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsOverview",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsScoreHistory",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsWorkFromAnywhereHardwareReadinessMetric",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsWorkFromAnywhereMetrics",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/userExperienceAnalyticsWorkFromAnywhereModelPerformance",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/virtualEndpoint",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/windowsAutopilotDeviceIdentities",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/windowsInformationProtectionAppLearningSummaries",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/windowsInformationProtectionNetworkLearningSummaries",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/deviceManagement/windowsMalwareInformation",
+  "scope": "DeviceManagementConfiguration.Read.All"
+ },
+ {
+  "path": "/devices/extensions",
+  "scope": "Device.Read.All"
+ },
+ {
+  "path": "/devices/memberOf",
+  "scope": "Device.Read.All"
+ },
+ {
+  "path": "/devices/registeredOwners",
+  "scope": "Device.Read.All"
+ },
+ {
+  "path": "/devices/registeredUsers",
+  "scope": "Device.Read.All"
+ },
+ {
+  "path": "/devices/transitiveMemberOf",
+  "scope": "Device.Read.All"
+ },
+ {
+  "path": "/directory/administrativeUnits",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/attributeSets",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/customSecurityAttributeDefinitions",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/deletedItems",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/deviceLocalCredentials",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/federationConfigurations",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/onPremisesSynchronization",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/publicKeyInfrastructure",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/recovery",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/remoteTenantGroups",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/directory/subscriptions",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/groups/sets",
+  "scope": "Group.Read.All"
+ },
+ {
+  "path": "/identity/healthIssues",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/identity/identityAccounts",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/identity/sensorCandidateActivationConfiguration",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/identity/sensorCandidates",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/identity/sensors",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/identity/settings",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/identityProtection/riskDetections",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/identityProtection/riskyServicePrincipals",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/identityProtection/riskyUsers",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/identityProtection/servicePrincipalRiskDetections",
+  "scope": "Directory.Read.All"
+ },
+ {
+  "path": "/policies/activityBasedTimeoutPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/adminConsentRequestPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/appManagementPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/authenticationFlowsPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/authenticationMethodsPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/authenticationStrengthPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/authorizationPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/claimsMappingPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/conditionalAccessPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/crossTenantAccessPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/defaultAppManagementPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/deviceRegistrationPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/featureRolloutPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/federatedTokenValidationPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/homeRealmDiscoveryPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/identitySecurityDefaultsEnforcementPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/ownerlessGroupPolicy",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/permissionGrantPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/roleManagementPolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/roleManagementPolicyAssignments",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/tokenIssuancePolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/policies/tokenLifetimePolicies",
+  "scope": "Policy.Read.All"
+ },
+ {
+  "path": "/roleManagement/directory",
+  "scope": "RoleManagement.Read.Directory"
+ },
+ {
+  "path": "/roleManagement/entitlementManagement",
+  "scope": "RoleManagement.Read.Directory"
+ },
+ {
+  "path": "/security/alerts",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/alerts_v2",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/attackSimulation",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/auditLog",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/cases",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/collaboration",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/dataSecurityAndGovernance",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/identities",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/incidents",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/labels",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/secureScoreControlProfiles",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/secureScores",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/subjectRightsRequests",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/threatIntelligence",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/triggerTypes",
+  "scope": "SecurityEvents.Read.All"
+ },
+ {
+  "path": "/security/triggers",
+  "scope": "SecurityEvents.Read.All"
+ }
+]

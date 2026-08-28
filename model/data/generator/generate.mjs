@@ -753,3 +753,284 @@ function* trackH() {
   }
 }
 if (TRACKS.includes("h")) writeTrack("h", [...trackH()]);
+
+// ---------- track I: mechanical abstention (v1.1.1) ----------
+// r6 regression: trained heavily on acting, it began inventing confident
+// documentation for features that do not exist. Track C had collapsed to 15
+// examples (0.1% of tokens). This track is generated mechanically, so it
+// scales, and its invented feature names are disjoint from the eval's.
+
+const I_PRODUCTS = [
+  ["Intune", "Microsoft Intune"], ["Entra", "Microsoft Entra ID"], ["Defender", "Microsoft Defender for Endpoint"],
+];
+const I_ADJ = ["Adaptive", "Cascading", "Latent", "Parallel", "Composite", "Recursive", "Ambient", "Federated", "Layered", "Deferred"];
+const I_NOUN = ["Enrollment Envelope", "Policy Halo", "Trust Ledger", "Device Chorus", "Compliance Beacon", "Session Weave",
+  "Access Prism", "Signal Vault", "Baseline Drift Monitor", "Identity Mesh Gate", "Threat Lattice", "Config Anchor"];
+const I_ASK = [
+  (f, p) => `How do I enable ${f} in ${p}?`,
+  (f, p) => `What licence does ${f} require in ${p}?`,
+  (f, p) => `Where do I find the ${f} settings in the ${p} admin centre?`,
+  (f, p) => `Can you walk me through configuring ${f}?`,
+  (f, p) => `What is the default value for ${f} in ${p}?`,
+];
+
+function* trackI() {
+  const N = Number(argOf("--i-count", "160"));
+  for (let v = 0; v < N; v++) {
+    const [short, full] = pick(I_PRODUCTS);
+    const feature = `${pick(I_ADJ)} ${pick(I_NOUN)}`;
+    const ask = pick(I_ASK)(`"${feature}"`, short);
+    const thinking =
+      `The excerpts provided do not mention "${feature}". I have no evidence this feature exists in ${full}. ` +
+      `Describing how to configure it would mean inventing settings, licences and portal paths, which is worse than ` +
+      `saying nothing. The correct response is to state that it is not in the documentation.`;
+    yield {
+      messages: [
+        { role: "system", content: "You are a Microsoft 365 administration assistant. Answer only from the provided documentation excerpts. If the excerpts do not contain the answer, reply with exactly: NOT IN DOCS" },
+        { role: "user", content: ask },
+        { role: "assistant", thinking, content: "NOT IN DOCS" },
+      ],
+    };
+  }
+  // Half the value is knowing when NOT to abstain: same shape, real feature,
+  // answer present in context. Without these the model learns to always refuse.
+  const REAL = [
+    ["device compliance policies", "Compliance policies define the rules a device must meet, such as OS version or encryption, and report each device as compliant or noncompliant."],
+    ["conditional access policies", "Conditional Access policies evaluate signals such as user, device and location, then grant, block or require additional controls for access."],
+    ["enrollment restrictions", "Enrollment restrictions limit which platforms may enrol and how many devices a single user can enrol."],
+    ["security baselines", "Security baselines are preconfigured groups of recommended settings that can be assigned to devices."],
+    ["app protection policies", "App protection policies apply data-protection rules inside managed apps, independent of whether the device is enrolled."],
+  ];
+  for (let v = 0; v < Math.floor(N / 4); v++) {
+    const [feat, answer] = pick(REAL);
+    yield {
+      messages: [
+        { role: "system", content: "You are a Microsoft 365 administration assistant. Answer only from the provided documentation excerpts. If the excerpts do not contain the answer, reply with exactly: NOT IN DOCS" },
+        { role: "user", content: `[doc 1: intune/protect/overview.md]\n${answer}\n\n---\n\nWhat are ${feat} used for?` },
+        { role: "assistant", thinking: `The excerpt directly describes ${feat}, so I can answer from it rather than abstaining.`, content: answer },
+      ],
+    };
+  }
+}
+if (TRACKS.includes("i")) writeTrack("i", [...trackI()]);
+
+// ---------- track J: evidence-conditioned action (v1.1.1, post-r7) ----------
+// r7 lesson: 159 abstention examples that all emitted the literal string
+// "NOT IN DOCS" taught a shortcut ("when unsure, refuse") instead of a skill
+// ("decide whether the evidence supports an answer"). The refusal then fired
+// during tool-use tasks where evidence WAS available: trajectories 49->39.
+//
+// Track J replaces it with matched counterfactuals: near-identical prompts
+// that differ only in evidence state, so the model must read the evidence
+// rather than pattern-match the question. Refusal wording is varied so no
+// single string can become the shortcut.
+
+const J_NOEVIDENCE = [
+  "The documentation provided does not cover that.",
+  "I can't find that in the supplied documentation.",
+  "That isn't in the excerpts I was given, so I can't confirm it.",
+  "The provided documentation doesn't mention this feature.",
+];
+const J_EMPTY = [
+  "The tenant returned no matching records, so there is nothing to report.",
+  "That query came back empty for this tenant.",
+  "No devices matched, so I can't give a count above zero.",
+];
+const J_FEATURES = ["Adaptive Policy Weaving", "Tenant Echo Sync", "Composite Trust Relay",
+  "Layered Enrollment Cascade", "Ambient Compliance Drift", "Recursive Access Prism"];
+const J_REAL = [
+  ["compliance policy", "deviceManagement/deviceCompliancePolicies",
+   "Compliance policies define rules a device must meet and mark it compliant or noncompliant."],
+  ["conditional access policy", "identity/conditionalAccess/policies",
+   "Conditional Access policies evaluate signals and then grant, block or challenge access."],
+  ["managed device", "deviceManagement/managedDevices",
+   "Managed devices are the devices enrolled in Intune for this tenant."],
+];
+
+function* trackJ() {
+  const N = Number(argOf("--j-count", "70"));
+  const sys = "You are a Microsoft 365 administration assistant. Use the documentation excerpts and tenant tools available to you. Answer from evidence; say so plainly when the evidence does not support an answer.";
+  for (let v = 0; v < N; v++) {
+    const feature = pick(J_FEATURES);
+    const [realName, path, realAnswer] = pick(J_REAL);
+
+    // (a) documentation question, NO supporting passage -> abstain (varied wording)
+    yield { messages: [
+      { role: "system", content: sys },
+      { role: "user", content: `[doc 1: intune/protect/overview.md]\n${realAnswer}\n\n---\n\nHow do I configure ${feature}?` },
+      { role: "assistant",
+        thinking: `The excerpt covers ${realName}s, not "${feature}". Nothing here supports an answer about that feature, and inventing settings would be worse than saying so.`,
+        content: pick(J_NOEVIDENCE) },
+    ]};
+
+    // (b) SAME shape, real feature, passage present -> answer confidently
+    yield { messages: [
+      { role: "system", content: sys },
+      { role: "user", content: `[doc 1: intune/protect/overview.md]\n${realAnswer}\n\n---\n\nHow do I use a ${realName}?` },
+      { role: "assistant",
+        thinking: `The excerpt describes ${realName}s directly, so the evidence supports an answer.`,
+        content: realAnswer },
+    ]};
+
+    // (c) tenant-state question with a tool -> CALL THE TOOL, never abstain.
+    // This is the counterfactual that stops "unsure -> refuse" from leaking
+    // into agentic work: absence of a doc passage is not absence of evidence.
+    const count = 3 + (v % 40);
+    yield { tools: F_TOOLS, messages: [
+      { role: "system", content: sys },
+      { role: "user", content: `How many ${realName}s exist in this tenant right now?` },
+      { role: "assistant", thinking: `This asks about live tenant state, not documentation. I have graph_get, so the evidence is obtainable: call the tool rather than declining.`,
+        tool_calls: [{ id: "call_j1", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}` }) } }] },
+      { role: "tool", tool_call_id: "call_j1", content: JSON.stringify({ value: Array.from({ length: count }, (_, i) => ({ id: `obj-${i}` })) }) },
+      { role: "assistant", thinking: `The tool returned ${count} objects, so the answer is supported by tenant data.`,
+        content: `There are ${count} ${realName}s in this tenant.` },
+    ]};
+
+    // (d) same tool call, EMPTY result -> report emptiness, do not invent
+    yield { tools: F_TOOLS, messages: [
+      { role: "system", content: sys },
+      { role: "user", content: `How many ${realName}s are there in this tenant?` },
+      { role: "assistant", thinking: `Live tenant state; call graph_get.`,
+        tool_calls: [{ id: "call_j2", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}` }) } }] },
+      { role: "tool", tool_call_id: "call_j2", content: JSON.stringify({ value: [] }) },
+      { role: "assistant", thinking: `The tool succeeded but returned no objects. The honest answer is zero/none, not a guess.`,
+        content: pick(J_EMPTY) },
+    ]};
+  }
+}
+if (TRACKS.includes("j")) writeTrack("j", [...trackJ()]);
+
+// ---------- track K: real Graph surface (v1.1.1, mined from production tools) ----------
+// Endpoints and query shapes extracted from four open-source Intune tools
+// (IntuneAssignmentChecker, IntuneBrew, IntuneGet, TenuVault). Only the public
+// Microsoft Graph surface is used: endpoint names, $filter/$select/$expand
+// shapes and pagination. Held-out eval endpoints are excluded by construction.
+//
+// Two gaps this closes, both found by comparing against real tool code:
+//   - our Graph vocabulary was 18 hand-picked endpoints; these add 12 more
+//   - pagination was entirely absent from training AND eval, yet @odata.nextLink
+//     appears 183 times in real tools. A model that ignores it silently
+//     under-reports, which is the most dangerous kind of wrong answer.
+
+const K_ENDPOINTS = [
+  ["deviceManagement/assignmentFilters", "assignment filters"],
+  ["deviceManagement/deviceHealthScripts", "device remediation scripts"],
+  ["deviceManagement/deviceManagementScripts", "platform scripts"],
+  ["deviceManagement/deviceShellScripts", "macOS shell scripts"],
+  ["deviceManagement/groupPolicyConfigurations", "administrative templates"],
+  ["deviceAppManagement/mobileAppConfigurations", "app configuration policies"],
+  ["deviceAppManagement/iosManagedAppProtections", "iOS app protection policies"],
+  ["deviceAppManagement/androidManagedAppProtections", "Android app protection policies"],
+  ["deviceAppManagement/windowsManagedAppProtections", "Windows app protection policies"],
+];
+const K_HELDOUT = ["mobileAppCategories", "deviceEnrollmentConfigurations", "namedLocations", "directoryRoles", "domains"];
+
+// Phrasing pools: r8 showed that duplicating identical rows teaches
+// memorization and made Graph planning WORSE (10/16 -> 6/16). Unique
+// surface forms are what add signal, so vary the ask, not the count.
+const K_ASK_LIST = [
+  (l) => `List the ${l} in this tenant, returning only id and displayName.`,
+  (l) => `Show me every ${l.replace(/s$/, "")} we have, just the id and name.`,
+  (l) => `I need a list of ${l} with their names. Which call?`,
+  (l) => `Pull the ${l} for an audit; name and id are enough.`,
+  (l) => `What Graph request lists our ${l}?`,
+];
+const K_ASK_COUNT = [
+  (l) => `How many ${l} are configured in this tenant?`,
+  (l) => `Count the ${l} for me.`,
+  (l) => `How many ${l} do we have in total?`,
+  (l) => `Give me the total number of ${l} in the tenant.`,
+];
+const K_ASK_ASSIGNED = [
+  (l) => `Which ${l} are actually assigned to something?`,
+  (l) => `Show me the ${l} that have assignments.`,
+  (l) => `Which of our ${l} are assigned, and which are orphaned?`,
+];
+
+function* trackK() {
+  const N = Number(argOf("--k-count", "40"));
+  for (let v = 0; v < N; v++) {
+    const [path, label] = K_ENDPOINTS[v % K_ENDPOINTS.length];
+    if (K_HELDOUT.some((h) => path.includes(h))) continue; // never train on sealed eval surface
+
+    // (a) plan a call using the query shapes real tools actually use
+    yield { messages: [
+      { role: "system", content: "You are a Microsoft Graph planner. Reply with exactly one fenced json block describing the call." },
+      { role: "user", content: K_ASK_LIST[Math.floor(v / K_ENDPOINTS.length) % K_ASK_LIST.length](label) },
+      { role: "assistant",
+        thinking: `${label} live under /${path}. The caller wants two fields, so $select keeps the response small.`,
+        content: "```json\n" + JSON.stringify({ method: "GET", path: `/${path}`, query: { $select: "id,displayName" } }, null, 2) + "\n```" },
+    ]};
+
+    // (b) pagination: a first page carrying @odata.nextLink MUST be followed.
+    // Answering from page one is the silent-undercount failure mode.
+    const page1 = 20, page2 = 3 + (v % 12);
+    yield { tools: F_TOOLS, messages: [
+      { role: "system", content: "You are an Intune administration assistant. Use graph_get for tenant data." },
+      { role: "user", content: K_ASK_COUNT[Math.floor(v / K_ENDPOINTS.length) % K_ASK_COUNT.length](label) },
+      { role: "assistant", thinking: `Count the objects at /${path}.`,
+        tool_calls: [{ id: "call_k1", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}` }) } }] },
+      { role: "tool", tool_call_id: "call_k1", content: JSON.stringify({
+          value: Array.from({ length: page1 }, (_, i) => ({ id: `p1-${i}` })),
+          "@odata.nextLink": `https://graph.microsoft.com/v1.0/${path}?$skiptoken=X` }) },
+      { role: "assistant",
+        thinking: `The response carries @odata.nextLink, so this is only the first page. Answering ${page1} now would under-report. Follow the link.`,
+        tool_calls: [{ id: "call_k2", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}?$skiptoken=X` }) } }] },
+      { role: "tool", tool_call_id: "call_k2", content: JSON.stringify({ value: Array.from({ length: page2 }, (_, i) => ({ id: `p2-${i}` })) }) },
+      { role: "assistant",
+        thinking: `Second page has no nextLink, so the collection is complete: ${page1} + ${page2} = ${page1 + page2}.`,
+        content: `There are ${page1 + page2} ${label} in this tenant.` },
+    ]};
+
+    // (c) assignment filtering, the pattern IntuneAssignmentChecker leans on
+    if (v % 3 === 0) {
+      yield { messages: [
+        { role: "system", content: "You are a Microsoft Graph planner. Reply with exactly one fenced json block describing the call." },
+        { role: "user", content: K_ASK_ASSIGNED[Math.floor(v / K_ENDPOINTS.length) % K_ASK_ASSIGNED.length](label) },
+        { role: "assistant",
+          thinking: `Assignment state is exposed by $expand on assignments; expanding is cheaper than fetching each object's assignments separately.`,
+          content: "```json\n" + JSON.stringify({ method: "GET", path: `/${path}`, query: { $expand: "assignments", $select: "id,displayName" } }, null, 2) + "\n```" },
+      ]};
+    }
+  }
+}
+if (TRACKS.includes("k")) writeTrack("k", [...trackK()]);
+
+// ---------- track L: official Graph surface (v1.1.1) ----------
+// Derived from Microsoft's published OData metadata and permissions reference,
+// NOT from any tenant: 126 navigable endpoints with the least-privilege scope
+// each one needs. This replaces hand-picked endpoint tables (18 in tracks a/b,
+// 30 after mining real tools) with the authoritative surface.
+//
+// Held-out eval endpoints are removed at build time, so growing this table can
+// never contaminate the benchmark.
+//
+// Scope correctness matters beyond the score: agent manifests declare the Graph
+// permissions the product will request, and over-broad scopes are a real
+// security defect, not a formatting nit.
+
+const L_SURFACE = JSON.parse(readFileSync(join(HERE, "graph-surface.json"), "utf8"));
+const L_ASK = [
+  (n) => `Which Graph endpoint lists ${n}?`,
+  (n) => `I need to read ${n}. What is the call and which permission does it need?`,
+  (n) => `What request returns ${n}, and what scope should the agent declare?`,
+  (n) => `Give me the Graph call for ${n} plus its least-privilege scope.`,
+];
+const humanise = (p) => p.replace(/^\//, "").split("/").pop()
+  .replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+
+function* trackL() {
+  const N = Number(argOf("--l-count", "260"));
+  for (let v = 0; v < N; v++) {
+    const e = L_SURFACE[v % L_SURFACE.length];
+    const name = humanise(e.path);
+    yield { messages: [
+      { role: "system", content: "You are a Microsoft Graph planner. Reply with exactly one fenced json block describing the call, including the least-privilege scope." },
+      { role: "user", content: L_ASK[Math.floor(v / L_SURFACE.length) % L_ASK.length](name) },
+      { role: "assistant",
+        thinking: `${name} is exposed at ${e.path}. The narrowest scope that can read it is ${e.scope}; requesting anything broader would over-permission the agent.`,
+        content: "```json\n" + JSON.stringify({ method: "GET", path: e.path, scope: e.scope }, null, 2) + "\n```" },
+    ]};
+  }
+}
+if (TRACKS.includes("l")) writeTrack("l", [...trackL()]);
