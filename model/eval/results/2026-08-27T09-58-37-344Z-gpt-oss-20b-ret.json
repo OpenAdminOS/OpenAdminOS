@@ -1,0 +1,871 @@
+{
+  "label": "gpt-oss-20b-ret",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-27T09-58-37-344Z",
+  "results": [
+    {
+      "id": "manifest-draft-noncompliant-devices",
+      "file": "01-manifest-draft.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 31914,
+      "response": "```yaml\ndescriptor:\n  id: noncompliant-device-report\n  name: Noncompliant Device Report\n  description: Generates a summary of noncompliant managed devices and recommends initial checks for administrators.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: devices\n  mode: read\n\nskills:\n  - id: load_devices\n    format: graph\n    label: Load Managed Devices\n    detail: Retrieves managed devices from Microsoft Graph.\n    settings:\n      method: GET\n      path: /deviceManagement/managedDevices\n      select:\n        - id\n        - deviceName\n        - complianceState\n        - userPrincipalName\n        - lastSyncDateTime\n      scopes:\n        - DeviceManagementManagedDevices.Read.All\n\n  - id: summarize_noncompliant\n    format: llm\n    label: Summarize Noncompliant Devices\n    detail: Summarizes which devices are noncompliant and suggests initial checks for admins.\n    settings:\n      system: \"You are an assistant that summarizes device compliance data.\"\n      prompt: |\n        Here is the list of devices:\n        {{ load_devices.output }}\n\n        Identify which devices are noncompliant and suggest what an admin should check first.\n      temperature: 0.7\n      maxTokens: 200\n\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    summary: \"{{ summarize_noncompliant.output }}\"\n    data:\n      devices: \"{{ load_devices.output }}\"\n```"
+    },
+    {
+      "id": "graph-query-managed-devices",
+      "file": "02-graph-query-plan.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 8155,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/managedDevices\",\n  \"scopes\": [\"DeviceManagementManagedDevices.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "posture-classify-retire-candidates",
+      "file": "03-posture-classify.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 19624,
+      "response": "LAPTOP-BURAK  \nDESKTOP-DANA"
+    },
+    {
+      "id": "docs-dem-device-limit",
+      "file": "04-docs-dem-limit.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 17102,
+      "response": "A **device enrollment manager (DEM)** account can enroll and manage up to **1,000 devices** in Intune.  \nA **standard non‑admin** account can enroll up to **15 devices**."
+    },
+    {
+      "id": "docs-enrollment-limit-range",
+      "file": "05-docs-enrollment-restriction-range.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 18220,
+      "response": "In Intune device limit restrictions, you can configure a limit of **1 to 15 devices per user**."
+    },
+    {
+      "id": "docs-entra-signin-frequency-default",
+      "file": "06-docs-entra-signin-frequency.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 19335,
+      "response": "The Microsoft Entra ID default configuration for user sign‑in frequency is a **rolling window of 90 days**."
+    },
+    {
+      "id": "docs-defender-offboarding-package-expiry",
+      "file": "07-docs-defender-offboard-expiry.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 22064,
+      "response": "A Defender for Endpoint offboarding package is valid **for 7 days** after the date it is downloaded.  \nIf a package is used after that 7‑day window, the device will **reject the package** and the offboarding action will not be applied."
+    },
+    {
+      "id": "docs-intune-macos-agent-checkin",
+      "file": "08-docs-intune-agent-checkin.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 20179,
+      "response": "The Intune management agent on macOS devices normally checks in with Intune **every 8 hours** to look for new or updated shell scripts. This script‑check‑in interval is independent of the device’s MDM check‑in."
+    },
+    {
+      "id": "docs-entra-named-locations-limit",
+      "file": "09-docs-entra-named-locations.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 18698,
+      "response": "The maximum number of named locations you can configure for Microsoft Entra Conditional Access is **195**."
+    },
+    {
+      "id": "docs-defender-data-retention",
+      "file": "10-docs-defender-retention.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21164,
+      "response": "Data from Microsoft Defender for Endpoint is retained and visible across the portal for **180 days** (the default retention period).  \n\n- Advanced Hunting queries can only access data for 30 days unless the data is streamed to Microsoft Sentinel, where longer retention may apply."
+    },
+    {
+      "id": "abstain-intune-11",
+      "file": "11-abstain-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15715,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "abstain-entra-12",
+      "file": "12-abstain-entra.yaml",
+      "pass": false,
+      "detail": "missing: [NOT IN DOCS] forbidden-hit: [] unmatched: []",
+      "ms": 21940,
+      "response": ""
+    },
+    {
+      "id": "abstain-defender-13",
+      "file": "13-abstain-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 14867,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "graph-query-list-users",
+      "file": "14-graph-users.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/reports/directoryProvisioning?format=csv\",\"scopes\":[\"Reports.Read.All\"]}",
+      "ms": 12030,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/reports/directoryProvisioning?format=csv\",\n  \"scopes\": [\"Reports.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "graph-query-ca-policies",
+      "file": "15-graph-ca-policies.yaml",
+      "pass": false,
+      "detail": "JSON parse error: Unexpected end of JSON input",
+      "ms": 31675,
+      "response": ""
+    },
+    {
+      "id": "graph-query-compliance-policies",
+      "file": "16-graph-compliance-policies.yaml",
+      "pass": false,
+      "detail": "JSON parse error: Unexpected end of JSON input",
+      "ms": 31693,
+      "response": ""
+    },
+    {
+      "id": "graph-query-app-registrations",
+      "file": "17-graph-app-registrations.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 7574,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/applications\",\n  \"scopes\": [\"Application.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "graph-query-groups",
+      "file": "18-graph-groups.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 5361,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/groups\",\n  \"scopes\": [\"Group.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "manifest-scheduled-stale-groups",
+      "file": "19-manifest-scheduled.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 30098,
+      "response": "```yaml\ndescriptor:\n  id: weekly-group-inventory\n  name: Weekly Group Inventory\n  description: Summarizes the group landscape by counting groups per group type.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: policies\n  mode: read\n\nskills:\n  - id: load_groups\n    format: graph\n    label: Load Groups\n    detail: Load all groups from Microsoft Graph\n    settings:\n      method: GET\n      path: /groups\n      select:\n        - id\n        - displayName\n        - groupTypes\n        - membershipRule\n      scopes:\n        - Group.Read.All\n\n  - id: count_by_group_type\n    format: transform\n    label: Count Groups by Type\n    detail: Count groups per groupTypes\n    settings:\n      kind: count-by-field\n      source: \"{{ load_groups.output }}\"\n      field: groupTypes\n      buckets: []\n\n  - id: summarize_landscape\n    format: llm\n    label: Summarize Landscape\n    detail: Summarize group landscape\n    settings:\n      system: \"You are an admin assistant.\"\n      prompt: \"Summarize the group landscape based on the following data: {{ count_by_group_type.output }}\"\n      temperature: 0.2\n      maxTokens: 200\n\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n    - id: weekly\n      kind: scheduled\n      intervalSeconds: 604800\n  result:\n    summary: \"Weekly Group Inventory Summary\"\n    data:\n      groups: \"{{ load_groups.output }}\"\n      counts: \"{{ count_by_group_type.output }}\"\n      summary: \"{{ summarize_landscape.output }}\"\n```"
+    },
+    {
+      "id": "manifest-transform-chain",
+      "file": "20-manifest-transform-chain.yaml",
+      "pass": false,
+      "detail": "/definition/result must have required property 'summary'; /definition/result must NOT have additional properties",
+      "ms": 38843,
+      "response": "```yaml\ndescriptor:\n  id: top-noncompliant-models\n  name: Top Non-Compliant Models\n  description: |\n    Loads managed devices, counts them by compliance state, selects the oldest 10 devices,\n    and summarizes the findings using an LLM.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: devices\n  mode: read\n\nskills:\n  - id: load_devices\n    format: graph\n    label: Load Managed Devices\n    detail: |\n      Retrieves managed devices with selected fields.\n    settings:\n      method: GET\n      path: /deviceManagement/managedDevices\n      select:\n        - id\n        - deviceName\n        - model\n        - complianceState\n        - lastSyncDateTime\n      scopes:\n        - DeviceManagementManagedDevices.Read.All\n\n  - id: count_by_compliance\n    format: transform\n    label: Count by Compliance State\n    detail: |\n      Counts devices grouped by complianceState with buckets for compliant, noncompliant, and unknown.\n    settings:\n      kind: count-by-field\n      source: \"{{ load_devices.output }}\"\n      field: complianceState\n      buckets:\n        - compliant\n        - noncompliant\n        - unknown\n\n  - id: sort_by_last_sync\n    format: transform\n    label: Sort by Last Sync Time\n    detail: |\n      Sorts devices by lastSyncDateTime ascending and takes the oldest 10.\n    settings:\n      kind: sort-by\n      source: \"{{ load_devices.output }}\"\n      field: lastSyncDateTime\n      direction: asc\n      take: 10\n\n  - id: summarize\n    format: llm\n    label: Summarize Findings\n    detail: |\n      Generates a concise summary of the compliance data.\n    settings:\n      system: |\n        You are an assistant summarizing device compliance data for an organization.\n      prompt: |\n        Summarize the following device compliance data:\n        {{ sort_by_last_sync.output }}\n      temperature: 0.7\n      maxTokens: 200\n\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    summaryTemplate: \"{{ summarize.output }}\"\n    data:\n      load_devices: \"{{ load_devices.output }}\"\n      count_by_compliance: \"{{ count_by_compliance.output }}\"\n      sort_by_last_sync: \"{{ sort_by_last_sync.output }}\"\n      summarize: \"{{ summarize.output }}\"\n```"
+    },
+    {
+      "id": "manifest-hard-minimal-prompt",
+      "file": "21-manifest-hard-no-spec.yaml",
+      "pass": false,
+      "detail": "/ must have required property 'descriptor'; / must have required property 'skills'; / must have required property 'definition'; / must NOT have additional properties; / must NOT have additional properties",
+      "ms": 49773,
+      "response": "```yaml\nslug: dormant-guest-accounts\nname: Dormant Guest Accounts\ndescription: Loads guest users from Microsoft Graph and summarizes dormant ones using an LLM.\nmode: read\nintegrations:\n  - name: microsoft_graph\n    type: api\n    scopes:\n      - User.Read.All\nsteps:\n  - name: Load Guest Users\n    type: api\n    integration: microsoft_graph\n    method: GET\n    endpoint: /users?$filter=userType eq 'Guest'\n    output: guest_users\n  - name: Identify Dormant Users\n    type: script\n    language: javascript\n    script: |\n      const dormant = guest_users.filter(user => {\n        const lastSignIn = new Date(user.signInActivity?.lastSignInDateTime);\n        const now = new Date();\n        const diffDays = (now - lastSignIn) / (1000 * 60 * 60 * 24);\n        return diffDays > 90;\n      });\n      return dormant;\n    input: guest_users\n    output: dormant_users\n  - name: Summarize Dormant Users\n    type: llm\n    model: gpt-4\n    prompt: |\n      Summarize the following dormant guest accounts:\n      {{dormant_users}}\n    output: summary\n```"
+    },
+    {
+      "id": "reasoning-least-privilege-scope",
+      "file": "22-scope-least-privilege.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 9292,
+      "response": "**DeviceManagementConfiguration.Read.All**"
+    },
+    {
+      "id": "reasoning-compliance-breakdown",
+      "file": "23-reasoning-compliance-breakdown.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 4607,
+      "response": "- **Unknown‑state devices:** 25  \n- **Percentage of the fleet:** \\( \\frac{25}{250} \\times 100 = 10\\% \\)"
+    },
+    {
+      "id": "voice-run-summary",
+      "file": "24-voice-run-summary.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 4916,
+      "response": "The agent scanned 412 devices, identifying 37 that have not synced in over 90 days. Of those, 5 are noncompliant."
+    },
+    {
+      "id": "gen-reasoning-retire-0",
+      "file": "400-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [PHONE-ERIK, VM-BORIS, PHONE-ADA] forbidden-hit: [] unmatched: []",
+      "ms": 25468,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-1",
+      "file": "401-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [DESKTOP-FATMA, PHONE-GEORGE] forbidden-hit: [] unmatched: []",
+      "ms": 25488,
+      "response": "DESKTOP-HANA  \nDES"
+    },
+    {
+      "id": "gen-reasoning-retire-2",
+      "file": "402-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [LAPTOP-DEV, LAPTOP-HANA, LAPTOP-ERIK] forbidden-hit: [] unmatched: []",
+      "ms": 24471,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-3",
+      "file": "403-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 23756,
+      "response": "PHONE-ADA  \nPHONE-GEORGE  \nLAPTOP-FATMA"
+    },
+    {
+      "id": "gen-reasoning-retire-4",
+      "file": "404-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21023,
+      "response": "- LAPTOP-GEORGE  \n- LAPTOP-ADA  \n- DESKTOP-FATMA"
+    },
+    {
+      "id": "gen-reasoning-retire-5",
+      "file": "405-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [LAPTOP-GEORGE, VM-FATMA, PHONE-HANA, DESKTOP-ADA] forbidden-hit: [] unmatched: []",
+      "ms": 25496,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-6",
+      "file": "406-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [LAPTOP-ERIK, VM-CARMEN, LAPTOP-GEORGE, PHONE-HANA] forbidden-hit: [] unmatched: []",
+      "ms": 25497,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-7",
+      "file": "407-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 19563,
+      "response": "LAPTOP-HANA  \nVM-ADA"
+    },
+    {
+      "id": "gen-reasoning-retire-8",
+      "file": "408-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [PHONE-GEORGE, LAPTOP-BORIS, DESKTOP-DEV] forbidden-hit: [] unmatched: []",
+      "ms": 24496,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-9",
+      "file": "409-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21939,
+      "response": "PHONE-BORIS  \nPHONE-FATMA"
+    },
+    {
+      "id": "gen-reasoning-retire-10",
+      "file": "410-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [DESKTOP-FATMA] forbidden-hit: [] unmatched: []",
+      "ms": 25463,
+      "response": "VM-ADA  \nDESKTOP-CARMEN  \nDESKTOP-FAT"
+    },
+    {
+      "id": "gen-reasoning-retire-11",
+      "file": "411-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21208,
+      "response": "LAPTOP-HANA  \nDESKTOP-BORIS  \nLAPTOP-ADA  \nDESKTOP-CARMEN"
+    },
+    {
+      "id": "gen-reasoning-retire-12",
+      "file": "412-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [LAPTOP-ADA, LAPTOP-DEV, LAPTOP-FATMA, DESKTOP-HANA] forbidden-hit: [] unmatched: []",
+      "ms": 25464,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-13",
+      "file": "413-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [PHONE-ADA, DESKTOP-CARMEN, LAPTOP-FATMA, LAPTOP-GEORGE] forbidden-hit: [] unmatched: []",
+      "ms": 25010,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-14",
+      "file": "414-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [DESKTOP-CARMEN, VM-ADA, VM-HANA, DESKTOP-FATMA, LAPTOP-DEV] forbidden-hit: [] unmatched: []",
+      "ms": 25454,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-15",
+      "file": "415-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16463,
+      "response": "PHONE-ADA\nDESKTOP-BORIS"
+    },
+    {
+      "id": "gen-reasoning-retire-16",
+      "file": "416-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16746,
+      "response": "LAPTOP-ADA  \nVM-FATMA"
+    },
+    {
+      "id": "gen-reasoning-retire-17",
+      "file": "417-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [DESKTOP-FATMA, VM-ADA, LAPTOP-DEV] forbidden-hit: [] unmatched: []",
+      "ms": 25499,
+      "response": ""
+    },
+    {
+      "id": "gen-reasoning-retire-18",
+      "file": "418-gen-reasoning-retire.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 23185,
+      "response": "DESKTOP-ADA  \nVM-GEORGE  \nPHONE-DEV"
+    },
+    {
+      "id": "gen-reasoning-retire-19",
+      "file": "419-gen-reasoning-retire.yaml",
+      "pass": false,
+      "detail": "missing: [LAPTOP-GEORGE, VM-HANA] forbidden-hit: [] unmatched: []",
+      "ms": 25516,
+      "response": ""
+    },
+    {
+      "id": "gen-graph-seen-0",
+      "file": "500-gen-graph-seen.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/deviceManagement/managedDevices?$filter=needsHardwareInventoryExport eq true\",\"scopes\":[\"DeviceManagementManagedDevices.Read.All\"]}",
+      "ms": 11057,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/managedDevices?$filter=needsHardwareInventoryExport eq true\",\n  \"scopes\": [\"DeviceManagementManagedDevices.Read.All\"]\n}\n```"
+    },
+    {
+      "id": "gen-graph-seen-1",
+      "file": "501-gen-graph-seen.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/users?$select=id,displayName,userType\",\"scopes\":[\"User.ReadBasic.All\"]}",
+      "ms": 10631,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/users?$select=id,displayName,userType\",\n  \"scopes\": [\"User.ReadBasic.All\"]\n}\n```"
+    },
+    {
+      "id": "gen-graph-seen-2",
+      "file": "502-gen-graph-seen.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/groups?$filter=securityEnabled eq true\",\"scopes\":[\"Group.Read.All\"]}",
+      "ms": 7723,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/groups?$filter=securityEnabled eq true\",\n  \"scopes\": [\"Group.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "gen-graph-seen-3",
+      "file": "503-gen-graph-seen.yaml",
+      "pass": false,
+      "detail": "JSON parse error: Unexpected token '`', \"```json\n{\n\"... is not valid JSON",
+      "ms": 31671,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \""
+    },
+    {
+      "id": "gen-graph-seen-4",
+      "file": "504-gen-graph-seen.yaml",
+      "pass": false,
+      "detail": "JSON parse error: Unexpected end of JSON input",
+      "ms": 31700,
+      "response": ""
+    },
+    {
+      "id": "gen-graph-heldout-5",
+      "file": "505-gen-graph-heldout.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/beta/identity/conditionalAccess/namedLocations\",\"scopes\":[\"ConditionalAccess.Read.All\"]}",
+      "ms": 8221,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/beta/identity/conditionalAccess/namedLocations\",\n  \"scopes\": [\"ConditionalAccess.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "gen-graph-heldout-6",
+      "file": "506-gen-graph-heldout.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/deviceManagement/deviceEnrollmentConfigurations\",\"scopes\":[\"DeviceManagementConfiguration.Read.All\"]}",
+      "ms": 8518,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/deviceEnrollmentConfigurations\",\n  \"scopes\": [\"DeviceManagementConfiguration.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "gen-graph-heldout-7",
+      "file": "507-gen-graph-heldout.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 8063,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceAppManagement/mobileAppCategories\",\n  \"scopes\": [\"DeviceManagementApps.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "gen-graph-heldout-8",
+      "file": "508-gen-graph-heldout.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/v1.0/directoryRoles\",\"scopes\":[\"Directory.Read.All\"]}",
+      "ms": 10867,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/v1.0/directoryRoles\",\n  \"scopes\": [\"Directory.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "gen-graph-heldout-9",
+      "file": "509-gen-graph-heldout.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/domains?$filter=verified eq true\",\"scopes\":[\"Domain.Read.All\"]}",
+      "ms": 12893,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/domains?$filter=verified eq true\",\n  \"scopes\": [\"Domain.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "gen-abstain-intune-0",
+      "file": "600-gen-abstain-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 13805,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-intune-1",
+      "file": "601-gen-abstain-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12850,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-intune-2",
+      "file": "602-gen-abstain-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15003,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-intune-3",
+      "file": "603-gen-abstain-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15826,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-entra-4",
+      "file": "604-gen-abstain-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 10368,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-entra-5",
+      "file": "605-gen-abstain-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 11000,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-entra-6",
+      "file": "606-gen-abstain-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15598,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-entra-7",
+      "file": "607-gen-abstain-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 7439,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-defender-8",
+      "file": "608-gen-abstain-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 13982,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-defender-9",
+      "file": "609-gen-abstain-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 17210,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-defender-10",
+      "file": "610-gen-abstain-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 17431,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-abstain-defender-11",
+      "file": "611-gen-abstain-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 14088,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "gen-voice-0",
+      "file": "700-gen-voice.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 4831,
+      "response": "The agent scanned 128 mailboxes, finding 9 with forwarding rules to external addresses. Two new rules were created this week."
+    },
+    {
+      "id": "gen-voice-1",
+      "file": "701-gen-voice.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b6\\b]",
+      "ms": 5866,
+      "response": "The agent reviewed 54 conditional access policies. Six are in report‑only mode and one blocks legacy authentication."
+    },
+    {
+      "id": "gen-voice-2",
+      "file": "702-gen-voice.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 5192,
+      "response": "The agent reviewed 300 app registrations. 41 of those have secrets expiring within 30 days."
+    },
+    {
+      "id": "gen-voice-3",
+      "file": "703-gen-voice.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b12\\b]",
+      "ms": 5165,
+      "response": "The audit examined 76 groups. Twelve of those groups have no owner assigned."
+    },
+    {
+      "id": "harvest-entra-0",
+      "file": "800-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21195,
+      "response": "Microsoft recommends setting **user sign‑in frequency to 12 hours** to satisfy NIST’s reauthentication requirement."
+    },
+    {
+      "id": "harvest-intune-0",
+      "file": "800-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15112,
+      "response": "The maximum number of device platform restriction policies that can be created in Microsoft Intune is **25**."
+    },
+    {
+      "id": "harvest-entra-1",
+      "file": "801-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16629,
+      "response": "The Conditional Access Optimization Agent can target **up to 200 users** in a passkey adoption campaign."
+    },
+    {
+      "id": "harvest-intune-1",
+      "file": "801-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 17277,
+      "response": "Configuration Manager deletes the history for canceled or denied application approval requests **30 days after the request is canceled or denied**. This default period can be changed by configuring the **Delete Aged Application Request Data** site‑maintenance task."
+    },
+    {
+      "id": "harvest-entra-2",
+      "file": "802-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15569,
+      "response": "The provisioning service runs subsequent syncs roughly every **40 minutes** while it is active."
+    },
+    {
+      "id": "harvest-entra-3",
+      "file": "803-harvest-entra.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b3\\b]",
+      "ms": 25035,
+      "response": ""
+    },
+    {
+      "id": "harvest-defender-4",
+      "file": "804-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15938,
+      "response": "The maximum time a newly created endpoint security policy can take to reach a device is **up to 90 minutes**."
+    },
+    {
+      "id": "harvest-defender-5",
+      "file": "805-harvest-defender.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b3000\\b]",
+      "ms": 25172,
+      "response": "The Export feature in the Threat Explorer **Phish** view can export up to **3,000 users** and their corresponding attempts."
+    },
+    {
+      "id": "harvest-intune-6",
+      "file": "806-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 11717,
+      "response": "A newly created CORS rule can take up to **30 minutes** to propagate after you save it."
+    },
+    {
+      "id": "harvest-entra-7",
+      "file": "807-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15284,
+      "response": "Backups of a managed domain are kept for **up to 30 days**. Any backup older than 30 days is automatically deleted."
+    },
+    {
+      "id": "harvest-intune-8",
+      "file": "808-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 13556,
+      "response": "The filter evaluation results can take up to **30 minutes** to appear in the Intune admin center."
+    },
+    {
+      "id": "harvest-defender-9",
+      "file": "809-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 17167,
+      "response": "It can take up to **8 hours** for tags to be fully applied after you create them."
+    },
+    {
+      "id": "harvest-defender-10",
+      "file": "810-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 20277,
+      "response": "The Microsoft Defender Vulnerability Management trial is a **90‑day** trial.  \nYou can request a single 30‑day extension within the last 15 days of the trial, which would bring the total trial period to **120 days**."
+    },
+    {
+      "id": "harvest-defender-11",
+      "file": "811-harvest-defender.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b30\\b]",
+      "ms": 24738,
+      "response": ""
+    },
+    {
+      "id": "harvest-entra-12",
+      "file": "812-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12763,
+      "response": "According to the security guardrails summary, you should validate emergency access account functionality **at least every 90 days**."
+    },
+    {
+      "id": "harvest-intune-13",
+      "file": "813-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15823,
+      "response": "The banner shown is the **“90 days”** renewal banner."
+    },
+    {
+      "id": "harvest-defender-14",
+      "file": "814-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16054,
+      "response": "The maximum interval between retry attempts for deferred messages in Microsoft 365 is **60 minutes**."
+    },
+    {
+      "id": "harvest-intune-15",
+      "file": "815-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 14970,
+      "response": "Under Intune device limit restrictions, a single user can enroll **up to 15 devices** in Microsoft Intune."
+    },
+    {
+      "id": "harvest-entra-16",
+      "file": "816-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15767,
+      "response": "The maximum number of users you can select for a workflow execution simulation is **10 users**."
+    },
+    {
+      "id": "harvest-defender-17",
+      "file": "817-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 17618,
+      "response": "Defender for Cloud Apps can apply Microsoft Purview sensitivity labels only to files that are **up to 30 MB** in size. Files larger than 30 MB cannot have a label applied through Defender for Cloud Apps."
+    },
+    {
+      "id": "harvest-entra-18",
+      "file": "818-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 10735,
+      "response": "An asynchronous PKI upload can take **up to 30 minutes** to finish."
+    },
+    {
+      "id": "harvest-defender-19",
+      "file": "819-harvest-defender.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b30\\b]",
+      "ms": 22319,
+      "response": "The excerpts you provided do not include any information about how long it takes for changes to trusted ARC sealers to propagate after you add or modify them."
+    },
+    {
+      "id": "harvest-entra-20",
+      "file": "820-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 18923,
+      "response": "The `signInActivity` property can be delayed. According to the documentation:\n\n* **Maximum delay** – up to **24 hours** after a user signs in.  \n* **Typical delay** – sign‑in events usually appear in the sign‑in report within **6 hours**.\n\nSo, after a user signs in, you can expect the `signInActivity` data to be updated within a few hours, but it may take up to a full day."
+    },
+    {
+      "id": "harvest-intune-21",
+      "file": "821-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21723,
+      "response": "It can take **up to 45 days** for a released device to be automatically removed from the Devices page in Intune."
+    },
+    {
+      "id": "harvest-entra-22",
+      "file": "822-harvest-entra.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b90\\b]",
+      "ms": 19120,
+      "response": ""
+    },
+    {
+      "id": "harvest-entra-23",
+      "file": "823-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 14167,
+      "response": "The group can remain in the **PIM for Groups** list for up to **24 hours** after it is deleted from Microsoft Entra ID."
+    },
+    {
+      "id": "harvest-intune-24",
+      "file": "824-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16140,
+      "response": "The acceptance report data in Intune is refreshed **every 24 hours** (with up to a 12‑hour generation delay, meaning the data can be up to 36 hours out‑of‑date)."
+    },
+    {
+      "id": "harvest-entra-25",
+      "file": "825-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21056,
+      "response": "Named locations that are soft‑deleted are kept in the recycle bin for **30 days**.  \nIf they are not restored within that period, Microsoft Entra ID permanently hard‑deletes them.  \n\n*Source: “Soft‑deleted objects are also hard deleted after 30 days” (doc 1) and the general soft‑delete retention rule in the recover‑from‑deletions documentation (doc 3).*"
+    },
+    {
+      "id": "harvest-defender-26",
+      "file": "826-harvest-defender.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b3000\\b]",
+      "ms": 18222,
+      "response": "The Top targeted users view in Threat Explorer can export up to **3,000 users** and their corresponding attempts."
+    },
+    {
+      "id": "harvest-intune-27",
+      "file": "827-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12027,
+      "response": "Historical data remains visible for **up to 60 days** after you revoke consent to share anonymized and aggregate metrics."
+    },
+    {
+      "id": "harvest-intune-28",
+      "file": "828-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16813,
+      "response": "The `pszCompany` parameter in the `InstallStatusMIFEx` function is limited to **64 characters**."
+    },
+    {
+      "id": "harvest-intune-29",
+      "file": "829-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16441,
+      "response": "The default Policy Polling Interval for the desired configuration management client agent is **60 minutes** (one hour)."
+    },
+    {
+      "id": "harvest-entra-30",
+      "file": "830-harvest-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 14308,
+      "response": "The maximum delay is **up to 10 minutes** while issuer hints propagate back to the client after updating the CA trust store."
+    },
+    {
+      "id": "harvest-defender-31",
+      "file": "831-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 18346,
+      "response": "Enable Controlled Folder Access in audit mode for **at least 30 days** before reviewing the detections and creating an allow‑list."
+    },
+    {
+      "id": "harvest-defender-32",
+      "file": "832-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16276,
+      "response": "The maximum period of raw data you can explore with Microsoft Defender’s advanced hunting is **30 days**."
+    },
+    {
+      "id": "harvest-defender-33",
+      "file": "833-harvest-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21492,
+      "response": "Messages that are quarantined by Safe Attachments policies in Defender for Office 365 are kept in quarantine for **30 days** before they are permanently deleted."
+    },
+    {
+      "id": "harvest-intune-34",
+      "file": "834-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 3922,
+      "response": "The maximum number of device platform restriction policies that can be created in Microsoft Intune is **25**."
+    },
+    {
+      "id": "harvest-intune-35",
+      "file": "835-harvest-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16791,
+      "response": "When enrollment time grouping is **not** configured, Intune may take up to **8 hours** after a device enrolls for all assigned apps and policies to be fully delivered."
+    }
+  ]
+}

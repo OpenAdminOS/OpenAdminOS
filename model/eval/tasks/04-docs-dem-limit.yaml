@@ -1,0 +1,13 @@
+id: docs-dem-device-limit
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are an Intune administration assistant. Answer factually and concisely.
+prompt: |-
+  How many devices can a device enrollment manager (DEM) account enroll and
+  manage in Intune, and how many can a standard non-admin account enroll?
+mustMatch:
+  - "1[,.]?000"
+  - "\\b15\\b"

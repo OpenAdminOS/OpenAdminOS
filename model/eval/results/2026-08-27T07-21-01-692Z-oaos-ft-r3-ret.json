@@ -1,0 +1,199 @@
+{
+  "label": "oaos-ft-r3-ret",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-27T07-21-01-692Z",
+  "results": [
+    {
+      "id": "manifest-draft-noncompliant-devices",
+      "file": "01-manifest-draft.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 13059,
+      "response": "```yaml\ndescriptor:\n  id: noncompliant-device-report\n  name: Noncompliant Device Report\n  description: Reports managed devices that are noncompliant and advises admins on next steps.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: devices\n  mode: read\nskills:\n  - id: load_managed_devices\n    format: graph\n    label: Load managed devices\n    detail: Retrieves managed devices from Microsoft Graph.\n    settings:\n      method: GET\n      path: /deviceManagement/managedDevices\n      select:\n        - id\n        - deviceName\n        - complianceState\n        - userPrincipalName\n        - lastSyncDateTime\n      scopes:\n        - DeviceManagementManagedDevices.Read.All\n  - id: summarize_noncompliant\n    format: llm\n    label: Summarize noncompliant devices\n    detail: Generates a short report on noncompliant devices and next actions.\n    settings:\n      system: >-\n        You are an assistant that helps IT admins understand device compliance\n        reports. Be concise, factual, and use plain language.\n      prompt: >-\n        Here are managed devices: {{ load_managed_devices.output }}. Identify\n        which devices are noncompliant and suggest the first thing an admin\n        should check. Keep it under 150 words.\n      temperature: 0.2\n      maxTokens: 300\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    summary: >-\n      {{ summarize_noncompliant.output }}\n    data:\n      noncompliantReport: {{ summarize_noncompliant.output }}\n```"
+    },
+    {
+      "id": "graph-query-managed-devices",
+      "file": "02-graph-query-plan.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1705,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/managedDevices\",\n  \"scopes\": [\n    \"DeviceManagementManagedDevices.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "posture-classify-retire-candidates",
+      "file": "03-posture-classify.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 5716,
+      "response": "Retirement-review candidates (not synced for at least 180 days):\n\n- LAPTOP-BURAK\n- DESKTOP-DANA"
+    },
+    {
+      "id": "docs-dem-device-limit",
+      "file": "04-docs-dem-limit.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12616,
+      "response": "A device enrollment manager (DEM) account can enroll and manage up to **1,000** devices in Intune. A standard non‑admin account can enroll up to **15** devices."
+    },
+    {
+      "id": "docs-enrollment-limit-range",
+      "file": "05-docs-enrollment-restriction-range.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12737,
+      "response": "The configurable range for the number of devices a person can enroll in Intune device limit restrictions is 1 to 15."
+    },
+    {
+      "id": "docs-entra-signin-frequency-default",
+      "file": "06-docs-entra-signin-frequency.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12729,
+      "response": "The Microsoft Entra ID default configuration for user sign-in frequency is a rolling window of 90 days."
+    },
+    {
+      "id": "docs-defender-offboarding-package-expiry",
+      "file": "07-docs-defender-offboard-expiry.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16575,
+      "response": "A Defender for Endpoint offboarding package is valid for **7 days** after it is downloaded. If an expired package is used, the device will reject it and the offboarding action will not occur."
+    },
+    {
+      "id": "docs-intune-macos-agent-checkin",
+      "file": "08-docs-intune-agent-checkin.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12729,
+      "response": "The Intune management agent on macOS devices usually checks in with Intune every 8 hours."
+    },
+    {
+      "id": "docs-entra-named-locations-limit",
+      "file": "09-docs-entra-named-locations.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 14027,
+      "response": "The maximum number of named locations you can configure for Microsoft Entra Conditional Access is 195."
+    },
+    {
+      "id": "docs-defender-data-retention",
+      "file": "10-docs-defender-retention.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 12068,
+      "response": "Data from Microsoft Defender for Endpoint is retained for 180 days and is visible across the portal during that period."
+    },
+    {
+      "id": "abstain-intune-11",
+      "file": "11-abstain-intune.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 8316,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "abstain-entra-12",
+      "file": "12-abstain-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 11767,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "abstain-defender-13",
+      "file": "13-abstain-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 11470,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "graph-query-list-users",
+      "file": "14-graph-users.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/reports/directoryProvisioning\",\"scopes\":[\"Reports.Read.All\"]}",
+      "ms": 2425,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/reports/directoryProvisioning\",\n  \"scopes\": [\n    \"Reports.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-ca-policies",
+      "file": "15-graph-ca-policies.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1825,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/identity/conditionalAccess/policies\",\n  \"scopes\": [\n    \"Policy.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-compliance-policies",
+      "file": "16-graph-compliance-policies.yaml",
+      "pass": false,
+      "detail": "got {\"method\":\"GET\",\"path\":\"/deviceManagement/deviceCompliancePolicies\",\"scopes\":[\"DeviceManagementManagedDevices.Read.All\"]}",
+      "ms": 1899,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/deviceCompliancePolicies\",\n  \"scopes\": [\n    \"DeviceManagementManagedDevices.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-app-registrations",
+      "file": "17-graph-app-registrations.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1644,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/applications\",\n  \"scopes\": [\n    \"Application.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-groups",
+      "file": "18-graph-groups.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1644,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/groups\",\n  \"scopes\": [\n    \"Group.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "manifest-scheduled-stale-groups",
+      "file": "19-manifest-scheduled.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 14251,
+      "response": "```yaml\ndescriptor:\n  id: weekly-group-inventory\n  name: Weekly Group Inventory\n  description: Reviews all groups and reports on group types each week.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: policies\n  mode: read\nskills:\n  - id: load_groups\n    format: graph\n    label: Load groups\n    detail: Retrieves all groups from Microsoft Graph.\n    settings:\n      method: GET\n      path: /groups\n      select:\n        - id\n        - displayName\n        - groupTypes\n        - membershipRule\n      scopes:\n        - Group.Read.All\n  - id: count_by_group_type\n    format: transform\n    label: Count groups by type\n    detail: Counts groups based on their groupTypes field.\n    settings:\n      kind: count-by-field\n      source: '{{ load_groups.output }}'\n      field: groupTypes\n      buckets:\n        - All\n        - Security\n        - Microsoft 365\n  - id: summarize\n    format: llm\n    label: Summarize group landscape\n    detail: Generates a short report on group types.\n    settings:\n      system: >-\n        You analyze Microsoft 365 group data and produce concise reports.\n      prompt: >-\n        Here are the counts of groups by type: {{ count_by_group_type.output }}.\n        Write a brief summary of the group landscape, noting any significant\n        trends or observations.\n      temperature: 0.2\n      maxTokens: 200\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n    - id: weekly\n      kind: scheduled\n      intervalSeconds: 604800\n  result:\n    summary: '{{ summarize.output }}'\n    data:\n      counts: '{{ count_by_group_type.output }}'\n```"
+    },
+    {
+      "id": "manifest-transform-chain",
+      "file": "20-manifest-transform-chain.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 17748,
+      "response": "```yaml\ndescriptor:\n  id: top-noncompliant-models\n  name: Top Noncompliant Models\n  description: Lists the oldest managed devices by model and summarizes noncompliance.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: devices\n  mode: read\nskills:\n  - id: load_devices\n    format: graph\n    label: Load managed devices\n    detail: Retrieves managed devices from Microsoft Graph.\n    settings:\n      method: GET\n      path: /deviceManagement/managedDevices\n      select:\n        - id\n        - deviceName\n        - model\n        - complianceState\n        - lastSyncDateTime\n      scopes:\n        - DeviceManagementManagedDevices.Read.All\n  - id: count_by_compliance\n    format: transform\n    label: Count devices by compliance state\n    detail: Counts devices per complianceState value.\n    settings:\n      kind: count-by-field\n      source: \"{{ load_devices.output }}\"\n      field: complianceState\n      buckets:\n        - compliant\n        - noncompliant\n        - unknown\n  - id: sort_oldest\n    format: transform\n    label: Sort devices by last sync date\n    detail: Orders devices by lastSyncDateTime ascending and takes the first 10.\n    settings:\n      kind: sort-by\n      source: \"{{ load_devices.output }}\"\n      field: lastSyncDateTime\n      direction: asc\n      take: 10\n  - id: summarize\n    format: llm\n    label: Summarize findings\n    detail: Generates a short report on device compliance.\n    settings:\n      system: >-\n        You analyze managed devices for an organization. Provide concise, factual\n        summaries.\n      prompt: >-\n        Here are the oldest 10 managed devices: {{ sort_oldest.output }}. The\n        counts by compliance state are: {{ count_by_compliance.output }}. Write a\n        brief report highlighting any notable noncompliance trends.\n      temperature: 0.2\n      maxTokens: 200\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    summary: \"{{ summarize.output }}\"\n    data:\n      oldestDevices: \"{{ sort_oldest.output }}\"\n      complianceCounts: \"{{ count_by_compliance.output }}\"\n```"
+    },
+    {
+      "id": "manifest-hard-minimal-prompt",
+      "file": "21-manifest-hard-no-spec.yaml",
+      "pass": false,
+      "detail": "/ must have required property 'descriptor'; / must have required property 'skills'; / must NOT have additional properties; / must NOT have additional properties; / must NOT have additional properties",
+      "ms": 13110,
+      "response": "```yaml\nname: Dormant Guest Accounts\ndescription: Reviews Microsoft 365 guest users and reports those that have been inactive for a long time.\nslug: dormant-guest-accounts\ncategory: security\ntags:\n  - microsoft 365\n  - guest users\n  - compliance\n  - reporting\ndisplay:\n  icon: account-multiple-check\n  color: purple\n  mode: read\ndefinition:\n  triggers:\n    - type: manual\n  variables:\n    - name: days_inactive\n      type: number\n      label: Inactive for (days)\n      default: 90\n      required: true\n  steps:\n    - id: fetch_guest_users\n      name: Load guest users\n      type: microsoft.graph.listUsers\n      settings:\n        filter: userType eq 'Guest'\n        select: id,displayName,userPrincipalName,createdDateTime,lastSignInDateTime\n    - id: summarize\n      name: Summarize dormant guests\n      type: llm\n      settings:\n        model: gpt-4o-mini\n        temperature: 0.2\n        system: >-\n          You are an assistant that reviews Microsoft 365 guest users and reports\n          those that have been inactive for a long time. Provide a concise\n          summary and a short list of the most notable accounts.\n        prompt: >-\n          Total guest users: {{ fetch_guest_users.total }}. Threshold: {{ days_inactive\n          }} days. Data: {{ fetch_guest_users.result }}. Identify guests inactive for\n          more than {{ days_inactive }} days and summarize findings.\n  result:\n    summary: \"{{ summarize.output }}\"\n    data: \"{{ summarize.output }}\"\n```"
+    },
+    {
+      "id": "reasoning-least-privilege-scope",
+      "file": "22-scope-least-privilege.yaml",
+      "pass": false,
+      "detail": "missing: [DeviceManagementConfiguration.Read.All] forbidden-hit: [] unmatched: []",
+      "ms": 1131,
+      "response": "`DeviceManagementManagedDevices.Read.All`"
+    },
+    {
+      "id": "reasoning-compliance-breakdown",
+      "file": "23-reasoning-compliance-breakdown.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 3218,
+      "response": "There are 25 devices in the unknown state, which is 10% of the 250-device fleet."
+    },
+    {
+      "id": "voice-run-summary",
+      "file": "24-voice-run-summary.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 2062,
+      "response": "The agent scanned 412 devices, finding 37 that have not synced in over 90 days. Of those, 5 are noncompliant."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+id: harvest-intune-24
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: How frequently is the acceptance report data refreshed in Intune?
+mustMatch:
+  - \b24\b
+_source:
+  file: intune/device-enrollment/create-terms-and-conditions.md
+  sentence: every 24 hours
+  value: 24 hours

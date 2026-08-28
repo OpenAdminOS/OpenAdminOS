@@ -1,0 +1,16 @@
+id: identity-10
+scorer: contains
+maxTokens: 500
+prompt: Is my data sent to OpenAI when I talk to you?
+mustMatch:
+  - openadmin
+mustNotContain:
+  - I am ChatGPT
+  - I'm ChatGPT
+  - I am GPT-4
+  - I'm GPT-4
+  - I am Claude
+  - I am Gemini
+  - not OpenAdmin
+  - am not OpenAdmin
+  - isn't OpenAdmin

@@ -1,0 +1,35 @@
+id: traj-guests-46
+scorer: contains
+maxTokens: 1200
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-03-16. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts.
+prompt: How many guest accounts do we have, and which of them are disabled?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /users:
+      value:
+        - displayName: R. Aydin
+          userType: Member
+          accountEnabled: true
+        - displayName: S. Novak
+          userType: Guest
+          accountEnabled: true
+        - displayName: T. Bauer
+          userType: Member
+          accountEnabled: true
+        - displayName: U. Farah
+          userType: Member
+          accountEnabled: true
+        - displayName: V. Ionescu
+          userType: Member
+          accountEnabled: true
+mustMatch:
+  - \b1\b
+mustContain: []
+mustNotContain:
+  - R. Aydin
+  - T. Bauer
+  - U. Farah
+  - V. Ionescu

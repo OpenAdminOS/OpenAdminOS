@@ -1,0 +1,12 @@
+id: docs-enrollment-limit-range
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are an Intune administration assistant. Answer factually and concisely.
+prompt: |-
+  In Intune device limit restrictions, what is the configurable range for the
+  number of devices a person can enroll?
+mustMatch:
+  - "\\b1\\b[\\s\\S]{0,30}\\b15\\b"

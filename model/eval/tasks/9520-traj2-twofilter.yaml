@@ -1,0 +1,64 @@
+id: traj2-twofilter-20
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-12-26. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: List the personally-owned devices that are currently noncompliant.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: LYRA-298
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: macOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-10-21T00:00:00.000Z'
+        - deviceName: MIRA-405
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-09-26T00:00:00.000Z'
+        - deviceName: PICO-538
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: iOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-11-22T00:00:00.000Z'
+        - deviceName: NOVA-936
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-10-16T00:00:00.000Z'
+        - deviceName: ORION-281
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: Android
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-06-04T00:00:00.000Z'
+        - deviceName: VESTA-858
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: iOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-07T00:00:00.000Z'
+        - deviceName: RHEA-711
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-08-03T00:00:00.000Z'
+mustContain:
+  - PICO-538
+  - VESTA-858
+mustNotContain:
+  - LYRA-298
+  - MIRA-405
+  - NOVA-936
+  - ORION-281
+  - RHEA-711

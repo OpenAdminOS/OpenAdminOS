@@ -1,0 +1,17 @@
+id: harvest-defender-32
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum period of raw data you can explore using Microsoft Defender's
+  advanced hunting feature?
+mustMatch:
+  - \b30\b
+_source:
+  file: defender/defender-xdr/advanced-hunting-overview.md
+  sentence: up to 30 days
+  value: 30 days

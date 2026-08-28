@@ -1,0 +1,35 @@
+{
+  "label": "harness-verify",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-27T13-01-14-774Z",
+  "provenance": {
+    "servedModel": "gpt-oss-20b-MXFP4.gguf",
+    "retrieval": true,
+    "filter": "9000-",
+    "taskCount": 1,
+    "taskFilesSeen": 1,
+    "docIndex": {
+      "chunks": 55193,
+      "corpora": [
+        "intune",
+        "entra",
+        "defender"
+      ],
+      "built": "2026-08-26T14:36:49.586Z"
+    },
+    "harnessVersion": "v1.1-2026-08-27"
+  },
+  "results": [
+    {
+      "id": "traj-noncompliant-0",
+      "file": "9000-traj-noncompliant.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 30377,
+      "toolCalls": 1,
+      "usefulCalls": 1,
+      "turnsUsed": 2,
+      "response": "The following managed devices are currently marked **noncompliant**:\n\n| Device name |\n|-------------|\n| BEACON\u2011V48 |\n| DELTA\u2011V27 |\n| ATLAS\u2011J50 |\n\nThese are the only devices in the tenant whose `complianceState` is `noncompliant`."
+    }
+  ]
+}

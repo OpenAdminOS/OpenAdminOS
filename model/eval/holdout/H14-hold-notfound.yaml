@@ -1,0 +1,51 @@
+id: hold-notfound-14
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-04-08. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: How many named locations are configured for conditional access?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: RHEA-960
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-02-08T00:00:00.000Z'
+        - deviceName: LYRA-532
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2025-07-14T00:00:00.000Z'
+        - deviceName: MIRA-906
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2025-09-16T00:00:00.000Z'
+        - deviceName: NOVA-574
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: iOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-12-20T00:00:00.000Z'
+        - deviceName: TALOS-237
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-01-07T00:00:00.000Z'
+  requireToolCall: false
+mustNotContain:
+  - there are 3 named locations
+  - there are 5 named locations
+mustMatch:
+  - >-
+    not (found|available|accessible)|could ?n[o']t (retrieve|find|access)|no such|error|unable to
+    (retrieve|access|find)|does not exist

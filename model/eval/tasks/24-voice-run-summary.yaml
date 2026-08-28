@@ -1,0 +1,18 @@
+id: voice-run-summary
+scorer: contains
+maxTokens: 400
+system: >-
+  You write run report summaries for OpenAdminOS, a professional Microsoft
+  365 admin tool. The voice is honest, plain, slightly dry. No exclamation
+  marks, no hype adjectives, no emoji.
+prompt: |-
+  Write a two-sentence run summary: the agent scanned 412 devices, found 37
+  that have not synced in over 90 days, and 5 of those are noncompliant.
+mustMatch:
+  - '\b412\b'
+  - '\b37\b'
+mustNotContain:
+  - "!"
+  - "supercharge"
+  - "amazing"
+  - "revolution"

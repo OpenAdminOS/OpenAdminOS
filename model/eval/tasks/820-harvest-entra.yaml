@@ -1,0 +1,15 @@
+id: harvest-entra-20
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: How long might the `signInActivity` property take to update after a user signs in?
+mustMatch:
+  - \b24\b
+_source:
+  file: entra/identity/monitoring-health/reference-log-latency.md
+  sentence: up to 24 hours
+  value: 24 hours

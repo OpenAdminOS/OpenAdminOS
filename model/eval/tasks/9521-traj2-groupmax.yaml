@@ -1,0 +1,63 @@
+id: traj2-groupmax-21
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-11-13. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: Which operating system has the most noncompliant devices in our fleet?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: RHEA-669
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: Android
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-04-28T00:00:00.000Z'
+        - deviceName: ORION-384
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-06-27T00:00:00.000Z'
+        - deviceName: VESTA-272
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: macOS
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-06-14T00:00:00.000Z'
+        - deviceName: PICO-793
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-06-01T00:00:00.000Z'
+        - deviceName: LYRA-195
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: Android
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-06-22T00:00:00.000Z'
+        - deviceName: MIRA-904
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-11-07T00:00:00.000Z'
+        - deviceName: NOVA-446
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: iOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-07-04T00:00:00.000Z'
+        - deviceName: TALOS-239
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: iOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-02-04T00:00:00.000Z'
+mustContain:
+  - iOS

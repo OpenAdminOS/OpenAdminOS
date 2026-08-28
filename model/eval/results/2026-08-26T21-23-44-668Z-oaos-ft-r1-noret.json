@@ -1,0 +1,199 @@
+{
+  "label": "oaos-ft-r1-noret",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-26T21-23-44-668Z",
+  "results": [
+    {
+      "id": "manifest-draft-noncompliant-devices",
+      "file": "01-manifest-draft.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 18502,
+      "response": "```yaml\ndescriptor:\n  id: noncompliant-device-report\n  name: Noncompliant Device Report\n  description: Reviews managed devices and reports findings for admin review.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: devices\n  mode: read\nskills:\n  - id: load_managed_devices\n    format: graph\n    label: Load managed devices\n    detail: Reads managed devices from the active tenant.\n    settings:\n      method: GET\n      path: /deviceManagement/managedDevices\n      select:\n        - id\n        - deviceName\n        - complianceState\n        - userPrincipalName\n        - lastSyncDateTime\n      scopes:\n        - DeviceManagementManagedDevices.Read.All\n  - id: summarize_noncompliant\n    format: llm\n    label: Summarize findings with the active LLM\n    detail: Generates a short managed devices report.\n    settings:\n      system: >-\n        You review managed devices for Microsoft 365 admins. Be concise, factual, and\n        conservative. Use only the supplied data.\n      prompt: >-\n        Total managed devices: {{ load_managed_devices.output | size }}.\n        Details: {{ load_managed_devices.output }}.\n        Write a compact report: list how many devices are noncompliant, name the\n        most common noncompliant state, and advise what to verify first (e.g., device\n        configuration, policy assignment, or user action).\n      temperature: 0.2\n      maxTokens: 250\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    summary: >-\n      {{ summarize_noncompliant.output }}\n    data:\n      total: '{{ load_managed_devices.output | size }}'\n      noncompliant: '{{ load_managed_devices.output | selectattr(\"complianceState\", \"==\",\n        \"Noncompliant\") | list | size }}'\n      mostCommonState: '{{ load_managed_devices.output | groupby(\"complianceState\") |\n        sort(attribute=\"1\") | last | first }}'\n      firstNoncompliant: '{{ load_managed_devices.output | selectattr(\"complianceState\",\n        \"==\", \"Noncompliant\") | first }}'\n```"
+    },
+    {
+      "id": "graph-query-managed-devices",
+      "file": "02-graph-query-plan.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 2275,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/managedDevices\",\n  \"scopes\": [\n    \"DeviceManagementManagedDevices.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "posture-classify-retire-candidates",
+      "file": "03-posture-classify.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 1309,
+      "response": "LAPTOP-BURAK\nDESKTOP-DANA"
+    },
+    {
+      "id": "docs-dem-device-limit",
+      "file": "04-docs-dem-limit.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [1[,.]?000, \\b15\\b]",
+      "ms": 2138,
+      "response": "A device enrollment manager (DEM) account can enroll and manage up to **250 devices** in Intune.  \nA standard non‑admin account can enroll and manage up to **1 device**."
+    },
+    {
+      "id": "docs-enrollment-limit-range",
+      "file": "05-docs-enrollment-restriction-range.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b1\\b[\\s\\S]{0,30}\\b15\\b]",
+      "ms": 862,
+      "response": "The configurable range is 1 to 50 devices per person."
+    },
+    {
+      "id": "docs-entra-signin-frequency-default",
+      "file": "06-docs-entra-signin-frequency.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [rolling]",
+      "ms": 2139,
+      "response": "The default user sign‑in frequency for Microsoft Entra ID is 90 days. This means that, by default, users are required to re‑authenticate after 90 days of continuous sign‑in."
+    },
+    {
+      "id": "docs-defender-offboarding-package-expiry",
+      "file": "07-docs-defender-offboard-expiry.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [(seven|7)\\s*[- ]?days?, reject]",
+      "ms": 2226,
+      "response": "A Defender for Endpoint device offboarding package is valid for 30 days from the\ndate it is downloaded. If an expired package is used, the offboarding process\nfails and the device remains managed by the tenant."
+    },
+    {
+      "id": "docs-intune-macos-agent-checkin",
+      "file": "08-docs-intune-agent-checkin.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 1112,
+      "response": "The Intune management agent on macOS devices typically checks in with Intune every 8 hours."
+    },
+    {
+      "id": "docs-entra-named-locations-limit",
+      "file": "09-docs-entra-named-locations.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [\\b195\\b]",
+      "ms": 885,
+      "response": "4096 named locations can be configured for Microsoft Entra Conditional Access."
+    },
+    {
+      "id": "docs-defender-data-retention",
+      "file": "10-docs-defender-retention.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [180\\s*[- ]?days]",
+      "ms": 1376,
+      "response": "Data from Microsoft Defender for Endpoint is retained for 90 days and remains visible across the portal for that duration."
+    },
+    {
+      "id": "abstain-intune-11",
+      "file": "11-abstain-intune.yaml",
+      "pass": false,
+      "detail": "missing: [NOT IN DOCS] forbidden-hit: [] unmatched: []",
+      "ms": 1698,
+      "response": "Quantum Sync Interval controls how often Intune checks for updates to the device's configuration and policies. The default value is 60 minutes."
+    },
+    {
+      "id": "abstain-entra-12",
+      "file": "12-abstain-entra.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 546,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "abstain-defender-13",
+      "file": "13-abstain-defender.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 508,
+      "response": "NOT IN DOCS"
+    },
+    {
+      "id": "graph-query-list-users",
+      "file": "14-graph-users.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1954,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/users\",\n  \"scopes\": [\n    \"User.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-ca-policies",
+      "file": "15-graph-ca-policies.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1716,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/identity/conditionalAccess/policies\",\n  \"scopes\": [\n    \"Policy.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-compliance-policies",
+      "file": "16-graph-compliance-policies.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1748,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/deviceCompliancePolicies\",\n  \"scopes\": [\n    \"DeviceManagementConfiguration.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-app-registrations",
+      "file": "17-graph-app-registrations.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1534,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/applications\",\n  \"scopes\": [\n    \"Application.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "graph-query-groups",
+      "file": "18-graph-groups.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 1538,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/groups\",\n  \"scopes\": [\n    \"Group.Read.All\"\n  ]\n}\n```"
+    },
+    {
+      "id": "manifest-scheduled-stale-groups",
+      "file": "19-manifest-scheduled.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 16219,
+      "response": "```yaml\ndescriptor:\n  id: weekly-group-inventory\n  name: Weekly Group Inventory\n  description: Reviews groups and reports findings for admin review.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: policies\n  mode: read\nskills:\n  - id: load_groups\n    format: graph\n    label: Load groups\n    detail: Reads groups from the active tenant.\n    settings:\n      method: GET\n      path: /groups\n      select:\n        - id\n        - displayName\n        - groupTypes\n        - membershipRule\n      scopes:\n        - Group.Read.All\n  - id: count_by_group_types\n    format: transform\n    label: Count groups by type\n    detail: Tallies groups according to their groupTypes.\n    settings:\n      kind: count-by-field\n      source: '{{ load_groups.output }}'\n      field: groupTypes\n      buckets:\n        - All\n        - Security\n        - Microsoft 365\n  - id: summarize\n    format: llm\n    label: Summarize findings\n    detail: Generates a short groups report for the admin.\n    settings:\n      system: >-\n        You review groups for Microsoft 365 admins. Be concise, factual, and\n        conservative. Use only the supplied data.\n      prompt: >-\n        Total groups: {{ load_groups.output | size }}. Details: {{ count_by_group_types.output }}.\n        Write a compact report: main finding, what to verify, next actions.\n      temperature: 0.2\n      maxTokens: 400\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n    - id: weekly\n      kind: scheduled\n      intervalSeconds: 604800\n  result:\n    summary: '{{ summarize.output }}'\n    data:\n      total: '{{ load_groups.output | size }}'\n      breakdown: '{{ count_by_group_types.output }}'\n```"
+    },
+    {
+      "id": "manifest-transform-chain",
+      "file": "20-manifest-transform-chain.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 19423,
+      "response": "```yaml\ndescriptor:\n  id: top-noncompliant-models\n  name: Top noncompliant models\n  description: Reviews managed devices and reports findings for admin review.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: devices\n  mode: read\nskills:\n  - id: load_managed_devices\n    format: graph\n    label: Load managed devices\n    detail: Reads managed devices from the active tenant.\n    settings:\n      method: GET\n      path: /deviceManagement/managedDevices\n      select:\n        - id\n        - deviceName\n        - model\n        - complianceState\n        - lastSyncDateTime\n      scopes:\n        - DeviceManagementManagedDevices.Read.All\n  - id: count_by_compliance\n    format: transform\n    label: Count devices by complianceState\n    detail: Tallies managed devices per complianceState.\n    settings:\n      kind: count-by-field\n      source: '{{ load_managed_devices.output }}'\n      field: complianceState\n      buckets:\n        - compliant\n        - noncompliant\n        - unknown\n  - id: oldest_items\n    format: transform\n    label: Sample devices by lastSyncDateTime\n    detail: Lists managed devices ordered by lastSyncDateTime.\n    settings:\n      kind: sort-by\n      source: '{{ load_managed_devices.output }}'\n      field: lastSyncDateTime\n      direction: asc\n      take: 10\n  - id: summarize\n    format: llm\n    label: Summarize findings with the active LLM\n    detail: Generates a short managed devices report.\n    settings:\n      system: >-\n        You review managed devices for Microsoft 365 admins. Be concise, factual, and\n        conservative. Use only the supplied data.\n      prompt: >-\n        Total managed devices: {{ load_managed_devices.output | size }}.\n        Breakdown by complianceState: {{ count_by_compliance.output }}.\n        Details: {{ oldest_items.output }}.\n        Write a compact report: main finding, what to verify, next actions.\n      temperature: 0.2\n      maxTokens: 400\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    summary: '{{ summarize.output }}'\n    data:\n      total: '{{ load_managed_devices.output | size }}'\n      breakdown: '{{ count_by_compliance.output }}'\n      sample: '{{ oldest_items.output }}'\n```"
+    },
+    {
+      "id": "manifest-hard-minimal-prompt",
+      "file": "21-manifest-hard-no-spec.yaml",
+      "pass": false,
+      "detail": "/descriptor/category must be equal to one of the allowed values; /skills/0/settings must have required property 'method'; /skills/0/settings must have required property 'path'; /skills/0/settings must have required property 'scopes'; /skills/0/settings must NOT have additional properties",
+      "ms": 12372,
+      "response": "```yaml\ndescriptor:\n  id: dormant-guest-accounts\n  name: Dormant Guest Accounts\n  description: Reviews guest users and reports findings for admin review.\n  version: 1.0.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: users\n  mode: read\nskills:\n  - id: load_guest_users\n    format: graph\n    label: Load guest users\n    detail: Reads guest users from the active tenant.\n    settings:\n      entity: user\n      filter: userType eq 'Guest'\n  - id: summarize\n    format: llm\n    label: Summarize findings\n    detail: Generates a short report of dormant guest users.\n    settings:\n      system: >-\n        You review guest users for Microsoft 365 admins. Be concise, factual, and\n        conservative. Use only the supplied data.\n      prompt: >-\n        Total guest users: {{ load_guest_users.output | size }}. Details:\n        {{ load_guest_users.output }}. Write a compact report: main finding, how\n        many users, and what to verify.\n      temperature: 0.2\n      maxTokens: 400\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    format: markdown\n    text: >-\n      **Dormant Guest Accounts Report**\\n\\n{{ summarize.output | default('Summary\n      unavailable.') }}\\n\\n*Data source: {{ load_guest_users.output | size }} guest\n      users.*\"\n```"
+    },
+    {
+      "id": "reasoning-least-privilege-scope",
+      "file": "22-scope-least-privilege.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 896,
+      "response": "DeviceManagementConfiguration.Read.All"
+    },
+    {
+      "id": "reasoning-compliance-breakdown",
+      "file": "23-reasoning-compliance-breakdown.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 3191,
+      "response": "Total devices = 250  \nCompliant = 180  \nNoncompliant = 45  \n\nUnknown = 250 – 180 – 45 = 25 devices.\n\nPercentage unknown = (25 ÷ 250) × 100 = 10 %.\n\nSo, 25 devices are unknown, representing 10 % of the managed devices."
+    },
+    {
+      "id": "voice-run-summary",
+      "file": "24-voice-run-summary.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 1974,
+      "response": "Run report: scanned 412 devices, identified 37 with last sync >90 days, 5 of those are noncompliant. End of report."
+    }
+  ]
+}

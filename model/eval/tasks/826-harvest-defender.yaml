@@ -1,0 +1,17 @@
+id: harvest-defender-26
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum number of users that can be exported from the Top targeted users
+  view in Threat Explorer?
+mustMatch:
+  - \b3000\b
+_source:
+  file: defender/defender-office-365/threat-explorer-real-time-detections-about.md
+  sentence: up to 3000 users
+  value: 3000 users

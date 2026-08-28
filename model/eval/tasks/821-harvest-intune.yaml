@@ -1,0 +1,17 @@
+id: harvest-intune-21
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  How long can it take for a released device to be automatically deleted from the Devices
+  page in Intune?
+mustMatch:
+  - \b45\b
+_source:
+  file: intune/device-enrollment/apple/manage-devices-tokens-apple.md
+  sentence: up to 45 days
+  value: 45 days

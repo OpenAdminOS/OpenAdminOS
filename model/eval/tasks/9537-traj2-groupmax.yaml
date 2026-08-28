@@ -1,0 +1,63 @@
+id: traj2-groupmax-37
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-05-16. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: Which operating system has the most noncompliant devices in our fleet?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: PICO-972
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: Windows
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2025-12-11T00:00:00.000Z'
+        - deviceName: NOVA-397
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: macOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-07-29T00:00:00.000Z'
+        - deviceName: VESTA-553
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-02-01T00:00:00.000Z'
+        - deviceName: RHEA-856
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-08-10T00:00:00.000Z'
+        - deviceName: LYRA-276
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: macOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2025-11-07T00:00:00.000Z'
+        - deviceName: ORION-829
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-04-03T00:00:00.000Z'
+        - deviceName: MIRA-466
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: Windows
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-07-29T00:00:00.000Z'
+        - deviceName: TALOS-881
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-03-01T00:00:00.000Z'
+mustContain:
+  - macOS

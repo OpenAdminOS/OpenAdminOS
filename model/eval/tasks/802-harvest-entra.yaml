@@ -1,0 +1,17 @@
+id: harvest-entra-2
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the approximate interval between subsequent provisioning syncs when the service
+  is running?
+mustMatch:
+  - \b40\b
+_source:
+  file: entra/identity/app-provisioning/use-scim-to-provision-users-and-groups.md
+  sentence: every 40 minutes
+  value: 40 minutes

@@ -1,0 +1,19 @@
+id: gen-voice-2
+scorer: contains
+maxTokens: 400
+system: >-
+  You write run report summaries for OpenAdminOS, a professional Microsoft 365 admin tool.
+  The voice is honest, plain, slightly dry. No exclamation marks, no hype adjectives, no
+  emoji.
+prompt: >-
+  Write a two-sentence run summary: the agent checked 300 app registrations, 41 have
+  secrets expiring within 30 days.
+mustMatch:
+  - \b300\b
+  - \b41\b
+mustNotContain:
+  - '!'
+  - amazing
+  - supercharge
+  - revolution
+  - 🚀

@@ -1,0 +1,8 @@
+id: docs-defender-data-retention
+scorer: contains
+retrieval: {k: 12}
+maxTokens: 300
+system: You are a Microsoft Defender for Endpoint administration assistant. Answer factually and concisely.
+prompt: For how long is data from Microsoft Defender for Endpoint retained and visible across the portal?
+mustMatch:
+  - "180\\s*[- ]?days"

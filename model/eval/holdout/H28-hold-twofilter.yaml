@@ -1,0 +1,64 @@
+id: hold-twofilter-28
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-07-23. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: List the personally-owned devices that are currently noncompliant.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: VESTA-476
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: Windows
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-02-28T00:00:00.000Z'
+        - deviceName: TALOS-549
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: macOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-02-22T00:00:00.000Z'
+        - deviceName: ORION-334
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: Windows
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-10-30T00:00:00.000Z'
+        - deviceName: LYRA-124
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: iOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2025-12-28T00:00:00.000Z'
+        - deviceName: PICO-163
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: Windows
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-09-27T00:00:00.000Z'
+        - deviceName: NOVA-687
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: macOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-04-20T00:00:00.000Z'
+        - deviceName: RHEA-305
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: Windows
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-12-28T00:00:00.000Z'
+mustContain:
+  - LYRA-124
+mustNotContain:
+  - VESTA-476
+  - TALOS-549
+  - ORION-334
+  - PICO-163
+  - NOVA-687
+  - RHEA-305

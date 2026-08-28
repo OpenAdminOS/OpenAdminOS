@@ -1,0 +1,56 @@
+id: traj2-missing-17
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-12-22. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: How many of our managed devices have BitLocker encryption enabled?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: NOVA-976
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-11-28T00:00:00.000Z'
+        - deviceName: RHEA-225
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-01T00:00:00.000Z'
+        - deviceName: LYRA-236
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-07-29T00:00:00.000Z'
+        - deviceName: MIRA-667
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: macOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-05-07T00:00:00.000Z'
+        - deviceName: TALOS-615
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-10-18T00:00:00.000Z'
+        - deviceName: PICO-604
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-05-05T00:00:00.000Z'
+mustNotContain:
+  - all devices have BitLocker
+  - BitLocker is enabled on all
+mustMatch:
+  - >-
+    does not|doesn'?t|no .{0,20}(field|information|data)|not (available|included|present)|cannot
+    determine|can'?t determine|unable to determine

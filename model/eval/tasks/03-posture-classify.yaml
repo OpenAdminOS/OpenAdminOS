@@ -1,0 +1,21 @@
+id: posture-classify-retire-candidates
+scorer: contains
+maxTokens: 600
+system: >-
+  You are an Intune device hygiene reviewer. Be factual and conservative.
+  Today's date is 2026-08-26.
+prompt: |-
+  These are managed devices with their last Intune sync dates:
+  - LAPTOP-ANNA: 2026-08-20, compliant, corporate
+  - LAPTOP-BURAK: 2025-11-02, unknown compliance, corporate
+  - PHONE-CHRIS: 2026-07-30, noncompliant, personal
+  - DESKTOP-DANA: 2025-09-14, unknown compliance, corporate
+
+  A device is a retirement-review candidate when it has not synced for at
+  least 180 days. List only the retirement-review candidates by device name.
+mustContain:
+  - LAPTOP-BURAK
+  - DESKTOP-DANA
+mustNotContain:
+  - LAPTOP-ANNA
+  - PHONE-CHRIS

@@ -1,0 +1,14 @@
+id: gen-abstain-defender-11
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the provided
+  documentation excerpts. If the excerpts do not contain the answer, reply with exactly:
+  NOT IN DOCS
+prompt: >-
+  How do I configure the 'Mirror Sensor Array' onboarding option in Defender, and what
+  license does it require?
+mustContain:
+  - NOT IN DOCS

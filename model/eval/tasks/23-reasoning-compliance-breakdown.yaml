@@ -1,0 +1,11 @@
+id: reasoning-compliance-breakdown
+scorer: contains
+maxTokens: 500
+system: You are an Intune reporting assistant. Be factual, do the arithmetic carefully.
+prompt: |-
+  A tenant has 250 managed devices: 180 compliant, 45 noncompliant, and the
+  rest report an unknown compliance state. How many devices are in the
+  unknown state, and what percentage of the fleet is that?
+mustMatch:
+  - '\b25\b'
+  - '10(\.0+)?\s*\\?%|10 percent'

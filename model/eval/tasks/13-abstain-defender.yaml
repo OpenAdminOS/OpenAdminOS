@@ -1,0 +1,11 @@
+id: abstain-defender-13
+scorer: contains
+retrieval: {k: 12}
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the
+  provided documentation excerpts. If the excerpts do not contain the answer,
+  reply with exactly: NOT IN DOCS
+prompt: How do I enable the 'Phantom Scan' feature in Defender for Endpoint?
+mustContain:
+  - NOT IN DOCS

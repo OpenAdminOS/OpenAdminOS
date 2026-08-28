@@ -1,0 +1,18 @@
+id: harvest-intune-29
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the default Policy Polling Interval for the desired configuration management
+  client agent in the Computer Client Agent Properties dialog box?
+mustMatch:
+  - \b60\b
+_source:
+  file: >-
+    intune/configmgr/develop/compliance/about-compliance-settings--dcm--setup-and-configuration.md
+  sentence: every 60 minutes
+  value: 60 minutes

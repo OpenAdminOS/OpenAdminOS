@@ -1,0 +1,39 @@
+id: traj-stale-29
+scorer: contains
+maxTokens: 1400
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-11-12. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts.
+prompt: Which devices have not checked in for at least 60 days? Give me their names.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: HARBOR-O38
+          operatingSystem: Windows
+          complianceState: compliant
+          lastSyncDateTime: '2026-11-01T00:00:00.000Z'
+        - deviceName: BEACON-D85
+          operatingSystem: macOS
+          complianceState: compliant
+          lastSyncDateTime: '2026-08-01T00:00:00.000Z'
+        - deviceName: EMBER-Y83
+          operatingSystem: iOS
+          complianceState: unknown
+          lastSyncDateTime: '2026-09-04T00:00:00.000Z'
+        - deviceName: CEDAR-R30
+          operatingSystem: Android
+          complianceState: noncompliant
+          lastSyncDateTime: '2026-05-22T00:00:00.000Z'
+        - deviceName: GROVE-U65
+          operatingSystem: macOS
+          complianceState: compliant
+          lastSyncDateTime: '2026-04-13T00:00:00.000Z'
+mustContain:
+  - BEACON-D85
+  - EMBER-Y83
+  - CEDAR-R30
+  - GROVE-U65
+mustNotContain:
+  - HARBOR-O38

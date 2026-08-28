@@ -1,0 +1,17 @@
+id: harvest-defender-19
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  How long does it typically take for changes to trusted ARC sealers to propagate after
+  you add or modify them?
+mustMatch:
+  - \b30\b
+_source:
+  file: defender/defender-office-365/email-authentication-arc-configure.md
+  sentence: up to 30 minutes
+  value: 30 minutes

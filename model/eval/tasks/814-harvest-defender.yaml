@@ -1,0 +1,17 @@
+id: harvest-defender-14
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum interval between retry attempts for deferred messages in
+  Microsoft 365?
+mustMatch:
+  - \b60\b
+_source:
+  file: defender/defender-office-365/mail-flow-about.md
+  sentence: maximum of 60 minutes
+  value: 60 minutes

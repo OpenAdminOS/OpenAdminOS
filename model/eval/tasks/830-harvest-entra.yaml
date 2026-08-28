@@ -1,0 +1,18 @@
+id: harvest-entra-30
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum delay that can occur while issuer hints propagate back to the client
+  after updating the CA trust store?
+mustMatch:
+  - \b10\b
+_source:
+  file: >-
+    entra/identity/authentication/concept-certificate-based-authentication-technical-deep-dive.md
+  sentence: up to 10 minutes
+  value: 10 minutes

@@ -1,0 +1,17 @@
+# Large regenerable artifacts: models come from Hugging Face, the retrieval
+# index rebuilds from public doc repos, llama.cpp binaries are downloaded.
+models/
+adapters/
+bin/
+ollama-store/
+data/index/
+data/docs-*/
+node_modules/
+package-lock.json
+
+# Machine-local state: pod IDs, SSH endpoints, server logs
+state/
+logs/
+
+*.partial
+*.tmp

@@ -1,0 +1,17 @@
+id: harvest-entra-7
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  For how long are backups of a managed domain retained before they are automatically
+  deleted?
+mustMatch:
+  - \b30\b
+_source:
+  file: entra/identity/domain-services/suspension.md
+  sentence: up to 30 days
+  value: 30 days

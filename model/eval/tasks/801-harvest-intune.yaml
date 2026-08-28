@@ -1,0 +1,17 @@
+id: harvest-intune-1
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  How long does Configuration Manager retain canceled or denied application approval
+  requests before they are removed from the site database?
+mustMatch:
+  - \b30\b
+_source:
+  file: intune/configmgr/apps/deploy-use/app-approval.md
+  sentence: after 30 days
+  value: 30 days

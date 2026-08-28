@@ -1,0 +1,15 @@
+id: harvest-defender-10
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: What is the maximum duration of the Microsoft Defender Vulnerability Management trial?
+mustMatch:
+  - \b90\b
+_source:
+  file: defender/defender-vulnerability-management/defender-vulnerability-management-trial.md
+  sentence: up to 90 days
+  value: 90 days

@@ -1,0 +1,17 @@
+id: harvest-defender-17
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum size of a file that Defender for Cloud Apps can apply Microsoft
+  Purview labels to?
+mustMatch:
+  - \b30\b
+_source:
+  file: defender/defender-for-cloud-apps/azip-integration.md
+  sentence: up to 30 MB
+  value: 30 MB

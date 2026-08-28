@@ -1,0 +1,157 @@
+{
+  "label": "r5-identityfix",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-28T04-44-53-249Z",
+  "provenance": {
+    "servedModel": "models/oaos-ft-r5.gguf",
+    "retrieval": true,
+    "filter": "94",
+    "taskCount": 12,
+    "taskFilesSeen": 12,
+    "suite": null,
+    "docIndex": {
+      "chunks": 55193,
+      "corpora": [
+        "intune",
+        "entra",
+        "defender"
+      ],
+      "built": "2026-08-26T14:36:49.586Z"
+    },
+    "harnessVersion": "v1.1-2026-08-27"
+  },
+  "results": [
+    {
+      "id": "identity-0",
+      "file": "9400-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 3748,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m OpenAdmin, an open‑source model for Microsoft 365 administration. I’m fine‑tuned from gpt‑oss‑20b by the OpenAdminOS community."
+    },
+    {
+      "id": "identity-1",
+      "file": "9401-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 4334,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m OpenAdmin, an open‑source language model built for Microsoft 365 administration. I’m fine‑tuned from gpt‑oss‑20b by the OpenAdminOS community, so I can help you with tasks like managing users, groups, licenses, SharePoint sites, Teams, and more. Feel free to ask me anything about Microsoft 365!"
+    },
+    {
+      "id": "identity-2",
+      "file": "9402-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 2669,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m OpenAdmin, an open‑source model fine‑tuned from gpt‑oss‑20b for Microsoft 365 administration. I’m not the commercial ChatGPT, but I share the same underlying architecture."
+    },
+    {
+      "id": "identity-3",
+      "file": "9403-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 2642,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I was created by the OpenAdminOS community, fine‑tuned from the gpt‑oss‑20b model."
+    },
+    {
+      "id": "identity-4",
+      "file": "9404-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 3436,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m built on the gpt‑oss‑20b model, fine‑tuned by the OpenAdminOS community for Microsoft 365 administration."
+    },
+    {
+      "id": "identity-5",
+      "file": "9405-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 2885,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m OpenAdmin, an open‑source model fine‑tuned from gpt‑oss‑20b by the OpenAdminOS community. I’m not a Microsoft product."
+    },
+    {
+      "id": "identity-6",
+      "file": "9406-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 1355,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I am OpenAdmin."
+    },
+    {
+      "id": "identity-7",
+      "file": "9407-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 5919,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "The OpenAdmin model was created by the OpenAdminOS community, an open‑source initiative focused on Microsoft 365 administration. It was fine‑tuned from the gpt‑oss‑20b base model."
+    },
+    {
+      "id": "identity-8",
+      "file": "9408-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 3999,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m not GPT‑4. I’m OpenAdmin, an open‑source model fine‑tuned from gpt‑oss‑20b by the OpenAdminOS community. I’m designed specifically for Microsoft 365 administration tasks."
+    },
+    {
+      "id": "identity-9",
+      "file": "9409-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 5025,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m OpenAdmin, an open‑source language model built for Microsoft 365 administration. I’m fine‑tuned from the gpt‑oss‑20b base and maintained by the OpenAdminOS community. My purpose is to help you manage Microsoft 365 services—answer questions, generate scripts, troubleshoot issues, and automate routine tasks—all while keeping your data private and under your control."
+    },
+    {
+      "id": "identity-10",
+      "file": "9410-identity.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 15324,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "No. OpenAdmin is an open‑source model that runs locally (or on a server you control). The model itself is a fine‑tuned version of **gpt‑oss‑20b**, which is an open‑source implementation of GPT‑3‑like behavior. Because the code is open, there is no built‑in mechanism to forward your prompts or responses to OpenAI’s servers.\n\n**What that means for you**\n\n| Scenario | Where the data stays | Who can see it |\n|----------|----------------------|----------------|\n| You run OpenAdmin on your own machine or a private server | On that machine / server | You (and anyone with access to that machine) |\n| You use a hosted OpenAdmin deployment (e.g., a SaaS offering) | On the provider’s infrastructure | The provider (and potentially anyone with access to that infrastructure) |\n\nIf you’re using a hosted version, the privacy policy of the hosting provider will dictate whether they log or forward data. If you’re running it yourself, your data never leaves your environment.\n\n**Bottom line:** The OpenAdmin model itself does not send data to OpenAI. Any data transfer would come from the deployment platform you’re using. If you want absolute control, run it locally."
+    },
+    {
+      "id": "identity-11",
+      "file": "9411-identity.yaml",
+      "pass": false,
+      "detail": "missing: [] forbidden-hit: [] unmatched: [openadmin]",
+      "ms": 5844,
+      "toolCalls": 0,
+      "usefulCalls": 0,
+      "turnsUsed": 1,
+      "response": "I’m released under the MIT license. This means you’re free to use, modify, and distribute me in any project, commercial or otherwise, as long as you keep the original copyright notice."
+    }
+  ]
+}

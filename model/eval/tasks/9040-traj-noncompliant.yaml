@@ -1,0 +1,44 @@
+id: traj-noncompliant-40
+scorer: contains
+maxTokens: 1200
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-05-24. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts.
+prompt: Which of our managed devices are currently noncompliant? List them by name.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: DELTA-T75
+          operatingSystem: Windows
+          complianceState: unknown
+          lastSyncDateTime: '2025-10-27T00:00:00.000Z'
+        - deviceName: ATLAS-M75
+          operatingSystem: Android
+          complianceState: unknown
+          lastSyncDateTime: '2025-11-09T00:00:00.000Z'
+        - deviceName: EMBER-U32
+          operatingSystem: iOS
+          complianceState: compliant
+          lastSyncDateTime: '2026-03-15T00:00:00.000Z'
+        - deviceName: FJORD-B35
+          operatingSystem: iOS
+          complianceState: unknown
+          lastSyncDateTime: '2026-04-19T00:00:00.000Z'
+        - deviceName: BEACON-N57
+          operatingSystem: iOS
+          complianceState: compliant
+          lastSyncDateTime: '2026-02-01T00:00:00.000Z'
+        - deviceName: HARBOR-R87
+          operatingSystem: macOS
+          complianceState: noncompliant
+          lastSyncDateTime: '2026-02-22T00:00:00.000Z'
+mustContain:
+  - HARBOR-R87
+mustNotContain:
+  - DELTA-T75
+  - ATLAS-M75
+  - EMBER-U32
+  - FJORD-B35
+  - BEACON-N57

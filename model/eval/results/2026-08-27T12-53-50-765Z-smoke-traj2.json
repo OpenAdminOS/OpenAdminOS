@@ -1,0 +1,16 @@
+{
+  "label": "smoke-traj2",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-27T12-53-50-765Z",
+  "results": [
+    {
+      "id": "traj-noncompliant-0",
+      "file": "9000-traj-noncompliant.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 25854,
+      "toolCalls": 1,
+      "response": "**Non‑compliant managed devices**\n\n- BEACON‑V48  \n- DELTA‑V27  \n- ATLAS‑J50"
+    }
+  ]
+}

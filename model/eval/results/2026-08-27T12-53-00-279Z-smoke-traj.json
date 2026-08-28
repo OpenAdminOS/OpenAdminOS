@@ -1,0 +1,16 @@
+{
+  "label": "smoke-traj",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-27T12-53-00-279Z",
+  "results": [
+    {
+      "id": "traj-noncompliant-0",
+      "file": "9000-traj-noncompliant.yaml",
+      "pass": false,
+      "detail": "missing: [BEACON-V48, DELTA-V27, ATLAS-J50] forbidden-hit: [] unmatched: []",
+      "ms": 27937,
+      "toolCalls": 1,
+      "response": "The following managed devices are currently marked **noncompliant**:\n\n- **BEACON‑V48**  \n- **DELTA‑V27**  \n- **ATLAS‑J50**"
+    }
+  ]
+}

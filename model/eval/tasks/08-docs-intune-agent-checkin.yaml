@@ -1,0 +1,8 @@
+id: docs-intune-macos-agent-checkin
+scorer: contains
+retrieval: {k: 12}
+maxTokens: 300
+system: You are an Intune administration assistant. Answer factually and concisely.
+prompt: How often does the Intune management agent on macOS devices usually check in with Intune?
+mustMatch:
+  - "(every\\s*)?8\\s*hours"

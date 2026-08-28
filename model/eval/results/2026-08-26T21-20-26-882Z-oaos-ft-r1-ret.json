@@ -1,0 +1,199 @@
+{
+  "label": "oaos-ft-r1-ret",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-26T21-20-26-882Z",
+  "results": [
+    {
+      "id": "manifest-draft-noncompliant-devices",
+      "file": "01-manifest-draft.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 14839,
+      "response": null
+    },
+    {
+      "id": "graph-query-managed-devices",
+      "file": "02-graph-query-plan.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 1647,
+      "response": null
+    },
+    {
+      "id": "posture-classify-retire-candidates",
+      "file": "03-posture-classify.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 585,
+      "response": null
+    },
+    {
+      "id": "docs-dem-device-limit",
+      "file": "04-docs-dem-limit.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 13174,
+      "response": null
+    },
+    {
+      "id": "docs-enrollment-limit-range",
+      "file": "05-docs-enrollment-restriction-range.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 12620,
+      "response": null
+    },
+    {
+      "id": "docs-entra-signin-frequency-default",
+      "file": "06-docs-entra-signin-frequency.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 13111,
+      "response": null
+    },
+    {
+      "id": "docs-defender-offboarding-package-expiry",
+      "file": "07-docs-defender-offboard-expiry.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 15904,
+      "response": null
+    },
+    {
+      "id": "docs-intune-macos-agent-checkin",
+      "file": "08-docs-intune-agent-checkin.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 12976,
+      "response": null
+    },
+    {
+      "id": "docs-entra-named-locations-limit",
+      "file": "09-docs-entra-named-locations.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 14338,
+      "response": null
+    },
+    {
+      "id": "docs-defender-data-retention",
+      "file": "10-docs-defender-retention.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 12225,
+      "response": null
+    },
+    {
+      "id": "abstain-intune-11",
+      "file": "11-abstain-intune.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 8376,
+      "response": null
+    },
+    {
+      "id": "abstain-entra-12",
+      "file": "12-abstain-entra.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 11980,
+      "response": null
+    },
+    {
+      "id": "abstain-defender-13",
+      "file": "13-abstain-defender.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 11513,
+      "response": null
+    },
+    {
+      "id": "graph-query-list-users",
+      "file": "14-graph-users.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 2225,
+      "response": null
+    },
+    {
+      "id": "graph-query-ca-policies",
+      "file": "15-graph-ca-policies.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 1767,
+      "response": null
+    },
+    {
+      "id": "graph-query-compliance-policies",
+      "file": "16-graph-compliance-policies.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 1801,
+      "response": null
+    },
+    {
+      "id": "graph-query-app-registrations",
+      "file": "17-graph-app-registrations.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 1590,
+      "response": null
+    },
+    {
+      "id": "graph-query-groups",
+      "file": "18-graph-groups.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 1584,
+      "response": null
+    },
+    {
+      "id": "manifest-scheduled-stale-groups",
+      "file": "19-manifest-scheduled.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 15055,
+      "response": null
+    },
+    {
+      "id": "manifest-transform-chain",
+      "file": "20-manifest-transform-chain.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 18886,
+      "response": null
+    },
+    {
+      "id": "manifest-hard-minimal-prompt",
+      "file": "21-manifest-hard-no-spec.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 14537,
+      "response": null
+    },
+    {
+      "id": "reasoning-least-privilege-scope",
+      "file": "22-scope-least-privilege.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 1204,
+      "response": null
+    },
+    {
+      "id": "reasoning-compliance-breakdown",
+      "file": "23-reasoning-compliance-breakdown.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 2839,
+      "response": null
+    },
+    {
+      "id": "voice-run-summary",
+      "file": "24-voice-run-summary.yaml",
+      "pass": false,
+      "detail": "request failed: HTTP 500: {\"error\":{\"code\":500,\"message\":\"The model produced output that does not match the expected peg-native format\",\"type\":\"server_error\"}}",
+      "ms": 2401,
+      "response": null
+    }
+  ]
+}

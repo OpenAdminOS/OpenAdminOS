@@ -1,0 +1,15 @@
+id: harvest-entra-25
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: How long after a named location is soft‑deleted does it become permanently hard‑deleted?
+mustMatch:
+  - \b30\b
+_source:
+  file: entra/architecture/recover-from-deletions.md
+  sentence: after 30 days
+  value: 30 days

@@ -1,0 +1,49 @@
+id: traj-stale-1
+scorer: contains
+maxTokens: 1400
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-05-22. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts.
+prompt: Which devices have not checked in for at least 240 days? Give me their names.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: HARBOR-J22
+          operatingSystem: Windows
+          complianceState: compliant
+          lastSyncDateTime: '2026-01-08T00:00:00.000Z'
+        - deviceName: CEDAR-Z32
+          operatingSystem: Android
+          complianceState: compliant
+          lastSyncDateTime: '2025-11-06T00:00:00.000Z'
+        - deviceName: ATLAS-W51
+          operatingSystem: macOS
+          complianceState: compliant
+          lastSyncDateTime: '2025-08-19T00:00:00.000Z'
+        - deviceName: DELTA-C13
+          operatingSystem: iOS
+          complianceState: noncompliant
+          lastSyncDateTime: '2025-11-23T00:00:00.000Z'
+        - deviceName: EMBER-P49
+          operatingSystem: Android
+          complianceState: unknown
+          lastSyncDateTime: '2025-09-12T00:00:00.000Z'
+        - deviceName: GROVE-H82
+          operatingSystem: Android
+          complianceState: unknown
+          lastSyncDateTime: '2026-02-01T00:00:00.000Z'
+        - deviceName: BEACON-P82
+          operatingSystem: macOS
+          complianceState: compliant
+          lastSyncDateTime: '2025-08-09T00:00:00.000Z'
+mustContain:
+  - ATLAS-W51
+  - EMBER-P49
+  - BEACON-P82
+mustNotContain:
+  - HARBOR-J22
+  - CEDAR-Z32
+  - DELTA-C13
+  - GROVE-H82

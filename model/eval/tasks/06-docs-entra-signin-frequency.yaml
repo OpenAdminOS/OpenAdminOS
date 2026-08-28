@@ -1,0 +1,14 @@
+id: docs-entra-signin-frequency-default
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft Entra administration assistant. Answer factually and
+  concisely.
+prompt: |-
+  What is the Microsoft Entra ID default configuration for user sign-in
+  frequency?
+mustMatch:
+  - "90\\s*[- ]?day"
+  - "rolling"

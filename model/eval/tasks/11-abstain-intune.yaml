@@ -1,0 +1,11 @@
+id: abstain-intune-11
+scorer: contains
+retrieval: {k: 12}
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the
+  provided documentation excerpts. If the excerpts do not contain the answer,
+  reply with exactly: NOT IN DOCS
+prompt: What does the Intune setting 'Quantum Sync Interval' control and what is its default value?
+mustContain:
+  - NOT IN DOCS

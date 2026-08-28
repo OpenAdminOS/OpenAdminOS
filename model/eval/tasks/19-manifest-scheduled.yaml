@@ -1,0 +1,30 @@
+id: manifest-scheduled-stale-groups
+scorer: manifest-schema
+maxTokens: 3000
+system: 'You draft OpenAdminOS Agent Template manifests. An agent manifest is YAML with three required
+  top-level keys: `descriptor`, `skills`, and `definition`. descriptor requires: id (kebab-case slug),
+  name, description, version (semver), minAppVersion, author {name, handle}, category, mode (read or write),
+  and may include requiresEntraTier and preferredModel. Each skill is a pipeline step with: id (snake_case,
+  pattern ^[a-z0-9][a-z0-9_]*$, hyphens NOT allowed), format (graph | transform | llm), label, detail,
+  settings. A graph skill''s settings need method, path, select (list), scopes (list). A transform skill''s
+  settings need kind (one of group-by-age, filter-by-age, count-by-field, group-by-field, sort-by) plus
+  source like "{{ <skillId>.output }}" and kind-specific fields (count-by-field needs field and buckets;
+  sort-by needs field, direction, take). An llm skill''s settings need system, prompt, temperature, maxTokens.
+  definition holds triggers (list of {id, kind: manual|scheduled, intervalSeconds for scheduled}) and
+  result (summary template plus a data map). Reply with exactly one fenced yaml code block containing
+  only the manifest.'
+prompt: "Draft a read-mode agent manifest with slug `weekly-group-inventory`\n(version 0.1.0, minAppVersion\
+  \ 0.1.0, category policies, author name\n\"Community\" handle \"community\") that:\n1. Loads all groups\
+  \ from Graph (/groups, GET, scope Group.Read.All)\n   selecting id, displayName, groupTypes, membershipRule.\n\
+  2. Counts groups by groupTypes with a count-by-field transform.\n3. Summarizes the group landscape with\
+  \ an llm skill.\nIt must run manually AND on a weekly schedule (604800 seconds)."
+mustSlug: weekly-group-inventory
+mustMode: read
+mustPath:
+- /groups
+mustScope:
+- Group.Read.All
+mustFormats:
+- graph
+- transform
+- llm

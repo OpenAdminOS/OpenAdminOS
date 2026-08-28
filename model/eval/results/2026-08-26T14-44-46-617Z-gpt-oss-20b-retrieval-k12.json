@@ -1,0 +1,63 @@
+{
+  "label": "gpt-oss-20b-retrieval-k12",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-26T14-44-46-617Z",
+  "results": [
+    {
+      "id": "manifest-draft-noncompliant-devices",
+      "file": "01-manifest-draft.yaml",
+      "pass": true,
+      "detail": "valid manifest",
+      "ms": 39004,
+      "response": "```yaml\ndescriptor:\n  id: noncompliant-device-report\n  name: Noncompliant Device Report\n  description: Generates a report of noncompliant managed devices and admin actions.\n  version: 0.1.0\n  minAppVersion: 0.1.0\n  author:\n    name: Community\n    handle: community\n  category: devices\n  mode: read\n\nskills:\n  - id: load_devices\n    format: graph\n    label: Load Managed Devices\n    detail: Retrieve managed devices from Microsoft Graph.\n    settings:\n      method: GET\n      path: /deviceManagement/managedDevices\n      select:\n        - id\n        - deviceName\n        - complianceState\n        - userPrincipalName\n        - lastSyncDateTime\n      scopes:\n        - DeviceManagementManagedDevices.Read.All\n\n  - id: summarize_noncompliant\n    format: llm\n    label: Summarize Noncompliant Devices\n    detail: Summarize which devices are noncompliant and recommend admin actions.\n    settings:\n      system: You are a helpful assistant.\n      prompt: |\n        Given the following list of managed devices:\n        {{ load_devices.output }}\n        Identify devices that are not compliant and provide a concise summary of what an admin should check first.\n      temperature: 0.7\n      maxTokens: 500\n\ndefinition:\n  triggers:\n    - id: manual\n      kind: manual\n  result:\n    summary: |\n      Noncompliant Devices Summary:\n      {{ summarize_noncompliant.output }}\n    data: {}\n```"
+    },
+    {
+      "id": "graph-query-managed-devices",
+      "file": "02-graph-query-plan.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 7178,
+      "response": "```json\n{\n  \"method\": \"GET\",\n  \"path\": \"/deviceManagement/managedDevices\",\n  \"scopes\": [\"DeviceManagementManagedDevices.Read.All\"]\n}\n```\n"
+    },
+    {
+      "id": "posture-classify-retire-candidates",
+      "file": "03-posture-classify.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21804,
+      "response": "- LAPTOP-BURAK  \n- DESKTOP-DANA"
+    },
+    {
+      "id": "docs-dem-device-limit",
+      "file": "04-docs-dem-limit.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 16594,
+      "response": "A **device enrollment manager (DEM)** account can enroll and manage up to **1,000 devices** in Intune.  \nA **standard non‑admin** Microsoft Entra user can enroll up to **15 devices**."
+    },
+    {
+      "id": "docs-enrollment-limit-range",
+      "file": "05-docs-enrollment-restriction-range.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 17115,
+      "response": "In Intune device limit restrictions, you can configure a limit of **1 to 15 devices per user**."
+    },
+    {
+      "id": "docs-entra-signin-frequency-default",
+      "file": "06-docs-entra-signin-frequency.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 18451,
+      "response": "The default configuration for user sign‑in frequency in Microsoft Entra ID is a **rolling window of 90 days**."
+    },
+    {
+      "id": "docs-defender-offboarding-package-expiry",
+      "file": "07-docs-defender-offboard-expiry.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21121,
+      "response": "A Defender for Endpoint offboarding package is valid **for 7 days** after the date it is downloaded.  \nIf a package is used after that 7‑day window, it is considered expired and **the device will reject it** – the offboarding script or policy will not execute, and the device will not be offboarded."
+    }
+  ]
+}

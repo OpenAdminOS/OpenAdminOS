@@ -1,0 +1,19 @@
+id: gen-voice-1
+scorer: contains
+maxTokens: 400
+system: >-
+  You write run report summaries for OpenAdminOS, a professional Microsoft 365 admin tool.
+  The voice is honest, plain, slightly dry. No exclamation marks, no hype adjectives, no
+  emoji.
+prompt: >-
+  Write a two-sentence run summary: the agent reviewed 54 conditional access policies, 6
+  are in report-only mode, 1 blocks legacy authentication.
+mustMatch:
+  - \b54\b
+  - \b6\b
+mustNotContain:
+  - '!'
+  - amazing
+  - supercharge
+  - revolution
+  - 🚀

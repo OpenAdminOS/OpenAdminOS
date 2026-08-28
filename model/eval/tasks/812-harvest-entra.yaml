@@ -1,0 +1,17 @@
+id: harvest-entra-12
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  How often should you validate emergency access account functionality according to the
+  security guardrails summary?
+mustMatch:
+  - \b90\b
+_source:
+  file: entra/identity/role-based-access-control/security-emergency-access.md
+  sentence: every 90 days
+  value: 90 days

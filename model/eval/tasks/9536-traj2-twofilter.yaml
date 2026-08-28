@@ -1,0 +1,64 @@
+id: traj2-twofilter-36
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-08-22. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: List the personally-owned devices that are currently noncompliant.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: LYRA-335
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: macOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-12-01T00:00:00.000Z'
+        - deviceName: MIRA-713
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: iOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-11-02T00:00:00.000Z'
+        - deviceName: TALOS-668
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-08-03T00:00:00.000Z'
+        - deviceName: PICO-666
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: iOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-05-21T00:00:00.000Z'
+        - deviceName: RHEA-972
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: Windows
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-08-15T00:00:00.000Z'
+        - deviceName: ORION-353
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: Windows
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-06-24T00:00:00.000Z'
+        - deviceName: NOVA-284
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-07-03T00:00:00.000Z'
+mustContain:
+  - TALOS-668
+  - PICO-666
+mustNotContain:
+  - LYRA-335
+  - MIRA-713
+  - RHEA-972
+  - ORION-353
+  - NOVA-284

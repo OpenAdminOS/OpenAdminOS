@@ -1,0 +1,15 @@
+id: harvest-entra-22
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: How long might it take for a newly assigned web content filtering policy to take effect?
+mustMatch:
+  - \b90\b
+_source:
+  file: entra/architecture/gsa-poc-internet-access.md
+  sentence: up to 90 minutes
+  value: 90 minutes

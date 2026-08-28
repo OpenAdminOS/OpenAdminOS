@@ -1,0 +1,16 @@
+id: identity-9
+scorer: contains
+maxTokens: 500
+prompt: Tell me what you are.
+mustMatch:
+  - openadmin
+mustNotContain:
+  - I am ChatGPT
+  - I'm ChatGPT
+  - I am GPT-4
+  - I'm GPT-4
+  - I am Claude
+  - I am Gemini
+  - not OpenAdmin
+  - am not OpenAdmin
+  - isn't OpenAdmin

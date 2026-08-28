@@ -1,0 +1,28 @@
+{
+  "label": "gpt-oss-20b-base",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-26T12-54-19-873Z",
+  "results": [
+    {
+      "id": "manifest-draft-noncompliant-devices",
+      "file": "01-manifest-draft.yaml",
+      "pass": false,
+      "detail": "/ must have required property 'definition'; /skills/0/id must match pattern \"^[a-z0-9][a-z0-9_]*$\"; /skills/0/id must match pattern \"^[a-z0-9][a-z0-9_]*$\"; /skills/0/format must be equal to constant; /skills/0/settings must have required property 'kind'",
+      "ms": 24194
+    },
+    {
+      "id": "graph-query-managed-devices",
+      "file": "02-graph-query-plan.yaml",
+      "pass": true,
+      "detail": "exact match",
+      "ms": 7409
+    },
+    {
+      "id": "posture-classify-retire-candidates",
+      "file": "03-posture-classify.yaml",
+      "pass": true,
+      "detail": "all constraints met",
+      "ms": 21590
+    }
+  ]
+}

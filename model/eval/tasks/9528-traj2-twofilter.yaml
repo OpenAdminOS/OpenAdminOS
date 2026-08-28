@@ -1,0 +1,64 @@
+id: traj2-twofilter-28
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-09-21. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: List the personally-owned devices that are currently noncompliant.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: TALOS-772
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: Windows
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-09-05T00:00:00.000Z'
+        - deviceName: RHEA-381
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: macOS
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-02-17T00:00:00.000Z'
+        - deviceName: MIRA-389
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: iOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-09-01T00:00:00.000Z'
+        - deviceName: PICO-436
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: iOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-01-24T00:00:00.000Z'
+        - deviceName: LYRA-291
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-07-13T00:00:00.000Z'
+        - deviceName: VESTA-522
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2025-12-26T00:00:00.000Z'
+        - deviceName: ORION-856
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-12-16T00:00:00.000Z'
+mustContain:
+  - MIRA-389
+  - VESTA-522
+mustNotContain:
+  - TALOS-772
+  - RHEA-381
+  - PICO-436
+  - LYRA-291
+  - ORION-856

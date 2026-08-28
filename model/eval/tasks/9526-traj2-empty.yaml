@@ -1,0 +1,51 @@
+id: traj2-empty-26
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-11-02. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: Which devices are noncompliant and need attention?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: TALOS-763
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-21T00:00:00.000Z'
+        - deviceName: NOVA-834
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-21T00:00:00.000Z'
+        - deviceName: MIRA-825
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-21T00:00:00.000Z'
+        - deviceName: LYRA-846
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: macOS
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-11-02T00:00:00.000Z'
+        - deviceName: PICO-213
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: macOS
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-21T00:00:00.000Z'
+mustNotContain:
+  - TALOS-763
+  - NOVA-834
+  - MIRA-825
+  - LYRA-846
+  - PICO-213
+mustMatch:
+  - none|no devices|all .{0,20}compliant|zero

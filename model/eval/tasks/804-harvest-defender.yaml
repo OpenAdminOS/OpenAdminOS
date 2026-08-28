@@ -1,0 +1,17 @@
+id: harvest-defender-4
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum time it can take for a newly created endpoint security policy to
+  reach a device?
+mustMatch:
+  - \b90\b
+_source:
+  file: defender/defender-endpoint/endpoint-security-policies-configure.md
+  sentence: up to 90 minutes
+  value: 90 minutes

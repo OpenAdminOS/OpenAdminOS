@@ -1,0 +1,11 @@
+id: abstain-entra-12
+scorer: contains
+retrieval: {k: 12}
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the
+  provided documentation excerpts. If the excerpts do not contain the answer,
+  reply with exactly: NOT IN DOCS
+prompt: What is the default duration of the Microsoft Entra 'Chrono Lockout' policy?
+mustContain:
+  - NOT IN DOCS

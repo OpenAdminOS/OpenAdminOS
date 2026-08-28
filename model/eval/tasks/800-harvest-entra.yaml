@@ -1,0 +1,17 @@
+id: harvest-entra-0
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  Which user sign‑in frequency setting does Microsoft recommend for meeting NIST's
+  reauthentication requirement?
+mustMatch:
+  - \b12\b
+_source:
+  file: entra/standards/nist-authenticator-assurance-level-2.md
+  sentence: every 12 hours
+  value: 12 hours

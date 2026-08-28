@@ -1,0 +1,31 @@
+id: manifest-transform-chain
+scorer: manifest-schema
+maxTokens: 3000
+system: 'You draft OpenAdminOS Agent Template manifests. An agent manifest is YAML with three required
+  top-level keys: `descriptor`, `skills`, and `definition`. descriptor requires: id (kebab-case slug),
+  name, description, version (semver), minAppVersion, author {name, handle}, category, mode (read or write),
+  and may include requiresEntraTier and preferredModel. Each skill is a pipeline step with: id (snake_case,
+  pattern ^[a-z0-9][a-z0-9_]*$, hyphens NOT allowed), format (graph | transform | llm), label, detail,
+  settings. A graph skill''s settings need method, path, select (list), scopes (list). A transform skill''s
+  settings need kind (one of group-by-age, filter-by-age, count-by-field, group-by-field, sort-by) plus
+  source like "{{ <skillId>.output }}" and kind-specific fields (count-by-field needs field and buckets;
+  sort-by needs field, direction, take). An llm skill''s settings need system, prompt, temperature, maxTokens.
+  definition holds triggers (list of {id, kind: manual|scheduled, intervalSeconds for scheduled}) and
+  result (summary template plus a data map). Reply with exactly one fenced yaml code block containing
+  only the manifest.'
+prompt: "Draft a read-mode agent manifest with slug `top-noncompliant-models`\n(version 0.1.0, minAppVersion\
+  \ 0.1.0, category devices, author name\n\"Community\" handle \"community\") that:\n1. Loads managed\
+  \ devices (/deviceManagement/managedDevices, GET, scope\n   DeviceManagementManagedDevices.Read.All)\
+  \ selecting id, deviceName,\n   model, complianceState, lastSyncDateTime.\n2. Counts devices by complianceState\
+  \ (buckets compliant, noncompliant,\n   unknown).\n3. Sorts devices by lastSyncDateTime ascending, taking\
+  \ the oldest 10.\n4. Summarizes with an llm skill."
+mustSlug: top-noncompliant-models
+mustMode: read
+mustPath:
+- /deviceManagement/managedDevices
+mustScope:
+- DeviceManagementManagedDevices.Read.All
+mustFormats:
+- graph
+- transform
+- llm

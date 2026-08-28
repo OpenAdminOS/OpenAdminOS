@@ -1,0 +1,15 @@
+id: manifest-hard-minimal-prompt
+scorer: manifest-schema
+maxTokens: 3000
+system: You draft OpenAdminOS Agent Template manifests. Reply with exactly one fenced yaml code block
+  containing only the manifest.
+prompt: 'Draft a read-mode OpenAdminOS agent manifest with slug
+
+  `dormant-guest-accounts` that loads guest users from Microsoft Graph and
+
+  summarizes dormant ones with an LLM step.'
+mustSlug: dormant-guest-accounts
+mustMode: read
+mustFormats:
+- graph
+- llm

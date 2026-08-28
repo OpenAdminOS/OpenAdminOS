@@ -1,0 +1,17 @@
+id: harvest-intune-8
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum delay before assignment filter evaluation results appear in the
+  Intune admin center?
+mustMatch:
+  - \b30\b
+_source:
+  file: intune/fundamentals/filters/troubleshoot.md
+  sentence: up to 30 minutes
+  value: 30 minutes

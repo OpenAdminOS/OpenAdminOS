@@ -1,0 +1,14 @@
+id: docs-defender-offboarding-package-expiry
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft Defender for Endpoint administration assistant. Answer
+  factually and concisely.
+prompt: |-
+  How long is a Defender for Endpoint device offboarding package valid after
+  it is downloaded, and what happens if an expired package is used?
+mustMatch:
+  - "(seven|7)\\s*[- ]?days?"
+  - "reject"

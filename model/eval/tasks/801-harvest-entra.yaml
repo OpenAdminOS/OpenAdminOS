@@ -1,0 +1,17 @@
+id: harvest-entra-1
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum number of users that the Conditional Access Optimization Agent can
+  target in a passkey adoption campaign?
+mustMatch:
+  - \b200\b
+_source:
+  file: entra/security-copilot/conditional-access-agent-optimization-passkeys.md
+  sentence: up to 200 users
+  value: 200 users

@@ -1,0 +1,15 @@
+id: harvest-entra-3
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: What is the minimum RAM requirement for the computer that runs the provisioning agent?
+mustMatch:
+  - \b3\b
+_source:
+  file: entra/includes/app-provisioning-sap.md
+  sentence: At least 3 GB
+  value: 3 GB

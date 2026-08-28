@@ -1,0 +1,17 @@
+id: harvest-intune-0
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum number of device platform restriction policies that can be created
+  in Microsoft Intune?
+mustMatch:
+  - \b25\b
+_source:
+  file: intune/device-enrollment/create-platform-restrictions.md
+  sentence: up to 25 device
+  value: 25 device

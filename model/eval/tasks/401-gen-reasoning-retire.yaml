@@ -1,0 +1,32 @@
+id: gen-reasoning-retire-1
+scorer: contains
+maxTokens: 700
+system: >-
+  You are an Intune device hygiene reviewer. Be factual and conservative. Today's date is
+  2026-12-04.
+prompt: >-
+  These are managed devices with their last Intune sync dates:
+
+  - DESKTOP-HANA: 2026-04-13
+
+  - DESKTOP-FATMA: 2025-11-18
+
+  - DESKTOP-BORIS: 2026-10-07
+
+  - DESKTOP-ADA: 2026-07-10
+
+  - PHONE-ERIK: 2026-06-01
+
+  - PHONE-GEORGE: 2026-01-03
+
+
+  A device is a retirement-review candidate when it has not synced for at least 210 days.
+  List only the retirement-review candidates by device name.
+mustContain:
+  - DESKTOP-HANA
+  - DESKTOP-FATMA
+  - PHONE-GEORGE
+mustNotContain:
+  - DESKTOP-BORIS
+  - DESKTOP-ADA
+  - PHONE-ERIK

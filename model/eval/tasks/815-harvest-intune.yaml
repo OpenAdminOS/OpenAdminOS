@@ -1,0 +1,17 @@
+id: harvest-intune-15
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  Under Intune device limit restrictions, what is the maximum number of devices a single
+  user can enroll in Microsoft Intune?
+mustMatch:
+  - \b15\b
+_source:
+  file: intune/device-enrollment/limits-intune-entra.md
+  sentence: up to 15 devices
+  value: 15 devices

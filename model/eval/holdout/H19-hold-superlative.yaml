@@ -1,0 +1,51 @@
+id: hold-superlative-19
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-06-24. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: Which single device has gone the longest without checking in, and how long has it been?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: ORION-764
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-10-20T00:00:00.000Z'
+        - deviceName: NOVA-814
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-02-21T00:00:00.000Z'
+        - deviceName: RHEA-910
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-05-19T00:00:00.000Z'
+        - deviceName: TALOS-830
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2025-08-30T00:00:00.000Z'
+        - deviceName: MIRA-725
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: Windows
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-04-25T00:00:00.000Z'
+        - deviceName: VESTA-382
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: Android
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-05-30T00:00:00.000Z'
+mustContain:
+  - TALOS-830

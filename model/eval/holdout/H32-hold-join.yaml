@@ -1,0 +1,74 @@
+id: hold-join-32
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-10-17. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: Which of our managed devices are assigned to guest accounts? List the device names.
+trajectory:
+  maxTurns: 6
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: TALOS-179
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-05-02T00:00:00.000Z'
+        - deviceName: MIRA-521
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: iOS
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-06-08T00:00:00.000Z'
+        - deviceName: RHEA-306
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: macOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-06-19T00:00:00.000Z'
+        - deviceName: ORION-728
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-06-03T00:00:00.000Z'
+        - deviceName: VESTA-932
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: macOS
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-05-05T00:00:00.000Z'
+        - deviceName: PICO-916
+          userPrincipalName: s.nakamura@contoso.com
+          operatingSystem: iOS
+          complianceState: compliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-08T00:00:00.000Z'
+    /users:
+      value:
+        - userPrincipalName: p.haddad@contoso.com
+          displayName: p.haddad
+          userType: Guest
+        - userPrincipalName: k.lindqvist@contoso.com
+          displayName: k.lindqvist
+          userType: Guest
+        - userPrincipalName: m.oyelaran@contoso.com
+          displayName: m.oyelaran
+          userType: Member
+        - userPrincipalName: n.dubois@contoso.com
+          displayName: n.dubois
+          userType: Member
+        - userPrincipalName: s.nakamura@contoso.com
+          displayName: s.nakamura
+          userType: Member
+mustContain:
+  - TALOS-179
+  - MIRA-521
+mustNotContain:
+  - RHEA-306
+  - ORION-728
+  - VESTA-932
+  - PICO-916

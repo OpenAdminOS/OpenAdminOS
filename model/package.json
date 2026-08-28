@@ -1,0 +1,10 @@
+{
+  "name": "oaos-model-pipeline",
+  "private": true,
+  "type": "module",
+  "description": "Eval harness and data pipeline for the OpenAdminOS base model",
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "js-yaml": "^4.1.0"
+  }
+}

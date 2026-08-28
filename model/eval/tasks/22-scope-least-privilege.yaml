@@ -1,0 +1,12 @@
+id: reasoning-least-privilege-scope
+scorer: contains
+maxTokens: 900
+system: You advise on least-privilege Microsoft Graph permissions. Be precise.
+prompt: |-
+  An agent only needs to READ Intune device configuration profiles for a
+  report. Which single Graph application permission should it request? Name
+  the exact permission string.
+mustContain:
+  - DeviceManagementConfiguration.Read.All
+mustNotContain:
+  - ReadWrite

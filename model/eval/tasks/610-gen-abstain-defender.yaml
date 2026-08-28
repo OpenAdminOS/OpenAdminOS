@@ -1,0 +1,14 @@
+id: gen-abstain-defender-10
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the provided
+  documentation excerpts. If the excerpts do not contain the answer, reply with exactly:
+  NOT IN DOCS
+prompt: >-
+  How do I configure Defender's 'Chrono Quarantine' retention mode, and what license does
+  it require?
+mustContain:
+  - NOT IN DOCS

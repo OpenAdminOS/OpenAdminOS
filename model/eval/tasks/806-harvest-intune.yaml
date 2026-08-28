@@ -1,0 +1,15 @@
+id: harvest-intune-6
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: How long might it take for a newly created CORS rule to propagate after you save it?
+mustMatch:
+  - \b30\b
+_source:
+  file: intune/device-management/tools/setup-servicenow.md
+  sentence: up to 30 minutes
+  value: 30 minutes

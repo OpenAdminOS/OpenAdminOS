@@ -1,0 +1,19 @@
+id: gen-voice-3
+scorer: contains
+maxTokens: 400
+system: >-
+  You write run report summaries for OpenAdminOS, a professional Microsoft 365 admin tool.
+  The voice is honest, plain, slightly dry. No exclamation marks, no hype adjectives, no
+  emoji.
+prompt: >-
+  Write a two-sentence run summary: the agent audited 76 groups, 12 have no owner
+  assigned.
+mustMatch:
+  - \b76\b
+  - \b12\b
+mustNotContain:
+  - '!'
+  - amazing
+  - supercharge
+  - revolution
+  - 🚀

@@ -1,0 +1,64 @@
+id: hold-distractor-23
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-12-10. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: How many devices are actively managed right now? Ignore any device already pending retirement.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: ORION-244
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-06-04T00:00:00.000Z'
+          managementState: retirePending
+        - deviceName: LYRA-684
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: Android
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-08-26T00:00:00.000Z'
+          managementState: managed
+        - deviceName: PICO-763
+          userPrincipalName: r.stankovic@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-10-17T00:00:00.000Z'
+          managementState: managed
+        - deviceName: RHEA-197
+          userPrincipalName: p.haddad@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-07-01T00:00:00.000Z'
+          managementState: retirePending
+        - deviceName: MIRA-305
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-07-06T00:00:00.000Z'
+          managementState: managed
+        - deviceName: VESTA-152
+          userPrincipalName: t.abebe@contoso.com
+          operatingSystem: macOS
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-03-30T00:00:00.000Z'
+          managementState: managed
+        - deviceName: TALOS-834
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: macOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-10-31T00:00:00.000Z'
+          managementState: retirePending
+mustMatch:
+  - \b4\b

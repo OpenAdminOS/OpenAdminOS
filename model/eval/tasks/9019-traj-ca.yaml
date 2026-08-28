@@ -1,0 +1,23 @@
+id: traj-ca-19
+scorer: contains
+maxTokens: 1400
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-09-21. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts.
+prompt: Review our conditional access policies and tell me which ones are not actively enforcing.
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /identity/conditionalAccess/policies:
+      value:
+        - displayName: Baseline MFA
+          state: enabledForReportingButNotEnforced
+        - displayName: Legacy Auth Block
+          state: enabled
+        - displayName: Risky Sign-in
+          state: disabled
+mustContain:
+  - Baseline MFA
+  - Risky Sign-in
+mustNotContain:
+  - Legacy Auth Block

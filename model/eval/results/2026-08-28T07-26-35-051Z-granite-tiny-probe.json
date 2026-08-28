@@ -1,0 +1,36 @@
+{
+  "label": "granite-tiny-probe",
+  "endpoint": "http://127.0.0.1:8090",
+  "when": "2026-08-28T07-26-35-051Z",
+  "provenance": {
+    "servedModel": "models/granite-4.0-h-tiny-Q4_K_M.gguf",
+    "retrieval": true,
+    "filter": "9500",
+    "taskCount": 1,
+    "taskFilesSeen": 1,
+    "suite": null,
+    "docIndex": {
+      "chunks": 55193,
+      "corpora": [
+        "intune",
+        "entra",
+        "defender"
+      ],
+      "built": "2026-08-26T14:36:49.586Z"
+    },
+    "harnessVersion": "v1.1-2026-08-27"
+  },
+  "results": [
+    {
+      "id": "traj2-join-0",
+      "file": "9500-traj2-join.yaml",
+      "pass": false,
+      "detail": "missing: [VESTA-901, MIRA-568] forbidden-hit: [NOVA-742, PICO-239] unmatched: []",
+      "ms": 4580,
+      "toolCalls": 1,
+      "usefulCalls": 1,
+      "turnsUsed": 2,
+      "response": "Based on the tenant data retrieved, the managed devices assigned to guest accounts are:\n\n- **NOVA-742** (Android, noncompliant)\n- **PICO-239** (iOS, unknown compliance)\n\nThese devices are owned by personal accounts, indicating they are likely guest accounts."
+    }
+  ]
+}

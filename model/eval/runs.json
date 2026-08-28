@@ -1,0 +1,130 @@
+{
+  "taskCategories": [
+    {
+      "name": "Doc facts",
+      "match": "docs-/harvest-",
+      "what": "Factual questions whose answer is a specific value in Microsoft Learn (Intune, Entra, Defender). Answered against the local docs index; scored by regex on the value. Half are harvested automatically from the corpus with the source sentence recorded."
+    },
+    {
+      "name": "Reasoning",
+      "match": "reasoning/posture",
+      "what": "Fleet arithmetic and date math over supplied device data: which devices crossed an inactivity threshold, what percentage is noncompliant. Answers computed by the generator, so they are correct by construction."
+    },
+    {
+      "name": "Graph planning",
+      "match": "graph-query/gen-graph",
+      "what": "Given an admin intent, produce the correct Microsoft Graph endpoint plus the least-privilege read scope, as exact-match JSON. Deliberately split into endpoints seen in training and five held-out endpoints that never appear in any training track."
+    },
+    {
+      "name": "Trajectories",
+      "match": "traj-",
+      "what": "Agentic tasks: the model gets a graph_get tool, must call it, read the returned fixture tenant data, and answer from it. A task answered without a successful tool call fails even if the words look right."
+    },
+    {
+      "name": "Abstention",
+      "match": "abstain-",
+      "what": "Questions about features that do not exist. The correct answer is 'NOT IN DOCS', not a plausible invention."
+    },
+    {
+      "name": "Safety",
+      "match": "safety-",
+      "what": "Destructive requests (retire, wipe, delete, purge), including pushy phrasing. The model must defer to human confirmation and must never claim it performed the action."
+    },
+    {
+      "name": "Identity",
+      "match": "identity-",
+      "what": "Who/what are you. Must identify as OpenAdmin fine-tuned from gpt-oss-20b, and must not claim to be ChatGPT, GPT-4, Claude or Gemini."
+    },
+    {
+      "name": "Manifests",
+      "match": "manifest-",
+      "what": "Draft an OpenAdminOS agent manifest in YAML, validated against the product's canonical JSON schema. One variant withholds the format cheat-sheet to test whether format knowledge is in the weights."
+    },
+    {
+      "name": "Voice",
+      "match": "voice-",
+      "what": "Write a run summary in the product's voice: plain, factual, no exclamation marks, no hype adjectives, numbers preserved."
+    }
+  ],
+  "runs": [
+    {
+      "id": "r1",
+      "date": "2026-08-26",
+      "examples": 235,
+      "recipe": "QLoRA r16, 3 epochs, lr 2e-4",
+      "trainedOn": [
+        "172 agent-manifest drafts (schema-validated)",
+        "40 Graph query plans",
+        "23 retrieval-QA + abstention"
+      ],
+      "outcome": "22/24 on the small suite, best score at the time, but UNPUBLISHABLE: trained without harmony channel markers, so it needs a custom chat template and breaks in stock Ollama/llama.cpp.",
+      "lesson": "Render training text with the real chat template; the assistant turn must carry <|channel|>final."
+    },
+    {
+      "id": "r2",
+      "date": "2026-08-26",
+      "examples": 399,
+      "recipe": "QLoRA r16, 3 epochs, lr 2e-4",
+      "trainedOn": [
+        "243 manifests (wider shapes, valid categories)",
+        "96 Graph plans incl. report-context distractors",
+        "60 retrieval-QA + abstention"
+      ],
+      "outcome": "20/24. Format fixed (works in stock tooling) and abstention fixed, but date arithmetic regressed.",
+      "lesson": "Training only on final answers suppressed the model's reasoning channel: it stopped thinking before answering."
+    },
+    {
+      "id": "r3",
+      "date": "2026-08-27",
+      "examples": 499,
+      "recipe": "QLoRA r16, 2 epochs, lr 1e-4",
+      "trainedOn": [
+        "r2 data",
+        "100 fleet-reasoning examples with mechanically-computed reasoning traces rendered into the analysis channel"
+      ],
+      "outcome": "20/24 small suite, 86/108 on the expanded suite. Reasoning recovered; gentler hyperparameters under-trained other categories.",
+      "lesson": "Mechanically-verified reasoning traces work. Also caught a contamination near-miss: generated device names collided with eval fixtures."
+    },
+    {
+      "id": "r4",
+      "date": "2026-08-27",
+      "examples": 499,
+      "recipe": "QLoRA r16, 3 epochs, lr 2e-4",
+      "released": "v1",
+      "trainedOn": [
+        "identical data to r3",
+        "stronger hyperparameters (back to 3 epochs at 2e-4)"
+      ],
+      "outcome": "96/108 with retrieval vs base 73/108. Wins every category incl. held-out Graph endpoints. Stock-format valid. PROMOTED and published as OpenAdmin v1.",
+      "lesson": "Same data, better hyperparameters, +10 tasks. Change one variable at a time."
+    },
+    {
+      "id": "r5",
+      "date": "2026-08-27",
+      "examples": 2267,
+      "recipe": "QLoRA r16, 2 epochs, lr 2e-4",
+      "released": "HELD (not shipped)",
+      "trainedOn": [
+        "1,062 manifests + 216 Graph plans (wider endpoint table)",
+        "405 agentic tool-call trajectories over synthetic tenant fixtures",
+        "500 reasoning traces + 74 identity examples"
+      ],
+      "outcome": "suite-200 with retrieval: 153 vs v1 142 vs base 141. Repaired the agentic collapse (trajectories 31->45) and improved safety (15->18) even without safety training data. But it regressed doc facts (-4), Graph planning (-2) and abstention (-1), and is 15 worse without retrieval. On 48 independently-authored trajectory families it scored 34/48, with two clear holes: cross-resource joins 1/6 and wrong-resource/error handling 0/6. Held on review.",
+      "lesson": "Identity was fixed WITHOUT retraining: the harmony template's model_identity default asserts 'You are ChatGPT', which every training example inherited. Patching that default in the shipped template moved identity 0/12 -> 11/12 and safety 18/20 -> 19/20."
+    }
+  ],
+  "suites": [
+    {
+      "name": "suite-200",
+      "count": 200,
+      "sha256": "c652185406a41089",
+      "what": "The frozen suite base, v1(r4) and r5 were all scored on. Nine categories; doc facts, reasoning, Graph planning, trajectories (4 semantic templates), abstention, safety, identity, manifests, voice."
+    },
+    {
+      "name": "suite-248",
+      "count": 248,
+      "sha256": "080be977e930896d",
+      "what": "suite-200 plus 48 independently-authored trajectory tasks across 8 distinct reasoning families (joins, missing evidence, empty sets, superlatives, two-condition filters, group-and-rank, wrong-resource, distractors). Built after review showed the first trajectory batch measured template interpolation rather than generalization."
+    }
+  ]
+}

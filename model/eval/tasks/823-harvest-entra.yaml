@@ -1,0 +1,17 @@
+id: harvest-entra-23
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum time delay for a deleted group to be removed from the PIM for Groups
+  option?
+mustMatch:
+  - \b24\b
+_source:
+  file: entra/id-governance/entitlement-management-access-package-eligible.md
+  sentence: up to 24 hours
+  value: 24 hours

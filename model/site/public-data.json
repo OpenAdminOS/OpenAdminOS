@@ -1,0 +1,1360 @@
+{
+  "generatedAt": "2026-08-28T09:28:28.492Z",
+  "schemaVersion": 1,
+  "model": {
+    "name": "OpenAdmin",
+    "baseModel": "openai/gpt-oss-20b",
+    "license": "Apache-2.0",
+    "published": {
+      "huggingface": "OpenAdminOS/openadmin-20b",
+      "gguf": "OpenAdminOS/openadmin-20b-GGUF",
+      "ollama": "openadminos/openadmin"
+    },
+    "releasedVersion": "v1",
+    "quantized": "MXFP4",
+    "fileSizeGB": 12.1
+  },
+  "hardware": {
+    "measuredOn": "GMKtec NucBox K8 Plus (Ryzen 7 8845HS, 32GB RAM, Radeon 780M, no discrete GPU)",
+    "generationTokensPerSecond": 28,
+    "minimumRamGB": 16,
+    "recommendedRamGB": 32
+  },
+  "retrieval": {
+    "chunks": 55193,
+    "corpora": [
+      "intune",
+      "entra",
+      "defender"
+    ],
+    "builtAt": "2026-08-26T14:36:49.586Z",
+    "sources": "MicrosoftDocs memdocs (Intune), entra-docs, defender-docs — CC-BY-4.0"
+  },
+  "trainingData": {
+    "tracks": {
+      "a-capped": 200,
+      "a": 1062,
+      "b": 216,
+      "c": 15,
+      "d": 500,
+      "e": 74,
+      "f": 405,
+      "g": 60,
+      "h": 296,
+      "train-r6": 1766
+    },
+    "total": 4594,
+    "policy": "100% synthetic and machine-validated. No tenant data. No distillation from proprietary APIs."
+  },
+  "evalSuites": [
+    {
+      "name": "suite-200",
+      "count": 200,
+      "sha256": "c652185406a41089",
+      "what": "The frozen suite base, v1(r4) and r5 were all scored on. Nine categories; doc facts, reasoning, Graph planning, trajectories (4 semantic templates), abstention, safety, identity, manifests, voice."
+    },
+    {
+      "name": "suite-248",
+      "count": 248,
+      "sha256": "080be977e930896d",
+      "what": "suite-200 plus 48 independently-authored trajectory tasks across 8 distinct reasoning families (joins, missing evidence, empty sets, superlatives, two-condition filters, group-and-rank, wrong-resource, distractors). Built after review showed the first trajectory batch measured template interpolation rather than generalization."
+    }
+  ],
+  "taskCategories": [
+    {
+      "name": "Doc facts",
+      "what": "Factual questions whose answer is a specific value in Microsoft Learn, answered against the local docs index."
+    },
+    {
+      "name": "Reasoning",
+      "what": "Fleet arithmetic and date math over supplied device data."
+    },
+    {
+      "name": "Graph planning",
+      "what": "Produce the correct Microsoft Graph endpoint and least-privilege scope. Includes held-out endpoints never seen in training."
+    },
+    {
+      "name": "Trajectories",
+      "what": "Agentic tasks: call the tool, read returned tenant data, answer from it. Answering without a successful tool call fails."
+    },
+    {
+      "name": "Abstention",
+      "what": "Questions about features that do not exist. The correct answer is to say so."
+    },
+    {
+      "name": "Safety",
+      "what": "Destructive requests must defer to human confirmation and never claim the action was performed."
+    },
+    {
+      "name": "Identity",
+      "what": "Must identify as OpenAdmin fine-tuned from gpt-oss-20b."
+    },
+    {
+      "name": "Manifests",
+      "what": "Draft an agent manifest that both validates against the schema and matches the request."
+    },
+    {
+      "name": "Voice",
+      "what": "Run summaries in the product's plain, factual voice."
+    }
+  ],
+  "trainingRuns": [
+    {
+      "id": "r1",
+      "date": "2026-08-26",
+      "examples": 235,
+      "recipe": "QLoRA r16, 3 epochs, lr 2e-4",
+      "trainedOn": [
+        "172 agent-manifest drafts (schema-validated)",
+        "40 Graph query plans",
+        "23 retrieval-QA + abstention"
+      ],
+      "outcome": "22/24 on the small suite, best score at the time, but UNPUBLISHABLE: trained without harmony channel markers, so it needs a custom chat template and breaks in stock Ollama/llama.cpp.",
+      "lesson": "Render training text with the real chat template; the assistant turn must carry <|channel|>final."
+    },
+    {
+      "id": "r2",
+      "date": "2026-08-26",
+      "examples": 399,
+      "recipe": "QLoRA r16, 3 epochs, lr 2e-4",
+      "trainedOn": [
+        "243 manifests (wider shapes, valid categories)",
+        "96 Graph plans incl. report-context distractors",
+        "60 retrieval-QA + abstention"
+      ],
+      "outcome": "20/24. Format fixed (works in stock tooling) and abstention fixed, but date arithmetic regressed.",
+      "lesson": "Training only on final answers suppressed the model's reasoning channel: it stopped thinking before answering."
+    },
+    {
+      "id": "r3",
+      "date": "2026-08-27",
+      "examples": 499,
+      "recipe": "QLoRA r16, 2 epochs, lr 1e-4",
+      "trainedOn": [
+        "r2 data",
+        "100 fleet-reasoning examples with mechanically-computed reasoning traces rendered into the analysis channel"
+      ],
+      "outcome": "20/24 small suite, 86/108 on the expanded suite. Reasoning recovered; gentler hyperparameters under-trained other categories.",
+      "lesson": "Mechanically-verified reasoning traces work. Also caught a contamination near-miss: generated device names collided with eval fixtures."
+    },
+    {
+      "id": "r4",
+      "date": "2026-08-27",
+      "examples": 499,
+      "recipe": "QLoRA r16, 3 epochs, lr 2e-4",
+      "released": "v1",
+      "trainedOn": [
+        "identical data to r3",
+        "stronger hyperparameters (back to 3 epochs at 2e-4)"
+      ],
+      "outcome": "96/108 with retrieval vs base 73/108. Wins every category incl. held-out Graph endpoints. Stock-format valid. PROMOTED and published as OpenAdmin v1.",
+      "lesson": "Same data, better hyperparameters, +10 tasks. Change one variable at a time."
+    },
+    {
+      "id": "r5",
+      "date": "2026-08-27",
+      "examples": 2267,
+      "recipe": "QLoRA r16, 2 epochs, lr 2e-4",
+      "released": "HELD (not shipped)",
+      "trainedOn": [
+        "1,062 manifests + 216 Graph plans (wider endpoint table)",
+        "405 agentic tool-call trajectories over synthetic tenant fixtures",
+        "500 reasoning traces + 74 identity examples"
+      ],
+      "outcome": "suite-200 with retrieval: 153 vs v1 142 vs base 141. Repaired the agentic collapse (trajectories 31->45) and improved safety (15->18) even without safety training data. But it regressed doc facts (-4), Graph planning (-2) and abstention (-1), and is 15 worse without retrieval. On 48 independently-authored trajectory families it scored 34/48, with two clear holes: cross-resource joins 1/6 and wrong-resource/error handling 0/6. Held on review.",
+      "lesson": "Identity was fixed WITHOUT retraining: the harmony template's model_identity default asserts 'You are ChatGPT', which every training example inherited. Patching that default in the shipped template moved identity 0/12 -> 11/12 and safety 18/20 -> 19/20."
+    }
+  ],
+  "scores": [
+    {
+      "label": "r5patched-ret",
+      "passed": 165,
+      "total": 200,
+      "when": "2026-08-28T05-47-04-281Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 7,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 40,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 43,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "r5-200-ret",
+      "passed": 153,
+      "total": 200,
+      "when": "2026-08-27T20-46-06-301Z",
+      "retrieval": true,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 8,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 40,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 14,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 45,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 18,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "v1-r4-200-ret",
+      "passed": 142,
+      "total": 200,
+      "when": "2026-08-27T17-15-40-617Z",
+      "retrieval": true,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 10,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 44,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 31,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 15,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "base-200-ret",
+      "passed": 141,
+      "total": 200,
+      "when": "2026-08-27T16-41-41-092Z",
+      "retrieval": true,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 4,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 11,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 39,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 14,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 46,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "v1-r4-200-noret",
+      "passed": 119,
+      "total": 200,
+      "when": "2026-08-27T16-53-44-198Z",
+      "retrieval": false,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 10,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 23,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 15,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 35,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 15,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "base-200-noret",
+      "passed": 115,
+      "total": 200,
+      "when": "2026-08-27T15-41-40-257Z",
+      "retrieval": false,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 6,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 15,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 7,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 46,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "r5patched-noret",
+      "passed": 114,
+      "total": 200,
+      "when": "2026-08-28T05-10-36-101Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 8,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 20,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 3,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 1,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 43,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "r5-200-noret",
+      "passed": 104,
+      "total": 200,
+      "when": "2026-08-27T20-01-54-753Z",
+      "retrieval": false,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 8,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 4,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 0,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 46,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 18,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r4-ret",
+      "passed": 96,
+      "total": 108,
+      "when": "2026-08-27T10-57-47-695Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 10,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 44,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "granite-tiny-base2-ret",
+      "passed": 92,
+      "total": 200,
+      "when": "2026-08-28T08-19-31-464Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 0,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 2,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 5,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 43,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 4,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 13,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r3-ret",
+      "passed": 86,
+      "total": 108,
+      "when": "2026-08-27T10-36-35-784Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 8,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 18,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 40,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 2,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r2-ret",
+      "passed": 74,
+      "total": 108,
+      "when": "2026-08-27T10-16-09-336Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 9,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 4,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 41,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 2,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "gpt-oss-20b-ret",
+      "passed": 73,
+      "total": 108,
+      "when": "2026-08-27T09-58-37-344Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 4,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 11,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 39,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 14,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r4-noret",
+      "passed": 69,
+      "total": 108,
+      "when": "2026-08-27T10-42-18-359Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 10,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 23,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 15,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r3-noret",
+      "passed": 57,
+      "total": 108,
+      "when": "2026-08-27T10-21-36-483Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 8,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 18,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 11,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 2,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "gpt-oss-20b-noret",
+      "passed": 49,
+      "total": 108,
+      "when": "2026-08-27T09-26-41-645Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 6,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 15,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 7,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r2-noret",
+      "passed": 45,
+      "total": 108,
+      "when": "2026-08-27T10-02-13-252Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 9,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 4,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 12,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 2,
+          "total": 5
+        }
+      }
+    },
+    {
+      "label": "granite-tiny-base-ret",
+      "passed": 45,
+      "total": 200,
+      "when": "2026-08-28T07-36-25-100Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 0,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 2,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 5,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 0,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 0,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 13,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r1-ret",
+      "passed": 22,
+      "total": 24,
+      "when": "2026-08-26T21-27-05-133Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 6,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 3,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 7,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 2,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "r5-safetyfix",
+      "passed": 19,
+      "total": 20,
+      "when": "2026-08-28T04-45-42-964Z",
+      "retrieval": true,
+      "suite": null,
+      "categories": {
+        "Safety": {
+          "passed": 19,
+          "total": 20
+        }
+      }
+    },
+    {
+      "label": "ministral-3-8b-ret",
+      "passed": 17,
+      "total": 24,
+      "when": "2026-08-26T16-05-37-686Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 2,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 3,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 7,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 3,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "oaos-ft-r1-noret",
+      "passed": 16,
+      "total": 24,
+      "when": "2026-08-26T21-23-44-668Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 6,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 3,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 1,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 2,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "qwen3-8b-ret",
+      "passed": 13,
+      "total": 24,
+      "when": "2026-08-26T15-48-52-183Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 4,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 1,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 4,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 1,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "phi-4-mini-ret",
+      "passed": 11,
+      "total": 24,
+      "when": "2026-08-26T15-22-54-218Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 0,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 0,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 2,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 7,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 1,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "r5-identityfix",
+      "passed": 11,
+      "total": 12,
+      "when": "2026-08-28T04-44-53-249Z",
+      "retrieval": true,
+      "suite": null,
+      "categories": {
+        "Identity": {
+          "passed": 11,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "ministral-3-8b-noret",
+      "passed": 10,
+      "total": 24,
+      "when": "2026-08-26T15-55-37-261Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 2,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 3,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 0,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 3,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "gpt-oss-20b-retrieval-k12",
+      "passed": 7,
+      "total": 7,
+      "when": "2026-08-26T14-44-46-617Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 1
+        },
+        "Graph planning": {
+          "passed": 1,
+          "total": 1
+        },
+        "Reasoning": {
+          "passed": 1,
+          "total": 1
+        },
+        "Doc facts": {
+          "passed": 4,
+          "total": 4
+        }
+      }
+    },
+    {
+      "label": "gpt-oss-20b-retrieval",
+      "passed": 6,
+      "total": 7,
+      "when": "2026-08-26T14-41-19-509Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 1
+        },
+        "Graph planning": {
+          "passed": 1,
+          "total": 1
+        },
+        "Reasoning": {
+          "passed": 1,
+          "total": 1
+        },
+        "Doc facts": {
+          "passed": 3,
+          "total": 4
+        }
+      }
+    },
+    {
+      "label": "qwen3-8b-noret",
+      "passed": 6,
+      "total": 24,
+      "when": "2026-08-26T15-33-51-693Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 2,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 1,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 0,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 0,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "phi-4-mini-noret",
+      "passed": 5,
+      "total": 24,
+      "when": "2026-08-26T15-20-01-724Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 0,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 0,
+          "total": 6
+        },
+        "Reasoning": {
+          "passed": 1,
+          "total": 3
+        },
+        "Doc facts": {
+          "passed": 0,
+          "total": 7
+        },
+        "Abstention": {
+          "passed": 3,
+          "total": 3
+        },
+        "Voice": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "gpt-oss-20b-base",
+      "passed": 3,
+      "total": 3,
+      "when": "2026-08-26T12-55-51-285Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 1
+        },
+        "Graph planning": {
+          "passed": 1,
+          "total": 1
+        },
+        "Reasoning": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "gpt-oss-20b-no-retrieval",
+      "passed": 3,
+      "total": 7,
+      "when": "2026-08-26T14-39-35-039Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 1
+        },
+        "Graph planning": {
+          "passed": 1,
+          "total": 1
+        },
+        "Reasoning": {
+          "passed": 1,
+          "total": 1
+        },
+        "Doc facts": {
+          "passed": 0,
+          "total": 4
+        }
+      }
+    },
+    {
+      "label": "smoke-traj2",
+      "passed": 1,
+      "total": 1,
+      "when": "2026-08-27T12-53-50-765Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Trajectories": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "harness-verify",
+      "passed": 1,
+      "total": 1,
+      "when": "2026-08-27T13-01-14-774Z",
+      "retrieval": true,
+      "suite": null,
+      "categories": {
+        "Trajectories": {
+          "passed": 1,
+          "total": 1
+        }
+      }
+    },
+    {
+      "label": "smoke-traj",
+      "passed": 0,
+      "total": 1,
+      "when": "2026-08-27T12-53-00-279Z",
+      "retrieval": null,
+      "suite": null,
+      "categories": {
+        "Trajectories": {
+          "passed": 0,
+          "total": 1
+        }
+      }
+    }
+  ]
+}

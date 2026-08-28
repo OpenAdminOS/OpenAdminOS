@@ -1,0 +1,27 @@
+id: manifest-draft-noncompliant-devices
+scorer: manifest-schema
+maxTokens: 3000
+system: 'You draft OpenAdminOS Agent Template manifests. An agent manifest is YAML with three required
+  top-level keys: `descriptor`, `skills`, and `definition`. descriptor requires: id (kebab-case slug),
+  name, description, version (semver), minAppVersion, author {name, handle}, category, mode (read or write),
+  and may include requiresEntraTier and preferredModel. Each skill is a pipeline step with: id (snake_case,
+  pattern ^[a-z0-9][a-z0-9_]*$, hyphens are NOT allowed in skill ids), format (graph | transform | llm),
+  label, detail, settings. A graph skill''s settings need method, path, select (list of fields), scopes
+  (list of Graph permission strings). An llm skill''s settings need system, prompt, temperature, maxTokens.
+  `definition` holds triggers (e.g. [{id: manual, kind: manual}]) and result (summary template plus a
+  data map). Reference earlier outputs as "{{ <skillId>.output }}". Reply with exactly one fenced yaml
+  code block containing only the manifest.'
+prompt: "Draft a read-mode agent manifest with slug `noncompliant-device-report`\n(version 0.1.0, minAppVersion\
+  \ 0.1.0, category devices, author name\n\"Community\" handle \"community\") that:\n1. Loads managed\
+  \ devices from Graph (`/deviceManagement/managedDevices`,\n   GET, scope DeviceManagementManagedDevices.Read.All)\
+  \ selecting id,\n   deviceName, complianceState, userPrincipalName, lastSyncDateTime.\n2. Uses an llm\
+  \ skill to summarize which devices are noncompliant and what\n   an admin should check first."
+mustSlug: noncompliant-device-report
+mustMode: read
+mustPath:
+- /deviceManagement/managedDevices
+mustScope:
+- DeviceManagementManagedDevices.Read.All
+mustFormats:
+- graph
+- llm

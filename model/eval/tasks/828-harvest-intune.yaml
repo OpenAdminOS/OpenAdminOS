@@ -1,0 +1,17 @@
+id: harvest-intune-28
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What is the maximum number of characters allowed for the pszCompany parameter in the
+  InstallStatusMIFEx function?
+mustMatch:
+  - \b64\b
+_source:
+  file: intune/configmgr/develop/reference/core/servers/manage/installstatusmifex-function.md
+  sentence: limited to 64 characters
+  value: 64 characters

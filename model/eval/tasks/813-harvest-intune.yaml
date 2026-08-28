@@ -1,0 +1,17 @@
+id: harvest-intune-13
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer factually and concisely from
+  the provided documentation excerpts.
+prompt: >-
+  What renewal banner appears when a certification authority has 3 months remaining before
+  expiration?
+mustMatch:
+  - \b90\b
+_source:
+  file: intune/cloud-pki/renew-ca.md
+  sentence: expires in 90 days
+  value: 90 days

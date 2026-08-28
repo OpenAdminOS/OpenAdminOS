@@ -1,0 +1,51 @@
+id: traj2-superlative-27
+scorer: contains
+maxTokens: 1600
+system: >-
+  You are OpenAdmin, assisting a Microsoft 365 administrator. Today's date is 2026-11-25. Use the
+  graph_get tool to read tenant data before answering; never invent tenant facts. If the data does
+  not support an answer, say so plainly.
+prompt: Which single device has gone the longest without checking in, and how long has it been?
+trajectory:
+  maxTurns: 4
+  fixtures:
+    /deviceManagement/managedDevices:
+      value:
+        - deviceName: PICO-194
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: iOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-08-15T00:00:00.000Z'
+        - deviceName: TALOS-870
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: iOS
+          complianceState: unknown
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-08-06T00:00:00.000Z'
+        - deviceName: ORION-899
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: Android
+          complianceState: unknown
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-08-19T00:00:00.000Z'
+        - deviceName: MIRA-490
+          userPrincipalName: n.dubois@contoso.com
+          operatingSystem: iOS
+          complianceState: compliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-08-20T00:00:00.000Z'
+        - deviceName: NOVA-624
+          userPrincipalName: k.lindqvist@contoso.com
+          operatingSystem: Android
+          complianceState: noncompliant
+          managedDeviceOwnerType: personal
+          lastSyncDateTime: '2026-11-13T00:00:00.000Z'
+        - deviceName: RHEA-407
+          userPrincipalName: m.oyelaran@contoso.com
+          operatingSystem: Windows
+          complianceState: noncompliant
+          managedDeviceOwnerType: company
+          lastSyncDateTime: '2026-04-27T00:00:00.000Z'
+mustContain:
+  - RHEA-407
