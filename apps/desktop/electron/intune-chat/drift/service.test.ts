@@ -453,6 +453,115 @@ describe("point-in-time compare", () => {
   });
 });
 
+describe("cross-tenant compare", () => {
+  const RESOURCE = "configurationPolicies" as const;
+
+  function refreshTenant(
+    store: IntelligenceSqliteStore,
+    tenantId: string,
+    rows: Array<Record<string, unknown>>,
+  ): void {
+    store.replaceGraphResources({
+      tenantId,
+      resource: RESOURCE,
+      label: "Settings catalog policies",
+      scopeSet: ["DeviceManagementConfiguration.Read.All"],
+      refreshedAt: "2026-08-29T10:00:00.000Z",
+      rows,
+    });
+  }
+
+  it("matches by unique name, ignores tenant-specific fields, and buckets the rest", async () => {
+    await withDriftService(async ({ service, store }) => {
+      refreshTenant(store, "tenant-1", [
+        {
+          id: "a-1",
+          displayName: "BitLocker policy",
+          setting: "on",
+          lastModifiedDateTime: "2026-01-01T00:00:00Z",
+          assignments: [{ target: "group-contoso" }],
+        },
+        { id: "a-2", displayName: "Contoso only", setting: "x" },
+        { id: "a-3", displayName: "Firewall policy", setting: "strict" },
+      ]);
+      refreshTenant(store, "tenant-2", [
+        {
+          id: "b-1",
+          displayName: "BitLocker policy",
+          setting: "on",
+          lastModifiedDateTime: "2026-05-05T00:00:00Z",
+          assignments: [{ target: "group-fabrikam" }],
+        },
+        { id: "b-2", displayName: "Fabrikam only", setting: "y" },
+        { id: "b-3", displayName: "Firewall policy", setting: "loose" },
+      ]);
+
+      const compare = await service.getTenantCompare({
+        tenantIdA: "tenant-1",
+        tenantIdB: "tenant-2",
+        resources: [RESOURCE],
+      });
+      const counts = compare.resources.find((entry) => entry.resource === RESOURCE);
+      assert.deepEqual(
+        {
+          matchedSame: counts?.matchedSame,
+          different: counts?.different,
+          onlyInA: counts?.onlyInA,
+          onlyInB: counts?.onlyInB,
+          ambiguous: counts?.ambiguous,
+        },
+        // BitLocker matches as SAME: id, timestamps, and assignments are
+        // tenant-specific and excluded by default.
+        { matchedSame: 1, different: 1, onlyInA: 1, onlyInB: 1, ambiguous: 0 },
+      );
+      const different = compare.entries.find((entry) => entry.bucket === "different");
+      assert.equal(different?.displayName, "Firewall policy");
+      const settingChange = different?.changes.find((change) => change.path === "setting");
+      assert.equal(settingChange?.before, "strict");
+      assert.equal(settingChange?.after, "loose");
+
+      // Opting into assignments makes BitLocker different.
+      const withAssignments = await service.getTenantCompare({
+        tenantIdA: "tenant-1",
+        tenantIdB: "tenant-2",
+        resources: [RESOURCE],
+        includeAssignments: true,
+      });
+      const countsWith = withAssignments.resources.find(
+        (entry) => entry.resource === RESOURCE,
+      );
+      assert.equal(countsWith?.matchedSame, 0);
+      assert.equal(countsWith?.different, 2);
+    });
+  });
+
+  it("counts duplicate names as ambiguous and reports missing tenant data", async () => {
+    await withDriftService(async ({ service, store }) => {
+      refreshTenant(store, "tenant-1", [
+        { id: "a-1", displayName: "Twin", setting: "1" },
+        { id: "a-2", displayName: "Twin", setting: "2" },
+        { id: "a-3", displayName: "Unique", setting: "3" },
+      ]);
+
+      const compare = await service.getTenantCompare({
+        tenantIdA: "tenant-1",
+        tenantIdB: "tenant-2",
+        resources: [RESOURCE],
+      });
+      const counts = compare.resources.find((entry) => entry.resource === RESOURCE);
+      assert.equal(counts?.ambiguous, 2);
+      assert.equal(counts?.onlyInA, 1);
+      assert.equal(compare.tenantAHasData, true);
+      assert.equal(compare.tenantBHasData, false);
+
+      await assert.rejects(
+        service.getTenantCompare({ tenantIdA: "tenant-1", tenantIdB: "tenant-1" }),
+        /two different tenants/i,
+      );
+    });
+  });
+});
+
 async function withDriftService(
   run: (input: {
     service: DriftService;
@@ -462,7 +571,7 @@ async function withDriftService(
   const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-service-"));
   const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
   const persisted: DriftPersistedState = {
-    tenants: [tenant],
+    tenants: [tenant, secondTenant],
     activeTenantId: tenant.id,
   };
   const service = new DriftService({
@@ -517,5 +626,13 @@ const tenant: TenantRecord = {
   displayName: "Contoso",
   username: "admin@contoso.example",
   homeAccountId: "home-account-1",
+  addedAt: "2026-07-05T09:00:00.000Z",
+};
+
+const secondTenant: TenantRecord = {
+  id: "tenant-2",
+  displayName: "Fabrikam",
+  username: "admin@fabrikam.example",
+  homeAccountId: "home-account-2",
   addedAt: "2026-07-05T09:00:00.000Z",
 };

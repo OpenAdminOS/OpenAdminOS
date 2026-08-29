@@ -1123,6 +1123,56 @@ export interface DriftTimeCompareResult {
   retentionLimited?: boolean;
 }
 
+// ─── Cross-tenant compare (v0.5) ─────────────────────────────────────────
+//
+// Graph object ids are tenant-specific, so objects match across tenants
+// by unique display name (or structurally, when a resource has exactly
+// one object per tenant, which covers the policy singletons). Names that
+// appear more than once inside a tenant are counted as ambiguous and
+// never guess-matched. Tenant-specific fields (ids, timestamps, scope
+// tags, and by default assignments) are excluded from the equality diff.
+
+export interface DriftTenantCompareInput {
+  tenantIdA: string;
+  tenantIdB: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+  includeAssignments?: boolean;
+}
+
+export interface DriftTenantCompareResourceCounts {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  matchedSame: number;
+  different: number;
+  onlyInA: number;
+  onlyInB: number;
+  ambiguous: number;
+}
+
+export interface DriftTenantCompareEntry {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  displayName: string;
+  bucket: "different" | "only-in-a" | "only-in-b";
+  fieldChangeCount: number;
+  changes: DriftFieldChange[];
+  truncated?: boolean;
+}
+
+export interface DriftTenantCompareResult {
+  tenantIdA: string;
+  tenantIdB: string;
+  evaluatedAt: string;
+  includeAssignments: boolean;
+  tenantAHasData: boolean;
+  tenantBHasData: boolean;
+  resources: DriftTenantCompareResourceCounts[];
+  entries: DriftTenantCompareEntry[];
+  hasMore: boolean;
+  limit: number;
+}
+
 export interface RefreshGraphCacheOptions {
   resources?: GraphCacheResourceKind[];
   tenantId?: string;
@@ -2019,6 +2069,9 @@ export interface OpenAdminOSApi {
   getDriftTimeCompare?(
     input: DriftTimeCompareInput,
   ): Promise<DriftTimeCompareResult>;
+  getDriftTenantCompare?(
+    input: DriftTenantCompareInput,
+  ): Promise<DriftTenantCompareResult>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,

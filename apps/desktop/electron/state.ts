@@ -74,6 +74,8 @@ import type {
   DriftObjectHistoryInput,
   DriftObjectHistoryResult,
   DriftStatus,
+  DriftTenantCompareInput,
+  DriftTenantCompareResult,
   DriftTimeCompareInput,
   DriftTimeCompareResult,
   DriftTimelineInput,
@@ -2067,6 +2069,12 @@ export class AppStateStore {
     input: DriftTimeCompareInput,
   ): Promise<DriftTimeCompareResult> {
     return this.driftService.getTimeCompare(input);
+  }
+
+  async getDriftTenantCompare(
+    input: DriftTenantCompareInput,
+  ): Promise<DriftTenantCompareResult> {
+    return this.driftService.getTenantCompare(input);
   }
 
   async getGraphCacheRefreshSchedule(

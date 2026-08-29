@@ -11,6 +11,10 @@ import type {
   DriftObjectHistoryInput,
   DriftObjectHistoryResult,
   DriftStatus,
+  DriftTenantCompareEntry,
+  DriftTenantCompareInput,
+  DriftTenantCompareResourceCounts,
+  DriftTenantCompareResult,
   DriftTimeCompareInput,
   DriftTimeCompareResult,
   DriftTimelineEntry,
@@ -500,6 +504,149 @@ export class DriftService {
     };
   }
 
+  async getTenantCompare(
+    input: DriftTenantCompareInput,
+  ): Promise<DriftTenantCompareResult> {
+    const persisted = await this.host.read();
+    const tenantA = this.host.resolveTenant(persisted, input.tenantIdA);
+    const tenantB = this.host.resolveTenant(persisted, input.tenantIdB);
+    if (tenantA.id === tenantB.id) {
+      throw new Error("Cross-tenant compare requires two different tenants.");
+    }
+    const resources = normalizeTrackedResources(input.resources);
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+    const includeAssignments = input.includeAssignments === true;
+    const now = new Date().toISOString();
+
+    let tenantAHasData = false;
+    let tenantBHasData = false;
+    const counts: DriftTenantCompareResourceCounts[] = [];
+    const entries: DriftTenantCompareEntry[] = [];
+
+    for (const resource of resources) {
+      const resourceLabel = labelForResource(resource);
+      const stateA = this.host.readDriftStateAt(tenantA.id, resource, now);
+      const stateB = this.host.readDriftStateAt(tenantB.id, resource, now);
+      if (stateA.size > 0) tenantAHasData = true;
+      if (stateB.size > 0) tenantBHasData = true;
+
+      const resourceCounts: DriftTenantCompareResourceCounts = {
+        resource,
+        resourceLabel,
+        matchedSame: 0,
+        different: 0,
+        onlyInA: 0,
+        onlyInB: 0,
+        ambiguous: 0,
+      };
+      counts.push(resourceCounts);
+
+      const pairs: Array<{
+        displayName: string;
+        rawA?: string;
+        rawB?: string;
+      }> = [];
+
+      if (stateA.size === 1 && stateB.size === 1) {
+        // Singleton resources (and single-object collections) match
+        // structurally; the policy singletons have no display name.
+        const objectA = [...stateA.values()][0]!;
+        const objectB = [...stateB.values()][0]!;
+        pairs.push({
+          displayName: objectA.displayName ?? objectB.displayName ?? resourceLabel,
+          rawA: objectA.rawJson,
+          rawB: objectB.rawJson,
+        });
+      } else {
+        const byNameA = groupByCompareName(stateA);
+        const byNameB = groupByCompareName(stateB);
+        resourceCounts.ambiguous += byNameA.ambiguous + byNameB.ambiguous;
+        const names = new Set([...byNameA.unique.keys(), ...byNameB.unique.keys()]);
+        for (const name of [...names].sort()) {
+          const objectA = byNameA.unique.get(name);
+          const objectB = byNameB.unique.get(name);
+          pairs.push({
+            displayName: objectA?.displayName ?? objectB?.displayName ?? name,
+            ...(objectA ? { rawA: objectA.rawJson } : {}),
+            ...(objectB ? { rawB: objectB.rawJson } : {}),
+          });
+        }
+      }
+
+      for (const pair of pairs) {
+        if (pair.rawA !== undefined && pair.rawB === undefined) {
+          resourceCounts.onlyInA += 1;
+          entries.push({
+            resource,
+            resourceLabel,
+            displayName: pair.displayName,
+            bucket: "only-in-a",
+            fieldChangeCount: 0,
+            changes: [],
+          });
+          continue;
+        }
+        if (pair.rawA === undefined && pair.rawB !== undefined) {
+          resourceCounts.onlyInB += 1;
+          entries.push({
+            resource,
+            resourceLabel,
+            displayName: pair.displayName,
+            bucket: "only-in-b",
+            fieldChangeCount: 0,
+            changes: [],
+          });
+          continue;
+        }
+        if (rawTooLarge(pair.rawA) || rawTooLarge(pair.rawB)) {
+          resourceCounts.different += 1;
+          entries.push({
+            resource,
+            resourceLabel,
+            displayName: pair.displayName,
+            bucket: "different",
+            fieldChangeCount: 0,
+            changes: [],
+            truncated: true,
+          });
+          continue;
+        }
+        const changes = diffDriftObjects(
+          parseRawJson(pair.rawA),
+          parseRawJson(pair.rawB),
+          resource,
+        ).filter((change) => crossTenantChangeRelevant(change, includeAssignments));
+        if (changes.length === 0) {
+          resourceCounts.matchedSame += 1;
+          continue;
+        }
+        resourceCounts.different += 1;
+        entries.push({
+          resource,
+          resourceLabel,
+          displayName: pair.displayName,
+          bucket: "different",
+          fieldChangeCount: changes.length,
+          changes,
+        });
+      }
+    }
+
+    entries.sort(compareTenantEntries);
+    return {
+      tenantIdA: tenantA.id,
+      tenantIdB: tenantB.id,
+      evaluatedAt: now,
+      includeAssignments,
+      tenantAHasData,
+      tenantBHasData,
+      resources: counts,
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+    };
+  }
+
   private async resolveTenant(tenantId: string): Promise<TenantRecord> {
     const persisted = await this.host.read();
     return this.host.resolveTenant(persisted, tenantId);
@@ -639,6 +786,75 @@ function ensureTrackedResource(resource: GraphCacheResourceKind): void {
   if (!DRIFT_TRACKED_RESOURCES.has(resource)) {
     throw new Error(`Resource is not tracked for drift: ${resource}`);
   }
+}
+
+// Fields that are inherently tenant-specific and must not count as a
+// configuration difference when comparing two tenants.
+const CROSS_TENANT_IGNORED_TOP_FIELDS = new Set([
+  "id",
+  "createdDateTime",
+  "modifiedDateTime",
+  "lastModifiedDateTime",
+  "version",
+  "roleScopeTagIds",
+  "supportsScopeTags",
+]);
+
+// Assignments target tenant-specific groups and filters; excluded from
+// cross-tenant equality by default, with a visible opt-in.
+const CROSS_TENANT_ASSIGNMENT_TOP_FIELDS = new Set(["assignments", "isAssigned"]);
+
+function crossTenantChangeRelevant(
+  change: DriftFieldChange,
+  includeAssignments: boolean,
+): boolean {
+  const top = change.path.split(/[.[]/)[0] ?? change.path;
+  if (CROSS_TENANT_IGNORED_TOP_FIELDS.has(top)) return false;
+  if (!includeAssignments && CROSS_TENANT_ASSIGNMENT_TOP_FIELDS.has(top)) return false;
+  return true;
+}
+
+interface CompareObjectState {
+  version: number;
+  contentHash: string;
+  rawJson: string;
+  displayName?: string;
+}
+
+function groupByCompareName(state: Map<string, CompareObjectState>): {
+  unique: Map<string, CompareObjectState>;
+  ambiguous: number;
+} {
+  const byName = new Map<string, CompareObjectState[]>();
+  let unnamed = 0;
+  for (const object of state.values()) {
+    const name = object.displayName?.trim().toLocaleLowerCase();
+    if (!name) {
+      unnamed += 1;
+      continue;
+    }
+    byName.set(name, [...(byName.get(name) ?? []), object]);
+  }
+  const unique = new Map<string, CompareObjectState>();
+  let ambiguous = unnamed;
+  for (const [name, objects] of byName) {
+    if (objects.length === 1) unique.set(name, objects[0]!);
+    else ambiguous += objects.length;
+  }
+  return { unique, ambiguous };
+}
+
+function compareTenantEntries(
+  left: DriftTenantCompareEntry,
+  right: DriftTenantCompareEntry,
+): number {
+  if (left.resource !== right.resource) {
+    return left.resource.localeCompare(right.resource);
+  }
+  if (left.bucket !== right.bucket) {
+    return left.bucket.localeCompare(right.bucket);
+  }
+  return left.displayName.localeCompare(right.displayName);
 }
 
 function requireIsoInstant(value: string, label: "from" | "to"): string {

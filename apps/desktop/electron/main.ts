@@ -52,6 +52,7 @@ import type {
   CreateWorkspaceInput,
   DriftBaselineDriftInput,
   DriftEntryDetailInput,
+  DriftTenantCompareInput,
   DriftTimeCompareInput,
   DriftObjectHistoryInput,
   DriftTimelineInput,
@@ -4058,6 +4059,32 @@ function validateDriftTimeCompareInput(value: unknown): DriftTimeCompareInput {
   return input;
 }
 
+function validateDriftTenantCompareInput(value: unknown): DriftTenantCompareInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Tenant compare input must be an object.");
+  }
+  const input: DriftTenantCompareInput = {
+    tenantIdA: requireBoundedString(value.tenantIdA, "tenantIdA", 256),
+    tenantIdB: requireBoundedString(value.tenantIdB, "tenantIdB", 256),
+  };
+  if (input.tenantIdA === input.tenantIdB) {
+    throw new Error("Tenant compare requires two different tenants.");
+  }
+  if (value.resources !== undefined) {
+    input.resources = validateDriftResourceArray(value.resources, "resources");
+  }
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "tenant compare limit", 1, 5_000);
+  }
+  if (value.includeAssignments !== undefined) {
+    if (typeof value.includeAssignments !== "boolean") {
+      throw new Error("includeAssignments must be a boolean.");
+    }
+    input.includeAssignments = value.includeAssignments;
+  }
+  return input;
+}
+
 function validateOptionalDriftBoundary(
   value: unknown,
   label: "from" | "to",
@@ -5183,6 +5210,12 @@ function registerIpcHandlers() {
     "openadminos:get-drift-time-compare",
     handleTrusted((_event, input: unknown) =>
       store.getDriftTimeCompare(validateDriftTimeCompareInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-tenant-compare",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftTenantCompare(validateDriftTenantCompareInput(input)),
     ),
   );
   ipcMain.handle(
