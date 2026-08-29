@@ -25,7 +25,7 @@ export const SETUP_COPY = {
   guestChatHint:
     "No tenant connected. You can draft a question now; connecting happens when you send.",
   guestComposerPlaceholder:
-    "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
+    "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
   statusNoTenant: "No active tenant · Connect",
 } as const;
 

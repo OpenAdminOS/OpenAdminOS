@@ -3661,7 +3661,7 @@ function validateWorkspacePromptContextInput(
 
 function validateSendIntuneChatMessageInput(value: unknown): SendIntuneChatMessageInput {
   if (!isPlainRecord(value)) {
-    throw new Error("Intune Chat message input must be an object.");
+    throw new Error("Chat message input must be an object.");
   }
   if (value.refreshIfStale !== undefined && typeof value.refreshIfStale !== "boolean") {
     throw new Error("refreshIfStale must be a boolean.");

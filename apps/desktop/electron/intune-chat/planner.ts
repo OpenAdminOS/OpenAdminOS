@@ -930,7 +930,7 @@ function buildDeterministicFindings(input: {
 
 export function chatTitleForPrompt(prompt: string): string {
   const cleaned = prompt.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= 54) return cleaned || "Intune chat";
+  if (cleaned.length <= 54) return cleaned || "Chat";
   return `${cleaned.slice(0, 51).trim()}...`;
 }
 

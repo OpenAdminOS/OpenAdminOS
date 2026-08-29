@@ -34,7 +34,7 @@ describe("IntuneChat guest exploration", () => {
     });
 
     const composer = await screen.findByPlaceholderText(
-      "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
+      "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
     );
     await user.click(
       screen.getByRole("button", {
@@ -78,7 +78,7 @@ describe("IntuneChat guest exploration", () => {
     );
 
     const composer = await screen.findByPlaceholderText(
-      "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
+      "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
     );
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));

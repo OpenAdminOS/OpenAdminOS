@@ -409,7 +409,7 @@ function validateGraphGetPath(path: string): {
   const scopes = [...new Set([...endpointScopes, ...resourceScopes])].sort();
   if (scopes.length === 0) {
     throw new Error(
-      "Graph path is known, but it is outside Intune Chat's read-only scope allowlist.",
+      "Graph path is known, but it is outside Chat's read-only scope allowlist.",
     );
   }
   return { scopes, summary: endpoint.summary };

@@ -1395,7 +1395,7 @@ export class AppStateStore {
 
   private requireIntelligenceStore(): IntelligenceSqliteStore {
     if (!this.intelligenceStore) {
-      throw new Error("Intune Chat requires a configured userData directory.");
+      throw new Error("Chat requires a configured userData directory.");
     }
     return this.intelligenceStore;
   }
@@ -1410,7 +1410,7 @@ export class AppStateStore {
       : undefined;
     if (!tenant) {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before using Intune Chat.",
+        "No tenant connected. Connect a Microsoft 365 tenant before using Chat.",
       );
     }
     return tenant;

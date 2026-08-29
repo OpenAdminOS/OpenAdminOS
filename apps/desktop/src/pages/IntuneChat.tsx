@@ -76,6 +76,15 @@ const promptGroups = [
     ],
   },
   {
+    label: "Users",
+    prompts: [
+      "Which user accounts are disabled?",
+      "Which guest users have not signed in recently?",
+      "Which users are linked to noncompliant managed devices?",
+      "Which users appear in recent directory audit events?",
+    ],
+  },
+  {
     label: "Apps",
     prompts: [
       "Which required apps are assigned but not installed on targeted devices?",
@@ -85,39 +94,30 @@ const promptGroups = [
     ],
   },
   {
-    label: "Autopilot",
+    label: "Policies",
     prompts: [
-      "Which Autopilot devices are in failed enrollment state?",
-      "Which deployment profiles make the enrolling user a local admin?",
-      "Which Win32 apps are assigned during Autopilot ESP?",
-      "Why is this Autopilot device stuck during ESP?",
+      "Which compliance policies were modified most recently?",
+      "Which Conditional Access policies are disabled or report-only?",
+      "Which configuration policies have the highest setting counts?",
+      "Which policies changed recently?",
     ],
   },
   {
-    label: "Security",
+    label: "Sign-ins",
     prompts: [
       "Which recent sign-ins failed because of Conditional Access?",
-      "Which Conditional Access policies depend on device compliance?",
-      "Which endpoint security policies are assigned to all devices?",
-      "What are the top risks visible from cached tenant data?",
+      "Which users have repeated failed sign-ins?",
+      "Which risky sign-ins need review?",
+      "Which applications have the most sign-in failures?",
     ],
   },
   {
-    label: "Updates",
+    label: "Identity",
     prompts: [
-      "Which devices should have received 25H2 but have not?",
-      "Which update rings might conflict with feature update policies?",
-      "Which Windows devices are below the supported OS build?",
-      "Why are feature updates not offered to active devices?",
-    ],
-  },
-  {
-    label: "Scripts",
-    prompts: [
-      "Which remediation scripts have not reported results recently?",
-      "Which devices are likely affected by Intune Management Extension delays?",
-      "Which scripts run as the logged-on user versus system?",
-      "Why are remediation results missing even though scripts ran locally?",
+      "Which Entra devices are not managed in Intune?",
+      "Which groups have changed recently?",
+      "Which guest accounts have stale sign-in activity?",
+      "Which Conditional Access policies exclude guest or external identities?",
     ],
   },
 ];

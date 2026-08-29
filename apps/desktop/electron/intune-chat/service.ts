@@ -916,7 +916,7 @@ export class IntuneChatService {
     const persisted = await this.host.read();
     const activeTenant = this.host.resolveTenant(persisted);
     if (persisted.tenants.length === 0) {
-      throw new Error("Connect at least one tenant before using multi-tenant Intune Chat.");
+      throw new Error("Connect at least one tenant before using multi-tenant Chat.");
     }
     const groups = store.listTenantGroups();
     const resolvedGroups = resolveTenantGroups(input.tenantScope, groups);
@@ -1056,7 +1056,7 @@ export class IntuneChatService {
       const completion = await llm.complete({
         system: buildIntuneChatSystemPrompt(input.provider?.isLocal === true),
         prompt: [
-          "Summarize this read-only multi-tenant Intune Chat result for an admin.",
+          "Summarize this read-only multi-tenant Chat result for an admin.",
           "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
           `Question: ${input.prompt}`,
           JSON.stringify(
@@ -2163,7 +2163,7 @@ export class IntuneChatService {
     const consent = input.hostedProviderConsent;
     if (!consent) {
       throw new Error(
-        "Hosted provider confirmation is required before Intune Chat can send tenant context to the selected provider.",
+        "Hosted provider confirmation is required before Chat can send tenant context to the selected provider.",
       );
     }
 

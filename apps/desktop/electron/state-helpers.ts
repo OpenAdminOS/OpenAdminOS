@@ -529,7 +529,7 @@ export function buildMultiTenantDossierMarkdown(input: {
   rows: MultiTenantDeviceRow[];
 }): string {
   const lines = [
-    "# Multi-tenant Intune Chat dossier",
+    "# Multi-tenant Chat dossier",
     "",
     `Generated: ${input.generatedAt}`,
     `Provider: ${input.providerName}${input.model ? ` · ${input.model}` : ""}`,
@@ -881,7 +881,7 @@ export function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProv
 
 export function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
   return [
-    "You are OpenAdminOS Intune Chat.",
+    "You are OpenAdminOS Chat.",
     "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
     "If the context is missing, stale, partial, or has Graph errors, say that plainly.",
     "Do not invent tenant state, counts, users, devices, policies, or remediation results.",

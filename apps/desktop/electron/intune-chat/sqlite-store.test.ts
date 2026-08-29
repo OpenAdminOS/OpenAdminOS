@@ -448,7 +448,7 @@ describe("Intune Chat SQLite store", () => {
           },
         ],
         assistantText: "Contoso has one non-compliant Windows device; Fabrikam failed.",
-        exportDossierMarkdown: "# Multi-tenant Intune Chat dossier\n",
+        exportDossierMarkdown: "# Multi-tenant Chat dossier\n",
       };
       store.upsertMultiTenantJob(job);
       assert.equal(store.getMultiTenantJob(job.id)?.summary.failedTenants, 1);
