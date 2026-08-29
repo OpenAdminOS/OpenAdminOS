@@ -540,6 +540,19 @@ export interface RunLogRecord {
 export interface RunRecord {
   id: string;
   agentSlug: string;
+  /**
+   * Set for host-generated system runs. "baseline-rollback" runs carry
+   * a deterministic host-built plan, are not backed by an installed
+   * agent, and apply their graph-write actions in the host after the
+   * same typed confirmation gate as agent write plans.
+   */
+  origin?: "baseline-rollback";
+  rollback?: {
+    baselineId: string;
+    requiredScopes: string[];
+    /** Drift changes that need manual review and are not in the plan. */
+    manualCount: number;
+  };
   status: RunStatus;
   queuedAt: string;
   startedAt?: string;
@@ -1121,6 +1134,13 @@ export interface DriftTimeCompareResult {
    * least one compared resource, so the "before" side may be partial.
    */
   retentionLimited?: boolean;
+}
+
+export interface StartBaselineRollbackInput {
+  tenantId: string;
+  baselineId?: string;
+  /** Optional subset; when set, only these objects roll back. */
+  selections?: Array<{ resource: GraphCacheResourceKind; graphId: string }>;
 }
 
 // ─── Cross-tenant compare (v0.5) ─────────────────────────────────────────
@@ -2072,6 +2092,7 @@ export interface OpenAdminOSApi {
   getDriftTenantCompare?(
     input: DriftTenantCompareInput,
   ): Promise<DriftTenantCompareResult>;
+  startBaselineRollback?(input: StartBaselineRollbackInput): Promise<RunRecord>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,

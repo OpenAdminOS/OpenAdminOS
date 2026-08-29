@@ -54,6 +54,7 @@ import type {
   DriftEntryDetailInput,
   DriftTenantCompareInput,
   DriftTimeCompareInput,
+  StartBaselineRollbackInput,
   DriftObjectHistoryInput,
   DriftTimelineInput,
   ExportAuditLogInput,
@@ -4059,6 +4060,35 @@ function validateDriftTimeCompareInput(value: unknown): DriftTimeCompareInput {
   return input;
 }
 
+function validateStartBaselineRollbackInput(
+  value: unknown,
+): StartBaselineRollbackInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Rollback input must be an object.");
+  }
+  const input: StartBaselineRollbackInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+  };
+  if (value.baselineId !== undefined) {
+    input.baselineId = requireBoundedString(value.baselineId, "baselineId", 300);
+  }
+  if (value.selections !== undefined) {
+    if (!Array.isArray(value.selections) || value.selections.length > 500) {
+      throw new Error("Rollback selections must be an array with at most 500 entries.");
+    }
+    input.selections = value.selections.map((entry, index) => {
+      if (!isPlainRecord(entry)) {
+        throw new Error(`selections[${index}] must be an object.`);
+      }
+      return {
+        resource: validateDriftResource(entry.resource, `selections[${index}].resource`),
+        graphId: requireBoundedString(entry.graphId, `selections[${index}].graphId`, 512),
+      };
+    });
+  }
+  return input;
+}
+
 function validateDriftTenantCompareInput(value: unknown): DriftTenantCompareInput {
   if (!isPlainRecord(value)) {
     throw new Error("Tenant compare input must be an object.");
@@ -5216,6 +5246,12 @@ function registerIpcHandlers() {
     "openadminos:get-drift-tenant-compare",
     handleTrusted((_event, input: unknown) =>
       store.getDriftTenantCompare(validateDriftTenantCompareInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:start-baseline-rollback",
+    handleTrusted((_event, input: unknown) =>
+      store.startBaselineRollback(validateStartBaselineRollbackInput(input)),
     ),
   );
   ipcMain.handle(

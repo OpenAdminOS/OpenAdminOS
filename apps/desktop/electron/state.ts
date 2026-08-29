@@ -81,6 +81,7 @@ import type {
   DriftTimelineInput,
   DriftTimelineResult,
   ListDriftBaselinesInput,
+  StartBaselineRollbackInput,
   RenameDriftBaselineInput,
   RetireDriftBaselineInput,
   ImportMultiTenantResultToWorkspacesInput,
@@ -2075,6 +2076,21 @@ export class AppStateStore {
     input: DriftTenantCompareInput,
   ): Promise<DriftTenantCompareResult> {
     return this.driftService.getTenantCompare(input);
+  }
+
+  async startBaselineRollback(input: StartBaselineRollbackInput): Promise<RunRecord> {
+    const built = await this.driftService.buildBaselineRollbackPlan(input);
+    return this.runService.startRollbackRun({
+      tenantId: built.tenantId,
+      baselineId: built.baselineId,
+      plan: {
+        summary: built.draft.summary,
+        confirmationPhrase: built.draft.confirmationPhrase,
+        actions: built.draft.actions,
+      },
+      requiredScopes: built.draft.requiredScopes,
+      manualCount: built.draft.manual.length,
+    });
   }
 
   async getGraphCacheRefreshSchedule(
