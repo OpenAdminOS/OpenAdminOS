@@ -20,6 +20,17 @@ const TRACKED_RESOURCES = [
   "groupPolicyConfigurations",
   "assignmentFilters",
   "roleScopeTags",
+  // Entra configuration surfaces (v0.5). Defender alert/incident/score
+  // resources are event streams, not configuration, and stay untracked.
+  "namedLocations",
+  "authenticationMethodsPolicy",
+  "authorizationPolicy",
+  "crossTenantAccessPolicy",
+  "directoryRoles",
+  "administrativeUnits",
+  "applications",
+  "servicePrincipals",
+  "domains",
 ] as const satisfies readonly GraphCacheResourceKind[];
 
 export const DRIFT_TRACKED_RESOURCES: ReadonlySet<GraphCacheResourceKind> =
