@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-08-28T09:28:28.492Z",
-  "schemaVersion": 1,
+  "generatedAt": "2026-08-29T06:36:47.163Z",
+  "schemaVersion": 2,
   "model": {
     "name": "OpenAdmin",
     "baseModel": "openai/gpt-oss-20b",
@@ -20,16 +20,7 @@
     "minimumRamGB": 16,
     "recommendedRamGB": 32
   },
-  "retrieval": {
-    "chunks": 55193,
-    "corpora": [
-      "intune",
-      "entra",
-      "defender"
-    ],
-    "builtAt": "2026-08-26T14:36:49.586Z",
-    "sources": "MicrosoftDocs memdocs (Intune), entra-docs, defender-docs — CC-BY-4.0"
-  },
+  "retrieval": null,
   "trainingData": {
     "tracks": {
       "a-capped": 200,
@@ -38,12 +29,25 @@
       "c": 15,
       "d": 500,
       "e": 74,
-      "f": 405,
+      "f": 341,
       "g": 60,
       "h": 296,
-      "train-r6": 1766
+      "i": 159,
+      "j": 115,
+      "k": 90,
+      "l": 390,
+      "m": 104,
+      "train-mini-r1": 1910,
+      "train-mini-r2": 1806,
+      "train-mini-r3": 1936,
+      "train-r10": 1806,
+      "train-r11": 1936,
+      "train-r6": 1766,
+      "train-r7": 1910,
+      "train-r8": 1888,
+      "train-r9": 1762
     },
-    "total": 4594,
+    "total": 20342,
     "policy": "100% synthetic and machine-validated. No tenant data. No distillation from proprietary APIs."
   },
   "evalSuites": [
@@ -110,7 +114,8 @@
         "23 retrieval-QA + abstention"
       ],
       "outcome": "22/24 on the small suite, best score at the time, but UNPUBLISHABLE: trained without harmony channel markers, so it needs a custom chat template and breaks in stock Ollama/llama.cpp.",
-      "lesson": "Render training text with the real chat template; the assistant turn must carry <|channel|>final."
+      "lesson": "Render training text with the real chat template; the assistant turn must carry <|channel|>final.",
+      "track": "20b"
     },
     {
       "id": "r2",
@@ -123,7 +128,8 @@
         "60 retrieval-QA + abstention"
       ],
       "outcome": "20/24. Format fixed (works in stock tooling) and abstention fixed, but date arithmetic regressed.",
-      "lesson": "Training only on final answers suppressed the model's reasoning channel: it stopped thinking before answering."
+      "lesson": "Training only on final answers suppressed the model's reasoning channel: it stopped thinking before answering.",
+      "track": "20b"
     },
     {
       "id": "r3",
@@ -135,7 +141,8 @@
         "100 fleet-reasoning examples with mechanically-computed reasoning traces rendered into the analysis channel"
       ],
       "outcome": "20/24 small suite, 86/108 on the expanded suite. Reasoning recovered; gentler hyperparameters under-trained other categories.",
-      "lesson": "Mechanically-verified reasoning traces work. Also caught a contamination near-miss: generated device names collided with eval fixtures."
+      "lesson": "Mechanically-verified reasoning traces work. Also caught a contamination near-miss: generated device names collided with eval fixtures.",
+      "track": "20b"
     },
     {
       "id": "r4",
@@ -148,7 +155,8 @@
         "stronger hyperparameters (back to 3 epochs at 2e-4)"
       ],
       "outcome": "96/108 with retrieval vs base 73/108. Wins every category incl. held-out Graph endpoints. Stock-format valid. PROMOTED and published as OpenAdmin v1.",
-      "lesson": "Same data, better hyperparameters, +10 tasks. Change one variable at a time."
+      "lesson": "Same data, better hyperparameters, +10 tasks. Change one variable at a time.",
+      "track": "20b"
     },
     {
       "id": "r5",
@@ -162,10 +170,127 @@
         "500 reasoning traces + 74 identity examples"
       ],
       "outcome": "suite-200 with retrieval: 153 vs v1 142 vs base 141. Repaired the agentic collapse (trajectories 31->45) and improved safety (15->18) even without safety training data. But it regressed doc facts (-4), Graph planning (-2) and abstention (-1), and is 15 worse without retrieval. On 48 independently-authored trajectory families it scored 34/48, with two clear holes: cross-resource joins 1/6 and wrong-resource/error handling 0/6. Held on review.",
-      "lesson": "Identity was fixed WITHOUT retraining: the harmony template's model_identity default asserts 'You are ChatGPT', which every training example inherited. Patching that default in the shipped template moved identity 0/12 -> 11/12 and safety 18/20 -> 19/20."
+      "lesson": "Identity was fixed WITHOUT retraining: the harmony template's model_identity default asserts 'You are ChatGPT', which every training example inherited. Patching that default in the shipped template moved identity 0/12 -> 11/12 and safety 18/20 -> 19/20.",
+      "track": "20b"
+    },
+    {
+      "id": "r6",
+      "date": "2026-08-28",
+      "examples": 1766,
+      "recipe": "QLoRA r16, 2 epochs, lr 2e-4, trained under the OpenAdmin identity",
+      "trainedOn": [
+        "200 manifests (capped from 1,062: they were 73% of training tokens while accuracy stayed flat)",
+        "296 join and error-handling trajectories targeting r5's two measured holes",
+        "60 write-safety examples (we previously had none), plus 405 trajectories, 500 reasoning traces, 216 Graph plans"
+      ],
+      "outcome": "Best checkpoint so far: 173/200 with retrieval on GPU (v1 154, r5 164, base 147). Trajectories reached 49/60, beating even the base model, and safety returned to 20/20. But abstention regressed to 10/15, so it fails the no-regression release gate.",
+      "lesson": "Rebalancing by training tokens works: cutting manifest dominance and adding targeted tracks moved the categories we aimed at. Training heavily on acting appears to cost willingness to decline — abstention is the trade-off to watch. Operationally: never terminate a pod with a download in flight; the r6 GGUF aborted at 269MB, though the adapter was already safe.",
+      "track": "20b"
+    },
+    {
+      "id": "r7",
+      "date": "2026-08-28",
+      "examples": 1910,
+      "recipe": "QLoRA r16, 2 epochs, lr 2e-4",
+      "trainedOn": [
+        "r6's mix plus 159 mechanically-generated abstention examples (5.1% of tokens, up from 0.1%)",
+        "invented feature names disjoint from the eval set, with a quarter counter-examples where the feature is real"
+      ],
+      "outcome": "164/200 with retrieval. Abstention fixed (10 -> 14/15, our best) and reasoning reached 23/23, but trajectories collapsed 49 -> 39 and Graph planning 11 -> 7. Fails the gate.",
+      "lesson": "All 159 examples emitted the identical string 'NOT IN DOCS', which taught a shortcut ('when unsure, refuse') rather than a skill ('judge whether the evidence supports an answer'). The refusal then fired during tool-use tasks where evidence WAS available. Uniform target strings are a trap: vary the surface form or the model learns the string, not the behaviour.",
+      "track": "20b"
+    },
+    {
+      "id": "r8",
+      "date": "2026-08-28",
+      "examples": 1888,
+      "recipe": "QLoRA r16, 1.5 epochs, lr 1e-4 (halved), step checkpoints; ratios per adversarial review",
+      "trainedOn": [
+        "track I replaced by track J: 115 matched counterfactuals differing only in evidence state (no passage -> decline; tenant question with a tool -> CALL the tool; empty tool result -> report emptiness), with varied refusal wording",
+        "manifests trimmed 200 -> 150, Graph planning duplicated 2x, reasoning trimmed"
+      ],
+      "outcome": "164/200. Trajectories recovered to 45 and abstention to 12, a middle point rather than both. Still fails the gate: Doc facts 41 vs v1's 44, Graph planning 6 vs 10, abstention 12 vs 15.",
+      "lesson": "Counterfactuals beat uniform refusals (trajectories 39 -> 45 while abstention held above r6), so the diagnosis was right, but the fix was not sufficient alone. Separately: duplicating Graph-planning examples 2x made that category WORSE (10 -> 6). Oversampling identical rows teaches memorization, not the skill; the track is combinatorially capped at 216 unique examples and needs new endpoint sources, not repetition.",
+      "track": "20b"
+    },
+    {
+      "id": "r9",
+      "date": "2026-08-28",
+      "examples": 1762,
+      "recipe": "QLoRA r16, 1.5 epochs, lr 1e-4",
+      "trainedOn": [
+        "track K: 90 examples over 12 endpoints mined from production Intune tooling, all with unique phrasings",
+        "36 pagination trajectories teaching the model to follow @odata.nextLink instead of answering from page one"
+      ],
+      "outcome": "162/200 on the frozen suite, but 34/48 on the independent trajectory families: the best any checkpoint has scored there (r6 32, v1 26). Safety held at 20/20 and abstention improved to 13/15.",
+      "lesson": "Pagination generalised. The independent families are held-out reasoning shapes the model never trained on, so teaching it to follow nextLink improved agentic reasoning broadly, not just the trained pattern. Also: neither our training data nor our eval suite covered pagination at all, while real admin tooling depends on it constantly. A benchmark can only measure what it thinks to ask.",
+      "track": "20b"
+    },
+    {
+      "id": "lite-r1",
+      "track": "8b",
+      "date": "2026-08-28",
+      "examples": 1910,
+      "recipe": "QLoRA r32, 4 epochs, lr 1e-4, Mistral [INST] format",
+      "trainedOn": [
+        "the r7 dataset re-rendered from harmony into Mistral format: reasoning traces became short plain-text preambles, since this base is not a reasoning model",
+        "identity rewritten so the small model never claims to be the 20B"
+      ],
+      "outcome": "150/200 with retrieval, up from a 107 baseline: +43 points. Abstention 15/15 and safety 20/20 with no fabricated features, so it clears both release gates. Matches or beats the published v1 on doc facts, abstention, safety and voice at 40% of the size.",
+      "lesson": "A small model given one coherent job cleared its gate on the first attempt, while the 20B has now missed five times carrying nine competing behaviours in one adapter. Its real weakness is exactly where capacity matters: multi-step trajectories (30/60 against the flagship's 46). Four separate incompatibilities had to be fixed before training would start (FP8 weights the GPU could not take, an unknown tokenizer class, and two malformed tokenizer fields); all are now encoded in the script."
     }
   ],
   "scores": [
+    {
+      "label": "gpu-r6-ret",
+      "passed": 173,
+      "total": 200,
+      "when": "2026-08-28T11-49-53-468Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 11,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 42,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 10,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 49,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
     {
       "label": "r5patched-ret",
       "passed": 165,
@@ -217,6 +342,306 @@
       }
     },
     {
+      "label": "gpu-r5-ret",
+      "passed": 164,
+      "total": 200,
+      "when": "2026-08-28T11-04-26-231Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 9,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 42,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 12,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 43,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 18,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r7-ret",
+      "passed": 164,
+      "total": 200,
+      "when": "2026-08-28T15-44-45-981Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 7,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 23,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 44,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 14,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 39,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r8-ret",
+      "passed": 164,
+      "total": 200,
+      "when": "2026-08-28T17-37-45-966Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 6,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 22,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 41,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 12,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 45,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r9-ret",
+      "passed": 162,
+      "total": 200,
+      "when": "2026-08-28T19-49-59-963Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 7,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 41,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 13,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 2,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 46,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 10,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r10-ret",
+      "passed": 155,
+      "total": 200,
+      "when": "2026-08-28T21-47-49-594Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 5,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 18,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 41,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 12,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 42,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-v1-r4-ret",
+      "passed": 154,
+      "total": 200,
+      "when": "2026-08-28T10-27-58-172Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 10,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 15,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 44,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 39,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 15,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 10,
+          "total": 12
+        }
+      }
+    },
+    {
       "label": "r5-200-ret",
       "passed": 153,
       "total": 200,
@@ -258,6 +683,156 @@
         },
         "Identity": {
           "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-mini-ft-ret",
+      "passed": 150,
+      "total": 200,
+      "when": "2026-08-28T18-48-36-002Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 9,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 15,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 44,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 30,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 10,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-base-ret",
+      "passed": 147,
+      "total": 200,
+      "when": "2026-08-28T10-18-10-323Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 5,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 5,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 41,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 13,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 45,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r6-noret",
+      "passed": 145,
+      "total": 200,
+      "when": "2026-08-28T11-29-48-893Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 11,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 13,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 11,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 49,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
           "total": 12
         }
       }
@@ -355,6 +930,306 @@
       }
     },
     {
+      "label": "gpu-mini2-ft-ret",
+      "passed": 137,
+      "total": 200,
+      "when": "2026-08-29T05-36-20-259Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 1,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 14,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 36,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 33,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r8-noret",
+      "passed": 129,
+      "total": 200,
+      "when": "2026-08-28T17-31-28-686Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 1,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 6,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 12,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 9,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 45,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r9-noret",
+      "passed": 129,
+      "total": 200,
+      "when": "2026-08-28T19-36-46-911Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 7,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 21,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 11,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 10,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 2,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 46,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 10,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r10-noret",
+      "passed": 127,
+      "total": 200,
+      "when": "2026-08-28T21-37-08-711Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 6,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 17,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 13,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 12,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 42,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-v1-r4-noret",
+      "passed": 126,
+      "total": 200,
+      "when": "2026-08-28T10-24-43-020Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 10,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 16,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 14,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 40,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 15,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 10,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r7-noret",
+      "passed": 123,
+      "total": 200,
+      "when": "2026-08-28T15-26-50-653Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 7,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 23,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 1,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 39,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
       "label": "v1-r4-200-noret",
       "passed": 119,
       "total": 200,
@@ -396,6 +1271,156 @@
         },
         "Identity": {
           "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-r5-noret",
+      "passed": 118,
+      "total": 200,
+      "when": "2026-08-28T10-46-15-197Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 3,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 9,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 20,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 7,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 1,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 43,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 18,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-mini-ft-noret",
+      "passed": 117,
+      "total": 200,
+      "when": "2026-08-28T18-41-21-094Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 9,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 15,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 11,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 30,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 10,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-base-noret",
+      "passed": 116,
+      "total": 200,
+      "when": "2026-08-28T10-07-41-795Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 5,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 7,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 8,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 14,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 3,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 45,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
           "total": 12
         }
       }
@@ -484,6 +1509,106 @@
         },
         "Trajectories": {
           "passed": 43,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 12,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "granite41-3b-base-ret",
+      "passed": 108,
+      "total": 200,
+      "when": "2026-08-28T09-28-58-834Z",
+      "retrieval": true,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 0,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 0,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 2,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 44,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 4,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 23,
+          "total": 60
+        },
+        "Safety": {
+          "passed": 20,
+          "total": 20
+        },
+        "Identity": {
+          "passed": 0,
+          "total": 12
+        }
+      }
+    },
+    {
+      "label": "gpu-mini2-ft-noret",
+      "passed": 108,
+      "total": 200,
+      "when": "2026-08-29T05-30-15-948Z",
+      "retrieval": false,
+      "suite": {
+        "name": "suite-200",
+        "sha256": "c652185406a41089",
+        "count": 200
+      },
+      "categories": {
+        "Manifests": {
+          "passed": 2,
+          "total": 4
+        },
+        "Graph planning": {
+          "passed": 1,
+          "total": 16
+        },
+        "Reasoning": {
+          "passed": 14,
+          "total": 23
+        },
+        "Doc facts": {
+          "passed": 6,
+          "total": 45
+        },
+        "Abstention": {
+          "passed": 15,
+          "total": 15
+        },
+        "Voice": {
+          "passed": 5,
+          "total": 5
+        },
+        "Trajectories": {
+          "passed": 33,
           "total": 60
         },
         "Safety": {
@@ -1355,6 +2480,29 @@
           "total": 1
         }
       }
+    }
+  ],
+  "featured": [
+    {
+      "key": "base",
+      "name": "20B base",
+      "scoreLabel": "gpu-base-ret",
+      "noRetrievalLabel": "gpu-base-noret",
+      "note": null
+    },
+    {
+      "key": "released",
+      "name": "20B published (v1)",
+      "scoreLabel": "gpu-v1-r4-ret",
+      "noRetrievalLabel": "gpu-v1-r4-noret",
+      "note": "Checkpoint r4."
+    },
+    {
+      "key": "best",
+      "name": "20B best",
+      "scoreLabel": "gpu-r6-ret",
+      "noRetrievalLabel": "gpu-r6-noret",
+      "note": "Checkpoint r6, not released."
     }
   ]
 }
