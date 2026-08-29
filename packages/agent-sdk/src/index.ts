@@ -1198,6 +1198,17 @@ export interface DriftBundleCompareResult {
   limit: number;
 }
 
+// ─── Documentation retrieval (v0.5) ──────────────────────────────────────
+
+export interface RetrievalStatus {
+  available: boolean;
+  builtAt?: string;
+  chunkCount?: number;
+  embeddingModel?: string;
+  dim?: number;
+  reason?: string;
+}
+
 // ─── MCP write-gateway (v0.5) ────────────────────────────────────────────
 
 export interface GatewayPublicStatus {
@@ -2199,6 +2210,8 @@ export interface OpenAdminOSApi {
   disableGateway?(): Promise<GatewayPublicStatus>;
   regenerateGatewayToken?(): Promise<{ status: GatewayPublicStatus; token: string }>;
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
+  getRetrievalStatus?(): Promise<RetrievalStatus>;
+  refreshRetrievalIndex?(): Promise<RetrievalStatus>;
   exportDriftBaseline?(
     input: ExportDriftBaselineInput,
   ): Promise<ExportDriftBaselineResult>;

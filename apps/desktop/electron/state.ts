@@ -173,6 +173,7 @@ import { IntuneChatService } from "./intune-chat/service.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
 import { GatewayService } from "./gateway/service.js";
+import { RetrievalIndex, type RetrievalStatus } from "./retrieval/retrieval.js";
 import { RunService } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -1027,6 +1028,7 @@ export class AppStateStore {
   private readonly driftService: DriftService;
   private readonly runService: RunService;
   private readonly gatewayService: GatewayService;
+  private retrievalIndexInstance: RetrievalIndex | undefined;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
   private readonly providerListFactory:
@@ -1356,6 +1358,35 @@ export class AppStateStore {
 
   async startGatewayIfEnabled(): Promise<void> {
     await this.gatewayService.startIfEnabled();
+  }
+
+  private retrievalIndex(): RetrievalIndex | undefined {
+    if (!this.userDataPath) return undefined;
+    if (!this.retrievalIndexInstance) {
+      this.retrievalIndexInstance = new RetrievalIndex(
+        join(this.userDataPath, "retrieval-index"),
+      );
+    }
+    return this.retrievalIndexInstance;
+  }
+
+  async getRetrievalStatus(): Promise<RetrievalStatus> {
+    const index = this.retrievalIndex();
+    if (!index) {
+      return {
+        available: false,
+        reason:
+          "The documentation index is not installed. Answers are not documentation-grounded yet.",
+      };
+    }
+    return index.status();
+  }
+
+  async refreshRetrievalIndex(): Promise<RetrievalStatus> {
+    // Rebuilding/downloading the index is host infrastructure; here we
+    // drop the cache so a freshly installed index is picked up.
+    this.retrievalIndexInstance?.reset();
+    return this.getRetrievalStatus();
   }
 
   private emptyAzureOpenAIConfig(): AzureOpenAIProviderConfig {

@@ -5400,6 +5400,14 @@ function registerIpcHandlers() {
     }),
   );
   ipcMain.handle(
+    "openadminos:get-retrieval-status",
+    handleTrusted(() => store.getRetrievalStatus()),
+  );
+  ipcMain.handle(
+    "openadminos:refresh-retrieval-index",
+    handleTrusted(() => store.refreshRetrievalIndex()),
+  );
+  ipcMain.handle(
     "openadminos:get-gateway-status",
     handleTrusted(() => store.getGatewayStatus()),
   );
