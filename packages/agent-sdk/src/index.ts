@@ -438,6 +438,11 @@ export const DEFAULT_GRAPH_READ_SCOPE_NAMES = [
   "AuditLog.Read.All",
   "IdentityRiskyUser.Read.All",
   "SecurityEvents.Read.All",
+  "RoleManagement.Read.Directory",
+  "AdministrativeUnit.Read.All",
+  "Domain.Read.All",
+  "SecurityAlert.Read.All",
+  "SecurityIncident.Read.All",
 ] as const;
 
 /**
@@ -862,6 +867,19 @@ export const GRAPH_CACHE_RESOURCE_KINDS = [
   "managedDeviceOverview",
   "managedDeviceEncryptionStates",
   "troubleshootingEvents",
+  "namedLocations",
+  "authenticationMethodsPolicy",
+  "authorizationPolicy",
+  "crossTenantAccessPolicy",
+  "directoryRoles",
+  "administrativeUnits",
+  "applications",
+  "servicePrincipals",
+  "domains",
+  "securityAlerts",
+  "securityIncidents",
+  "secureScores",
+  "secureScoreControlProfiles",
 ] as const;
 
 export type GraphCacheResourceKind = (typeof GRAPH_CACHE_RESOURCE_KINDS)[number];

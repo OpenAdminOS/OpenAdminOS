@@ -888,6 +888,18 @@ function isAcceptedPermissionSuperset(
   ) {
     return true;
   }
+  // Microsoft's permissions reference lists Policy.Read.AuthenticationMethod
+  // as least-privileged for GET /policies/authenticationMethodsPolicy and
+  // Policy.Read.All as the documented higher-privileged alternative. The
+  // initial consent set already carries Policy.Read.All, so requesting the
+  // narrower duplicate would only add consent-screen noise.
+  if (
+    resource === "authenticationMethodsPolicy" &&
+    scope === "Policy.Read.All" &&
+    documentedScopes.includes("Policy.Read.AuthenticationMethod")
+  ) {
+    return true;
+  }
   return scope === "User.Read.All" && documentedScopes.includes("User.ReadBasic.All");
 }
 
@@ -949,6 +961,19 @@ function graphPmResourceName(
     managedDeviceOverview: "managedDeviceOverview",
     managedDeviceEncryptionStates: "managedDeviceEncryptionState",
     troubleshootingEvents: "deviceManagementTroubleshootingEvent",
+    namedLocations: "namedLocation",
+    authenticationMethodsPolicy: "authenticationMethodsPolicy",
+    authorizationPolicy: "authorizationPolicy",
+    crossTenantAccessPolicy: "crossTenantAccessPolicy",
+    directoryRoles: "directoryRole",
+    administrativeUnits: "administrativeUnit",
+    applications: "application",
+    servicePrincipals: "servicePrincipal",
+    domains: "domain",
+    securityAlerts: "alert",
+    securityIncidents: "incident",
+    secureScores: "secureScore",
+    secureScoreControlProfiles: "secureScoreControlProfile",
   };
   return resourceNames[resource];
 }

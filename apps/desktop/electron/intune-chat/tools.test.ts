@@ -121,6 +121,54 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("graph_get accepts Entra and Defender read paths with their scopes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    try {
+      const store = seededStore(dir, 1);
+      const graphRequests: Array<{ scopes: string[]; path: string }> = [];
+      let currentScopes: string[] = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() {
+          return [];
+        },
+        async retireManagedDevice() {
+          throw new Error("write should not run");
+        },
+        async request(input) {
+          graphRequests.push({ scopes: currentScopes, path: input.path });
+          return { value: [] };
+        },
+      };
+      const ctx = toolContext(store, {
+        graphForScopes: async (scopes) => {
+          currentScopes = scopes;
+          return graph;
+        },
+      });
+
+      const cases: Array<{ path: string; scope: string }> = [
+        { path: "/identity/conditionalAccess/namedLocations", scope: "Policy.Read.All" },
+        { path: "/directoryRoles", scope: "RoleManagement.Read.Directory" },
+        { path: "/security/alerts_v2", scope: "SecurityAlert.Read.All" },
+        { path: "/security/incidents", scope: "SecurityIncident.Read.All" },
+        { path: "/security/secureScores", scope: "SecurityEvents.Read.All" },
+      ];
+      for (const [index, entry] of cases.entries()) {
+        const execution = await executeIntuneChatTool(ctx, "graph_get", {
+          path: entry.path,
+        });
+        assert.equal(execution.trace.error, undefined, `${entry.path} should be allowed`);
+        assert.equal(graphRequests[index]?.path, entry.path);
+        assert.ok(
+          graphRequests[index]?.scopes.includes(entry.scope),
+          `${entry.path} should request ${entry.scope}, got ${graphRequests[index]?.scopes.join(", ")}`,
+        );
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refresh_resource triggers the provided refresh callback", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     try {

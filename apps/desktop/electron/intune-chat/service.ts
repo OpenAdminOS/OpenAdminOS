@@ -1215,7 +1215,13 @@ export class IntuneChatService {
           total: resources.length,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const raw = error instanceof Error ? error.message : String(error);
+        // A 403 on a read resource almost always means the tenant was
+        // consented before this permission existed in the requested set.
+        // Surface the recovery path instead of the raw Graph body.
+        const message = raw.includes("HTTP 403")
+          ? `Microsoft Graph denied read access for ${definition.label}. This tenant was likely connected before OpenAdminOS requested ${definition.scopes.join(", ")}. Reconnect the tenant to grant the new read permissions, then refresh again.`
+          : raw;
         store.recordGraphResourceError({
           tenantId: tenant.id,
           resource,

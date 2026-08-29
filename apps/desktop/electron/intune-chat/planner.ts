@@ -19,6 +19,13 @@ const SCOPES = {
   groups: ["GroupMember.Read.All"],
   audit: ["AuditLog.Read.All"],
   policy: ["Policy.Read.All"],
+  roles: ["RoleManagement.Read.Directory"],
+  adminUnits: ["AdministrativeUnit.Read.All"],
+  applications: ["Application.Read.All"],
+  domains: ["Domain.Read.All"],
+  securityAlerts: ["SecurityAlert.Read.All"],
+  securityIncidents: ["SecurityIncident.Read.All"],
+  secureScore: ["SecurityEvents.Read.All"],
 } satisfies Record<string, string[]>;
 
 export const GRAPH_CACHE_RESOURCES: readonly GraphCacheResourceDefinition[] = [
@@ -182,6 +189,71 @@ export const GRAPH_CACHE_RESOURCES: readonly GraphCacheResourceDefinition[] = [
     label: "Troubleshooting events",
     scopes: SCOPES.managedDevices,
   },
+  {
+    resource: "namedLocations",
+    label: "Named locations",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "authenticationMethodsPolicy",
+    label: "Authentication methods policy",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "authorizationPolicy",
+    label: "Authorization policy",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "crossTenantAccessPolicy",
+    label: "Cross-tenant access policy",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "directoryRoles",
+    label: "Directory roles",
+    scopes: SCOPES.roles,
+  },
+  {
+    resource: "administrativeUnits",
+    label: "Administrative units",
+    scopes: SCOPES.adminUnits,
+  },
+  {
+    resource: "applications",
+    label: "App registrations",
+    scopes: SCOPES.applications,
+  },
+  {
+    resource: "servicePrincipals",
+    label: "Service principals",
+    scopes: SCOPES.applications,
+  },
+  {
+    resource: "domains",
+    label: "Domains",
+    scopes: SCOPES.domains,
+  },
+  {
+    resource: "securityAlerts",
+    label: "Defender alerts",
+    scopes: SCOPES.securityAlerts,
+  },
+  {
+    resource: "securityIncidents",
+    label: "Defender incidents",
+    scopes: SCOPES.securityIncidents,
+  },
+  {
+    resource: "secureScores",
+    label: "Secure Score history",
+    scopes: SCOPES.secureScore,
+  },
+  {
+    resource: "secureScoreControlProfiles",
+    label: "Secure Score controls",
+    scopes: SCOPES.secureScore,
+  },
 ] as const;
 
 export interface PlannedChatContext {
@@ -335,6 +407,39 @@ export function planChatContext(question: string): PlannedChatContext {
   }
   if (matchesAny(lower, ["sign-in", "signin", "signed in", "accessing microsoft 365", "login", "failure", "risk", "risks", "mfa", "conditional access", "ca policy", "blocked", "grant control", "session control", "trusted location", "named location"])) {
     add("signIns", "conditionalAccessPolicies", "users", "groups");
+    if (matchesAny(lower, ["trusted location", "named location", "ip range", "country"])) {
+      add("namedLocations");
+    }
+    if (matchesAny(lower, ["mfa", "authentication method", "authenticator", "passkey", "fido"])) {
+      add("authenticationMethodsPolicy");
+    }
+  }
+  if (matchesAny(lower, ["directory role", "admin role", "global admin", "privileged", "role assignment", "role member"])) {
+    add("directoryRoles", "users");
+  }
+  if (matchesAny(lower, ["administrative unit", "admin unit", "scoped administration", "delegated administration"])) {
+    add("administrativeUnits", "users", "groups");
+  }
+  if (matchesAny(lower, ["app registration", "app secret", "client secret", "certificate expiry", "expiring certificate", "expiring secret", "service principal", "enterprise application", "app credential"])) {
+    add("applications", "servicePrincipals");
+  }
+  if (matchesAny(lower, ["domain", "domains", "federated", "federation", "dns", "verified domain"])) {
+    add("domains");
+  }
+  if (matchesAny(lower, ["alert", "alerts", "incident", "incidents", "defender", "sentinel", "threat", "malware", "phishing", "compromised", "security operations", "soc"])) {
+    add("securityAlerts", "securityIncidents");
+  }
+  if (matchesAny(lower, ["secure score", "securescore", "security posture", "improvement action", "security recommendation"])) {
+    add("secureScores", "secureScoreControlProfiles");
+  }
+  if (matchesAny(lower, ["guest", "external user", "b2b", "cross-tenant", "external collaboration"])) {
+    add("users");
+    if (matchesAny(lower, ["cross-tenant", "b2b", "external collaboration", "inbound", "outbound"])) {
+      add("crossTenantAccessPolicy");
+    }
+    if (matchesAny(lower, ["invite", "default role", "user consent", "authorization policy"])) {
+      add("authorizationPolicy");
+    }
   }
   if (matchesAny(lower, ["audit", "changed", "created", "deleted", "modified"])) {
     add("directoryAudits", "users");
@@ -705,6 +810,125 @@ export function pathForResource(resource: GraphCacheResourceKind): {
       return {
         path: "/deviceManagement/troubleshootingEvents",
         select: ["id", "eventDateTime", "correlationId", "troubleshootingErrorDetails"],
+        query: { "$top": "250" },
+      };
+    case "namedLocations":
+      return {
+        path: "/identity/conditionalAccess/namedLocations",
+        select: ["id", "displayName", "createdDateTime", "modifiedDateTime"],
+      };
+    // The three policy singletons return one object, not a collection;
+    // fetchGraphCachePages unwraps both shapes.
+    case "authenticationMethodsPolicy":
+      return {
+        path: "/policies/authenticationMethodsPolicy",
+      };
+    case "authorizationPolicy":
+      return {
+        path: "/policies/authorizationPolicy",
+      };
+    case "crossTenantAccessPolicy":
+      return {
+        path: "/policies/crossTenantAccessPolicy",
+      };
+    case "directoryRoles":
+      return {
+        path: "/directoryRoles",
+        select: ["id", "displayName", "description", "roleTemplateId"],
+      };
+    case "administrativeUnits":
+      return {
+        // Beta exposes administrative units at the root; v1.0 moved them
+        // under /directory. The cache client pins beta.
+        path: "/administrativeUnits",
+        select: ["id", "displayName", "description", "visibility"],
+      };
+    case "applications":
+      return {
+        path: "/applications",
+        select: [
+          "id",
+          "appId",
+          "displayName",
+          "createdDateTime",
+          "signInAudience",
+          "passwordCredentials",
+          "keyCredentials",
+        ],
+      };
+    case "servicePrincipals":
+      return {
+        path: "/servicePrincipals",
+        select: [
+          "id",
+          "appId",
+          "displayName",
+          "accountEnabled",
+          "servicePrincipalType",
+          "appOwnerOrganizationId",
+          "passwordCredentials",
+          "keyCredentials",
+        ],
+      };
+    case "domains":
+      return {
+        path: "/domains",
+        select: ["id", "isDefault", "isInitial", "isVerified", "authenticationType"],
+      };
+    case "securityAlerts":
+      return {
+        path: "/security/alerts_v2",
+        select: [
+          "id",
+          "title",
+          "severity",
+          "status",
+          "detectionSource",
+          "serviceSource",
+          "createdDateTime",
+          "lastUpdateDateTime",
+        ],
+        query: { "$top": "250", "$orderby": "createdDateTime desc" },
+      };
+    case "securityIncidents":
+      return {
+        path: "/security/incidents",
+        select: [
+          "id",
+          "displayName",
+          "severity",
+          "status",
+          "classification",
+          "determination",
+          "assignedTo",
+          "createdDateTime",
+          "lastUpdateDateTime",
+        ],
+        query: { "$top": "250", "$orderby": "createdDateTime desc" },
+      };
+    case "secureScores":
+      // Daily snapshots, newest first by default; ~90 days of history.
+      return {
+        path: "/security/secureScores",
+        select: ["id", "createdDateTime", "currentScore", "maxScore", "activeUserCount", "licensedUserCount"],
+        query: { "$top": "90" },
+      };
+    case "secureScoreControlProfiles":
+      return {
+        path: "/security/secureScoreControlProfiles",
+        select: [
+          "id",
+          "title",
+          "controlCategory",
+          "actionType",
+          "service",
+          "maxScore",
+          "rank",
+          "deprecated",
+          "implementationCost",
+          "userImpact",
+          "tier",
+        ],
         query: { "$top": "250" },
       };
   }

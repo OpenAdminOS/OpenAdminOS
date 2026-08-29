@@ -21,7 +21,8 @@ describe("setup scope groups", () => {
       ["devices", 6],
       ["apps", 2],
       ["directory", 4],
-      ["security", 4],
+      ["identity", 3],
+      ["security", 6],
     ]);
   });
 

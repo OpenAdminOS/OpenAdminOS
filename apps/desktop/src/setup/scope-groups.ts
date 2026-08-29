@@ -1,7 +1,7 @@
 import type { RequestedScope } from "../shared/openAdminOS";
 
 export interface ScopeGroup {
-  id: "devices" | "apps" | "directory" | "security" | "other";
+  id: "devices" | "apps" | "directory" | "identity" | "security" | "other";
   title: string;
   summary: string;
   scopes: RequestedScope[];
@@ -24,9 +24,15 @@ const GROUPS: readonly Omit<ScopeGroup, "scopes">[] = [
     summary: "Users, groups, directory names, and license tiers.",
   },
   {
+    id: "identity",
+    title: "Identity and access",
+    summary: "Entra directory roles, administrative units, and verified domains.",
+  },
+  {
     id: "security",
     title: "Security and sign-ins",
-    summary: "Conditional Access, sign-in logs, risk signals, and Secure Score.",
+    summary:
+      "Conditional Access, sign-in logs, risk signals, Defender alerts and incidents, and Secure Score.",
   },
 ];
 
@@ -43,10 +49,15 @@ export const SCOPE_GROUP_BY_NAME: Readonly<Record<string, ScopeGroup["id"]>> = {
   "GroupMember.Read.All": "directory",
   "Directory.Read.All": "directory",
   "Organization.Read.All": "directory",
+  "RoleManagement.Read.Directory": "identity",
+  "AdministrativeUnit.Read.All": "identity",
+  "Domain.Read.All": "identity",
   "Policy.Read.All": "security",
   "AuditLog.Read.All": "security",
   "IdentityRiskyUser.Read.All": "security",
   "SecurityEvents.Read.All": "security",
+  "SecurityAlert.Read.All": "security",
+  "SecurityIncident.Read.All": "security",
 };
 
 export function groupRequestedScopes(scopes: RequestedScope[]): ScopeGroup[] {

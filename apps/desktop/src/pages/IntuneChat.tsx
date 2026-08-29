@@ -115,9 +115,18 @@ const promptGroups = [
     label: "Identity",
     prompts: [
       "Which Entra devices are not managed in Intune?",
-      "Which groups have changed recently?",
-      "Which guest accounts have stale sign-in activity?",
+      "Which app registration secrets or certificates expire soon?",
+      "Which users hold privileged directory roles?",
       "Which Conditional Access policies exclude guest or external identities?",
+    ],
+  },
+  {
+    label: "Security",
+    prompts: [
+      "Which high-severity Defender incidents are open?",
+      "Which Defender alerts were raised this week?",
+      "How has Secure Score changed over the last 90 days?",
+      "Which Secure Score improvement actions rank highest?",
     ],
   },
 ];
@@ -4178,6 +4187,19 @@ function chatResourceLabel(resource: GraphCacheResourceKind): string {
     windowsAutopilotProfiles: "Windows Autopilot profiles",
     windowsFeatureUpdateProfiles: "Windows feature update policies",
     windowsQualityUpdateProfiles: "Windows quality update policies",
+    namedLocations: "Named locations",
+    authenticationMethodsPolicy: "Authentication methods policy",
+    authorizationPolicy: "Authorization policy",
+    crossTenantAccessPolicy: "Cross-tenant access policy",
+    directoryRoles: "Directory roles",
+    administrativeUnits: "Administrative units",
+    applications: "App registrations",
+    servicePrincipals: "Service principals",
+    domains: "Domains",
+    securityAlerts: "Defender alerts",
+    securityIncidents: "Defender incidents",
+    secureScores: "Secure Score history",
+    secureScoreControlProfiles: "Secure Score controls",
   };
   return labels[resource];
 }

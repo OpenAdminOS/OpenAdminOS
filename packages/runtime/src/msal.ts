@@ -145,6 +145,36 @@ export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
     rationale:
       "Reads Microsoft Secure Score controls so the Secure score prioritizer can rank improvement actions by impact.",
   },
+  {
+    name: "RoleManagement.Read.Directory",
+    mode: "read",
+    rationale:
+      "Reads Entra directory roles so Chat can answer which admin roles exist and how policies target privileged users. Never modifies role assignments.",
+  },
+  {
+    name: "AdministrativeUnit.Read.All",
+    mode: "read",
+    rationale:
+      "Reads administrative units so scoped-administration questions can be answered with the tenant's actual delegation structure.",
+  },
+  {
+    name: "Domain.Read.All",
+    mode: "read",
+    rationale:
+      "Reads verified domains and their authentication type so Chat can explain federation and domain configuration questions.",
+  },
+  {
+    name: "SecurityAlert.Read.All",
+    mode: "read",
+    rationale:
+      "Reads Microsoft Defender alerts so Chat can summarize open alerts by severity and service. Alert data is read-only; triage actions are never taken.",
+  },
+  {
+    name: "SecurityIncident.Read.All",
+    mode: "read",
+    rationale:
+      "Reads Microsoft Defender incidents so Chat can report incident status, classification, and assignment. Incidents are never modified.",
+  },
 ];
 
 const SUCCESS_TEMPLATE = `<!doctype html>
