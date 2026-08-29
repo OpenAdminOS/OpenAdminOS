@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-29T06:36:47.163Z",
+  "generatedAt": "2026-08-29T07:05:16.085Z",
   "schemaVersion": 2,
   "model": {
     "name": "OpenAdmin",
@@ -2498,11 +2498,11 @@
       "note": "Checkpoint r4."
     },
     {
-      "key": "best",
-      "name": "20B best",
-      "scoreLabel": "gpu-r6-ret",
-      "noRetrievalLabel": "gpu-r6-noret",
-      "note": "Checkpoint r6, not released."
+      "key": "curated-0",
+      "name": "8B Lite",
+      "scoreLabel": "gpu-mini-ft-ret",
+      "noRetrievalLabel": "gpu-mini-ft-noret",
+      "note": "OpenAdmin Lite (Ministral 3 8B, 4.9 GB), not yet released."
     }
   ]
 }

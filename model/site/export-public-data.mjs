@@ -106,26 +106,24 @@ function featuredSeries(key, name, score, note = null) {
   return { key, name, scoreLabel: score.label, noRetrievalLabel: noRetrieval?.label ?? null, note };
 }
 
-// Featured is, in order: the base model's newest suite-scored retrieval run,
-// the released version's newest one, and the best non-released checkpoint's
-// newest one. Missing suite provenance omits a candidate; labels and task counts
-// never stand in for an explicit suite.
-// TODO(ugur): curate featured labels by hand if this rule picks wrong.
+// Featured is an EXPLICIT curation, never a max() over scores: score alone
+// cannot see that a checkpoint is unshippable. r6 is the highest-scoring
+// checkpoint and fails the release gate because it fabricates documentation
+// for features that do not exist (abstention 10/15); it belongs in the run
+// log as a documented failure, not in a headline chart. Only checkpoints a
+// human has decided are fit to show may appear here. Missing suite provenance
+// still omits a candidate; labels and task counts never stand in for a suite.
 const baseScore = newestScore("base", true);
 const releasedScore = newestScore(releasedRun.id, true);
-const releasedIds = new Set(releasedRuns.map((run) => run.id));
-const bestCheckpoint = trainingRuns
-  .filter((run) => !releasedIds.has(run.id))
-  .map((run) => ({ run, score: newestScore(run.id, true) }))
-  .filter(({ score }) => score)
-  .sort((a, b) => (b.score.passed / b.score.total) - (a.score.passed / a.score.total)
-    || b.score.when.localeCompare(a.score.when))[0] ?? null;
+const CURATED_EXTRA = [
+  // checkpoint id -> display name + note. Keep this list human-edited.
+  { checkpoint: "lite-r1", name: "8B Lite", note: "OpenAdmin Lite (Ministral 3 8B, 4.9 GB), not yet released." },
+];
 const featured = [
   featuredSeries("base", "20B base", baseScore),
   featuredSeries("released", `20B published (${releasedRun.released})`, releasedScore, `Checkpoint ${releasedRun.id}.`),
-  bestCheckpoint
-    ? featuredSeries("best", `${bestCheckpoint.run.track === "8b" ? "8B" : "20B"} best`, bestCheckpoint.score, `Checkpoint ${bestCheckpoint.run.id}, not released.`)
-    : null,
+  ...CURATED_EXTRA.map(({ checkpoint, name, note }, i) =>
+    featuredSeries(`curated-${i}`, name, newestScore(checkpoint, true), note)),
 ].filter(Boolean);
 
 const out = {
