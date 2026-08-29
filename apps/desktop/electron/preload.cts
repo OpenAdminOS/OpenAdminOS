@@ -233,6 +233,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:retire-drift-baseline", input),
   getDriftBaselineDrift: (input) =>
     ipcRenderer.invoke("openadminos:get-drift-baseline-drift", input),
+  getDriftTimeCompare: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-time-compare", input),
   getGraphCacheRefreshSchedule: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-refresh-schedule", tenantId),
   setGraphCacheRefreshSchedule: (input) =>

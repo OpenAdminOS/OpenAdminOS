@@ -11,6 +11,8 @@ import type {
   DriftObjectHistoryInput,
   DriftObjectHistoryResult,
   DriftStatus,
+  DriftTimeCompareInput,
+  DriftTimeCompareResult,
   DriftTimelineEntry,
   DriftTimelineInput,
   DriftTimelineResult,
@@ -114,6 +116,18 @@ export interface DriftServiceHost {
     baselineId: string;
     resources: readonly GraphCacheResourceKind[];
   }): DriftBaselineChangeRecord[];
+  readDriftStateAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+    atIso: string,
+  ): Map<
+    string,
+    { version: number; contentHash: string; rawJson: string; displayName?: string }
+  >;
+  getOldestDriftSnapshotAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+  ): string | undefined;
 }
 
 export class DriftService {
@@ -396,6 +410,96 @@ export class DriftService {
     };
   }
 
+  async getTimeCompare(input: DriftTimeCompareInput): Promise<DriftTimeCompareResult> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    const from = requireIsoInstant(input.from, "from");
+    const to = requireIsoInstant(input.to, "to");
+    if (Date.parse(from) >= Date.parse(to)) {
+      throw new Error("Compare requires the from moment to be before the to moment.");
+    }
+    const resources = normalizeTrackedResources(input.resources);
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+
+    let retentionLimited = false;
+    const countsByResource = new Map<
+      GraphCacheResourceKind,
+      { added: number; removed: number; modified: number }
+    >();
+    const entries: DriftBaselineDriftEntry[] = [];
+
+    for (const resource of resources) {
+      const counts = { added: 0, removed: 0, modified: 0 };
+      countsByResource.set(resource, counts);
+      const oldest = this.host.getOldestDriftSnapshotAt(tenant.id, resource);
+      if (oldest !== undefined && from < oldest) retentionLimited = true;
+
+      const before = this.host.readDriftStateAt(tenant.id, resource, from);
+      const after = this.host.readDriftStateAt(tenant.id, resource, to);
+
+      for (const [graphId, current] of after) {
+        const previous = before.get(graphId);
+        if (!previous) {
+          counts.added += 1;
+          entries.push(
+            baselineDriftEntry({
+              resource,
+              graphId,
+              kind: "added",
+              ...(current.displayName ? { displayName: current.displayName } : {}),
+              currentRawJson: current.rawJson,
+            }),
+          );
+        } else if (previous.contentHash !== current.contentHash) {
+          counts.modified += 1;
+          entries.push(
+            baselineDriftEntry({
+              resource,
+              graphId,
+              kind: "modified",
+              ...(current.displayName
+                ? { displayName: current.displayName }
+                : previous.displayName
+                  ? { displayName: previous.displayName }
+                  : {}),
+              pinnedRawJson: previous.rawJson,
+              currentRawJson: current.rawJson,
+            }),
+          );
+        }
+      }
+      for (const [graphId, previous] of before) {
+        if (after.has(graphId)) continue;
+        counts.removed += 1;
+        entries.push(
+          baselineDriftEntry({
+            resource,
+            graphId,
+            kind: "removed",
+            ...(previous.displayName ? { displayName: previous.displayName } : {}),
+            pinnedRawJson: previous.rawJson,
+          }),
+        );
+      }
+    }
+    entries.sort(compareBaselineEntries);
+
+    return {
+      tenantId: tenant.id,
+      from,
+      to,
+      evaluatedAt: new Date().toISOString(),
+      resources: resources.map((resource) => ({
+        resource,
+        resourceLabel: labelForResource(resource),
+        ...(countsByResource.get(resource) ?? { added: 0, removed: 0, modified: 0 }),
+      })),
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+      ...(retentionLimited ? { retentionLimited: true } : {}),
+    };
+  }
+
   private async resolveTenant(tenantId: string): Promise<TenantRecord> {
     const persisted = await this.host.read();
     return this.host.resolveTenant(persisted, tenantId);
@@ -535,6 +639,13 @@ function ensureTrackedResource(resource: GraphCacheResourceKind): void {
   if (!DRIFT_TRACKED_RESOURCES.has(resource)) {
     throw new Error(`Resource is not tracked for drift: ${resource}`);
   }
+}
+
+function requireIsoInstant(value: string, label: "from" | "to"): string {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`Compare ${label} must be an ISO timestamp.`);
+  }
+  return value;
 }
 
 function normalizeLimit(value: unknown, fallback: number): number {

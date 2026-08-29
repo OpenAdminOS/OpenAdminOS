@@ -74,6 +74,8 @@ import type {
   DriftObjectHistoryInput,
   DriftObjectHistoryResult,
   DriftStatus,
+  DriftTimeCompareInput,
+  DriftTimeCompareResult,
   DriftTimelineInput,
   DriftTimelineResult,
   ListDriftBaselinesInput,
@@ -1157,6 +1159,10 @@ export class AppStateStore {
         host.requireIntelligenceStore().retireDriftBaseline(tenantId, baselineId, now),
       listDriftBaselineChanges: (input) =>
         host.requireIntelligenceStore().listDriftBaselineChanges(input),
+      readDriftStateAt: (tenantId, resource, atIso) =>
+        host.requireIntelligenceStore().readDriftStateAt(tenantId, resource, atIso),
+      getOldestDriftSnapshotAt: (tenantId, resource) =>
+        host.requireIntelligenceStore().getOldestDriftSnapshotAt(tenantId, resource),
     });
     this.runService = new RunService({
       read: () => host.read(),
@@ -2055,6 +2061,12 @@ export class AppStateStore {
     input: DriftBaselineDriftInput,
   ): Promise<DriftBaselineDriftResult> {
     return this.driftService.getBaselineDrift(input);
+  }
+
+  async getDriftTimeCompare(
+    input: DriftTimeCompareInput,
+  ): Promise<DriftTimeCompareResult> {
+    return this.driftService.getTimeCompare(input);
   }
 
   async getGraphCacheRefreshSchedule(

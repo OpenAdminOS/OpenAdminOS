@@ -1090,6 +1090,39 @@ export interface DriftBaselineDriftResult {
   limit: number;
 }
 
+// ─── Point-in-time compare (v0.5) ────────────────────────────────────────
+//
+// Compares the tracked-configuration state at two moments, reconstructed
+// from retained drift version intervals. Entries and per-resource counts
+// share the baseline-drift shapes.
+
+export type DriftCompareEntry = DriftBaselineDriftEntry;
+export type DriftCompareResourceCounts = DriftBaselineResourceDrift;
+
+export interface DriftTimeCompareInput {
+  tenantId: string;
+  from: string;
+  to: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+}
+
+export interface DriftTimeCompareResult {
+  tenantId: string;
+  from: string;
+  to: string;
+  evaluatedAt: string;
+  resources: DriftCompareResourceCounts[];
+  entries: DriftCompareEntry[];
+  hasMore: boolean;
+  limit: number;
+  /**
+   * True when `from` predates the oldest retained drift snapshot for at
+   * least one compared resource, so the "before" side may be partial.
+   */
+  retentionLimited?: boolean;
+}
+
 export interface RefreshGraphCacheOptions {
   resources?: GraphCacheResourceKind[];
   tenantId?: string;
@@ -1983,6 +2016,9 @@ export interface OpenAdminOSApi {
   getDriftBaselineDrift?(
     input: DriftBaselineDriftInput,
   ): Promise<DriftBaselineDriftResult>;
+  getDriftTimeCompare?(
+    input: DriftTimeCompareInput,
+  ): Promise<DriftTimeCompareResult>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,

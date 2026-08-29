@@ -368,6 +368,91 @@ describe("named drift baselines", () => {
   });
 });
 
+describe("point-in-time compare", () => {
+  const RESOURCE = "configurationPolicies" as const;
+
+  function refresh(
+    store: IntelligenceSqliteStore,
+    refreshedAt: string,
+    rows: Array<Record<string, unknown>>,
+  ): void {
+    store.replaceGraphResources({
+      tenantId: "tenant-1",
+      resource: RESOURCE,
+      label: "Settings catalog policies",
+      scopeSet: ["DeviceManagementConfiguration.Read.All"],
+      refreshedAt,
+      rows,
+    });
+  }
+
+  it("diffs the reconstructed states at two moments", async () => {
+    await withDriftService(async ({ service, store }) => {
+      refresh(store, "2026-08-10T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "A" },
+        { id: "policy-2", displayName: "Policy Two", setting: "B" },
+      ]);
+      refresh(store, "2026-08-15T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "CHANGED" },
+        { id: "policy-3", displayName: "Policy Three", setting: "C" },
+      ]);
+      refresh(store, "2026-08-20T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "CHANGED AGAIN" },
+        { id: "policy-3", displayName: "Policy Three", setting: "C" },
+      ]);
+
+      // Between capture 1 and capture 2: policy-1 modified, policy-2
+      // removed, policy-3 added. Capture 3 is after the window and must
+      // not leak into the "to" side.
+      const compare = await service.getTimeCompare({
+        tenantId: "tenant-1",
+        from: "2026-08-10T12:00:00.000Z",
+        to: "2026-08-15T12:00:00.000Z",
+      });
+      const counts = compare.resources.find((entry) => entry.resource === RESOURCE);
+      assert.deepEqual(
+        { added: counts?.added, removed: counts?.removed, modified: counts?.modified },
+        { added: 1, removed: 1, modified: 1 },
+      );
+      const modified = compare.entries.find((entry) => entry.changeKind === "modified");
+      const settingChange = modified?.changes.find((change) => change.path === "setting");
+      assert.equal(settingChange?.before, "A");
+      assert.equal(settingChange?.after, "CHANGED");
+      assert.equal(compare.retentionLimited, undefined);
+
+      const identical = await service.getTimeCompare({
+        tenantId: "tenant-1",
+        from: "2026-08-15T12:00:00.000Z",
+        to: "2026-08-15T13:00:00.000Z",
+      });
+      assert.equal(identical.entries.length, 0);
+    });
+  });
+
+  it("flags retention-limited windows and rejects inverted ranges", async () => {
+    await withDriftService(async ({ service, store }) => {
+      refresh(store, "2026-08-10T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "A" },
+      ]);
+      const limited = await service.getTimeCompare({
+        tenantId: "tenant-1",
+        from: "2026-08-01T00:00:00.000Z",
+        to: "2026-08-15T00:00:00.000Z",
+      });
+      assert.equal(limited.retentionLimited, true);
+
+      await assert.rejects(
+        service.getTimeCompare({
+          tenantId: "tenant-1",
+          from: "2026-08-15T00:00:00.000Z",
+          to: "2026-08-01T00:00:00.000Z",
+        }),
+        /from moment to be before/i,
+      );
+    });
+  });
+});
+
 async function withDriftService(
   run: (input: {
     service: DriftService;
@@ -414,6 +499,10 @@ async function withDriftService(
     retireDriftBaseline: (tenantId, baselineId, now) =>
       store.retireDriftBaseline(tenantId, baselineId, now),
     listDriftBaselineChanges: (input) => store.listDriftBaselineChanges(input),
+    readDriftStateAt: (tenantId, resource, atIso) =>
+      store.readDriftStateAt(tenantId, resource, atIso),
+    getOldestDriftSnapshotAt: (tenantId, resource) =>
+      store.getOldestDriftSnapshotAt(tenantId, resource),
   });
   try {
     await run({ service, store });

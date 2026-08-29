@@ -1449,6 +1449,74 @@ export class IntelligenceSqliteStore {
   }
 
   /**
+   * The tracked-configuration state as of `atIso`, reconstructed from
+   * retained version intervals: per object, the highest version whose
+   * first_seen_at is at or before the moment, excluded when the object
+   * was already removed by then. Versions increase monotonically with
+   * first_seen_at, so MAX(version) among earlier-seen rows is the state.
+   */
+  readDriftStateAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+    atIso: string,
+  ): Map<
+    string,
+    { version: number; contentHash: string; rawJson: string; displayName?: string }
+  > {
+    const rows = this.db
+      .prepare(
+        `SELECT v.graph_id, v.version, v.content_hash, v.raw_json, v.display_name, v.removed_at
+         FROM drift_object_versions v
+         INNER JOIN (
+           SELECT graph_id, MAX(version) AS version
+           FROM drift_object_versions
+           WHERE tenant_id = ? AND resource = ? AND first_seen_at <= ?
+           GROUP BY graph_id
+         ) latest
+           ON latest.graph_id = v.graph_id AND latest.version = v.version
+         WHERE v.tenant_id = ? AND v.resource = ?`,
+      )
+      .all(tenantId, resource, atIso, tenantId, resource) as unknown as Array<{
+      graph_id: string;
+      version: number;
+      content_hash: string;
+      raw_json: string;
+      display_name: string | null;
+      removed_at: string | null;
+    }>;
+    const state = new Map<
+      string,
+      { version: number; contentHash: string; rawJson: string; displayName?: string }
+    >();
+    for (const row of rows) {
+      if (row.removed_at !== null && row.removed_at <= atIso) continue;
+      state.set(row.graph_id, {
+        version: row.version,
+        contentHash: row.content_hash,
+        rawJson: row.raw_json,
+        ...(row.display_name ? { displayName: row.display_name } : {}),
+      });
+    }
+    return state;
+  }
+
+  getOldestDriftSnapshotAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+  ): string | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT captured_at
+         FROM drift_snapshots
+         WHERE tenant_id = ? AND resource = ?
+         ORDER BY captured_at ASC, id ASC
+         LIMIT 1`,
+      )
+      .get(tenantId, resource) as { captured_at?: string } | undefined;
+    return row?.captured_at;
+  }
+
+  /**
    * Versions pinned by a non-retired baseline must survive retention
    * pruning, or the baseline could no longer explain what it protects.
    */
