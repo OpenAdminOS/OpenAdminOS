@@ -135,6 +135,54 @@ except Exception as e:
     # prompts and tool outputs. Fail loudly instead of burning GPU hours.
     raise SystemExit(f"ABORT: assistant-only loss masking failed ({e}). Fix before spending GPU.")
 
+# Live-board heartbeat for training.openadminos.com. Inert unless the pod
+# sets TRAINING_STATE_TOKEN and TRAINING_RUN_ID. Stdlib only, 5s timeout,
+# every exception swallowed: reporting can never touch the run itself.
+import os
+
+if os.environ.get("TRAINING_STATE_TOKEN") and os.environ.get("TRAINING_RUN_ID"):
+    import time as _hb_time
+    import urllib.request as _hb_rq
+    from transformers import TrainerCallback as _HbBase
+
+    class _Heartbeat(_HbBase):
+        def __init__(self):
+            self._last = 0.0
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            now = _hb_time.time()
+            if now - self._last < 300:
+                return
+            self._last = now
+            try:
+                detail = f"step {state.global_step:,}/{state.max_steps:,}"
+                loss = (logs or {}).get("loss")
+                if loss is not None:
+                    detail += f" · loss {loss:.2f}"
+                body = json.dumps({
+                    "run": os.environ["TRAINING_RUN_ID"],
+                    "stage": "train",
+                    "detail": detail,
+                }).encode()
+                req = _hb_rq.Request(
+                    os.environ.get(
+                        "TRAINING_STATE_URL",
+                        "https://training.openadminos.com/api/training/run-state",
+                    ),
+                    data=body,
+                    method="POST",
+                    headers={
+                        "Authorization": "Bearer " + os.environ["TRAINING_STATE_TOKEN"],
+                        "Content-Type": "application/json",
+                    },
+                )
+                _hb_rq.urlopen(req, timeout=5).close()
+            except Exception:
+                pass
+
+    trainer.add_callback(_Heartbeat())
+    print("live heartbeat enabled", flush=True)
+
 print(trainer.train(), flush=True)
 
 model.save_pretrained("/workspace/out/adapter")
