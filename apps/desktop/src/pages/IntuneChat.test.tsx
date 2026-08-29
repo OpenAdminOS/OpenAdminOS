@@ -71,6 +71,12 @@ describe("IntuneChat guest exploration", () => {
       bridge,
     });
 
+    // A fresh install auto-opens setup; this test covers the contextual
+    // path, so dismiss the first-run dialog before drafting a question.
+    await user.click(
+      await screen.findByRole("button", { name: "Close" }),
+    );
+
     const composer = await screen.findByPlaceholderText(
       "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
     );

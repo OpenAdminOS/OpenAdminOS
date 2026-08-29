@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { SETUP_COPY } from "../copy";
 import { useToast } from "../components/Toast";
 import { isProviderImplemented } from "../shared/providers";
@@ -34,6 +34,7 @@ const SetupFlowContext = createContext<SetupFlowValue | null>(null);
 
 export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const {
     state,
@@ -121,8 +122,23 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     if (loading || restoredRef.current) return;
     restoredRef.current = true;
     const restored = readPendingIntent();
-    if (restored) beginFlow(restored);
-  }, [beginFlow, loading]);
+    if (restored) {
+      beginFlow(restored);
+      return;
+    }
+    // First run: a launch with zero connected tenants opens the setup flow
+    // unprompted, so a fresh install starts with permissions and Microsoft
+    // sign-in instead of an inert chat screen. Once a tenant exists, setup
+    // stays contextual. Skipped for the menu-bar companion window and
+    // renderer-only development, where tenant auth is unavailable.
+    if (
+      window.openAdminOS &&
+      state.tenants.length === 0 &&
+      !location.pathname.startsWith("/companion")
+    ) {
+      beginFlow(null, "permissions");
+    }
+  }, [beginFlow, loading, location.pathname, state.tenants.length]);
 
   useEffect(() => {
     if (!open || stage !== "waiting") return;
@@ -184,8 +200,11 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         return;
       }
       setConnectedTenant(tenant);
+      // Intent-less flows (first run, status strip, Settings) continue into
+      // provider selection when no provider is connected yet, so a fresh
+      // install is fully usable when the dialog closes.
       setStage(
-        intent && intentNeedsProvider(intent) && !providerReadyForIntent(intent)
+        (!intent || intentNeedsProvider(intent)) && !providerReadyForIntent(intent)
           ? "provider"
           : "ready",
       );

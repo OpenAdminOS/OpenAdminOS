@@ -1542,9 +1542,11 @@ Removed from navigation:
 - **Home** — its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
 - **Report issue** — available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
-### First run and contextual activation (locked for v0.4)
+### First run and contextual activation (updated for v0.5)
 
-Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`. Users can inspect Chat, Agents, Changes, and Settings, select a suggested question, and edit a local draft before granting tenant access. The empty-state heading, explanation, and suggested questions stay centered as one block immediately above the composer rather than floating in the middle of the transcript area.
+Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`.
+
+**v0.5 decision (2026-08-29):** a launch with zero connected tenants opens the shared setup dialog automatically (permissions review, then Microsoft sign-in, then provider selection when no provider is connected), so a fresh install starts guided instead of presenting an inert chat screen. The dialog is dismissible and auto-opens at most once per launch; a restored pending intent takes precedence; the menu-bar companion window and renderer-only development never auto-open. Once at least one tenant exists, setup returns to being purely contextual. Users can still dismiss the dialog and inspect Chat, Agents, Changes, and Settings, select a suggested question, and edit a local draft before granting tenant access. The empty-state heading, explanation, and suggested questions stay centered as one block immediately above the composer rather than floating in the middle of the transcript area.
 
 Setup opens only when an action needs tenant context: sending Chat, starting or rerunning an agent, opening tenant Changes from its empty state, refreshing tenant cache data, or explicitly choosing Connect tenant. The shared setup dialog follows this order:
 
@@ -1680,7 +1682,7 @@ Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent 
 
 These must exist and work well before any public release.
 
-1. **Contextual first-run activation** — the real Chat-first shell opens immediately. Tenant permissions, browser sign-in, and provider readiness appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
+1. **Guided first-run activation**: the real Chat-first shell opens immediately, and a zero-tenant launch auto-opens the setup dialog (see §4a). Tenant permissions, browser sign-in, and provider readiness otherwise appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
 2. **MSAL consent flow** — Lawyer-grade transparency about Graph scopes requested. Read scopes only by default; write scopes requested per-agent at install time.
 3. **LLM provider configuration** — All 5 providers, test connection, model dropdowns populated by querying the provider, per-agent overrides.
 4. **Diff confirmation for write agents** — Side-by-side before/after, scope summary, typed confirmation for destructive actions.

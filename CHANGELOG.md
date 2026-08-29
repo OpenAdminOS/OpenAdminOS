@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- A fresh install now starts guided: launching with zero connected tenants opens tenant setup automatically (permissions review, Microsoft sign-in, then provider selection when none is connected). The dialog is dismissible, appears at most once per launch, and setup stays contextual once a tenant exists.
+
 - Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.
 - Release publishing verifies the Windows Authenticode signature and signer common name before uploading, and fails with the actual certificate subject when it does not match the configured publisher.
 
