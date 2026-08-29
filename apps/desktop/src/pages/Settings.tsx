@@ -43,6 +43,7 @@ import {
   type ProviderTestResult,
   type ProviderSummary,
   type ReleaseDiagnostics,
+  type RetrievalStatus,
   type RunHistoryPruneResult,
   type RunHistoryRetentionSettings,
   type SandboxSettings,
@@ -52,6 +53,7 @@ import {
   type SetAzureOpenAIProviderConfigInput,
   type TenantRecord,
   type TrustState,
+  type UsageTelemetryPayload,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
@@ -105,6 +107,7 @@ export default function Settings() {
     disconnectTenant,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
+    setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
   const { openSetup } = useSetupFlow();
@@ -333,8 +336,10 @@ export default function Settings() {
               registryRefreshError={state.registryRefreshError}
               lastRegistryRefresh={state.lastRegistryRefresh}
               registryInstallCountsEnabled={state.registryInstallCountsEnabled}
+              usageTelemetryEnabled={state.usageTelemetryEnabled ?? false}
               onSetRegistrySource={setRegistrySource}
               onSetRegistryInstallCountsEnabled={setRegistryInstallCountsEnabled}
+              onSetUsageTelemetryEnabled={setUsageTelemetryEnabled}
             />
           )}
           {section === "about" && <AboutSection />}
@@ -3497,25 +3502,158 @@ function PrivacySection({
   registryRefreshError,
   lastRegistryRefresh,
   registryInstallCountsEnabled,
+  usageTelemetryEnabled,
   onSetRegistrySource,
   onSetRegistryInstallCountsEnabled,
+  onSetUsageTelemetryEnabled,
 }: {
   trust: TrustState;
   registrySource: string;
   registryRefreshError: string | null;
   lastRegistryRefresh: string | null;
   registryInstallCountsEnabled: boolean;
+  usageTelemetryEnabled: boolean;
   onSetRegistrySource: (
     url: string,
     options?: { confirmExternalSource?: boolean },
   ) => Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   onSetRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
+  onSetUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
 }) {
   const platform = window.openAdminOS?.platform ?? "unknown";
   const [savingInstallCounts, setSavingInstallCounts] = useState(false);
   const [installCountsError, setInstallCountsError] = useState<string | null>(null);
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
+  const [telemetryPreview, setTelemetryPreview] = useState<{
+    enabled: boolean;
+    endpointConfigured: boolean;
+    payload: UsageTelemetryPayload;
+  } | null>(null);
+  const [telemetryPreviewLoading, setTelemetryPreviewLoading] = useState(true);
+  const [telemetrySaving, setTelemetrySaving] = useState(false);
+  const [telemetryTestSending, setTelemetryTestSending] = useState(false);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const [telemetryTestResult, setTelemetryTestResult] = useState<string | null>(null);
+  const [retrievalStatus, setRetrievalStatus] = useState<RetrievalStatus | null>(null);
+  const [retrievalLoading, setRetrievalLoading] = useState(true);
+  const [retrievalRefreshing, setRetrievalRefreshing] = useState(false);
+  const [retrievalError, setRetrievalError] = useState<string | null>(null);
   const isOfficialRegistry = isOfficialRegistrySource(registrySource);
+  const telemetryToggleAvailable = Boolean(
+    window.openAdminOS?.setUsageTelemetryEnabled,
+  );
+
+  const loadTelemetryPreview = useCallback(async () => {
+    const getPreview = window.openAdminOS?.getUsageTelemetryPreview;
+    setTelemetryPreviewLoading(true);
+    setTelemetryError(null);
+    if (!getPreview) {
+      setTelemetryPreview(null);
+      setTelemetryError("The exact telemetry preview is unavailable in this build.");
+      setTelemetryPreviewLoading(false);
+      return;
+    }
+
+    try {
+      setTelemetryPreview(await getPreview());
+    } catch (error) {
+      setTelemetryError(
+        error instanceof Error
+          ? error.message
+          : "The exact telemetry preview could not be loaded.",
+      );
+    } finally {
+      setTelemetryPreviewLoading(false);
+    }
+  }, []);
+
+  const loadRetrievalStatus = useCallback(async () => {
+    const getStatus = window.openAdminOS?.getRetrievalStatus;
+    setRetrievalLoading(true);
+    setRetrievalError(null);
+    if (!getStatus) {
+      setRetrievalStatus({
+        available: false,
+        reason: "Documentation retrieval is unavailable in this build.",
+      });
+      setRetrievalLoading(false);
+      return;
+    }
+
+    try {
+      setRetrievalStatus(await getStatus());
+    } catch (error) {
+      setRetrievalStatus(null);
+      setRetrievalError(
+        error instanceof Error
+          ? error.message
+          : "The documentation index status could not be checked.",
+      );
+    } finally {
+      setRetrievalLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTelemetryPreview();
+  }, [loadTelemetryPreview, usageTelemetryEnabled]);
+
+  useEffect(() => {
+    void loadRetrievalStatus();
+  }, [loadRetrievalStatus]);
+
+  const toggleUsageTelemetry = async () => {
+    setTelemetrySaving(true);
+    setTelemetryError(null);
+    setTelemetryTestResult(null);
+    try {
+      await onSetUsageTelemetryEnabled(!usageTelemetryEnabled);
+    } catch (error) {
+      setTelemetryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTelemetrySaving(false);
+    }
+  };
+
+  const sendTelemetryTest = async () => {
+    const sendTest = window.openAdminOS?.sendUsageTelemetryTest;
+    if (!sendTest) {
+      setTelemetryTestResult("Test pings are unavailable in this build.");
+      return;
+    }
+
+    setTelemetryTestSending(true);
+    setTelemetryError(null);
+    setTelemetryTestResult(null);
+    try {
+      const result = await sendTest();
+      setTelemetryTestResult(
+        result.sent ? "Test ping sent." : "Test ping was not sent.",
+      );
+    } catch (error) {
+      setTelemetryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTelemetryTestSending(false);
+    }
+  };
+
+  const refreshRetrievalStatus = async () => {
+    const refreshIndex = window.openAdminOS?.refreshRetrievalIndex;
+    if (!refreshIndex) {
+      setRetrievalError("Documentation index refresh is unavailable in this build.");
+      return;
+    }
+
+    setRetrievalRefreshing(true);
+    setRetrievalError(null);
+    try {
+      setRetrievalStatus(await refreshIndex());
+    } catch (error) {
+      setRetrievalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRetrievalRefreshing(false);
+    }
+  };
 
   const toggleRegistryInstallCounts = async () => {
     setSavingInstallCounts(true);
@@ -3538,13 +3676,112 @@ function PrivacySection({
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
           id="tenant-telemetry"
-          description="No tenant data, prompts, run results, analytics events, or error-reporting data are collected. Optional aggregate agent-install counts are controlled separately below. Crash logs stay on this device."
+          description="Tenant data, prompts, run results, and error-reporting data are never collected. Optional usage telemetry and aggregate registry install counts are controlled separately below. Crash logs stay on this device."
           control={
             <Pill tone="success">
               <StatusDot tone="success" /> Not collected
             </Pill>
           }
         />
+        <Card>
+          <section aria-labelledby="usage-telemetry-title">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
+              <div className="min-w-0 max-w-[520px]">
+                <h3
+                  id="usage-telemetry-title"
+                  className="text-[13px] font-medium text-[var(--color-text)]"
+                >
+                  Usage telemetry
+                </h3>
+                <p
+                  id="usage-telemetry-description"
+                  className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]"
+                >
+                  Tenant, agent, and run counts are converted to bucketed ranges on
+                  this device. Tenant content, prompts, and results are never sent.
+                  Nothing is sent unless this setting is on and this build has a
+                  collector configured.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                  {usageTelemetryEnabled ? "On" : "Off"}
+                </span>
+                <SettingsSwitch
+                  checked={usageTelemetryEnabled}
+                  disabled={!telemetryToggleAvailable || telemetrySaving}
+                  label="Usage telemetry"
+                  describedBy="usage-telemetry-description"
+                  onClick={() => void toggleUsageTelemetry()}
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h4 className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-soft)]">
+                  Exactly what a ping contains
+                </h4>
+                <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+                  counts and versions only
+                </span>
+              </div>
+              <OutputJsonBlock
+                value={telemetryPreview?.payload ?? null}
+                copyLabel="Copy telemetry payload"
+                className="mt-2"
+              />
+              {telemetryPreviewLoading && (
+                <p
+                  role="status"
+                  className="mt-2 text-[11px] text-[var(--color-text-muted)]"
+                >
+                  Loading exact payload…
+                </p>
+              )}
+              {telemetryPreview && !telemetryPreview.endpointConfigured && (
+                <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  This build has no telemetry collector configured, so nothing is
+                  sent even when this is on.
+                </p>
+              )}
+              {telemetryError && (
+                <div
+                  role="alert"
+                  className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+                >
+                  {telemetryError}
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <p className="max-w-[420px] text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  A test ping sends the preview once. It does not change this setting.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={
+                    !usageTelemetryEnabled ||
+                    !telemetryPreview?.endpointConfigured ||
+                    telemetryTestSending
+                  }
+                  onClick={() => void sendTelemetryTest()}
+                >
+                  {telemetryTestSending ? "Sending…" : "Send a test ping"}
+                </Button>
+              </div>
+              {telemetryTestResult && (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="mt-2 text-right text-[11px] text-[var(--color-text-soft)]"
+                >
+                  {telemetryTestResult}
+                </p>
+              )}
+            </div>
+          </section>
+        </Card>
         <SettingRow
           id="registry-install-counts"
           description="When enabled, installing a public registry agent sends only agent slug, app version, platform, and a yearly per-agent hash for aggregate counts. No tenant data, prompts, run results, or Graph data are sent."
@@ -3602,6 +3839,102 @@ function PrivacySection({
             {registryRefreshError}
           </div>
         )}
+        <Card>
+          <section aria-labelledby="documentation-grounding-title" className="px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 max-w-[520px]">
+                <h3
+                  id="documentation-grounding-title"
+                  className="text-[13px] font-medium text-[var(--color-text)]"
+                >
+                  Documentation grounding
+                </h3>
+                <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                  Retrieval grounds answers in local Microsoft documentation. It runs
+                  on this device and never sends the question to a remote service when
+                  a local provider is selected.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                leadingIcon={<IconRefresh size={12} />}
+                disabled={
+                  retrievalLoading ||
+                  retrievalRefreshing ||
+                  !window.openAdminOS?.refreshRetrievalIndex
+                }
+                onClick={() => void refreshRetrievalStatus()}
+              >
+                {retrievalRefreshing
+                  ? "Checking…"
+                  : retrievalStatus?.available
+                    ? "Refresh"
+                    : "Check for index"}
+              </Button>
+            </div>
+
+            <div aria-live="polite" aria-busy={retrievalLoading || retrievalRefreshing}>
+              {retrievalLoading ? (
+                <div
+                  role="status"
+                  className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                >
+                  Checking the local documentation index…
+                </div>
+              ) : retrievalStatus?.available ? (
+                <div className="mt-4">
+                  <Pill tone="success">
+                    <StatusDot tone="success" /> Available
+                  </Pill>
+                  <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <RetrievalDetail
+                      label="Built"
+                      value={
+                        retrievalStatus.builtAt
+                          ? formatRetrievalBuildDate(retrievalStatus.builtAt)
+                          : "Not recorded"
+                      }
+                      dateTime={retrievalStatus.builtAt}
+                    />
+                    <RetrievalDetail
+                      label="Chunks"
+                      value={
+                        retrievalStatus.chunkCount === undefined
+                          ? "Not recorded"
+                          : retrievalStatus.chunkCount.toLocaleString()
+                      }
+                    />
+                    <RetrievalDetail
+                      label="Embedding model"
+                      value={retrievalStatus.embeddingModel ?? "Not recorded"}
+                      mono
+                    />
+                  </dl>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
+                  <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-text-soft)]">
+                    <StatusDot tone="muted" /> Not documentation-grounded yet
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                    {retrievalStatus?.reason ??
+                      "No local documentation index is available yet."}
+                  </p>
+                </div>
+              )}
+            </div>
+            {retrievalError && (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+              >
+                {retrievalError}
+              </div>
+            )}
+          </section>
+        </Card>
         <SettingRow
           id="crash-reporting"
           description="No crash reports are sent. Errors stay local."
@@ -3663,6 +3996,71 @@ function PrivacySection({
         onClose={() => setRegistryModalOpen(false)}
         onSave={onSetRegistrySource}
       />
+    </div>
+  );
+}
+
+function SettingsSwitch({
+  checked,
+  disabled,
+  label,
+  describedBy,
+  onClick,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  describedBy?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      aria-describedby={describedBy}
+      disabled={disabled}
+      onClick={onClick}
+      className={`relative h-6 w-10 rounded-full ring-1 transition-colors duration-150 enabled:hover:ring-[var(--color-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 ${
+        checked
+          ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
+          : "bg-[var(--color-bg-raised)] ring-[var(--color-border-strong)]"
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`absolute left-1 top-1 h-4 w-4 rounded-full transition-transform duration-150 ${
+          checked
+            ? "translate-x-4 bg-[var(--color-on-accent)]"
+            : "translate-x-0 bg-[var(--color-text-muted)]"
+        }`}
+      />
+    </button>
+  );
+}
+
+function RetrievalDetail({
+  label,
+  value,
+  dateTime,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  dateTime?: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </dt>
+      <dd
+        className={`mt-1 break-words text-[11px] text-[var(--color-text-soft)] ${mono ? "font-mono" : ""}`}
+      >
+        {dateTime ? <time dateTime={dateTime}>{value}</time> : value}
+      </dd>
     </div>
   );
 }
@@ -4336,6 +4734,16 @@ function formatFuture(iso: string): string {
   if (ms < 60 * 60 * 1000) return `${Math.ceil(ms / 60_000)}m`;
   if (ms < 24 * 60 * 60 * 1000) return `${Math.ceil(ms / (60 * 60_000))}h`;
   return new Date(iso).toLocaleDateString();
+}
+
+function formatRetrievalBuildDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }
 
 function formatDateTime(value: string) {

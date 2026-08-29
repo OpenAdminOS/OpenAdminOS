@@ -388,6 +388,68 @@ describe("Settings provider section", () => {
     expect(screen.getByText(/10 local history rows removed/i)).toBeInTheDocument();
   });
 
+  it("keeps usage telemetry off by default and supports preview and test actions", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge();
+
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/privacy",
+      bridge,
+    });
+
+    const telemetrySwitch = await screen.findByRole("switch", {
+      name: "Usage telemetry",
+    });
+    expect(telemetrySwitch).toHaveAttribute("aria-checked", "false");
+    expect(await screen.findByText(/openadminos-usage-1/)).toBeInTheDocument();
+
+    await user.click(telemetrySwitch);
+
+    await waitFor(() => {
+      expect(bridge.setUsageTelemetryEnabled).toHaveBeenCalledWith(true);
+      expect(telemetrySwitch).toHaveAttribute("aria-checked", "true");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Send a test ping" }));
+
+    await waitFor(() => {
+      expect(bridge.sendUsageTelemetryTest).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Test ping sent.");
+  });
+
+  it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {
+    const user = userEvent.setup();
+    const reason = "The local Microsoft documentation index is not installed.";
+    const getRetrievalStatus = vi.fn(async () => ({
+      available: false,
+      reason,
+    }));
+    const refreshRetrievalIndex = vi.fn(async () => ({
+      available: false,
+      reason,
+    }));
+    const bridge = makeMockBridge({
+      getRetrievalStatus,
+      refreshRetrievalIndex,
+    });
+
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/privacy",
+      bridge,
+    });
+
+    expect(await screen.findByText(reason)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Check for index" }));
+
+    await waitFor(() => {
+      expect(refreshRetrievalIndex).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("keeps the disconnect confirmation open and surfaces deletion failures", async () => {
     const user = userEvent.setup();
     const disconnectTenant = vi.fn(async () => {
