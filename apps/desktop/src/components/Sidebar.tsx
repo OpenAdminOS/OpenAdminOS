@@ -4,6 +4,7 @@ import {
   IconAgents,
   IconChanges,
   IconChat,
+  IconFleet,
   IconSettings,
   IconLogo,
   IconCommand,
@@ -88,6 +89,16 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       badge: state.installedAgents.length,
     },
     { to: "/changes", label: "Changes", icon: <IconChanges size={16} /> },
+    ...(state.tenants.length >= 2
+      ? [
+          {
+            to: "/fleet",
+            label: "Fleet",
+            icon: <IconFleet size={16} />,
+            badge: state.tenants.length,
+          },
+        ]
+      : []),
     { to: "/settings", label: "Settings", icon: <IconSettings size={16} /> },
   ];
 

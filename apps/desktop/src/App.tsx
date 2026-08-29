@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router"
 import { AppShell, TitleBarInset } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
+import { useAppState } from "./state";
 
 const Agents = lazy(() => import("./pages/Agents"));
 const AgentsHome = lazy(() => import("./pages/AgentsHome"));
@@ -11,6 +12,7 @@ const AgentHub = lazy(() => import("./pages/AgentHub"));
 const Activity = lazy(() => import("./pages/Activity"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
+const Fleet = lazy(() => import("./pages/Fleet"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Connectors = lazy(() => import("./pages/Connectors"));
 const Settings = lazy(() => import("./pages/Settings"));
@@ -69,6 +71,7 @@ export default function App() {
           <Route path="/hub" element={<Navigate to="/agents/hub" replace />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
           <Route path="/changes" element={<Changes />} />
+          <Route path="/fleet" element={<FleetRoute />} />
           <Route path="/workspaces" element={<Workspaces />} />
           <Route path="/connectors" element={<Connectors />} />
           <Route path="/activity" element={<Activity />} />
@@ -79,6 +82,15 @@ export default function App() {
       </Suspense>
     </AppShell>
   );
+}
+
+function FleetRoute() {
+  const { state, loading } = useAppState();
+
+  if (loading) return <RouteFallback />;
+  if (state.tenants.length < 2) return <Navigate to="/chat" replace />;
+
+  return <Fleet />;
 }
 
 function NotFound() {
