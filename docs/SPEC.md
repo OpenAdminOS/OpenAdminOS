@@ -1196,6 +1196,23 @@ version pinned by an active baseline. Baseline drift (added, removed, and
 modified objects with deterministic field-level diffs) is computed on demand
 from the pinned set against the latest live versions; nothing calls Graph.
 
+**Baseline rollback (v0.5).** Rollback plans are built deterministically by
+the host, never by an LLM: modified objects become PATCH actions carrying the
+pinned baseline values (read-only fields stripped), drifted additions become
+destructive-severity DELETE actions, and objects deleted since the baseline
+become POST recreations where Graph supports it. Every generated action is
+validated against the bundled Graph endpoint catalog; anything undocumented,
+plus deliberately report-only surfaces (directory roles, app registration and
+service principal credentials, domains), is listed for manual review instead
+of guessed. The plan flows through the existing run machinery as a
+host-generated system run (`origin: "baseline-rollback"`): same stored plan,
+same exact-match typed confirmation phrase (for example ROLLBACK 4 OBJECTS),
+same reject path, same audit and run history. Apply is fail-stop: actions run
+strictly in order, the first Graph failure terminates the run with an exact
+count of what was applied, and nothing after the failed action is attempted.
+Rollback runs are not backed by an installed agent and cannot be re-run;
+each rollback builds a fresh plan from current drift.
+
 Snapshots are created only when the normal Graph cache refresh writes a tracked
 resource. A first refresh establishes a baseline; later refreshes compare the
 new canonicalized rows against the previous version for each object and store
