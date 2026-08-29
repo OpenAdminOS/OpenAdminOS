@@ -25,6 +25,7 @@ export function getRedis(): Redis {
  *   oa:rate:agent-submit:<ip>:<bucket>     integer     rate-limit counter (1h TTL)
  *   oa:rate:support-issue:<ip>:<bucket>    integer     rate-limit counter (1h TTL)
  *   oa:dedup:support-issue:<hash>          string      "1" + 24h TTL
+ *   oa:training:run-state                  json        latest reported training stage
  *   oa:installs7d:<slug>                   zset        installId → unix-ms score
  *   oa:slugs                               string      JSON-encoded array, 1h TTL
  */
@@ -35,6 +36,7 @@ export const keys = {
   agentSubmissionRate: (ip: string, bucket: number) => `oa:rate:agent-submit:${ip}:${bucket}`,
   supportIssueRate: (ip: string, bucket: number) => `oa:rate:support-issue:${ip}:${bucket}`,
   supportIssueDedup: (hash: string) => `oa:dedup:support-issue:${hash}`,
+  trainingRunState: () => `oa:training:run-state`,
   installs7d: (slug: string) => `oa:installs7d:${slug}`,
   knownSlugs: () => `oa:slugs`,
 } as const;

@@ -15,6 +15,8 @@ export const env = createEnv({
     OPENADMINOS_GITHUB_REPO: z.string().min(1).optional(),
     OPENADMINOS_GITHUB_BRANCH: z.string().min(1).optional(),
     CRON_SECRET: z.string().min(1).optional(),
+    // Runtime-only and optional so unconfigured builds render an idle line.
+    TRAINING_STATE_TOKEN: z.string().min(1).optional(),
   },
   client: {},
   runtimeEnv: {
@@ -26,6 +28,7 @@ export const env = createEnv({
     OPENADMINOS_GITHUB_REPO: process.env.OPENADMINOS_GITHUB_REPO,
     OPENADMINOS_GITHUB_BRANCH: process.env.OPENADMINOS_GITHUB_BRANCH,
     CRON_SECRET: process.env.CRON_SECRET,
+    TRAINING_STATE_TOKEN: process.env.TRAINING_STATE_TOKEN,
   },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,
