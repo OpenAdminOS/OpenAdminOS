@@ -36,7 +36,6 @@ export const keys = {
   agentSubmissionRate: (ip: string, bucket: number) => `oa:rate:agent-submit:${ip}:${bucket}`,
   supportIssueRate: (ip: string, bucket: number) => `oa:rate:support-issue:${ip}:${bucket}`,
   supportIssueDedup: (hash: string) => `oa:dedup:support-issue:${hash}`,
-  trainingRunState: () => `oa:training:run-state`,
   installs7d: (slug: string) => `oa:installs7d:${slug}`,
   knownSlugs: () => `oa:slugs`,
 } as const;
