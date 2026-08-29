@@ -838,6 +838,11 @@ const J_EMPTY = [
 ];
 const J_FEATURES = ["Adaptive Policy Weaving", "Tenant Echo Sync", "Composite Trust Relay",
   "Layered Enrollment Cascade", "Ambient Compliance Drift", "Recursive Access Prism"];
+// English plurals: a bare "s" gives "policys". Teaching the model broken
+// grammar in a few hundred examples is a small thing that makes every answer
+// read as unpolished.
+const plural = (n) => n.endsWith("y") && !/[aeiou]y$/.test(n) ? n.slice(0, -1) + "ies" : n + "s";
+
 const J_REAL = [
   ["compliance policy", "deviceManagement/deviceCompliancePolicies",
    "Compliance policies define rules a device must meet and mark it compliant or noncompliant."],
@@ -859,7 +864,7 @@ function* trackJ() {
       { role: "system", content: sys },
       { role: "user", content: `[doc 1: intune/protect/overview.md]\n${realAnswer}\n\n---\n\nHow do I configure ${feature}?` },
       { role: "assistant",
-        thinking: `The excerpt covers ${realName}s, not "${feature}". Nothing here supports an answer about that feature, and inventing settings would be worse than saying so.`,
+        thinking: `The excerpt covers ${plural(realName)}, not "${feature}". Nothing here supports an answer about that feature, and inventing settings would be worse than saying so.`,
         content: pick(J_NOEVIDENCE) },
     ]};
 
@@ -868,7 +873,7 @@ function* trackJ() {
       { role: "system", content: sys },
       { role: "user", content: `[doc 1: intune/protect/overview.md]\n${realAnswer}\n\n---\n\nHow do I use a ${realName}?` },
       { role: "assistant",
-        thinking: `The excerpt describes ${realName}s directly, so the evidence supports an answer.`,
+        thinking: `The excerpt describes ${plural(realName)} directly, so the evidence supports an answer.`,
         content: realAnswer },
     ]};
 
@@ -878,18 +883,18 @@ function* trackJ() {
     const count = 3 + (v % 40);
     yield { tools: F_TOOLS, messages: [
       { role: "system", content: sys },
-      { role: "user", content: `How many ${realName}s exist in this tenant right now?` },
+      { role: "user", content: `How many ${plural(realName)} exist in this tenant right now?` },
       { role: "assistant", thinking: `This asks about live tenant state, not documentation. I have graph_get, so the evidence is obtainable: call the tool rather than declining.`,
         tool_calls: [{ id: "call_j1", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}` }) } }] },
       { role: "tool", tool_call_id: "call_j1", content: JSON.stringify({ value: Array.from({ length: count }, (_, i) => ({ id: `obj-${i}` })) }) },
       { role: "assistant", thinking: `The tool returned ${count} objects, so the answer is supported by tenant data.`,
-        content: `There are ${count} ${realName}s in this tenant.` },
+        content: `There are ${count} ${plural(realName)} in this tenant.` },
     ]};
 
     // (d) same tool call, EMPTY result -> report emptiness, do not invent
     yield { tools: F_TOOLS, messages: [
       { role: "system", content: sys },
-      { role: "user", content: `How many ${realName}s are there in this tenant?` },
+      { role: "user", content: `How many ${plural(realName)} are there in this tenant?` },
       { role: "assistant", thinking: `Live tenant state; call graph_get.`,
         tool_calls: [{ id: "call_j2", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}` }) } }] },
       { role: "tool", tool_call_id: "call_j2", content: JSON.stringify({ value: [] }) },
@@ -1010,11 +1015,21 @@ if (TRACKS.includes("k")) writeTrack("k", [...trackK()]);
 // security defect, not a formatting nit.
 
 const L_SURFACE = JSON.parse(readFileSync(join(HERE, "graph-surface.json"), "utf8"));
-const L_ASK = [
+// r10 lesson: teaching {method, path, scope} taught the model to emit a
+// "scopes" key on EVERY Graph plan, which breaks exact-match scoring on tasks
+// that expect the canonical {method, path, query} shape. The model had the
+// right endpoint and still failed. Scope knowledge and call shape are now
+// taught as separate question types so the JSON contract stays canonical.
+const L_ASK_PATH = [
   (n) => `Which Graph endpoint lists ${n}?`,
-  (n) => `I need to read ${n}. What is the call and which permission does it need?`,
-  (n) => `What request returns ${n}, and what scope should the agent declare?`,
-  (n) => `Give me the Graph call for ${n} plus its least-privilege scope.`,
+  (n) => `What request returns ${n}?`,
+  (n) => `Give me the Graph call for ${n}.`,
+  (n) => `How do I read ${n} from this tenant?`,
+];
+const L_ASK_SCOPE = [
+  (n) => `What permission does an agent need to read ${n}?`,
+  (n) => `Which least-privilege scope covers reading ${n}?`,
+  (n) => `If an agent reads ${n}, what should its manifest declare?`,
 ];
 const humanise = (p) => p.replace(/^\//, "").split("/").pop()
   .replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
@@ -1024,13 +1039,133 @@ function* trackL() {
   for (let v = 0; v < N; v++) {
     const e = L_SURFACE[v % L_SURFACE.length];
     const name = humanise(e.path);
+    const round = Math.floor(v / L_SURFACE.length);
+
+    // (a) call shape: canonical {method, path, query}, no extra keys
     yield { messages: [
-      { role: "system", content: "You are a Microsoft Graph planner. Reply with exactly one fenced json block describing the call, including the least-privilege scope." },
-      { role: "user", content: L_ASK[Math.floor(v / L_SURFACE.length) % L_ASK.length](name) },
+      { role: "system", content: "You are a Microsoft Graph planner. Reply with exactly one fenced json block describing the call." },
+      { role: "user", content: L_ASK_PATH[round % L_ASK_PATH.length](name) },
       { role: "assistant",
-        thinking: `${name} is exposed at ${e.path}. The narrowest scope that can read it is ${e.scope}; requesting anything broader would over-permission the agent.`,
-        content: "```json\n" + JSON.stringify({ method: "GET", path: e.path, scope: e.scope }, null, 2) + "\n```" },
+        thinking: `${name} is exposed at ${e.path}.`,
+        content: "```json\n" + JSON.stringify({ method: "GET", path: e.path }, null, 2) + "\n```" },
     ]};
+
+    // (b) permissions: prose, so scope knowledge never leaks into the JSON shape
+    if (v % 2 === 0) {
+      yield { messages: [
+        { role: "system", content: "You are a Microsoft 365 administration assistant. Answer concisely." },
+        { role: "user", content: L_ASK_SCOPE[round % L_ASK_SCOPE.length](name) },
+        { role: "assistant",
+          thinking: `Reading ${e.path} needs ${e.scope}. Anything broader would over-permission the agent.`,
+          content: `${e.scope}. That is the narrowest scope that can read ${e.path}; a broader one would grant more than the agent needs.` },
+      ]};
+    }
   }
 }
 if (TRACKS.includes("l")) writeTrack("l", [...trackL()]);
+
+// ---------- track M: multi-turn conversation (v1.1.1) ----------
+// Every example before this track was single-turn, yet the product is a chat.
+// Real admin work is conversational: a question, then a refinement on its
+// result, then an action. Three behaviours no single-turn example can teach:
+//
+//   - carrying context across turns ("filter those to Windows")
+//   - asking a clarifying question instead of guessing at an ambiguous ask
+//   - refusing a destructive follow-up even after a cooperative exchange,
+//     which is the case most likely to slip past a model trained only on
+//     isolated refusals
+const M_KINDS = [
+  ["compliance policies", "deviceManagement/deviceCompliancePolicies"],
+  ["managed devices", "deviceManagement/managedDevices"],
+  ["conditional access policies", "identity/conditionalAccess/policies"],
+  ["configuration profiles", "deviceManagement/deviceConfigurations"],
+];
+const M_VAGUE = [
+  ["Clean up the old devices.", "\"old\" could mean last check-in, enrolment date, or OS version, and the cutoff matters"],
+  ["Tidy up our policies.", "\"tidy up\" could mean delete unassigned policies, merge duplicates, or just report on them"],
+  ["Sort out the non-compliant machines.", "\"sort out\" could mean report, notify the users, or retire them"],
+  ["Fix our compliance situation.", "that could mean adjusting policy rules, remediating devices, or reporting on the gap"],
+  ["Deal with the guest accounts.", "\"deal with\" could mean review, restrict, or remove them, and the criteria matter"],
+  ["Make the security baseline stricter.", "which settings, and stricter by how much: there are dozens of independent controls"],
+  ["Get rid of the unused apps.", "\"unused\" needs a definition (no installs, no assignments, or no launches in N days)"],
+  ["Review the risky sign-ins.", "\"risky\" could mean the risk level Entra assigned, or your own threshold, and over what window"],
+];
+
+// Phrasing pools, for the reason tracks K and L needed them: identical asks
+// dedupe away, and near-identical ones teach memorization rather than the
+// behaviour.
+const M_ASK_COUNT = [
+  (k) => `How many ${k} do we have?`,
+  (k) => `Count our ${k} for me.`,
+  (k) => `What is our total number of ${k}?`,
+  (k) => `How many ${k} are in this tenant?`,
+];
+const M_FOLLOWUP = [
+  "Now just the Windows ones.",
+  "Filter those to Windows only.",
+  "And how many of them are Windows?",
+  "Of those, which target Windows?",
+];
+const M_ASK_STALE = [
+  (k) => `Which ${k} haven't been touched in a year?`,
+  (k) => `Show me ${k} nobody has modified recently.`,
+  (k) => `Do we have stale ${k} sitting around?`,
+  (k) => `Which of our ${k} look abandoned?`,
+];
+const M_DESTRUCTIVE = [
+  "Great, delete them all.",
+  "Perfect — remove them.",
+  "Good. Go ahead and delete those.",
+  "Right, get rid of them then.",
+];
+
+function* trackM() {
+  const N = Number(argOf("--m-count", "60"));
+  for (let v = 0; v < N; v++) {
+    const [kind, path] = M_KINDS[v % M_KINDS.length];
+    const total = 40 + (v % 60), win = 10 + (v % 20);
+
+    // (a) follow-up that refers to the previous result by pronoun
+    yield { tools: F_TOOLS, messages: [
+      { role: "system", content: "You are an Intune administration assistant. Use graph_get for tenant data." },
+      { role: "user", content: M_ASK_COUNT[Math.floor(v / M_KINDS.length) % M_ASK_COUNT.length](kind) },
+      { role: "assistant", thinking: `Count ${path}.`,
+        tool_calls: [{ id: "m1", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}` }) } }] },
+      { role: "tool", tool_call_id: "m1", content: JSON.stringify({ value: Array.from({ length: total }, (_, i) => ({ id: `o${i}`, platform: i < win ? "windows" : "ios" })) }) },
+      { role: "assistant", content: `There are ${total} ${kind} in this tenant.` },
+      { role: "user", content: M_FOLLOWUP[Math.floor(v / M_KINDS.length) % M_FOLLOWUP.length] },
+      { role: "assistant",
+        thinking: `"the Windows ones" refers to the ${kind} I already fetched. I have that data in the previous tool result, so I can filter it rather than calling Graph again.`,
+        content: `${win} of those ${total} ${kind} target Windows.` },
+    ]};
+
+    // (b) ambiguous request -> ask, do not guess
+    if (v % 2 === 0) {
+      const [ask, why] = M_VAGUE[v % M_VAGUE.length];
+      yield { messages: [
+        { role: "system", content: "You are an Intune administration assistant." },
+        { role: "user", content: ask },
+        { role: "assistant",
+          thinking: `This is ambiguous: ${why}. Guessing risks doing the wrong thing to real devices, so ask before acting.`,
+          content: `Before I do anything: ${why}. Which do you mean, and what cutoff should I use?` },
+      ]};
+    }
+
+    // (c) destructive follow-up after a cooperative exchange
+    if (v % 4 === 0) {
+      yield { tools: F_TOOLS, messages: [
+        { role: "system", content: "You are an Intune administration assistant. Use graph_get for tenant data." },
+        { role: "user", content: M_ASK_STALE[Math.floor(v / M_KINDS.length) % M_ASK_STALE.length](kind) },
+        { role: "assistant", thinking: `Fetch ${path} and check the modified dates.`,
+          tool_calls: [{ id: "m2", type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: `/${path}` }) } }] },
+        { role: "tool", tool_call_id: "m2", content: JSON.stringify({ value: Array.from({ length: win }, (_, i) => ({ id: `stale${i}` })) }) },
+        { role: "assistant", content: `${win} ${kind} have not been modified in over a year.` },
+        { role: "user", content: M_DESTRUCTIVE[Math.floor(v / M_KINDS.length) % M_DESTRUCTIVE.length] },
+        { role: "assistant",
+          thinking: `I found these, so it is tempting to finish the job. But deleting ${win} ${kind} is destructive and irreversible, and being mid-conversation does not make it pre-approved. Describe the blast radius and hand the decision back.`,
+          content: `I can't delete them myself. That would remove ${win} ${kind} permanently, and anything currently assigned to them would stop being enforced. If you want to proceed, the app will ask you to confirm the exact list first. I can show you what each one is assigned to before you decide.` },
+      ]};
+    }
+  }
+}
+if (TRACKS.includes("m")) writeTrack("m", [...trackM()]);
