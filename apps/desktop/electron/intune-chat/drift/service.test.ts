@@ -224,6 +224,150 @@ function seedTimeline(store: IntelligenceSqliteStore): void {
   });
 }
 
+describe("named drift baselines", () => {
+  const RESOURCE = "configurationPolicies" as const;
+  const SCOPES = ["DeviceManagementConfiguration.Read.All"];
+
+  function refresh(
+    store: IntelligenceSqliteStore,
+    refreshedAt: string,
+    rows: Array<Record<string, unknown>>,
+  ): void {
+    store.replaceGraphResources({
+      tenantId: "tenant-1",
+      resource: RESOURCE,
+      label: "Settings catalog policies",
+      scopeSet: SCOPES,
+      refreshedAt,
+      rows,
+    });
+  }
+
+  it("creates, lists, renames, and retires a baseline with one-active enforcement", async () => {
+    await withDriftService(async ({ service, store }) => {
+      refresh(store, "2026-08-29T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "A" },
+        { id: "policy-2", displayName: "Policy Two", setting: "B" },
+      ]);
+
+      const created = await service.createBaseline({
+        tenantId: "tenant-1",
+        name: "  Golden   config ",
+      });
+      assert.equal(created.name, "Golden config");
+      assert.equal(created.status, "active");
+      assert.equal(created.pinnedObjectCount, 2);
+      assert.deepEqual(created.resources, [RESOURCE]);
+
+      await assert.rejects(
+        service.createBaseline({ tenantId: "tenant-1", name: "Second" }),
+        /active baseline already exists/i,
+      );
+
+      const renamed = await service.renameBaseline({
+        tenantId: "tenant-1",
+        baselineId: created.id,
+        name: "Approved config",
+      });
+      assert.equal(renamed.name, "Approved config");
+
+      const retired = await service.retireBaseline({
+        tenantId: "tenant-1",
+        baselineId: created.id,
+      });
+      assert.equal(retired.status, "retired");
+      assert.ok(retired.retiredAt);
+
+      const replacement = await service.createBaseline({
+        tenantId: "tenant-1",
+        name: "Second",
+      });
+      assert.equal(replacement.status, "active");
+      const listed = await service.listBaselines({ tenantId: "tenant-1" });
+      assert.equal(listed.length, 2);
+    });
+  });
+
+  it("refuses to create a baseline before any tracked capture exists", async () => {
+    await withDriftService(async ({ service }) => {
+      await assert.rejects(
+        service.createBaseline({ tenantId: "tenant-1", name: "Too early" }),
+        /Refresh the tenant cache first/i,
+      );
+    });
+  });
+
+  it("reports added, removed, and modified drift against the active baseline", async () => {
+    await withDriftService(async ({ service, store }) => {
+      refresh(store, "2026-08-29T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "A" },
+        { id: "policy-2", displayName: "Policy Two", setting: "B" },
+      ]);
+      await service.createBaseline({ tenantId: "tenant-1", name: "Golden" });
+
+      refresh(store, "2026-08-29T11:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "CHANGED" },
+        { id: "policy-3", displayName: "Policy Three", setting: "C" },
+      ]);
+
+      const drift = await service.getBaselineDrift({ tenantId: "tenant-1" });
+      assert.equal(drift.baseline.name, "Golden");
+      const resourceDrift = drift.resources.find((entry) => entry.resource === RESOURCE);
+      assert.deepEqual(
+        {
+          added: resourceDrift?.added,
+          removed: resourceDrift?.removed,
+          modified: resourceDrift?.modified,
+        },
+        { added: 1, removed: 1, modified: 1 },
+      );
+
+      const byKind = new Map(drift.entries.map((entry) => [entry.changeKind, entry]));
+      assert.equal(byKind.get("added")?.graphId, "policy-3");
+      assert.equal(byKind.get("removed")?.graphId, "policy-2");
+      const modified = byKind.get("modified");
+      assert.equal(modified?.graphId, "policy-1");
+      const settingChange = modified?.changes.find((change) => change.path === "setting");
+      assert.equal(settingChange?.before, "A");
+      assert.equal(settingChange?.after, "CHANGED");
+    });
+  });
+
+  it("keeps pinned versions through retention pruning while the baseline is active", async () => {
+    await withDriftService(async ({ service, store }) => {
+      refresh(store, "2026-08-01T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "A" },
+      ]);
+      const baseline = await service.createBaseline({
+        tenantId: "tenant-1",
+        name: "Golden",
+      });
+      refresh(store, "2026-08-02T10:00:00.000Z", [
+        { id: "policy-1", displayName: "Policy One", setting: "B" },
+      ]);
+
+      // Zero-day retention would normally delete every superseded version.
+      store.pruneDriftHistory("tenant-1", 0);
+      const protectedDrift = await service.getBaselineDrift({ tenantId: "tenant-1" });
+      const modified = protectedDrift.entries.find(
+        (entry) => entry.changeKind === "modified",
+      );
+      const settingChange = modified?.changes.find((change) => change.path === "setting");
+      assert.equal(settingChange?.before, "A", "pinned version must survive pruning");
+
+      await service.retireBaseline({
+        tenantId: "tenant-1",
+        baselineId: baseline.id,
+      });
+      const afterRetire = store.pruneDriftHistory("tenant-1", 0);
+      assert.ok(
+        afterRetire.versionsDeleted >= 1,
+        "retired baselines no longer protect superseded versions",
+      );
+    });
+  });
+});
+
 async function withDriftService(
   run: (input: {
     service: DriftService;
@@ -260,6 +404,16 @@ async function withDriftService(
       ),
     getDriftResourceStats: (tenantId, resources) =>
       store.getDriftResourceStats(tenantId, resources),
+    createDriftBaseline: (input) => store.createDriftBaseline(input),
+    listDriftBaselines: (tenantId) => store.listDriftBaselines(tenantId),
+    getDriftBaseline: (tenantId, baselineId) =>
+      store.getDriftBaseline(tenantId, baselineId),
+    getActiveDriftBaseline: (tenantId) => store.getActiveDriftBaseline(tenantId),
+    renameDriftBaseline: (tenantId, baselineId, name) =>
+      store.renameDriftBaseline(tenantId, baselineId, name),
+    retireDriftBaseline: (tenantId, baselineId, now) =>
+      store.retireDriftBaseline(tenantId, baselineId, now),
+    listDriftBaselineChanges: (input) => store.listDriftBaselineChanges(input),
   });
   try {
     await run({ service, store });

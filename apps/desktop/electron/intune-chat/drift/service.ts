@@ -1,4 +1,10 @@
 import type {
+  CreateDriftBaselineInput,
+  DriftBaseline,
+  DriftBaselineDriftEntry,
+  DriftBaselineDriftInput,
+  DriftBaselineDriftResult,
+  DriftBaselineResourceDrift,
   DriftEntryDetail,
   DriftEntryDetailInput,
   DriftFieldChange,
@@ -10,11 +16,16 @@ import type {
   DriftTimelineResult,
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
+  ListDriftBaselinesInput,
+  RenameDriftBaselineInput,
+  RetireDriftBaselineInput,
   TenantRecord,
 } from "@openadminos/agent-sdk";
 import { definitionForResource } from "../planner.js";
 import type {
   CachedGraphResourceRecord,
+  DriftBaselineChangeRecord,
+  DriftBaselineRecord,
   DriftObjectVersionRecord,
   DriftResourceStatsRecord,
   DriftSnapshotChangeRecord,
@@ -76,6 +87,33 @@ export interface DriftServiceHost {
     tenantId: string,
     resources: readonly GraphCacheResourceKind[],
   ): DriftResourceStatsRecord[];
+  createDriftBaseline(input: {
+    tenantId: string;
+    name: string;
+    now: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): DriftBaselineRecord;
+  listDriftBaselines(tenantId: string): DriftBaselineRecord[];
+  getDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+  ): DriftBaselineRecord | undefined;
+  getActiveDriftBaseline(tenantId: string): DriftBaselineRecord | undefined;
+  renameDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+    name: string,
+  ): DriftBaselineRecord;
+  retireDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+    now: string,
+  ): DriftBaselineRecord;
+  listDriftBaselineChanges(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): DriftBaselineChangeRecord[];
 }
 
 export class DriftService {
@@ -270,6 +308,94 @@ export class DriftService {
     };
   }
 
+  async createBaseline(input: CreateDriftBaselineInput): Promise<DriftBaseline> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.createDriftBaseline({
+      tenantId: tenant.id,
+      name: input.name,
+      now: new Date().toISOString(),
+      resources: TRACKED_RESOURCES,
+    });
+  }
+
+  async listBaselines(input: ListDriftBaselinesInput): Promise<DriftBaseline[]> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.listDriftBaselines(tenant.id);
+  }
+
+  async renameBaseline(input: RenameDriftBaselineInput): Promise<DriftBaseline> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.renameDriftBaseline(tenant.id, input.baselineId, input.name);
+  }
+
+  async retireBaseline(input: RetireDriftBaselineInput): Promise<DriftBaseline> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.retireDriftBaseline(
+      tenant.id,
+      input.baselineId,
+      new Date().toISOString(),
+    );
+  }
+
+  async getBaselineDrift(
+    input: DriftBaselineDriftInput,
+  ): Promise<DriftBaselineDriftResult> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    const baseline = input.baselineId
+      ? this.host.getDriftBaseline(tenant.id, input.baselineId)
+      : this.host.getActiveDriftBaseline(tenant.id);
+    if (!baseline) {
+      throw new Error(
+        input.baselineId
+          ? "Baseline was not found for this tenant."
+          : "No active baseline exists for this tenant. Create one from the Changes view first.",
+      );
+    }
+    const resources = normalizeTrackedResources(input.resources);
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+    const changes = this.host.listDriftBaselineChanges({
+      tenantId: tenant.id,
+      baselineId: baseline.id,
+      resources,
+    });
+
+    const countsByResource = new Map<
+      GraphCacheResourceKind,
+      { added: number; removed: number; modified: number }
+    >();
+    for (const resource of resources) {
+      countsByResource.set(resource, { added: 0, removed: 0, modified: 0 });
+    }
+    const entries: DriftBaselineDriftEntry[] = [];
+    for (const change of changes) {
+      const counts = countsByResource.get(change.resource);
+      if (counts) counts[change.kind] += 1;
+      entries.push(baselineDriftEntry(change));
+    }
+    entries.sort(compareBaselineEntries);
+
+    return {
+      tenantId: tenant.id,
+      baseline,
+      evaluatedAt: new Date().toISOString(),
+      resources: resources.map((resource): DriftBaselineResourceDrift => {
+        const counts = countsByResource.get(resource) ?? {
+          added: 0,
+          removed: 0,
+          modified: 0,
+        };
+        return {
+          resource,
+          resourceLabel: labelForResource(resource),
+          ...counts,
+        };
+      }),
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+    };
+  }
+
   private async resolveTenant(tenantId: string): Promise<TenantRecord> {
     const persisted = await this.host.read();
     return this.host.resolveTenant(persisted, tenantId);
@@ -343,6 +469,40 @@ function timelineEntryMatches(entry: DriftTimelineEntry, query: string): boolean
     .join(" ")
     .toLocaleLowerCase()
     .includes(needle);
+}
+
+function baselineDriftEntry(change: DriftBaselineChangeRecord): DriftBaselineDriftEntry {
+  const base = {
+    resource: change.resource,
+    resourceLabel: labelForResource(change.resource),
+    graphId: change.graphId,
+    ...(change.displayName ? { displayName: change.displayName } : {}),
+    changeKind: change.kind,
+  };
+  if (rawTooLarge(change.pinnedRawJson) || rawTooLarge(change.currentRawJson)) {
+    return { ...base, fieldChangeCount: 0, changes: [], truncated: true };
+  }
+  const changes = diffDriftObjects(
+    change.kind === "added" ? {} : parseRawJson(change.pinnedRawJson),
+    change.kind === "removed" ? {} : parseRawJson(change.currentRawJson),
+    change.resource,
+  );
+  return { ...base, fieldChangeCount: changes.length, changes };
+}
+
+function compareBaselineEntries(
+  left: DriftBaselineDriftEntry,
+  right: DriftBaselineDriftEntry,
+): number {
+  if (left.resource !== right.resource) {
+    return left.resource.localeCompare(right.resource);
+  }
+  if (left.changeKind !== right.changeKind) {
+    return left.changeKind.localeCompare(right.changeKind);
+  }
+  const leftName = left.displayName ?? left.graphId;
+  const rightName = right.displayName ?? right.graphId;
+  return leftName.localeCompare(rightName);
 }
 
 function fieldChangesFor(change: DriftSnapshotChangeRecord): DriftFieldChange[] {

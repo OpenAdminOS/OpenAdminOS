@@ -7,6 +7,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Added
 
 - A fresh install now starts guided: launching with zero connected tenants opens tenant setup automatically (permissions review, Microsoft sign-in, then provider selection when none is connected). The dialog is dismissible, appears at most once per launch, and setup stays contextual once a tenant exists.
+- Named drift baselines: pin a tenant's current tracked configuration as a named baseline, then see added, removed, and modified drift against it with field-level diffs. One active baseline per tenant; retiring keeps history; retention pruning never deletes configuration versions an active baseline pins.
+- The drift timeline now tracks Entra configuration surfaces: named locations, authentication methods, authorization, and cross-tenant access policies, directory roles, administrative units, app registrations, service principals, and domains.
 - Chat now reads Entra and Defender data as first-class cached resources: named locations, authentication methods policy, authorization policy, cross-tenant access policy, directory roles, administrative units, app registrations and service principals (including credential expiry), domains, Defender alerts and incidents, and Secure Score history and controls. Tenant consent gains "Identity and access" and extended "Security and sign-ins" groups, and a tenant consented before this release gets a clear reconnect path instead of a raw Graph 403 when refreshing the new resources.
 
 - Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.

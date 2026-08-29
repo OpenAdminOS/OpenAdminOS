@@ -50,6 +50,7 @@ import type {
   CompanionRunDueReadSchedulesResult,
   CompanionSnapshot,
   CreateWorkspaceInput,
+  DriftBaselineDriftInput,
   DriftEntryDetailInput,
   DriftObjectHistoryInput,
   DriftTimelineInput,
@@ -4011,6 +4012,25 @@ function validateDriftObjectHistoryInput(value: unknown): DriftObjectHistoryInpu
   return input;
 }
 
+function validateDriftBaselineDriftInput(value: unknown): DriftBaselineDriftInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Baseline drift input must be an object.");
+  }
+  const input: DriftBaselineDriftInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+  };
+  if (value.baselineId !== undefined) {
+    input.baselineId = requireBoundedString(value.baselineId, "baselineId", 300);
+  }
+  if (value.resources !== undefined) {
+    input.resources = validateDriftResourceArray(value.resources, "resources");
+  }
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "baseline drift limit", 1, 5_000);
+  }
+  return input;
+}
+
 function validateOptionalDriftBoundary(
   value: unknown,
   label: "from" | "to",
@@ -5076,6 +5096,60 @@ function registerIpcHandlers() {
     "openadminos:get-drift-status",
     handleTrusted((_event, tenantId: unknown) =>
       store.getDriftStatus(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:list-drift-baselines",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("List baselines input must be an object.");
+      }
+      return store.listDriftBaselines({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:create-drift-baseline",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Create baseline input must be an object.");
+      }
+      return store.createDriftBaseline({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        name: requireBoundedString(input.name, "baseline name", 80),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:rename-drift-baseline",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Rename baseline input must be an object.");
+      }
+      return store.renameDriftBaseline({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        baselineId: requireBoundedString(input.baselineId, "baselineId", 300),
+        name: requireBoundedString(input.name, "baseline name", 80),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:retire-drift-baseline",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Retire baseline input must be an object.");
+      }
+      return store.retireDriftBaseline({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        baselineId: requireBoundedString(input.baselineId, "baselineId", 300),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-baseline-drift",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftBaselineDrift(validateDriftBaselineDriftInput(input)),
     ),
   );
   ipcMain.handle(

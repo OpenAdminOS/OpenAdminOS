@@ -65,6 +65,10 @@ import type {
   GraphCacheRefreshResult,
   GraphCacheRefreshScheduleSettings,
   GraphCacheStatus,
+  CreateDriftBaselineInput,
+  DriftBaseline,
+  DriftBaselineDriftInput,
+  DriftBaselineDriftResult,
   DriftEntryDetail,
   DriftEntryDetailInput,
   DriftObjectHistoryInput,
@@ -72,6 +76,9 @@ import type {
   DriftStatus,
   DriftTimelineInput,
   DriftTimelineResult,
+  ListDriftBaselinesInput,
+  RenameDriftBaselineInput,
+  RetireDriftBaselineInput,
   ImportMultiTenantResultToWorkspacesInput,
   ImportMultiTenantResultToWorkspacesResult,
   CreateWorkspaceInput,
@@ -1136,6 +1143,20 @@ export class AppStateStore {
         ),
       getDriftResourceStats: (tenantId, resources) =>
         host.requireIntelligenceStore().getDriftResourceStats(tenantId, resources),
+      createDriftBaseline: (input) =>
+        host.requireIntelligenceStore().createDriftBaseline(input),
+      listDriftBaselines: (tenantId) =>
+        host.requireIntelligenceStore().listDriftBaselines(tenantId),
+      getDriftBaseline: (tenantId, baselineId) =>
+        host.requireIntelligenceStore().getDriftBaseline(tenantId, baselineId),
+      getActiveDriftBaseline: (tenantId) =>
+        host.requireIntelligenceStore().getActiveDriftBaseline(tenantId),
+      renameDriftBaseline: (tenantId, baselineId, name) =>
+        host.requireIntelligenceStore().renameDriftBaseline(tenantId, baselineId, name),
+      retireDriftBaseline: (tenantId, baselineId, now) =>
+        host.requireIntelligenceStore().retireDriftBaseline(tenantId, baselineId, now),
+      listDriftBaselineChanges: (input) =>
+        host.requireIntelligenceStore().listDriftBaselineChanges(input),
     });
     this.runService = new RunService({
       read: () => host.read(),
@@ -2012,6 +2033,28 @@ export class AppStateStore {
 
   async getDriftStatus(tenantId: string): Promise<DriftStatus> {
     return this.driftService.getDriftStatus(tenantId);
+  }
+
+  async listDriftBaselines(input: ListDriftBaselinesInput): Promise<DriftBaseline[]> {
+    return this.driftService.listBaselines(input);
+  }
+
+  async createDriftBaseline(input: CreateDriftBaselineInput): Promise<DriftBaseline> {
+    return this.driftService.createBaseline(input);
+  }
+
+  async renameDriftBaseline(input: RenameDriftBaselineInput): Promise<DriftBaseline> {
+    return this.driftService.renameBaseline(input);
+  }
+
+  async retireDriftBaseline(input: RetireDriftBaselineInput): Promise<DriftBaseline> {
+    return this.driftService.retireBaseline(input);
+  }
+
+  async getDriftBaselineDrift(
+    input: DriftBaselineDriftInput,
+  ): Promise<DriftBaselineDriftResult> {
+    return this.driftService.getBaselineDrift(input);
   }
 
   async getGraphCacheRefreshSchedule(

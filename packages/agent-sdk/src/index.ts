@@ -1013,6 +1013,83 @@ export interface DriftStatus {
   resources: DriftResourceStatus[];
 }
 
+// ─── Named drift baselines (v0.5) ────────────────────────────────────────
+//
+// A baseline pins the exact live object versions (per resource, graph id,
+// version, and content hash) at creation time. Baseline drift is the set
+// difference between those pins and the latest live versions, so it
+// survives snapshot retention pruning: pinned versions are never pruned
+// while their baseline is active.
+
+export type DriftBaselineStatus = "active" | "retired";
+
+export interface DriftBaseline {
+  id: string;
+  tenantId: string;
+  name: string;
+  status: DriftBaselineStatus;
+  createdAt: string;
+  retiredAt?: string;
+  pinnedObjectCount: number;
+  resources: GraphCacheResourceKind[];
+}
+
+export interface CreateDriftBaselineInput {
+  tenantId: string;
+  name: string;
+}
+
+export interface RenameDriftBaselineInput {
+  tenantId: string;
+  baselineId: string;
+  name: string;
+}
+
+export interface RetireDriftBaselineInput {
+  tenantId: string;
+  baselineId: string;
+}
+
+export interface ListDriftBaselinesInput {
+  tenantId: string;
+}
+
+export interface DriftBaselineResourceDrift {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  added: number;
+  removed: number;
+  modified: number;
+}
+
+export interface DriftBaselineDriftEntry {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  graphId: string;
+  displayName?: string;
+  changeKind: "added" | "removed" | "modified";
+  fieldChangeCount: number;
+  changes: DriftFieldChange[];
+  truncated?: boolean;
+}
+
+export interface DriftBaselineDriftInput {
+  tenantId: string;
+  baselineId?: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+}
+
+export interface DriftBaselineDriftResult {
+  tenantId: string;
+  baseline: DriftBaseline;
+  evaluatedAt: string;
+  resources: DriftBaselineResourceDrift[];
+  entries: DriftBaselineDriftEntry[];
+  hasMore: boolean;
+  limit: number;
+}
+
 export interface RefreshGraphCacheOptions {
   resources?: GraphCacheResourceKind[];
   tenantId?: string;
@@ -1899,6 +1976,13 @@ export interface OpenAdminOSApi {
     input: DriftObjectHistoryInput,
   ): Promise<DriftObjectHistoryResult>;
   getDriftStatus?(tenantId: string): Promise<DriftStatus>;
+  listDriftBaselines?(input: ListDriftBaselinesInput): Promise<DriftBaseline[]>;
+  createDriftBaseline?(input: CreateDriftBaselineInput): Promise<DriftBaseline>;
+  renameDriftBaseline?(input: RenameDriftBaselineInput): Promise<DriftBaseline>;
+  retireDriftBaseline?(input: RetireDriftBaselineInput): Promise<DriftBaseline>;
+  getDriftBaselineDrift?(
+    input: DriftBaselineDriftInput,
+  ): Promise<DriftBaselineDriftResult>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,

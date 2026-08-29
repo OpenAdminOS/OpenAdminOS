@@ -223,6 +223,16 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-drift-object-history", input),
   getDriftStatus: (tenantId: string) =>
     ipcRenderer.invoke("openadminos:get-drift-status", tenantId),
+  listDriftBaselines: (input) =>
+    ipcRenderer.invoke("openadminos:list-drift-baselines", input),
+  createDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:create-drift-baseline", input),
+  renameDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:rename-drift-baseline", input),
+  retireDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:retire-drift-baseline", input),
+  getDriftBaselineDrift: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-baseline-drift", input),
   getGraphCacheRefreshSchedule: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-refresh-schedule", tenantId),
   setGraphCacheRefreshSchedule: (input) =>
