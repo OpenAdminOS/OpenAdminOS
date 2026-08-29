@@ -37,7 +37,9 @@ import type {
   DriftSnapshotChangeRecord,
   DriftSnapshotRecord,
 } from "../sqlite-store.js";
+import { lookupEndpoint } from "../../graph-catalog.js";
 import { attributeDriftChange, type DriftAuditCache } from "./attribution.js";
+import { buildRollbackPlan, type RollbackPlanDraft } from "./rollback.js";
 import {
   diffDriftObjects,
   isTimestampOnlyChange,
@@ -502,6 +504,44 @@ export class DriftService {
       limit,
       ...(retentionLimited ? { retentionLimited: true } : {}),
     };
+  }
+
+  /**
+   * Deterministic rollback plan for current drift against a baseline.
+   * The caller (run integration) owns turning this into a confirmed
+   * write run; this method never applies anything.
+   */
+  async buildBaselineRollbackPlan(input: {
+    tenantId: string;
+    baselineId?: string;
+    selections?: ReadonlyArray<{
+      resource: GraphCacheResourceKind;
+      graphId: string;
+    }>;
+  }): Promise<{ tenantId: string; baselineId: string; draft: RollbackPlanDraft }> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    const baseline = input.baselineId
+      ? this.host.getDriftBaseline(tenant.id, input.baselineId)
+      : this.host.getActiveDriftBaseline(tenant.id);
+    if (!baseline) {
+      throw new Error(
+        input.baselineId
+          ? "Baseline was not found for this tenant."
+          : "No active baseline exists for this tenant. Create one from the Changes view first.",
+      );
+    }
+    const changes = this.host.listDriftBaselineChanges({
+      tenantId: tenant.id,
+      baselineId: baseline.id,
+      resources: TRACKED_RESOURCES,
+    });
+    const draft = buildRollbackPlan({
+      changes,
+      labelForResource,
+      resolveEndpoint: (method, path) => lookupEndpoint(method, path),
+      ...(input.selections ? { selections: input.selections } : {}),
+    });
+    return { tenantId: tenant.id, baselineId: baseline.id, draft };
   }
 
   async getTenantCompare(
