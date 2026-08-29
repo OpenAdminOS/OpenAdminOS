@@ -453,6 +453,51 @@ describe("point-in-time compare", () => {
   });
 });
 
+describe("fleet drift status", () => {
+  it("reports per-tenant baseline drift counts and no-baseline tenants honestly", async () => {
+    await withDriftService(async ({ service, store }) => {
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "configurationPolicies",
+        label: "Settings catalog policies",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"],
+        refreshedAt: "2026-08-29T10:00:00.000Z",
+        rows: [{ id: "p-1", displayName: "One", setting: "A" }],
+      });
+      await service.createBaseline({ tenantId: "tenant-1", name: "Golden" });
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "configurationPolicies",
+        label: "Settings catalog policies",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"],
+        refreshedAt: "2026-08-29T11:00:00.000Z",
+        rows: [{ id: "p-1", displayName: "One", setting: "B" }],
+      });
+
+      const fleet = await service.getFleetDriftStatus({});
+      const first = fleet.tenants.find((entry) => entry.tenantId === "tenant-1");
+      const second = fleet.tenants.find((entry) => entry.tenantId === "tenant-2");
+      assert.equal(first?.baseline?.name, "Golden");
+      assert.deepEqual(
+        {
+          added: first?.drift?.added,
+          removed: first?.drift?.removed,
+          modified: first?.drift?.modified,
+        },
+        { added: 0, removed: 0, modified: 1 },
+      );
+      assert.ok(first?.lastCaptureAt);
+      assert.equal(second?.baseline, undefined);
+      assert.equal(second?.drift, undefined);
+
+      await assert.rejects(
+        service.getFleetDriftStatus({ groupId: "missing-group" }),
+        /Tenant group was not found/,
+      );
+    });
+  });
+});
+
 describe("cross-tenant compare", () => {
   const RESOURCE = "configurationPolicies" as const;
 
@@ -612,6 +657,8 @@ async function withDriftService(
       store.readDriftStateAt(tenantId, resource, atIso),
     getOldestDriftSnapshotAt: (tenantId, resource) =>
       store.getOldestDriftSnapshotAt(tenantId, resource),
+    countDriftBaselineChanges: (input) => store.countDriftBaselineChanges(input),
+    listTenantGroups: () => store.listTenantGroups(),
   });
   try {
     await run({ service, store });

@@ -1136,6 +1136,29 @@ export interface DriftTimeCompareResult {
   retentionLimited?: boolean;
 }
 
+// ─── Fleet drift status (v0.5) ───────────────────────────────────────────
+
+export interface FleetTenantDriftStatus {
+  tenantId: string;
+  tenantName: string;
+  /** Absent when the tenant has no active baseline. */
+  baseline?: { id: string; name: string; createdAt: string };
+  /** Absent when drift could not be evaluated (no baseline or no data). */
+  drift?: { added: number; removed: number; modified: number; evaluatedAt: string };
+  lastCaptureAt?: string;
+  trackedObjectCount: number;
+}
+
+export interface FleetDriftStatusInput {
+  /** Optional tenant group filter; all connected tenants otherwise. */
+  groupId?: string;
+}
+
+export interface FleetDriftStatusResult {
+  tenants: FleetTenantDriftStatus[];
+  evaluatedAt: string;
+}
+
 export interface StartBaselineRollbackInput {
   tenantId: string;
   baselineId?: string;
@@ -2093,6 +2116,7 @@ export interface OpenAdminOSApi {
     input: DriftTenantCompareInput,
   ): Promise<DriftTenantCompareResult>;
   startBaselineRollback?(input: StartBaselineRollbackInput): Promise<RunRecord>;
+  getFleetDriftStatus?(input: FleetDriftStatusInput): Promise<FleetDriftStatusResult>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,

@@ -80,6 +80,8 @@ import type {
   DriftTimeCompareResult,
   DriftTimelineInput,
   DriftTimelineResult,
+  FleetDriftStatusInput,
+  FleetDriftStatusResult,
   ListDriftBaselinesInput,
   StartBaselineRollbackInput,
   RenameDriftBaselineInput,
@@ -1166,6 +1168,9 @@ export class AppStateStore {
         host.requireIntelligenceStore().readDriftStateAt(tenantId, resource, atIso),
       getOldestDriftSnapshotAt: (tenantId, resource) =>
         host.requireIntelligenceStore().getOldestDriftSnapshotAt(tenantId, resource),
+      countDriftBaselineChanges: (input) =>
+        host.requireIntelligenceStore().countDriftBaselineChanges(input),
+      listTenantGroups: () => host.requireIntelligenceStore().listTenantGroups(),
     });
     this.runService = new RunService({
       read: () => host.read(),
@@ -2076,6 +2081,12 @@ export class AppStateStore {
     input: DriftTenantCompareInput,
   ): Promise<DriftTenantCompareResult> {
     return this.driftService.getTenantCompare(input);
+  }
+
+  async getFleetDriftStatus(
+    input: FleetDriftStatusInput,
+  ): Promise<FleetDriftStatusResult> {
+    return this.driftService.getFleetDriftStatus(input);
   }
 
   async startBaselineRollback(input: StartBaselineRollbackInput): Promise<RunRecord> {

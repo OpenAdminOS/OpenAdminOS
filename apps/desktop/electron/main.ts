@@ -5255,6 +5255,19 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:get-fleet-drift-status",
+    handleTrusted((_event, input: unknown) => {
+      if (input !== undefined && !isPlainRecord(input)) {
+        throw new Error("Fleet drift status input must be an object.");
+      }
+      const groupId =
+        input !== undefined
+          ? optionalBoundedString((input as Record<string, unknown>).groupId, "groupId", 128)
+          : undefined;
+      return store.getFleetDriftStatus(groupId ? { groupId } : {});
+    }),
+  );
+  ipcMain.handle(
     "openadminos:get-graph-cache-refresh-schedule",
     handleTrusted((_event, tenantId?: unknown) =>
       store.getGraphCacheRefreshSchedule(

@@ -20,11 +20,15 @@ import type {
   DriftTimelineEntry,
   DriftTimelineInput,
   DriftTimelineResult,
+  FleetDriftStatusInput,
+  FleetDriftStatusResult,
+  FleetTenantDriftStatus,
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
   ListDriftBaselinesInput,
   RenameDriftBaselineInput,
   RetireDriftBaselineInput,
+  TenantGroup,
   TenantRecord,
 } from "@openadminos/agent-sdk";
 import { definitionForResource } from "../planner.js";
@@ -134,6 +138,12 @@ export interface DriftServiceHost {
     tenantId: string,
     resource: GraphCacheResourceKind,
   ): string | undefined;
+  countDriftBaselineChanges(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): { added: number; removed: number; modified: number };
+  listTenantGroups(): TenantGroup[];
 }
 
 export class DriftService {
@@ -542,6 +552,58 @@ export class DriftService {
       ...(input.selections ? { selections: input.selections } : {}),
     });
     return { tenantId: tenant.id, baselineId: baseline.id, draft };
+  }
+
+  async getFleetDriftStatus(
+    input: FleetDriftStatusInput,
+  ): Promise<FleetDriftStatusResult> {
+    const persisted = await this.host.read();
+    let tenants = persisted.tenants;
+    if (input.groupId) {
+      const group = this.host
+        .listTenantGroups()
+        .find((candidate) => candidate.id === input.groupId);
+      if (!group) throw new Error("Tenant group was not found.");
+      const members = new Set(group.tenantIds);
+      tenants = tenants.filter((tenant) => members.has(tenant.id));
+    }
+    const evaluatedAt = new Date().toISOString();
+    const statuses: FleetTenantDriftStatus[] = tenants.map((tenant) => {
+      const stats = this.host.getDriftResourceStats(tenant.id, TRACKED_RESOURCES);
+      const lastCaptureAt = stats
+        .map((stat) => stat.lastSnapshotAt)
+        .filter((value): value is string => typeof value === "string")
+        .sort()
+        .at(-1);
+      const trackedObjectCount = stats.reduce(
+        (sum, stat) => sum + stat.currentObjectCount,
+        0,
+      );
+      const baseline = this.host.getActiveDriftBaseline(tenant.id);
+      const status: FleetTenantDriftStatus = {
+        tenantId: tenant.id,
+        tenantName: tenant.displayName,
+        trackedObjectCount,
+        ...(lastCaptureAt ? { lastCaptureAt } : {}),
+      };
+      if (baseline) {
+        status.baseline = {
+          id: baseline.id,
+          name: baseline.name,
+          createdAt: baseline.createdAt,
+        };
+        status.drift = {
+          ...this.host.countDriftBaselineChanges({
+            tenantId: tenant.id,
+            baselineId: baseline.id,
+            resources: TRACKED_RESOURCES,
+          }),
+          evaluatedAt,
+        };
+      }
+      return status;
+    });
+    return { tenants: statuses, evaluatedAt };
   }
 
   async getTenantCompare(

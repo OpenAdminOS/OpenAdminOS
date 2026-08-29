@@ -1517,6 +1517,52 @@ export class IntelligenceSqliteStore {
   }
 
   /**
+   * Baseline drift counts without fetching raw JSON: pins compared to
+   * the latest live version hashes. Cheap enough to run across a fleet.
+   */
+  countDriftBaselineChanges(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): { added: number; removed: number; modified: number } {
+    const pins = this.db
+      .prepare(
+        `SELECT resource, graph_id, content_hash
+         FROM drift_baseline_pins
+         WHERE tenant_id = ? AND baseline_id = ?`,
+      )
+      .all(input.tenantId, input.baselineId) as unknown as Array<{
+      resource: GraphCacheResourceKind;
+      graph_id: string;
+      content_hash: string;
+    }>;
+    const pinsByResource = new Map<GraphCacheResourceKind, Map<string, string>>();
+    for (const pin of pins) {
+      const byId = pinsByResource.get(pin.resource) ?? new Map<string, string>();
+      byId.set(pin.graph_id, pin.content_hash);
+      pinsByResource.set(pin.resource, byId);
+    }
+    let added = 0;
+    let removed = 0;
+    let modified = 0;
+    for (const resource of input.resources) {
+      const pinned = pinsByResource.get(resource) ?? new Map<string, string>();
+      const live = this.readLatestDriftVersions(input.tenantId, resource);
+      for (const [graphId, latest] of live) {
+        if (latest.removed_at) continue;
+        const pinnedHash = pinned.get(graphId);
+        if (pinnedHash === undefined) added += 1;
+        else if (pinnedHash !== latest.content_hash) modified += 1;
+      }
+      for (const [graphId] of pinned) {
+        const latest = live.get(graphId);
+        if (!latest || latest.removed_at) removed += 1;
+      }
+    }
+    return { added, removed, modified };
+  }
+
+  /**
    * Versions pinned by a non-retired baseline must survive retention
    * pruning, or the baseline could no longer explain what it protects.
    */
