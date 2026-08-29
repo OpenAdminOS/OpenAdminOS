@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>18 · MCP Gateway · OpenAdminOS</title>
+  <link rel="stylesheet" href="_design.css">
+  <style>
+    body { min-width: 1080px; min-height: 700px; }
+    button, input, select { font: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    svg { stroke-linecap: round; stroke-linejoin: round; }
+    .settings-shell { display: grid; grid-template-columns: 204px minmax(0, 1fr); flex: 1; min-height: 0; }
+    .settings-rail { border-right: 1px solid var(--border); background: var(--bg-1); padding: 18px 12px; }
+    .settings-search { margin-bottom: 13px; }
+    .settings-links { display: grid; gap: 2px; }
+    .settings-link { width: 100%; border: 0; border-radius: 6px; background: transparent; padding: 7px 9px; color: var(--text-2); text-align: left; cursor: pointer; font-size: 11px; }
+    .settings-link:hover { background: var(--bg-2); color: var(--text-0); }
+    .settings-link.active { background: var(--accent-bg); color: var(--accent); }
+    .settings-content { min-width: 0; overflow-y: auto; padding: 22px 30px 38px; }
+    .settings-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+    .settings-intro h1 { font-size: 20px; }
+    .settings-intro p { max-width: 650px; margin-top: 4px; color: var(--text-2); font-size: 11px; }
+    .gateway-switch { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-1); padding: 8px 10px; }
+    .switch-copy strong, .switch-copy small { display: block; }
+    .switch-copy strong { font-size: 11px; }
+    .switch-copy small { color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .toggle { position: relative; width: 38px; height: 21px; flex: 0 0 38px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-3); cursor: pointer; }
+    .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 13px; height: 13px; border-radius: 50%; background: var(--text-2); }
+    .gateway-card { margin-bottom: 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-1); overflow: hidden; }
+    .gateway-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 15px; border-bottom: 1px solid var(--border); }
+    .gateway-head h2 { font-size: 12px; }
+    .gateway-head p { margin-top: 2px; color: var(--text-2); font-size: 10px; }
+    .off-pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(229, 198, 120, .25); border-radius: 999px; background: rgba(229, 198, 120, .08); padding: 3px 7px; color: var(--warning); font: 9px 'JetBrains Mono', monospace; }
+    .gateway-body { padding: 14px 15px; }
+    .endpoint-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+    .endpoint-row label { color: var(--text-2); font-size: 10px; }
+    .endpoint-value { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2); padding: 7px 9px; color: var(--text-2); font: 10px 'JetBrains Mono', monospace; }
+    .boundary-note { margin-top: 10px; border-left: 2px solid var(--success); padding: 7px 10px; background: rgba(156, 200, 143, .06); color: var(--text-2); font-size: 10px; line-height: 1.55; }
+    .pair-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+    .pair-step { position: relative; min-height: 124px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-2); padding: 12px; }
+    .step-num { display: grid; width: 21px; height: 21px; place-items: center; margin-bottom: 9px; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--accent); font: 10px 'JetBrains Mono', monospace; }
+    .pair-step h3 { font-size: 11px; }
+    .pair-step p { margin-top: 4px; color: var(--text-2); font-size: 10px; line-height: 1.55; }
+    .token { margin-top: 9px; border: 1px dashed rgba(232, 168, 124, .4); border-radius: 5px; background: var(--accent-bg); padding: 7px 8px; color: var(--accent); font: 600 11px 'JetBrains Mono', monospace; letter-spacing: .08em; text-align: center; }
+    .token-meta { margin-top: 5px; color: var(--text-3); font: 8px 'JetBrains Mono', monospace; text-align: center; }
+    .binding-example { margin-top: 9px; color: var(--success); font: 9px 'JetBrains Mono', monospace; }
+    .client-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .client-table th, .client-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+    .client-table tr:last-child td { border-bottom: 0; }
+    .client-table th { background: var(--bg-2); color: var(--text-3); font: 9px 'JetBrains Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .client-name { display: flex; align-items: center; gap: 9px; }
+    .client-icon { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-3); color: var(--accent); font: 600 9px 'JetBrains Mono', monospace; }
+    .client-name strong, .client-name small { display: block; }
+    .client-name strong { font-size: 11px; }
+    .client-name small { color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .tenant-binding { display: inline-flex; align-items: center; gap: 6px; color: var(--text-1); }
+    .access { color: var(--text-2); font: 9px 'JetBrains Mono', monospace; }
+    .status-offline { color: var(--warning); font: 9px 'JetBrains Mono', monospace; }
+    .proposal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; padding: 14px 15px; }
+    .proposal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+    .proposal h3 { font-size: 12px; }
+    .external-label { border: 1px solid rgba(196, 165, 217, .25); border-radius: 4px; background: rgba(196, 165, 217, .08); padding: 2px 6px; color: var(--purple); font: 9px 'JetBrains Mono', monospace; }
+    .proposal p { margin-top: 5px; color: var(--text-2); font-size: 10px; }
+    .proposal-meta { display: flex; gap: 14px; margin-top: 9px; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .proposal-route { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 6px; }
+    .proposal-route small { color: var(--text-3); font: 8px 'JetBrains Mono', monospace; }
+    @media (max-width: 1180px) { .pair-grid { grid-template-columns: 1fr; } .pair-step { min-height: 0; } .settings-shell { grid-template-columns: 178px minmax(0, 1fr); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <div class="traffic-lights" aria-label="Window controls"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+      <div class="titlebar-title">OpenAdminOS · Settings · Gateway</div>
+      <div class="titlebar-status"><span class="dot-status idle"></span><span>gateway off · v0.5 reference</span></div>
+    </header>
+
+    <aside class="sidebar" aria-label="Application navigation">
+      <div class="brand"><div class="brand-mark">O</div><div><div class="brand-name">OpenAdminOS</div><div class="brand-sub">LOCAL ADMIN RUNTIME</div></div></div>
+      <div class="nav-section">
+        <div class="nav-label">Workspace</div>
+        <a class="nav-item" href="15-contextual-setup.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>Chat</a>
+        <a class="nav-item" href="03-agents-grid.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="3"/></svg>Agents</a>
+        <a class="nav-item" href="16-baseline-rollback.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M7 3v14M7 7h8a3 3 0 0 1 3 3v1M17 21V7M17 17H9a3 3 0 0 1-3-3v-1"/></svg>Changes</a>
+        <a class="nav-item active" href="18-mcp-gateway.html"><svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5a7 7 0 0 0 0-3l2-1.5-2-3.4-2.4 1A8 8 0 0 0 14 5l-.4-2.6H9.7L9.3 5a8 8 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 3l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 9.3 19l.4 2.6h3.9L14 19a8 8 0 0 0 2.6-1.5l2.4 1 2-3.4z"/></svg>Settings<span class="nav-badge">1</span></a>
+      </div>
+      <a class="tenant-switcher" href="08-tenant-switcher.html"><span class="tenant-avatar">CT</span><span class="tenant-info"><span class="tenant-name">Contoso Production</span><span class="tenant-id">active tenant</span></span></a>
+    </aside>
+
+    <main class="main">
+      <div class="settings-shell">
+        <aside class="settings-rail" aria-label="Settings sections">
+          <input class="form-input settings-search" type="search" placeholder="Search settings" aria-label="Search settings">
+          <nav class="settings-links"><button class="settings-link">Providers</button><button class="settings-link">Tenants</button><button class="settings-link">Chat</button><button class="settings-link">Connectors</button><button class="settings-link active">Gateway</button><button class="settings-link">General</button><button class="settings-link">Privacy</button><button class="settings-link">About</button></nav>
+        </aside>
+
+        <div class="settings-content">
+          <header class="settings-intro"><div><h1>Gateway</h1><p>Pair local MCP clients with a tenant-scoped OpenAdminOS session. External proposals use the same review and confirmation gates as in-app runs.</p></div><div class="gateway-switch"><span class="switch-copy"><strong>Enable MCP Gateway</strong><small>Off by default</small></span><button class="toggle" type="button" role="switch" aria-checked="false" aria-label="Enable MCP Gateway"></button></div></header>
+
+          <section class="gateway-card" aria-labelledby="gateway-status-title">
+            <header class="gateway-head"><div><h2 id="gateway-status-title">Local gateway</h2><p>Existing pairings are retained while the listener is off.</p></div><span class="off-pill"><span class="dot-status warn"></span>Off</span></header>
+            <div class="gateway-body"><div class="endpoint-row"><label for="gateway-endpoint">Local endpoint</label><div class="endpoint-value" id="gateway-endpoint">http://127.0.0.1:47891/mcp</div><button class="btn" disabled>Copy</button></div><div class="boundary-note">The listener binds to loopback only. Pairing does not grant tenant access by itself. Every client is bound to one connected tenant and a declared access class.</div></div>
+          </section>
+
+          <section class="gateway-card" aria-labelledby="pairing-title">
+            <header class="gateway-head"><div><h2 id="pairing-title">Pair a client</h2><p>Pairing tokens expire after 10 minutes and work once.</p></div><button class="btn" disabled>Generate pairing token</button></header>
+            <div class="gateway-body">
+              <div class="pair-grid">
+                <article class="pair-step"><span class="step-num">1</span><h3>Enable the gateway</h3><p>Start the loopback listener. No client can connect while the gateway is off.</p></article>
+                <article class="pair-step"><span class="step-num">2</span><h3>Copy the pairing token</h3><p>Paste this one-time token into the client during MCP setup.</p><div class="token">OAO-Q7R4-LM2C</div><div class="token-meta">preview token · expires 09:58</div></article>
+                <article class="pair-step"><span class="step-num">3</span><h3>Approve tenant binding</h3><p>Review the client name, tenant, and read or write proposal access before pairing.</p><div class="binding-example">Contoso Production · proposals allowed</div></article>
+              </div>
+            </div>
+          </section>
+
+          <section class="gateway-card" aria-labelledby="clients-title">
+            <header class="gateway-head"><div><h2 id="clients-title">Connected clients</h2><p>2 paired clients · offline while gateway is off</p></div></header>
+            <table class="client-table">
+              <thead><tr><th scope="col">Client</th><th scope="col">Tenant binding</th><th scope="col">Access</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead>
+              <tbody>
+                <tr><td><div class="client-name"><span class="client-icon">CC</span><span><strong>Claude Code</strong><small>paired 28 Aug 2026</small></span></div></td><td><span class="tenant-binding"><span class="dot-status ok"></span>Contoso Production</span></td><td class="access">Read tools + write proposals</td><td class="status-offline">Listener off</td><td><button class="btn btn-danger">Revoke</button></td></tr>
+                <tr><td><div class="client-name"><span class="client-icon">VS</span><span><strong>VS Code Admin Tools</strong><small>paired 12 Aug 2026</small></span></div></td><td><span class="tenant-binding"><span class="dot-status ok"></span>Fabrikam Europe</span></td><td class="access">Read tools only</td><td class="status-offline">Listener off</td><td><button class="btn btn-danger">Revoke</button></td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="gateway-card" aria-labelledby="proposals-title">
+            <header class="gateway-head"><div><h2 id="proposals-title">Pending proposals</h2><p>External writes wait here until the standard diff is reviewed.</p></div><span class="nav-badge">1</span></header>
+            <article class="proposal"><div><div class="proposal-head"><h3>Exclude Break Glass Accounts from sign-in frequency policy</h3><span class="tag tag-write">Write proposal</span><span class="external-label">External client: Claude Code</span></div><p>1 Conditional Access policy · 2 excluded users · no Graph write has run</p><div class="proposal-meta"><span>tenant · Contoso Production</span><span>received · 4 min ago</span><span>proposal id · ext_01J8QF3</span></div></div><div class="proposal-route"><small>Routes to standard diff confirmation</small><button class="btn btn-warning">Review diff</button></div></article>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

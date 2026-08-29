@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>17 · Fleet · OpenAdminOS</title>
+  <link rel="stylesheet" href="_design.css">
+  <style>
+    body { min-width: 1120px; min-height: 720px; }
+    button, input, select { font: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    svg { stroke-linecap: round; stroke-linejoin: round; }
+    .content { flex: 1; padding: 22px 32px 38px; }
+    .group-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+    .group-title { font-size: 17px; font-weight: 600; }
+    .group-meta { margin-top: 3px; color: var(--text-2); font: 10px 'JetBrains Mono', monospace; }
+    .group-actions { display: flex; gap: 8px; }
+    .fleet-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+    .table-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg-1); }
+    .fleet-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .fleet-table th, .fleet-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+    .fleet-table tbody tr:last-child td { border-bottom: 0; }
+    .fleet-table th { background: var(--bg-2); color: var(--text-3); font: 9px 'JetBrains Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .fleet-table tbody tr:hover { background: var(--bg-2); }
+    .tenant-cell { display: flex; align-items: center; gap: 9px; min-width: 170px; }
+    .tenant-mark { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-3); color: var(--text-1); font: 600 9px 'JetBrains Mono', monospace; }
+    .tenant-cell strong, .tenant-cell small { display: block; }
+    .tenant-cell strong { font-size: 11px; }
+    .tenant-cell small { margin-top: 1px; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .baseline { color: var(--text-1); }
+    .baseline small { display: block; margin-top: 2px; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .drift-counts { display: flex; gap: 5px; white-space: nowrap; font: 10px 'JetBrains Mono', monospace; }
+    .drift-count { border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); padding: 2px 5px; }
+    .drift-count.add { color: var(--success); }
+    .drift-count.remove { color: var(--danger); }
+    .drift-count.modify { color: var(--warning); }
+    .capture { color: var(--text-2); font: 10px 'JetBrains Mono', monospace; white-space: nowrap; }
+    .status-pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 7px; font: 9px 'JetBrains Mono', monospace; white-space: nowrap; }
+    .status-pill.ok { border-color: rgba(156, 200, 143, .24); background: rgba(156, 200, 143, .08); color: var(--success); }
+    .status-pill.warn { border-color: rgba(229, 198, 120, .24); background: rgba(229, 198, 120, .08); color: var(--warning); }
+    .status-pill.danger { border-color: rgba(229, 136, 136, .24); background: rgba(229, 136, 136, .08); color: var(--danger); }
+    .side-stack { display: grid; gap: 12px; }
+    .panel { background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 13px 14px; border-bottom: 1px solid var(--border); }
+    .panel-head h2 { font-size: 12px; }
+    .panel-head p { margin-top: 3px; color: var(--text-2); font-size: 10px; }
+    .panel-body { padding: 13px 14px; }
+    .agent-summary { display: flex; align-items: center; gap: 10px; margin-bottom: 13px; }
+    .agent-icon { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(156, 200, 143, .24); border-radius: 7px; background: rgba(156, 200, 143, .08); color: var(--success); }
+    .agent-summary strong, .agent-summary small { display: block; }
+    .agent-summary strong { font-size: 12px; }
+    .agent-summary small { margin-top: 2px; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .run-progress { display: grid; gap: 7px; }
+    .progress-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 10px; }
+    .progress-row span:last-child { color: var(--text-2); font: 9px 'JetBrains Mono', monospace; }
+    .progress-track { grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 3px; background: var(--bg-3); }
+    .progress-fill { height: 100%; background: var(--success); }
+    .aggregate { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .aggregate div { text-align: center; }
+    .aggregate strong { display: block; font: 600 14px 'JetBrains Mono', monospace; }
+    .aggregate span { color: var(--text-3); font: 8px 'JetBrains Mono', monospace; text-transform: uppercase; }
+    .write-note { color: var(--text-2); font-size: 10px; line-height: 1.55; }
+    .confirm-strip { grid-column: 1 / -1; margin-top: 2px; border: 1px solid rgba(229, 198, 120, .25); border-radius: 8px; overflow: hidden; background: var(--bg-1); }
+    .confirm-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 14px; border-bottom: 1px solid var(--border); background: rgba(229, 198, 120, .05); }
+    .confirm-head strong { font-size: 12px; }
+    .confirm-head span { color: var(--warning); font: 9px 'JetBrains Mono', monospace; }
+    .confirm-tenants { display: grid; grid-template-columns: repeat(3, 1fr); }
+    .tenant-confirm { min-width: 0; padding: 12px 14px; border-right: 1px solid var(--border); }
+    .tenant-confirm:last-child { border-right: 0; }
+    .tenant-confirm-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .tenant-confirm-top strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .phrase { display: block; margin-bottom: 7px; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .confirm-input { height: 31px; padding: 6px 8px; font-size: 10px; }
+    .tenant-confirm.ready .confirm-input { border-color: rgba(156, 200, 143, .34); color: var(--success); }
+    .tenant-confirm.waiting .confirm-input { border-color: rgba(229, 198, 120, .28); color: var(--text-2); }
+    .confirm-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--border); color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .btn[disabled] { cursor: not-allowed; opacity: .45; }
+    @media (max-width: 1260px) {
+      .fleet-layout { grid-template-columns: 1fr; }
+      .side-stack { grid-template-columns: 1fr 1fr; }
+      .confirm-tenants { grid-template-columns: 1fr 1fr; }
+      .tenant-confirm:nth-child(2) { border-right: 0; }
+      .tenant-confirm:nth-child(3) { border-top: 1px solid var(--border); }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <div class="traffic-lights" aria-label="Window controls"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+      <div class="titlebar-title">OpenAdminOS · Fleet</div>
+      <div class="titlebar-status"><span class="pulse"></span><span>6 tenants · v0.5 reference</span></div>
+    </header>
+
+    <aside class="sidebar" aria-label="Application navigation">
+      <div class="brand"><div class="brand-mark">O</div><div><div class="brand-name">OpenAdminOS</div><div class="brand-sub">MSP WORKSPACE</div></div></div>
+      <div class="nav-section">
+        <div class="nav-label">Workspace</div>
+        <a class="nav-item" href="15-contextual-setup.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>Chat</a>
+        <a class="nav-item" href="03-agents-grid.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="3"/></svg>Agents</a>
+        <a class="nav-item" href="16-baseline-rollback.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M7 3v14M7 7h8a3 3 0 0 1 3 3v1M17 21V7M17 17H9a3 3 0 0 1-3-3v-1"/></svg>Changes</a>
+        <a class="nav-item active" href="17-fleet.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 20V9l8-5 8 5v11M2 20h20M8 20v-6h8v6"/></svg>Fleet<span class="nav-badge">6</span></a>
+        <a class="nav-item" href="19-telemetry.html"><svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5a7 7 0 0 0 0-3l2-1.5-2-3.4-2.4 1A8 8 0 0 0 14 5l-.4-2.6H9.7L9.3 5a8 8 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 3l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 9.3 19l.4 2.6h3.9L14 19a8 8 0 0 0 2.6-1.5l2.4 1 2-3.4z"/></svg>Settings</a>
+      </div>
+      <a class="tenant-switcher" href="08-tenant-switcher.html"><span class="tenant-avatar">MC</span><span class="tenant-info"><span class="tenant-name">Managed customers</span><span class="tenant-id">6 tenants · group scope</span></span></a>
+    </aside>
+
+    <main class="main">
+      <header class="main-header">
+        <div><h1 class="page-title">Fleet</h1><div class="page-subtitle">Cross-tenant status with tenant-pinned execution</div></div>
+        <div class="header-actions"><button class="btn">Manage groups</button><button class="btn btn-primary">Run across fleet</button></div>
+      </header>
+
+      <div class="content">
+        <div class="group-head"><div><h2 class="group-title">Managed customers · 6 tenants</h2><p class="group-meta">Last fleet refresh 29 Aug 2026, 10:24 · local cache only</p></div><div class="group-actions"><button class="btn">Export status</button><button class="btn">Refresh captures</button></div></div>
+
+        <div class="fleet-layout">
+          <section class="table-card" aria-label="Per-tenant baseline drift status">
+            <table class="fleet-table">
+              <thead><tr><th scope="col">Tenant</th><th scope="col">Baseline</th><th scope="col">Drift</th><th scope="col">Last capture</th><th scope="col">Status</th></tr></thead>
+              <tbody>
+                <tr><td><div class="tenant-cell"><span class="tenant-mark">CT</span><span><strong>Contoso Production</strong><small>contoso.onmicrosoft.com</small></span></div></td><td><div class="baseline">Production standard<small>18 Aug 2026</small></div></td><td><div class="drift-counts"><span class="drift-count add">+2</span><span class="drift-count remove">−1</span><span class="drift-count modify">~3</span></div></td><td class="capture">12 min ago</td><td><span class="status-pill warn"><span class="dot-status warn"></span>Review drift</span></td></tr>
+                <tr><td><div class="tenant-cell"><span class="tenant-mark">FB</span><span><strong>Fabrikam Europe</strong><small>fabrikameu.onmicrosoft.com</small></span></div></td><td><div class="baseline">EU security floor<small>22 Aug 2026</small></div></td><td><div class="drift-counts"><span class="drift-count add">+0</span><span class="drift-count remove">−0</span><span class="drift-count modify">~0</span></div></td><td class="capture">18 min ago</td><td><span class="status-pill ok"><span class="dot-status ok"></span>Matches baseline</span></td></tr>
+                <tr><td><div class="tenant-cell"><span class="tenant-mark">NW</span><span><strong>Northwind Traders</strong><small>northwind.onmicrosoft.com</small></span></div></td><td><div class="baseline">Managed baseline<small>11 Aug 2026</small></div></td><td><div class="drift-counts"><span class="drift-count add">+0</span><span class="drift-count remove">−0</span><span class="drift-count modify">~2</span></div></td><td class="capture">43 min ago</td><td><span class="status-pill warn"><span class="dot-status warn"></span>2 modified</span></td></tr>
+                <tr><td><div class="tenant-cell"><span class="tenant-mark">AD</span><span><strong>Adventure Works</strong><small>adventure-works.onmicrosoft.com</small></span></div></td><td><div class="baseline">Standard tenant<small>26 Aug 2026</small></div></td><td><div class="drift-counts"><span class="drift-count add">+1</span><span class="drift-count remove">−0</span><span class="drift-count modify">~0</span></div></td><td class="capture">1 h ago</td><td><span class="status-pill warn"><span class="dot-status warn"></span>1 added</span></td></tr>
+                <tr><td><div class="tenant-cell"><span class="tenant-mark">WC</span><span><strong>Wide World Importers</strong><small>wideworld.onmicrosoft.com</small></span></div></td><td><div class="baseline">Customer baseline<small>4 Aug 2026</small></div></td><td><div class="drift-counts"><span class="drift-count add">+0</span><span class="drift-count remove">−0</span><span class="drift-count modify">~0</span></div></td><td class="capture">6 h ago</td><td><span class="status-pill danger"><span class="dot-status danger"></span>Capture stale</span></td></tr>
+                <tr><td><div class="tenant-cell"><span class="tenant-mark">TL</span><span><strong>Tailspin Toys</strong><small>tailspintoys.onmicrosoft.com</small></span></div></td><td><div class="baseline">No active baseline<small>not configured</small></div></td><td><div class="drift-counts"><span class="drift-count">n/a</span></div></td><td class="capture">2 days ago</td><td><span class="status-pill danger"><span class="dot-status danger"></span>Needs baseline</span></td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <aside class="side-stack">
+            <section class="panel">
+              <header class="panel-head"><div><h2>Fleet run</h2><p>One read-only run per tenant</p></div><span class="tag tag-read">Read</span></header>
+              <div class="panel-body">
+                <div class="agent-summary"><span class="agent-icon">✓</span><span><strong>Conditional Access explainer</strong><small>6 tenant-pinned run records</small></span></div>
+                <div class="run-progress">
+                  <div class="progress-row"><span>Ready</span><span>4 tenants</span><div class="progress-track"><div class="progress-fill" style="width:66.67%"></div></div></div>
+                  <div class="progress-row"><span>Reading local cache</span><span>1 tenant</span><div class="progress-track"><div class="progress-fill" style="width:16.67%;background:var(--accent)"></div></div></div>
+                  <div class="progress-row"><span>Skipped, stale cache</span><span>1 tenant</span><div class="progress-track"><div class="progress-fill" style="width:16.67%;background:var(--danger)"></div></div></div>
+                </div>
+                <div class="aggregate"><div><strong>6</strong><span>scoped</span></div><div><strong>4</strong><span>complete</span></div><div><strong>37</strong><span>findings</span></div></div>
+              </div>
+            </section>
+            <section class="panel">
+              <header class="panel-head"><div><h2>Tenant boundary</h2><p>Runs never share tenant context</p></div></header>
+              <div class="panel-body"><p class="write-note">Fleet aggregation is read-only. A write agent creates a separate plan and run record for every tenant. Skipped and failed tenants remain visible in the result.</p></div>
+            </section>
+          </aside>
+
+          <section class="confirm-strip" aria-labelledby="write-confirm-title">
+            <header class="confirm-head"><strong id="write-confirm-title">Per-tenant write confirmation</strong><span>No confirm-all action</span></header>
+            <div class="confirm-tenants">
+              <div class="tenant-confirm ready"><div class="tenant-confirm-top"><strong>Contoso Production</strong><span class="status-pill ok">Phrase matched</span></div><label class="phrase" for="contoso-confirm">Type RETIRE 3 DEVICES</label><input class="form-input mono confirm-input" id="contoso-confirm" value="RETIRE 3 DEVICES"></div>
+              <div class="tenant-confirm waiting"><div class="tenant-confirm-top"><strong>Northwind Traders</strong><span class="status-pill warn">Waiting</span></div><label class="phrase" for="northwind-confirm">Type RETIRE 2 DEVICES</label><input class="form-input mono confirm-input" id="northwind-confirm" placeholder="Type exact phrase"></div>
+              <div class="tenant-confirm waiting"><div class="tenant-confirm-top"><strong>Adventure Works</strong><span class="status-pill warn">Waiting</span></div><label class="phrase" for="adventure-confirm">Type RETIRE 1 DEVICE</label><input class="form-input mono confirm-input" id="adventure-confirm" placeholder="Type exact phrase"></div>
+            </div>
+            <footer class="confirm-foot"><span>Each plan applies only after its own exact-match confirmation</span><button class="btn btn-warning" disabled>Confirm 3 tenant runs</button></footer>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

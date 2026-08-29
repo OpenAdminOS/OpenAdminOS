@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>19 · Privacy and telemetry · OpenAdminOS</title>
+  <link rel="stylesheet" href="_design.css">
+  <style>
+    body { min-width: 1040px; min-height: 680px; }
+    button, input { font: inherit; }
+    button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    svg { stroke-linecap: round; stroke-linejoin: round; }
+    .settings-shell { display: grid; grid-template-columns: 204px minmax(0, 1fr); flex: 1; min-height: 0; }
+    .settings-rail { border-right: 1px solid var(--border); background: var(--bg-1); padding: 18px 12px; }
+    .settings-search { margin-bottom: 13px; }
+    .settings-links { display: grid; gap: 2px; }
+    .settings-link { width: 100%; border: 0; border-radius: 6px; background: transparent; padding: 7px 9px; color: var(--text-2); text-align: left; cursor: pointer; font-size: 11px; }
+    .settings-link:hover { background: var(--bg-2); color: var(--text-0); }
+    .settings-link.active { background: var(--accent-bg); color: var(--accent); }
+    .settings-content { min-width: 0; overflow-y: auto; padding: 22px 30px 38px; }
+    .settings-intro { margin-bottom: 20px; }
+    .settings-intro h1 { font-size: 20px; }
+    .settings-intro p { max-width: 680px; margin-top: 4px; color: var(--text-2); font-size: 11px; line-height: 1.6; }
+    .privacy-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr); gap: 16px; align-items: start; }
+    .privacy-card { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-1); overflow: hidden; }
+    .privacy-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 15px 16px; border-bottom: 1px solid var(--border); }
+    .privacy-head h2 { font-size: 13px; }
+    .privacy-head p { max-width: 560px; margin-top: 3px; color: var(--text-2); font-size: 10px; line-height: 1.55; }
+    .switch-wrap { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+    .switch-wrap span { color: var(--text-3); font: 9px 'JetBrains Mono', monospace; text-transform: uppercase; }
+    .toggle { position: relative; width: 38px; height: 21px; flex: 0 0 38px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg-3); cursor: pointer; }
+    .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 13px; height: 13px; border-radius: 50%; background: var(--text-2); }
+    .privacy-body { padding: 15px 16px; }
+    .off-state { display: flex; align-items: center; gap: 8px; margin-bottom: 13px; border: 1px solid rgba(156, 200, 143, .22); border-radius: 6px; background: rgba(156, 200, 143, .07); padding: 9px 10px; color: var(--success); font-size: 10px; }
+    .off-state strong { color: var(--text-0); }
+    .payload-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .payload-label h3 { color: var(--text-2); font: 9px 'JetBrains Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .payload-label span { color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .payload { overflow-x: auto; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-2); padding: 13px 14px; color: var(--text-1); font: 10px/1.7 'JetBrains Mono', monospace; white-space: pre; }
+    .privacy-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 12px; }
+    .privacy-actions p { max-width: 430px; color: var(--text-3); font-size: 9px; line-height: 1.5; }
+    .test-button { white-space: nowrap; }
+    .never-list { display: grid; gap: 8px; }
+    .never-item { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; align-items: start; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .never-item:last-child { border-bottom: 0; padding-bottom: 0; }
+    .never-mark { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid rgba(156, 200, 143, .24); border-radius: 5px; background: rgba(156, 200, 143, .07); color: var(--success); font-size: 11px; }
+    .never-item strong, .never-item small { display: block; }
+    .never-item strong { font-size: 11px; }
+    .never-item small { margin-top: 2px; color: var(--text-2); font-size: 9px; line-height: 1.5; }
+    .scope-card { margin-top: 16px; }
+    .scope-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .scope-table th, .scope-table td { padding: 9px 11px; border-bottom: 1px solid var(--border); text-align: left; }
+    .scope-table tr:last-child td { border-bottom: 0; }
+    .scope-table th { background: var(--bg-2); color: var(--text-3); font: 9px 'JetBrains Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .scope-table td:last-child { color: var(--text-2); }
+    .bucket { color: var(--accent); font-family: 'JetBrains Mono', monospace; }
+    .control-note { margin-top: 12px; border-left: 2px solid var(--accent); background: var(--accent-bg); padding: 9px 11px; color: var(--text-2); font-size: 10px; line-height: 1.6; }
+    @media (max-width: 1160px) { .privacy-grid { grid-template-columns: 1fr; } .settings-shell { grid-template-columns: 178px minmax(0, 1fr); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <div class="traffic-lights" aria-label="Window controls"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+      <div class="titlebar-title">OpenAdminOS · Settings · Privacy</div>
+      <div class="titlebar-status"><span class="dot-status ok"></span><span>telemetry off · v0.5 reference</span></div>
+    </header>
+
+    <aside class="sidebar" aria-label="Application navigation">
+      <div class="brand"><div class="brand-mark">O</div><div><div class="brand-name">OpenAdminOS</div><div class="brand-sub">LOCAL ADMIN RUNTIME</div></div></div>
+      <div class="nav-section">
+        <div class="nav-label">Workspace</div>
+        <a class="nav-item" href="15-contextual-setup.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>Chat</a>
+        <a class="nav-item" href="03-agents-grid.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="3"/></svg>Agents</a>
+        <a class="nav-item" href="16-baseline-rollback.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M7 3v14M7 7h8a3 3 0 0 1 3 3v1M17 21V7M17 17H9a3 3 0 0 1-3-3v-1"/></svg>Changes</a>
+        <a class="nav-item active" href="19-telemetry.html"><svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5a7 7 0 0 0 0-3l2-1.5-2-3.4-2.4 1A8 8 0 0 0 14 5l-.4-2.6H9.7L9.3 5a8 8 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 3l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 9.3 19l.4 2.6h3.9L14 19a8 8 0 0 0 2.6-1.5l2.4 1 2-3.4z"/></svg>Settings</a>
+      </div>
+      <a class="tenant-switcher" href="08-tenant-switcher.html"><span class="tenant-avatar">CT</span><span class="tenant-info"><span class="tenant-name">Contoso Production</span><span class="tenant-id">active tenant</span></span></a>
+    </aside>
+
+    <main class="main">
+      <div class="settings-shell">
+        <aside class="settings-rail" aria-label="Settings sections">
+          <input class="form-input settings-search" type="search" placeholder="Search settings" aria-label="Search settings">
+          <nav class="settings-links"><button class="settings-link">Providers</button><button class="settings-link">Tenants</button><button class="settings-link">Chat</button><button class="settings-link">Connectors</button><button class="settings-link">Gateway</button><button class="settings-link">General</button><button class="settings-link active">Privacy</button><button class="settings-link">About</button></nav>
+        </aside>
+
+        <div class="settings-content">
+          <header class="settings-intro"><h1>Privacy</h1><p>Control optional product telemetry and inspect the complete payload before anything is sent. Desktop telemetry is separate from website analytics and registry install counts.</p></header>
+
+          <div class="privacy-grid">
+            <section class="privacy-card" aria-labelledby="telemetry-title">
+              <header class="privacy-head"><div><h2 id="telemetry-title">Install and usage telemetry</h2><p>Share coarse product counts and version classes to help prioritize compatibility and reliability work. This setting is off unless you enable it.</p></div><div class="switch-wrap"><span>Off</span><button class="toggle" type="button" role="switch" aria-checked="false" aria-label="Enable install and usage telemetry"></button></div></header>
+              <div class="privacy-body">
+                <div class="off-state"><span class="dot-status ok"></span><span><strong>Telemetry is off.</strong> No install or usage payloads are sent in the background.</span></div>
+                <div class="payload-label"><h3>Exact JSON payload preview</h3><span>counts and versions only</span></div>
+                <pre class="payload" aria-label="Exact telemetry JSON payload">{
+  "anonymousId": "oao_7c91f4a2b8e6",
+  "appVersion": "0.5.0",
+  "platform": "win32",
+  "providerClass": "local",
+  "tenantCountBucket": "2-5",
+  "agentCountBucket": "6-10",
+  "runCountBucket": "51-100"
+}</pre>
+                <div class="privacy-actions"><p>A test ping sends this preview once. It does not enable ongoing telemetry or change this switch.</p><button class="btn test-button">Send a test ping</button></div>
+              </div>
+            </section>
+
+            <section class="privacy-card" aria-labelledby="never-title">
+              <header class="privacy-head"><div><h2 id="never-title">Never included</h2><p>The telemetry schema does not accept tenant or run content fields.</p></div></header>
+              <div class="privacy-body never-list">
+                <div class="never-item"><span class="never-mark">✓</span><span><strong>Tenant content and identity</strong><small>No tenant names, tenant IDs, domains, users, devices, policies, or Microsoft Graph response data.</small></span></div>
+                <div class="never-item"><span class="never-mark">✓</span><span><strong>Prompts and model context</strong><small>No prompt text, workspace notes, cached evidence, provider credentials, or model inputs.</small></span></div>
+                <div class="never-item"><span class="never-mark">✓</span><span><strong>Results and run detail</strong><small>No answers, findings, diffs, action plans, typed phrases, logs, errors, or exported files.</small></span></div>
+                <div class="never-item"><span class="never-mark">✓</span><span><strong>Exact activity counts</strong><small>Tenant, agent, and run totals are converted to coarse buckets on this device before sending.</small></span></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="privacy-card scope-card" aria-labelledby="fields-title">
+            <header class="privacy-head"><div><h2 id="fields-title">Field definitions</h2><p>Every allowed field is visible here. Adding a field requires a product review and an updated payload preview.</p></div></header>
+            <table class="scope-table">
+              <thead><tr><th scope="col">Field</th><th scope="col">Example</th><th scope="col">Purpose</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">anonymousId</td><td class="bucket">random local id</td><td>Distinguish installations without an account or tenant identifier.</td></tr>
+                <tr><td class="mono">appVersion</td><td class="bucket">0.5.0</td><td>Measure supported version adoption.</td></tr>
+                <tr><td class="mono">platform</td><td class="bucket">win32</td><td>Prioritize platform-specific compatibility work.</td></tr>
+                <tr><td class="mono">providerClass</td><td class="bucket">local | hosted</td><td>Understand provider class usage without provider or model names.</td></tr>
+                <tr><td class="mono">*CountBucket</td><td class="bucket">0, 1, 2-5, 6-10, 11-50, 51-100, 101+</td><td>Coarse tenant, installed agent, and retained run counts.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <div class="control-note">Tenant content, prompts, and results are never sent. Turning telemetry off stops future background payloads. The random anonymous ID can be reset from this page without deleting local OpenAdminOS data.</div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
