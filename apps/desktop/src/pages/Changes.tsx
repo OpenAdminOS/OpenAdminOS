@@ -71,6 +71,9 @@ export default function Changes() {
     : state.tenants[0];
   const baselinesAvailable = Boolean(window.openAdminOS?.listDriftBaselines);
   const compareAvailable = Boolean(window.openAdminOS?.getDriftTimeCompare);
+  const baselineRollbackAvailable = Boolean(
+    window.openAdminOS?.startBaselineRollback,
+  );
   const otherTenants = useMemo(
     () => state.tenants.filter((tenant) => tenant.id !== activeTenant?.id),
     [activeTenant?.id, state.tenants],
@@ -123,6 +126,11 @@ export default function Changes() {
     null,
   );
   const [retireBaselineBusy, setRetireBaselineBusy] = useState(false);
+  const [baselineRollbackOpen, setBaselineRollbackOpen] = useState(false);
+  const [baselineRollbackError, setBaselineRollbackError] = useState<
+    string | null
+  >(null);
+  const [baselineRollbackBusy, setBaselineRollbackBusy] = useState(false);
   const [compareMode, setCompareMode] = useState<CompareMode>("time");
   const [timeCompareFrom, setTimeCompareFrom] = useState(() =>
     defaultCompareDateValue(-7),
@@ -893,6 +901,36 @@ export default function Changes() {
     }
   };
 
+  const closeBaselineRollbackModal = () => {
+    if (baselineRollbackBusy) return;
+    setBaselineRollbackOpen(false);
+    setBaselineRollbackError(null);
+  };
+
+  const handleBaselineRollback = async () => {
+    const startBaselineRollback = window.openAdminOS?.startBaselineRollback;
+    if (!activeTenant) return;
+
+    setBaselineRollbackBusy(true);
+    setBaselineRollbackError(null);
+    try {
+      if (!startBaselineRollback) {
+        throw new Error(
+          "Baseline rollback is unavailable in this build. The desktop bridge does not expose the rollback method.",
+        );
+      }
+      const run = await startBaselineRollback({ tenantId: activeTenant.id });
+      setBaselineRollbackOpen(false);
+      navigate(`/runs/${run.id}`);
+    } catch (caught) {
+      setBaselineRollbackError(
+        caught instanceof Error ? caught.message : String(caught),
+      );
+    } finally {
+      setBaselineRollbackBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -964,6 +1002,14 @@ export default function Changes() {
               setRetireBaselineError(null);
               setRetireBaselineOpen(true);
             }}
+            onRollback={
+              baselineRollbackAvailable
+                ? () => {
+                    setBaselineRollbackError(null);
+                    setBaselineRollbackOpen(true);
+                  }
+                : undefined
+            }
             onRetry={() => {
               setBaselineError(null);
               setBaselineReloadNonce((current) => current + 1);
@@ -1124,6 +1170,14 @@ export default function Changes() {
         busy={retireBaselineBusy}
         onClose={closeRetireBaselineModal}
         onConfirm={() => void handleRetireBaseline()}
+      />
+      <BaselineRollbackModal
+        open={baselineRollbackOpen}
+        entryCount={tenantBaselineDrift?.entries.length ?? 0}
+        error={baselineRollbackError}
+        busy={baselineRollbackBusy}
+        onClose={closeBaselineRollbackModal}
+        onConfirm={() => void handleBaselineRollback()}
       />
     </>
   );
@@ -2015,6 +2069,7 @@ function BaselinesSegment({
   onCreate,
   onRename,
   onRetire,
+  onRollback,
   onRetry,
 }: {
   loading: boolean;
@@ -2027,6 +2082,7 @@ function BaselinesSegment({
   onCreate: () => void;
   onRename: () => void;
   onRetire: () => void;
+  onRollback?: () => void;
   onRetry: () => void;
 }) {
   if (loading && !activeBaseline && retiredBaselines.length === 0 && !error) {
@@ -2079,6 +2135,7 @@ function BaselinesSegment({
           drift={drift}
           expandedEntry={expandedEntry}
           onToggleEntry={onToggleEntry}
+          onRollback={onRollback}
         />
       ) : null}
 
@@ -2257,10 +2314,12 @@ function BaselineDriftEntries({
   drift,
   expandedEntry,
   onToggleEntry,
+  onRollback,
 }: {
   drift: DriftBaselineDriftResult;
   expandedEntry: string | null;
   onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
+  onRollback?: () => void;
 }) {
   return (
     <Card className="overflow-hidden">
@@ -2274,9 +2333,16 @@ function BaselineDriftEntries({
             baseline
           </div>
         </div>
-        <span className="text-[11px] text-[var(--color-text-muted)]">
-          {formatDateTime(drift.evaluatedAt)}
-        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="text-[11px] text-[var(--color-text-muted)]">
+            {formatDateTime(drift.evaluatedAt)}
+          </span>
+          {onRollback && drift.entries.length > 0 ? (
+            <Button size="sm" variant="primary" onClick={onRollback}>
+              Roll back drift
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {drift.entries.length === 0 ? (
@@ -3336,6 +3402,65 @@ function RetireBaselineModal({
             onClick={onConfirm}
           >
             {busy ? "Retiring…" : "Retire baseline"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function BaselineRollbackModal({
+  open,
+  entryCount,
+  error,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  entryCount: number;
+  error: string | null;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <ModalHeader
+        title="Roll back baseline drift"
+        subtitle="Pre-flight review"
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <p className="text-[13px] leading-6 text-[var(--color-text-soft)]">
+          This builds a rollback plan for the drifted objects below. Nothing is
+          applied until you review the plan and type the confirmation phrase on
+          the run page.
+        </p>
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+          {entryCount.toLocaleString()} drifted{" "}
+          {entryCount === 1 ? "entry" : "entries"}{" "}
+          {entryCount === 1 ? "is" : "are"} included in this plan.
+        </div>
+        {error ? (
+          <div
+            role="alert"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+          >
+            {error}
+          </div>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            data-autofocus
+            variant="primary"
+            disabled={busy || entryCount === 0}
+            onClick={onConfirm}
+          >
+            {busy ? "Building rollback plan…" : "Build rollback plan"}
           </Button>
         </div>
       </div>

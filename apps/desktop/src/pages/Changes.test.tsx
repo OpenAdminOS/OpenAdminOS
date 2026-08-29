@@ -1,13 +1,16 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import Changes from "./Changes";
 import {
   createMockAppState,
+  createAwaitingConfirmationRun,
   makeMockBridge,
   mockTenant,
   renderRoute,
+  renderWithAppState,
 } from "../test/test-utils";
 import type {
   DriftBaseline,
@@ -351,6 +354,98 @@ describe("Changes page", () => {
     expect(getDriftBaselineDrift).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       baselineId: "baseline-1",
+    });
+  });
+
+  it("builds a whole-drift rollback plan and opens the run route", async () => {
+    const user = userEvent.setup();
+    const startBaselineRollback = vi.fn(async () =>
+      createAwaitingConfirmationRun({
+        id: "rollback-run-1",
+        agentSlug: "baseline-rollback",
+        origin: "baseline-rollback",
+        rollback: {
+          baselineId: activeNamedBaseline.id,
+          requiredScopes: ["DeviceManagementConfiguration.ReadWrite.All"],
+          manualCount: 0,
+        },
+      }),
+    );
+    const bridge = makeTimelineBridge([], {
+      listDriftBaselines: vi.fn(async () => [activeNamedBaseline]),
+      getDriftBaselineDrift: vi.fn(async () => namedBaselineDrift),
+      startBaselineRollback,
+    });
+
+    renderWithAppState(
+      <Routes>
+        <Route path="/changes" element={<Changes />} />
+        <Route path="/runs/:id" element={<div>Rollback run route</div>} />
+      </Routes>,
+      { route: "/changes", bridge },
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Baselines" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Roll back drift" }),
+    );
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Roll back baseline drift",
+    });
+    expect(
+      within(dialog).getByText(
+        "This builds a rollback plan for the drifted objects below. Nothing is applied until you review the plan and type the confirmation phrase on the run page.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("1 drifted entry is included in this plan."),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Build rollback plan" }),
+    );
+
+    await waitFor(() => {
+      expect(startBaselineRollback).toHaveBeenCalledWith({
+        tenantId: "tenant-1",
+      });
+    });
+    expect(await screen.findByText("Rollback run route")).toBeInTheDocument();
+  });
+
+  it("shows a no-automatable-actions rollback error inside the pre-flight modal", async () => {
+    const user = userEvent.setup();
+    const message =
+      "No drifted objects can be rolled back automatically. Review the manual items in the drift detail.";
+    const startBaselineRollback = vi.fn(async () => {
+      throw new Error(message);
+    });
+
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes",
+      bridge: makeTimelineBridge([], {
+        listDriftBaselines: vi.fn(async () => [activeNamedBaseline]),
+        getDriftBaselineDrift: vi.fn(async () => namedBaselineDrift),
+        startBaselineRollback,
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Baselines" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Roll back drift" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Roll back baseline drift",
+    });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Build rollback plan" }),
+    );
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(message);
+    expect(startBaselineRollback).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
     });
   });
 
