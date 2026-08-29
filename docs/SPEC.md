@@ -1803,8 +1803,19 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `13-v0.4-one-surface.html` | Interactive Chat-first, single-contextual-rail UX exploration | 🟡 Proposed |
 | `14-v0.4-implemented-review.html` | Interactive review of the implemented three-destination navigation and full-text Chat history drawer | ✅ Done |
 | `15-contextual-setup.html` | Chat-first contextual tenant and provider activation | ✅ Done |
+| `16-training-conveyor-concepts.html` | training.openadminos.com direction exploration (conveyor metaphor) | ⚪ Superseded |
+| `17-training-railway-concepts.html` | training.openadminos.com style exploration (railway metaphor, four styles) | ⚪ Superseded ("Flap Hall" chosen) |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
+
+### training.openadminos.com (decided 2026-08-29)
+
+The model program's public "trained in public" page ships as a `/training` route inside `web/` (served on the training subdomain via a host rewrite; the domain itself must be attached to the Vercel project). Decisions locked during the concept rounds:
+
+- **Design**: the "Flap Hall" direction — a split-flap departure board over a railway line where each training run is a train that dwells at pipeline stations (Generate → Validate → Train → Quantize → Evaluate → Review → Release). Held runs sit on a siding; a run only passes Review by human decision.
+- **Data**: the page renders exclusively from `model/site/public-data.json` (schemaVersion 2), validated at build time. The benchmark chart uses only the exporter's `featured` series, which guarantees every displayed score carries its suite hash and retrieval condition. No hand-transcribed numbers.
+- **Live state**: an authenticated `/api/training/run-state` route (Upstash) that the GPU pod posts to; the page is idle by default (released train parked at the terminus), shows live state only when fresh, and labels stale state honestly. No simulated runs in production.
+- The interim concept mockup (`18-training-site-flaphall.html`) was removed once the production route landed; 16/17 remain as design history.
 
 ---
 
