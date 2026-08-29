@@ -150,6 +150,30 @@ const bakeGroups = models.filter((m) => !m.startsWith("oaos-ft")).map((m) => ({
   }),
 }));
 
+// ---------- chart 3: the two model lines, head to head ----------
+// Both tiers are scored on the same frozen suite with the same harness, so
+// readers can see exactly what the smaller model gives up (and what it does not).
+const TIER_SERIES = [
+  { name: "20B base", label: "gpu-base-ret", color: colorSlots[0] },
+  { name: "20B published (v1)", label: "gpu-v1-r4-ret", color: colorSlots[1] },
+  { name: "20B best", label: "gpu-r6-ret", color: colorSlots[2] },
+  { name: "Lite 8B", label: "gpu-mini-ft-ret", color: colorSlots[3] },
+].filter((s) => latestByLabel.has(s.label));
+const suite200 = (() => {
+  try { return new Set(JSON.parse(readFileSync(join(HERE, "suites/suite-200.json"), "utf8")).taskIds); }
+  catch { return null; }
+})();
+const inSuite = (id) => !suite200 || suite200.has(id);
+const tierGroups = catNames.map((c) => ({
+  name: c,
+  short: c.split(" ")[0],
+  short2: c.split(" ").slice(1).join(" ") || undefined,
+  values: TIER_SERIES.map((s) => {
+    const sc = score(latestByLabel.get(s.label), (id) => inSuite(id) && catOf(id) === c);
+    return { series: s.name, pct: pct(sc), raw: sc ? `${sc.pass}/${sc.total}` : "n/a" };
+  }),
+}));
+
 // ---------- run history ----------
 const history = runs.slice(-30).reverse().map((r) => {
   const sc = score(r);
@@ -208,6 +232,10 @@ const html = `<!doctype html>
   .run ul { margin:6px 0; padding-left:18px; color:#c3c2b7; font-size:12px; }
   .run-out { color:#c3c2b7; font-size:12px; margin-top:4px; }
   .run-out b { color:#8b8a82; font-weight:600; }
+  .track { margin:26px 0 10px; padding:12px 14px; background:#232322; border:1px solid #32322f; border-radius:6px; }
+  .track-head { color:#ffffff; font-size:14px; font-weight:600; }
+  .track-meta { color:#8b8a82; font-size:12px; margin-top:2px; }
+  .track-role { color:#c3c2b7; font-size:12px; margin-top:6px; }
 </style></head><body><div class="wrap">
 <h1>OpenAdminOS model pipeline</h1>
 <div class="sub">Local eval + fine-tune progress · updated ${now} · regenerated automatically after every eval run</div>
@@ -216,7 +244,7 @@ const html = `<!doctype html>
   <div class="tile"><b>${idxMeta ? idxMeta.count.toLocaleString("en-US") : "–"}</b><span>doc chunks indexed (Intune · Entra · Defender)</span></div>
   <div class="tile"><b>${taskCount}</b><span>eval tasks, mechanically scored</span></div>
   <div class="tile"><b>${Object.values(sftCounts).reduce((a, b) => a + b, 0)}</b><span>validated training examples</span></div>
-  <div class="tile"><b>${models.filter((m) => !m.startsWith("oaos-ft")).length}</b><span>models in bake-off</span></div>
+  <div class="tile"><b>${(runLog.tracks ?? []).length || 1}</b><span>model tiers (20B flagship · 8B Lite)</span></div>
 </div>
 
 <h2>Does grounding + fine-tuning make answers better?</h2>
@@ -230,16 +258,29 @@ ${legend(modeSeries)}
 ${groupedBars(bakeGroups, modeSeries, { barW: 34, groupPad: 60 })}
 ${tableView(bakeGroups, modeSeries)}
 
+<h2>Two model lines, same benchmark</h2>
+<div class="note">Both tiers are scored on the identical frozen suite with the identical harness. The smaller model gives up multi-step agentic work; it does not give up safety or honesty.</div>
+${legend(TIER_SERIES)}
+${groupedBars(tierGroups, TIER_SERIES)}
+${tableView(tierGroups, TIER_SERIES)}
+
 <h2>Training runs — what each one trained on</h2>
 <div class="note">Internal runs are numbered r1, r2, …; a run only earns a public version if it beats the incumbent with no category regression.</div>
-${runLog.runs.map((r) => `
+${(runLog.tracks ?? [{ id: null }]).map((tr) => `
+${tr.id ? `<div class="track">
+  <div class="track-head">${esc(tr.name)}</div>
+  <div class="track-meta">${esc(tr.base)} · ${esc(tr.size)}</div>
+  <div class="track-role">${esc(tr.role)}</div>
+  <div class="track-meta">Published: ${esc(tr.published)}</div>
+</div>` : ""}
+${runLog.runs.filter((r) => !tr.id || (r.track ?? "20b") === tr.id).map((r) => `
 <div class="run">
   <div class="run-head"><b>${esc(r.id)}</b>${r.released ? ` <span class="tag">${esc(r.released)}</span>` : ""}
     <span class="muted">${esc(r.date)} · ${r.examples.toLocaleString("en-US")} examples · ${esc(r.recipe)}</span></div>
   <ul>${(r.trainedOn ?? []).map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
   <div class="run-out"><b>Outcome:</b> ${esc(r.outcome)}</div>
   ${r.lesson ? `<div class="run-out"><b>Lesson:</b> ${esc(r.lesson)}</div>` : ""}
-</div>`).join("")}
+</div>`).join("")}`).join("")}
 
 <h2>Frozen eval suites</h2>
 <div class="note">A suite pins an exact task list and its hash so scores stay comparable when new tasks are written.</div>

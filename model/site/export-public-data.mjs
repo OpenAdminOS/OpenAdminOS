@@ -61,6 +61,10 @@ function summarize(label) {
 
 const runLog = existsSync(join(ROOT, "eval/runs.json"))
   ? JSON.parse(readFileSync(join(ROOT, "eval/runs.json"), "utf8")) : { runs: [], taskCategories: [], suites: [] };
+const trainingRuns = runLog.runs ?? [];
+const releasedRuns = trainingRuns.filter((run) => typeof run.released === "string" && /^v\d+(?:\.\d+){0,2}$/.test(run.released));
+const releasedRun = releasedRuns[releasedRuns.length - 1];
+if (!releasedRun) throw new Error("eval/runs.json has no released version marker");
 const idx = existsSync(join(ROOT, "data/index/index-meta.json"))
   ? JSON.parse(readFileSync(join(ROOT, "data/index/index-meta.json"), "utf8")) : null;
 const sft = {};
@@ -70,16 +74,68 @@ if (existsSync(join(ROOT, "data/sft"))) {
   }
 }
 
+const scores = [...byLabel.keys()].map(summarize).filter(Boolean).sort((a, b) => b.passed - a.passed);
+
+function checkpointOf(score) {
+  const servedModel = byLabel.get(score.label)?.provenance?.servedModel;
+  if (typeof servedModel !== "string") return null;
+  const file = servedModel.split(/[\\/]/).pop().toLowerCase();
+  if (file === "base.gguf" || /^gpt-oss-20b(?:-|\.gguf)/.test(file)) return "base";
+  const run = file.match(/(?:^|[-_])(r\d+)(?=[-_.]|$)/);
+  if (run) return run[1];
+  if (file === "mini.gguf" && /^gpu-mini-ft-/.test(score.label)) return "lite-r1";
+  return null;
+}
+
+function sameSuite(a, b) {
+  return a?.name === b?.name && a?.sha256 === b?.sha256;
+}
+
+function newestScore(checkpoint, retrieval, suite = null) {
+  return scores
+    .filter((score) => checkpointOf(score) === checkpoint
+      && score.retrieval === retrieval
+      && score.suite !== null
+      && (!suite || sameSuite(score.suite, suite)))
+    .sort((a, b) => b.when.localeCompare(a.when))[0] ?? null;
+}
+
+function featuredSeries(key, name, score, note = null) {
+  if (!score) return null;
+  const noRetrieval = newestScore(checkpointOf(score), false, score.suite);
+  return { key, name, scoreLabel: score.label, noRetrievalLabel: noRetrieval?.label ?? null, note };
+}
+
+// Featured is an EXPLICIT curation, never a max() over scores: score alone
+// cannot see that a checkpoint is unshippable. r6 is the highest-scoring
+// checkpoint and fails the release gate because it fabricates documentation
+// for features that do not exist (abstention 10/15); it belongs in the run
+// log as a documented failure, not in a headline chart. Only checkpoints a
+// human has decided are fit to show may appear here. Missing suite provenance
+// still omits a candidate; labels and task counts never stand in for a suite.
+const baseScore = newestScore("base", true);
+const releasedScore = newestScore(releasedRun.id, true);
+const CURATED_EXTRA = [
+  // checkpoint id -> display name + note. Keep this list human-edited.
+  { checkpoint: "lite-r1", name: "8B Lite", note: "OpenAdmin Lite (Ministral 3 8B, 4.9 GB), not yet released." },
+];
+const featured = [
+  featuredSeries("base", "20B base", baseScore),
+  featuredSeries("released", `20B published (${releasedRun.released})`, releasedScore, `Checkpoint ${releasedRun.id}.`),
+  ...CURATED_EXTRA.map(({ checkpoint, name, note }, i) =>
+    featuredSeries(`curated-${i}`, name, newestScore(checkpoint, true), note)),
+].filter(Boolean);
+
 const out = {
   generatedAt: new Date().toISOString(),
-  schemaVersion: 1,
+  schemaVersion: 2,
   // Everything the public site is allowed to state as fact.
   model: {
     name: "OpenAdmin",
     baseModel: "openai/gpt-oss-20b",
     license: "Apache-2.0",
     published: { huggingface: "OpenAdminOS/openadmin-20b", gguf: "OpenAdminOS/openadmin-20b-GGUF", ollama: "openadminos/openadmin" },
-    releasedVersion: "v1",
+    releasedVersion: releasedRun.released,
     quantized: "MXFP4",
     fileSizeGB: 12.1,
   },
@@ -93,9 +149,10 @@ const out = {
   trainingData: { tracks: sft, total: Object.values(sft).reduce((a, b) => a + b, 0), policy: "100% synthetic and machine-validated. No tenant data. No distillation from proprietary APIs." },
   evalSuites: runLog.suites ?? [],
   taskCategories: CATEGORIES.map(([name, , what]) => ({ name, what })),
-  trainingRuns: runLog.runs ?? [],
+  trainingRuns,
   // Scores are only comparable within the same suite; each entry says which.
-  scores: [...byLabel.keys()].map(summarize).filter(Boolean).sort((a, b) => b.passed - a.passed),
+  scores,
+  featured,
 };
 
 writeFileSync(join(HERE, "public-data.json"), JSON.stringify(out, null, 2));
