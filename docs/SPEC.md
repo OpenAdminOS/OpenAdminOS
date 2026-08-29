@@ -1178,10 +1178,23 @@ useful to an Intune/Entra admin: compliance policies, configuration profiles,
 settings catalog policies, Conditional Access policies, apps and app-management
 policies, scripts/remediations, Autopilot/enrollment profiles, Windows update
 policies, endpoint security intents, group policy configurations, assignment
-filters, and scope tags. High-churn inventory and event resources such as
-managed devices, detected apps, sign-ins, troubleshooting events, overview
-aggregates, and encryption state stay out of drift tracking so the timeline does
-not become noise or a storage sink.
+filters, and scope tags. Since v0.5 the tracked set also covers Entra
+configuration surfaces: named locations, authentication methods policy,
+authorization policy, cross-tenant access policy, directory roles,
+administrative units, app registrations, service principals, and domains.
+High-churn inventory and event resources such as managed devices, detected
+apps, sign-ins, troubleshooting events, overview aggregates, encryption state,
+and Defender alerts/incidents/Secure Score stay out of drift tracking so the
+timeline does not become noise or a storage sink.
+
+**Named baselines (v0.5).** A baseline pins the exact live object versions
+(per resource, Graph id, version, and content hash) at creation time, not
+snapshot ids, so baseline drift survives snapshot retention. At most one
+baseline per tenant is active; retiring keeps the baseline and its pins but
+releases its pruning protection. Retention pruning never deletes an object
+version pinned by an active baseline. Baseline drift (added, removed, and
+modified objects with deterministic field-level diffs) is computed on demand
+from the pinned set against the latest live versions; nothing calls Graph.
 
 Snapshots are created only when the normal Graph cache refresh writes a tracked
 resource. A first refresh establishes a baseline; later refreshes compare the
