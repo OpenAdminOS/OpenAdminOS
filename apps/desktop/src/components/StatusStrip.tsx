@@ -20,11 +20,17 @@ export function StatusStrip() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
+  const externalProposals = state.runs.filter(
+    (run) =>
+      run.origin === "external-proposal" &&
+      run.status === "awaiting-confirmation",
+  );
   const runningCount = state.runs.filter(
     (run) =>
-      run.status === "queued" ||
-      run.status === "running" ||
-      run.status === "awaiting-confirmation",
+      (run.status === "queued" ||
+        run.status === "running" ||
+        run.status === "awaiting-confirmation") &&
+      !(run.origin === "external-proposal" && run.status === "awaiting-confirmation"),
   ).length;
   const trustCopy = deriveTrustCopy({
     provider: activeProvider,
@@ -84,6 +90,21 @@ export function StatusStrip() {
         </span>
 
       <div className="flex min-w-0 items-center justify-end gap-3">
+        {externalProposals.length > 0 && (
+          <Link
+            to={`/runs/${encodeURIComponent(externalProposals[0]!.id)}`}
+            className="inline-flex items-center gap-1.5 rounded-sm text-[var(--color-warning)] transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+            title="Review a pending external proposal"
+            aria-label={`${externalProposals.length} external proposal${externalProposals.length === 1 ? "" : "s"}`}
+          >
+            <span className="inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--color-warning-soft)] px-1 text-[10px] leading-4 ring-1 ring-[var(--color-warning)]/25">
+              {externalProposals.length}
+            </span>
+            <span>
+              external proposal{externalProposals.length === 1 ? "" : "s"}
+            </span>
+          </Link>
+        )}
         {runningCount > 0 && (
           <Link
             to="/activity"

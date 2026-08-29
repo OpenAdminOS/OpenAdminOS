@@ -5,6 +5,7 @@ import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
+import { OutputJsonBlock } from "../components/OutputPane";
 import { useReportIssue } from "../components/ReportIssueModal";
 import {
   IconCheck,
@@ -36,6 +37,7 @@ import {
   type DriftHistoryPruneResult,
   type DriftRetentionSettings,
   type GraphCacheStatus,
+  type GatewayPublicStatus,
   type LocalDataSummary,
   type ProviderId,
   type ProviderTestResult,
@@ -51,6 +53,7 @@ import {
   type TenantRecord,
   type TrustState,
 } from "../shared/openAdminOS";
+import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -316,6 +319,12 @@ export default function Settings() {
             />
           )}
           {section === "chat" && <ChatSettingsSection />}
+          {section === "gateway" && (
+            <GatewaySection
+              tenants={state.tenants}
+              activeTenantId={state.activeTenantId}
+            />
+          )}
           {section === "general" && <GeneralSection />}
           {section === "privacy" && (
             <PrivacySection
@@ -1974,6 +1983,633 @@ function ClearLocalDataModal({
       </div>
     </Modal>
   );
+}
+
+function GatewaySection({
+  tenants,
+  activeTenantId,
+}: {
+  tenants: TenantRecord[];
+  activeTenantId?: string;
+}) {
+  const fallbackTenantId = activeTenantId ?? tenants[0]?.id ?? "";
+  const [gatewayStatus, setGatewayStatus] =
+    useState<GatewayPublicStatus | null>(null);
+  const [selectedTenantId, setSelectedTenantId] = useState(fallbackTenantId);
+  const [portInput, setPortInput] = useState("");
+  const [pairingToken, setPairingToken] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [endpointCopied, setEndpointCopied] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<
+    | { kind: "regenerate" }
+    | { kind: "revoke"; clientId: string; clientName: string }
+    | { kind: "disable" }
+    | null
+  >(null);
+  const gatewayAvailable = Boolean(
+    window.openAdminOS?.getGatewayStatus &&
+      window.openAdminOS.enableGateway &&
+      window.openAdminOS.disableGateway &&
+      window.openAdminOS.regenerateGatewayToken &&
+      window.openAdminOS.revokeGatewayClient,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = window.openAdminOS;
+    if (!api?.getGatewayStatus) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    void api
+      .getGatewayStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setGatewayStatus(status);
+        setSelectedTenantId(status.boundTenantId ?? fallbackTenantId);
+      })
+      .catch((caught: unknown) => {
+        if (!cancelled) {
+          setError(
+            gatewayActionError(
+              "Gateway status could not be loaded",
+              caught,
+              "Restart OpenAdminOS, then open Gateway settings again.",
+            ),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fallbackTenantId]);
+
+  const boundTenant = gatewayStatus?.boundTenantId
+    ? tenants.find((tenant) => tenant.id === gatewayStatus.boundTenantId)
+    : undefined;
+  const listeningPort = gatewayStatus
+    ? (gatewayStatus.listeningPort ?? gatewayStatus.port)
+    : undefined;
+  const endpoint = listeningPort
+    ? `http://127.0.0.1:${listeningPort}/`
+    : undefined;
+
+  const enableGateway = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const api = window.openAdminOS;
+    if (!api?.enableGateway || busyAction) return;
+    if (!selectedTenantId) {
+      setError("Select a connected tenant before enabling the gateway.");
+      return;
+    }
+    const trimmedPort = portInput.trim();
+    const parsedPort = trimmedPort ? Number(trimmedPort) : undefined;
+    if (
+      parsedPort !== undefined &&
+      (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65_535)
+    ) {
+      setError("Port must be a whole number between 1 and 65535.");
+      return;
+    }
+    setBusyAction("enable");
+    setError(null);
+    try {
+      const result = await api.enableGateway({
+        boundTenantId: selectedTenantId,
+        ...(parsedPort !== undefined ? { port: parsedPort } : {}),
+      });
+      setGatewayStatus(result.status);
+      setPairingToken(result.token);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The gateway could not be enabled",
+          caught,
+          "Check that the port is available, then try again.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const regenerateToken = async () => {
+    const api = window.openAdminOS;
+    if (!api?.regenerateGatewayToken || busyAction) return;
+    setBusyAction("regenerate");
+    setError(null);
+    try {
+      const result = await api.regenerateGatewayToken();
+      setGatewayStatus(result.status);
+      setPairingToken(result.token);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The pairing token could not be regenerated",
+          caught,
+          "The existing token remains active. Try again after checking the gateway status.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const revokeClient = async (clientId: string) => {
+    const api = window.openAdminOS;
+    if (!api?.revokeGatewayClient || busyAction) return;
+    setBusyAction(`revoke:${clientId}`);
+    setError(null);
+    try {
+      setGatewayStatus(await api.revokeGatewayClient(clientId));
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The client pairing could not be revoked",
+          caught,
+          "Check that the gateway is available, then try again.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const disableGateway = async () => {
+    const api = window.openAdminOS;
+    if (!api?.disableGateway || busyAction) return;
+    setBusyAction("disable");
+    setError(null);
+    try {
+      setGatewayStatus(await api.disableGateway());
+      setPairingToken(null);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The gateway could not be disabled",
+          caught,
+          "Check the listener status, then try again.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const copyEndpoint = async () => {
+    if (!endpoint) return;
+    try {
+      await copyTextToClipboard(endpoint);
+      setEndpointCopied(true);
+      window.setTimeout(() => setEndpointCopied(false), 1500);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The loopback URL could not be copied",
+          caught,
+          "Select the URL and copy it manually.",
+        ),
+      );
+    }
+  };
+
+  const confirmGatewayAction = async () => {
+    if (!pendingConfirmation || busyAction) return;
+    if (pendingConfirmation.kind === "regenerate") {
+      await regenerateToken();
+    } else if (pendingConfirmation.kind === "revoke") {
+      await revokeClient(pendingConfirmation.clientId);
+    } else {
+      await disableGateway();
+    }
+    setPendingConfirmation(null);
+  };
+
+  const confirmationCopy = gatewayConfirmationCopy(pendingConfirmation);
+
+  return (
+    <div className="max-w-[820px]">
+      <SectionTitle
+        title="Gateway"
+        subtitle="Pair local MCP clients with one tenant-scoped OpenAdminOS session."
+      />
+
+      <div className="mt-6 flex flex-col gap-4">
+        {!gatewayAvailable ? (
+          <Card>
+            <div className="p-5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              Gateway controls are unavailable in this build. Open this section in
+              the desktop app with gateway support enabled.
+            </div>
+          </Card>
+        ) : loading ? (
+          <Card>
+            <div role="status" className="p-5 text-[12.5px] text-[var(--color-text-muted)]">
+              Loading local gateway status…
+            </div>
+          </Card>
+        ) : gatewayStatus === null ? (
+          <Card>
+            <div className="p-5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              Gateway status is unavailable. Use the recovery below, then reload
+              this section.
+            </div>
+          </Card>
+        ) : !gatewayStatus?.enabled ? (
+          <Card>
+            <form onSubmit={(event) => void enableGateway(event)} className="p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="max-w-[620px]">
+                  <div className="text-[13px] font-medium text-[var(--color-text)]">
+                    Local MCP gateway
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                    The gateway is a local, loopback-only MCP server. It lets
+                    external AI clients read one bound tenant and propose changes
+                    that you still confirm by hand.
+                  </p>
+                </div>
+                <Pill>Off</Pill>
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_180px]">
+                <div>
+                  <label
+                    htmlFor="gateway-tenant"
+                    className="block text-[11px] font-medium text-[var(--color-text-soft)]"
+                  >
+                    Bound tenant
+                  </label>
+                  <select
+                    id="gateway-tenant"
+                    name="gateway-tenant"
+                    required
+                    value={selectedTenantId}
+                    onChange={(event) => setSelectedTenantId(event.target.value)}
+                    disabled={busyAction !== null || tenants.length === 0}
+                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {tenants.length === 0 ? (
+                      <option value="">No connected tenant</option>
+                    ) : (
+                      tenants.map((tenant) => (
+                        <option key={tenant.id} value={tenant.id}>
+                          {tenant.displayName}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="gateway-port"
+                    className="block text-[11px] font-medium text-[var(--color-text-soft)]"
+                  >
+                    Port (optional)
+                  </label>
+                  <input
+                    id="gateway-port"
+                    name="gateway-port"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={65_535}
+                    step={1}
+                    autoComplete="off"
+                    value={portInput}
+                    onChange={(event) => setPortInput(event.target.value)}
+                    placeholder={String(gatewayStatus?.port ?? 47_891)}
+                    disabled={busyAction !== null}
+                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 font-mono text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 border-l-2 border-[var(--color-success)] bg-[var(--color-success-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+                Reads are scoped to the selected tenant. Every write is only a
+                proposal that requires typed confirmation in this app. Nothing an
+                external client sends can apply a change.
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={busyAction !== null || !selectedTenantId}
+                  leadingIcon={<IconLock size={12} />}
+                >
+                  {busyAction === "enable" ? "Enabling…" : "Enable gateway"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        ) : (
+          <>
+            <Card>
+              <div className="p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[13px] font-medium text-[var(--color-text)]">
+                      Local gateway
+                    </div>
+                    <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                      The listener accepts paired clients on this device only.
+                    </p>
+                  </div>
+                  <Pill tone={gatewayStatus.running ? "success" : "warning"}>
+                    <StatusDot tone={gatewayStatus.running ? "success" : "warning"} />
+                    {gatewayStatus.running ? "Running" : "Listener stopped"}
+                  </Pill>
+                </div>
+
+                <dl className="mt-4 grid gap-3 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)] sm:grid-cols-3">
+                  <GatewayFact
+                    label="Bound tenant"
+                    value={
+                      boundTenant?.displayName ??
+                      gatewayStatus.boundTenantId ??
+                      "No tenant"
+                    }
+                  />
+                  <GatewayFact
+                    label="Listener port"
+                    value={listeningPort ? String(listeningPort) : "Not listening"}
+                    mono
+                  />
+                  <GatewayFact
+                    label="Pairing token"
+                    value={gatewayStatus.hasToken ? "Configured" : "Not configured"}
+                  />
+                </dl>
+
+                {endpoint && (
+                  <div className="mt-4">
+                    <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Loopback URL
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+                      <code className="min-w-0 flex-1 break-all font-mono text-[12px] text-[var(--color-text)]">
+                        {endpoint}
+                      </code>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void copyEndpoint()}
+                        aria-label="Copy loopback URL"
+                      >
+                        {endpointCopied ? "Copied" : "Copy"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 border-l-2 border-[var(--color-success)] bg-[var(--color-success-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+                  Reads are scoped to {boundTenant?.displayName ?? "the bound tenant"}.
+                  Every write is only a proposal that requires typed confirmation
+                  in this app. Nothing an external client sends can apply a change.
+                </div>
+              </div>
+            </Card>
+
+            {pairingToken && (
+              <Card>
+                <div className="p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                        Pairing token
+                      </h3>
+                      <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                        This token is shown once. Copy it now. You can regenerate a
+                        replacement later.
+                      </p>
+                    </div>
+                    <Pill tone="warning">Shown once</Pill>
+                  </div>
+                  <OutputJsonBlock
+                    value={pairingToken}
+                    copyLabel="Copy pairing token"
+                    className="mt-4"
+                  />
+                </div>
+              </Card>
+            )}
+
+            <Card>
+              <div className="border-b border-[var(--color-border-soft)] px-5 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                      Connected clients
+                    </h3>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+                      {gatewayStatus.clients.length.toLocaleString()} paired client
+                      {gatewayStatus.clients.length === 1 ? "" : "s"} for this local gateway.
+                    </p>
+                  </div>
+                  <div className="max-w-[360px] text-right">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={busyAction !== null}
+                      leadingIcon={<IconRefresh size={11} />}
+                      onClick={() => setPendingConfirmation({ kind: "regenerate" })}
+                    >
+                      {busyAction === "regenerate" ? "Regenerating…" : "Regenerate token"}
+                    </Button>
+                    <p className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-warning)]">
+                      Paired clients must re-pair after regeneration.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {gatewayStatus.clients.length === 0 ? (
+                <div className="px-5 py-6 text-[12px] text-[var(--color-text-muted)]">
+                  No clients are paired with this gateway.
+                </div>
+              ) : (
+                <ul aria-label="Connected gateway clients" className="divide-y divide-[var(--color-border-soft)]">
+                  {gatewayStatus.clients.map((client) => (
+                    <li
+                      key={client.id}
+                      className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+                          {client.name}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                          Paired {formatDateTime(client.createdAt)}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="danger"
+                        disabled={busyAction !== null}
+                        onClick={() =>
+                          setPendingConfirmation({
+                            kind: "revoke",
+                            clientId: client.id,
+                            clientName: client.name,
+                          })
+                        }
+                        aria-label={`Revoke ${client.name}`}
+                      >
+                        {busyAction === `revoke:${client.id}` ? "Revoking…" : "Revoke"}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-border-soft)] px-5 py-4">
+                <p className="max-w-[560px] text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+                  Disabling stops the loopback listener. Existing client records
+                  remain available when the gateway is enabled again.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="danger"
+                  disabled={busyAction !== null}
+                  onClick={() => setPendingConfirmation({ kind: "disable" })}
+                >
+                  {busyAction === "disable" ? "Disabling…" : "Disable gateway"}
+                </Button>
+              </div>
+            </Card>
+          </>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+          >
+            {error}
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={pendingConfirmation !== null}
+        onClose={() => {
+          if (!busyAction) setPendingConfirmation(null);
+        }}
+        size="md"
+      >
+        <ModalHeader
+          title={confirmationCopy.title}
+          subtitle="This changes local gateway access."
+          onClose={() => {
+            if (!busyAction) setPendingConfirmation(null);
+          }}
+        />
+        <div className="p-6">
+          <p className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            {confirmationCopy.detail}
+          </p>
+          <div className="mt-6 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busyAction !== null}
+              onClick={() => setPendingConfirmation(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={busyAction !== null}
+              onClick={() => void confirmGatewayAction()}
+            >
+              {busyAction ? confirmationCopy.busyLabel : confirmationCopy.confirmLabel}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function GatewayFact({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </dt>
+      <dd
+        className={`mt-1 truncate text-[12px] text-[var(--color-text)] ${mono ? "font-mono" : ""}`}
+        title={value}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function gatewayActionError(
+  prefix: string,
+  caught: unknown,
+  recovery: string,
+): string {
+  const raw = caught instanceof Error ? caught.message : String(caught);
+  const reason = userFacingErrorReason(raw);
+  return reason ? `${prefix}: ${reason} ${recovery}` : `${prefix}. ${recovery}`;
+}
+
+function gatewayConfirmationCopy(
+  confirmation:
+    | { kind: "regenerate" }
+    | { kind: "revoke"; clientId: string; clientName: string }
+    | { kind: "disable" }
+    | null,
+): { title: string; detail: string; confirmLabel: string; busyLabel: string } {
+  if (confirmation?.kind === "regenerate") {
+    return {
+      title: "Regenerate pairing token?",
+      detail:
+        "The current token will stop working. Every paired client must pair again with the replacement token.",
+      confirmLabel: "Regenerate pairing token",
+      busyLabel: "Regenerating…",
+    };
+  }
+  if (confirmation?.kind === "revoke") {
+    return {
+      title: `Revoke ${confirmation.clientName}?`,
+      detail:
+        "This client will lose gateway access immediately. It can connect again only after pairing with a valid token.",
+      confirmLabel: "Revoke client",
+      busyLabel: "Revoking…",
+    };
+  }
+  return {
+    title: "Disable gateway?",
+    detail:
+      "The loopback listener will stop. Existing client records remain available if the gateway is enabled again.",
+    confirmLabel: "Disable gateway now",
+    busyLabel: "Disabling…",
+  };
 }
 
 function GeneralSection() {

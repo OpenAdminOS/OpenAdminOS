@@ -2,6 +2,7 @@ export const SETTINGS_SECTIONS = [
   { id: "providers", title: "Providers", description: "Choose where answers are generated.", keywords: ["llm", "model", "ollama", "anthropic", "openai", "local", "hosted"] },
   { id: "tenants", title: "Tenants", description: "Manage Microsoft 365 connections and delegated permissions.", keywords: ["microsoft", "entra", "account", "connection", "permissions"] },
   { id: "chat", title: "Chat", description: "Configure retrieval, cache, and local learning behavior.", keywords: ["conversation", "cache", "refresh", "investigation", "learning"] },
+  { id: "gateway", title: "Gateway", description: "Pair local MCP clients with one tenant.", keywords: ["mcp", "loopback", "external", "proposal", "pairing", "client"] },
   { id: "general", title: "General", description: "Configure desktop behavior, safety, and local history.", keywords: ["menu bar", "scheduler", "sandbox", "theme", "retention", "audit"] },
   { id: "privacy", title: "Privacy", description: "Review data residency, telemetry, registry, and updates.", keywords: ["data", "telemetry", "residency", "registry", "crash", "writes"] },
   { id: "about", title: "About", description: "Review version, diagnostics, and project information.", keywords: ["version", "diagnostics", "support", "github"] },

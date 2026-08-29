@@ -59,6 +59,8 @@ export default function RunResult() {
   const isLive = run?.status === "queued" || run?.status === "running";
   const isAwaiting = run?.status === "awaiting-confirmation";
   const isBaselineRollback = run?.origin === "baseline-rollback";
+  const isExternalProposal = run?.origin === "external-proposal";
+  const isSystemRun = run?.origin !== undefined;
   const runTenant = run?.tenantId
     ? state.tenants.find((tenant) => tenant.id === run.tenantId)
     : undefined;
@@ -168,9 +170,11 @@ export default function RunResult() {
         title={
           isBaselineRollback
             ? "Baseline rollback"
-            : agent
-              ? formatAgentDisplayName(agent)
-              : run.agentSlug
+            : isExternalProposal
+              ? `External proposal from ${run.external?.clientName ?? "unknown client"}`
+              : agent
+                ? formatAgentDisplayName(agent)
+                : run.agentSlug
         }
         subtitle={
           <div className="flex flex-col gap-1">
@@ -203,6 +207,16 @@ export default function RunResult() {
                 </Pill>
               )}
             </span>
+            {isExternalProposal && (
+              <span className="inline-flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]">
+                <IconLock size={10} aria-hidden="true" />
+                <span>
+                  Required scopes: {run.external?.requiredScopes.length
+                    ? run.external.requiredScopes.join(", ")
+                    : "none declared"}
+                </span>
+              </span>
+            )}
             <span className="inline-flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
               <span>Run result</span>
               <span className="opacity-50">·</span>
@@ -298,7 +312,7 @@ export default function RunResult() {
                 </Button>
               </>
             )}
-            {!isLive && !isAwaiting && !isBaselineRollback && (
+            {!isLive && !isAwaiting && !isSystemRun && (
               <Button
                 variant="primary"
                 size="md"
@@ -313,7 +327,7 @@ export default function RunResult() {
         }
       />
       <PageBody>
-        {!isBaselineRollback ? (
+        {!isSystemRun ? (
           <TenantDriftNote
             runTenantId={run.tenantId}
             activeTenantId={state.activeTenantId}

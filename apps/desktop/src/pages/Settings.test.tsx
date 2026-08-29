@@ -32,6 +32,77 @@ describe("Settings provider section", () => {
     expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
   });
 
+  it("enables the gateway, shows its one-time token, revokes a client, and disables it", async () => {
+    const user = userEvent.setup();
+    const disabledStatus = {
+      enabled: false,
+      running: false,
+      port: 47_891,
+      hasToken: false,
+      clients: [],
+    };
+    const enabledStatus = {
+      enabled: true,
+      running: true,
+      port: 47_891,
+      listeningPort: 47_891,
+      boundTenantId: "tenant-1",
+      hasToken: true,
+      clients: [
+        {
+          id: "client-1",
+          name: "Claude Code",
+          createdAt: "2026-08-28T10:00:00.000Z",
+        },
+      ],
+    };
+    const enableGateway = vi.fn(async () => ({
+      status: enabledStatus,
+      token: "OAO-Q7R4-LM2C",
+    }));
+    const revokeGatewayClient = vi.fn(async () => ({
+      ...enabledStatus,
+      clients: [],
+    }));
+    const disableGateway = vi.fn(async () => disabledStatus);
+    const bridge = makeMockBridge({
+      getGatewayStatus: vi.fn(async () => disabledStatus),
+      enableGateway,
+      regenerateGatewayToken: vi.fn(async () => ({
+        status: enabledStatus,
+        token: "OAO-REGENERATED",
+      })),
+      revokeGatewayClient,
+      disableGateway,
+    });
+
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/gateway",
+      bridge,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Enable gateway" }));
+
+    await waitFor(() => {
+      expect(enableGateway).toHaveBeenCalledWith({ boundTenantId: "tenant-1" });
+    });
+    expect(screen.getAllByText("OAO-Q7R4-LM2C")).toHaveLength(1);
+    expect(screen.getByText("http://127.0.0.1:47891/")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Revoke Claude Code" }));
+    await user.click(screen.getByRole("button", { name: "Revoke client" }));
+    await waitFor(() => {
+      expect(revokeGatewayClient).toHaveBeenCalledWith("client-1");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Disable gateway" }));
+    await user.click(screen.getByRole("button", { name: "Disable gateway now" }));
+    await waitFor(() => {
+      expect(disableGateway).toHaveBeenCalledOnce();
+    });
+  });
+
   it("finds a setting from the shared catalog and focuses the rendered row", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge();
