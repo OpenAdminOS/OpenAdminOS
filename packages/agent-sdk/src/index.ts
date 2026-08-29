@@ -1136,6 +1136,62 @@ export interface DriftTimeCompareResult {
   retentionLimited?: boolean;
 }
 
+// ─── Baseline export bundles (v0.5) ──────────────────────────────────────
+//
+// A baseline export is a portable, local JSON copy of a baseline's pinned
+// configuration with tenant-specific fields stripped, so it can be
+// compared against another tenant (the MSP golden-tenant workflow). No
+// third-party baseline content is ever bundled with the app.
+
+export interface DriftBaselineExportObject {
+  displayName?: string;
+  body: Record<string, unknown>;
+}
+
+export interface DriftBaselineExportBundle {
+  format: "openadminos-baseline-export";
+  version: 1;
+  exportedAt: string;
+  sourceTenantName: string;
+  baselineName: string;
+  resources: Array<{
+    resource: GraphCacheResourceKind;
+    objects: DriftBaselineExportObject[];
+  }>;
+}
+
+export interface ExportDriftBaselineInput {
+  tenantId: string;
+  baselineId?: string;
+}
+
+export interface ExportDriftBaselineResult {
+  canceled: boolean;
+  filePath?: string;
+  objectCount?: number;
+}
+
+export interface DriftBundleCompareInput {
+  tenantId: string;
+  bundle: DriftBaselineExportBundle;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+  includeAssignments?: boolean;
+}
+
+export interface DriftBundleCompareResult {
+  tenantId: string;
+  baselineName: string;
+  sourceTenantName: string;
+  evaluatedAt: string;
+  includeAssignments: boolean;
+  tenantHasData: boolean;
+  resources: DriftTenantCompareResourceCounts[];
+  entries: DriftTenantCompareEntry[];
+  hasMore: boolean;
+  limit: number;
+}
+
 // ─── Fleet drift status (v0.5) ───────────────────────────────────────────
 
 export interface FleetTenantDriftStatus {
@@ -2117,6 +2173,15 @@ export interface OpenAdminOSApi {
   ): Promise<DriftTenantCompareResult>;
   startBaselineRollback?(input: StartBaselineRollbackInput): Promise<RunRecord>;
   getFleetDriftStatus?(input: FleetDriftStatusInput): Promise<FleetDriftStatusResult>;
+  exportDriftBaseline?(
+    input: ExportDriftBaselineInput,
+  ): Promise<ExportDriftBaselineResult>;
+  readDriftBundleFile?(): Promise<
+    { canceled: true } | { canceled: false; bundle: DriftBaselineExportBundle }
+  >;
+  getDriftBundleCompare?(
+    input: DriftBundleCompareInput,
+  ): Promise<DriftBundleCompareResult>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,

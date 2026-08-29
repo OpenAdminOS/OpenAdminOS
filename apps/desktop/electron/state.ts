@@ -80,6 +80,9 @@ import type {
   DriftTimeCompareResult,
   DriftTimelineInput,
   DriftTimelineResult,
+  DriftBaselineExportBundle,
+  DriftBundleCompareInput,
+  DriftBundleCompareResult,
   FleetDriftStatusInput,
   FleetDriftStatusResult,
   ListDriftBaselinesInput,
@@ -1171,6 +1174,8 @@ export class AppStateStore {
       countDriftBaselineChanges: (input) =>
         host.requireIntelligenceStore().countDriftBaselineChanges(input),
       listTenantGroups: () => host.requireIntelligenceStore().listTenantGroups(),
+      listDriftBaselinePinnedObjects: (input) =>
+        host.requireIntelligenceStore().listDriftBaselinePinnedObjects(input),
     });
     this.runService = new RunService({
       read: () => host.read(),
@@ -2081,6 +2086,19 @@ export class AppStateStore {
     input: DriftTenantCompareInput,
   ): Promise<DriftTenantCompareResult> {
     return this.driftService.getTenantCompare(input);
+  }
+
+  async buildDriftBaselineExport(input: {
+    tenantId: string;
+    baselineId?: string;
+  }): Promise<DriftBaselineExportBundle> {
+    return this.driftService.buildBaselineExport(input);
+  }
+
+  async getDriftBundleCompare(
+    input: DriftBundleCompareInput,
+  ): Promise<DriftBundleCompareResult> {
+    return this.driftService.compareTenantToBundle(input);
   }
 
   async getFleetDriftStatus(

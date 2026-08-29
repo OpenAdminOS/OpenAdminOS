@@ -1516,6 +1516,45 @@ export class IntelligenceSqliteStore {
     return row?.captured_at;
   }
 
+  /** Every pinned object of a baseline with its retained raw JSON. */
+  listDriftBaselinePinnedObjects(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): Array<{
+    resource: GraphCacheResourceKind;
+    graphId: string;
+    displayName?: string;
+    rawJson: string;
+  }> {
+    const wanted = new Set(input.resources);
+    const rows = this.db
+      .prepare(
+        `SELECT p.resource, p.graph_id, v.raw_json, v.display_name
+         FROM drift_baseline_pins p
+         INNER JOIN drift_object_versions v
+           ON v.tenant_id = p.tenant_id
+          AND v.resource = p.resource
+          AND v.graph_id = p.graph_id
+          AND v.version = p.version
+         WHERE p.tenant_id = ? AND p.baseline_id = ?`,
+      )
+      .all(input.tenantId, input.baselineId) as unknown as Array<{
+      resource: GraphCacheResourceKind;
+      graph_id: string;
+      raw_json: string;
+      display_name: string | null;
+    }>;
+    return rows
+      .filter((row) => wanted.has(row.resource))
+      .map((row) => ({
+        resource: row.resource,
+        graphId: row.graph_id,
+        rawJson: row.raw_json,
+        ...(row.display_name ? { displayName: row.display_name } : {}),
+      }));
+  }
+
   /**
    * Baseline drift counts without fetching raw JSON: pins compared to
    * the latest live version hashes. Cheap enough to run across a fleet.

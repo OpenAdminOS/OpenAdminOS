@@ -453,6 +453,93 @@ describe("point-in-time compare", () => {
   });
 });
 
+describe("baseline export and bundle compare", () => {
+  it("exports pinned objects with tenant fields stripped and compares them elsewhere", async () => {
+    await withDriftService(async ({ service, store }) => {
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "configurationPolicies",
+        label: "Settings catalog policies",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"],
+        refreshedAt: "2026-08-29T10:00:00.000Z",
+        rows: [
+          {
+            id: "p-1",
+            displayName: "Golden policy",
+            setting: "A",
+            lastModifiedDateTime: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+      await service.createBaseline({ tenantId: "tenant-1", name: "Golden" });
+
+      const bundle = await service.buildBaselineExport({ tenantId: "tenant-1" });
+      assert.equal(bundle.format, "openadminos-baseline-export");
+      assert.equal(bundle.baselineName, "Golden");
+      assert.equal(bundle.sourceTenantName, "Contoso");
+      const objects = bundle.resources.find(
+        (entry) => entry.resource === "configurationPolicies",
+      )?.objects;
+      assert.equal(objects?.length, 1);
+      assert.equal(objects?.[0]?.body.setting, "A");
+      assert.equal(objects?.[0]?.body.id, undefined);
+      assert.equal(objects?.[0]?.body.lastModifiedDateTime, undefined);
+
+      // The second tenant has a same-named but different policy plus an
+      // extra one; compare it against the exported bundle.
+      store.replaceGraphResources({
+        tenantId: "tenant-2",
+        resource: "configurationPolicies",
+        label: "Settings catalog policies",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"],
+        refreshedAt: "2026-08-29T11:00:00.000Z",
+        rows: [
+          { id: "q-1", displayName: "Golden policy", setting: "B" },
+          { id: "q-2", displayName: "Extra policy", setting: "C" },
+        ],
+      });
+      const compare = await service.compareTenantToBundle({
+        tenantId: "tenant-2",
+        bundle,
+      });
+      assert.equal(compare.tenantHasData, true);
+      assert.equal(compare.baselineName, "Golden");
+      const counts = compare.resources.find(
+        (entry) => entry.resource === "configurationPolicies",
+      );
+      assert.deepEqual(
+        {
+          matchedSame: counts?.matchedSame,
+          different: counts?.different,
+          onlyInA: counts?.onlyInA,
+          onlyInB: counts?.onlyInB,
+        },
+        { matchedSame: 0, different: 1, onlyInA: 1, onlyInB: 0 },
+      );
+      const different = compare.entries.find((entry) => entry.bucket === "different");
+      const settingChange = different?.changes.find(
+        (change) => change.path === "setting",
+      );
+      assert.equal(settingChange?.before, "B");
+      assert.equal(settingChange?.after, "A");
+    });
+  });
+
+  it("rejects files that are not baseline exports", async () => {
+    await withDriftService(async ({ service }) => {
+      await assert.rejects(
+        service.compareTenantToBundle({
+          tenantId: "tenant-1",
+          bundle: {
+            format: "something-else",
+          } as never,
+        }),
+        /not an OpenAdminOS baseline export/,
+      );
+    });
+  });
+});
+
 describe("fleet drift status", () => {
   it("reports per-tenant baseline drift counts and no-baseline tenants honestly", async () => {
     await withDriftService(async ({ service, store }) => {
@@ -659,6 +746,8 @@ async function withDriftService(
       store.getOldestDriftSnapshotAt(tenantId, resource),
     countDriftBaselineChanges: (input) => store.countDriftBaselineChanges(input),
     listTenantGroups: () => store.listTenantGroups(),
+    listDriftBaselinePinnedObjects: (input) =>
+      store.listDriftBaselinePinnedObjects(input),
   });
   try {
     await run({ service, store });

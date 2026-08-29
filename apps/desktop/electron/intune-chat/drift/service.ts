@@ -1,6 +1,10 @@
 import type {
   CreateDriftBaselineInput,
   DriftBaseline,
+  DriftBaselineExportBundle,
+  DriftBaselineExportObject,
+  DriftBundleCompareInput,
+  DriftBundleCompareResult,
   DriftBaselineDriftEntry,
   DriftBaselineDriftInput,
   DriftBaselineDriftResult,
@@ -43,7 +47,11 @@ import type {
 } from "../sqlite-store.js";
 import { lookupEndpoint } from "../../graph-catalog.js";
 import { attributeDriftChange, type DriftAuditCache } from "./attribution.js";
-import { buildRollbackPlan, type RollbackPlanDraft } from "./rollback.js";
+import {
+  buildRollbackPlan,
+  sanitizeGraphWriteBody,
+  type RollbackPlanDraft,
+} from "./rollback.js";
 import {
   diffDriftObjects,
   isTimestampOnlyChange,
@@ -144,6 +152,16 @@ export interface DriftServiceHost {
     resources: readonly GraphCacheResourceKind[];
   }): { added: number; removed: number; modified: number };
   listTenantGroups(): TenantGroup[];
+  listDriftBaselinePinnedObjects(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): Array<{
+    resource: GraphCacheResourceKind;
+    graphId: string;
+    displayName?: string;
+    rawJson: string;
+  }>;
 }
 
 export class DriftService {
@@ -554,6 +572,117 @@ export class DriftService {
     return { tenantId: tenant.id, baselineId: baseline.id, draft };
   }
 
+  /** Portable baseline bundle: pinned objects with tenant fields stripped. */
+  async buildBaselineExport(input: {
+    tenantId: string;
+    baselineId?: string;
+  }): Promise<DriftBaselineExportBundle> {
+    const persisted = await this.host.read();
+    const tenant = this.host.resolveTenant(persisted, input.tenantId);
+    const baseline = input.baselineId
+      ? this.host.getDriftBaseline(tenant.id, input.baselineId)
+      : this.host.getActiveDriftBaseline(tenant.id);
+    if (!baseline) {
+      throw new Error(
+        input.baselineId
+          ? "Baseline was not found for this tenant."
+          : "No active baseline exists for this tenant. Create one from the Changes view first.",
+      );
+    }
+    const pinned = this.host.listDriftBaselinePinnedObjects({
+      tenantId: tenant.id,
+      baselineId: baseline.id,
+      resources: TRACKED_RESOURCES,
+    });
+    const byResource = new Map<GraphCacheResourceKind, DriftBaselineExportObject[]>();
+    for (const object of pinned) {
+      const body = sanitizeGraphWriteBody(object.rawJson);
+      if (body === undefined) continue;
+      const list = byResource.get(object.resource) ?? [];
+      list.push({
+        ...(object.displayName ? { displayName: object.displayName } : {}),
+        body,
+      });
+      byResource.set(object.resource, list);
+    }
+    return {
+      format: "openadminos-baseline-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      sourceTenantName: tenant.displayName,
+      baselineName: baseline.name,
+      resources: [...byResource.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([resource, objects]) => ({ resource, objects })),
+    };
+  }
+
+  /** Compare the tenant's current configuration against an imported bundle. */
+  async compareTenantToBundle(
+    input: DriftBundleCompareInput,
+  ): Promise<DriftBundleCompareResult> {
+    const persisted = await this.host.read();
+    const tenant = this.host.resolveTenant(persisted, input.tenantId);
+    const bundle = input.bundle;
+    if (bundle.format !== "openadminos-baseline-export" || bundle.version !== 1) {
+      throw new Error("This file is not an OpenAdminOS baseline export.");
+    }
+    const bundleByResource = new Map<
+      GraphCacheResourceKind,
+      DriftBaselineExportObject[]
+    >();
+    for (const entry of bundle.resources) {
+      ensureTrackedResource(entry.resource);
+      bundleByResource.set(entry.resource, entry.objects);
+    }
+    const resources = input.resources
+      ? normalizeTrackedResources(input.resources)
+      : [...bundleByResource.keys()];
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+    const includeAssignments = input.includeAssignments === true;
+    const now = new Date().toISOString();
+
+    let tenantHasData = false;
+    const counts: DriftTenantCompareResourceCounts[] = [];
+    const entries: DriftTenantCompareEntry[] = [];
+    for (const resource of resources) {
+      const stateA = this.host.readDriftStateAt(tenant.id, resource, now);
+      if (stateA.size > 0) tenantHasData = true;
+      const stateB = new Map<string, CompareObjectState>();
+      for (const [index, object] of (bundleByResource.get(resource) ?? []).entries()) {
+        stateB.set(`bundle-${index}`, {
+          version: 1,
+          contentHash: "",
+          rawJson: JSON.stringify(object.body),
+          ...(object.displayName ? { displayName: object.displayName } : {}),
+        });
+      }
+      counts.push(
+        compareStateMaps({
+          resource,
+          resourceLabel: labelForResource(resource),
+          stateA,
+          stateB,
+          includeAssignments,
+          entries,
+        }),
+      );
+    }
+    entries.sort(compareTenantEntries);
+    return {
+      tenantId: tenant.id,
+      baselineName: bundle.baselineName,
+      sourceTenantName: bundle.sourceTenantName,
+      evaluatedAt: now,
+      includeAssignments,
+      tenantHasData,
+      resources: counts,
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+    };
+  }
+
   async getFleetDriftStatus(
     input: FleetDriftStatusInput,
   ): Promise<FleetDriftStatusResult> {
@@ -626,112 +755,20 @@ export class DriftService {
     const entries: DriftTenantCompareEntry[] = [];
 
     for (const resource of resources) {
-      const resourceLabel = labelForResource(resource);
       const stateA = this.host.readDriftStateAt(tenantA.id, resource, now);
       const stateB = this.host.readDriftStateAt(tenantB.id, resource, now);
       if (stateA.size > 0) tenantAHasData = true;
       if (stateB.size > 0) tenantBHasData = true;
-
-      const resourceCounts: DriftTenantCompareResourceCounts = {
-        resource,
-        resourceLabel,
-        matchedSame: 0,
-        different: 0,
-        onlyInA: 0,
-        onlyInB: 0,
-        ambiguous: 0,
-      };
-      counts.push(resourceCounts);
-
-      const pairs: Array<{
-        displayName: string;
-        rawA?: string;
-        rawB?: string;
-      }> = [];
-
-      if (stateA.size === 1 && stateB.size === 1) {
-        // Singleton resources (and single-object collections) match
-        // structurally; the policy singletons have no display name.
-        const objectA = [...stateA.values()][0]!;
-        const objectB = [...stateB.values()][0]!;
-        pairs.push({
-          displayName: objectA.displayName ?? objectB.displayName ?? resourceLabel,
-          rawA: objectA.rawJson,
-          rawB: objectB.rawJson,
-        });
-      } else {
-        const byNameA = groupByCompareName(stateA);
-        const byNameB = groupByCompareName(stateB);
-        resourceCounts.ambiguous += byNameA.ambiguous + byNameB.ambiguous;
-        const names = new Set([...byNameA.unique.keys(), ...byNameB.unique.keys()]);
-        for (const name of [...names].sort()) {
-          const objectA = byNameA.unique.get(name);
-          const objectB = byNameB.unique.get(name);
-          pairs.push({
-            displayName: objectA?.displayName ?? objectB?.displayName ?? name,
-            ...(objectA ? { rawA: objectA.rawJson } : {}),
-            ...(objectB ? { rawB: objectB.rawJson } : {}),
-          });
-        }
-      }
-
-      for (const pair of pairs) {
-        if (pair.rawA !== undefined && pair.rawB === undefined) {
-          resourceCounts.onlyInA += 1;
-          entries.push({
-            resource,
-            resourceLabel,
-            displayName: pair.displayName,
-            bucket: "only-in-a",
-            fieldChangeCount: 0,
-            changes: [],
-          });
-          continue;
-        }
-        if (pair.rawA === undefined && pair.rawB !== undefined) {
-          resourceCounts.onlyInB += 1;
-          entries.push({
-            resource,
-            resourceLabel,
-            displayName: pair.displayName,
-            bucket: "only-in-b",
-            fieldChangeCount: 0,
-            changes: [],
-          });
-          continue;
-        }
-        if (rawTooLarge(pair.rawA) || rawTooLarge(pair.rawB)) {
-          resourceCounts.different += 1;
-          entries.push({
-            resource,
-            resourceLabel,
-            displayName: pair.displayName,
-            bucket: "different",
-            fieldChangeCount: 0,
-            changes: [],
-            truncated: true,
-          });
-          continue;
-        }
-        const changes = diffDriftObjects(
-          parseRawJson(pair.rawA),
-          parseRawJson(pair.rawB),
+      counts.push(
+        compareStateMaps({
           resource,
-        ).filter((change) => crossTenantChangeRelevant(change, includeAssignments));
-        if (changes.length === 0) {
-          resourceCounts.matchedSame += 1;
-          continue;
-        }
-        resourceCounts.different += 1;
-        entries.push({
-          resource,
-          resourceLabel,
-          displayName: pair.displayName,
-          bucket: "different",
-          fieldChangeCount: changes.length,
-          changes,
-        });
-      }
+          resourceLabel: labelForResource(resource),
+          stateA,
+          stateB,
+          includeAssignments,
+          entries,
+        }),
+      );
     }
 
     entries.sort(compareTenantEntries);
@@ -921,6 +958,118 @@ interface CompareObjectState {
   contentHash: string;
   rawJson: string;
   displayName?: string;
+}
+
+/**
+ * Shared pairing and diffing for cross-tenant and bundle compare:
+ * structural match when each side has exactly one object (the policy
+ * singletons), otherwise unique-display-name matching with duplicates
+ * counted as ambiguous, tenant-specific fields excluded, assignments
+ * excluded unless opted in.
+ */
+function compareStateMaps(input: {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  stateA: Map<string, CompareObjectState>;
+  stateB: Map<string, CompareObjectState>;
+  includeAssignments: boolean;
+  entries: DriftTenantCompareEntry[];
+}): DriftTenantCompareResourceCounts {
+  const { resource, resourceLabel, stateA, stateB, includeAssignments, entries } =
+    input;
+  const resourceCounts: DriftTenantCompareResourceCounts = {
+    resource,
+    resourceLabel,
+    matchedSame: 0,
+    different: 0,
+    onlyInA: 0,
+    onlyInB: 0,
+    ambiguous: 0,
+  };
+
+  const pairs: Array<{ displayName: string; rawA?: string; rawB?: string }> = [];
+  if (stateA.size === 1 && stateB.size === 1) {
+    const objectA = [...stateA.values()][0]!;
+    const objectB = [...stateB.values()][0]!;
+    pairs.push({
+      displayName: objectA.displayName ?? objectB.displayName ?? resourceLabel,
+      rawA: objectA.rawJson,
+      rawB: objectB.rawJson,
+    });
+  } else {
+    const byNameA = groupByCompareName(stateA);
+    const byNameB = groupByCompareName(stateB);
+    resourceCounts.ambiguous += byNameA.ambiguous + byNameB.ambiguous;
+    const names = new Set([...byNameA.unique.keys(), ...byNameB.unique.keys()]);
+    for (const name of [...names].sort()) {
+      const objectA = byNameA.unique.get(name);
+      const objectB = byNameB.unique.get(name);
+      pairs.push({
+        displayName: objectA?.displayName ?? objectB?.displayName ?? name,
+        ...(objectA ? { rawA: objectA.rawJson } : {}),
+        ...(objectB ? { rawB: objectB.rawJson } : {}),
+      });
+    }
+  }
+
+  for (const pair of pairs) {
+    if (pair.rawA !== undefined && pair.rawB === undefined) {
+      resourceCounts.onlyInA += 1;
+      entries.push({
+        resource,
+        resourceLabel,
+        displayName: pair.displayName,
+        bucket: "only-in-a",
+        fieldChangeCount: 0,
+        changes: [],
+      });
+      continue;
+    }
+    if (pair.rawA === undefined && pair.rawB !== undefined) {
+      resourceCounts.onlyInB += 1;
+      entries.push({
+        resource,
+        resourceLabel,
+        displayName: pair.displayName,
+        bucket: "only-in-b",
+        fieldChangeCount: 0,
+        changes: [],
+      });
+      continue;
+    }
+    if (rawTooLarge(pair.rawA) || rawTooLarge(pair.rawB)) {
+      resourceCounts.different += 1;
+      entries.push({
+        resource,
+        resourceLabel,
+        displayName: pair.displayName,
+        bucket: "different",
+        fieldChangeCount: 0,
+        changes: [],
+        truncated: true,
+      });
+      continue;
+    }
+    const changes = diffDriftObjects(
+      parseRawJson(pair.rawA),
+      parseRawJson(pair.rawB),
+      resource,
+    ).filter((change) => crossTenantChangeRelevant(change, includeAssignments));
+    if (changes.length === 0) {
+      resourceCounts.matchedSame += 1;
+      continue;
+    }
+    resourceCounts.different += 1;
+    entries.push({
+      resource,
+      resourceLabel,
+      displayName: pair.displayName,
+      bucket: "different",
+      fieldChangeCount: changes.length,
+      changes,
+    });
+  }
+  return resourceCounts;
 }
 
 function groupByCompareName(state: Map<string, CompareObjectState>): {

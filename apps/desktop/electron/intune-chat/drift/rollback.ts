@@ -300,7 +300,7 @@ export function buildRollbackPlan(input: {
         pushManual("This resource cannot be updated in place through Graph.");
         continue;
       }
-      const body = sanitizedBody(change.pinnedRawJson);
+      const body = sanitizeGraphWriteBody(change.pinnedRawJson);
       if (body === undefined) {
         pushManual("The baseline copy of this object is unavailable.");
         continue;
@@ -355,7 +355,7 @@ export function buildRollbackPlan(input: {
       );
       continue;
     }
-    const body = sanitizedBody(change.pinnedRawJson);
+    const body = sanitizeGraphWriteBody(change.pinnedRawJson);
     if (body === undefined) {
       pushManual("The baseline copy of this object is unavailable.");
       continue;
@@ -412,7 +412,14 @@ function collectWriteScopes(scopes: readonly string[], out: Set<string>): void {
   }
 }
 
-function sanitizedBody(rawJson: string | undefined): Record<string, unknown> | undefined {
+/**
+ * Strips read-only and tenant-managed fields from a cached Graph object
+ * so the remainder is safe to send as a write body or export in a
+ * portable baseline bundle.
+ */
+export function sanitizeGraphWriteBody(
+  rawJson: string | undefined,
+): Record<string, unknown> | undefined {
   if (rawJson === undefined) return undefined;
   let parsed: unknown;
   try {

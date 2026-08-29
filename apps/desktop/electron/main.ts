@@ -18,7 +18,7 @@ import {
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
@@ -52,6 +52,8 @@ import type {
   CreateWorkspaceInput,
   DriftBaselineDriftInput,
   DriftEntryDetailInput,
+  DriftBaselineExportBundle,
+  DriftBundleCompareInput,
   DriftTenantCompareInput,
   DriftTimeCompareInput,
   StartBaselineRollbackInput,
@@ -4060,6 +4062,58 @@ function validateDriftTimeCompareInput(value: unknown): DriftTimeCompareInput {
   return input;
 }
 
+function validateDriftBundle(value: unknown): DriftBaselineExportBundle {
+  if (!isPlainRecord(value)) {
+    throw new Error("Baseline export bundle must be an object.");
+  }
+  if (value.format !== "openadminos-baseline-export" || value.version !== 1) {
+    throw new Error("This file is not an OpenAdminOS baseline export.");
+  }
+  const sourceTenantName = requireBoundedString(
+    value.sourceTenantName,
+    "sourceTenantName",
+    200,
+  );
+  const baselineName = requireBoundedString(value.baselineName, "baselineName", 80);
+  const exportedAt = requireBoundedString(value.exportedAt, "exportedAt", 80);
+  if (!Array.isArray(value.resources) || value.resources.length > 100) {
+    throw new Error("Baseline export resources must be an array with at most 100 entries.");
+  }
+  const resources = value.resources.map((entry, index) => {
+    if (!isPlainRecord(entry)) {
+      throw new Error(`resources[${index}] must be an object.`);
+    }
+    const resource = validateDriftResource(entry.resource, `resources[${index}].resource`);
+    if (!Array.isArray(entry.objects) || entry.objects.length > 5_000) {
+      throw new Error(
+        `resources[${index}].objects must be an array with at most 5000 entries.`,
+      );
+    }
+    const objects = entry.objects.map((object, objectIndex) => {
+      if (!isPlainRecord(object) || !isPlainRecord(object.body)) {
+        throw new Error(
+          `resources[${index}].objects[${objectIndex}] must carry an object body.`,
+        );
+      }
+      return {
+        ...(typeof object.displayName === "string" && object.displayName.length <= 512
+          ? { displayName: object.displayName }
+          : {}),
+        body: object.body as Record<string, unknown>,
+      };
+    });
+    return { resource, objects };
+  });
+  return {
+    format: "openadminos-baseline-export",
+    version: 1,
+    exportedAt,
+    sourceTenantName,
+    baselineName,
+    resources,
+  };
+}
+
 function validateStartBaselineRollbackInput(
   value: unknown,
 ): StartBaselineRollbackInput {
@@ -5253,6 +5307,97 @@ function registerIpcHandlers() {
     handleTrusted((_event, input: unknown) =>
       store.startBaselineRollback(validateStartBaselineRollbackInput(input)),
     ),
+  );
+  ipcMain.handle(
+    "openadminos:export-drift-baseline",
+    handleTrusted(async (_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Baseline export input must be an object.");
+      }
+      const bundle = await store.buildDriftBaselineExport({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        ...(input.baselineId !== undefined
+          ? { baselineId: requireBoundedString(input.baselineId, "baselineId", 300) }
+          : {}),
+      });
+      const objectCount = bundle.resources.reduce(
+        (sum, entry) => sum + entry.objects.length,
+        0,
+      );
+      const parent = mainWindow ?? undefined;
+      const defaultPath = `openadminos-baseline-${bundle.baselineName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")}-${bundle.exportedAt.slice(0, 10)}.json`;
+      const dialogOptions = {
+        title: "Export baseline",
+        defaultPath,
+        filters: [{ name: "OpenAdminOS baseline export", extensions: ["json"] }],
+      };
+      const result = parent
+        ? await dialog.showSaveDialog(parent, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions);
+      if (result.canceled || !result.filePath) {
+        return { canceled: true };
+      }
+      await writeFile(result.filePath, JSON.stringify(bundle, null, 2), "utf8");
+      return { canceled: false, filePath: result.filePath, objectCount };
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:read-drift-bundle-file",
+    handleTrusted(async () => {
+      const parent = mainWindow ?? undefined;
+      const dialogOptions = {
+        title: "Open baseline export",
+        filters: [{ name: "OpenAdminOS baseline export", extensions: ["json"] }],
+        properties: ["openFile" as const],
+      };
+      const result = parent
+        ? await dialog.showOpenDialog(parent, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
+      const filePath = result.filePaths[0];
+      if (result.canceled || !filePath) {
+        return { canceled: true };
+      }
+      const fileStat = await stat(filePath);
+      if (fileStat.size > 25 * 1024 * 1024) {
+        throw new Error("Baseline export files larger than 25 MB are not supported.");
+      }
+      const raw = await readFile(filePath, "utf8");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error("This file is not valid JSON.");
+      }
+      return { canceled: false, bundle: validateDriftBundle(parsed) };
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-bundle-compare",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Bundle compare input must be an object.");
+      }
+      const compare: DriftBundleCompareInput = {
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        bundle: validateDriftBundle(input.bundle),
+      };
+      if (input.resources !== undefined) {
+        compare.resources = validateDriftResourceArray(input.resources, "resources");
+      }
+      if (input.limit !== undefined) {
+        compare.limit = requireBoundedInteger(input.limit, "bundle compare limit", 1, 5_000);
+      }
+      if (input.includeAssignments !== undefined) {
+        if (typeof input.includeAssignments !== "boolean") {
+          throw new Error("includeAssignments must be a boolean.");
+        }
+        compare.includeAssignments = input.includeAssignments;
+      }
+      return store.getDriftBundleCompare(compare);
+    }),
   );
   ipcMain.handle(
     "openadminos:get-fleet-drift-status",

@@ -241,6 +241,12 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:start-baseline-rollback", input),
   getFleetDriftStatus: (input) =>
     ipcRenderer.invoke("openadminos:get-fleet-drift-status", input),
+  exportDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:export-drift-baseline", input),
+  readDriftBundleFile: () =>
+    ipcRenderer.invoke("openadminos:read-drift-bundle-file"),
+  getDriftBundleCompare: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-bundle-compare", input),
   getGraphCacheRefreshSchedule: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-refresh-schedule", tenantId),
   setGraphCacheRefreshSchedule: (input) =>
