@@ -5400,6 +5400,23 @@ function registerIpcHandlers() {
     }),
   );
   ipcMain.handle(
+    "openadminos:get-usage-telemetry-preview",
+    handleTrusted(() => store.getUsageTelemetryPreview()),
+  );
+  ipcMain.handle(
+    "openadminos:set-usage-telemetry-enabled",
+    handleTrusted((_event, enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("Usage telemetry enabled must be a boolean.");
+      }
+      return store.setUsageTelemetryEnabled(enabled);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:send-usage-telemetry-test",
+    handleTrusted(() => store.sendUsageTelemetry()),
+  );
+  ipcMain.handle(
     "openadminos:get-retrieval-status",
     handleTrusted(() => store.getRetrievalStatus()),
   );

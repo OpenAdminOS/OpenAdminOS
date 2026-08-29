@@ -174,6 +174,10 @@ import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
 import { GatewayService } from "./gateway/service.js";
 import { RetrievalIndex, type RetrievalStatus } from "./retrieval/retrieval.js";
+import {
+  buildUsageTelemetryPayload,
+  type UsageTelemetryPayload,
+} from "./telemetry/usage.js";
 import { RunService } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -253,6 +257,12 @@ interface PersistedState {
    * Defaults to true; users can disable it from Settings -> Privacy.
    */
   registryInstallCountsEnabled?: boolean;
+  /**
+   * Opt-in install and usage telemetry (counts and versions only).
+   * Absent or false means off; the ping never fires until the user
+   * turns it on from Settings -> Privacy.
+   */
+  usageTelemetryEnabled?: boolean;
   /**
    * MCP write-gateway configuration. The pairing token is never stored
    * here; it lives in provider-style safeStorage. Off by default.
@@ -810,6 +820,10 @@ function auditEventWithinRange(
   return true;
 }
 
+function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parseAuditExportBoundary(value: string | undefined, label: string): number | undefined {
   if (value === undefined) return undefined;
   const timestamp = Date.parse(value);
@@ -953,6 +967,12 @@ export interface AppStateStoreOptions {
    * deployment URL.
    */
   statsApiUrl?: string;
+  /**
+   * Base URL for the opt-in usage-telemetry collector. Empty (the
+   * default) means usage pings never fire regardless of the user's
+   * opt-in. Set per build once a collector is hosted.
+   */
+  usageTelemetryUrl?: string;
   /** Version string POSTed alongside install events, e.g. `0.1.5`. */
   appVersion?: string;
   /** Initial MXC setting used when state.json has no saved preference. */
@@ -1020,6 +1040,7 @@ export class AppStateStore {
     | ((info: { reason: string; runId?: string }) => void)
     | undefined;
   private readonly statsApiUrl: string;
+  private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
   private readonly sandboxedCodeDefault: boolean;
   private readonly userDataPath: string | undefined;
@@ -1067,6 +1088,7 @@ export class AppStateStore {
       this.onRunFinished = undefined;
       this.onStateChanged = undefined;
       this.statsApiUrl = "";
+      this.usageTelemetryUrl = "";
       this.appVersion = "0.0.0";
       this.sandboxedCodeDefault = false;
       this.userDataPath = undefined;
@@ -1091,6 +1113,13 @@ export class AppStateStore {
         typeof options.statsApiUrl === "string"
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
+      // No default: usage telemetry stays inert until a collector URL is
+      // configured for the build AND the user opts in. // TODO(ugur):
+      // decide where the usage collector is hosted and set it here.
+      this.usageTelemetryUrl =
+        typeof options.usageTelemetryUrl === "string"
+          ? options.usageTelemetryUrl
+          : "";
       this.appVersion = options.appVersion ?? "0.0.0";
       this.sandboxedCodeDefault = options.sandboxedCodeDefault === true;
       this.userDataPath = options.userDataPath;
@@ -1358,6 +1387,78 @@ export class AppStateStore {
 
   async startGatewayIfEnabled(): Promise<void> {
     await this.gatewayService.startIfEnabled();
+  }
+
+  private async buildUsageTelemetry(): Promise<{
+    payload: UsageTelemetryPayload;
+    enabled: boolean;
+  }> {
+    const persisted = await this.read();
+    const providers = await this.listProviders();
+    const activeProvider = providers.find(
+      (provider) => provider.id === persisted.activeProviderId,
+    );
+    const retrievalStatus = await this.getRetrievalStatus();
+    const installId = persisted.installId ?? "anonymous";
+    const payload = buildUsageTelemetryPayload({
+      installId,
+      appVersion: this.appVersion,
+      platform: process.platform,
+      arch: process.arch,
+      providerIsLocal: activeProvider?.isLocal === true,
+      tenantCount: persisted.tenants.length,
+      installedAgentCount: persisted.installedAgents.length,
+      runCount: persisted.runs.length,
+      retrievalIndexInstalled: retrievalStatus.available,
+    });
+    return { payload, enabled: persisted.usageTelemetryEnabled === true };
+  }
+
+  /** The exact JSON the Privacy preview shows and a ping would send. */
+  async getUsageTelemetryPreview(): Promise<{
+    enabled: boolean;
+    endpointConfigured: boolean;
+    payload: UsageTelemetryPayload;
+  }> {
+    const { payload, enabled } = await this.buildUsageTelemetry();
+    return {
+      enabled,
+      endpointConfigured: this.usageTelemetryUrl.length > 0,
+      payload,
+    };
+  }
+
+  async setUsageTelemetryEnabled(enabled: boolean): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      await this.write({ ...current, usageTelemetryEnabled: enabled });
+    });
+    if (enabled) void this.sendUsageTelemetry();
+    return this.getAppState();
+  }
+
+  /**
+   * Send one usage ping. No-op unless the user enabled telemetry AND a
+   * collector endpoint is configured. Errors are swallowed; telemetry
+   * must never affect the app.
+   */
+  async sendUsageTelemetry(): Promise<{ sent: boolean }> {
+    const { payload, enabled } = await this.buildUsageTelemetry();
+    if (!enabled || this.usageTelemetryUrl.length === 0) {
+      return { sent: false };
+    }
+    try {
+      await fetch(`${this.usageTelemetryUrl.replace(/\/$/, "")}/api/usage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5_000),
+      });
+      return { sent: true };
+    } catch (error) {
+      console.debug("[telemetry] usage ping failed:", error);
+      return { sent: false };
+    }
   }
 
   private retrievalIndex(): RetrievalIndex | undefined {
@@ -1801,6 +1902,7 @@ export class AppStateStore {
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
       registryInstallCountsEnabled: persisted.registryInstallCountsEnabled !== false,
+      usageTelemetryEnabled: persisted.usageTelemetryEnabled === true,
       schedulerStatus: this.deriveSchedulerStatus(persisted),
     };
     if (persisted.activeModelByProviderId) {
@@ -5039,6 +5141,32 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       if (typeof parsed.registryInstallCountsEnabled === "boolean") {
         state.registryInstallCountsEnabled = parsed.registryInstallCountsEnabled;
+      }
+      if (typeof parsed.usageTelemetryEnabled === "boolean") {
+        state.usageTelemetryEnabled = parsed.usageTelemetryEnabled;
+      }
+      if (isPlainRecordValue(parsed.gateway)) {
+        const gateway = parsed.gateway as Record<string, unknown>;
+        if (
+          typeof gateway.enabled === "boolean" &&
+          typeof gateway.port === "number" &&
+          Array.isArray(gateway.clients)
+        ) {
+          state.gateway = {
+            enabled: gateway.enabled,
+            port: gateway.port,
+            ...(typeof gateway.boundTenantId === "string"
+              ? { boundTenantId: gateway.boundTenantId }
+              : {}),
+            clients: gateway.clients.filter(
+              (client): client is { id: string; name: string; createdAt: string } =>
+                isPlainRecordValue(client) &&
+                typeof (client as Record<string, unknown>).id === "string" &&
+                typeof (client as Record<string, unknown>).name === "string" &&
+                typeof (client as Record<string, unknown>).createdAt === "string",
+            ),
+          };
+        }
       }
       if (typeof parsed.sandboxedCodeEnabled === "boolean") {
         state.sandboxedCodeEnabled = parsed.sandboxedCodeEnabled;

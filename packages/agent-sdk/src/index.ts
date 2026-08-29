@@ -751,6 +751,7 @@ export interface AppState {
   registrySource: string;
   /** Whether packaged builds report aggregate public registry install counts. */
   registryInstallCountsEnabled: boolean;
+  usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
 }
 
@@ -1196,6 +1197,21 @@ export interface DriftBundleCompareResult {
   entries: DriftTenantCompareEntry[];
   hasMore: boolean;
   limit: number;
+}
+
+// ─── Opt-in usage telemetry (v0.5) ───────────────────────────────────────
+
+export interface UsageTelemetryPayload {
+  schema: "openadminos-usage-1";
+  installId: string;
+  appVersion: string;
+  os: string;
+  arch: string;
+  providerClass: "local" | "hosted";
+  tenants: string;
+  agents: string;
+  runs: string;
+  retrievalIndex: boolean;
 }
 
 // ─── Documentation retrieval (v0.5) ──────────────────────────────────────
@@ -2212,6 +2228,13 @@ export interface OpenAdminOSApi {
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
   getRetrievalStatus?(): Promise<RetrievalStatus>;
   refreshRetrievalIndex?(): Promise<RetrievalStatus>;
+  getUsageTelemetryPreview?(): Promise<{
+    enabled: boolean;
+    endpointConfigured: boolean;
+    payload: UsageTelemetryPayload;
+  }>;
+  setUsageTelemetryEnabled?(enabled: boolean): Promise<AppState>;
+  sendUsageTelemetryTest?(): Promise<{ sent: boolean }>;
   exportDriftBaseline?(
     input: ExportDriftBaselineInput,
   ): Promise<ExportDriftBaselineResult>;
