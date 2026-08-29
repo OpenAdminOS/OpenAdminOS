@@ -24,6 +24,9 @@ import {
 import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   DriftAttribution,
+  DriftBaseline,
+  DriftBaselineDriftEntry,
+  DriftBaselineDriftResult,
   DriftEntryDetail,
   DriftFieldChange,
   DriftObjectHistoryResult,
@@ -39,6 +42,8 @@ import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 
 type DateRangeValue = "24h" | "7d" | "30d" | "all";
+type ChangesSegment = "timeline" | "baselines";
+type BaselineNameMode = "create" | "rename";
 
 const DATE_RANGES: {
   value: DateRangeValue;
@@ -63,6 +68,8 @@ export default function Changes() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : state.tenants[0];
+  const baselinesAvailable = Boolean(window.openAdminOS?.listDriftBaselines);
+  const [segment, setSegment] = useState<ChangesSegment>("timeline");
   const [status, setStatus] = useState<DriftTimelineStatus | null>(null);
   const [timeline, setTimeline] = useState<DriftTimelineResult | null>(null);
   const [selectedResource, setSelectedResource] = useState<
@@ -87,6 +94,27 @@ export default function Changes() {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [pinOpen, setPinOpen] = useState(false);
   const [pinWorkspaceId, setPinWorkspaceId] = useState("");
+  const [baselines, setBaselines] = useState<DriftBaseline[] | null>(null);
+  const [baselineDrift, setBaselineDrift] =
+    useState<DriftBaselineDriftResult | null>(null);
+  const [baselineLoading, setBaselineLoading] = useState(false);
+  const [baselineLoadAnnouncement, setBaselineLoadAnnouncement] = useState("");
+  const [baselineError, setBaselineError] = useState<string | null>(null);
+  const [baselineNoActive, setBaselineNoActive] = useState(false);
+  const [baselineReloadNonce, setBaselineReloadNonce] = useState(0);
+  const [expandedBaselineEntry, setExpandedBaselineEntry] = useState<string | null>(
+    null,
+  );
+  const [baselineNameMode, setBaselineNameMode] =
+    useState<BaselineNameMode | null>(null);
+  const [baselineName, setBaselineName] = useState("");
+  const [baselineNameError, setBaselineNameError] = useState<string | null>(null);
+  const [baselineNameBusy, setBaselineNameBusy] = useState(false);
+  const [retireBaselineOpen, setRetireBaselineOpen] = useState(false);
+  const [retireBaselineError, setRetireBaselineError] = useState<string | null>(
+    null,
+  );
+  const [retireBaselineBusy, setRetireBaselineBusy] = useState(false);
 
   useEffect(() => {
     const normalized = query.trim();
@@ -100,6 +128,10 @@ export default function Changes() {
 
   useEffect(() => {
     const api = window.openAdminOS;
+    if (segment !== "timeline") {
+      setLoading(false);
+      return;
+    }
     if (!activeTenant) {
       setStatus(null);
       setTimeline(null);
@@ -158,7 +190,107 @@ export default function Changes() {
     return () => {
       cancelled = true;
     };
-  }, [activeTenant, dateRange, debouncedQuery, limit, reloadNonce, selectedResource]);
+  }, [
+    activeTenant,
+    dateRange,
+    debouncedQuery,
+    limit,
+    reloadNonce,
+    segment,
+    selectedResource,
+  ]);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (segment !== "baselines" || !baselinesAvailable) {
+      setBaselineLoading(false);
+      return;
+    }
+    if (!activeTenant) {
+      setBaselines(null);
+      setBaselineDrift(null);
+      setBaselineError(null);
+      setBaselineNoActive(false);
+      setBaselineLoading(false);
+      return;
+    }
+    if (!api?.listDriftBaselines) {
+      setBaselineLoading(false);
+      return;
+    }
+    const listDriftBaselines = api.listDriftBaselines;
+
+    let cancelled = false;
+    setBaselineLoading(true);
+    setBaselineError(null);
+    setBaselineLoadAnnouncement("Loading baselines…");
+
+    void (async () => {
+      try {
+        const nextBaselines = await listDriftBaselines({
+          tenantId: activeTenant.id,
+        });
+        if (cancelled) return;
+        setBaselines(nextBaselines);
+
+        const nextActive = nextBaselines.find(
+          (baseline) => baseline.status === "active",
+        );
+        if (!nextActive) {
+          setBaselineDrift(null);
+          setBaselineNoActive(true);
+          setExpandedBaselineEntry(null);
+          setBaselineLoadAnnouncement("No active baseline.");
+          return;
+        }
+        if (!api.getDriftBaselineDrift) {
+          throw new Error(
+            "Baseline drift is unavailable in this build. The desktop bridge does not expose the drift evaluation method.",
+          );
+        }
+
+        try {
+          const nextDrift = await api.getDriftBaselineDrift({
+            tenantId: activeTenant.id,
+            baselineId: nextActive.id,
+          });
+          if (cancelled) return;
+          setBaselineDrift(nextDrift);
+          setBaselineNoActive(false);
+          setBaselineLoadAnnouncement(
+            nextDrift.entries.length === 1
+              ? "Showing 1 baseline drift entry."
+              : `Showing ${nextDrift.entries.length} baseline drift entries.`,
+          );
+        } catch (caught) {
+          if (cancelled) return;
+          if (isNoActiveBaselineError(caught)) {
+            setBaselineDrift(null);
+            setBaselineNoActive(true);
+            setExpandedBaselineEntry(null);
+            setBaselineLoadAnnouncement("No active baseline.");
+            return;
+          }
+          throw caught;
+        }
+      } catch (caught) {
+        if (cancelled) return;
+        setBaselineError(caught instanceof Error ? caught.message : String(caught));
+        setBaselineLoadAnnouncement("Baselines could not be loaded.");
+      } finally {
+        if (!cancelled) setBaselineLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTenant,
+    baselineReloadNonce,
+    baselinesAvailable,
+    segment,
+  ]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -302,6 +434,18 @@ export default function Changes() {
   const selectedMarkdown = selectedEntry
     ? buildChangeMarkdown(selectedEntry, detail, history)
     : "";
+  const tenantBaselines = (baselines ?? []).filter(
+    (baseline) => baseline.tenantId === activeTenant?.id,
+  );
+  const tenantBaselineDrift =
+    baselineDrift?.tenantId === activeTenant?.id ? baselineDrift : null;
+  const activeBaseline = baselineNoActive
+    ? undefined
+    : (tenantBaselineDrift?.baseline ??
+      tenantBaselines.find((baseline) => baseline.status === "active"));
+  const retiredBaselines = tenantBaselines.filter(
+    (baseline) => baseline.status === "retired",
+  );
 
   const handleResourceChange = (value: string) => {
     setSelectedResource(value === "all" ? "all" : (value as GraphCacheResourceKind));
@@ -366,20 +510,203 @@ export default function Changes() {
     }
   };
 
+  const openCreateBaseline = () => {
+    setBaselineNameMode("create");
+    setBaselineName("");
+    setBaselineNameError(null);
+  };
+
+  const openRenameBaseline = () => {
+    if (!activeBaseline) return;
+    setBaselineNameMode("rename");
+    setBaselineName(activeBaseline.name);
+    setBaselineNameError(null);
+  };
+
+  const closeBaselineNameModal = () => {
+    if (baselineNameBusy) return;
+    setBaselineNameMode(null);
+    setBaselineNameError(null);
+  };
+
+  const handleBaselineNameSubmit = async () => {
+    const api = window.openAdminOS;
+    const name = baselineName.trim();
+    if (!name) {
+      setBaselineNameError("Enter a baseline name.");
+      return;
+    }
+    if (name.length > 80) {
+      setBaselineNameError("Baseline names can contain at most 80 characters.");
+      return;
+    }
+    if (!activeTenant || !baselineNameMode) return;
+
+    setBaselineNameBusy(true);
+    setBaselineNameError(null);
+    try {
+      if (baselineNameMode === "create") {
+        if (!api?.createDriftBaseline) {
+          throw new Error(
+            "Baseline creation is unavailable in this build. The desktop bridge does not expose the create method.",
+          );
+        }
+        const created = await api.createDriftBaseline({
+          tenantId: activeTenant.id,
+          name,
+        });
+        setBaselines((current) => [
+          created,
+          ...(current ?? []).filter((baseline) => baseline.id !== created.id),
+        ]);
+        setBaselineDrift(null);
+        setBaselineNoActive(false);
+        setBaselineError(null);
+        setExpandedBaselineEntry(null);
+        setBaselineNameMode(null);
+        setBaselineLoading(true);
+        setBaselineLoadAnnouncement("Evaluating the new baseline…");
+
+        if (!api.getDriftBaselineDrift) {
+          setBaselineError(
+            "Baseline drift is unavailable in this build. The desktop bridge does not expose the drift evaluation method.",
+          );
+          setBaselineLoading(false);
+          return;
+        }
+        try {
+          const nextDrift = await api.getDriftBaselineDrift({
+            tenantId: activeTenant.id,
+            baselineId: created.id,
+          });
+          setBaselineDrift(nextDrift);
+          setBaselines((current) =>
+            (current ?? []).map((baseline) =>
+              baseline.id === nextDrift.baseline.id
+                ? nextDrift.baseline
+                : baseline,
+            ),
+          );
+          setBaselineLoadAnnouncement(
+            nextDrift.entries.length === 1
+              ? "Showing 1 baseline drift entry."
+              : `Showing ${nextDrift.entries.length} baseline drift entries.`,
+          );
+        } catch (caught) {
+          if (isNoActiveBaselineError(caught)) {
+            setBaselineDrift(null);
+            setBaselineNoActive(true);
+            setBaselineLoadAnnouncement("No active baseline.");
+          } else {
+            setBaselineError(caught instanceof Error ? caught.message : String(caught));
+            setBaselineLoadAnnouncement("Baseline drift could not be loaded.");
+          }
+        } finally {
+          setBaselineLoading(false);
+        }
+        return;
+      }
+
+      if (!activeBaseline) {
+        throw new Error("No active baseline exists to rename.");
+      }
+      if (!api?.renameDriftBaseline) {
+        throw new Error(
+          "Baseline rename is unavailable in this build. The desktop bridge does not expose the rename method.",
+        );
+      }
+      const renamed = await api.renameDriftBaseline({
+        tenantId: activeTenant.id,
+        baselineId: activeBaseline.id,
+        name,
+      });
+      setBaselines((current) =>
+        (current ?? []).map((baseline) =>
+          baseline.id === renamed.id ? renamed : baseline,
+        ),
+      );
+      setBaselineDrift((current) =>
+        current && current.baseline.id === renamed.id
+          ? { ...current, baseline: renamed }
+          : current,
+      );
+      setBaselineNameMode(null);
+    } catch (caught) {
+      setBaselineNameError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBaselineNameBusy(false);
+    }
+  };
+
+  const closeRetireBaselineModal = () => {
+    if (retireBaselineBusy) return;
+    setRetireBaselineOpen(false);
+    setRetireBaselineError(null);
+  };
+
+  const handleRetireBaseline = async () => {
+    const api = window.openAdminOS;
+    if (!activeTenant || !activeBaseline) return;
+    setRetireBaselineBusy(true);
+    setRetireBaselineError(null);
+    try {
+      if (!api?.retireDriftBaseline) {
+        throw new Error(
+          "Baseline retirement is unavailable in this build. The desktop bridge does not expose the retire method.",
+        );
+      }
+      const retired = await api.retireDriftBaseline({
+        tenantId: activeTenant.id,
+        baselineId: activeBaseline.id,
+      });
+      setBaselines((current) => {
+        const existing = current ?? [];
+        return existing.some((baseline) => baseline.id === retired.id)
+          ? existing.map((baseline) =>
+              baseline.id === retired.id ? retired : baseline,
+            )
+          : [retired, ...existing];
+      });
+      setBaselineDrift(null);
+      setBaselineNoActive(true);
+      setExpandedBaselineEntry(null);
+      setBaselineLoadAnnouncement("No active baseline.");
+      setRetireBaselineOpen(false);
+    } catch (caught) {
+      setRetireBaselineError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setRetireBaselineBusy(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
         title="Changes"
         subtitle={
           activeTenant
-            ? `Tenant drift timeline for ${activeTenant.displayName}. Entries are computed from local cache snapshots.`
+            ? segment === "baselines" && baselinesAvailable
+              ? `Named configuration baselines for ${activeTenant.displayName}. Drift is evaluated from local tracked versions.`
+              : `Tenant drift timeline for ${activeTenant.displayName}. Entries are computed from local cache snapshots.`
             : "Connect a Microsoft 365 tenant before reviewing change history."
         }
       />
       <PageBody>
         <div role="status" aria-live="polite" className="sr-only">
-          {loading ? "Loading change history." : loadAnnouncement}
+          {segment === "baselines" && baselinesAvailable
+            ? baselineLoading
+              ? "Loading baselines…"
+              : baselineLoadAnnouncement
+            : loading
+              ? "Loading change history."
+              : loadAnnouncement}
         </div>
+
+        <ChangesSegmentControl
+          segment={segment}
+          showBaselines={baselinesAvailable}
+          onChange={setSegment}
+        />
 
         {!activeTenant ? (
           <NoTenantState
@@ -388,6 +715,31 @@ export default function Changes() {
                 createPendingIntent({ kind: "view-changes", returnTo: "/changes" }),
               )
             }
+          />
+        ) : segment === "baselines" && baselinesAvailable ? (
+          <BaselinesSegment
+            loading={baselineLoading}
+            error={baselineError}
+            activeBaseline={activeBaseline}
+            drift={tenantBaselineDrift}
+            retiredBaselines={retiredBaselines}
+            expandedEntry={expandedBaselineEntry}
+            onToggleEntry={(entry) => {
+              const key = baselineDriftEntryKey(entry);
+              setExpandedBaselineEntry((current) =>
+                current === key ? null : key,
+              );
+            }}
+            onCreate={openCreateBaseline}
+            onRename={openRenameBaseline}
+            onRetire={() => {
+              setRetireBaselineError(null);
+              setRetireBaselineOpen(true);
+            }}
+            onRetry={() => {
+              setBaselineError(null);
+              setBaselineReloadNonce((current) => current + 1);
+            }}
           />
         ) : (
           <div className="space-y-4">
@@ -485,6 +837,23 @@ export default function Changes() {
         onConfirm={() => void handlePin()}
         onOpenWorkspaces={() => navigate("/workspaces")}
       />
+      <BaselineNameModal
+        mode={baselineNameMode}
+        name={baselineName}
+        error={baselineNameError}
+        busy={baselineNameBusy}
+        onNameChange={setBaselineName}
+        onClose={closeBaselineNameModal}
+        onSubmit={() => void handleBaselineNameSubmit()}
+      />
+      <RetireBaselineModal
+        open={retireBaselineOpen}
+        baseline={activeBaseline}
+        error={retireBaselineError}
+        busy={retireBaselineBusy}
+        onClose={closeRetireBaselineModal}
+        onConfirm={() => void handleRetireBaseline()}
+      />
     </>
   );
 }
@@ -493,6 +862,449 @@ type DriftTimelineStatus = {
   tenantId: string;
   resources: DriftResourceStatus[];
 };
+
+function ChangesSegmentControl({
+  segment,
+  showBaselines,
+  onChange,
+}: {
+  segment: ChangesSegment;
+  showBaselines: boolean;
+  onChange: (segment: ChangesSegment) => void;
+}) {
+  if (!showBaselines) return null;
+  return (
+    <div
+      role="group"
+      aria-label="Changes view"
+      className="mb-6 flex flex-wrap items-center gap-1.5"
+    >
+      {(["timeline", "baselines"] satisfies ChangesSegment[]).map((value) => {
+        const active = segment === value;
+        return (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(value)}
+            className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${focusRingClass} ${
+              active
+                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
+                : "bg-transparent text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            {value === "timeline" ? "Timeline" : "Baselines"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BaselinesSegment({
+  loading,
+  error,
+  activeBaseline,
+  drift,
+  retiredBaselines,
+  expandedEntry,
+  onToggleEntry,
+  onCreate,
+  onRename,
+  onRetire,
+  onRetry,
+}: {
+  loading: boolean;
+  error: string | null;
+  activeBaseline?: DriftBaseline;
+  drift: DriftBaselineDriftResult | null;
+  retiredBaselines: DriftBaseline[];
+  expandedEntry: string | null;
+  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
+  onCreate: () => void;
+  onRename: () => void;
+  onRetire: () => void;
+  onRetry: () => void;
+}) {
+  if (loading && !activeBaseline && retiredBaselines.length === 0 && !error) {
+    return (
+      <div className="space-y-4" aria-label="Loading baselines">
+        <Card className="h-52 animate-pulse bg-[var(--color-bg-raised)]">
+          <span className="sr-only">Loading active baseline</span>
+        </Card>
+        <Card className="h-44 animate-pulse bg-[var(--color-bg-raised)]">
+          <span className="sr-only">Loading baseline drift</span>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {error ? (
+        <InlineState
+          tone="danger"
+          title="Baselines unavailable"
+          message={`${error} Try again after the desktop bridge and local cache are ready.`}
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              leadingIcon={<IconRefresh size={12} />}
+              onClick={onRetry}
+            >
+              Retry
+            </Button>
+          }
+        />
+      ) : null}
+
+      {activeBaseline ? (
+        <ActiveBaselineCard
+          baseline={activeBaseline}
+          drift={drift}
+          loading={loading}
+          onRename={onRename}
+          onRetire={onRetire}
+        />
+      ) : error ? null : (
+        <NoActiveBaselineState onCreate={onCreate} />
+      )}
+
+      {activeBaseline && drift ? (
+        <BaselineDriftEntries
+          drift={drift}
+          expandedEntry={expandedEntry}
+          onToggleEntry={onToggleEntry}
+        />
+      ) : null}
+
+      <RetiredBaselinesList baselines={retiredBaselines} />
+    </div>
+  );
+}
+
+function ActiveBaselineCard({
+  baseline,
+  drift,
+  loading,
+  onRename,
+  onRetire,
+}: {
+  baseline: DriftBaseline;
+  drift: DriftBaselineDriftResult | null;
+  loading: boolean;
+  onRename: () => void;
+  onRetire: () => void;
+}) {
+  const resourceLabels = baseline.resources.map((resource) =>
+    baselineResourceLabel(resource, drift),
+  );
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="truncate text-[15px] font-semibold text-[var(--color-text)]">
+              {baseline.name}
+            </h2>
+            <Pill tone="success">Active baseline</Pill>
+          </div>
+          <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            {drift
+              ? `Evaluated ${formatDateTime(drift.evaluatedAt)}`
+              : loading
+                ? "Evaluating drift…"
+                : "Drift evaluation unavailable"}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={onRename}>
+            Rename
+          </Button>
+          <Button size="sm" variant="danger" onClick={onRetire}>
+            Retire
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-px bg-[var(--color-border-soft)] sm:grid-cols-3">
+        <BaselineMetric label="Created" value={formatDateTime(baseline.createdAt)} />
+        <BaselineMetric
+          label="Pinned objects"
+          value={baseline.pinnedObjectCount.toLocaleString()}
+        />
+        <BaselineMetric
+          label="Resources covered"
+          value={`${baseline.resources.length.toLocaleString()} covered`}
+          detail={resourceLabels.join(", ") || "No resources recorded"}
+        />
+      </div>
+
+      <div className="border-t border-[var(--color-border-soft)] px-5 py-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-[12px] font-semibold text-[var(--color-text)]">
+              Drift by resource
+            </h3>
+            <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+              Object changes against the pinned versions
+            </div>
+          </div>
+          {loading ? (
+            <Pill tone="default">
+              <span className="h-2 w-2 animate-spin rounded-full border border-current border-t-transparent" />
+              Loading…
+            </Pill>
+          ) : null}
+        </div>
+        {drift && drift.resources.length > 0 ? (
+          <div className="overflow-x-auto rounded-lg ring-1 ring-[var(--color-border-soft)]">
+            <table className="w-full min-w-[540px] text-left text-[12px]">
+              <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                <tr>
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    Resource
+                  </th>
+                  <th scope="col" className="px-3 py-2 text-right font-medium">
+                    Added
+                  </th>
+                  <th scope="col" className="px-3 py-2 text-right font-medium">
+                    Removed
+                  </th>
+                  <th scope="col" className="px-3 py-2 text-right font-medium">
+                    Modified
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {drift.resources.map((resource) => (
+                  <tr
+                    key={resource.resource}
+                    aria-label={`${resource.resourceLabel}: ${resource.added} added, ${resource.removed} removed, ${resource.modified} modified`}
+                    className="border-t border-[var(--color-border-soft)]"
+                  >
+                    <th
+                      scope="row"
+                      className="px-3 py-2.5 font-medium text-[var(--color-text-soft)]"
+                    >
+                      {resource.resourceLabel}
+                    </th>
+                    <td className="px-3 py-2.5 text-right font-mono text-[var(--color-success)]">
+                      {resource.added.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-[var(--color-danger)]">
+                      {resource.removed.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono text-[var(--color-accent)]">
+                      {resource.modified.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+            {loading
+              ? "Evaluating drift against the pinned versions…"
+              : drift
+                ? "No resource drift counts were returned."
+                : "Drift counts are not available."}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function BaselineMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+}) {
+  return (
+    <div className="min-w-0 bg-[var(--color-surface)] px-5 py-3">
+      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <div className="mt-1 text-[12px] font-medium text-[var(--color-text)]">
+        {value}
+      </div>
+      {detail ? (
+        <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]" title={detail}>
+          {detail}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BaselineDriftEntries({
+  drift,
+  expandedEntry,
+  onToggleEntry,
+}: {
+  drift: DriftBaselineDriftResult;
+  expandedEntry: string | null;
+  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-3">
+        <div>
+          <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
+            Drift entries
+          </h2>
+          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+            {drift.entries.length.toLocaleString()} objects differ from the baseline
+          </div>
+        </div>
+        <span className="text-[11px] text-[var(--color-text-muted)]">
+          {formatDateTime(drift.evaluatedAt)}
+        </span>
+      </div>
+
+      {drift.entries.length === 0 ? (
+        <div className="px-5 py-10 text-center">
+          <div className="text-[13px] font-medium text-[var(--color-text)]">
+            No baseline drift detected
+          </div>
+          <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
+            The latest tracked versions match this baseline.
+          </div>
+        </div>
+      ) : (
+        <div className="divide-y divide-[var(--color-border-soft)]">
+          {drift.entries.map((entry, index) => {
+            const key = baselineDriftEntryKey(entry);
+            const expanded = expandedEntry === key;
+            const detailId = `baseline-drift-detail-${index}`;
+            const name = entry.displayName ?? entry.graphId;
+            return (
+              <div key={key}>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={detailId}
+                  aria-label={`${expanded ? "Collapse" : "Expand"} baseline drift details for ${name}`}
+                  onClick={() => onToggleEntry(entry)}
+                  className={`grid w-full gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
+                >
+                  <span className="min-w-0">
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <ChangeKindChip kind={entry.changeKind} />
+                      <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
+                        {name}
+                      </span>
+                    </span>
+                    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+                      <span>{entry.resourceLabel}</span>
+                      <span aria-hidden="true" className="text-[var(--color-text-faint)]">
+                        ·
+                      </span>
+                      <span className="truncate font-mono">{entry.graphId}</span>
+                    </span>
+                  </span>
+                  <span className="flex items-center justify-end gap-3 self-center text-[11px] text-[var(--color-text-muted)]">
+                    <span>{formatFieldCount(entry.fieldChangeCount)}</span>
+                    <IconChevronDown
+                      size={13}
+                      aria-hidden="true"
+                      className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+                    />
+                  </span>
+                </button>
+                {expanded ? (
+                  <div
+                    id={detailId}
+                    className="space-y-3 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] p-4"
+                  >
+                    {entry.truncated ? (
+                      <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                        Raw before/after bodies exceeded the local display cap. The
+                        field list below is complete.
+                      </div>
+                    ) : null}
+                    <FieldChangesTable changes={entry.changes} />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          {drift.hasMore ? (
+            <div className="px-5 py-3 text-center text-[11px] text-[var(--color-text-muted)]">
+              This evaluation contains more drift entries than the local display limit.
+            </div>
+          ) : null}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function NoActiveBaselineState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <Card className="px-6 py-14 text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <IconClock size={18} />
+      </div>
+      <h2 className="mt-4 text-[15px] font-semibold text-[var(--color-text)]">
+        No active baseline
+      </h2>
+      <p className="mx-auto mt-1 max-w-[560px] text-[13px] leading-6 text-[var(--color-text-muted)]">
+        A baseline is a pinned copy of this tenant&apos;s configuration. Drift is
+        measured against it.
+      </p>
+      <Button
+        className="mt-5"
+        variant="primary"
+        leadingIcon={<IconPlus size={12} />}
+        onClick={onCreate}
+      >
+        Create baseline
+      </Button>
+    </Card>
+  );
+}
+
+function RetiredBaselinesList({ baselines }: { baselines: DriftBaseline[] }) {
+  if (baselines.length === 0) return null;
+  return (
+    <section aria-labelledby="retired-baselines-heading">
+      <h2
+        id="retired-baselines-heading"
+        className="mb-2 px-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+      >
+        Retired baselines
+      </h2>
+      <Card className="divide-y divide-[var(--color-border-soft)] overflow-hidden">
+        {baselines.map((baseline) => (
+          <div
+            key={baseline.id}
+            className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-6"
+          >
+            <div className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-text-soft)]">
+              {baseline.name}
+            </div>
+            <div className="text-[11px] text-[var(--color-text-muted)]">
+              Created {formatDateTime(baseline.createdAt)}
+            </div>
+            <div className="text-[11px] text-[var(--color-text-muted)]">
+              {baseline.retiredAt
+                ? `Retired ${formatDateTime(baseline.retiredAt)}`
+                : "Retired date unavailable"}
+            </div>
+          </div>
+        ))}
+      </Card>
+    </section>
+  );
+}
 
 function FiltersRow({
   resources,
@@ -729,7 +1541,7 @@ function TimelineRow({
       {isBaseline ? (
         <div className="min-w-0">
           <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-            Baseline captured — {(entry.rowCount ?? 0).toLocaleString()} objects tracked
+            Baseline captured: {(entry.rowCount ?? 0).toLocaleString()} objects tracked
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
             Future snapshots compare against this local baseline.
@@ -846,7 +1658,7 @@ function DetailPane({
             bodyClassName="p-3"
           >
             <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-              Baseline captured — {(entry.rowCount ?? 0).toLocaleString()} objects tracked.
+              Baseline captured: {(entry.rowCount ?? 0).toLocaleString()} objects tracked.
               This is the reference point for later drift detection, not a list of additions.
             </div>
           </OutputPaneSection>
@@ -1194,7 +2006,7 @@ function NoBaselineState({ onOpenSettings }: { onOpenSettings: () => void }) {
             No change history yet
           </div>
           <div className="mt-1 text-[13px] leading-6 text-[var(--color-text-muted)]">
-            Drift tracking starts with your first cache refresh — history appears
+            Drift tracking starts with your first cache refresh, history appears
             after the second.
           </div>
           <Button
@@ -1229,6 +2041,154 @@ function BaselineOnlyState({ baselineDate }: { baselineDate?: string }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+function BaselineNameModal({
+  mode,
+  name,
+  error,
+  busy,
+  onNameChange,
+  onClose,
+  onSubmit,
+}: {
+  mode: BaselineNameMode | null;
+  name: string;
+  error: string | null;
+  busy: boolean;
+  onNameChange: (name: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const creating = mode === "create";
+  const errorId = "baseline-name-error";
+  const hintId = "baseline-name-hint";
+  return (
+    <Modal open={mode !== null} onClose={onClose} size="md">
+      <ModalHeader
+        title={creating ? "Create baseline" : "Rename baseline"}
+        subtitle={
+          creating
+            ? "Pins the tenant's current tracked configuration versions"
+            : "Changes the local baseline label"
+        }
+        onClose={onClose}
+      />
+      <form
+        className="space-y-4 p-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div>
+          <label
+            htmlFor="baseline-name"
+            className="block text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+          >
+            Baseline name
+          </label>
+          <input
+            id="baseline-name"
+            name="baseline-name"
+            type="text"
+            data-autofocus
+            autoComplete="off"
+            maxLength={80}
+            value={name}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+            disabled={busy}
+            onChange={(event) => onNameChange(event.target.value)}
+            className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)] disabled:opacity-60"
+          />
+          <span
+            id={hintId}
+            className="mt-1.5 block text-[11px] text-[var(--color-text-muted)]"
+          >
+            Use 1 to 80 characters. Leading and trailing spaces are removed.
+          </span>
+        </div>
+
+        {error ? (
+          <div
+            id={errorId}
+            role="alert"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+          >
+            <div>{error}</div>
+            {isRefreshCacheRequired(error) ? (
+              <div className="mt-1 text-[var(--color-text-soft)]">
+                Refresh cache in Settings, then try again.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={busy}>
+            {busy
+              ? creating
+                ? "Creating…"
+                : "Renaming…"
+              : creating
+                ? "Create baseline"
+                : "Rename baseline"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function RetireBaselineModal({
+  open,
+  baseline,
+  error,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  baseline?: DriftBaseline;
+  error: string | null;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <ModalHeader
+        title="Retire baseline"
+        subtitle={baseline?.name ?? "Active baseline"}
+        onClose={onClose}
+      />
+      <div className="space-y-4 p-6">
+        <p className="text-[13px] leading-6 text-[var(--color-text-soft)]">
+          Retiring keeps history but stops drift evaluation and pruning protection.
+        </p>
+        {error ? (
+          <div
+            role="alert"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+          >
+            {error}
+          </div>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="danger" disabled={busy || !baseline} onClick={onConfirm}>
+            {busy ? "Retiring…" : "Retire baseline"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -1407,12 +2367,41 @@ function sourceLabel(source?: DriftAttribution["source"]): string {
   return "No audit source";
 }
 
+function baselineResourceLabel(
+  resource: GraphCacheResourceKind,
+  drift: DriftBaselineDriftResult | null,
+): string {
+  const label = drift?.resources.find(
+    (entry) => entry.resource === resource,
+  )?.resourceLabel;
+  if (label) return label;
+  const spaced = resource.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
+}
+
+function baselineDriftEntryKey(entry: DriftBaselineDriftEntry): string {
+  return `${entry.resource}:${entry.graphId}:${entry.changeKind}`;
+}
+
+function formatFieldCount(count: number): string {
+  return count === 1 ? "1 field changed" : `${count.toLocaleString()} fields changed`;
+}
+
+function isNoActiveBaselineError(caught: unknown): boolean {
+  const message = caught instanceof Error ? caught.message : String(caught);
+  return message.toLowerCase().includes("no active baseline");
+}
+
+function isRefreshCacheRequired(message: string): boolean {
+  return message.toLowerCase().includes("refresh the tenant cache first");
+}
+
 function valueToText(value: unknown): string {
-  if (value === undefined || value === null || value === "") return "—";
+  if (value === undefined || value === null || value === "") return "Not set";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   try {
-    return JSON.stringify(value, null, 2) ?? "—";
+    return JSON.stringify(value, null, 2) ?? "Not set";
   } catch {
     return String(value);
   }
@@ -1489,7 +2478,7 @@ function buildChangeMarkdown(
 
 function inlineMarkdownValue(value: unknown): string {
   const text = valueToText(value).replace(/\s+/g, " ").trim();
-  if (text === "—") return "—";
+  if (text === "Not set") return "Not set";
   return `\`${text.length > 160 ? `${text.slice(0, 157)}…` : text}\``;
 }
 
