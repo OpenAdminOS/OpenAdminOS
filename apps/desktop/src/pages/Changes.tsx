@@ -1,13 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { Modal, ModalHeader } from "../components/Modal";
-import {
-  OutputPane,
-  OutputPaneSection,
-} from "../components/OutputPane";
+import { OutputPane, OutputPaneSection } from "../components/OutputPane";
 import { Pill, StatusDot } from "../components/Pill";
 import {
   IconChanges,
@@ -31,6 +28,9 @@ import type {
   DriftFieldChange,
   DriftObjectHistoryResult,
   DriftResourceStatus,
+  DriftTenantCompareEntry,
+  DriftTenantCompareResult,
+  DriftTimeCompareResult,
   DriftTimelineChangeKind,
   DriftTimelineEntry,
   DriftTimelineResult,
@@ -42,7 +42,8 @@ import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 
 type DateRangeValue = "24h" | "7d" | "30d" | "all";
-type ChangesSegment = "timeline" | "baselines";
+type ChangesSegment = "timeline" | "baselines" | "compare";
+type CompareMode = "time" | "tenant";
 type BaselineNameMode = "create" | "rename";
 
 const DATE_RANGES: {
@@ -69,6 +70,11 @@ export default function Changes() {
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : state.tenants[0];
   const baselinesAvailable = Boolean(window.openAdminOS?.listDriftBaselines);
+  const compareAvailable = Boolean(window.openAdminOS?.getDriftTimeCompare);
+  const otherTenants = useMemo(
+    () => state.tenants.filter((tenant) => tenant.id !== activeTenant?.id),
+    [activeTenant?.id, state.tenants],
+  );
   const [segment, setSegment] = useState<ChangesSegment>("timeline");
   const [status, setStatus] = useState<DriftTimelineStatus | null>(null);
   const [timeline, setTimeline] = useState<DriftTimelineResult | null>(null);
@@ -102,19 +108,52 @@ export default function Changes() {
   const [baselineError, setBaselineError] = useState<string | null>(null);
   const [baselineNoActive, setBaselineNoActive] = useState(false);
   const [baselineReloadNonce, setBaselineReloadNonce] = useState(0);
-  const [expandedBaselineEntry, setExpandedBaselineEntry] = useState<string | null>(
-    null,
-  );
+  const [expandedBaselineEntry, setExpandedBaselineEntry] = useState<
+    string | null
+  >(null);
   const [baselineNameMode, setBaselineNameMode] =
     useState<BaselineNameMode | null>(null);
   const [baselineName, setBaselineName] = useState("");
-  const [baselineNameError, setBaselineNameError] = useState<string | null>(null);
+  const [baselineNameError, setBaselineNameError] = useState<string | null>(
+    null,
+  );
   const [baselineNameBusy, setBaselineNameBusy] = useState(false);
   const [retireBaselineOpen, setRetireBaselineOpen] = useState(false);
   const [retireBaselineError, setRetireBaselineError] = useState<string | null>(
     null,
   );
   const [retireBaselineBusy, setRetireBaselineBusy] = useState(false);
+  const [compareMode, setCompareMode] = useState<CompareMode>("time");
+  const [timeCompareFrom, setTimeCompareFrom] = useState(() =>
+    defaultCompareDateValue(-7),
+  );
+  const [timeCompareTo, setTimeCompareTo] = useState(() =>
+    defaultCompareDateValue(0),
+  );
+  const [timeCompare, setTimeCompare] = useState<DriftTimeCompareResult | null>(
+    null,
+  );
+  const [timeCompareLoading, setTimeCompareLoading] = useState(false);
+  const [timeCompareAnnouncement, setTimeCompareAnnouncement] = useState("");
+  const [timeCompareError, setTimeCompareError] = useState<string | null>(null);
+  const timeCompareRequestId = useRef(0);
+  const [expandedTimeCompareEntry, setExpandedTimeCompareEntry] = useState<
+    string | null
+  >(null);
+  const [tenantCompareId, setTenantCompareId] = useState("");
+  const [includeAssignments, setIncludeAssignments] = useState(false);
+  const [tenantCompare, setTenantCompare] =
+    useState<DriftTenantCompareResult | null>(null);
+  const [tenantCompareLoading, setTenantCompareLoading] = useState(false);
+  const [tenantCompareAnnouncement, setTenantCompareAnnouncement] =
+    useState("");
+  const [tenantCompareError, setTenantCompareError] = useState<string | null>(
+    null,
+  );
+  const [tenantCompareReloadNonce, setTenantCompareReloadNonce] = useState(0);
+  const [expandedTenantCompareEntry, setExpandedTenantCompareEntry] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     const normalized = query.trim();
@@ -125,6 +164,34 @@ export default function Changes() {
     const timer = window.setTimeout(() => setDebouncedQuery(normalized), 250);
     return () => window.clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => {
+    if (
+      (segment === "baselines" && !baselinesAvailable) ||
+      (segment === "compare" && !compareAvailable)
+    ) {
+      setSegment("timeline");
+    }
+  }, [baselinesAvailable, compareAvailable, segment]);
+
+  useEffect(() => {
+    timeCompareRequestId.current += 1;
+    setTimeCompare(null);
+    setTimeCompareError(null);
+    setTimeCompareLoading(false);
+    setExpandedTimeCompareEntry(null);
+    setTenantCompare(null);
+    setTenantCompareError(null);
+    setExpandedTenantCompareEntry(null);
+  }, [activeTenant?.id]);
+
+  useEffect(() => {
+    setTenantCompareId((current) =>
+      current && otherTenants.some((tenant) => tenant.id === current)
+        ? current
+        : (otherTenants[0]?.id ?? ""),
+    );
+  }, [otherTenants]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -275,7 +342,9 @@ export default function Changes() {
         }
       } catch (caught) {
         if (cancelled) return;
-        setBaselineError(caught instanceof Error ? caught.message : String(caught));
+        setBaselineError(
+          caught instanceof Error ? caught.message : String(caught),
+        );
         setBaselineLoadAnnouncement("Baselines could not be loaded.");
       } finally {
         if (!cancelled) setBaselineLoading(false);
@@ -285,11 +354,79 @@ export default function Changes() {
     return () => {
       cancelled = true;
     };
+  }, [activeTenant, baselineReloadNonce, baselinesAvailable, segment]);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (
+      segment !== "compare" ||
+      compareMode !== "tenant" ||
+      !compareAvailable
+    ) {
+      setTenantCompareLoading(false);
+      return;
+    }
+    if (!activeTenant || !tenantCompareId) {
+      setTenantCompare(null);
+      setTenantCompareError(null);
+      setTenantCompareLoading(false);
+      return;
+    }
+    if (!api?.getDriftTenantCompare) {
+      setTenantCompare(null);
+      setTenantCompareError(
+        "Tenant comparison is unavailable in this build. The desktop bridge does not expose the tenant comparison method.",
+      );
+      setTenantCompareAnnouncement("Tenant comparison could not be loaded.");
+      setTenantCompareLoading(false);
+      return;
+    }
+    const getDriftTenantCompare = api.getDriftTenantCompare;
+
+    let cancelled = false;
+    setTenantCompareLoading(true);
+    setTenantCompareError(null);
+    setTenantCompare(null);
+    setExpandedTenantCompareEntry(null);
+    setTenantCompareAnnouncement("Comparing tenant configuration.");
+
+    void getDriftTenantCompare({
+      tenantIdA: activeTenant.id,
+      tenantIdB: tenantCompareId,
+      limit: INITIAL_LIMIT,
+      includeAssignments,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setTenantCompare(result);
+        setTenantCompareAnnouncement(
+          result.entries.length === 1
+            ? "Showing 1 tenant comparison entry."
+            : `Showing ${result.entries.length} tenant comparison entries.`,
+        );
+      })
+      .catch((caught) => {
+        if (cancelled) return;
+        setTenantCompareError(
+          caught instanceof Error ? caught.message : String(caught),
+        );
+        setTenantCompareAnnouncement("Tenant comparison could not be loaded.");
+      })
+      .finally(() => {
+        if (!cancelled) setTenantCompareLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeTenant,
-    baselineReloadNonce,
-    baselinesAvailable,
+    compareAvailable,
+    compareMode,
+    includeAssignments,
     segment,
+    tenantCompareId,
+    tenantCompareReloadNonce,
   ]);
 
   useEffect(() => {
@@ -305,9 +442,10 @@ export default function Changes() {
         if (cancelled) return;
         setWorkspaces(nextWorkspaces);
         setPinWorkspaceId((current) =>
-          current && nextWorkspaces.some((workspace) => workspace.id === current)
+          current &&
+          nextWorkspaces.some((workspace) => workspace.id === current)
             ? current
-            : nextWorkspaces[0]?.id ?? "",
+            : (nextWorkspaces[0]?.id ?? ""),
         );
       })
       .catch(() => {
@@ -322,7 +460,9 @@ export default function Changes() {
     if (
       selectedResource !== "all" &&
       status &&
-      !status.resources.some((resource) => resource.resource === selectedResource)
+      !status.resources.some(
+        (resource) => resource.resource === selectedResource,
+      )
     ) {
       setSelectedResource("all");
     }
@@ -382,7 +522,9 @@ export default function Changes() {
       })
       .catch((caught) => {
         if (!cancelled) {
-          setDetailError(caught instanceof Error ? caught.message : String(caught));
+          setDetailError(
+            caught instanceof Error ? caught.message : String(caught),
+          );
         }
       })
       .finally(() => {
@@ -412,9 +554,10 @@ export default function Changes() {
     });
   }, [selectedResource, timeline]);
 
-  const groupedEntries = useMemo(() => groupEntriesByDay(visibleEntries), [
-    visibleEntries,
-  ]);
+  const groupedEntries = useMemo(
+    () => groupEntriesByDay(visibleEntries),
+    [visibleEntries],
+  );
   const noBaselineYet =
     Boolean(status) &&
     (selectedStatusResources.length === 0 ||
@@ -430,7 +573,10 @@ export default function Changes() {
     !hasRealChanges &&
     query.trim().length === 0 &&
     dateRange === "all";
-  const baselineDate = latestBaselineDate(selectedStatusResources, timeline?.entries ?? []);
+  const baselineDate = latestBaselineDate(
+    selectedStatusResources,
+    timeline?.entries ?? [],
+  );
   const selectedMarkdown = selectedEntry
     ? buildChangeMarkdown(selectedEntry, detail, history)
     : "";
@@ -446,9 +592,18 @@ export default function Changes() {
   const retiredBaselines = tenantBaselines.filter(
     (baseline) => baseline.status === "retired",
   );
+  const selectedCompareTenant = otherTenants.find(
+    (tenant) => tenant.id === tenantCompareId,
+  );
+  const timeCompareValidation = compareDateValidation(
+    timeCompareFrom,
+    timeCompareTo,
+  );
 
   const handleResourceChange = (value: string) => {
-    setSelectedResource(value === "all" ? "all" : (value as GraphCacheResourceKind));
+    setSelectedResource(
+      value === "all" ? "all" : (value as GraphCacheResourceKind),
+    );
     setLimit(INITIAL_LIMIT);
     setSelectedEntry(null);
   };
@@ -457,6 +612,59 @@ export default function Changes() {
     setDateRange(value as DateRangeValue);
     setLimit(INITIAL_LIMIT);
     setSelectedEntry(null);
+  };
+
+  const handleTimeCompare = async () => {
+    const api = window.openAdminOS;
+    if (!activeTenant || timeCompareValidation) return;
+    if (!api?.getDriftTimeCompare) {
+      setTimeCompareError(
+        "Time comparison is unavailable in this build. The desktop bridge does not expose the time comparison method.",
+      );
+      return;
+    }
+
+    const requestId = timeCompareRequestId.current + 1;
+    timeCompareRequestId.current = requestId;
+    setTimeCompareLoading(true);
+    setTimeCompareError(null);
+    setTimeCompare(null);
+    setExpandedTimeCompareEntry(null);
+    setTimeCompareAnnouncement("Comparing configuration over time.");
+    try {
+      const result = await api.getDriftTimeCompare({
+        tenantId: activeTenant.id,
+        from: compareDateToIso(timeCompareFrom),
+        to: compareDateToIso(timeCompareTo),
+        limit: INITIAL_LIMIT,
+      });
+      if (timeCompareRequestId.current !== requestId) return;
+      setTimeCompare(result);
+      setTimeCompareAnnouncement(
+        result.entries.length === 1
+          ? "Showing 1 time comparison entry."
+          : `Showing ${result.entries.length} time comparison entries.`,
+      );
+    } catch (caught) {
+      if (timeCompareRequestId.current !== requestId) return;
+      setTimeCompareError(
+        caught instanceof Error ? caught.message : String(caught),
+      );
+      setTimeCompareAnnouncement("Time comparison could not be loaded.");
+    } finally {
+      if (timeCompareRequestId.current === requestId) {
+        setTimeCompareLoading(false);
+      }
+    }
+  };
+
+  const handleTimeCompareDateChange = (field: "from" | "to", value: string) => {
+    if (field === "from") setTimeCompareFrom(value);
+    else setTimeCompareTo(value);
+    setTimeCompare(null);
+    setTimeCompareError(null);
+    setExpandedTimeCompareEntry(null);
+    setTimeCompareAnnouncement("");
   };
 
   const handleCopy = async () => {
@@ -598,7 +806,9 @@ export default function Changes() {
             setBaselineNoActive(true);
             setBaselineLoadAnnouncement("No active baseline.");
           } else {
-            setBaselineError(caught instanceof Error ? caught.message : String(caught));
+            setBaselineError(
+              caught instanceof Error ? caught.message : String(caught),
+            );
             setBaselineLoadAnnouncement("Baseline drift could not be loaded.");
           }
         } finally {
@@ -632,7 +842,9 @@ export default function Changes() {
       );
       setBaselineNameMode(null);
     } catch (caught) {
-      setBaselineNameError(caught instanceof Error ? caught.message : String(caught));
+      setBaselineNameError(
+        caught instanceof Error ? caught.message : String(caught),
+      );
     } finally {
       setBaselineNameBusy(false);
     }
@@ -673,7 +885,9 @@ export default function Changes() {
       setBaselineLoadAnnouncement("No active baseline.");
       setRetireBaselineOpen(false);
     } catch (caught) {
-      setRetireBaselineError(caught instanceof Error ? caught.message : String(caught));
+      setRetireBaselineError(
+        caught instanceof Error ? caught.message : String(caught),
+      );
     } finally {
       setRetireBaselineBusy(false);
     }
@@ -687,7 +901,9 @@ export default function Changes() {
           activeTenant
             ? segment === "baselines" && baselinesAvailable
               ? `Named configuration baselines for ${activeTenant.displayName}. Drift is evaluated from local tracked versions.`
-              : `Tenant drift timeline for ${activeTenant.displayName}. Entries are computed from local cache snapshots.`
+              : segment === "compare" && compareAvailable
+                ? `Compare retained configuration for ${activeTenant.displayName}. Results use local tracked versions.`
+                : `Tenant drift timeline for ${activeTenant.displayName}. Entries are computed from local cache snapshots.`
             : "Connect a Microsoft 365 tenant before reviewing change history."
         }
       />
@@ -697,14 +913,23 @@ export default function Changes() {
             ? baselineLoading
               ? "Loading baselines…"
               : baselineLoadAnnouncement
-            : loading
-              ? "Loading change history."
-              : loadAnnouncement}
+            : segment === "compare" && compareAvailable
+              ? compareMode === "time"
+                ? timeCompareLoading
+                  ? "Comparing configuration over time."
+                  : timeCompareAnnouncement
+                : tenantCompareLoading
+                  ? "Comparing tenant configuration."
+                  : tenantCompareAnnouncement
+              : loading
+                ? "Loading change history."
+                : loadAnnouncement}
         </div>
 
         <ChangesSegmentControl
           segment={segment}
           showBaselines={baselinesAvailable}
+          showCompare={compareAvailable}
           onChange={setSegment}
         />
 
@@ -712,7 +937,10 @@ export default function Changes() {
           <NoTenantState
             onConnect={() =>
               requireTenant(
-                createPendingIntent({ kind: "view-changes", returnTo: "/changes" }),
+                createPendingIntent({
+                  kind: "view-changes",
+                  returnTo: "/changes",
+                }),
               )
             }
           />
@@ -740,6 +968,49 @@ export default function Changes() {
               setBaselineError(null);
               setBaselineReloadNonce((current) => current + 1);
             }}
+          />
+        ) : segment === "compare" && compareAvailable ? (
+          <CompareSegment
+            mode={compareMode}
+            onModeChange={setCompareMode}
+            timeFrom={timeCompareFrom}
+            timeTo={timeCompareTo}
+            timeValidation={timeCompareValidation}
+            timeLoading={timeCompareLoading}
+            timeError={timeCompareError}
+            timeResult={timeCompare}
+            expandedTimeEntry={expandedTimeCompareEntry}
+            onTimeFromChange={(value) =>
+              handleTimeCompareDateChange("from", value)
+            }
+            onTimeToChange={(value) => handleTimeCompareDateChange("to", value)}
+            onRunTimeCompare={() => void handleTimeCompare()}
+            onToggleTimeEntry={(entry) => {
+              const key = baselineDriftEntryKey(entry);
+              setExpandedTimeCompareEntry((current) =>
+                current === key ? null : key,
+              );
+            }}
+            tenants={otherTenants}
+            activeTenant={activeTenant}
+            selectedTenant={selectedCompareTenant}
+            selectedTenantId={tenantCompareId}
+            includeAssignments={includeAssignments}
+            tenantLoading={tenantCompareLoading}
+            tenantError={tenantCompareError}
+            tenantResult={tenantCompare}
+            expandedTenantEntry={expandedTenantCompareEntry}
+            onTenantChange={setTenantCompareId}
+            onIncludeAssignmentsChange={setIncludeAssignments}
+            onToggleTenantEntry={(entry, index) => {
+              const key = tenantCompareEntryKey(entry, index);
+              setExpandedTenantCompareEntry((current) =>
+                current === key ? null : key,
+              );
+            }}
+            onRetryTenant={() =>
+              setTenantCompareReloadNonce((current) => current + 1)
+            }
           />
         ) : (
           <div className="space-y-4">
@@ -866,20 +1137,27 @@ type DriftTimelineStatus = {
 function ChangesSegmentControl({
   segment,
   showBaselines,
+  showCompare,
   onChange,
 }: {
   segment: ChangesSegment;
   showBaselines: boolean;
+  showCompare: boolean;
   onChange: (segment: ChangesSegment) => void;
 }) {
-  if (!showBaselines) return null;
+  if (!showBaselines && !showCompare) return null;
+  const segments: ChangesSegment[] = [
+    "timeline",
+    ...(showBaselines ? (["baselines"] as const) : []),
+    ...(showCompare ? (["compare"] as const) : []),
+  ];
   return (
     <div
       role="group"
       aria-label="Changes view"
       className="mb-6 flex flex-wrap items-center gap-1.5"
     >
-      {(["timeline", "baselines"] satisfies ChangesSegment[]).map((value) => {
+      {segments.map((value) => {
         const active = segment === value;
         return (
           <button
@@ -893,11 +1171,836 @@ function ChangesSegmentControl({
                 : "bg-transparent text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
             }`}
           >
-            {value === "timeline" ? "Timeline" : "Baselines"}
+            {value === "timeline"
+              ? "Timeline"
+              : value === "baselines"
+                ? "Baselines"
+                : "Compare"}
           </button>
         );
       })}
     </div>
+  );
+}
+
+function CompareSegment({
+  mode,
+  onModeChange,
+  timeFrom,
+  timeTo,
+  timeValidation,
+  timeLoading,
+  timeError,
+  timeResult,
+  expandedTimeEntry,
+  onTimeFromChange,
+  onTimeToChange,
+  onRunTimeCompare,
+  onToggleTimeEntry,
+  tenants,
+  activeTenant,
+  selectedTenant,
+  selectedTenantId,
+  includeAssignments,
+  tenantLoading,
+  tenantError,
+  tenantResult,
+  expandedTenantEntry,
+  onTenantChange,
+  onIncludeAssignmentsChange,
+  onToggleTenantEntry,
+  onRetryTenant,
+}: {
+  mode: CompareMode;
+  onModeChange: (mode: CompareMode) => void;
+  timeFrom: string;
+  timeTo: string;
+  timeValidation: string | null;
+  timeLoading: boolean;
+  timeError: string | null;
+  timeResult: DriftTimeCompareResult | null;
+  expandedTimeEntry: string | null;
+  onTimeFromChange: (value: string) => void;
+  onTimeToChange: (value: string) => void;
+  onRunTimeCompare: () => void;
+  onToggleTimeEntry: (entry: DriftBaselineDriftEntry) => void;
+  tenants: { id: string; displayName: string }[];
+  activeTenant: { id: string; displayName: string };
+  selectedTenant?: { id: string; displayName: string };
+  selectedTenantId: string;
+  includeAssignments: boolean;
+  tenantLoading: boolean;
+  tenantError: string | null;
+  tenantResult: DriftTenantCompareResult | null;
+  expandedTenantEntry: string | null;
+  onTenantChange: (tenantId: string) => void;
+  onIncludeAssignmentsChange: (include: boolean) => void;
+  onToggleTenantEntry: (entry: DriftTenantCompareEntry, index: number) => void;
+  onRetryTenant: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
+          <div>
+            <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
+              Comparison mode
+            </h2>
+            <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+              Compare retained configuration from the local cache
+            </div>
+          </div>
+          <div
+            role="group"
+            aria-label="Comparison mode"
+            className="inline-flex rounded-lg bg-[var(--color-bg-raised)] p-1 ring-1 ring-[var(--color-border-soft)]"
+          >
+            {(["time", "tenant"] satisfies CompareMode[]).map((value) => {
+              const active = mode === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onModeChange(value)}
+                  className={`rounded-md px-3 py-1.5 text-[11.5px] font-medium transition-colors ${focusRingClass} ${
+                    active
+                      ? "bg-[var(--color-surface)] text-[var(--color-text)] ring-1 ring-[var(--color-border)]"
+                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  }`}
+                >
+                  {value === "time" ? "Over time" : "Between tenants"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {mode === "time" ? (
+          <div className="flex flex-wrap items-end gap-3 px-4 py-4">
+            <CompareDateField
+              id="compare-from-date"
+              label="From"
+              value={timeFrom}
+              disabled={timeLoading}
+              invalid={Boolean(timeValidation)}
+              onChange={onTimeFromChange}
+            />
+            <CompareDateField
+              id="compare-to-date"
+              label="To"
+              value={timeTo}
+              disabled={timeLoading}
+              invalid={Boolean(timeValidation)}
+              onChange={onTimeToChange}
+            />
+            <Button
+              variant="primary"
+              disabled={timeLoading || Boolean(timeValidation)}
+              onClick={onRunTimeCompare}
+            >
+              {timeLoading ? "Comparing…" : "Run compare"}
+            </Button>
+            {timeValidation ? (
+              <div
+                id="compare-date-validation"
+                role="alert"
+                className="w-full text-[11.5px] text-[var(--color-danger)]"
+              >
+                {timeValidation}
+              </div>
+            ) : null}
+          </div>
+        ) : tenants.length === 0 ? null : (
+          <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+            <div>
+              <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                Tenant A
+              </div>
+              <div className="mt-2 flex h-10 items-center rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
+                {activeTenant.displayName}
+              </div>
+            </div>
+            <label htmlFor="compare-tenant-b" className="block">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                Tenant B
+              </span>
+              <select
+                id="compare-tenant-b"
+                name="compare-tenant-b"
+                aria-label="Tenant B"
+                value={selectedTenantId}
+                disabled={tenantLoading}
+                onChange={(event) => onTenantChange(event.target.value)}
+                className={`mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] disabled:opacity-60 ${focusRingClass}`}
+              >
+                {tenants.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex min-h-10 items-start gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+              <input
+                type="checkbox"
+                name="include-assignments"
+                aria-label="Include assignments"
+                autoComplete="off"
+                checked={includeAssignments}
+                disabled={tenantLoading}
+                onChange={(event) =>
+                  onIncludeAssignmentsChange(event.target.checked)
+                }
+                className={`mt-0.5 h-4 w-4 accent-[var(--color-accent)] ${focusRingClass}`}
+              />
+              <span>
+                <span className="block text-[12px] font-medium text-[var(--color-text)]">
+                  Include assignments
+                </span>
+                <span className="mt-0.5 block max-w-[330px] text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+                  Assignments target tenant-specific groups and are excluded by
+                  default.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+      </Card>
+
+      {mode === "time" ? (
+        <TimeCompareResults
+          loading={timeLoading}
+          error={timeError}
+          result={timeResult}
+          expandedEntry={expandedTimeEntry}
+          onRetry={onRunTimeCompare}
+          onToggleEntry={onToggleTimeEntry}
+        />
+      ) : tenants.length === 0 ? (
+        <SecondTenantRequiredState />
+      ) : (
+        <TenantCompareResults
+          loading={tenantLoading}
+          error={tenantError}
+          result={tenantResult}
+          tenantA={activeTenant}
+          tenantB={selectedTenant}
+          expandedEntry={expandedTenantEntry}
+          onRetry={onRetryTenant}
+          onToggleEntry={onToggleTenantEntry}
+        />
+      )}
+    </div>
+  );
+}
+
+function CompareDateField({
+  id,
+  label,
+  value,
+  disabled,
+  invalid,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  disabled: boolean;
+  invalid: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label htmlFor={id} className="block">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </span>
+      <input
+        id={id}
+        name={id}
+        type="date"
+        value={value}
+        disabled={disabled}
+        aria-invalid={invalid}
+        aria-describedby={invalid ? "compare-date-validation" : undefined}
+        autoComplete="off"
+        onChange={(event) => onChange(event.target.value)}
+        className={`mt-2 h-10 rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] disabled:opacity-60 ${focusRingClass}`}
+      />
+    </label>
+  );
+}
+
+function TimeCompareResults({
+  loading,
+  error,
+  result,
+  expandedEntry,
+  onRetry,
+  onToggleEntry,
+}: {
+  loading: boolean;
+  error: string | null;
+  result: DriftTimeCompareResult | null;
+  expandedEntry: string | null;
+  onRetry: () => void;
+  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
+}) {
+  if (loading)
+    return <CompareLoadingState label="Comparing configuration over time" />;
+  if (error) {
+    return (
+      <InlineState
+        tone="danger"
+        title="Time comparison unavailable"
+        message={`${error} Adjust the date window or retry after the local cache is ready.`}
+        action={
+          <Button
+            size="sm"
+            variant="secondary"
+            leadingIcon={<IconRefresh size={12} />}
+            onClick={onRetry}
+          >
+            Retry
+          </Button>
+        }
+      />
+    );
+  }
+  if (!result) {
+    return (
+      <Card className="px-5 py-8 text-center">
+        <div className="text-[13px] font-medium text-[var(--color-text)]">
+          No comparison run
+        </div>
+        <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
+          Choose a date window, then run the comparison.
+        </div>
+      </Card>
+    );
+  }
+
+  const resources = result.resources.filter(
+    (resource) => resource.added + resource.removed + resource.modified > 0,
+  );
+  const empty = resources.length === 0 && result.entries.length === 0;
+  return (
+    <div className="space-y-4">
+      {result.retentionLimited ? (
+        <InlineState
+          tone="info"
+          title="Retention-limited window"
+          message="Retention has pruned history older than part of this window. The before side may be incomplete."
+        />
+      ) : null}
+      {empty ? (
+        <Card className="px-5 py-12 text-center">
+          <div className="text-[13px] font-medium text-[var(--color-text)]">
+            No tracked configuration changed in this window.
+          </div>
+        </Card>
+      ) : (
+        <>
+          {resources.length > 0 ? (
+            <TimeCompareResourceSummary resources={resources} />
+          ) : null}
+          <TimeCompareEntries
+            result={result}
+            expandedEntry={expandedEntry}
+            onToggleEntry={onToggleEntry}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function TimeCompareResourceSummary({
+  resources,
+}: {
+  resources: DriftTimeCompareResult["resources"];
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b border-[var(--color-border-soft)] px-5 py-3">
+        <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
+          Changes by resource
+        </h2>
+        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+          Resources with tracked changes in this window
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[540px] text-left text-[12px]">
+          <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            <tr>
+              <th scope="col" className="px-3 py-2 font-medium">
+                Resource
+              </th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Added
+              </th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Removed
+              </th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Modified
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {resources.map((resource) => (
+              <tr
+                key={resource.resource}
+                aria-label={`${resource.resourceLabel}: ${resource.added} added, ${resource.removed} removed, ${resource.modified} modified`}
+                className="border-t border-[var(--color-border-soft)]"
+              >
+                <th
+                  scope="row"
+                  className="px-3 py-2.5 font-medium text-[var(--color-text-soft)]"
+                >
+                  {resource.resourceLabel}
+                </th>
+                <td className="px-3 py-2.5 text-right font-mono text-[var(--color-success)]">
+                  {resource.added.toLocaleString()}
+                </td>
+                <td className="px-3 py-2.5 text-right font-mono text-[var(--color-danger)]">
+                  {resource.removed.toLocaleString()}
+                </td>
+                <td className="px-3 py-2.5 text-right font-mono text-[var(--color-accent)]">
+                  {resource.modified.toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function TimeCompareEntries({
+  result,
+  expandedEntry,
+  onToggleEntry,
+}: {
+  result: DriftTimeCompareResult;
+  expandedEntry: string | null;
+  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-3">
+        <div>
+          <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
+            Changed objects
+          </h2>
+          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+            {result.entries.length.toLocaleString()} objects changed in this
+            window
+          </div>
+        </div>
+        <span className="text-[11px] text-[var(--color-text-muted)]">
+          {formatDateTime(result.evaluatedAt)}
+        </span>
+      </div>
+      {result.entries.length === 0 ? (
+        <div className="px-5 py-10 text-center text-[13px] font-medium text-[var(--color-text)]">
+          No tracked configuration changed in this window.
+        </div>
+      ) : (
+        <div className="divide-y divide-[var(--color-border-soft)]">
+          {result.entries.map((entry, index) => {
+            const key = baselineDriftEntryKey(entry);
+            const expanded = expandedEntry === key;
+            const detailId = `time-compare-detail-${index}`;
+            const name = entry.displayName ?? entry.graphId;
+            return (
+              <div key={key}>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={detailId}
+                  aria-label={`${expanded ? "Collapse" : "Expand"} time comparison details for ${name}`}
+                  onClick={() => onToggleEntry(entry)}
+                  className={`grid w-full gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
+                >
+                  <span className="min-w-0">
+                    <span className="flex min-w-0 flex-wrap items-center gap-2">
+                      <ChangeKindChip kind={entry.changeKind} />
+                      <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
+                        {name}
+                      </span>
+                    </span>
+                    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+                      <span>{entry.resourceLabel}</span>
+                      <span
+                        aria-hidden="true"
+                        className="text-[var(--color-text-faint)]"
+                      >
+                        ·
+                      </span>
+                      <span className="truncate font-mono">
+                        {entry.graphId}
+                      </span>
+                    </span>
+                  </span>
+                  <span className="flex items-center justify-end gap-3 self-center text-[11px] text-[var(--color-text-muted)]">
+                    <span>{formatFieldCount(entry.fieldChangeCount)}</span>
+                    <IconChevronDown
+                      size={13}
+                      aria-hidden="true"
+                      className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+                    />
+                  </span>
+                </button>
+                {expanded ? (
+                  <div
+                    id={detailId}
+                    className="space-y-3 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] p-4"
+                  >
+                    {entry.truncated ? <CompareTruncationNotice /> : null}
+                    <FieldChangesTable changes={entry.changes} />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          {result.hasMore ? <CompareHasMoreNotice /> : null}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TenantCompareResults({
+  loading,
+  error,
+  result,
+  tenantA,
+  tenantB,
+  expandedEntry,
+  onRetry,
+  onToggleEntry,
+}: {
+  loading: boolean;
+  error: string | null;
+  result: DriftTenantCompareResult | null;
+  tenantA: { id: string; displayName: string };
+  tenantB?: { id: string; displayName: string };
+  expandedEntry: string | null;
+  onRetry: () => void;
+  onToggleEntry: (entry: DriftTenantCompareEntry, index: number) => void;
+}) {
+  if (loading)
+    return <CompareLoadingState label="Comparing tenant configuration" />;
+  if (error) {
+    return (
+      <InlineState
+        tone="danger"
+        title="Tenant comparison unavailable"
+        message={`${error} Retry after both tenant caches are ready.`}
+        action={
+          <Button
+            size="sm"
+            variant="secondary"
+            leadingIcon={<IconRefresh size={12} />}
+            onClick={onRetry}
+          >
+            Retry
+          </Button>
+        }
+      />
+    );
+  }
+  if (!result || !tenantB) return null;
+
+  if (!result.tenantAHasData || !result.tenantBHasData) {
+    return (
+      <div className="space-y-4">
+        {!result.tenantAHasData ? (
+          <NoCapturedConfigurationState tenantName={tenantA.displayName} />
+        ) : null}
+        {!result.tenantBHasData ? (
+          <NoCapturedConfigurationState tenantName={tenantB.displayName} />
+        ) : null}
+      </div>
+    );
+  }
+
+  const resources = result.resources.filter(
+    (resource) =>
+      resource.matchedSame +
+        resource.different +
+        resource.onlyInA +
+        resource.onlyInB +
+        resource.ambiguous >
+      0,
+  );
+  return (
+    <div className="space-y-4">
+      {resources.length > 0 ? (
+        <TenantCompareResourceSummary resources={resources} />
+      ) : null}
+      <TenantCompareEntries
+        result={result}
+        tenantA={tenantA}
+        tenantB={tenantB}
+        expandedEntry={expandedEntry}
+        onToggleEntry={onToggleEntry}
+      />
+    </div>
+  );
+}
+
+function TenantCompareResourceSummary({
+  resources,
+}: {
+  resources: DriftTenantCompareResult["resources"];
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b border-[var(--color-border-soft)] px-5 py-3">
+        <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
+          Comparison by resource
+        </h2>
+        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+          Unique display names are matched across tenant caches
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-left text-[12px]">
+          <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            <tr>
+              <th scope="col" className="w-[34%] px-4 py-2 font-medium">
+                Resource
+              </th>
+              <th scope="col" className="px-4 py-2 font-medium">
+                Buckets
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {resources.map((resource) => (
+              <tr
+                key={resource.resource}
+                aria-label={tenantResourceSummaryLabel(resource)}
+                className="border-t border-[var(--color-border-soft)]"
+              >
+                <th
+                  scope="row"
+                  className="px-4 py-3 align-top font-medium text-[var(--color-text-soft)]"
+                >
+                  {resource.resourceLabel}
+                </th>
+                <td className="px-4 py-3 tabular-nums">
+                  <div className="flex flex-wrap gap-2">
+                    {resource.matchedSame > 0 ? (
+                      <Pill tone="success">
+                        {resource.matchedSame.toLocaleString()} same
+                      </Pill>
+                    ) : null}
+                    {resource.different > 0 ? (
+                      <Pill tone="warning">
+                        {resource.different.toLocaleString()} different
+                      </Pill>
+                    ) : null}
+                    {resource.onlyInA > 0 ? (
+                      <Pill tone="default">
+                        {resource.onlyInA.toLocaleString()} only in A
+                      </Pill>
+                    ) : null}
+                    {resource.onlyInB > 0 ? (
+                      <Pill tone="info">
+                        {resource.onlyInB.toLocaleString()} only in B
+                      </Pill>
+                    ) : null}
+                    {resource.ambiguous > 0 ? (
+                      <Pill tone="warning">
+                        {resource.ambiguous.toLocaleString()} ambiguous
+                      </Pill>
+                    ) : null}
+                  </div>
+                  {resource.ambiguous > 0 ? (
+                    <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+                      {ambiguousObjectNote(resource.ambiguous)}
+                    </div>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function TenantCompareEntries({
+  result,
+  tenantA,
+  tenantB,
+  expandedEntry,
+  onToggleEntry,
+}: {
+  result: DriftTenantCompareResult;
+  tenantA: { displayName: string };
+  tenantB: { displayName: string };
+  expandedEntry: string | null;
+  onToggleEntry: (entry: DriftTenantCompareEntry, index: number) => void;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-3">
+        <div>
+          <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
+            Configuration differences
+          </h2>
+          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+            {tenantA.displayName} compared with {tenantB.displayName}
+          </div>
+        </div>
+        <span className="text-[11px] text-[var(--color-text-muted)]">
+          {formatDateTime(result.evaluatedAt)}
+        </span>
+      </div>
+      {result.entries.length === 0 ? (
+        <div className="px-5 py-10 text-center">
+          <div className="text-[13px] font-medium text-[var(--color-text)]">
+            No configuration differences between these tenants.
+          </div>
+        </div>
+      ) : (
+        <div className="divide-y divide-[var(--color-border-soft)]">
+          {result.entries.map((entry, index) => {
+            const key = tenantCompareEntryKey(entry, index);
+            const expandable = entry.bucket === "different";
+            const expanded = expandable && expandedEntry === key;
+            const detailId = `tenant-compare-detail-${index}`;
+            const rowContent = (
+              <>
+                <span className="min-w-0">
+                  <span className="flex min-w-0 flex-wrap items-center gap-2">
+                    <TenantCompareBucketPill bucket={entry.bucket} />
+                    <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
+                      {entry.displayName}
+                    </span>
+                  </span>
+                  <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                    {entry.resourceLabel}
+                  </span>
+                </span>
+                <span className="flex items-center justify-end gap-3 self-center text-[11px] text-[var(--color-text-muted)]">
+                  {expandable ? (
+                    <>
+                      <span>{formatFieldCount(entry.fieldChangeCount)}</span>
+                      <IconChevronDown
+                        size={13}
+                        aria-hidden="true"
+                        className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+                      />
+                    </>
+                  ) : null}
+                </span>
+              </>
+            );
+            return (
+              <div key={key}>
+                {expandable ? (
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={detailId}
+                    aria-label={`${expanded ? "Collapse" : "Expand"} tenant comparison details for ${entry.displayName}`}
+                    onClick={() => onToggleEntry(entry, index)}
+                    className={`grid w-full gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
+                  >
+                    {rowContent}
+                  </button>
+                ) : (
+                  <div className="grid w-full gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                    {rowContent}
+                  </div>
+                )}
+                {expanded ? (
+                  <div
+                    id={detailId}
+                    className="space-y-3 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] p-4"
+                  >
+                    {entry.truncated ? <CompareTruncationNotice /> : null}
+                    <FieldChangesTable changes={entry.changes} />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+          {result.hasMore ? <CompareHasMoreNotice /> : null}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TenantCompareBucketPill({
+  bucket,
+}: {
+  bucket: DriftTenantCompareEntry["bucket"];
+}) {
+  if (bucket === "different") return <Pill tone="warning">Different</Pill>;
+  if (bucket === "only-in-b") return <Pill tone="info">Only in B</Pill>;
+  return <Pill tone="default">Only in A</Pill>;
+}
+
+function CompareLoadingState({ label }: { label: string }) {
+  return (
+    <div className="space-y-3" aria-label={label}>
+      <Card className="h-32 animate-pulse bg-[var(--color-bg-raised)]">
+        <span className="sr-only">{label}</span>
+      </Card>
+      <Card className="h-48 animate-pulse bg-[var(--color-bg-raised)]">
+        <span className="sr-only">Loading comparison entries</span>
+      </Card>
+    </div>
+  );
+}
+
+function CompareTruncationNotice() {
+  return (
+    <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+      Raw before/after bodies exceeded the local display cap. The field list
+      below is complete.
+    </div>
+  );
+}
+
+function CompareHasMoreNotice() {
+  return (
+    <div className="px-5 py-3 text-center text-[11px] text-[var(--color-text-muted)]">
+      This comparison contains more entries than the local display limit.
+    </div>
+  );
+}
+
+function SecondTenantRequiredState() {
+  return (
+    <Card className="px-6 py-14 text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <IconChanges size={18} />
+      </div>
+      <h2 className="mt-4 text-[15px] font-semibold text-[var(--color-text)]">
+        Connect a second tenant to compare configurations.
+      </h2>
+    </Card>
+  );
+}
+
+function NoCapturedConfigurationState({ tenantName }: { tenantName: string }) {
+  return (
+    <Card className="px-6 py-10 text-center">
+      <div className="text-[13px] font-medium text-[var(--color-text)]">
+        No captured configuration for {tenantName}. Refresh its cache first.
+      </div>
+    </Card>
   );
 }
 
@@ -1029,7 +2132,10 @@ function ActiveBaselineCard({
       </div>
 
       <div className="grid gap-px bg-[var(--color-border-soft)] sm:grid-cols-3">
-        <BaselineMetric label="Created" value={formatDateTime(baseline.createdAt)} />
+        <BaselineMetric
+          label="Created"
+          value={formatDateTime(baseline.createdAt)}
+        />
         <BaselineMetric
           label="Pinned objects"
           value={baseline.pinnedObjectCount.toLocaleString()}
@@ -1136,7 +2242,10 @@ function BaselineMetric({
         {value}
       </div>
       {detail ? (
-        <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]" title={detail}>
+        <div
+          className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]"
+          title={detail}
+        >
           {detail}
         </div>
       ) : null}
@@ -1161,7 +2270,8 @@ function BaselineDriftEntries({
             Drift entries
           </h2>
           <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            {drift.entries.length.toLocaleString()} objects differ from the baseline
+            {drift.entries.length.toLocaleString()} objects differ from the
+            baseline
           </div>
         </div>
         <span className="text-[11px] text-[var(--color-text-muted)]">
@@ -1204,10 +2314,15 @@ function BaselineDriftEntries({
                     </span>
                     <span className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
                       <span>{entry.resourceLabel}</span>
-                      <span aria-hidden="true" className="text-[var(--color-text-faint)]">
+                      <span
+                        aria-hidden="true"
+                        className="text-[var(--color-text-faint)]"
+                      >
                         ·
                       </span>
-                      <span className="truncate font-mono">{entry.graphId}</span>
+                      <span className="truncate font-mono">
+                        {entry.graphId}
+                      </span>
                     </span>
                   </span>
                   <span className="flex items-center justify-end gap-3 self-center text-[11px] text-[var(--color-text-muted)]">
@@ -1226,8 +2341,8 @@ function BaselineDriftEntries({
                   >
                     {entry.truncated ? (
                       <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-                        Raw before/after bodies exceeded the local display cap. The
-                        field list below is complete.
+                        Raw before/after bodies exceeded the local display cap.
+                        The field list below is complete.
                       </div>
                     ) : null}
                     <FieldChangesTable changes={entry.changes} />
@@ -1238,7 +2353,8 @@ function BaselineDriftEntries({
           })}
           {drift.hasMore ? (
             <div className="px-5 py-3 text-center text-[11px] text-[var(--color-text-muted)]">
-              This evaluation contains more drift entries than the local display limit.
+              This evaluation contains more drift entries than the local display
+              limit.
             </div>
           ) : null}
         </div>
@@ -1257,8 +2373,8 @@ function NoActiveBaselineState({ onCreate }: { onCreate: () => void }) {
         No active baseline
       </h2>
       <p className="mx-auto mt-1 max-w-[560px] text-[13px] leading-6 text-[var(--color-text-muted)]">
-        A baseline is a pinned copy of this tenant&apos;s configuration. Drift is
-        measured against it.
+        A baseline is a pinned copy of this tenant&apos;s configuration. Drift
+        is measured against it.
       </p>
       <Button
         className="mt-5"
@@ -1450,13 +2566,17 @@ function TimelinePanel({
             No changes match these filters.
           </div>
           <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-            Widen the date range, clear the display-name filter, or choose another resource.
+            Widen the date range, clear the display-name filter, or choose
+            another resource.
           </div>
         </div>
       ) : (
         <div className="divide-y divide-[var(--color-border-soft)]">
           {groups.map((group) => (
-            <section key={group.key} aria-labelledby={`changes-day-${group.key}`}>
+            <section
+              key={group.key}
+              aria-labelledby={`changes-day-${group.key}`}
+            >
               <div
                 id={`changes-day-${group.key}`}
                 className="bg-[var(--color-bg)] px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
@@ -1527,7 +2647,9 @@ function TimelineRow({
         <span className="truncate text-[12px] text-[var(--color-text-soft)]">
           {entry.resourceLabel}
         </span>
-        <span aria-hidden="true" className="text-[var(--color-text-faint)]">·</span>
+        <span aria-hidden="true" className="text-[var(--color-text-faint)]">
+          ·
+        </span>
         <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
           {formatShortDateTime(entry.capturedAt)}
         </span>
@@ -1541,7 +2663,8 @@ function TimelineRow({
       {isBaseline ? (
         <div className="min-w-0">
           <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-            Baseline captured: {(entry.rowCount ?? 0).toLocaleString()} objects tracked
+            Baseline captured: {(entry.rowCount ?? 0).toLocaleString()} objects
+            tracked
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
             Future snapshots compare against this local baseline.
@@ -1559,8 +2682,15 @@ function TimelineRow({
               ) : null}
               {entry.changeKind === "modified" ? (
                 <>
-                  <span aria-hidden="true" className="text-[var(--color-text-faint)]">·</span>
-                  <span>{entry.fieldChangeCount.toLocaleString()} fields changed</span>
+                  <span
+                    aria-hidden="true"
+                    className="text-[var(--color-text-faint)]"
+                  >
+                    ·
+                  </span>
+                  <span>
+                    {entry.fieldChangeCount.toLocaleString()} fields changed
+                  </span>
                 </>
               ) : null}
             </div>
@@ -1658,8 +2788,9 @@ function DetailPane({
             bodyClassName="p-3"
           >
             <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-              Baseline captured: {(entry.rowCount ?? 0).toLocaleString()} objects tracked.
-              This is the reference point for later drift detection, not a list of additions.
+              Baseline captured: {(entry.rowCount ?? 0).toLocaleString()}{" "}
+              objects tracked. This is the reference point for later drift
+              detection, not a list of additions.
             </div>
           </OutputPaneSection>
         </div>
@@ -1751,7 +2882,10 @@ function FieldChangesTable({ changes }: { changes: DriftFieldChange[] }) {
                 <th scope="col" className="w-[31%] px-3 py-2 font-medium">
                   Before
                 </th>
-                <th scope="col" className="w-[10%] px-3 py-2 text-center font-medium">
+                <th
+                  scope="col"
+                  className="w-[10%] px-3 py-2 text-center font-medium"
+                >
                   →
                 </th>
                 <th scope="col" className="w-[31%] px-3 py-2 font-medium">
@@ -1858,7 +2992,8 @@ function AttributionBlock({ attribution }: { attribution?: DriftAttribution }) {
       </div>
       {attribution?.alsoMatched ? (
         <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          Also matched {attribution.alsoMatched.toLocaleString()} more audit events.
+          Also matched {attribution.alsoMatched.toLocaleString()} more audit
+          events.
         </div>
       ) : null}
       {attribution?.reason === "audit-cache-stale" ? (
@@ -1895,7 +3030,11 @@ function AttributeTile({
   );
 }
 
-function AttributionInline({ attribution }: { attribution?: DriftAttribution }) {
+function AttributionInline({
+  attribution,
+}: {
+  attribution?: DriftAttribution;
+}) {
   if (attribution?.status === "matched") {
     return (
       <div className="min-w-0 text-[11px] leading-5 text-[var(--color-text-soft)]">
@@ -1955,7 +3094,9 @@ function InlineState({
       <StatusDot tone="info" />
     );
   return (
-    <div className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 ring-1 ${palette}`}>
+    <div
+      className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 ring-1 ${palette}`}
+    >
       <div className="flex min-w-0 items-start gap-2">
         <span className="mt-0.5 shrink-0">{icon}</span>
         <div className="min-w-0">
@@ -1982,8 +3123,8 @@ function NoTenantState({ onConnect }: { onConnect: () => void }) {
             No tenant connected
           </div>
           <div className="mt-1 text-[13px] leading-6 text-[var(--color-text-muted)]">
-            Change history is tenant-scoped. Connect a Microsoft 365 tenant before
-            reviewing drift snapshots.
+            Change history is tenant-scoped. Connect a Microsoft 365 tenant
+            before reviewing drift snapshots.
           </div>
           <Button className="mt-4" variant="primary" onClick={onConnect}>
             Connect tenant
@@ -2127,7 +3268,12 @@ function BaselineNameModal({
         ) : null}
 
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={busy}
+            onClick={onClose}
+          >
             Cancel
           </Button>
           <Button type="submit" variant="primary" disabled={busy}>
@@ -2169,7 +3315,8 @@ function RetireBaselineModal({
       />
       <div className="space-y-4 p-6">
         <p className="text-[13px] leading-6 text-[var(--color-text-soft)]">
-          Retiring keeps history but stops drift evaluation and pruning protection.
+          Retiring keeps history but stops drift evaluation and pruning
+          protection.
         </p>
         {error ? (
           <div
@@ -2183,7 +3330,11 @@ function RetireBaselineModal({
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="danger" disabled={busy || !baseline} onClick={onConfirm}>
+          <Button
+            variant="danger"
+            disabled={busy || !baseline}
+            onClick={onConfirm}
+          >
             {busy ? "Retiring…" : "Retire baseline"}
           </Button>
         </div>
@@ -2222,8 +3373,8 @@ function PinChangeToWorkspaceModal({
       <div className="space-y-4 p-6">
         {workspaces.length === 0 ? (
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            No active workspaces exist for this tenant. Create a workspace first,
-            then pin this change as evidence.
+            No active workspaces exist for this tenant. Create a workspace
+            first, then pin this change as evidence.
           </div>
         ) : (
           <label htmlFor="pin-change-workspace" className="block">
@@ -2306,7 +3457,49 @@ function groupEntriesByDay(entries: DriftTimelineEntry[]): EntryDayGroup[] {
   return [...groups.values()];
 }
 
-function dateRangeBounds(value: DateRangeValue): { from?: string; to?: string } {
+function defaultCompareDateValue(dayOffset: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + dayOffset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function compareDateValidation(from: string, to: string): string | null {
+  if (!from || !to) return "Choose both dates.";
+  if (from >= to) return "From date must be earlier than the to date.";
+  return null;
+}
+
+function compareDateToIso(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toISOString();
+}
+
+function tenantCompareEntryKey(
+  entry: DriftTenantCompareEntry,
+  index: number,
+): string {
+  return `${entry.resource}:${entry.displayName}:${entry.bucket}:${index}`;
+}
+
+function tenantResourceSummaryLabel(
+  resource: DriftTenantCompareResult["resources"][number],
+): string {
+  return `${resource.resourceLabel}: ${resource.matchedSame} matched same, ${resource.different} different, ${resource.onlyInA} only in A, ${resource.onlyInB} only in B, ${resource.ambiguous} ambiguous`;
+}
+
+function ambiguousObjectNote(count: number): string {
+  return count === 1
+    ? "1 object shares a display name and was not matched."
+    : `${count.toLocaleString()} objects share a display name and were not matched.`;
+}
+
+function dateRangeBounds(value: DateRangeValue): {
+  from?: string;
+  to?: string;
+} {
   const range = DATE_RANGES.find((entry) => entry.value === value);
   if (!range?.ms) return {};
   const to = new Date();
@@ -2343,7 +3536,11 @@ function changeKindConfig(kind: DriftTimelineChangeKind): {
     return { label: "Removed", tone: "danger", icon: <IconClose size={10} /> };
   }
   if (kind === "modified") {
-    return { label: "Modified", tone: "accent", icon: <IconChanges size={10} /> };
+    return {
+      label: "Modified",
+      tone: "accent",
+      icon: <IconChanges size={10} />,
+    };
   }
   return { label: "Baseline", tone: "default", icon: <IconClock size={10} /> };
 }
@@ -2384,7 +3581,9 @@ function baselineDriftEntryKey(entry: DriftBaselineDriftEntry): string {
 }
 
 function formatFieldCount(count: number): string {
-  return count === 1 ? "1 field changed" : `${count.toLocaleString()} fields changed`;
+  return count === 1
+    ? "1 field changed"
+    : `${count.toLocaleString()} fields changed`;
 }
 
 function isNoActiveBaselineError(caught: unknown): boolean {
@@ -2399,7 +3598,8 @@ function isRefreshCacheRequired(message: string): boolean {
 function valueToText(value: unknown): string {
   if (value === undefined || value === null || value === "") return "Not set";
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   try {
     return JSON.stringify(value, null, 2) ?? "Not set";
   } catch {
@@ -2432,16 +3632,21 @@ function buildChangeMarkdown(
   const attribution = detail?.attribution ?? entry.attribution;
   lines.push(
     `- Attribution: ${
-      attribution?.status === "matched" ? actorLabel(attribution) : "actor unknown"
+      attribution?.status === "matched"
+        ? actorLabel(attribution)
+        : "actor unknown"
     }`,
   );
   if (attribution?.activity) lines.push(`- Activity: ${attribution.activity}`);
-  if (attribution?.source) lines.push(`- Source: ${sourceLabel(attribution.source)}`);
+  if (attribution?.source)
+    lines.push(`- Source: ${sourceLabel(attribution.source)}`);
   if (attribution?.alsoMatched) {
     lines.push(`- Also matched: ${attribution.alsoMatched} more audit events`);
   }
   if (attribution?.reason === "audit-cache-stale") {
-    lines.push("- Attribution hint: refresh audit data to attribute this change");
+    lines.push(
+      "- Attribution hint: refresh audit data to attribute this change",
+    );
   }
   if (entry.timestampOnly) lines.push("- Timestamp-only change: yes");
   if (detail?.truncated) {
