@@ -541,17 +541,23 @@ export interface RunRecord {
   id: string;
   agentSlug: string;
   /**
-   * Set for host-generated system runs. "baseline-rollback" runs carry
-   * a deterministic host-built plan, are not backed by an installed
-   * agent, and apply their graph-write actions in the host after the
-   * same typed confirmation gate as agent write plans.
+   * Set for host-generated system runs. These carry a host-validated
+   * plan, are not backed by an installed agent, and apply their
+   * graph-write actions in the host after the same typed confirmation
+   * gate as agent write plans. "baseline-rollback" plans are built
+   * deterministically from drift; "external-proposal" plans arrive
+   * through the MCP gateway and can never self-apply.
    */
-  origin?: "baseline-rollback";
+  origin?: "baseline-rollback" | "external-proposal";
   rollback?: {
     baselineId: string;
     requiredScopes: string[];
     /** Drift changes that need manual review and are not in the plan. */
     manualCount: number;
+  };
+  external?: {
+    clientName: string;
+    requiredScopes: string[];
   };
   status: RunStatus;
   queuedAt: string;
@@ -1190,6 +1196,18 @@ export interface DriftBundleCompareResult {
   entries: DriftTenantCompareEntry[];
   hasMore: boolean;
   limit: number;
+}
+
+// ─── MCP write-gateway (v0.5) ────────────────────────────────────────────
+
+export interface GatewayPublicStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  listeningPort?: number;
+  boundTenantId?: string;
+  hasToken: boolean;
+  clients: Array<{ id: string; name: string; createdAt: string }>;
 }
 
 // ─── Fleet drift status (v0.5) ───────────────────────────────────────────
@@ -2173,6 +2191,14 @@ export interface OpenAdminOSApi {
   ): Promise<DriftTenantCompareResult>;
   startBaselineRollback?(input: StartBaselineRollbackInput): Promise<RunRecord>;
   getFleetDriftStatus?(input: FleetDriftStatusInput): Promise<FleetDriftStatusResult>;
+  getGatewayStatus?(): Promise<GatewayPublicStatus>;
+  enableGateway?(input: {
+    boundTenantId: string;
+    port?: number;
+  }): Promise<{ status: GatewayPublicStatus; token: string }>;
+  disableGateway?(): Promise<GatewayPublicStatus>;
+  regenerateGatewayToken?(): Promise<{ status: GatewayPublicStatus; token: string }>;
+  revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
   exportDriftBaseline?(
     input: ExportDriftBaselineInput,
   ): Promise<ExportDriftBaselineResult>;

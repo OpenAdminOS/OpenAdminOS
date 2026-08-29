@@ -172,6 +172,7 @@ import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { IntuneChatService } from "./intune-chat/service.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
+import { GatewayService } from "./gateway/service.js";
 import { RunService } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -251,6 +252,16 @@ interface PersistedState {
    * Defaults to true; users can disable it from Settings -> Privacy.
    */
   registryInstallCountsEnabled?: boolean;
+  /**
+   * MCP write-gateway configuration. The pairing token is never stored
+   * here; it lives in provider-style safeStorage. Off by default.
+   */
+  gateway?: {
+    enabled: boolean;
+    port: number;
+    boundTenantId?: string;
+    clients: Array<{ id: string; name: string; createdAt: string }>;
+  };
   /**
    * Enables experimental MXC-backed code execution for preview script
    * agents. Undefined means "no saved preference yet" so the host may
@@ -1015,6 +1026,7 @@ export class AppStateStore {
   private readonly chatService: IntuneChatService;
   private readonly driftService: DriftService;
   private readonly runService: RunService;
+  private readonly gatewayService: GatewayService;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
   private readonly providerListFactory:
@@ -1200,6 +1212,35 @@ export class AppStateStore {
         return host.intelligenceStore;
       },
     });
+    this.gatewayService = new GatewayService({
+      readConfig: async () => {
+        const persisted = await host.read();
+        return (
+          persisted.gateway ?? { enabled: false, port: 8092, clients: [] }
+        );
+      },
+      writeConfig: async (config) => {
+        await host.serialize(async () => {
+          const persisted = await host.read();
+          await host.write({ ...persisted, gateway: config });
+        });
+        host.emitStateChanged("gateway-config-changed");
+      },
+      readToken: () => this.gatewaySecrets().get("token"),
+      writeToken: (token) => this.gatewaySecrets().set("token", token),
+      clearToken: () => this.gatewaySecrets().remove("token"),
+      tenantName: async (tenantId) => {
+        const persisted = await host.read();
+        return persisted.tenants.find((entry) => entry.id === tenantId)?.displayName;
+      },
+      executeReadTool: (tenantId, name, input) =>
+        this.chatService.executeReadTool(tenantId, name, input),
+      queueExternalProposal: (input) =>
+        this.runService.startExternalProposalRun(input),
+      getRun: (runId) => this.runService.getRun(runId),
+      log: (message, metadata) =>
+        console.info("[gateway]", message, metadata ?? ""),
+    });
     this.runDeliveryService = new RunDeliveryService({
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
@@ -1229,6 +1270,7 @@ export class AppStateStore {
 
   close(): void {
     this.whatsappWebClientInstance?.dispose();
+    void this.gatewayService.stop();
     this.intelligenceStore?.close();
   }
 
@@ -1280,6 +1322,40 @@ export class AppStateStore {
       this.providerSecretStore?.forProvider(providerId) ??
       noSecrets
     );
+  }
+
+  // The gateway pairing token reuses the provider safeStorage vault
+  // under a reserved id so it never lands in plaintext state.json.
+  private gatewaySecrets(): SecretAccessor {
+    return (
+      this.providerSecretsForOverride?.("__gateway__" as ProviderId) ??
+      this.providerSecretStore?.forProvider("__gateway__") ??
+      noSecrets
+    );
+  }
+
+  async getGatewayStatus() {
+    return this.gatewayService.getStatus();
+  }
+
+  async enableGateway(input: { boundTenantId: string; port?: number }) {
+    return this.gatewayService.enable(input);
+  }
+
+  async disableGateway() {
+    return this.gatewayService.disable();
+  }
+
+  async regenerateGatewayToken() {
+    return this.gatewayService.regenerateToken();
+  }
+
+  async revokeGatewayClient(clientId: string) {
+    return this.gatewayService.revokeClient(clientId);
+  }
+
+  async startGatewayIfEnabled(): Promise<void> {
+    await this.gatewayService.startIfEnabled();
   }
 
   private emptyAzureOpenAIConfig(): AzureOpenAIProviderConfig {

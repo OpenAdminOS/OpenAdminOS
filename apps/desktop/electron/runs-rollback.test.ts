@@ -178,3 +178,60 @@ describe("rollback apply", () => {
     );
   });
 });
+
+describe("external gateway proposal apply", () => {
+  it("queues, gates, and applies an external proposal through the same path", async () => {
+    const { service, persisted, requests } = makeHarness();
+    const queued = await service.startExternalProposalRun({
+      tenantId: "tenant-1",
+      clientName: "Claude Code",
+      requiredScopes: ["DeviceManagementConfiguration.ReadWrite.All"],
+      plan: {
+        summary: "Claude Code proposes 1 change: rename",
+        confirmationPhrase: "APPLY 1 CHANGE",
+        actions: [
+          {
+            id: "proposal-0",
+            kind: "graph-write",
+            label: "Rename policy",
+            severity: "default",
+            request: {
+              method: "PATCH",
+              path: "/deviceManagement/deviceCompliancePolicies/policy-1",
+              body: { displayName: "Renamed" },
+            },
+          },
+        ],
+      },
+    });
+    assert.equal(queued.status, "awaiting-confirmation");
+    assert.equal(queued.origin, "external-proposal");
+    assert.equal(requests.length, 0, "external proposals never self-apply");
+
+    // A wrong phrase must not apply anything.
+    await assert.rejects(
+      service.confirmRun(queued.id, "apply 1 change"),
+      /Confirmation phrase does not match/,
+    );
+    assert.equal(requests.length, 0);
+
+    await service.confirmRun(queued.id, "APPLY 1 CHANGE");
+    const run = await waitForTerminal(persisted, queued.id);
+    assert.equal(run?.status, "completed");
+    assert.equal(requests.length, 1);
+    assert.match(run?.summary ?? "", /1 proposed change applied/);
+  });
+
+  it("refuses to queue an empty proposal", async () => {
+    const { service } = makeHarness();
+    await assert.rejects(
+      service.startExternalProposalRun({
+        tenantId: "tenant-1",
+        clientName: "Claude Code",
+        requiredScopes: [],
+        plan: { summary: "s", confirmationPhrase: "APPLY 0 CHANGES", actions: [] },
+      }),
+      /needs at least one action/,
+    );
+  });
+});

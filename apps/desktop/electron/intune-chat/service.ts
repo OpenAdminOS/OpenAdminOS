@@ -16,6 +16,7 @@ import {
   type GraphCacheStatus,
   type HostedProviderBatchConsent,
   type IntuneChatConversation,
+  type IntuneChatInvestigationToolName,
   type IntuneChatMessage,
   type IntuneChatProgressStep,
   type IntuneChatStreamEvent,
@@ -103,7 +104,7 @@ import {
   requiredScopesForResources,
   selfTrainingCandidateFromPrompt,
 } from "./planner.js";
-import type { IntuneChatToolContext } from "./tools.js";
+import { executeIntuneChatTool, type IntuneChatToolContext } from "./tools.js";
 
 type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
@@ -2092,6 +2093,35 @@ export class IntuneChatService {
       onEvent({ type: "completed", result });
     }
     return result;
+  }
+
+  /**
+   * Execute a single read-only chat tool for a fixed tenant. Used by
+   * the MCP gateway to expose the exact same read surface (allowlist,
+   * caps, drift access) to external AI clients without going through
+   * the conversational loop.
+   */
+  async executeReadTool(
+    tenantId: string,
+    name: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    const allowed: readonly IntuneChatInvestigationToolName[] = [
+      "list_cached_resources",
+      "query_cache",
+      "graph_get",
+      "query_drift",
+    ];
+    const match = allowed.find((candidate) => candidate === name);
+    if (!match) {
+      throw new Error(`Tool is not available through the gateway: ${name}`);
+    }
+    const ctx = this.buildChatToolContext(tenantId);
+    const execution = await executeIntuneChatTool(ctx, match, params);
+    if (execution.trace.error) {
+      throw new Error(execution.trace.error);
+    }
+    return execution.result;
   }
 
   private buildChatToolContext(tenantId: string): IntuneChatToolContext {

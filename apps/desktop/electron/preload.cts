@@ -241,6 +241,13 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:start-baseline-rollback", input),
   getFleetDriftStatus: (input) =>
     ipcRenderer.invoke("openadminos:get-fleet-drift-status", input),
+  getGatewayStatus: () => ipcRenderer.invoke("openadminos:get-gateway-status"),
+  enableGateway: (input) => ipcRenderer.invoke("openadminos:enable-gateway", input),
+  disableGateway: () => ipcRenderer.invoke("openadminos:disable-gateway"),
+  regenerateGatewayToken: () =>
+    ipcRenderer.invoke("openadminos:regenerate-gateway-token"),
+  revokeGatewayClient: (clientId: string) =>
+    ipcRenderer.invoke("openadminos:revoke-gateway-client", clientId),
   exportDriftBaseline: (input) =>
     ipcRenderer.invoke("openadminos:export-drift-baseline", input),
   readDriftBundleFile: () =>

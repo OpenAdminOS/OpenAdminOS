@@ -5400,6 +5400,38 @@ function registerIpcHandlers() {
     }),
   );
   ipcMain.handle(
+    "openadminos:get-gateway-status",
+    handleTrusted(() => store.getGatewayStatus()),
+  );
+  ipcMain.handle(
+    "openadminos:enable-gateway",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Enable gateway input must be an object.");
+      }
+      return store.enableGateway({
+        boundTenantId: requireBoundedString(input.boundTenantId, "boundTenantId", 256),
+        ...(input.port !== undefined
+          ? { port: requireBoundedInteger(input.port, "port", 1024, 65_535) }
+          : {}),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:disable-gateway",
+    handleTrusted(() => store.disableGateway()),
+  );
+  ipcMain.handle(
+    "openadminos:regenerate-gateway-token",
+    handleTrusted(() => store.regenerateGatewayToken()),
+  );
+  ipcMain.handle(
+    "openadminos:revoke-gateway-client",
+    handleTrusted((_event, clientId: unknown) =>
+      store.revokeGatewayClient(requireBoundedString(clientId, "clientId", 128)),
+    ),
+  );
+  ipcMain.handle(
     "openadminos:get-fleet-drift-status",
     handleTrusted((_event, input: unknown) => {
       if (input !== undefined && !isPlainRecord(input)) {
@@ -6098,6 +6130,9 @@ if (!gotLock) {
     void store.processPendingRunDeliveries();
     debugStartupLog("registered ipc handlers");
     void store.processPendingRunDeliveries();
+    void store.startGatewayIfEnabled().catch((error) => {
+      console.error("[gateway] failed to start on launch", error);
+    });
     debugStartupLog("registered ipc handlers");
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());
