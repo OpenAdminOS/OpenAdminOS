@@ -1859,6 +1859,22 @@ These are explicitly unresolved. Don't pick a default without asking.
 - A web-hosted SaaS version (would betray the local-first positioning)
 - Agents for non-Microsoft platforms (AWS, GCP) — possibly later, but the v1 thesis is depth-in-Microsoft, not breadth
 - Agent-authoring inside the desktop app (authors use their own editor + the SDK; the app is a runtime, not an IDE)
+- Defender for Endpoint device actions (isolate machine, live response, etc.). These use the separate `api.security.microsoft.com` API rather than Microsoft Graph. v0.5 is Graph-only; Defender is a read/report surface (alerts, incidents, Secure Score), not an action surface. Revisit if there is demand for a second non-Graph client.
+- Third-party configuration baseline content (for example OpenIntuneBaseline). Decided 2026-08-29: OpenAdminOS ships no bundled or derived third-party baselines, ever. Baseline content is user-generated only, via own-tenant exports.
+
+---
+
+## 8a. v0.5 capability surfaces
+
+v0.5 adds four capability areas on top of the drift timeline; each maps to an acquirer-visible signal.
+
+**Governed MCP write-gateway.** A local, loopback-only (127.0.0.1) MCP server, off by default, authenticated by a single pairing token held in safeStorage and bound to exactly one tenant at enable time. External AI clients get the same read-only tool allowlist as Chat. The only write capability is `propose_write_plan`: proposed actions are validated against the bundled Graph endpoint catalog (unknown endpoints rejected), turned into a standard `WritePlan`, and queued as an `external-proposal` system run that requires the normal typed confirmation in the desktop app. No external client can apply a change; a proposal can only be reviewed, confirmed, or rejected by a human. Apply is fail-stop and shares the rollback apply path.
+
+**Retrieval.** Local documentation grounding ported from the model bench's `retrieve.mjs`: a locally installed index (Intune/Entra/Defender docs, matched to one embedding model) is cosine-ranked against the question, with source-file provenance on every hit. Query embedding hits a loopback embedding server and refuses any non-loopback endpoint, so a local provider never sends the question off-device. A missing index is a designed "not documentation-grounded yet" state, not an error. Index distribution (first-run download of the ~263 MB index) and the embedding-model serving are host infrastructure tracked separately; the ranking engine and honest states ship in v0.5.
+
+**Opt-in usage telemetry.** Off by default. Counts and versions only: a resettable anonymous install id, app version, OS/arch, whether the active provider is local or hosted, and bucketed (never exact) tenant/agent/run counts, plus whether a retrieval index is installed. Never tenant content, tenant ids, prompts, run results, or error text. The Privacy preview shows the exact JSON, and the send path serializes that same payload, so preview and wire can never diverge. Nothing is sent unless the user opts in AND the build has a collector URL configured (empty by default).
+
+**Fleet.** For installs with two or more tenants, a Fleet view aggregates each tenant's active baseline, drift counts, and last capture time, filterable by tenant group. Multi-tenant runs keep per-tenant confirmation for writes.
 
 ---
 
