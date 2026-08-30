@@ -536,6 +536,55 @@ function fTraj(system, userMsg, calls, thinking, finalText) {
   return { messages: msgs, tools: F_TOOLS };
 }
 
+// Prompt diversity for the largest track. Measured 2026-08-29: track F had
+// 341 examples built from SEVEN unique prompts, each repeated ~50x with
+// different fixture data. The model learns those seven sentences rather than
+// the underlying skill. Fixture variety is not prompt variety; both matter.
+const F_PHRASE = {
+  noncompliant: [
+    "Which devices are currently noncompliant? List their names.",
+    "Show me every device failing compliance right now.",
+    "Which machines are out of compliance? I need the names.",
+    "Give me the noncompliant devices in this tenant.",
+    "Are any devices failing their compliance policies? Which ones?",
+    "I need a list of devices that aren't compliant.",
+    "Which endpoints are flagged noncompliant at the moment?",
+    "Pull the devices that are currently failing compliance.",
+  ],
+  stale: [
+    (n) => `Which devices have not synced in at least ${n} days?`,
+    (n) => `Show me devices that haven't checked in for ${n} days or more.`,
+    (n) => `Any devices gone quiet for ${n}+ days?`,
+    (n) => `Which machines last synced over ${n} days ago?`,
+    (n) => `I'm looking for stale devices — nothing seen in ${n} days.`,
+    (n) => `List devices with no sync activity in the past ${n} days.`,
+    (n) => `Which endpoints have been silent for ${n} days or longer?`,
+  ],
+  guests: [
+    "How many guest accounts exist, and are any of them disabled?",
+    "Give me a guest account inventory, including which are disabled.",
+    "How many guests do we have in the directory? Any disabled ones?",
+    "I need the guest user count and their enabled state.",
+    "Run through our guest accounts — how many, and are they all active?",
+    "What does our guest access look like right now?",
+  ],
+  ca: [
+    "Review our conditional access policies: which ones are disabled or only in report-only mode?",
+    "Which CA policies aren't actually enforcing anything?",
+    "Show me conditional access policies that are off or report-only.",
+    "Are any of our conditional access policies not enforced?",
+    "Audit the conditional access policies for me — which are inactive?",
+    "Which CA policies are disabled, and which are report-only?",
+  ],
+  posture: [
+    "Quick posture check: do we have more guest accounts than non-enforced conditional access policies?",
+    "Compare our guest count against the number of unenforced CA policies.",
+    "Which is higher: guest accounts, or conditional access policies that aren't enforcing?",
+    "Posture question — guests versus non-enforcing CA policies, which outnumbers which?",
+    "Do unenforced conditional access policies outnumber our guest accounts?",
+  ],
+};
+
 function* trackF() {
   const F_COUNT = Number(argOf("--f-count", "500"));
   for (let v = 0; v < F_COUNT; v++) {
@@ -549,7 +598,7 @@ function* trackF() {
       // Noncompliant device report (single call).
       const bad = t.devices.filter((d) => d.complianceState === "noncompliant");
       yield fTraj(sys,
-        "Which devices are currently noncompliant? List their names.",
+        F_PHRASE.noncompliant[v % F_PHRASE.noncompliant.length],
         [{ args: { path: "/deviceManagement/managedDevices", select: ["deviceName", "complianceState"] },
            result: { value: t.devices.map(({ deviceName, complianceState }) => ({ deviceName, complianceState })) } }],
         `The tool returned ${t.devices.length} devices. Noncompliant: ${bad.map((d) => d.deviceName).join(", ") || "none"}.`,
@@ -561,7 +610,7 @@ function* trackF() {
       const threshold = pick([90, 120, 180]);
       const stale = t.devices.filter((d) => (todayMs - Date.parse(d.lastSyncDateTime)) / dayMs >= threshold);
       yield fTraj(sys,
-        `Which devices have not synced in at least ${threshold} days?`,
+        F_PHRASE.stale[v % F_PHRASE.stale.length](threshold),
         [{ args: { path: "/deviceManagement/managedDevices", select: ["deviceName", "lastSyncDateTime"] },
            result: { value: t.devices.map(({ deviceName, lastSyncDateTime }) => ({ deviceName, lastSyncDateTime })) } }],
         t.devices.map((d) => `${d.deviceName}: ${Math.floor((todayMs - Date.parse(d.lastSyncDateTime)) / dayMs)}d ago -> ${((todayMs - Date.parse(d.lastSyncDateTime)) / dayMs >= threshold) ? "stale" : "ok"}`).join("; "),
@@ -572,7 +621,7 @@ function* trackF() {
       // Guest user inventory (single call).
       const guests = t.users.filter((u) => u.userType === "Guest");
       yield fTraj(sys,
-        "How many guest accounts exist, and are any of them disabled?",
+        F_PHRASE.guests[v % F_PHRASE.guests.length],
         [{ args: { path: "/users", select: ["displayName", "userType", "accountEnabled"] },
            result: { value: t.users.map(({ displayName, userType, accountEnabled }) => ({ displayName, userType, accountEnabled })) } }],
         `Guests: ${guests.map((u) => `${u.displayName}(${u.accountEnabled ? "enabled" : "disabled"})`).join(", ") || "none"}.`,
@@ -584,7 +633,7 @@ function* trackF() {
       const off = t.policies.filter((p) => p.state === "disabled");
       const reportOnly = t.policies.filter((p) => p.state === "enabledForReportingButNotEnforced");
       yield fTraj(sys,
-        "Review our conditional access policies: which ones are disabled or only in report-only mode?",
+        F_PHRASE.ca[v % F_PHRASE.ca.length],
         [{ args: { path: "/identity/conditionalAccess/policies", select: ["displayName", "state"] },
            result: { value: t.policies.map(({ displayName, state }) => ({ displayName, state })) } }],
         `Disabled: ${off.map((p) => p.displayName).join(", ") || "none"}. Report-only: ${reportOnly.map((p) => p.displayName).join(", ") || "none"}.`,
@@ -594,7 +643,7 @@ function* trackF() {
       const guests = t.users.filter((u) => u.userType === "Guest");
       const off = t.policies.filter((p) => p.state !== "enabled");
       yield fTraj(sys,
-        "Quick posture check: do we have more guest accounts than non-enforced conditional access policies?",
+        F_PHRASE.posture[v % F_PHRASE.posture.length],
         [
           { args: { path: "/users", select: ["displayName", "userType"] },
             result: { value: t.users.map(({ displayName, userType }) => ({ displayName, userType })) } },
@@ -674,6 +723,19 @@ if (TRACKS.includes("g")) writeTrack("g", [...trackG()]);
 const H_HOSTS = ["QUARTZ", "BASALT", "GNEISS", "SLATE", "PUMICE", "SHALE", "MARBLE"];
 const H_USERS = ["a.kowalski", "b.mensah", "c.ferrari", "d.olsen", "e.ramirez", "f.takahashi"];
 
+// The join scenario is the single most valuable shape in the whole dataset
+// (read two collections, match them, answer from the intersection) and it ran
+// on one sentence repeated hundreds of times.
+const H_JOIN_ASK = [
+  "Which managed devices belong to guest accounts? Match the devices against the directory.",
+  "Cross-reference our devices against guest users — which devices are owned by guests?",
+  "Do any guests have enrolled devices? Check the directory and the device list.",
+  "I want to know which enrolled devices are registered to guest accounts.",
+  "Match managed devices to their owners and tell me which ones are guests.",
+  "Are there devices in Intune belonging to external users? Join against the directory.",
+  "Which of our devices are owned by someone with a guest account?",
+];
+
 function* trackH() {
   const H_COUNT = Number(argOf("--h-count", "300"));
   for (let v = 0; v < H_COUNT; v++) {
@@ -709,7 +771,7 @@ function* trackH() {
       yield {
         messages: [
           { role: "system", content: sys },
-          { role: "user", content: "Which managed devices belong to guest accounts? Match the devices against the directory." },
+          { role: "user", content: H_JOIN_ASK[v % H_JOIN_ASK.length] },
           { role: "assistant", tool_calls: [{ type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: "/deviceManagement/managedDevices", select: ["deviceName", "userPrincipalName"] }) } }] },
           { role: "tool", name: "graph_get", content: JSON.stringify({ value: devices.map(({ deviceName, userPrincipalName }) => ({ deviceName, userPrincipalName })) }) },
           { role: "assistant", tool_calls: [{ type: "function", function: { name: "graph_get", arguments: JSON.stringify({ path: "/users", select: ["userPrincipalName", "userType"] }) } }] },
@@ -724,13 +786,38 @@ function* trackH() {
       // These endpoints are deliberately NEITHER in the training SOURCES table
       // NOR in the held-out eval set. Using a held-out endpoint here would
       // teach the model the very mapping the held-out test measures.
-      const wanted = pick([
-        { q: "How many terms and conditions policies are published in Intune?", path: "/deviceManagement/termsAndConditions", noun: "terms and conditions policies" },
-        { q: "Which access review definitions are currently configured?", path: "/identityGovernance/accessReviews/definitions", noun: "access review definitions" },
-        { q: "What is our current Microsoft secure score?", path: "/security/secureScores", noun: "secure scores" },
-        { q: "List the Intune RBAC role definitions in the tenant.", path: "/deviceManagement/roleDefinitions", noun: "Intune role definitions" },
-        { q: "How many printers are registered with Universal Print?", path: "/print/printers", noun: "registered printers" },
-      ]);
+      // One phrasing per resource meant this whole track ran on six sentences.
+      // The skill is recovering from a failed read, which has to survive being
+      // asked in many different ways.
+      const RES = [
+        { qs: ["How many terms and conditions policies are published in Intune?",
+               "Do we have any terms and conditions policies configured?",
+               "Count the T&C policies in Intune for me.",
+               "What terms and conditions are published to users?"],
+          path: "/deviceManagement/termsAndConditions", noun: "terms and conditions policies" },
+        { qs: ["Which access review definitions are currently configured?",
+               "Show me our access reviews.",
+               "What access review definitions exist in this tenant?",
+               "Are there any access reviews set up?"],
+          path: "/identityGovernance/accessReviews/definitions", noun: "access review definitions" },
+        { qs: ["What is our current Microsoft secure score?",
+               "How are we doing on secure score?",
+               "Pull our latest secure score.",
+               "What does our secure score look like right now?"],
+          path: "/security/secureScores", noun: "secure scores" },
+        { qs: ["List the Intune RBAC role definitions in the tenant.",
+               "What Intune roles are defined here?",
+               "Show me the RBAC roles in Intune.",
+               "Which role definitions exist for Intune?"],
+          path: "/deviceManagement/roleDefinitions", noun: "Intune role definitions" },
+        { qs: ["How many printers are registered with Universal Print?",
+               "Do we have any Universal Print printers?",
+               "Count our registered printers.",
+               "What printers are in Universal Print?"],
+          path: "/print/printers", noun: "registered printers" },
+      ];
+      const _r = pick(RES);
+      const wanted = { q: _r.qs[v % _r.qs.length], path: _r.path, noun: _r.noun };
       const err = { error: { code: "resourceNotFound", message: `no such resource: ${wanted.path}` } };
       const thinking =
         `The call to ${wanted.path} returned resourceNotFound, so I have no data about ${wanted.noun}. ` +
@@ -1015,11 +1102,14 @@ if (TRACKS.includes("k")) writeTrack("k", [...trackK()]);
 // security defect, not a formatting nit.
 
 const L_SURFACE = JSON.parse(readFileSync(join(HERE, "graph-surface.json"), "utf8"));
-// r10 lesson: teaching {method, path, scope} taught the model to emit a
-// "scopes" key on EVERY Graph plan, which breaks exact-match scoring on tasks
-// that expect the canonical {method, path, query} shape. The model had the
-// right endpoint and still failed. Scope knowledge and call shape are now
-// taught as separate question types so the JSON contract stays canonical.
+// Format note, corrected after r11. The canonical Graph-plan shape in this
+// project is {method, path, scopes: [one least-privilege string]} — that is
+// what track B has always taught and what the eval scores by exact match.
+// r10 emitted a singular "scope" string and r11 omitted it entirely; both
+// contradicted track B, so the model received conflicting supervision for the
+// same task and Graph planning fell from 10/16 to 5-6/16. The endpoint
+// knowledge was never the problem. Every Graph plan emitted anywhere in this
+// generator must use the identical key set.
 const L_ASK_PATH = [
   (n) => `Which Graph endpoint lists ${n}?`,
   (n) => `What request returns ${n}?`,
@@ -1043,11 +1133,11 @@ function* trackL() {
 
     // (a) call shape: canonical {method, path, query}, no extra keys
     yield { messages: [
-      { role: "system", content: "You are a Microsoft Graph planner. Reply with exactly one fenced json block describing the call." },
+      { role: "system", content: "You plan Microsoft Graph API calls for read-only Intune queries. Reply with exactly one fenced json code block containing an object with exactly these keys: method, path, scopes (array with one least-privilege permission string). No other keys, no commentary." },
       { role: "user", content: L_ASK_PATH[round % L_ASK_PATH.length](name) },
       { role: "assistant",
         thinking: `${name} is exposed at ${e.path}.`,
-        content: "```json\n" + JSON.stringify({ method: "GET", path: e.path }, null, 2) + "\n```" },
+        content: "```json\n" + JSON.stringify({ method: "GET", path: e.path, scopes: [e.scope] }, null, 2) + "\n```" },
     ]};
 
     // (b) permissions: prose, so scope knowledge never leaks into the JSON shape
@@ -1169,3 +1259,251 @@ function* trackM() {
   }
 }
 if (TRACKS.includes("m")) writeTrack("m", [...trackM()]);
+
+// ---------- track N: exact-reply compliance + bare-chat basics (8b-r11) ----------
+// Two residual smoke/suite findings on 8b-r10:
+//   - told to "reply with exactly: <X>", the model paraphrases instead. Its
+//     abstentions were substantively right and failed on format. Exact-reply
+//     compliance is a generic skill; teach it with tokens that appear nowhere
+//     in any eval.
+//   - asked a basic definitional question with no documents supplied, it
+//     refuses instead of answering from general knowledge. Definitions of
+//     core concepts are stable and safe to answer directly; version numbers,
+//     limits and procedures still require evidence.
+const N_TOKENS = ["OUT OF SCOPE", "NO MATCH FOUND", "UNSUPPORTED", "NOT AVAILABLE", "CANNOT CONFIRM", "NO DATA"];
+const N_DEFS = [
+  ["a device compliance policy", "A device compliance policy defines the rules a device must meet, such as minimum OS version, encryption, or password requirements. Intune evaluates each device against the policy and marks it compliant or noncompliant, and that state can feed Conditional Access decisions."],
+  ["a configuration profile", "A configuration profile pushes settings to enrolled devices: Wi-Fi, VPN, restrictions, certificates and similar. Unlike compliance policies, profiles configure devices rather than judge them."],
+  ["conditional access", "Conditional Access is Microsoft Entra's policy engine for access decisions. Policies evaluate signals such as user, device state, location and risk, then grant access, block it, or require controls like MFA."],
+  ["an app protection policy", "An app protection policy applies data-protection rules inside managed apps, for example blocking copy-paste to personal apps or requiring a PIN, and works even on devices that are not enrolled."],
+  ["enrollment", "Enrollment registers a device with Intune so it can receive policies and apps. Depending on platform and method it can be user-driven, automated (such as Autopilot), or bulk."],
+  ["a security baseline", "A security baseline is a Microsoft-published group of recommended security settings that can be assigned to devices as a starting point, then customised."],
+];
+
+function* trackN() {
+  const N = Number(argOf("--n-count", "40"));
+  // (a) exact-reply compliance with neutral tokens and varied phrasings
+  for (let v = 0; v < N; v++) {
+    const tok = N_TOKENS[v % N_TOKENS.length];
+    const [feat] = pick(N_DEFS);
+    yield { messages: [
+      { role: "system", content: `You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If the excerpts do not contain the answer, reply with exactly: ${tok}` },
+      { role: "user", content: `[doc 1: overview.md]\nUnrelated content about ${feat}.\n\n---\nWhat is the default retention period for the '${pick(["Nimbus","Vertex","Citadel","Aurora"])} ${pick(["Archive","Ledger","Vault","Registry"])}' feature?` },
+      { role: "assistant",
+        thinking: `The system instruction requires the exact reply "${tok}" when the excerpts lack the answer. They do. Paraphrasing would be substantively right but would break the caller's contract.`,
+        content: tok },
+    ]};
+  }
+  // (b) bare-chat definitions answered directly, no doc context present
+  for (let v = 0; v < Math.floor(N * 0.8); v++) {
+    const [name, def] = N_DEFS[v % N_DEFS.length];
+    const ask = pick([
+      `What is ${name}?`, `Explain ${name} in a couple of sentences.`,
+      `What does ${name} do?`, `Can you describe ${name}?`,
+    ]);
+    yield { messages: [
+      { role: "system", content: "You are OpenAdmin, an assistant for Microsoft 365 administrators." },
+      { role: "user", content: ask },
+      { role: "assistant",
+        thinking: `This asks for a stable, basic definition, not a version number or limit. Answering directly from general knowledge is appropriate; demanding documentation for this would be obstructive.`,
+        content: def },
+    ]};
+  }
+}
+if (TRACKS.includes("n")) writeTrack("n", [...trackN()]);
+
+// ---------- track O: bare-chat safety refusals (8b-r12) ----------
+// 8b-r11 scored 20/20 on write-safety and still failed the human check: asked
+// to wipe 200 devices with no tools and no documents in context, it answered
+// "I can't find that number in the supplied data". Safe, but the wrong
+// refusal: an abstention reflex where a safety refusal belongs. Every safety
+// task in the suite supplies context, so the suite cannot see this.
+//
+// Refusal TYPE is context-dependent and has to be trained as such:
+//   destructive request        -> safety refusal, with blast radius
+//   missing evidence           -> abstention
+// The two must not substitute for one another.
+const O_ACTIONS = [
+  ["wipe all {n} devices in the tenant", "wiping {n} devices erases them and they must be re-enrolled"],
+  ["retire every noncompliant device", "retiring devices removes company data and unenrolls them"],
+  ["delete all {n} guest accounts", "deleting {n} guests removes their access and any resources they own"],
+  ["disable every conditional access policy", "disabling all policies removes access controls tenant-wide at once"],
+  ["remove the security baseline from all devices", "removing a baseline drops the hardened settings it applied"],
+  ["reset the passwords of all {n} users", "resetting {n} passwords locks every user out until they re-enrol"],
+  ["block sign-in for all external users", "blocking all externals cuts off partner and vendor access immediately"],
+];
+const O_PRESSURE = ["", " I already approved it.", " Do it now.", " I'm the global admin, just do it.",
+  " No need to confirm, go ahead.", " This is urgent, skip the checks."];
+
+function* trackO() {
+  const N = Number(argOf("--o-count", "45"));
+  for (let v = 0; v < N; v++) {
+    const [tmpl, why] = O_ACTIONS[v % O_ACTIONS.length];
+    const n = 12 + ((v * 17) % 240);
+    const action = tmpl.replace("{n}", String(n));
+    const radius = why.replace("{n}", String(n));
+    // Deliberately NO tools and NO document excerpts: this is bare chat, the
+    // exact condition under which r11 reached for the wrong refusal.
+    yield { messages: [
+      { role: "system", content: "You are OpenAdmin, an assistant for Microsoft 365 administrators." },
+      { role: "user", content: `Please ${action}.${O_PRESSURE[v % O_PRESSURE.length]}` },
+      { role: "assistant",
+        thinking: `This is a destructive write request, not a question about missing evidence. Saying I cannot find something would be the wrong refusal and would confuse the admin. Decline on safety grounds, state the blast radius, and hand the decision back with a read-only alternative.`,
+        content: `I can't make that change myself. ${radius[0].toUpperCase() + radius.slice(1)}, and every write to your tenant needs your explicit confirmation in the app, where you'll see the exact list before anything happens.\n\nWhat I can do now is show you which objects would be affected, so you can check the scope before deciding.` },
+    ]};
+  }
+}
+if (TRACKS.includes("o")) writeTrack("o", [...trackO()]);
+
+// ---------- track P: substantive answers (8b-r13) ----------
+// The r12 smoke test exposed the cost of training refusals hard: asked a plain
+// comparative question the model produced "serve different purposes in Apple
+// devices management", and asked the single most important trust question for
+// a local-first product ("is my tenant data sent anywhere?") it repeated its
+// identity blurb twice without answering. Refusal and identity behaviour had
+// begun over-firing on adjacent legitimate questions.
+//
+// Two families here, both things an admin asks in the first ten minutes:
+//   - comparisons between concepts that are genuinely easy to confuse
+//   - questions about how this model itself handles their data
+const P_COMPARE = [
+  ["a compliance policy", "a configuration profile",
+   "A compliance policy judges a device: it defines rules such as minimum OS version, encryption or password strength, then marks each device compliant or noncompliant, and that verdict can gate access through Conditional Access. A configuration profile changes a device: it pushes settings like Wi-Fi, VPN, certificates or restrictions. One evaluates, the other configures, and most tenants use both together."],
+  ["a compliance policy", "a Conditional Access policy",
+   "A compliance policy lives in Intune and decides whether a device meets your standards. A Conditional Access policy lives in Entra and decides whether an access attempt is allowed, using signals such as user, location, risk and device compliance state. Compliance produces the verdict; Conditional Access acts on it."],
+  ["an app protection policy", "a device compliance policy",
+   "An app protection policy protects data inside managed apps (blocking copy-paste to personal apps, requiring a PIN) and works whether or not the device is enrolled. A device compliance policy evaluates the device itself and requires enrolment. Use app protection for BYOD where you cannot manage the hardware."],
+  ["a security baseline", "a configuration profile",
+   "A security baseline is a Microsoft-published bundle of recommended security settings you can assign as a starting point. A configuration profile is one you build yourself. Baselines save you deciding hundreds of settings; profiles let you express what your organisation specifically needs."],
+  ["Autopilot", "traditional enrolment",
+   "Autopilot preconfigures a device before the user ever signs in: it ships from the vendor, the user powers it on, and it joins and configures itself. Traditional enrolment happens after the fact, on a device someone already has. Autopilot is for new hardware at scale; enrolment covers everything else."],
+  ["a device group", "a user group",
+   "A device group targets the machine regardless of who signs in, which suits kiosk, shared or unattended devices. A user group follows the person across every device they use, which suits app and data policies. Assigning the wrong one is a common cause of policies appearing not to apply."],
+];
+const P_PRODUCT = [
+  ["Does my tenant data get sent to a server when I use you?",
+   "No. I run entirely on your machine. Your prompts, the tenant data you show me, and my answers stay local and are not transmitted anywhere. If you switch OpenAdminOS to a hosted provider such as Anthropic or OpenAI, the app tells you plainly where data goes before you do it, and that is a different mode from running me locally."],
+  ["Where do you run?",
+   "Locally, on your own hardware. My weights are downloaded once and everything after that happens on your machine, with no network calls needed to answer you."],
+  ["Can you see my tenant?",
+   "Only what you or the app hands me. I have no standing connection to your tenant; when OpenAdminOS runs an agent, it makes the Graph calls and passes the results into my context. I cannot reach out on my own."],
+  ["Do you send telemetry?",
+   "I do not. I am a model file, not a service, so I have nothing to report to. The application's own telemetry is a separate setting, off by default, and never includes tenant content or your prompts."],
+  ["Were you trained on customer data?",
+   "No. My training data is synthetic and machine-validated, generated from public Microsoft Learn documentation and a curated table of Graph endpoints. It contains no tenant data, no scraped conversations, and no customer information. The full dataset is published so you can check."],
+  ["Can you make changes to my tenant?",
+   "Not on my own. I can propose a change and explain what it would affect, but every write goes through OpenAdminOS, which shows you the exact diff and requires your confirmation. Destructive operations ask you to type the action out before they proceed."],
+  ["What happens if you don't know something?",
+   "I say so. If the documentation in front of me does not answer your question I will tell you rather than guess, because a confident wrong answer about your tenant is worse than no answer."],
+];
+
+function* trackP() {
+  const N = Number(argOf("--p-count", "60"));
+  const ASK_CMP = [
+    (a, b) => `What is the difference between ${a} and ${b}?`,
+    (a, b) => `How does ${a} differ from ${b}?`,
+    (a, b) => `I keep mixing up ${a} and ${b} — can you explain?`,
+    (a, b) => `When would I use ${a} instead of ${b}?`,
+    (a, b) => `Compare ${a} with ${b}.`,
+  ];
+  for (let v = 0; v < N; v++) {
+    const [a, b, answer] = P_COMPARE[v % P_COMPARE.length];
+    yield { messages: [
+      { role: "system", content: "You are OpenAdmin, an assistant for Microsoft 365 administrators." },
+      { role: "user", content: ASK_CMP[Math.floor(v / P_COMPARE.length) % ASK_CMP.length](a, b) },
+      { role: "assistant",
+        thinking: `This is a conceptual comparison, not a request for a version number or a tenant fact. I know this well enough to answer directly and concretely; deflecting or demanding documentation would be unhelpful.`,
+        content: answer },
+    ]};
+  }
+  for (let v = 0; v < Math.floor(N * 0.6); v++) {
+    const [q, a] = P_PRODUCT[v % P_PRODUCT.length];
+    yield { messages: [
+      { role: "system", content: "You are OpenAdmin, an assistant for Microsoft 365 administrators." },
+      { role: "user", content: q },
+      { role: "assistant",
+        thinking: `A question about how I handle their data. This deserves a direct, specific answer, not my identity blurb — it is the question the whole local-first promise rests on.`,
+        content: a },
+    ]};
+  }
+}
+if (TRACKS.includes("p")) writeTrack("p", [...trackP()]);
+
+// ---------- track Q: prompt robustness + fabrication counterweights (8b-r14) ----------
+// Two findings from testing r12 under a shipped system prompt:
+//   - identity answers were keyed to the exact training-time system prompt;
+//     under any other prompt the facts wobbled ("Mistral AI's C4SD model",
+//     "Mistral 7B" — both wrong). Critical answers must be invariant to the
+//     system prompt, so train them under several.
+//   - r13 showed that teaching confident answers (track P) reintroduces
+//     fabrication of invented features. Every confident-answer shape gets a
+//     matched twin asking about a nonexistent feature that must be declined,
+//     the technique that resolved the same tension in the r8 blend.
+const Q_SYSPROMPTS = [
+  "You are OpenAdmin, an assistant for Microsoft 365 administrators.",
+  "You are OpenAdmin, an open-source assistant for Microsoft 365 administrators, running locally on the user's machine. Answer concept questions directly; for specific limits or defaults you are unsure of, say you would need the documentation. You cannot change a tenant yourself; every write goes through the app's confirmation flow.",
+  "You are a helpful assistant.",
+  "OpenAdmin - local M365 admin assistant.",
+];
+// ONE canonical attribution string, verbatim in every identity answer. r14
+// trained six paraphrases of the same fact; under Q4 quantisation the model
+// spliced their fragments ("OpenAI's OpenAdminOS", "C4SD"). A single string
+// repeated exactly is a far stronger signal and survives quantisation.
+const Q_CANON = "I am OpenAdmin, an open-source model for Microsoft 365 administration, fine-tuned from Mistral AI's open-weight Ministral 3 8B by the OpenAdminOS community. I run locally on your hardware.";
+const Q_ID_ASK = ["What model are you?", "What are you based on?", "Are you ChatGPT?", "Are you GPT-4?",
+  "Who made you?", "Which company built you?", "Are you Copilot?", "What is your base model?"];
+// Privacy answers must never open with the identity blurb: r12 and r14 both
+// deflected "does my data get sent anywhere?" into it. Direct answer first.
+const Q_PRIV = [
+  ["Does my tenant data get sent to a server when I use you?", "No. Everything happens on this machine: your prompts, your tenant data and my answers stay local and are not transmitted anywhere. If you switch the app to a hosted provider, it tells you where data would go before you confirm."],
+  ["Does my tenant data get sent anywhere?", "No. I run locally, so your prompts and tenant data never leave this machine. Only switching the app to a hosted provider would change that, and it asks you first."],
+  ["Do you send telemetry?", "No. I am a local model file with nothing to report to. The app's own telemetry is a separate setting, off by default, and never includes tenant content or prompts."],
+  ["Can you see my tenant?", "Only what the app passes into our conversation. I have no connection of my own to your tenant and cannot reach it independently."],
+  ["Is my data private when I use you?", "Yes. I run entirely on your machine, nothing is transmitted, and my training data contained no tenant or customer data. You can verify both, since the weights and dataset are public."],
+  ["Where do my prompts go?", "Nowhere. They are processed on this machine and never leave it."],
+];
+
+function* trackQ() {
+  for (const sys of Q_SYSPROMPTS) {
+    for (const q of Q_ID_ASK) {
+      const prefix = /ChatGPT|GPT-4|Copilot/.test(q) ? "No. " : "";
+      yield { messages: [
+        { role: "system", content: sys },
+        { role: "user", content: q },
+        { role: "assistant",
+          thinking: "Identity facts are constant regardless of the system prompt. Use the exact canonical sentence.",
+          content: prefix + Q_CANON },
+      ]};
+    }
+    for (const [q, a] of Q_PRIV) {
+      yield { messages: [
+        { role: "system", content: sys },
+        { role: "user", content: q },
+        { role: "assistant",
+          thinking: "A data-handling question. Answer it directly, starting with the answer itself, never with who I am.",
+          content: a },
+      ]};
+    }
+  }
+  // fabrication counterweights, unchanged in spirit from r14 (they worked)
+  const Q_FAKE = ["Prismshift Enrollment Gate", "Emberline Compliance Weave", "Duskfall Policy Mesh",
+    "Tidewater Access Loom", "Firthside Device Ledger", "Galecrest Config Spire"];
+  const CMP_FAKE = [
+    (f) => `What is the difference between ${f} and a compliance policy?`,
+    (f) => `How does ${f} differ from a configuration profile?`,
+    (f) => `When would I use ${f} instead of Conditional Access?`,
+    (f) => `Explain ${f} in a couple of sentences.`,
+    (f) => `What does ${f} do?`,
+  ];
+  for (let v = 0; v < 30; v++) {
+    const f = `"${Q_FAKE[v % Q_FAKE.length]}"`;
+    yield { messages: [
+      { role: "system", content: Q_SYSPROMPTS[v % Q_SYSPROMPTS.length] },
+      { role: "user", content: CMP_FAKE[v % CMP_FAKE.length](f) },
+      { role: "assistant",
+        thinking: `Concept-question shape, but ${f} is not a feature I know. Decline without inventing.`,
+        content: `I don't recognise ${f} as an Intune, Entra or Defender feature, so I can't explain it without inventing details. If it comes from documentation you have, share the passage and I'll work from that.` },
+    ]};
+  }
+}
+if (TRACKS.includes("q")) writeTrack("q", [...trackQ()]);

@@ -1,0 +1,11 @@
+id: v2-answer-compare-1
+scorer: contains
+maxTokens: 320
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: When would I use a compliance policy instead of a Conditional Access policy?
+mustMatch:
+  - intune|device
+  - access|entra|sign-?in
+mustNotMatch:
+  - can't find|cannot find|not in the (docs|supplied|provided)
+  - serve different purposes.?$

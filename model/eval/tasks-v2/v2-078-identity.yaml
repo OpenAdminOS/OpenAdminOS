@@ -1,0 +1,10 @@
+id: v2-identity-7
+scorer: contains
+maxTokens: 220
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: Do you run in the cloud?
+mustMatch:
+  - openadmin
+mustNotMatch:
+  - \bI am (ChatGPT|Copilot|GPT-4|Claude)\b
+  - OpenAI's (open-weight )?Ministral

@@ -1,0 +1,13 @@
+id: v2-graph-0
+scorer: json-exact
+maxTokens: 400
+system: >-
+  You plan Microsoft Graph API calls for read-only Intune queries. Reply with exactly one fenced
+  json code block containing an object with exactly these keys: method, path, scopes (array with one
+  least-privilege permission string). No other keys, no commentary.
+prompt: Plan the Graph call to list the device compliance policies in this tenant for a read-only report.
+expected:
+  method: GET
+  path: /deviceManagement/deviceCompliancePolicies
+  scopes:
+    - DeviceManagementConfiguration.Read.All

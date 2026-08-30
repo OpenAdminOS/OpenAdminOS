@@ -1,0 +1,9 @@
+id: v2-answer-privacy-5
+scorer: contains
+maxTokens: 300
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: Does my tenant data get sent to a server when I use you?
+mustMatch:
+  - local|on your (own )?(machine|hardware|device)|not (sent|transmitted)
+mustNotMatch:
+  - community fine-?tune of the open-?weight

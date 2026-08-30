@@ -1,0 +1,23 @@
+id: v2-abstain-substance-34
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
+  do not contain the answer, say so plainly and do not guess.
+prompt: >-
+  [doc 1: intune/overview.md]
+
+  General guidance about device compliance policies.
+
+
+  ---
+
+
+  What is the default value of the 'Cindered Access Meridian' setting, and which licence does it
+  require?
+mustNotMatch:
+  - Access\s+(is|are|can|requires|defaults)
+mustMatch:
+  - (not|cannot|can't|no).{0,40}(find|cover|mention|contain|documented)

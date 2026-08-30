@@ -1,0 +1,11 @@
+id: v2-answer-compare-12
+scorer: contains
+maxTokens: 320
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: How does an app protection policy differ from a device compliance policy?
+mustMatch:
+  - app|data
+  - device|enrol
+mustNotMatch:
+  - can't find|cannot find|not in the (docs|supplied|provided)
+  - serve different purposes.?$
