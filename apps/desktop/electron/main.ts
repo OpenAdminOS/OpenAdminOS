@@ -4668,7 +4668,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: "#0a0c10",
+    backgroundColor: "#1c1917",
     show: false,
     // Windows: draw our own chrome and overlay the system buttons on it,
     // so the app header replaces the native title bar instead of stacking
@@ -4683,8 +4683,11 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
-            color: "#0a0c10",
-            symbolColor: "#9b958a",
+            // Must match --color-bg and --color-text-muted in
+            // src/styles/globals.css. Any drift paints the window-control
+            // strip as a visibly different block from the app chrome.
+            color: "#1c1917",
+            symbolColor: "#9a9085",
             height: 32,
           },
         }

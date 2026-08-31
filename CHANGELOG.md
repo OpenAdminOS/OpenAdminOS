@@ -11,6 +11,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 
 - Windows no longer stacks a native title bar and menu bar above the app's own header: the window controls are overlaid on the app chrome and the menu is reachable with Alt, which gives back two rows of vertical space. Linux drops the macOS title-bar spacer it never needed.
+- The window now opens on the app's own background color instead of an older darker shade, so launch no longer flashes a mismatched background, and the Windows window-control strip blends into the app chrome instead of painting as a lighter block.
 
 ### Removed
 
