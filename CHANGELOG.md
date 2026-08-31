@@ -6,22 +6,21 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- The training pipeline now reports stage transitions and a five-minute training heartbeat to the live board at training.openadminos.com. Reporting is strictly best-effort: it is inert unless the pod sets the reporting env vars and can never fail a run.
-- Four animated concept mockups for the training.openadminos.com status page (`docs/mockups/16-training-conveyor-concepts.html`): a side-view factory conveyor of the model training pipeline, to be driven later by run-state posts from the GPU pod.
 - Second concept round for the same page (`docs/mockups/17-training-railway-concepts.html`): the conveyor metaphor replaced by a railway line where the training run is a train that dwells at stations, with dwell timers, stage telemetry, a held-run siding, and a departure board. Four styles: metro diagram, comic steam railway, split-flap board, clay model railway. The split-flap style now uses real public-domain train art (recolored CC0 SVGs from FreeSVG, catalogued in `docs/mockups/assets/trains/`).
-- training.openadminos.com now ships as a production `/training` route in `web/` in the chosen Flap Hall design: a split-flap departure board and railway line rendered from `model/site/public-data.json`, idle by default with live run state only from the authenticated `/api/training/run-state` endpoint, plus server-rendered benchmarks (suite and retrieval condition attached to every score), the full run log including failed and held runs, and downloads. The interim single-file concept mockup was removed.
-- The training-data exporter (`model/site/export-public-data.mjs`) emits schemaVersion 2: a `featured` benchmark-series selection that only admits scores with explicit suite and retrieval provenance, a data-derived released version, and the full r1 to r9 plus lite-r1 run log.
 
 - Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.
 - Release publishing verifies the Windows Authenticode signature and signer common name before uploading, and fails with the actual certificate subject when it does not match the configured publisher.
 
 ### Changed
 
+- Benchmark figures are generated from scored runs by `model/site-benchmarks/export-benchmark-data.mjs` and committed as a contract the page parses at build time, so a marketing claim cannot drift from a measurement.
 - Windows code signing runs through Azure Artifact Signing (formerly Trusted Signing): the certificate is short-lived and rotated by Microsoft, the key never leaves Microsoft's HSM, CI holds only a revocable service principal credential, and SmartScreen reputation is established faster than with the previous OV certificate.
 - `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
 - Documented Windows installation, including how to verify the publisher and what to expect from SmartScreen while the organization-validated certificate accrues download reputation.
 
 ### Removed
+
+- The training status page, its run-state API, the pod-side stage reporting in the training pipeline, and the two Supabase tables that backed it. The published run log went with it; the 8B model card no longer claims that log is public.
 
 ### Fixed
 
