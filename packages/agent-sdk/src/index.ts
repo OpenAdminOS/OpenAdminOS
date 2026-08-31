@@ -2267,7 +2267,8 @@ export interface OpenAdminOSApi {
   getRetrievalStatus?(): Promise<RetrievalStatus>;
   refreshRetrievalIndex?(): Promise<RetrievalStatus>;
   installRetrievalIndex?(input: {
-    sourceDir?: string;
+    /** "download" fetches the published index; omit to pick a folder. */
+    source?: "download";
     baseUrl?: string;
   }): Promise<RetrievalStatus>;
   getUsageTelemetryPreview?(): Promise<{

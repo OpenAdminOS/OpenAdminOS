@@ -3657,7 +3657,7 @@ function PrivacySection({
     }
   };
 
-  const installRetrievalIndex = async () => {
+  const installRetrievalIndex = async (source: "download" | "folder" = "download") => {
     const install = window.openAdminOS?.installRetrievalIndex;
     if (!install || retrievalInstalling) return;
     setRetrievalInstalling(true);
@@ -3666,7 +3666,9 @@ function PrivacySection({
       // No argument opens a folder picker in the host. An index copied
       // onto the machine works without any network access, which is the
       // only option some tenants allow.
-      setRetrievalStatus(await install({}));
+      // "download" fetches the published release asset; "folder" opens a
+      // picker in the host so an air-gapped machine can install a copy.
+      setRetrievalStatus(await install(source === "download" ? { source } : {}));
     } catch (caught) {
       setRetrievalError(
         caught instanceof Error ? caught.message : String(caught),
@@ -3903,9 +3905,22 @@ function PrivacySection({
                   retrievalInstalling ||
                   !window.openAdminOS?.installRetrievalIndex
                 }
-                onClick={() => void installRetrievalIndex()}
+                onClick={() => void installRetrievalIndex("download")}
               >
-                {retrievalInstalling ? "Installing…" : "Install index…"}
+                {retrievalInstalling ? "Installing…" : "Download index"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={
+                  retrievalLoading ||
+                  retrievalInstalling ||
+                  !window.openAdminOS?.installRetrievalIndex
+                }
+                onClick={() => void installRetrievalIndex("folder")}
+              >
+                Install from folder…
               </Button>
             </div>
 

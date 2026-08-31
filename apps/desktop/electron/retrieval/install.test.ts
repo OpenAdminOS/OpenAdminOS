@@ -5,7 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { downloadIndex, installIndexFromDirectory, validateIndexDirectory } from "./install.js";
+import { createHash } from "node:crypto";
+
+import {
+  downloadIndex,
+  installIndexFromDirectory,
+  parseChecksums,
+  validateIndexDirectory,
+} from "./install.js";
 
 async function writeIndex(dir: string, chunks: number, dim = 3): Promise<void> {
   await mkdir(dir, { recursive: true });
@@ -92,5 +99,54 @@ describe("documentation index install", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("published index integrity", () => {
+  it("discards a file whose hash does not match the published manifest", async () => {
+    const root = await mkdtemp(join(tmpdir(), "oaos-idx-"));
+    try {
+      const meta = JSON.stringify({ dim: 3, count: 1, when: "2026-08-31" });
+      const chunks = JSON.stringify({ file: "a.md", text: "a" }) + "\n";
+      const vectors = Buffer.from(new Float32Array(3).buffer);
+      // A manifest that matches meta and chunks, but not the vectors:
+      // exactly the shape of a corrupted or substituted asset.
+      const sha = (b: Buffer | string) =>
+        createHash("sha256").update(b).digest("hex");
+      const manifest = [
+        `${sha(meta)}  index-meta.json`,
+        `${sha(chunks)}  chunks.jsonl`,
+        `${"0".repeat(64)}  embeddings.f32`,
+      ].join("\n");
+
+      const fetchImpl = (async (url: string) => {
+        const name = String(url).split("/").pop()!;
+        if (name === "SHA256SUMS.txt") return new Response(manifest);
+        if (name === "index-meta.json") return new Response(meta);
+        if (name === "chunks.jsonl") return new Response(chunks);
+        return new Response(vectors);
+      }) as unknown as typeof fetch;
+
+      await assert.rejects(
+        downloadIndex({
+          baseUrl: "https://example.test/idx",
+          targetDir: join(root, "installed"),
+          fetchImpl,
+        }),
+        /checksum|tampered|corrupted/i,
+      );
+      assert.equal(existsSync(join(root, "installed")), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reads a standard sha256sum manifest", () => {
+    const parsed = parseChecksums(
+      `${"a".repeat(64)}  chunks.jsonl\n${"b".repeat(64)} *embeddings.f32\n# comment\n`,
+    );
+    assert.equal(parsed.get("chunks.jsonl"), "a".repeat(64));
+    assert.equal(parsed.get("embeddings.f32"), "b".repeat(64));
+    assert.equal(parsed.size, 2);
   });
 });

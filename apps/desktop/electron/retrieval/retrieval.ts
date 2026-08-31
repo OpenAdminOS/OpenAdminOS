@@ -134,6 +134,52 @@ export class RetrievalIndex {
   }
 }
 
+/**
+ * Accept the index metadata as the build pipeline writes it.
+ *
+ * The pipeline emits `{dim, count, corpora, when}`; this module was
+ * written against `{dim, chunkCount, embeddingModel, builtAt}`. Rather
+ * than force one side to change and break the other, normalise here.
+ * `embeddingModel` is absent in pipeline output, so it falls back to the
+ * model the corpus was built with; the dimension check below is what
+ * actually catches a mismatched embedding model at query time.
+ */
+export function normalizeIndexMeta(raw: Record<string, unknown>): RetrievalIndexMeta {
+  const dim = typeof raw.dim === "number" ? raw.dim : Number.NaN;
+  if (!Number.isFinite(dim) || dim <= 0) {
+    throw new Error("The index metadata does not declare a vector dimension.");
+  }
+  const chunkCount =
+    typeof raw.chunkCount === "number"
+      ? raw.chunkCount
+      : typeof raw.count === "number"
+        ? raw.count
+        : 0;
+  const builtAt =
+    typeof raw.builtAt === "string"
+      ? raw.builtAt
+      : typeof raw.when === "string"
+        ? raw.when
+        : "unknown";
+  const embeddingModel =
+    typeof raw.embeddingModel === "string" && raw.embeddingModel
+      ? raw.embeddingModel
+      : DEFAULT_INDEX_EMBEDDING_MODEL;
+  const sources = Array.isArray(raw.corpora)
+    ? raw.corpora.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+  return {
+    dim,
+    chunkCount,
+    builtAt,
+    embeddingModel,
+    ...(sources && sources.length > 0 ? { sources } : {}),
+  };
+}
+
+/** What the published index corpus was embedded with. */
+export const DEFAULT_INDEX_EMBEDDING_MODEL = "nomic-embed-text";
+
 function loadIndexFrom(dir: string): LoadedIndex {
   const metaPath = join(dir, "index-meta.json");
   if (!existsSync(metaPath)) {
@@ -141,7 +187,9 @@ function loadIndexFrom(dir: string): LoadedIndex {
       "The documentation index is not installed. Answers are not documentation-grounded yet.",
     );
   }
-  const meta = JSON.parse(readFileSync(metaPath, "utf8")) as RetrievalIndexMeta;
+  const meta = normalizeIndexMeta(
+    JSON.parse(readFileSync(metaPath, "utf8")) as Record<string, unknown>,
+  );
   const chunks = readFileSync(join(dir, "chunks.jsonl"), "utf8")
     .split("\n")
     .filter(Boolean)

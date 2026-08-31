@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { normalizeIndexMeta } from "./retrieval.js";
+
 /**
  * Installing a documentation index.
  *
@@ -15,6 +17,21 @@ import { join } from "node:path";
  */
 
 export const INDEX_FILES = ["index-meta.json", "chunks.jsonl", "embeddings.f32"] as const;
+
+/** Checksum manifest published alongside the index files. */
+export const INDEX_CHECKSUM_FILE = "SHA256SUMS.txt";
+
+/**
+ * Where the published documentation index lives.
+ *
+ * GitHub release assets are free to download with no bandwidth limit and
+ * allow files just under 2 GiB, which suits a 264 MB index far better
+ * than the marketing site's host. The index ships on its own tag so it
+ * can be rebuilt on the documentation's cadence without cutting an app
+ * release.
+ */
+export const DEFAULT_INDEX_BASE_URL =
+  "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/docs-index-2026-08-26";
 
 export interface InstallProgress {
   file: string;
@@ -37,20 +54,12 @@ export async function validateIndexDirectory(dir: string): Promise<InstallResult
       throw new Error(`The index is incomplete: ${file} is missing.`);
     }
   }
-  const meta = JSON.parse(await readFile(join(dir, "index-meta.json"), "utf8")) as {
-    dim?: unknown;
-    chunkCount?: unknown;
-    embeddingModel?: unknown;
-    builtAt?: unknown;
-  };
-  if (typeof meta.dim !== "number" || meta.dim <= 0) {
-    throw new Error("The index metadata does not declare a vector dimension.");
-  }
-  if (typeof meta.embeddingModel !== "string" || !meta.embeddingModel) {
-    throw new Error(
-      "The index metadata does not name the embedding model it was built with. Without it the vectors cannot be trusted to match.",
-    );
-  }
+  const meta = normalizeIndexMeta(
+    JSON.parse(await readFile(join(dir, "index-meta.json"), "utf8")) as Record<
+      string,
+      unknown
+    >,
+  );
   const chunkLines = (await readFile(join(dir, "chunks.jsonl"), "utf8"))
     .split("\n")
     .filter(Boolean).length;
@@ -107,6 +116,19 @@ export async function downloadIndex(input: {
   await rm(staging, { recursive: true, force: true });
   await mkdir(staging, { recursive: true });
 
+  // Fetch the checksum manifest first when it is published. Size alone
+  // catches a truncated download; only a hash catches a corrupted or
+  // substituted one.
+  let checksums = new Map<string, string>();
+  try {
+    const sums = await doFetch(`${base}/${INDEX_CHECKSUM_FILE}`, {
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    if (sums.ok) checksums = parseChecksums(await sums.text());
+  } catch {
+    // A missing manifest is not fatal; the consistency check still runs.
+  }
+
   for (const file of INDEX_FILES) {
     const response = await doFetch(`${base}/${file}`, {
       ...(input.signal ? { signal: input.signal } : {}),
@@ -120,6 +142,15 @@ export async function downloadIndex(input: {
       throw new Error(
         `${file} downloaded ${buffer.byteLength} bytes but the server declared ${declared}. Treating it as truncated.`,
       );
+    }
+    const expected = checksums.get(file);
+    if (expected) {
+      const actual = createHash("sha256").update(buffer).digest("hex");
+      if (actual !== expected) {
+        throw new Error(
+          `${file} does not match its published checksum. The download was corrupted or tampered with, so it was discarded.`,
+        );
+      }
     }
     await writeFile(join(staging, file), buffer);
     input.onProgress?.({
@@ -141,6 +172,16 @@ export async function indexDigest(dir: string): Promise<string> {
     hash.update(await readFile(join(dir, file)));
   }
   return hash.digest("hex").slice(0, 16);
+}
+
+/** Parse a `sha256  filename` manifest into a map. */
+export function parseChecksums(text: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const match = line.trim().match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+    if (match) map.set(match[2]!.trim(), match[1]!.toLowerCase());
+  }
+  return map;
 }
 
 async function promoteStaging(staging: string, target: string): Promise<void> {

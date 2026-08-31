@@ -184,7 +184,11 @@ import {
   ollamaEmbedQuery,
   type RetrievalStatus,
 } from "./retrieval/retrieval.js";
-import { downloadIndex, installIndexFromDirectory } from "./retrieval/install.js";
+import {
+  DEFAULT_INDEX_BASE_URL,
+  downloadIndex,
+  installIndexFromDirectory,
+} from "./retrieval/install.js";
 import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
@@ -1543,10 +1547,13 @@ export class AppStateStore {
     const targetDir = join(this.userDataPath, "retrieval-index");
     if (input.sourceDir) {
       await installIndexFromDirectory({ sourceDir: input.sourceDir, targetDir });
-    } else if (input.baseUrl) {
-      await downloadIndex({ baseUrl: input.baseUrl, targetDir });
     } else {
-      throw new Error("Provide either a folder or a download URL.");
+      // Default to the published release asset; callers can override the
+      // URL for a private mirror.
+      await downloadIndex({
+        baseUrl: input.baseUrl ?? DEFAULT_INDEX_BASE_URL,
+        targetDir,
+      });
     }
     this.retrievalIndexInstance?.reset();
     this.retrievalIndexInstance = undefined;

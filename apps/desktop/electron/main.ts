@@ -5478,10 +5478,12 @@ function registerIpcHandlers() {
     "openadminos:install-retrieval-index",
     handleTrusted(async (_event, input: unknown) => {
       const record = isPlainRecord(input) ? input : {};
-      if (typeof record.baseUrl === "string" && record.baseUrl.length > 0) {
-        return store.installRetrievalIndex({
-          baseUrl: requireBoundedString(record.baseUrl, "baseUrl", 2048),
-        });
+      if (record.source === "download") {
+        return store.installRetrievalIndex(
+          typeof record.baseUrl === "string" && record.baseUrl.length > 0
+            ? { baseUrl: requireBoundedString(record.baseUrl, "baseUrl", 2048) }
+            : {},
+        );
       }
       const parent = mainWindow ?? undefined;
       const options = {
