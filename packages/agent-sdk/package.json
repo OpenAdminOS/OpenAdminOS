@@ -1,6 +1,6 @@
 {
   "name": "@openadminos/agent-sdk",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "type": "module",
   "description": "Shared TypeScript contracts for OpenAdminOS packages.",
   "main": "./dist/index.js",
