@@ -4670,7 +4670,29 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     title: "OpenAdminOS",
     backgroundColor: "#0a0c10",
     show: false,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Windows: draw our own chrome and overlay the system buttons on it,
+    // so the app header replaces the native title bar instead of stacking
+    // under it. macOS keeps the inset traffic lights. Linux keeps the
+    // native frame because titleBarOverlay is not supported there.
+    titleBarStyle:
+      process.platform === "darwin"
+        ? "hiddenInset"
+        : process.platform === "win32"
+          ? "hidden"
+          : "default",
+    ...(process.platform === "win32"
+      ? {
+          titleBarOverlay: {
+            color: "#0a0c10",
+            symbolColor: "#9b958a",
+            height: 32,
+          },
+        }
+      : {}),
+    // The menu is reachable with Alt on Windows and Linux; showing it
+    // permanently costs a full row above a UI that already has its own
+    // navigation.
+    autoHideMenuBar: process.platform !== "darwin",
     webPreferences: {
       preload: join(currentDir, "preload.cjs"),
       contextIsolation: true,

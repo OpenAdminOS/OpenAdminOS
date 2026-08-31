@@ -6,7 +6,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Tenant sign-in now uses the OpenAdminOS Entra app registration, so the consent screen names OpenAdminOS and tenant audit logs attribute activity to it rather than to Microsoft's Graph command line app. Admins whose organizations do not allow third-party multi-tenant apps can choose "Connect with your own app registration" and supply their own client ID (a public client; no client secret is needed or accepted). Each tenant remembers the registration it was connected with, and existing tenants need to reconnect once after upgrading.
+
 ### Changed
+
+- Windows no longer stacks a native title bar and menu bar above the app's own header: the window controls are overlaid on the app chrome and the menu is reachable with Alt, which gives back two rows of vertical space. Linux drops the macOS title-bar spacer it never needed.
 
 ### Removed
 
