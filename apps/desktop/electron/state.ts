@@ -187,6 +187,7 @@ import {
 import {
   DEFAULT_INDEX_BASE_URL,
   downloadIndex,
+  fetchIndexManifest,
   installIndexFromDirectory,
 } from "./retrieval/install.js";
 import {
@@ -278,6 +279,15 @@ interface PersistedState {
    * turns it on from Settings -> Privacy.
    */
   usageTelemetryEnabled?: boolean;
+  /**
+   * Automatic documentation-index install. On by default: grounding
+   * measurably improves answers, so every admin should get it without
+   * having to find a setting. Admins on restricted or metered networks
+   * can turn it off, and it never runs while it is off.
+   */
+  retrievalAutoInstall?: boolean;
+  /** Last automatic attempt, so a failure does not retry every launch. */
+  retrievalAutoInstallAttemptedAt?: string;
   /**
    * MCP write-gateway configuration. The pairing token is never stored
    * here; it lives in provider-style safeStorage. Off by default.
@@ -1510,6 +1520,16 @@ export class AppStateStore {
     return this.retrievalIndexInstance;
   }
 
+  /** Status plus, when known, a newer published index version. */
+  async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
+    const status = await this.getRetrievalStatus();
+    if (!status.available) return status;
+    const manifest = await fetchIndexManifest();
+    return manifest && manifest.version !== status.version
+      ? { ...status, updateAvailable: manifest.version }
+      : status;
+  }
+
   async getRetrievalStatus(): Promise<RetrievalStatus> {
     const index = this.retrievalIndex();
     if (!index) {
@@ -1558,6 +1578,74 @@ export class AppStateStore {
     this.retrievalIndexInstance?.reset();
     this.retrievalIndexInstance = undefined;
     return this.getRetrievalStatus();
+  }
+
+  async getRetrievalAutoInstallEnabled(): Promise<boolean> {
+    const persisted = await this.read();
+    return persisted.retrievalAutoInstall !== false;
+  }
+
+  async setRetrievalAutoInstallEnabled(enabled: boolean): Promise<RetrievalStatus> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      await this.write({ ...current, retrievalAutoInstall: enabled });
+    });
+    if (enabled) void this.autoInstallRetrievalIndex();
+    return this.getRetrievalStatus();
+  }
+
+  /**
+   * Fetch the documentation index in the background on launch.
+   *
+   * Grounding is worth having for every admin, so this does not wait to
+   * be discovered in Settings. It is still bounded: it never runs when
+   * the admin turned it off, never runs when an index is already
+   * installed, retries at most once a day after a failure so a blocked
+   * network is not hammered, and never blocks startup or surfaces an
+   * error dialog. Settings shows the resulting state either way.
+   */
+  async autoInstallRetrievalIndex(): Promise<void> {
+    try {
+      if (!this.userDataPath) return;
+      const persisted = await this.read();
+      if (persisted.retrievalAutoInstall === false) return;
+
+      // Follow the published pointer so a rebuilt index reaches existing
+      // installs too, not just fresh ones. No manifest (offline, blocked,
+      // not yet published) means fall back to installing the pinned
+      // release when nothing is installed at all.
+      const status = await this.getRetrievalStatus();
+      const manifest = await fetchIndexManifest();
+      if (status.available) {
+        if (!manifest || manifest.version === status.version) return;
+      }
+
+      const lastAttempt = persisted.retrievalAutoInstallAttemptedAt;
+      if (lastAttempt) {
+        const age = Date.now() - new Date(lastAttempt).getTime();
+        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
+      }
+      await this.serialize(async () => {
+        const current = await this.read();
+        await this.write({
+          ...current,
+          retrievalAutoInstallAttemptedAt: new Date().toISOString(),
+        });
+      });
+
+      await this.installRetrievalIndex(
+        manifest ? { baseUrl: manifest.baseUrl } : {},
+      );
+      this.emitStateChanged("retrieval-index-installed");
+    } catch (error) {
+      // Never user-facing: a missing release, an offline machine or a
+      // proxy that blocks the download all simply leave answers
+      // ungrounded, which the Settings panel states plainly.
+      console.info(
+        "[retrieval] automatic index install skipped:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   async refreshRetrievalIndex(): Promise<RetrievalStatus> {
@@ -5280,6 +5368,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       if (typeof parsed.usageTelemetryEnabled === "boolean") {
         state.usageTelemetryEnabled = parsed.usageTelemetryEnabled;
+      }
+      if (typeof parsed.retrievalAutoInstall === "boolean") {
+        state.retrievalAutoInstall = parsed.retrievalAutoInstall;
+      }
+      if (typeof parsed.retrievalAutoInstallAttemptedAt === "string") {
+        state.retrievalAutoInstallAttemptedAt = parsed.retrievalAutoInstallAttemptedAt;
       }
       if (isPlainRecordValue(parsed.gateway)) {
         const gateway = parsed.gateway as Record<string, unknown>;

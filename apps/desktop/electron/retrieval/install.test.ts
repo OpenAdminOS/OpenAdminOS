@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 
 import {
   downloadIndex,
+  fetchIndexManifest,
   installIndexFromDirectory,
   parseChecksums,
   validateIndexDirectory,
@@ -148,5 +149,34 @@ describe("published index integrity", () => {
     assert.equal(parsed.get("chunks.jsonl"), "a".repeat(64));
     assert.equal(parsed.get("embeddings.f32"), "b".repeat(64));
     assert.equal(parsed.size, 2);
+  });
+});
+
+describe("index update pointer", () => {
+  const manifest = (body: unknown, ok = true) =>
+    (async () => new Response(JSON.stringify(body), { status: ok ? 200 : 404 })) as unknown as typeof fetch;
+
+  it("reads the published version and release location", async () => {
+    const result = await fetchIndexManifest({
+      fetchImpl: manifest({
+        version: "2026-09-30",
+        baseUrl: "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/docs-index-2026-09-30",
+      }),
+    });
+    assert.equal(result?.version, "2026-09-30");
+  });
+
+  it("refuses a pointer that redirects the download off our release host", async () => {
+    // The pointer is fetched over the network, so it must not be able to
+    // aim a 264 MB download at an arbitrary host.
+    const result = await fetchIndexManifest({
+      fetchImpl: manifest({ version: "9", baseUrl: "https://evil.example/payload" }),
+    });
+    assert.equal(result, null);
+  });
+
+  it("treats an unreachable or malformed pointer as no update", async () => {
+    assert.equal(await fetchIndexManifest({ fetchImpl: manifest({}, false) }), null);
+    assert.equal(await fetchIndexManifest({ fetchImpl: manifest({ version: 5 }) }), null);
   });
 });

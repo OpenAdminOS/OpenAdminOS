@@ -5472,7 +5472,20 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:get-retrieval-status",
-    handleTrusted(() => store.getRetrievalStatus()),
+    handleTrusted(() => store.getRetrievalStatusWithUpdates()),
+  );
+  ipcMain.handle(
+    "openadminos:set-retrieval-auto-install",
+    handleTrusted((_event, enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("Automatic index install must be a boolean.");
+      }
+      return store.setRetrievalAutoInstallEnabled(enabled);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-retrieval-auto-install",
+    handleTrusted(() => store.getRetrievalAutoInstallEnabled()),
   );
   ipcMain.handle(
     "openadminos:install-retrieval-index",
@@ -6244,6 +6257,9 @@ if (!gotLock) {
     void store.startGatewayIfEnabled().catch((error) => {
       console.error("[gateway] failed to start on launch", error);
     });
+    // Fetch or update the documentation index in the background. Never
+    // blocks startup and never raises a dialog; Settings shows the state.
+    void store.autoInstallRetrievalIndex();
     debugStartupLog("registered ipc handlers");
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());

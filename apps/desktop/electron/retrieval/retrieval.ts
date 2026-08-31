@@ -23,6 +23,12 @@ export interface RetrievalIndexMeta {
   builtAt: string;
   chunkCount: number;
   sources?: string[];
+  /**
+   * Index release version, e.g. "2026-08-26". Compared against the
+   * published manifest to decide whether a newer index exists. Falls
+   * back to the build date when the file predates versioning.
+   */
+  version: string;
 }
 
 export interface RetrievedChunk {
@@ -59,6 +65,7 @@ export class RetrievalIndex {
         chunkCount: index.meta.chunkCount,
         embeddingModel: index.meta.embeddingModel,
         dim: index.meta.dim,
+        version: index.meta.version,
       };
     } catch (error) {
       return {
@@ -168,11 +175,16 @@ export function normalizeIndexMeta(raw: Record<string, unknown>): RetrievalIndex
   const sources = Array.isArray(raw.corpora)
     ? raw.corpora.filter((entry): entry is string => typeof entry === "string")
     : undefined;
+  const version =
+    typeof raw.version === "string" && raw.version
+      ? raw.version
+      : builtAt.slice(0, 10);
   return {
     dim,
     chunkCount,
     builtAt,
     embeddingModel,
+    version,
     ...(sources && sources.length > 0 ? { sources } : {}),
   };
 }

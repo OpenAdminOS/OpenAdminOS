@@ -27,9 +27,19 @@ if (!process.argv[2]) {
   process.exit(2);
 }
 
-const meta = JSON.parse(await readFile(join(indexDir, "index-meta.json"), "utf8"));
+const metaPath = join(indexDir, "index-meta.json");
+const meta = JSON.parse(await readFile(metaPath, "utf8"));
 const built = typeof meta.when === "string" ? meta.when : meta.builtAt;
-const tag = process.argv[3] ?? `docs-index-${String(built).slice(0, 10)}`;
+const version = meta.version ?? String(built).slice(0, 10);
+const tag = process.argv[3] ?? `docs-index-${version}`;
+
+// Stamp the version into the metadata so an installed index can say
+// which release it is, and the app can tell when a newer one exists.
+if (meta.version !== version) {
+  meta.version = version;
+  await writeFile(metaPath, JSON.stringify(meta));
+  console.log(`stamped index version ${version}`);
+}
 
 async function sha256(path) {
   return await new Promise((resolveHash, reject) => {
@@ -60,8 +70,21 @@ await writeFile(sumsPath, lines.join("\n") + "\n");
 console.log(`\nindex: ${meta.count ?? meta.chunkCount} chunks, dim ${meta.dim}, ${(total / 1024 ** 2).toFixed(0)} MB`);
 console.log(`tag:   ${tag}`);
 
+// The stable pointer every install polls. Publishing a new index means
+// uploading its assets under a new tag, then rewriting this one file on
+// the fixed `docs-index` tag.
+const manifest = {
+  version,
+  baseUrl: `https://github.com/OpenAdminOS/OpenAdminOS/releases/download/${tag}`,
+  chunkCount: meta.count ?? meta.chunkCount,
+  builtAt: built,
+};
+const manifestPath = join(indexDir, "index-latest.json");
+await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+
 if (process.env.DRY_RUN === "1") {
-  console.log("\nDRY_RUN=1, not publishing. Wrote SHA256SUMS.txt only.");
+  console.log("\nDRY_RUN=1, not publishing.");
+  console.log("manifest:", JSON.stringify(manifest));
   process.exit(0);
 }
 
@@ -76,4 +99,22 @@ const args = [
 ];
 console.log(`\ngh ${args.slice(0, 3).join(" ")} ...`);
 const result = spawnSync("gh", args, { stdio: "inherit" });
-process.exit(result.status ?? 1);
+if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
+
+// Move the stable pointer last, so it never names a release that does
+// not exist yet.
+console.log("\nupdating the docs-index pointer");
+spawnSync("gh", ["release", "delete-asset", "docs-index", "index-latest.json", "--yes"], {
+  stdio: "ignore",
+});
+const pointer = spawnSync(
+  "gh",
+  ["release", "upload", "docs-index", manifestPath, "--clobber"],
+  { stdio: "inherit" },
+);
+if ((pointer.status ?? 1) !== 0) {
+  console.error(
+    "\nAssets published, but the docs-index pointer was not updated. Create a release tagged `docs-index` once, then re-run.",
+  );
+}
+process.exit(pointer.status ?? 1);

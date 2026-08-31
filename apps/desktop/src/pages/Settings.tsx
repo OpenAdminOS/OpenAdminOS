@@ -3937,7 +3937,17 @@ function PrivacySection({
                   <Pill tone="success">
                     <StatusDot tone="success" /> Available
                   </Pill>
+                  {retrievalStatus.updateAvailable ? (
+                    <p className="mt-2 text-[12px] text-[var(--color-text-muted)]">
+                      Version {retrievalStatus.updateAvailable} is available and
+                      installs automatically in the background.
+                    </p>
+                  ) : null}
                   <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <RetrievalDetail
+                      label="Version"
+                      value={retrievalStatus.version ?? "Not recorded"}
+                    />
                     <RetrievalDetail
                       label="Built"
                       value={

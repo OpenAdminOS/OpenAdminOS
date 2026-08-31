@@ -1256,6 +1256,10 @@ export interface UsageTelemetryPayload {
 
 export interface RetrievalStatus {
   available: boolean;
+  /** Installed index version, e.g. "2026-08-26". */
+  version?: string;
+  /** Newer version available from the published manifest, when known. */
+  updateAvailable?: string;
   builtAt?: string;
   chunkCount?: number;
   embeddingModel?: string;
@@ -2266,6 +2270,8 @@ export interface OpenAdminOSApi {
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
   getRetrievalStatus?(): Promise<RetrievalStatus>;
   refreshRetrievalIndex?(): Promise<RetrievalStatus>;
+  getRetrievalAutoInstall?(): Promise<boolean>;
+  setRetrievalAutoInstall?(enabled: boolean): Promise<RetrievalStatus>;
   installRetrievalIndex?(input: {
     /** "download" fetches the published index; omit to pick a folder. */
     source?: "download";

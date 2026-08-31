@@ -33,6 +33,57 @@ export const INDEX_CHECKSUM_FILE = "SHA256SUMS.txt";
 export const DEFAULT_INDEX_BASE_URL =
   "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/docs-index-2026-08-26";
 
+/**
+ * Stable pointer to the current index release.
+ *
+ * The index is rebuilt as Microsoft's documentation changes, so the app
+ * cannot hardcode one release forever. This file lives on a tag that
+ * never moves and names the version and the release that holds it, the
+ * same shape an updater uses. Publishing a new index means uploading
+ * new assets and rewriting this one small file.
+ */
+export const INDEX_MANIFEST_URL =
+  "https://github.com/OpenAdminOS/OpenAdminOS/releases/download/docs-index/index-latest.json";
+
+export interface IndexManifest {
+  version: string;
+  baseUrl: string;
+  chunkCount?: number;
+  builtAt?: string;
+}
+
+/** Read the published pointer. Returns null when it cannot be reached. */
+export async function fetchIndexManifest(input: {
+  url?: string;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+} = {}): Promise<IndexManifest | null> {
+  const doFetch = input.fetchImpl ?? fetch;
+  try {
+    const response = await doFetch(input.url ?? INDEX_MANIFEST_URL, {
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    if (!response.ok) return null;
+    const raw = (await response.json()) as Record<string, unknown>;
+    if (typeof raw.version !== "string" || typeof raw.baseUrl !== "string") {
+      return null;
+    }
+    // Only ever follow a pointer back to our own release host.
+    const host = new URL(raw.baseUrl).hostname.toLowerCase();
+    if (host !== "github.com" && !host.endsWith(".githubusercontent.com")) {
+      return null;
+    }
+    return {
+      version: raw.version,
+      baseUrl: raw.baseUrl,
+      ...(typeof raw.chunkCount === "number" ? { chunkCount: raw.chunkCount } : {}),
+      ...(typeof raw.builtAt === "string" ? { builtAt: raw.builtAt } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface InstallProgress {
   file: string;
   receivedBytes: number;
