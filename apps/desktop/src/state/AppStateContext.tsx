@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import {
+  type ConnectTenantOptions,
   deriveTrustState,
   providerCatalog,
   type AgentDraft,
@@ -60,7 +61,7 @@ interface AppStateContextValue {
   confirmRun: (runId: string, phrase: string) => Promise<RunRecord>;
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
-  connectTenant: () => Promise<TenantRecord | undefined>;
+  connectTenant: (options?: ConnectTenantOptions) => Promise<TenantRecord | undefined>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
@@ -471,7 +472,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     return api.getRequestedScopes();
   }, []);
 
-  const connectTenant = useCallback(async () => {
+  const connectTenant = useCallback(async (options?: ConnectTenantOptions) => {
     const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error(
@@ -482,7 +483,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
     setError(null);
     try {
-      const nextState = await api.connectTenant();
+      const nextState = await api.connectTenant(options);
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
       const id = nextState.activeTenantId;

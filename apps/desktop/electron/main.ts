@@ -52,6 +52,7 @@ import type {
   CreateWorkspaceInput,
   DriftBaselineDriftInput,
   DriftEntryDetailInput,
+  ConnectTenantOptions,
   DriftBaselineExportBundle,
   DriftBundleCompareInput,
   DriftTenantCompareInput,
@@ -4114,6 +4115,34 @@ function validateDriftBundle(value: unknown): DriftBaselineExportBundle {
   };
 }
 
+function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
+  if (value === undefined || value === null) return {};
+  if (!isPlainRecord(value)) {
+    throw new Error("Connect tenant options must be an object.");
+  }
+  if (value.appRegistration === undefined) return {};
+  if (!isPlainRecord(value.appRegistration)) {
+    throw new Error("appRegistration must be an object.");
+  }
+  const registration = value.appRegistration;
+  const options: ConnectTenantOptions = {
+    appRegistration: {
+      clientId: requireBoundedString(registration.clientId, "clientId", 64),
+    },
+  };
+  if (
+    registration.directoryTenantId !== undefined &&
+    registration.directoryTenantId !== ""
+  ) {
+    options.appRegistration!.directoryTenantId = requireBoundedString(
+      registration.directoryTenantId,
+      "directoryTenantId",
+      128,
+    );
+  }
+  return options;
+}
+
 function validateStartBaselineRollbackInput(
   value: unknown,
 ): StartBaselineRollbackInput {
@@ -5829,8 +5858,8 @@ function registerIpcHandlers() {
     "openadminos:get-requested-scopes",
     handleTrusted(() => store.listRequestedScopes()),
   );
-  ipcMain.handle("openadminos:connect-tenant", handleTrusted(async () => {
-    const state = await store.connectTenant();
+  ipcMain.handle("openadminos:connect-tenant", handleTrusted(async (_event, input?: unknown) => {
+    const state = await store.connectTenant(validateConnectTenantOptions(input));
     void registerSchedulerIfReady("tenant");
     return state;
   }));
@@ -6099,6 +6128,13 @@ if (!gotLock) {
 
     const userDataDir = app.getPath("userData");
     const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
+    // Bring-your-own registrations get an isolated token cache: MSAL
+    // binds tokens to a client id, so mixing caches would surface
+    // accounts that the active client can never refresh.
+    const tokenStoreFor = (clientId: string) =>
+      new SafeStorageTokenCacheStore(
+        join(userDataDir, `tokens-${clientId.replace(/[^0-9a-zA-Z-]/g, "")}.bin`),
+      );
     seedIntuneChatSmokeState(userDataDir);
     seedReportIssueSmokeState(userDataDir);
     try {
@@ -6121,6 +6157,7 @@ if (!gotLock) {
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
       tokenStore,
+      tokenStoreFor,
       userDataPath: userDataDir,
       userAgentsDir: join(userDataDir, "agents"),
       // Only packaged production builds report installs to the public

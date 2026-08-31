@@ -486,6 +486,44 @@ export interface TenantRecord {
    * run yet or returned no relevant SKUs.
    */
   relevantLicenses?: TenantLicense[];
+  /**
+   * Which Entra app registration this tenant was connected with. Token
+   * refresh must reuse the same client id that issued the tokens, so
+   * this is pinned per tenant at connect time. Absent on tenants
+   * connected before app-identity choice existed; those fall back to
+   * the app default.
+   */
+  appRegistration?: TenantAppRegistration;
+}
+
+/**
+ * The Entra application identity used to sign in to a tenant.
+ *
+ * `kind: "openadminos"` is the published, publisher-verified
+ * OpenAdminOS multi-tenant app. `kind: "custom"` is an admin's own
+ * registration, for organizations that do not permit third-party
+ * multi-tenant service principals.
+ *
+ * Public clients only: OpenAdminOS uses Authorization Code + PKCE with
+ * a loopback redirect, so there is never a client secret. A secret
+ * cannot be protected inside a distributed desktop binary.
+ */
+export interface TenantAppRegistration {
+  kind: "openadminos" | "custom";
+  clientId: string;
+  /**
+   * Full MSAL authority. Single-tenant custom registrations need their
+   * directory id here; multi-tenant apps use the common authority.
+   */
+  authority?: string;
+}
+
+export interface ConnectTenantOptions {
+  /**
+   * Custom registration to sign in with. Omit to use the OpenAdminOS
+   * app. `directoryTenantId` is required only for single-tenant apps.
+   */
+  appRegistration?: { clientId: string; directoryTenantId?: string };
 }
 
 /** A subscribed SKU surfaced in the Settings → Tenants license panel. */
@@ -2450,7 +2488,7 @@ export interface OpenAdminOSApi {
    * what is actually requested.
    */
   getRequestedScopes(): Promise<RequestedScope[]>;
-  connectTenant(): Promise<AppState>;
+  connectTenant(options?: ConnectTenantOptions): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;

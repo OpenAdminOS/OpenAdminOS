@@ -18,7 +18,40 @@ import {
 } from "@openadminos/agent-sdk";
 
 export const GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
+
+/**
+ * The OpenAdminOS multi-tenant app registration: public client,
+ * `http://localhost` loopback redirect, public-client flows enabled,
+ * delegated read scopes only.
+ *
+ * An application (client) id is a public identifier, not a secret. It
+ * appears in every authorization URL the browser sees, so shipping it
+ * in the open is expected for a public client.
+ */
+export const OPENADMINOS_CLIENT_ID = "d1de0a94-f67a-421d-8804-a235955ffd69";
+
+/** The client id the app signs in with when the user does not bring their own. */
+export function defaultClientId(): string {
+  return OPENADMINOS_CLIENT_ID || GRAPH_CLI_CLIENT_ID;
+}
+
 export const DEFAULT_AUTHORITY = "https://login.microsoftonline.com/common";
+
+/**
+ * Build the MSAL authority for a bring-your-own registration. Custom
+ * apps registered as single-tenant must authenticate against their own
+ * directory; multi-tenant apps use /common.
+ */
+export function authorityForDirectory(directoryTenantId?: string): string {
+  const trimmed = directoryTenantId?.trim();
+  if (!trimmed) return DEFAULT_AUTHORITY;
+  if (!/^[0-9a-zA-Z.-]{1,100}$/.test(trimmed)) {
+    throw new Error(
+      "Directory (tenant) ID must be a GUID or a verified domain name.",
+    );
+  }
+  return `https://login.microsoftonline.com/${trimmed}`;
+}
 // Bundled at initial sign-in so the admin sees ONE Microsoft consent
 // screen, every bundled read-only agent can run without a second
 // consent prompt, and Intune Chat can refresh its core read-only cache
@@ -240,7 +273,7 @@ export function createMsalClient(input: {
 }): PublicClientApplication {
   return new PublicClientApplication({
     auth: {
-      clientId: input.clientId ?? GRAPH_CLI_CLIENT_ID,
+      clientId: input.clientId ?? defaultClientId(),
       authority: input.authority ?? DEFAULT_AUTHORITY,
     },
     cache: {

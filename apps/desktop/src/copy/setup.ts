@@ -26,6 +26,21 @@ export const SETUP_COPY = {
     "No tenant connected. You can draft a question now; connecting happens when you send.",
   guestComposerPlaceholder:
     "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
+  appIdentityTitle: "Which app registration signs you in",
+  appIdentityDefault:
+    "Connecting uses the OpenAdminOS app registration. Your admin approves the read permissions above, and OpenAdminOS appears by name in your tenant's audit log.",
+  useOwnRegistration: "Connect with your own app registration",
+  ownRegistrationTitle: "Use your own app registration",
+  ownRegistrationBody:
+    "For organizations that do not allow third-party multi-tenant apps. Register a public client (mobile and desktop) in Entra with the redirect URI http://localhost, then enter its details below.",
+  ownRegistrationNoSecret:
+    "No client secret is needed or accepted. OpenAdminOS signs in as a public client using Authorization Code with PKCE, so a secret could not be kept safe in a desktop app.",
+  clientIdLabel: "Application (client) ID",
+  clientIdHint: "The GUID from your app registration overview.",
+  directoryIdLabel: "Directory (tenant) ID",
+  directoryIdHint:
+    "Only needed when your registration is single-tenant. Leave empty for a multi-tenant registration.",
+  useDefaultRegistration: "Use the OpenAdminOS registration instead",
   statusNoTenant: "No active tenant · Connect",
 } as const;
 

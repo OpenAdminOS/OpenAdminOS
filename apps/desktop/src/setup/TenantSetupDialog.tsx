@@ -15,7 +15,13 @@ import {
   IconWarning,
 } from "../components/icons";
 import { SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
-import type { ProviderId, ProviderSummary, RequestedScope, TenantRecord } from "../shared/openAdminOS";
+import type {
+  ConnectTenantOptions,
+  ProviderId,
+  ProviderSummary,
+  RequestedScope,
+  TenantRecord,
+} from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import type { PendingIntent } from "./pending-intent";
 import { groupRequestedScopes } from "./scope-groups";
@@ -58,7 +64,7 @@ export function TenantSetupDialog({
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
   onClose: () => void;
-  onConnect: () => void;
+  onConnect: (options?: ConnectTenantOptions) => void;
   onKeepWaiting: () => void;
   onTryAgain: () => void;
   onSelectProvider: (id: ProviderId) => void;
@@ -135,9 +141,14 @@ function PermissionsStep({
   scopes: RequestedScope[] | null;
   scopesError: string | null;
   onCancel: () => void;
-  onConnect: () => void;
+  onConnect: (options?: ConnectTenantOptions) => void;
 }) {
   const groups = useMemo(() => groupRequestedScopes(scopes ?? []), [scopes]);
+  // Bring-your-own app registration: closed by default so the common
+  // path stays one button, but always visible as an option.
+  const [customOpen, setCustomOpen] = useState(false);
+  const [clientId, setClientId] = useState("");
+  const [directoryTenantId, setDirectoryTenantId] = useState("");
   return (
     <>
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-6">
@@ -203,6 +214,68 @@ function PermissionsStep({
           <p>{SETUP_COPY.signInScopesNote}</p>
           <p>{SETUP_COPY.betaNote}</p>
         </div>
+
+        <div className="mt-4 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            {SETUP_COPY.appIdentityTitle}
+          </div>
+          {customOpen ? (
+            <div className="mt-2 space-y-3">
+              <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+                {SETUP_COPY.ownRegistrationBody}
+              </p>
+              <p className="text-[11px] leading-5 text-[var(--color-text-muted)]">
+                {SETUP_COPY.ownRegistrationNoSecret}
+              </p>
+              <label className="block text-[12px] text-[var(--color-text-soft)]">
+                {SETUP_COPY.clientIdLabel}
+                <input
+                  value={clientId}
+                  onChange={(event) => setClientId(event.target.value)}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  spellCheck={false}
+                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                />
+                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                  {SETUP_COPY.clientIdHint}
+                </span>
+              </label>
+              <label className="block text-[12px] text-[var(--color-text-soft)]">
+                {SETUP_COPY.directoryIdLabel}
+                <input
+                  value={directoryTenantId}
+                  onChange={(event) => setDirectoryTenantId(event.target.value)}
+                  placeholder="contoso.onmicrosoft.com"
+                  spellCheck={false}
+                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                />
+                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                  {SETUP_COPY.directoryIdHint}
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setCustomOpen(false)}
+                className="text-[11px] text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
+              >
+                {SETUP_COPY.useDefaultRegistration}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-2 space-y-2">
+              <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+                {SETUP_COPY.appIdentityDefault}
+              </p>
+              <button
+                type="button"
+                onClick={() => setCustomOpen(true)}
+                className="text-[11px] text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
+              >
+                {SETUP_COPY.useOwnRegistration}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
@@ -210,10 +283,27 @@ function PermissionsStep({
           data-autofocus
           variant="primary"
           leadingIcon={<IconShield size={13} />}
-          disabled={scopes === null || scopesError !== null}
-          onClick={onConnect}
+          disabled={
+            scopes === null ||
+            scopesError !== null ||
+            (customOpen && clientId.trim().length === 0)
+          }
+          onClick={() =>
+            onConnect(
+              customOpen
+                ? {
+                    appRegistration: {
+                      clientId: clientId.trim(),
+                      ...(directoryTenantId.trim()
+                        ? { directoryTenantId: directoryTenantId.trim() }
+                        : {}),
+                    },
+                  }
+                : undefined,
+            )
+          }
         >
-          {SETUP_COPY.approve}
+          {customOpen ? SETUP_COPY.useOwnRegistration : SETUP_COPY.approve}
         </Button>
       </DialogFooter>
     </>

@@ -12,7 +12,12 @@ import { useLocation, useNavigate } from "react-router";
 import { SETUP_COPY } from "../copy";
 import { useToast } from "../components/Toast";
 import { isProviderImplemented } from "../shared/providers";
-import type { ProviderId, RequestedScope, TenantRecord } from "../shared/openAdminOS";
+import type {
+  ConnectTenantOptions,
+  ProviderId,
+  RequestedScope,
+  TenantRecord,
+} from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import {
   clearPendingIntent,
@@ -188,13 +193,13 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     if (wasWaiting) void cancelConnectTenant();
   }, [cancelConnectTenant, stage]);
 
-  const startConnect = useCallback(async () => {
+  const startConnect = useCallback(async (options?: ConnectTenantOptions) => {
     const attemptId = attemptIdRef.current + 1;
     attemptIdRef.current = attemptId;
     setError(null);
     setStage("waiting");
     try {
-      const tenant = await connectTenant();
+      const tenant = await connectTenant(options);
       if (attemptId !== attemptIdRef.current) {
         if (tenant) toast.success(SETUP_COPY.lateSuccess(tenant.displayName));
         return;
@@ -293,7 +298,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         providers={state.providers}
         activeProviderId={state.activeProviderId}
         onClose={closeFlow}
-        onConnect={() => void startConnect()}
+        onConnect={(options) => void startConnect(options)}
         onKeepWaiting={() => setStage("waiting")}
         onTryAgain={() => void tryAgain()}
         onSelectProvider={(id) => void selectProvider(id)}

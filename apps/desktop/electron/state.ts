@@ -11,7 +11,10 @@ import {
   createCodexLlm,
   createAppleFoundationLlm,
   createLmStudioLlm,
+  DEFAULT_AUTHORITY,
+  authorityForDirectory,
   createMsalClient,
+  defaultClientId,
   createOllamaLlm,
   createRegistryInstallCountPayload,
   createTenantSession,
@@ -59,6 +62,8 @@ import type {
   RunHistoryRetentionSettings,
   ProviderTestResult,
   StartRunOptions,
+  TenantAppRegistration,
+  ConnectTenantOptions,
   TenantRecord,
   TenantSession,
   AzureOpenAIProviderConfig,
@@ -820,6 +825,20 @@ function auditEventWithinRange(
   return true;
 }
 
+function requireClientId(value: string): string {
+  const trimmed = value.trim();
+  if (
+    !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+      trimmed,
+    )
+  ) {
+    throw new Error(
+      "Application (client) ID must be a GUID from your Entra app registration.",
+    );
+  }
+  return trimmed;
+}
+
 function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -968,6 +987,12 @@ export interface AppStateStoreOptions {
    */
   statsApiUrl?: string;
   /**
+   * Factory for a per-client-id token cache when a tenant is connected
+   * with a bring-your-own app registration. Custom registrations must
+   * not share the default identity's cache. Omit in tests.
+   */
+  tokenStoreFor?(clientId: string): TokenCacheStorage;
+  /**
    * Base URL for the opt-in usage-telemetry collector. Empty (the
    * default) means usage pings never fire regardless of the user's
    * opt-in. Set per build once a collector is hosted.
@@ -1039,6 +1064,8 @@ export class AppStateStore {
   private readonly onStateChanged:
     | ((info: { reason: string; runId?: string }) => void)
     | undefined;
+  private readonly msalClients = new Map<string, PublicClientApplication>();
+  private readonly tokenStoreFor: AppStateStoreOptions["tokenStoreFor"];
   private readonly statsApiUrl: string;
   private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
@@ -1068,7 +1095,6 @@ export class AppStateStore {
     | undefined;
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
-  private msalClient: PublicClientApplication | undefined;
   private tenantConnectController: AbortController | undefined;
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
@@ -1088,6 +1114,7 @@ export class AppStateStore {
       this.onRunFinished = undefined;
       this.onStateChanged = undefined;
       this.statsApiUrl = "";
+      this.tokenStoreFor = undefined;
       this.usageTelemetryUrl = "";
       this.appVersion = "0.0.0";
       this.sandboxedCodeDefault = false;
@@ -1113,6 +1140,7 @@ export class AppStateStore {
         typeof options.statsApiUrl === "string"
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
+      this.tokenStoreFor = options.tokenStoreFor;
       // No default: usage telemetry stays inert until a collector URL is
       // configured for the build AND the user opts in. // TODO(ugur):
       // decide where the usage collector is hosted and set it here.
@@ -1520,7 +1548,7 @@ export class AppStateStore {
   }
 
   private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
-    const client = this.getMsalClient();
+    const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     return createTenantSession({
       client,
@@ -1632,13 +1660,42 @@ export class AppStateStore {
   }
 
   private getMsalClient(): PublicClientApplication {
-    if (this.msalClient) return this.msalClient;
+    return this.msalClientFor(undefined);
+  }
+
+  /**
+   * MSAL clients are cached per (clientId, authority). Tokens are bound
+   * to the client id that issued them, so silent refresh for a tenant
+   * must reuse the exact registration it was connected with. Custom
+   * registrations get their own token cache file; the default identity
+   * keeps the original `tokens.bin` so existing installs are untouched.
+   */
+  private msalClientFor(
+    registration: TenantAppRegistration | undefined,
+  ): PublicClientApplication {
+    const clientId = registration?.clientId ?? defaultClientId();
+    const authority = registration?.authority ?? DEFAULT_AUTHORITY;
+    const key = `${clientId}|${authority}`;
+    const cached = this.msalClients.get(key);
+    if (cached) return cached;
+
+    const isDefault = clientId === defaultClientId();
+    const store =
+      isDefault || !this.tokenStoreFor
+        ? this.tokenStore
+        : this.tokenStoreFor(clientId);
     const cacheStorage: TokenCacheStorage = {
-      read: () => this.tokenStore.read(),
-      write: (serialized) => this.tokenStore.write(serialized),
+      read: () => store.read(),
+      write: (serialized) => store.write(serialized),
     };
-    this.msalClient = createMsalClient({ storage: cacheStorage });
-    return this.msalClient;
+    const client = createMsalClient({ storage: cacheStorage, clientId, authority });
+    this.msalClients.set(key, client);
+    return client;
+  }
+
+  /** The MSAL client that issued this tenant's tokens. */
+  private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
+    return this.msalClientFor(tenant.appRegistration);
   }
 
   private requireIntelligenceStore(): IntelligenceSqliteStore {
@@ -4651,11 +4708,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }));
   }
 
-  async connectTenant(): Promise<AppState> {
+  async connectTenant(options: ConnectTenantOptions = {}): Promise<AppState> {
     this.tenantConnectController?.abort();
     const controller = new AbortController();
     this.tenantConnectController = controller;
-    const client = this.getMsalClient();
+    // Resolve which Entra app identity signs in. A custom registration
+    // must be a public client (Authorization Code + PKCE, loopback
+    // redirect); there is deliberately no client secret to supply.
+    const registration: TenantAppRegistration | undefined = options.appRegistration
+      ? {
+          kind: "custom",
+          clientId: requireClientId(options.appRegistration.clientId),
+          authority: authorityForDirectory(
+            options.appRegistration.directoryTenantId,
+          ),
+        }
+      : { kind: "openadminos", clientId: defaultClientId() };
+    const client = this.msalClientFor(registration);
     let result;
     try {
       result = await runInteractiveFlow({
@@ -4693,6 +4762,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: account.username,
       addedAt,
       lastUsedAt: addedAt,
+      ...(registration ? { appRegistration: registration } : {}),
     };
 
     await this.serialize(async () => {
@@ -4760,7 +4830,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (recent && !licensesMissing && !options.force) {
       return;
     }
-    const client = this.getMsalClient();
+    const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const session = createTenantSession({
       client,
@@ -4825,7 +4895,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (target) {
         try {
           await removeAccount({
-            client: this.getMsalClient(),
+            client: this.msalClientForTenant(target),
             homeAccountId: target.homeAccountId,
           });
         } catch (cause) {
@@ -4986,7 +5056,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
       );
     }
-    const client = this.getMsalClient();
+    const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const tenantSession = createTenantSession({
       client,
