@@ -1,11 +1,11 @@
-id: v2-answer-compare-3
+id: v2-answer-compare-5
 scorer: contains
 maxTokens: 320
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: What is the difference between a security baseline and a configuration profile?
+prompt: How does a compliance policy differ from a configuration profile?
 mustMatch:
-  - recommend|microsoft-?published|preconfigur
-  - custom|your own|build
+  - evaluat|judge|marks?|compliant
+  - settings?|configur|push
 mustNotMatch:
   - can't find|cannot find|not in the (docs|supplied|provided)
   - serve different purposes.?$

@@ -2,7 +2,7 @@ id: v2-identity-18
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Is my data sent anywhere?
+prompt: Who is responsible for your training?
 mustMatch:
   - openadmin
 mustNotMatch:

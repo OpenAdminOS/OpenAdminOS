@@ -5,17 +5,17 @@ retrieval:
 maxTokens: 300
 system: >-
   You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
-  do not contain the answer, reply with exactly: OUT OF SCOPE
+  do not contain the answer, reply with exactly: NO ANSWER FOUND
 prompt: >-
   [doc 1: intune/overview.md]
 
-  General guidance about configuration profiles.
+  General guidance about managed devices.
 
 
   ---
 
 
-  What is the default value of the 'Zephyr Signal Trellis' setting, and which licence does it
+  What is the default value of the 'Tessellated Trust Fabric' setting, and which licence does it
   require?
 mustContain:
-  - OUT OF SCOPE
+  - NO ANSWER FOUND

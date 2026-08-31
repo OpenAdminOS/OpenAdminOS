@@ -2,7 +2,7 @@ id: v2-identity-25
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Which company built you?
+prompt: Which company should I contact about you?
 mustMatch:
   - openadmin
 mustNotMatch:

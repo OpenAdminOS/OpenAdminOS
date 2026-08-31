@@ -9,13 +9,13 @@ system: >-
 prompt: >-
   [doc 1: intune/overview.md]
 
-  General guidance about security baselines.
+  General guidance about conditional access policies.
 
 
   ---
 
 
-  What is the default value of the 'Tessellated Enrollment Weave' setting, and which licence does it
+  What is the default value of the 'Prismatic Access Meridian' setting, and which licence does it
   require?
 mustContain:
   - NOT PRESENT

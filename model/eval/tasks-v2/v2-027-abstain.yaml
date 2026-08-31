@@ -5,17 +5,17 @@ retrieval:
 maxTokens: 300
 system: >-
   You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
-  do not contain the answer, reply with exactly: NO ANSWER FOUND
+  do not contain the answer, reply with exactly: OUT OF SCOPE
 prompt: >-
   [doc 1: intune/overview.md]
 
-  General guidance about security baselines.
+  General guidance about configuration profiles.
 
 
   ---
 
 
-  What is the default value of the 'Prismatic Config Lattice' setting, and which licence does it
+  What is the default value of the 'Halcyon Device Chorus' setting, and which licence does it
   require?
 mustContain:
-  - NO ANSWER FOUND
+  - OUT OF SCOPE

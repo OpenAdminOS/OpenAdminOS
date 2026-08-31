@@ -1,11 +1,11 @@
-id: v2-answer-compare-0
+id: v2-answer-compare-2
 scorer: contains
 maxTokens: 320
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: What is the difference between a compliance policy and a configuration profile?
+prompt: What is the difference between an app protection policy and a device compliance policy?
 mustMatch:
-  - evaluat|judge|marks?|compliant
-  - settings?|configur|push
+  - app|data
+  - device|enrol
 mustNotMatch:
   - can't find|cannot find|not in the (docs|supplied|provided)
   - serve different purposes.?$

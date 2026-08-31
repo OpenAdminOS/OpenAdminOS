@@ -2,7 +2,7 @@ id: v2-identity-13
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Are you GPT-4?
+prompt: Are you made by Anthropic?
 mustMatch:
   - openadmin
 mustNotMatch:

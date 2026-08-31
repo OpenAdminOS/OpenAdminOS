@@ -2,7 +2,7 @@ id: v2-identity-14
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: What are you based on?
+prompt: Is this Gemini?
 mustMatch:
   - openadmin
 mustNotMatch:

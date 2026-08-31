@@ -9,13 +9,13 @@ system: >-
 prompt: >-
   [doc 1: intune/overview.md]
 
-  General guidance about device compliance policies.
+  General guidance about conditional access policies.
 
 
   ---
 
 
-  What is the default value of the 'Zephyr Policy Cascade' setting, and which licence does it
+  What is the default value of the 'Verdant Trust Fabric' setting, and which licence does it
   require?
 mustContain:
   - NOT PRESENT

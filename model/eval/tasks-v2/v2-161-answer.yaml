@@ -1,9 +1,0 @@
-id: v2-answer-privacy-8
-scorer: contains
-maxTokens: 300
-system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Were you trained on customer data?
-mustMatch:
-  - no|synthetic|public|no tenant data
-mustNotMatch:
-  - community fine-?tune of the open-?weight

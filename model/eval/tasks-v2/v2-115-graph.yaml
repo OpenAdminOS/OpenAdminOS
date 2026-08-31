@@ -5,7 +5,7 @@ system: >-
   You plan Microsoft Graph API calls for read-only Intune queries. Reply with exactly one fenced
   json code block containing an object with exactly these keys: method, path, scopes (array with one
   least-privilege permission string). No other keys, no commentary.
-prompt: Plan the Graph call to list the conditional access policies in this tenant for a read-only report.
+prompt: I need to enumerate our conditional access policies. Give me the call.
 expected:
   method: GET
   path: /identity/conditionalAccess/policies

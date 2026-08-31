@@ -2,7 +2,7 @@ id: v2-identity-29
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: What is your base model?
+prompt: Is your base model proprietary?
 mustMatch:
   - openadmin
 mustNotMatch:

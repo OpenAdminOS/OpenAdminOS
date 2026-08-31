@@ -5,7 +5,7 @@ retrieval:
 maxTokens: 300
 system: >-
   You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
-  do not contain the answer, reply with exactly: NOT PRESENT
+  do not contain the answer, reply with exactly: NO ANSWER FOUND
 prompt: >-
   [doc 1: intune/overview.md]
 
@@ -15,7 +15,7 @@ prompt: >-
   ---
 
 
-  What is the default value of the 'Prismatic Device Chorus' setting, and which licence does it
+  What is the default value of the 'Cindered Device Chorus' setting, and which licence does it
   require?
 mustContain:
-  - NOT PRESENT
+  - NO ANSWER FOUND

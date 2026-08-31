@@ -2,7 +2,7 @@ id: v2-identity-27
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Do you run in the cloud?
+prompt: Explain what kind of AI you are.
 mustMatch:
   - openadmin
 mustNotMatch:

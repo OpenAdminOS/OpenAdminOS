@@ -1,9 +1,9 @@
-id: v2-answer-privacy-2
+id: v2-answer-privacy-4
 scorer: contains
 maxTokens: 300
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Do you send telemetry?
+prompt: Can you make changes to my tenant?
 mustMatch:
-  - do not|don't|no telemetry|nothing to report
+  - not on my own|confirm|cannot|can't
 mustNotMatch:
   - community fine-?tune of the open-?weight

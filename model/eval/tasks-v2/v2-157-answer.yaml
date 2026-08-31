@@ -1,9 +1,9 @@
-id: v2-answer-privacy-4
+id: v2-answer-privacy-6
 scorer: contains
 maxTokens: 300
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Can you make changes to my tenant?
+prompt: Is anything about my tenant uploaded?
 mustMatch:
-  - not on my own|confirm|cannot|can't
+  - no|nothing|local|not (sent|transmitted|uploaded)
 mustNotMatch:
   - community fine-?tune of the open-?weight

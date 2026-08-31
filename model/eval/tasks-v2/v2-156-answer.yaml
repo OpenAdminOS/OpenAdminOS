@@ -1,9 +1,9 @@
-id: v2-answer-privacy-3
+id: v2-answer-privacy-5
 scorer: contains
 maxTokens: 300
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Were you trained on customer data?
+prompt: Where are my prompts processed?
 mustMatch:
-  - no|synthetic|public|no tenant data
+  - local|this machine|on your
 mustNotMatch:
   - community fine-?tune of the open-?weight

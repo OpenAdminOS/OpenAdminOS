@@ -5,17 +5,17 @@ retrieval:
 maxTokens: 300
 system: >-
   You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
-  do not contain the answer, reply with exactly: NO ANSWER FOUND
+  do not contain the answer, reply with exactly: NOT PRESENT
 prompt: >-
   [doc 1: intune/overview.md]
 
-  General guidance about managed devices.
+  General guidance about app protection policies.
 
 
   ---
 
 
-  What is the default value of the 'Cindered Policy Cascade' setting, and which licence does it
+  What is the default value of the 'Prismatic Policy Cascade' setting, and which licence does it
   require?
 mustContain:
-  - NO ANSWER FOUND
+  - NOT PRESENT

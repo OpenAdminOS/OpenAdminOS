@@ -2,7 +2,7 @@ id: v2-identity-26
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Are you Copilot?
+prompt: Are you the same as Copilot for Intune?
 mustMatch:
   - openadmin
 mustNotMatch:

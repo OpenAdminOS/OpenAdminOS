@@ -1,11 +1,11 @@
-id: v2-answer-compare-17
+id: v2-answer-compare-19
 scorer: contains
 maxTokens: 320
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: What is the difference between an app protection policy and a device compliance policy?
+prompt: Compare a device group with a user group.
 mustMatch:
-  - app|data
-  - device|enrol
+  - device|machine
+  - user|person|people
 mustNotMatch:
   - can't find|cannot find|not in the (docs|supplied|provided)
   - serve different purposes.?$

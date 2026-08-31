@@ -1,9 +1,9 @@
-id: v2-answer-privacy-7
+id: v2-answer-privacy-9
 scorer: contains
 maxTokens: 300
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Do you send telemetry?
+prompt: Do I need to worry about data residency with you?
 mustMatch:
-  - do not|don't|no telemetry|nothing to report
+  - no|local|stays|never leaves
 mustNotMatch:
   - community fine-?tune of the open-?weight

@@ -2,7 +2,7 @@ id: v2-identity-22
 scorer: contains
 maxTokens: 220
 system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
-prompt: Are you ChatGPT?
+prompt: What licence are you under?
 mustMatch:
   - openadmin
 mustNotMatch:

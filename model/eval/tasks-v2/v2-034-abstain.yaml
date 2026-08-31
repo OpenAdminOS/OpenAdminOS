@@ -9,15 +9,17 @@ system: >-
 prompt: >-
   [doc 1: intune/overview.md]
 
-  General guidance about app protection policies.
+  General guidance about security baselines.
 
 
   ---
 
 
-  What is the default value of the 'Umbral Signal Trellis' setting, and which licence does it
+  What is the default value of the 'Tessellated Access Meridian' setting, and which licence does it
   require?
 mustNotMatch:
-  - Signal\s+(is|are|can|requires|defaults)
+  - \bAccess\b[^.]{0,60}\b(is|are|can be|requires|defaults? to|is set to)\b
+  - (default|value) (is|of it is|for it is) [^ ]
+  - requires? (a )?(Microsoft )?(Entra|Intune|Defender|E[35])
 mustMatch:
-  - (not|cannot|can't|no).{0,40}(find|cover|mention|contain|documented)
+  - (not|cannot|can'?t|won'?t|no|unable|isn'?t|does not|doesn'?t|nothing)\b

@@ -6,16 +6,12 @@ maxTokens: 300
 system: >-
   You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
   do not contain the answer, reply with exactly: NO RECORD
-prompt: >-
+prompt: |-
   [doc 1: intune/overview.md]
-
-  General guidance about security baselines.
-
+  General guidance about configuration profiles.
 
   ---
 
-
-  What is the default value of the 'Cindered Device Chorus' setting, and which licence does it
-  require?
+  What is the default value of the 'Zephyr Trust Fabric' setting, and which licence does it require?
 mustContain:
   - NO RECORD
