@@ -16,9 +16,9 @@ const load = (s) => JSON.parse(readFileSync(join(R, pick(s)), "utf8"));
 // Three categorical slots, validated against the dark surface #1a1a19:
 // all pass the lightness band, chroma floor, CVD separation and contrast.
 const MODELS = [
-  { label: "OpenAdmin 8B", file: "V3-8b", colour: "own", note: "4.9 GB · your hardware · no cost" },
-  { label: "Claude Opus 5", file: "V3-claude-opus-5", colour: "ext", note: "hosted · per-token billing" },
-  { label: "GPT-5.6-sol", file: "V3-gpt-5.6-sol", colour: "third", note: "hosted · per-token billing" },
+  { label: "OpenAdmin 8B", file: "V4-8b", colour: "own", note: "4.9 GB · your hardware · no cost" },
+  { label: "Claude Opus 5", file: "V4-claude-opus-5", colour: "ext", note: "hosted · per-token billing" },
+  { label: "GPT-5.6-sol", file: "V4-gpt-5.6-sol", colour: "third", note: "hosted · per-token billing" },
 ].map((m) => ({ ...m, results: load(m.file).results }));
 
 const ids = new Set(MODELS[0].results.map((r) => r.id));
@@ -62,12 +62,86 @@ function bars() {
            + `<title>${esc(c)} — ${esc(m.label)}: ${v[0]}/${v[1]} (${pct}%)</title></path>`;
       }
       o += `<text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" class="val">${v[0]}</text>`;
+      o += `<rect x="${x}" y="${top}" width="${barW}" height="${plotH}" fill="transparent"><title>${esc(c)} — ${esc(m.label)}: ${v[0]} of ${v[1]} (${pct}%)</title></rect>`;
     });
     const w = c.split(" ");
+    const n = (MODELS[0].agg[c] ?? [0, 0])[1];
     o += `<text x="${gx + gw / 2}" y="${H - bottom + 18}" text-anchor="middle" class="ax">${esc(w[0])}</text>`;
     if (w.length > 1) o += `<text x="${gx + gw / 2}" y="${H - bottom + 32}" text-anchor="middle" class="ax">${esc(w.slice(1).join(" "))}</text>`;
+    o += `<text x="${gx + gw / 2}" y="${H - bottom + (w.length > 1 ? 46 : 32)}" text-anchor="middle" class="ax" style="opacity:.75">${n} tasks</text>`;
   });
   return o + "</svg>";
+}
+
+// Cumulative correct answers across the run. The rising-line form used by
+// frontier benchmarks, applied to something it actually describes: where the
+// models diverge, and by how much. A flat step means that model missed a task.
+function lines() {
+  const W = 800, H = 320, left = 46, bottom = 52, top = 18, right = 120;
+  const plotW = W - left - right, plotH = H - bottom - top;
+  const n = MODELS[0].results.length;
+  const maxY = n;
+  const X = (i) => left + (plotW * i) / (n - 1);
+  const Y = (v) => top + plotH - (plotH * v) / maxY;
+  let o = `<svg viewBox="0 0 ${W} ${H}" role="img" id="cum" aria-label="Cumulative correct answers across the ${n} tasks, one line per model" style="width:100%;max-width:${W}px">`;
+  for (let g = 0; g <= maxY; g += 10) {
+    o += `<line x1="${left}" x2="${left + plotW}" y1="${Y(g)}" y2="${Y(g)}" stroke="var(--grid)" stroke-width="1"/>`
+       + `<text x="${left - 8}" y="${Y(g) + 4}" text-anchor="end" class="ax">${g}</text>`;
+  }
+  // a perfect run, for reference — the ceiling every line is measured against
+  o += `<line x1="${X(0)}" y1="${Y(1)}" x2="${X(n - 1)}" y2="${Y(n)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 4" opacity=".5"/>`;
+  o += `<text x="${X(n - 1) + 6}" y="${Y(n) + 4}" class="ax" style="opacity:.7">perfect</text>`;
+  const series = MODELS.map((m) => {
+    let c = 0;
+    const pts = m.results.map((r, i) => { if (r.pass) c++; return [X(i), Y(c)]; });
+    return { ...m, pts, final: c };
+  });
+  for (const s of series) {
+    o += `<polyline fill="none" stroke="var(--${s.colour})" stroke-width="2" stroke-linejoin="round" points="${s.pts.map((p) => p.join(",")).join(" ")}"/>`;
+    const last = s.pts[s.pts.length - 1];
+    o += `<circle cx="${last[0]}" cy="${last[1]}" r="3.5" fill="var(--${s.colour})"/>`;
+  }
+  // direct labels at the line ends, nudged apart when finals collide
+  const placed = [];
+  for (const s of series.slice().sort((a, b) => b.final - a.final)) {
+    let y = s.pts[s.pts.length - 1][1] + 4;
+    while (placed.some((p) => Math.abs(p - y) < 14)) y += 14;
+    placed.push(y);
+    o += `<text x="${X(n - 1) + 8}" y="${y}" class="val" fill="var(--${s.colour})">${esc(s.label)} ${s.final}</text>`;
+  }
+  o += `<text x="${left}" y="${H - bottom + 20}" class="ax">task 1</text>`
+     + `<text x="${left + plotW}" y="${H - bottom + 20}" text-anchor="end" class="ax">task ${n}</text>`
+     + `<text x="${left + plotW / 2}" y="${H - bottom + 36}" text-anchor="middle" class="ax">tasks in the order they were asked</text>`;
+  // crosshair + one tooltip listing every series at that task
+  o += `<line id="cx" x1="0" x2="0" y1="${top}" y2="${top + plotH}" stroke="var(--text-secondary)" stroke-width="1" opacity="0"/>`;
+  o += `<rect id="cxhit" x="${left}" y="${top}" width="${plotW}" height="${plotH}" fill="transparent"/>`;
+  o += `</svg>`;
+  const data = series.map((s) => ({ label: s.label, colour: s.colour,
+    cum: s.results.reduce((a, r) => { a.push((a[a.length - 1] ?? 0) + (r.pass ? 1 : 0)); return a; }, []),
+    ids: s.results.map((r) => r.id.replace("v2-", "")) }));
+  return o + `<div id="tip" class="tip" hidden></div>
+<script>(function(){
+  const svg=document.getElementById('cum'),hit=document.getElementById('cxhit'),cx=document.getElementById('cx'),tip=document.getElementById('tip');
+  const D=${JSON.stringify(data)},n=${n},left=${left},plotW=${plotW};
+  function at(e){
+    const r=svg.getBoundingClientRect(), vb=svg.viewBox.baseVal;
+    const x=(e.clientX-r.left)*(vb.width/r.width);
+    let i=Math.round(((x-left)/plotW)*(n-1)); i=Math.max(0,Math.min(n-1,i));
+    const px=left+(plotW*i)/(n-1);
+    cx.setAttribute('x1',px);cx.setAttribute('x2',px);cx.setAttribute('opacity','.5');
+    tip.hidden=false; tip.textContent='';
+    const h=document.createElement('div'); h.className='tt-h';
+    h.textContent='task '+(i+1)+' · '+D[0].ids[i]; tip.appendChild(h);
+    for(const s of D){ const row=document.createElement('div');
+      const sw=document.createElement('span'); sw.className='sw'; sw.style.background='var(--'+s.colour+')';
+      row.appendChild(sw); row.appendChild(document.createTextNode(' '+s.label+': '+s.cum[i]+' correct'));
+      tip.appendChild(row); }
+    tip.style.left=Math.min(e.clientX+14,window.innerWidth-230)+'px';
+    tip.style.top=(e.clientY+14)+'px';
+  }
+  hit.addEventListener('pointermove',at);
+  hit.addEventListener('pointerleave',()=>{cx.setAttribute('opacity','0');tip.hidden=true;});
+})();</script>`;
 }
 
 const html = `<!doctype html>
@@ -103,6 +177,11 @@ const html = `<!doctype html>
  .caveat b{color:var(--text-primary)}
  details{margin-top:10px}summary{color:var(--muted);font-size:12px;cursor:pointer}
  code{background:#111;padding:1px 5px;border-radius:3px;font-size:12px}
+ .note{color:var(--muted);font-size:12px;margin:0 0 10px}
+ .tip{position:fixed;z-index:9;background:var(--panel);border:1px solid var(--line);border-radius:6px;
+   padding:8px 11px;font-size:12px;color:var(--text-secondary);pointer-events:none;box-shadow:0 4px 14px #0009}
+ .tip .tt-h{color:var(--text-primary);margin-bottom:5px;font-size:11.5px}
+ .tip .sw{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:2px}
 </style></head><body><div class="wrap">
 
 <h1>Do Microsoft 365 admins need a frontier model?</h1>
@@ -132,6 +211,14 @@ ${bars()}
 ${cats.map((c) => `<tr><td>${esc(c)}</td>${MODELS.map((m) => `<td>${(m.agg[c] ?? [0, 0]).join("/")}</td>`).join("")}</tr>`).join("")}
 <tr><th>Total</th>${MODELS.map((m) => `<th>${m.total}/${N}</th>`).join("")}</tr>
 </table></details>
+
+<h2>Where the models diverge, task by task</h2>
+<div class="note">Cumulative correct answers across the same ${N} tasks in the order they were
+asked. A flat step is a miss. The dashed line is a perfect run.</div>
+<div class="legend">
+${MODELS.map((m) => `  <span class="chip"><span class="sw" style="background:var(--${m.colour})"></span>${esc(m.label)}</span>`).join("\n")}
+</div>
+${lines()}
 
 <h2>Where the difference actually is</h2>
 <table>

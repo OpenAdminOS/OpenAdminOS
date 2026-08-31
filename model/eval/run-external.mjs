@@ -62,7 +62,27 @@ function score(task, response) {
 
 const files = readdirSync(TASKS).filter((f) => f.endsWith(".yaml")).sort();
 const tasks = files.map((f) => load(readFileSync(join(TASKS, f), "utf8")));
-const chosen = LIMIT ? tasks.filter((_, i) => i % Math.ceil(tasks.length / LIMIT) === 0).slice(0, LIMIT) : tasks;
+// Stratified sample: take a proportional slice of EVERY category, so the
+// sample keeps the suite's shape and the total is exactly LIMIT. Taking every
+// Nth task (the old approach) silently returned 80 when asked for 100.
+function sample(all, limit) {
+  if (!limit || limit >= all.length) return all;
+  const byCat = {};
+  for (const t of all) (byCat[t.id.split("-")[1]] ??= []).push(t);
+  const cats = Object.keys(byCat);
+  const out = [];
+  for (const c of cats) {
+    const want = Math.round((limit * byCat[c].length) / all.length);
+    const step = byCat[c].length / Math.max(want, 1);
+    for (let i = 0; i < want; i++) out.push(byCat[c][Math.floor(i * step)]);
+  }
+  // rounding can leave us a task or two short or long; correct against the
+  // remaining pool so the count is exactly what was asked for
+  const have = new Set(out.map((t) => t.id));
+  for (const t of all) { if (out.length >= limit) break; if (!have.has(t.id)) { out.push(t); have.add(t.id); } }
+  return out.slice(0, limit).sort((a, b) => a.id.localeCompare(b.id));
+}
+const chosen = sample(tasks, LIMIT);
 
 const results = [];
 let pass = 0;
@@ -70,6 +90,7 @@ for (const [i, t] of chosen.entries()) {
   const prompt = `${t.system}\n\n${t.prompt}`;
   void prompt;
   let response = "";
+  const t0 = Date.now();
   try {
     if (CMD === "local") {
       const r = await fetch("http://127.0.0.1:8090/v1/chat/completions", {
@@ -98,9 +119,13 @@ for (const [i, t] of chosen.entries()) {
       response = stdout.trim();
     }
   } catch (e) { response = ""; }
+  const ms = Date.now() - t0;
   const s = score(t, response);
   if (s.pass) pass++;
-  results.push({ id: t.id, pass: s.pass, detail: s.detail, response: response.slice(0, 600) });
+  // chars is the FULL length before truncation: it is the billable output size,
+  // and we truncate the stored response only to keep result files readable.
+  results.push({ id: t.id, pass: s.pass, detail: s.detail, ms, chars: response.length,
+                 response: response.slice(0, 600) });
   process.stdout.write(`\r  ${i + 1}/${chosen.length}  pass ${pass}   `);
 }
 console.log();
