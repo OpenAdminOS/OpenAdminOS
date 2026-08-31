@@ -212,6 +212,15 @@ export default function IntuneChat() {
   const { state, startRun, refresh, loading } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
+  /**
+   * The conversation the host reported creating for an in-flight send.
+   *
+   * The sidebar list is reloaded asynchronously and can legitimately not
+   * contain it yet, so the route must not depend on the list alone to
+   * decide whether the open conversation exists.
+   */
+  const [pendingConversation, setPendingConversation] =
+    useState<IntuneChatConversation | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     routeConversationId ?? null,
   );
@@ -293,6 +302,25 @@ export default function IntuneChat() {
   const copiedClearTimerRef = useRef<number | null>(null);
   const draftConversationRef = useRef<string | null | undefined>(undefined);
   const skipDraftWriteRef = useRef(false);
+
+  /**
+   * Put a conversation into the sidebar list immediately.
+   *
+   * Sending the first message creates the conversation in the host and
+   * routes to /chat/<id> before the sidebar list has been reloaded. Without
+   * this the route points at an id the renderer has not seen yet, and the
+   * "Conversation not found" empty state flashes over a send that is in
+   * fact working.
+   */
+  const upsertConversation = (conversation: IntuneChatConversation) => {
+    setConversations((current) =>
+      current.some((entry) => entry.id === conversation.id)
+        ? current.map((entry) =>
+            entry.id === conversation.id ? conversation : entry,
+          )
+        : [conversation, ...current],
+    );
+  };
 
   const openConversation = (
     conversationId: string | null,
@@ -471,7 +499,13 @@ export default function IntuneChat() {
       api.getGraphCacheStatus().catch(() => null),
     ]);
     setConversations((current) => {
-      if (!query || !activeConversationId) return nextConversations;
+      if (!activeConversationId) return nextConversations;
+      // Keep the open conversation in the list when the reload does not
+      // return it. This was written for search (a filtered list hides the
+      // open conversation), but the same staleness happens right after a
+      // conversation is created: the route already points at it while the
+      // list still predates it, and dropping it here renders the
+      // "Conversation not found" state over a send that is working.
       const activeConversation = current.find(
         (conversation) => conversation.id === activeConversationId,
       );
@@ -812,6 +846,8 @@ export default function IntuneChat() {
       setPreflightPrompt("");
       setInput("");
       setMessages([result.userMessage, result.assistantMessage]);
+      setPendingConversation(result.conversation);
+      upsertConversation(result.conversation);
       openConversation(result.conversation.id, { replace: true });
       await loadShell(result.conversation.id);
     } catch (caught) {
@@ -943,6 +979,8 @@ export default function IntuneChat() {
           if (event.type === "started") {
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
+            setPendingConversation(event.conversation);
+            upsertConversation(event.conversation);
             openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
@@ -1027,6 +1065,8 @@ export default function IntuneChat() {
           }
         },
       );
+      setPendingConversation(result.conversation);
+      upsertConversation(result.conversation);
       openConversation(result.conversation.id, { replace: true });
       setCacheStatus(result.cacheStatus);
       if (result.assistantMessage.status === "completed") {
@@ -1521,9 +1561,13 @@ export default function IntuneChat() {
     return newest ? `Updated ${formatDateTime(newest)}` : "Cache ready";
   }, [cacheStatus]);
 
-  const activeConversation = conversations.find(
-    (conversation) => conversation.id === activeConversationId,
-  );
+  const activeConversation =
+    conversations.find(
+      (conversation) => conversation.id === activeConversationId,
+    ) ??
+    (pendingConversation && pendingConversation.id === activeConversationId
+      ? pendingConversation
+      : undefined);
   const unknownConversation = Boolean(
     shellLoaded &&
       routeConversationId &&

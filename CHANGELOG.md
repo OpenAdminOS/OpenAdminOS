@@ -24,6 +24,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Sending the first message in a new conversation no longer flashes "Conversation not found" while the answer is being fetched. The route moved to the new conversation before the sidebar list had reloaded, so the app briefly judged its own conversation to be missing while the send was working normally.
+
 ### Security
 
 - The Windows release gate fails closed when DigiCert KeyLocker credentials are missing, and the signing hook refuses to emit an unsigned build unless packaging validation opts in explicitly.

@@ -95,6 +95,71 @@ describe("IntuneChat guest exploration", () => {
   });
 });
 
+describe("IntuneChat new conversation routing", () => {
+  it("never flashes 'Conversation not found' while the first message is sending", async () => {
+    const user = userEvent.setup();
+    const newConversation: IntuneChatConversation = {
+      id: "conversation-new",
+      title: "Which Windows devices are stale?",
+      createdAt: "2026-08-31T12:00:00.000Z",
+      updatedAt: "2026-08-31T12:00:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    // Reproduces the real sequence: the host emits "started" with a
+    // conversation the sidebar list has not returned yet, and the route
+    // moves to it. The list stays stale on purpose, so the route can only
+    // stay valid if the conversation is seeded into local state.
+    const bridge = makeMockBridge(
+      {
+        listIntuneChatConversations: vi.fn(async () => []),
+        streamIntuneChatMessage: vi.fn(async (input, onEvent) => {
+          const result = {
+            conversation: newConversation,
+            userMessage: {
+              id: "message-user-new",
+              conversationId: newConversation.id,
+              role: "user" as const,
+              content: input.content,
+              status: "completed" as const,
+              createdAt: newConversation.createdAt,
+            },
+            assistantMessage: {
+              id: "message-assistant-new",
+              conversationId: newConversation.id,
+              role: "assistant" as const,
+              content: "",
+              status: "pending" as const,
+              createdAt: newConversation.createdAt,
+            },
+            cacheStatus: { tenantId: "tenant-1", resources: [] },
+          };
+          onEvent({ type: "started", ...result });
+          return result as never;
+        }),
+      },
+      createMockAppState(),
+    );
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    const composer = await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
+    await user.type(composer, "Which Windows devices are stale?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(bridge.streamIntuneChatMessage).toHaveBeenCalled(),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Conversation not found")).not.toBeInTheDocument(),
+    );
+  });
+});
+
 describe("IntuneChat hosted-provider consent", () => {
   it("shows consent copy and waits for explicit confirmation before sending tenant context", async () => {
     const user = userEvent.setup();
