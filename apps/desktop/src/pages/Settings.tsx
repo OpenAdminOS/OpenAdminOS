@@ -3971,6 +3971,19 @@ function PrivacySection({
                       mono
                     />
                   </dl>
+                  <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                    Built from Microsoft's published documentation for Intune,
+                    Entra, and Defender, used under{" "}
+                    <a
+                      href="https://creativecommons.org/licenses/by/4.0/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-soft)]"
+                    >
+                      CC BY 4.0
+                    </a>
+                    . Microsoft does not endorse this project.
+                  </p>
                 </div>
               ) : (
                 <div className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">

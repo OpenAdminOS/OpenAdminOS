@@ -88,7 +88,23 @@ if (process.env.DRY_RUN === "1") {
   process.exit(0);
 }
 
-const notes = `Documentation retrieval index.\n\n- ${meta.count ?? meta.chunkCount} chunks, ${meta.dim}-dimension vectors\n- Corpora: ${(meta.corpora ?? []).join(", ") || "unspecified"}\n- Built ${built}\n\nInstalled from Settings, or downloaded and installed from a folder on machines without network access. Verified against SHA256SUMS.txt.`;
+const notes = [
+  "Documentation retrieval index used to ground OpenAdminOS answers in Microsoft product documentation.",
+  "",
+  `- Version: ${version}`,
+  `- ${meta.count ?? meta.chunkCount} chunks, ${meta.dim}-dimension vectors`,
+  `- Corpora: ${(meta.corpora ?? []).join(", ") || "unspecified"}`,
+  `- Embedding model: nomic-embed-text (nomic-embed-text-v1.5)`,
+  `- Built: ${built}`,
+  "",
+  "The desktop app installs and updates this automatically. It can also be downloaded and installed from a folder on machines without outbound network access. Every file is verified against SHA256SUMS.txt.",
+  "",
+  "## Attribution",
+  "",
+  "Derived from Microsoft's public documentation for Intune, Microsoft Entra, and Microsoft Defender, published by Microsoft under the Creative Commons Attribution 4.0 International licence (CC BY 4.0). The text is chunked and embedded; it is not modified in substance. Microsoft does not endorse this project.",
+  "",
+  "Licence: https://creativecommons.org/licenses/by/4.0/",
+].join("\n");
 
 const args = [
   "release", "create", tag,
