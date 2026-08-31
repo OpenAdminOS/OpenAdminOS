@@ -6,6 +6,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Documentation grounding now reaches answers. Chat retrieves passages from a locally installed Microsoft documentation index and puts them in front of the tenant data, labelled as general product behaviour rather than tenant state, and asks the model to cite the source file so a claim can be checked. When no index is installed, answers fall back to tenant data only and say so.
+- A documentation index can be installed from a folder on the machine, which needs no network access, or fetched from a URL. Installs are staged and validated before they replace a working index, so a truncated download cannot leave the app with a corrupt one.
+- Query embedding runs through the local Ollama the app already manages, using `nomic-embed-text`, instead of requiring a second embedding server. Non-loopback endpoints are refused, so a question never leaves the device.
+
 - Second concept round for the same page (`docs/mockups/17-training-railway-concepts.html`): the conveyor metaphor replaced by a railway line where the training run is a train that dwells at stations, with dwell timers, stage telemetry, a held-run siding, and a departure board. Four styles: metro diagram, comic steam railway, split-flap board, clay model railway. The split-flap style now uses real public-domain train art (recolored CC0 SVGs from FreeSVG, catalogued in `docs/mockups/assets/trains/`).
 
 - Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.

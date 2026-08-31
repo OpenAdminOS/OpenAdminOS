@@ -2266,6 +2266,10 @@ export interface OpenAdminOSApi {
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
   getRetrievalStatus?(): Promise<RetrievalStatus>;
   refreshRetrievalIndex?(): Promise<RetrievalStatus>;
+  installRetrievalIndex?(input: {
+    sourceDir?: string;
+    baseUrl?: string;
+  }): Promise<RetrievalStatus>;
   getUsageTelemetryPreview?(): Promise<{
     enabled: boolean;
     endpointConfigured: boolean;

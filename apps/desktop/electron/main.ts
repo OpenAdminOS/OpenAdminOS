@@ -5475,6 +5475,28 @@ function registerIpcHandlers() {
     handleTrusted(() => store.getRetrievalStatus()),
   );
   ipcMain.handle(
+    "openadminos:install-retrieval-index",
+    handleTrusted(async (_event, input: unknown) => {
+      const record = isPlainRecord(input) ? input : {};
+      if (typeof record.baseUrl === "string" && record.baseUrl.length > 0) {
+        return store.installRetrievalIndex({
+          baseUrl: requireBoundedString(record.baseUrl, "baseUrl", 2048),
+        });
+      }
+      const parent = mainWindow ?? undefined;
+      const options = {
+        title: "Select the documentation index folder",
+        properties: ["openDirectory" as const],
+      };
+      const picked = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options);
+      const sourceDir = picked.filePaths[0];
+      if (picked.canceled || !sourceDir) return store.getRetrievalStatus();
+      return store.installRetrievalIndex({ sourceDir });
+    }),
+  );
+  ipcMain.handle(
     "openadminos:refresh-retrieval-index",
     handleTrusted(() => store.refreshRetrievalIndex()),
   );

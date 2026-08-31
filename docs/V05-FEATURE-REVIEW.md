@@ -113,7 +113,9 @@ Deliberately not changed:
 - **8 vertical dead space** - left alone. The pages are short because the data is short; padding them out would be decoration, and the honest fix is more useful content, which is a design decision rather than a defect.
 - **9 `/activity` naming** - left alone. The route is reachable from the status strip, run results, and the menu-bar companion, and the page is titled clearly. Renaming it would break existing links for no user benefit.
 
-Still open and owned elsewhere: retrieval index hosting, telemetry collector hosting, the 8B tool-format training, and an end-to-end gateway pairing test with a real MCP client.
+Retrieval was completed after this review (see the Retrieval section): chat now injects retrieved passages with citations, an index can be installed from a folder or a URL with staged validation, and query embedding reuses the app's Ollama rather than a second server. Verified end to end against real embeddings: both probe questions returned the correct document as the top hit.
+
+Still open and owned elsewhere: hosting the published index artifact, telemetry collector hosting, the 8B tool-format training, and an end-to-end gateway pairing test with a real MCP client.
 
 ## Recommended order
 

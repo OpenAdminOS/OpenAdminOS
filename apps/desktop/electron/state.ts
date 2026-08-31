@@ -179,7 +179,12 @@ import { IntuneChatService } from "./intune-chat/service.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
 import { GatewayService } from "./gateway/service.js";
-import { RetrievalIndex, type RetrievalStatus } from "./retrieval/retrieval.js";
+import {
+  RetrievalIndex,
+  ollamaEmbedQuery,
+  type RetrievalStatus,
+} from "./retrieval/retrieval.js";
+import { downloadIndex, installIndexFromDirectory } from "./retrieval/install.js";
 import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
@@ -1185,6 +1190,7 @@ export class AppStateStore {
         host.buildGraph(pinnedTenantId, agentScopes),
       startRun: (agentSlug, options) => host.startRun(agentSlug, options),
       getDriftTimeline: (input) => host.getDriftTimeline(input),
+      retrieveDocumentation: (query) => host.retrieveDocumentation(query),
       appVersion: this.appVersion,
       get userDataPath() {
         return host.userDataPath;
@@ -1510,6 +1516,41 @@ export class AppStateStore {
       };
     }
     return index.status();
+  }
+
+  /**
+   * Top documentation passages for a question. Empty when no index is
+   * installed, so chat simply answers from tenant data instead.
+   */
+  async retrieveDocumentation(
+    query: string,
+  ): Promise<Array<{ file: string; title?: string; text: string; score: number }>> {
+    const index = this.retrievalIndex();
+    if (!index || !index.status().available) return [];
+    const endpoint =
+      process.env.OPENADMINOS_EMBEDDING_ENDPOINT ?? "http://127.0.0.1:11434";
+    return index.retrieve(query, ollamaEmbedQuery(endpoint), { k: 12 });
+  }
+
+  /** Install an index from a local folder or a URL, then reload it. */
+  async installRetrievalIndex(input: {
+    sourceDir?: string;
+    baseUrl?: string;
+  }): Promise<RetrievalStatus> {
+    if (!this.userDataPath) {
+      throw new Error("Installing a documentation index needs a configured userData directory.");
+    }
+    const targetDir = join(this.userDataPath, "retrieval-index");
+    if (input.sourceDir) {
+      await installIndexFromDirectory({ sourceDir: input.sourceDir, targetDir });
+    } else if (input.baseUrl) {
+      await downloadIndex({ baseUrl: input.baseUrl, targetDir });
+    } else {
+      throw new Error("Provide either a folder or a download URL.");
+    }
+    this.retrievalIndexInstance?.reset();
+    this.retrievalIndexInstance = undefined;
+    return this.getRetrievalStatus();
   }
 
   async refreshRetrievalIndex(): Promise<RetrievalStatus> {

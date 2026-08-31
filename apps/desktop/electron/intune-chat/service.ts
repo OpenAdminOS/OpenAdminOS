@@ -156,6 +156,14 @@ export interface ChatServiceHost {
   }>;
   startRun(agentSlug: string, options?: StartRunOptions): Promise<RunRecord>;
   getDriftTimeline(input: DriftTimelineInput): Promise<DriftTimelineResult>;
+  /**
+   * Passages from the local documentation index for this question, with
+   * their source paths. Returns [] when no index is installed, so the
+   * answer degrades to tenant-data-only rather than failing.
+   */
+  retrieveDocumentation?(query: string): Promise<
+    Array<{ file: string; title?: string; text: string; score: number }>
+  >;
   readonly appVersion: string;
   readonly userDataPath: string | undefined;
   readonly intelligenceStore: IntelligenceSqliteStore | undefined;
@@ -1405,9 +1413,10 @@ export class IntuneChatService {
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
+        const documentation = await this.retrieveDocumentationSafely(modelQuestion);
         const completion = await llm.complete({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
+          prompt: buildAnswerPrompt(answerPack, documentation),
           ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
@@ -2126,6 +2135,26 @@ export class IntuneChatService {
     return execution.result;
   }
 
+  /**
+   * Documentation retrieval must never take an answer down: a missing
+   * index, an embedding model that was not pulled, or a stopped Ollama
+   * all degrade to an ungrounded answer rather than an error.
+   */
+  private async retrieveDocumentationSafely(
+    query: string,
+  ): Promise<Array<{ file: string; title?: string; text: string; score: number }>> {
+    if (!this.host.retrieveDocumentation) return [];
+    try {
+      return await this.host.retrieveDocumentation(query);
+    } catch (error) {
+      console.info(
+        "[intune-chat] documentation retrieval unavailable:",
+        error instanceof Error ? error.message : error,
+      );
+      return [];
+    }
+  }
+
   private buildChatToolContext(tenantId: string): IntuneChatToolContext {
     const store = this.host.requireIntelligenceStore();
     const log = (
@@ -2457,4 +2486,34 @@ function writeIntentBlockedMessage(
       ? `This looks like work for ${writeAgent.agentName}. Use the installed write agent so the normal plan and confirmation flow stays in force.`
       : "Use an installed write agent so the normal plan and confirmation flow stays in force.",
   ].join("\n\n");
+}
+
+/**
+ * Put Microsoft documentation in front of the tenant data, and say
+ * plainly which is which. The model must not present documentation as
+ * observed tenant state, and it must cite the file a claim came from so
+ * an admin can check it.
+ */
+function buildAnswerPrompt(
+  answerPack: string,
+  documentation: ReadonlyArray<{ file: string; title?: string; text: string }>,
+): string {
+  if (documentation.length === 0) {
+    return `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`;
+  }
+  const passages = documentation
+    .map(
+      (chunk, index) =>
+        `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
+    )
+    .join("\n\n");
+  return [
+    "Microsoft documentation passages retrieved locally for this question:",
+    passages,
+    "",
+    "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. If it does not cover the question, say so rather than guessing.",
+    "",
+    "Retrieved tenant context, which is this tenant's actual state:",
+    answerPack,
+  ].join("\n");
 }

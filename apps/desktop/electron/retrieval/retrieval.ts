@@ -178,12 +178,7 @@ function loadIndexFrom(dir: string): LoadedIndex {
  */
 export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
   return async (text: string) => {
-    const url = new URL(endpoint);
-    if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
-      throw new Error(
-        "Refusing to embed a query against a non-loopback endpoint. Retrieval must stay local.",
-      );
-    }
+    assertLoopback(endpoint);
     const response = await fetch(`${endpoint.replace(/\/$/, "")}/v1/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -201,4 +196,59 @@ export function loopbackEmbedQuery(endpoint: string): EmbedQuery {
     }
     return embedding;
   };
+}
+
+/**
+ * Query embedding through the local Ollama the app already manages.
+ *
+ * The model bench served the embedding model on its own port; reusing
+ * Ollama avoids a second process to install, supervise and firewall,
+ * and `nomic-embed-text` there is the same nomic-embed-text-v1.5 that
+ * built the index (768 dimensions). The `search_query:` prefix matches
+ * how the passages were embedded, and is what makes the vectors
+ * comparable.
+ */
+export function ollamaEmbedQuery(
+  endpoint: string,
+  model = "nomic-embed-text",
+): EmbedQuery {
+  return async (text: string) => {
+    assertLoopback(endpoint);
+    const response = await fetch(`${endpoint.replace(/\/$/, "")}/api/embed`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, input: `search_query: ${text}` }),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Embedding request failed with HTTP ${response.status}. Pull the model with \`ollama pull ${model}\`.`,
+      );
+    }
+    const payload = (await response.json()) as { embeddings?: number[][] };
+    const embedding = payload.embeddings?.[0];
+    if (!Array.isArray(embedding)) {
+      throw new Error("The embedding service returned no vector.");
+    }
+    return embedding;
+  };
+}
+
+function assertLoopback(endpoint: string): void {
+  const url = new URL(endpoint);
+  if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+    throw new Error(
+      "Refusing to embed a query against a non-loopback endpoint. Retrieval must stay local.",
+    );
+  }
+}
+
+/** Render retrieved passages for a prompt, keeping provenance attached. */
+export function formatRetrievedContext(chunks: readonly RetrievedChunk[]): string {
+  if (chunks.length === 0) return "";
+  return chunks
+    .map(
+      (chunk, index) =>
+        `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
+    )
+    .join("\n\n");
 }

@@ -251,6 +251,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-retrieval-status"),
   refreshRetrievalIndex: () =>
     ipcRenderer.invoke("openadminos:refresh-retrieval-index"),
+  installRetrievalIndex: (input) =>
+    ipcRenderer.invoke("openadminos:install-retrieval-index", input),
   getGatewayStatus: () => ipcRenderer.invoke("openadminos:get-gateway-status"),
   enableGateway: (input) => ipcRenderer.invoke("openadminos:enable-gateway", input),
   disableGateway: () => ipcRenderer.invoke("openadminos:disable-gateway"),

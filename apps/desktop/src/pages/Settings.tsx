@@ -3538,6 +3538,7 @@ function PrivacySection({
   const [retrievalStatus, setRetrievalStatus] = useState<RetrievalStatus | null>(null);
   const [retrievalLoading, setRetrievalLoading] = useState(true);
   const [retrievalRefreshing, setRetrievalRefreshing] = useState(false);
+  const [retrievalInstalling, setRetrievalInstalling] = useState(false);
   const [retrievalError, setRetrievalError] = useState<string | null>(null);
   const isOfficialRegistry = isOfficialRegistrySource(registrySource);
   const telemetryToggleAvailable = Boolean(
@@ -3653,6 +3654,25 @@ function PrivacySection({
       setRetrievalError(error instanceof Error ? error.message : String(error));
     } finally {
       setRetrievalRefreshing(false);
+    }
+  };
+
+  const installRetrievalIndex = async () => {
+    const install = window.openAdminOS?.installRetrievalIndex;
+    if (!install || retrievalInstalling) return;
+    setRetrievalInstalling(true);
+    setRetrievalError(null);
+    try {
+      // No argument opens a folder picker in the host. An index copied
+      // onto the machine works without any network access, which is the
+      // only option some tenants allow.
+      setRetrievalStatus(await install({}));
+    } catch (caught) {
+      setRetrievalError(
+        caught instanceof Error ? caught.message : String(caught),
+      );
+    } finally {
+      setRetrievalInstalling(false);
     }
   };
 
@@ -3873,6 +3893,19 @@ function PrivacySection({
                   : retrievalStatus?.available
                     ? "Refresh"
                     : "Check for index"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={
+                  retrievalLoading ||
+                  retrievalInstalling ||
+                  !window.openAdminOS?.installRetrievalIndex
+                }
+                onClick={() => void installRetrievalIndex()}
+              >
+                {retrievalInstalling ? "Installing…" : "Install index…"}
               </Button>
             </div>
 
