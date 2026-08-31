@@ -3,6 +3,8 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import {
   IconAgents,
   IconChanges,
+  IconConnectors,
+  IconHardDrive,
   IconChat,
   IconFleet,
   IconSettings,
@@ -104,6 +106,15 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     { to: "/settings", label: "Settings", icon: <IconSettings size={16} /> },
   ];
 
+  // Kept out of the primary list on purpose: these are power-user
+  // surfaces, and v0.4 cut the nav from ten items to four by demoting
+  // them. They earn a place here as a visually subordinate group so they
+  // are discoverable without competing with the daily destinations.
+  const secondaryNav: NavItem[] = [
+    { to: "/workspaces", label: "Workspaces", icon: <IconHardDrive size={16} /> },
+    { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },
+  ];
+
   const focusAdjacentNav = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const links = Array.from(
@@ -177,6 +188,15 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           Workspace
         </div>
         {mainNav.map((item) => (
+          <NavRow key={item.to} item={item} />
+        ))}
+      </nav>
+
+      <nav aria-label="More" className="mt-3 flex flex-col gap-0.5 px-2">
+        <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          More
+        </div>
+        {secondaryNav.map((item) => (
           <NavRow key={item.to} item={item} />
         ))}
       </nav>

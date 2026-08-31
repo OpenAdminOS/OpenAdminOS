@@ -28,6 +28,31 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: /Report issue/ })).not.toBeInTheDocument();
   });
 
+  it("keeps Workspaces and Connectors out of the primary group but reachable", () => {
+    renderRoute(<Sidebar />, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+
+    // The primary group stays the daily destinations only: v0.4 cut the
+    // nav to four items and these two are power-user surfaces.
+    const primary = screen.getByRole("navigation", { name: "Primary" });
+    expect(
+      within(primary).queryByRole("link", { name: /Workspaces/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(primary).queryByRole("link", { name: /Connectors/ }),
+    ).not.toBeInTheDocument();
+
+    const more = screen.getByRole("navigation", { name: "More" });
+    expect(
+      within(more)
+        .getAllByRole("link")
+        .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
+    ).toEqual(["Workspaces", "Connectors"]);
+  });
+
   it("shows Fleet only when at least two tenants are connected", async () => {
     const secondTenant: TenantRecord = {
       id: "tenant-2",

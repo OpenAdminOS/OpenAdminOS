@@ -13,6 +13,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Workspaces and Connectors are reachable from the sidebar again, in a subordinate "More" group below Settings. They were previously only findable through Settings, which hid two of the more distinctive surfaces. The primary navigation group is unchanged.
+
 - Settings now states the update behaviour in full: updates download in the background before the restart prompt, and choosing Later applies them on the next quit. The previous wording mentioned only the prompt.
 
 - Benchmark figures are generated from scored runs by `model/site-benchmarks/export-benchmark-data.mjs` and committed as a contract the page parses at build time, so a marketing claim cannot drift from a measurement.
