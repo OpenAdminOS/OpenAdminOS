@@ -53,3 +53,6 @@ apps/desktop/release/
 .env*.local
 scripts/waitlist-recipients.txt
 scripts/.broadcast-state.json
+
+# Private strategy notes: never publish
+docs/ACQUISITION-ROADMAP.md

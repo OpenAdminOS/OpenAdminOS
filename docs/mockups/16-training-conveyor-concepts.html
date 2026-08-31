@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>training.openadminos.com · conveyor concepts</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;600&family=Fredoka:wght@500;600;700&family=Geist:wght@400;500;600;700&display=swap');
+
+/* ============================================================
+   training.openadminos.com — four conveyor-belt page concepts
+   Side view of the OpenAdmin training pipeline as a factory.
+   Stage advance is simulated with JS; later it is driven by
+   the rented GPU pod posting run state to an API.
+   ============================================================ */
+
+:root {
+  --bg-0: #1c1917; --bg-1: #191614; --bg-2: #232120; --bg-3: #2a2724;
+  --border: #322e2a; --border-strong: #403a35;
+  --text-0: #f5f1eb; --text-1: #b5ada3; --text-2: #9a9085; --text-3: #6b6157;
+  --accent: #e8a87c; --accent-dim: #d99868;
+  --success: #9cc88f; --warning: #e5c678; --danger: #e58888; --purple: #c4a5d9;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: #141210; color: var(--text-0); font-family: 'Geist', -apple-system, sans-serif; font-size: 14px; line-height: 1.55; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+a { color: var(--accent); text-decoration: none; }
+
+/* ---------- top bar ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 24px; background: rgba(20,18,16,0.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace; font-size: 12px;
+}
+.topbar .site { color: var(--text-1); }
+.topbar .site b { color: var(--accent); font-weight: 600; }
+.topbar nav { margin-left: auto; display: flex; gap: 8px; }
+.topbar nav a {
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px;
+  color: var(--text-1); transition: all .12s;
+}
+.topbar nav a:hover { color: var(--text-0); border-color: var(--border-strong); background: var(--bg-2); }
+
+/* ---------- intro ---------- */
+.intro { max-width: 880px; padding: 48px 32px 40px; }
+.intro h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 10px; }
+.intro p { color: var(--text-1); margin-bottom: 10px; max-width: 720px; }
+.intro .stages { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
+.intro .stages span {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-2);
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px; padding: 3px 9px;
+}
+.intro .stages span i { font-style: normal; color: var(--accent); margin-right: 6px; }
+
+/* ---------- concept frame ---------- */
+.concept { border-top: 1px solid var(--border); padding-bottom: 56px; }
+.c-head { display: flex; align-items: baseline; gap: 18px; padding: 34px 32px 20px; max-width: 1200px; }
+.c-num { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent); flex-shrink: 0; }
+.c-head h2 { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+.c-head p { color: var(--text-2); font-size: 13px; max-width: 560px; }
+.scene-wrap { overflow-x: auto; padding: 0 24px; }
+.scene { position: relative; height: 520px; min-width: 1400px; max-width: 1400px; margin: 0 auto; border-radius: 14px; overflow: hidden; }
+
+/* ---------- shared factory geometry ---------- */
+.floor { position: absolute; left: 0; right: 0; bottom: 0; height: 78px; }
+.belt { position: absolute; left: 36px; right: 36px; bottom: 92px; height: 22px; border-radius: 11px; }
+.station { position: absolute; bottom: 114px; width: 152px; }
+.st-gen  { left:  46px; } .st-val  { left: 236px; } .st-train{ left: 426px; }
+.st-quant{ left: 616px; } .st-eval { left: 806px; } .st-rev  { left: 996px; }
+.st-rel  { left: 1186px; }
+.machine { position: relative; display: flex; align-items: flex-end; justify-content: center; }
+.m-body {
+  position: relative; width: 128px; height: 108px;
+  display: flex; align-items: center; justify-content: center;
+}
+.st-train .m-body { height: 128px; } .st-eval .m-body { height: 96px; }
+.st-rev .m-body { height: 118px; width: 112px; } .st-gen .m-body { height: 120px; }
+.m-glyph { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; letter-spacing: .08em; }
+.m-lamp { position: absolute; top: 8px; right: 10px; width: 8px; height: 8px; border-radius: 50%; animation: blink 2.2s infinite; }
+@keyframes blink { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
+.m-top { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); }
+.s-label { text-align: center; margin-top: 14px; }
+.s-label b { display: block; font-size: 12.5px; font-weight: 600; }
+.s-label span { display: block; font-size: 10.5px; margin-top: 1px; }
+
+/* station live highlight */
+.station { transition: filter .3s; }
+.station.live .m-body { animation: livePulse 1.4s ease-in-out infinite; }
+@keyframes livePulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.22); } }
+
+/* ---------- widgets riding the belt ---------- */
+.widget {
+  position: absolute; bottom: 116px; left: 0; width: 34px; height: 28px;
+  animation: ride 22s linear infinite;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace; font-size: 9px; font-weight: 600;
+}
+.widget.w2 { animation-delay: -7.3s; } .widget.w3 { animation-delay: -14.6s; }
+@keyframes ride { from { transform: translateX(-70px); } to { transform: translateX(1430px); } }
+
+/* reject drop at the validator */
+.reject {
+  position: absolute; left: 300px; bottom: 116px; width: 22px; height: 18px; border-radius: 4px;
+  animation: rejectDrop 6.5s ease-in infinite;
+  opacity: 0;
+}
+@keyframes rejectDrop {
+  0%, 55% { opacity: 0; transform: translateY(0) rotate(0); }
+  58% { opacity: 1; transform: translateY(0) rotate(0); }
+  70% { opacity: 1; transform: translateY(52px) rotate(24deg); }
+  74%, 100% { opacity: 0; transform: translateY(58px) rotate(24deg); }
+}
+.scrap {
+  position: absolute; left: 286px; bottom: 40px; width: 52px; height: 40px;
+  border-radius: 4px 4px 6px 6px;
+  display: flex; align-items: flex-end; justify-content: center;
+  font-family: 'JetBrains Mono', monospace; font-size: 8px; padding-bottom: 4px;
+}
+
+/* ---------- shared machine effects ---------- */
+.fx { position: absolute; pointer-events: none; }
+/* generator: falling samples */
+.st-gen .fx { left: 50%; top: -46px; width: 6px; height: 44px; transform: translateX(-50%); overflow: hidden; }
+.st-gen .fx::before { content: ''; position: absolute; left: 0; width: 6px; height: 6px; border-radius: 2px; animation: drop 1.1s linear infinite; }
+@keyframes drop { from { top: -8px; opacity: 1; } to { top: 44px; opacity: .5; } }
+/* validator: stamping piston */
+.st-val .fx { left: 50%; top: -50px; width: 18px; height: 54px; transform: translateX(-50%); animation: stamp 1.6s ease-in-out infinite; }
+@keyframes stamp { 0%, 60%, 100% { transform: translateX(-50%) translateY(0); } 72% { transform: translateX(-50%) translateY(26px); } 80% { transform: translateX(-50%) translateY(0); } }
+/* trainer: heat core */
+.st-train .fx { inset: auto; left: 50%; bottom: 34px; width: 56px; height: 42px; transform: translateX(-50%); border-radius: 8px; animation: heat 1.8s ease-in-out infinite; }
+@keyframes heat { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+/* quantizer: squeezing plates */
+.st-quant .fx { left: 50%; top: 24px; width: 84px; height: 12px; transform: translateX(-50%); animation: squeeze 2s ease-in-out infinite; }
+@keyframes squeeze { 0%,100% { transform: translateX(-50%) scaleX(1); } 50% { transform: translateX(-50%) scaleX(.55); } }
+/* evaluator: scanning beam */
+.st-eval .fx { left: 14px; right: 14px; top: 18px; bottom: 20px; overflow: hidden; }
+.st-eval .fx::before { content: ''; position: absolute; top: 0; bottom: 0; width: 3px; animation: scanline 1.7s ease-in-out infinite alternate; }
+@keyframes scanline { from { left: 4%; } to { left: 94%; } }
+/* review: ship / hold signal */
+.st-rev .fx { top: 14px; right: 12px; left: auto; width: 10px; height: 24px; display: flex; flex-direction: column; gap: 4px; }
+.st-rev .fx i { width: 10px; height: 10px; border-radius: 50%; }
+.st-rev .fx i:first-child { animation: sig 3.4s infinite; }
+.st-rev .fx i:last-child { animation: sig 3.4s infinite reverse; }
+@keyframes sig { 0%, 45% { opacity: 1; } 55%, 100% { opacity: .15; } }
+/* release: beacon */
+.st-rel .fx { top: -32px; left: 50%; width: 10px; height: 10px; border-radius: 50%; transform: translateX(-50%); animation: blink 1.4s infinite; z-index: 2; }
+
+/* smoke puffs */
+.puffs { position: absolute; bottom: 100%; left: 50%; width: 40px; height: 90px; transform: translateX(-50%); pointer-events: none; }
+.puffs i { position: absolute; bottom: 0; left: 12px; width: 14px; height: 14px; border-radius: 50%; opacity: 0; animation: puff 3s ease-out infinite; }
+.puffs i:nth-child(2) { animation-delay: 1s; left: 6px; }
+.puffs i:nth-child(3) { animation-delay: 2s; left: 18px; }
+@keyframes puff {
+  0% { opacity: 0; transform: translateY(0) scale(.5); }
+  20% { opacity: .7; }
+  100% { opacity: 0; transform: translateY(-70px) scale(1.9); }
+}
+
+/* gears */
+.gear { position: absolute; border-radius: 50%; animation: spin 5s linear infinite; }
+.gear::after { content: ''; position: absolute; inset: 26%; border-radius: 50%; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- HUD (the "this will be live" strip) ---------- */
+.hud { max-width: 1400px; margin: 18px auto 0; padding: 0 24px; }
+.hud-inner { border-radius: 10px; padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font-family: 'JetBrains Mono', monospace; font-size: 10.5px; padding: 3px 9px;
+  border-radius: 4px; transition: all .25s;
+}
+.hud-log { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; flex: 1; min-width: 260px; }
+.hud-log::before { content: '▸ '; }
+.hud-note { font-family: 'JetBrains Mono', monospace; font-size: 10px; width: 100%; }
+
+/* ============================================================
+   CONCEPT 1 — NIGHT SHIFT
+   On-brand dark hall, warm amber glow, flat comic silhouettes
+   ============================================================ */
+.c1 .scene { background: linear-gradient(180deg, #171310 0%, #1c1917 55%, #211d1a 100%); border: 1px solid var(--border); }
+.c1 .scene::before { /* distant hall silhouette */
+  content: ''; position: absolute; left: 0; right: 0; bottom: 78px; height: 210px;
+  background:
+    linear-gradient(transparent 0, transparent),
+    repeating-linear-gradient(90deg, transparent 0 90px, rgba(64,58,53,.28) 90px 96px),
+    radial-gradient(140px 60px at 20% 100%, rgba(232,168,124,.05), transparent 70%),
+    radial-gradient(140px 60px at 70% 100%, rgba(196,165,217,.05), transparent 70%);
+  opacity: .8;
+}
+.c1 .floor { background: #14110f; border-top: 1px solid var(--border-strong); }
+.c1 .floor::before { content: ''; position: absolute; inset: 10px 36px auto; height: 6px;
+  background: repeating-linear-gradient(45deg, var(--warning) 0 10px, #14110f 10px 20px); opacity: .18; border-radius: 3px; }
+.c1 .belt { background: #0f0d0b; border: 1px solid var(--border-strong); overflow: hidden; }
+.c1 .belt::before { content: ''; position: absolute; inset: 6px 0;
+  background: repeating-linear-gradient(90deg, transparent 0 26px, rgba(232,168,124,.35) 26px 30px, transparent 30px 40px);
+  animation: beltmove 1.1s linear infinite; }
+@keyframes beltmove { to { background-position: 40px 0; } }
+.c1 .m-body { background: linear-gradient(180deg, #2d2926, #232120); border: 1px solid var(--border-strong); border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.45), inset 0 1px 0 rgba(245,241,235,.05); }
+.c1 .m-glyph { color: var(--accent); background: rgba(232,168,124,.08); border: 1px solid rgba(232,168,124,.25); padding: 4px 8px; border-radius: 4px; }
+.c1 .m-lamp { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.c1 .m-top { width: 16px; height: 22px; background: #2a2724; border: 1px solid var(--border-strong); border-bottom: none; border-radius: 4px 4px 0 0; }
+.c1 .s-label b { color: var(--text-0); } .c1 .s-label span { color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
+.c1 .st-gen .fx::before { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.c1 .st-val .fx { background: linear-gradient(180deg, #403a35, #2a2724); border: 1px solid var(--border-strong); border-radius: 3px 3px 6px 6px; }
+.c1 .st-train .fx { background: radial-gradient(ellipse at center, rgba(232,168,124,.85), rgba(217,104,52,.25) 70%, transparent); filter: blur(2px); }
+.c1 .st-train .m-glyph { color: var(--warning); border-color: rgba(229,198,120,.3); background: rgba(229,198,120,.08); }
+.c1 .st-quant .fx { background: var(--border-strong); border-radius: 3px; box-shadow: 0 26px 0 var(--border-strong); }
+.c1 .st-eval .fx::before { background: var(--purple); box-shadow: 0 0 12px var(--purple); }
+.c1 .st-rev .fx i:first-child { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.c1 .st-rev .fx i:last-child { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+.c1 .st-rel .fx { background: var(--success); box-shadow: 0 0 10px var(--success); }
+.c1 .puffs i { background: rgba(181,173,163,.35); }
+.c1 .gear { width: 26px; height: 26px; left: -14px; top: 30px;
+  background: repeating-conic-gradient(#403a35 0 22deg, transparent 22deg 45deg); }
+.c1 .gear::after { background: #2a2724; border: 1px solid var(--border-strong); }
+.c1 .widget { background: #2d2926; border: 1px solid var(--accent-dim); border-radius: 5px; color: var(--accent);
+  animation-name: ride, morphC1; animation-duration: 22s, 22s; animation-timing-function: linear, step-end; animation-iteration-count: infinite, infinite; }
+.c1 .widget.w2, .c1 .widget.w3 { animation-name: ride, morphC1; }
+@keyframes morphC1 {
+  0%   { border-color: var(--accent-dim); box-shadow: none; border-radius: 5px; }
+  22%  { border-color: var(--success); box-shadow: 0 0 6px rgba(156,200,143,.4); }
+  38%  { border-color: var(--purple); box-shadow: 0 0 10px rgba(196,165,217,.55); }
+  51%  { border-color: var(--text-2); box-shadow: none; border-radius: 3px; }
+  64%  { border-color: var(--success); box-shadow: 0 0 6px rgba(156,200,143,.5); }
+  80%, 100% { border-color: var(--accent); box-shadow: 0 0 10px rgba(232,168,124,.5); border-radius: 5px; }
+}
+.c1 .reject { background: #3a2422; border: 1px solid var(--danger); }
+.c1 .scrap { background: #211d1a; border: 1px solid var(--border-strong); color: var(--danger); }
+.c1 .hud-inner { background: var(--bg-1); border: 1px solid var(--border); }
+.c1 .chip { background: var(--bg-2); border: 1px solid var(--border); color: var(--text-3); }
+.c1 .chip.active { background: rgba(232,168,124,.12); border-color: var(--accent); color: var(--accent); }
+.c1 .hud-log { color: var(--success); } .c1 .hud-note { color: var(--text-3); }
+
+/* ============================================================
+   CONCEPT 2 — INK & HALFTONE
+   Classic comic book: thick outlines, halftone paper, bursts
+   ============================================================ */
+.c2 .scene { background: #f4ecdd; border: 3px solid #17120d;
+  background-image: radial-gradient(rgba(23,18,13,.09) 1.2px, transparent 1.3px);
+  background-size: 9px 9px; }
+.c2 .scene::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 120px;
+  background: radial-gradient(rgba(47,111,237,.10) 1.6px, transparent 1.7px); background-size: 12px 12px; }
+.c2 .floor { background: #e5d9c2; border-top: 3px solid #17120d; }
+.c2 .belt { background: #fff; border: 3px solid #17120d; overflow: hidden; }
+.c2 .belt::before { content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(-60deg, #17120d 0 12px, #fff 12px 30px);
+  animation: beltmove2 .9s linear infinite; }
+@keyframes beltmove2 { to { background-position: 34.6px 0; } }
+.c2 .m-body { background: #fff; border: 3px solid #17120d; border-radius: 10px; box-shadow: 7px 7px 0 rgba(23,18,13,.85); }
+.c2 .st-gen .m-body { background: #f5c518; } .c2 .st-val .m-body { background: #7ec4e8; }
+.c2 .st-train .m-body { background: #f08c4a; } .c2 .st-quant .m-body { background: #b9a6e0; }
+.c2 .st-eval .m-body { background: #8fd49a; } .c2 .st-rev .m-body { background: #f2f2f2; }
+.c2 .st-rel .m-body { background: #f2a0a5; }
+.c2 .m-glyph { color: #17120d; background: #fff; border: 2.5px solid #17120d; padding: 4px 9px; border-radius: 6px; font-size: 12.5px; }
+.c2 .m-lamp { background: #e5484d; border: 2px solid #17120d; width: 11px; height: 11px; }
+.c2 .m-top { width: 20px; height: 24px; background: #fff; border: 3px solid #17120d; border-bottom: none; border-radius: 6px 6px 0 0; }
+.c2 .s-label b { color: #17120d; font-family: 'Bangers', cursive; font-size: 17px; letter-spacing: .05em; font-weight: 400; }
+.c2 .s-label span { color: #6b5f4d; }
+.c2 .st-gen .fx::before { background: #e5484d; border-radius: 50%; }
+.c2 .st-val .fx { background: #fff; border: 3px solid #17120d; border-radius: 4px 4px 8px 8px; }
+.c2 .st-train .fx { background: radial-gradient(ellipse, #ffdf6b, #f08c4a 70%); border-radius: 50%; border: 2px solid #17120d; }
+.c2 .st-quant .fx { background: #17120d; border-radius: 3px; box-shadow: 0 26px 0 #17120d; }
+.c2 .st-eval .fx::before { background: #e5484d; width: 4px; }
+.c2 .st-rev .fx i { border: 2px solid #17120d; }
+.c2 .st-rev .fx i:first-child { background: #8fd49a; } .c2 .st-rev .fx i:last-child { background: #f5c518; }
+.c2 .st-rel .fx { background: #e5484d; border: 2px solid #17120d; }
+.c2 .puffs i { background: #fff; border: 2px solid #17120d; }
+.c2 .gear { width: 30px; height: 30px; left: -18px; top: 26px;
+  background: repeating-conic-gradient(#17120d 0 22deg, #f5c518 22deg 45deg); border: 2px solid #17120d; }
+.c2 .gear::after { background: #fff; border: 2px solid #17120d; }
+.c2 .widget { background: #fff; border: 3px solid #17120d; border-radius: 6px; color: #17120d; box-shadow: 3px 3px 0 rgba(23,18,13,.6);
+  animation-name: ride, morphC2; animation-duration: 22s, 22s; animation-timing-function: linear, step-end; animation-iteration-count: infinite, infinite; }
+@keyframes morphC2 {
+  0%   { background: #ffe9a3; border-radius: 6px; }
+  22%  { background: #bfe8c8; }
+  38%  { background: #ffc078; }
+  51%  { background: #d9cdf2; border-radius: 3px; transform-origin: center; }
+  64%  { background: #bfe8c8; }
+  80%, 100% { background: #fff; border-radius: 6px; }
+}
+.c2 .reject { background: #e5484d; border: 3px solid #17120d; }
+.c2 .scrap { background: #fff; border: 3px solid #17120d; color: #e5484d; box-shadow: 4px 4px 0 rgba(23,18,13,.6); }
+/* onomatopoeia bursts */
+.burst {
+  position: absolute; font-family: 'Bangers', cursive; color: #17120d; z-index: 5;
+  padding: 6px 12px; background: #f5c518; border: 3px solid #17120d; border-radius: 50% 40% 55% 45%;
+  transform: rotate(-8deg); animation: burstPop 4.8s ease-in-out infinite; opacity: 0; font-size: 18px; letter-spacing: .06em;
+}
+.burst.b1 { left: 248px; top: 190px; }
+.burst.b2 { left: 452px; top: 160px; background: #f08c4a; animation-delay: 1.6s; transform: rotate(6deg); }
+.burst.b3 { left: 828px; top: 178px; background: #8fd49a; animation-delay: 3.2s; transform: rotate(-5deg); }
+@keyframes burstPop {
+  0%, 24% { opacity: 0; scale: .5; }
+  28% { opacity: 1; scale: 1.08; }
+  32% { scale: 1; }
+  52% { opacity: 1; }
+  60%, 100% { opacity: 0; scale: .7; }
+}
+.c2 .hud-inner { background: #fff; border: 3px solid #17120d; box-shadow: 6px 6px 0 rgba(23,18,13,.85); }
+.c2 .chip { background: #f4ecdd; border: 2px solid #17120d; color: #6b5f4d; }
+.c2 .chip.active { background: #f5c518; color: #17120d; }
+.c2 .hud-log { color: #17120d; } .c2 .hud-note { color: #6b5f4d; }
+.c2 .c-head h2 { font-family: 'Bangers', cursive; font-weight: 400; font-size: 26px; letter-spacing: .04em; }
+
+/* ============================================================
+   CONCEPT 3 — BLUEPRINT WORKS
+   Engineering drawing: grid paper, outline machines, callouts
+   ============================================================ */
+.c3 .scene { background: #0c2d4d; border: 1px solid #1d4a75;
+  background-image:
+    linear-gradient(rgba(159,208,255,.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(159,208,255,.07) 1px, transparent 1px),
+    linear-gradient(rgba(159,208,255,.14) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(159,208,255,.14) 1px, transparent 1px);
+  background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px; }
+.c3 .floor { background: transparent; border-top: 2px solid #9fd0ff; }
+.c3 .floor::before { content: 'SECTION A-A · CONVEYOR ELEVATION · SCALE 1:20'; position: absolute; left: 40px; top: 26px;
+  font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .18em; color: rgba(159,208,255,.5); }
+.c3 .belt { background: transparent; border: 2px solid #9fd0ff; overflow: hidden; }
+.c3 .belt::before { content: ''; position: absolute; inset: 7px 0;
+  background: repeating-linear-gradient(90deg, transparent 0 18px, rgba(159,208,255,.6) 18px 21px, transparent 21px 36px);
+  animation: beltmove 1.3s linear infinite; }
+.c3 .m-body { background: rgba(12,45,77,.5); border: 2px solid #9fd0ff; border-radius: 3px; }
+.c3 .m-body::before { content: ''; position: absolute; inset: 8px; border: 1px dashed rgba(159,208,255,.45); border-radius: 2px; }
+.c3 .m-glyph { color: #cfe8ff; font-size: 11px; }
+.c3 .m-lamp { background: #7ee0a3; box-shadow: 0 0 6px #7ee0a3; }
+.c3 .m-top { width: 14px; height: 20px; border: 2px solid #9fd0ff; border-bottom: none; border-radius: 2px 2px 0 0; background: rgba(12,45,77,.5); }
+.c3 .s-label b { color: #cfe8ff; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+.c3 .s-label span { color: rgba(159,208,255,.55); font-family: 'JetBrains Mono', monospace; font-size: 9.5px; }
+.c3 .st-gen .fx::before { background: #7ee0a3; }
+.c3 .st-val .fx { border: 2px solid #9fd0ff; background: rgba(12,45,77,.7); border-radius: 2px; }
+.c3 .st-train .fx { border: 2px dashed #ffb26b; background: rgba(255,178,107,.12); border-radius: 4px; }
+.c3 .st-quant .fx { background: transparent; border-top: 2px solid #9fd0ff; border-bottom: 2px solid #9fd0ff; height: 8px; box-shadow: none; }
+.c3 .st-eval .fx::before { background: #7ee0a3; box-shadow: 0 0 8px #7ee0a3; }
+.c3 .st-rev .fx i { border: 1.5px solid #9fd0ff; }
+.c3 .st-rev .fx i:first-child { background: #7ee0a3; } .c3 .st-rev .fx i:last-child { background: #ffd66b; }
+.c3 .st-rel .fx { border: 2px solid #7ee0a3; background: transparent; }
+.c3 .puffs i { border: 1.5px dashed rgba(159,208,255,.6); background: transparent; }
+.c3 .gear { width: 26px; height: 26px; left: -14px; top: 30px;
+  background: repeating-conic-gradient(rgba(159,208,255,.85) 0 20deg, transparent 20deg 45deg); }
+.c3 .gear::after { background: #0c2d4d; border: 2px solid #9fd0ff; }
+.c3 .widget { background: transparent; border: 2px solid #9fd0ff; border-radius: 3px; color: #cfe8ff;
+  animation-name: ride, morphC3; animation-duration: 22s, 22s; animation-timing-function: linear, step-end; animation-iteration-count: infinite, infinite; }
+@keyframes morphC3 {
+  0%   { border-style: dashed; border-color: #9fd0ff; }
+  22%  { border-style: solid; border-color: #7ee0a3; }
+  38%  { border-style: solid; border-color: #ffb26b; }
+  51%  { border-style: double; border-color: #9fd0ff; }
+  64%  { border-style: solid; border-color: #7ee0a3; }
+  80%, 100% { border-style: solid; border-color: #cfe8ff; background: rgba(207,232,255,.12); }
+}
+.c3 .reject { background: transparent; border: 2px dashed #ff8f8f; }
+.c3 .scrap { background: transparent; border: 2px solid #ff8f8f; color: #ff8f8f; }
+/* dimension line + title block */
+.c3 .dim { position: absolute; left: 110px; right: 110px; top: 40px; border-top: 1px solid rgba(159,208,255,.5);
+  font-family: 'JetBrains Mono', monospace; font-size: 9px; color: rgba(159,208,255,.6); text-align: center; letter-spacing: .14em; padding-top: 4px; }
+.c3 .dim::before, .c3 .dim::after { content: ''; position: absolute; top: -5px; width: 1px; height: 10px; background: rgba(159,208,255,.5); }
+.c3 .dim::before { left: 0; } .c3 .dim::after { right: 0; }
+.c3 .titleblock { position: absolute; right: 14px; bottom: 12px; border: 1.5px solid #9fd0ff; background: rgba(12,45,77,.85);
+  font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #cfe8ff; z-index: 6; }
+.c3 .titleblock div { padding: 3px 10px; border-bottom: 1px solid rgba(159,208,255,.4); letter-spacing: .08em; }
+.c3 .titleblock div:last-child { border-bottom: none; color: rgba(159,208,255,.6); }
+.c3 .hud-inner { background: #0c2d4d; border: 1.5px solid #9fd0ff; }
+.c3 .chip { background: transparent; border: 1px solid rgba(159,208,255,.4); color: rgba(159,208,255,.55); }
+.c3 .chip.active { border-color: #7ee0a3; color: #7ee0a3; background: rgba(126,224,163,.08); }
+.c3 .hud-log { color: #cfe8ff; } .c3 .hud-note { color: rgba(159,208,255,.5); }
+
+/* ============================================================
+   CONCEPT 4 — TOY WORKS
+   Claymorphic contraption: rounded, springy, warm daylight
+   ============================================================ */
+.c4 .scene { background: linear-gradient(180deg, #f3e7d3 0%, #efe0c8 70%, #e7d5b8 100%); border: 1px solid #d8c5a5; }
+.c4 .scene::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 100%;
+  background:
+    radial-gradient(90px 40px at 15% 20%, rgba(255,255,255,.5), transparent 70%),
+    radial-gradient(120px 50px at 60% 12%, rgba(255,255,255,.4), transparent 70%),
+    radial-gradient(80px 36px at 85% 26%, rgba(255,255,255,.45), transparent 70%); }
+.c4 .floor { background: #dcc9a8; border-top: 2px solid #c9b48f; }
+.c4 .belt { background: #6b5b48; border-radius: 14px; overflow: visible; box-shadow: inset 0 3px 6px rgba(0,0,0,.25); }
+.c4 .belt::before { content: ''; position: absolute; inset: 5px 6px; border-radius: 9px;
+  background: repeating-linear-gradient(90deg, #7d6c56 0 24px, #8a7860 24px 30px);
+  animation: beltmove 1.4s linear infinite; }
+.c4 .belt::after { content: ''; position: absolute; left: 20px; right: 20px; bottom: -14px; height: 22px;
+  background: radial-gradient(circle 11px at 11px 11px, #4e4235 10px, transparent 11px);
+  background-size: 90px 22px; background-repeat: repeat-x; }
+.c4 .m-body { background: linear-gradient(160deg, #fbf6ee, #efe3d0); border-radius: 22px;
+  box-shadow: 0 14px 26px rgba(107,91,72,.35), inset 0 3px 0 rgba(255,255,255,.8), inset 0 -6px 0 rgba(107,91,72,.12); }
+.c4 .st-gen .m-body { background: linear-gradient(160deg, #ffe6a8, #f5c869); }
+.c4 .st-val .m-body { background: linear-gradient(160deg, #cde8f5, #9fcfe6); }
+.c4 .st-train .m-body { background: linear-gradient(160deg, #ffc9a0, #f0a06a); }
+.c4 .st-quant .m-body { background: linear-gradient(160deg, #e0d2f2, #c4a5d9); }
+.c4 .st-eval .m-body { background: linear-gradient(160deg, #d1eec7, #9cc88f); }
+.c4 .st-rel .m-body { background: linear-gradient(160deg, #f7c8cb, #eb9ba1); }
+.c4 .m-glyph { color: #5c4c3a; background: rgba(255,255,255,.75); padding: 5px 10px; border-radius: 999px; font-size: 11.5px; box-shadow: inset 0 -2px 0 rgba(107,91,72,.15); }
+.c4 .m-lamp { background: #8fd49a; box-shadow: 0 0 0 3px rgba(255,255,255,.6); width: 9px; height: 9px; }
+.c4 .m-top { width: 22px; height: 26px; background: linear-gradient(160deg, #fbf6ee, #e5d6bf); border-radius: 10px 10px 0 0; box-shadow: inset 0 2px 0 rgba(255,255,255,.8); }
+.c4 .s-label b { color: #4c3f30; font-family: 'Fredoka', sans-serif; font-weight: 600; font-size: 14px; }
+.c4 .s-label span { color: #8a7860; }
+.c4 .machine { animation: bob 3.4s ease-in-out infinite; }
+.c4 .st-val .machine { animation-delay: .4s; } .c4 .st-train .machine { animation-delay: .8s; }
+.c4 .st-quant .machine { animation-delay: 1.2s; } .c4 .st-eval .machine { animation-delay: 1.6s; }
+.c4 .st-rev .machine { animation-delay: 2s; } .c4 .st-rel .machine { animation-delay: 2.4s; }
+@keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.c4 .st-gen .fx::before { background: #f0a06a; border-radius: 50%; }
+.c4 .st-val .fx { background: linear-gradient(160deg, #fbf6ee, #d9c9b0); border-radius: 6px 6px 12px 12px; box-shadow: 0 4px 8px rgba(107,91,72,.3); animation-timing-function: cubic-bezier(.34,1.56,.64,1); }
+.c4 .st-train .fx { background: radial-gradient(ellipse, #ffdf9e, rgba(240,160,106,.4) 70%, transparent); filter: blur(3px); }
+.c4 .st-quant .fx { background: #b39acb; border-radius: 6px; box-shadow: 0 26px 0 #b39acb; }
+.c4 .st-eval .fx::before { background: #64a857; box-shadow: 0 0 10px #8fd49a; border-radius: 2px; }
+.c4 .st-rev .fx i { box-shadow: 0 0 0 2.5px rgba(255,255,255,.7); }
+.c4 .st-rev .fx i:first-child { background: #8fd49a; } .c4 .st-rev .fx i:last-child { background: #f5c869; }
+.c4 .st-rel .fx { background: #eb9ba1; box-shadow: 0 0 0 3px rgba(255,255,255,.7); }
+.c4 .puffs i { background: rgba(255,255,255,.9); box-shadow: 0 2px 6px rgba(107,91,72,.2); }
+.c4 .gear { width: 30px; height: 30px; left: -16px; top: 28px;
+  background: repeating-conic-gradient(#c9b48f 0 22deg, #efe3d0 22deg 45deg); box-shadow: 0 4px 8px rgba(107,91,72,.3); }
+.c4 .gear::after { background: #fbf6ee; box-shadow: inset 0 2px 3px rgba(107,91,72,.25); }
+.c4 .widget { background: linear-gradient(160deg, #fbf6ee, #e5d6bf); border-radius: 10px; color: #5c4c3a;
+  box-shadow: 0 5px 10px rgba(107,91,72,.35), inset 0 2px 0 rgba(255,255,255,.85);
+  animation-name: ride, morphC4, hop; animation-duration: 22s, 22s, 1.1s; animation-timing-function: linear, step-end, ease-in-out; animation-iteration-count: infinite, infinite, infinite; }
+@keyframes hop { 0%,100% { margin-bottom: 0; } 50% { margin-bottom: 3px; } }
+@keyframes morphC4 {
+  0%   { background: linear-gradient(160deg, #ffe6a8, #f5c869); border-radius: 10px; }
+  22%  { background: linear-gradient(160deg, #cde8f5, #9fcfe6); }
+  38%  { background: linear-gradient(160deg, #ffc9a0, #f0a06a); }
+  51%  { background: linear-gradient(160deg, #e0d2f2, #c4a5d9); border-radius: 6px; }
+  64%  { background: linear-gradient(160deg, #d1eec7, #9cc88f); }
+  80%, 100% { background: linear-gradient(160deg, #fbf6ee, #e5d6bf); border-radius: 10px; }
+}
+.c4 .reject { background: #eb9ba1; border-radius: 8px; box-shadow: 0 3px 6px rgba(107,91,72,.3); }
+.c4 .scrap { background: #e5d6bf; border-radius: 8px 8px 12px 12px; color: #b9564f; box-shadow: inset 0 3px 5px rgba(107,91,72,.25); }
+.c4 .hud-inner { background: #fbf6ee; box-shadow: 0 10px 24px rgba(107,91,72,.25), inset 0 2px 0 rgba(255,255,255,.9); border-radius: 16px; }
+.c4 .chip { background: #efe3d0; color: #8a7860; border-radius: 999px; }
+.c4 .chip.active { background: #f0a06a; color: #fff; }
+.c4 .hud-log { color: #4c3f30; } .c4 .hud-note { color: #a08f76; }
+.c4 .c-head h2 { font-family: 'Fredoka', sans-serif; font-weight: 600; }
+
+/* ---------- decision footer ---------- */
+.outro { border-top: 1px solid var(--border); padding: 44px 32px 72px; max-width: 880px; }
+.outro h2 { font-size: 19px; font-weight: 600; margin-bottom: 12px; }
+.outro p { color: var(--text-1); margin-bottom: 10px; max-width: 720px; }
+.outro pre { background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-1); overflow-x: auto; margin: 14px 0; }
+.outro pre b { color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="site mono"><b>training</b>.openadminos.com · page concepts · pick one</span>
+  <nav>
+    <a href="#c1">1 Night Shift</a><a href="#c2">2 Ink &amp; Halftone</a><a href="#c3">3 Blueprint</a><a href="#c4">4 Toy Works</a>
+  </nav>
+</div>
+
+<div class="intro">
+  <h1>The training line, as a factory</h1>
+  <p>Four visual directions for a live status page at training.openadminos.com. All of them show the same thing: a side view of the OpenAdmin training pipeline as an animated conveyor belt, one machine per pipeline stage. The stage highlight, the log line and the counters below each scene are simulated here; in production the rented GPU pod posts run state to an API and the page renders it.</p>
+  <p>The seven stations map 1:1 to the real pipeline in <span class="mono">model/</span>, including the honest parts: the validator visibly bins rejected samples, and the review station can hold a run instead of shipping it (as happened with r5).</p>
+  <div class="stages">
+    <span><i>1</i>Generate · 8 synthetic tracks</span>
+    <span><i>2</i>Validate · schema gate</span>
+    <span><i>3</i>Train · QLoRA on rented GPU</span>
+    <span><i>4</i>Quantize · MXFP4, 12.1 GB</span>
+    <span><i>5</i>Evaluate · suite-248, mechanical</span>
+    <span><i>6</i>Review · ship or hold</span>
+    <span><i>7</i>Release · HF + Ollama</span>
+  </div>
+</div>
+
+<!-- ============ CONCEPT 1 ============ -->
+<section class="concept c1" id="c1">
+  <div class="c-head">
+    <span class="c-num">CONCEPT 01</span>
+    <div>
+      <h2>Night Shift</h2>
+      <p>The existing OpenAdminOS dark palette, so the page feels like the product. Flat machine silhouettes in a dim hall, warm amber glow, terminal-style status strip. Restrained comic, closest to the current brand.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="floor"></div>
+    <div class="belt"></div>
+    <div class="station st-gen"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">GEN</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Generate</b><span>8 tracks · 4,594 examples</span></div></div>
+    <div class="station st-val"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">VAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Validate</b><span>schema gate · rejects binned</span></div></div>
+    <div class="station st-train"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"><div class="puffs"><i></i><i></i><i></i></div></div><span class="m-glyph">GPU</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Train</b><span>QLoRA · rented pod</span></div></div>
+    <div class="station st-quant"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">4BIT</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Quantize</b><span>MXFP4 · 12.1 GB</span></div></div>
+    <div class="station st-eval"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">EVAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Evaluate</b><span>suite-248 · no LLM judges</span></div></div>
+    <div class="station st-rev"><div class="machine"><i class="fx"><i></i><i></i></i><div class="m-body"><span class="m-glyph">REV</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Review</b><span>ship or hold · human</span></div></div>
+    <div class="station st-rel"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">SHIP</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Release</b><span>HF + Ollama</span></div></div>
+    <div class="widget w1">r7</div><div class="widget w2">r7</div><div class="widget w3">r7</div>
+    <div class="reject"></div><div class="scrap">REJECT</div>
+  </div></div>
+  <div class="hud"><div class="hud-inner">
+    <div class="chips"></div>
+    <div class="hud-log" data-log></div>
+    <div class="hud-note">live source later: GPU pod → POST /api/run/state · history from public-data.json</div>
+  </div></div>
+</section>
+
+<!-- ============ CONCEPT 2 ============ -->
+<section class="concept c2" id="c2">
+  <div class="c-head">
+    <span class="c-num">CONCEPT 02</span>
+    <div>
+      <h2>Ink &amp; Halftone</h2>
+      <p>Full comic book: halftone paper, thick ink outlines, hard offset shadows, sound-effect bursts. Loudest and most shareable of the four, deliberately far from the app's palette so it reads as a poster.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="floor"></div>
+    <div class="belt"></div>
+    <div class="burst b1">STAMP</div>
+    <div class="burst b2">WHIRR</div>
+    <div class="burst b3">BEEP</div>
+    <div class="station st-gen"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">GEN</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Generate</b><span>8 tracks · 4,594 examples</span></div></div>
+    <div class="station st-val"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">VAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Validate</b><span>schema gate · rejects binned</span></div></div>
+    <div class="station st-train"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"><div class="puffs"><i></i><i></i><i></i></div></div><span class="m-glyph">GPU</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Train</b><span>QLoRA · rented pod</span></div></div>
+    <div class="station st-quant"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">4BIT</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Quantize</b><span>MXFP4 · 12.1 GB</span></div></div>
+    <div class="station st-eval"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">EVAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Evaluate</b><span>suite-248 · no LLM judges</span></div></div>
+    <div class="station st-rev"><div class="machine"><i class="fx"><i></i><i></i></i><div class="m-body"><span class="m-glyph">REV</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Review</b><span>ship or hold · human</span></div></div>
+    <div class="station st-rel"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">SHIP</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Release</b><span>HF + Ollama</span></div></div>
+    <div class="widget w1">r7</div><div class="widget w2">r7</div><div class="widget w3">r7</div>
+    <div class="reject"></div><div class="scrap">NOPE</div>
+  </div></div>
+  <div class="hud"><div class="hud-inner">
+    <div class="chips"></div>
+    <div class="hud-log" data-log></div>
+    <div class="hud-note">live source later: GPU pod → POST /api/run/state · history from public-data.json</div>
+  </div></div>
+</section>
+
+<!-- ============ CONCEPT 3 ============ -->
+<section class="concept c3" id="c3">
+  <div class="c-head">
+    <span class="c-num">CONCEPT 03</span>
+    <div>
+      <h2>Blueprint Works</h2>
+      <p>An engineering elevation drawing that happens to be alive: grid paper, outlined machines, dimension lines, a proper title block. The most "trust artifact" of the four; fits the honest, dry tone best.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="floor"></div>
+    <div class="belt"></div>
+    <div class="dim">PIPELINE LENGTH · ONE TRAINING RUN · ~14 H WALL CLOCK</div>
+    <div class="titleblock"><div>OPENADMINOS · TRAINING LINE</div><div>DWG NO. OA-TRAIN-01 · REV r7</div><div>DRAWN IN PUBLIC · APACHE-2.0</div></div>
+    <div class="station st-gen"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">GEN</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Generate</b><span>8 tracks · 4,594 ex</span></div></div>
+    <div class="station st-val"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">VAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Validate</b><span>schema gate</span></div></div>
+    <div class="station st-train"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"><div class="puffs"><i></i><i></i><i></i></div></div><span class="m-glyph">GPU</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Train</b><span>QLoRA · rented pod</span></div></div>
+    <div class="station st-quant"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">4BIT</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Quantize</b><span>MXFP4 · 12.1 GB</span></div></div>
+    <div class="station st-eval"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">EVAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Evaluate</b><span>suite-248 · mech.</span></div></div>
+    <div class="station st-rev"><div class="machine"><i class="fx"><i></i><i></i></i><div class="m-body"><span class="m-glyph">REV</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Review</b><span>ship or hold</span></div></div>
+    <div class="station st-rel"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">SHIP</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Release</b><span>HF + Ollama</span></div></div>
+    <div class="widget w1">r7</div><div class="widget w2">r7</div><div class="widget w3">r7</div>
+    <div class="reject"></div><div class="scrap">FAIL</div>
+  </div></div>
+  <div class="hud"><div class="hud-inner">
+    <div class="chips"></div>
+    <div class="hud-log" data-log></div>
+    <div class="hud-note">live source later: GPU pod → POST /api/run/state · history from public-data.json</div>
+  </div></div>
+</section>
+
+<!-- ============ CONCEPT 4 ============ -->
+<section class="concept c4" id="c4">
+  <div class="c-head">
+    <span class="c-num">CONCEPT 04</span>
+    <div>
+      <h2>Toy Works</h2>
+      <p>A friendly clay contraption in warm daylight: chunky rounded machines, springy bobbing, hopping parcels. Softest and most approachable; the copy stays dry so it never tips into cute-startup territory.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="floor"></div>
+    <div class="belt"></div>
+    <div class="station st-gen"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">GEN</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Generate</b><span>8 tracks · 4,594 examples</span></div></div>
+    <div class="station st-val"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">VAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Validate</b><span>schema gate · rejects binned</span></div></div>
+    <div class="station st-train"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"><div class="puffs"><i></i><i></i><i></i></div></div><span class="m-glyph">GPU</span><i class="m-lamp"></i><i class="gear"></i></div></div><div class="s-label"><b>Train</b><span>QLoRA · rented pod</span></div></div>
+    <div class="station st-quant"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">4BIT</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Quantize</b><span>MXFP4 · 12.1 GB</span></div></div>
+    <div class="station st-eval"><div class="machine"><i class="fx"></i><div class="m-body"><span class="m-glyph">EVAL</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Evaluate</b><span>suite-248 · no LLM judges</span></div></div>
+    <div class="station st-rev"><div class="machine"><i class="fx"><i></i><i></i></i><div class="m-body"><span class="m-glyph">REV</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Review</b><span>ship or hold · human</span></div></div>
+    <div class="station st-rel"><div class="machine"><i class="fx"></i><div class="m-body"><div class="m-top"></div><span class="m-glyph">SHIP</span><i class="m-lamp"></i></div></div><div class="s-label"><b>Release</b><span>HF + Ollama</span></div></div>
+    <div class="widget w1">r7</div><div class="widget w2">r7</div><div class="widget w3">r7</div>
+    <div class="reject"></div><div class="scrap">no</div>
+  </div></div>
+  <div class="hud"><div class="hud-inner">
+    <div class="chips"></div>
+    <div class="hud-log" data-log></div>
+    <div class="hud-note">live source later: GPU pod → POST /api/run/state · history from public-data.json</div>
+  </div></div>
+</section>
+
+<!-- ============ how it goes live ============ -->
+<div class="outro">
+  <h2>How any of these becomes a live page</h2>
+  <p>The scene is static art; only three things change at runtime, which keeps the API tiny. The pod pipeline scripts in <span class="mono">model/train/</span> gain one curl call per stage transition:</p>
+  <pre>POST /api/run/state        <b>{ run: "r7", stage: "train", detail: "step 1240/3000 · loss 0.83" }</b>
+GET  /api/run/state        → page polls (or SSE) and: highlights the station,
+                             updates the log line, advances the belt widgets
+GET  /public-data.json     → everything historical: scores, suites, run log</pre>
+  <p>Everything below the belt (chips, log, counters) renders straight from that state plus the existing <span class="mono">model/site/public-data.json</span> contract, so the page can never claim more than the pipeline actually reported. When no run is active, the line idles and the page shows the last released version and its scores.</p>
+  <p>Open questions flagged for you rather than decided here: whether the page shows failed and held runs on the belt itself (I would, it is the whole trust pitch), and whether concept 2 or 4 fits the "no hype" brand rule or should stay a social-preview asset only.</p>
+</div>
+
+<script>
+// Simulated run state. In production this loop is replaced by polling
+// /api/run/state fed by the GPU pod, plus public-data.json for history.
+const STAGES = ['Generate', 'Validate', 'Train', 'Quantize', 'Evaluate', 'Review', 'Release'];
+const LOGS = [
+  'generator: track f emitted 405 examples',
+  'validator: 4,594 admitted · 3 manifests rejected (schema fail)',
+  'trainer: r7 · step 1,240/3,000 · loss 0.83 · A100 80GB',
+  'quantizer: MXFP4 pack complete · 12.1 GB',
+  'eval: suite-248 · scoring mechanically · retrieval on',
+  'review: comparing r7 vs v1(r4) · abstention regression check',
+  'release: v1 is live on Hugging Face + Ollama',
+];
+document.querySelectorAll('.concept').forEach((sec, sIdx) => {
+  const chipsEl = sec.querySelector('.chips');
+  const logEl = sec.querySelector('[data-log]');
+  const stations = sec.querySelectorAll('.station');
+  STAGES.forEach(name => {
+    const c = document.createElement('span');
+    c.className = 'chip'; c.textContent = name;
+    chipsEl.appendChild(c);
+  });
+  const chips = chipsEl.children;
+  let i = sIdx * 2 % STAGES.length; // stagger concepts so they differ at a glance
+  const tick = () => {
+    for (let k = 0; k < STAGES.length; k++) {
+      chips[k].classList.toggle('active', k === i);
+      stations[k].classList.toggle('live', k === i);
+    }
+    logEl.textContent = LOGS[i];
+    i = (i + 1) % STAGES.length;
+  };
+  tick();
+  setInterval(tick, 3200);
+});
+</script>
+</body>
+</html>

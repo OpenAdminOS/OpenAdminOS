@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>training.openadminos.com · railway line concepts</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bangers&family=JetBrains+Mono:wght@400;600&family=Fredoka:wght@500;600&family=Geist:wght@400;500;600;700&display=swap');
+
+/* ============================================================
+   training.openadminos.com — four railway-line page concepts
+   The run is a train. It DWELLS at stations for hours; that is
+   the point. Liveliness comes from telemetry inside the stage
+   (loss, steps, timers), not from motion. Demo time is
+   compressed: seconds here stand for hours; the timers show
+   the real magnitudes.
+   ============================================================ */
+
+:root {
+  --bg-0: #1c1917; --bg-1: #191614; --bg-2: #232120; --bg-3: #2a2724;
+  --border: #322e2a; --border-strong: #403a35;
+  --text-0: #f5f1eb; --text-1: #b5ada3; --text-2: #9a9085; --text-3: #6b6157;
+  --accent: #e8a87c; --accent-dim: #d99868;
+  --success: #9cc88f; --warning: #e5c678; --danger: #e58888; --purple: #c4a5d9;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: #141210; color: var(--text-0); font-family: 'Geist', -apple-system, sans-serif; font-size: 14px; line-height: 1.55; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+a { color: var(--accent); text-decoration: none; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 24px; background: rgba(20,18,16,0.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace; font-size: 12px;
+}
+.topbar .site { color: var(--text-1); }
+.topbar .site b { color: var(--accent); font-weight: 600; }
+.topbar nav { margin-left: auto; display: flex; gap: 8px; }
+.topbar nav a { padding: 4px 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-1); transition: all .12s; }
+.topbar nav a:hover { color: var(--text-0); border-color: var(--border-strong); background: var(--bg-2); }
+
+.intro { max-width: 880px; padding: 48px 32px 40px; }
+.intro h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 10px; }
+.intro p { color: var(--text-1); margin-bottom: 10px; max-width: 740px; }
+.intro .mono-note { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-3); }
+
+.concept { border-top: 1px solid var(--border); padding-bottom: 56px; }
+.c-head { display: flex; align-items: baseline; gap: 18px; padding: 34px 32px 20px; max-width: 1200px; }
+.c-num { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent); flex-shrink: 0; }
+.c-head h2 { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+.c-head p { color: var(--text-2); font-size: 13px; max-width: 580px; }
+.scene-wrap { overflow-x: auto; padding: 0 24px; }
+.scene { position: relative; height: 480px; min-width: 1400px; max-width: 1400px; margin: 0 auto; border-radius: 14px; overflow: hidden; }
+
+/* ---------- shared railway geometry ---------- */
+.rail-main { position: absolute; left: 40px; right: 40px; bottom: 150px; height: 6px; border-radius: 3px; }
+.rail-siding { position: absolute; left: 990px; width: 250px; bottom: 218px; height: 5px; border-radius: 3px; opacity: .7; }
+.siding-tag { position: absolute; left: 992px; bottom: 232px; font-family: 'JetBrains Mono', monospace; font-size: 9px; letter-spacing: .12em; }
+
+.stn { position: absolute; bottom: 150px; width: 0; }
+.stn .node { position: absolute; left: -8px; bottom: -5px; width: 16px; height: 16px; border-radius: 50%; }
+.stn .stn-label { position: absolute; top: 26px; left: -75px; width: 150px; text-align: center; }
+.stn .stn-label b { display: block; font-size: 12px; font-weight: 600; }
+.stn .stn-label span { display: block; font-size: 10px; margin-top: 1px; }
+.stn .stn-dur { position: absolute; top: 66px; left: -75px; width: 150px; text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 9px; }
+.stn .signal { position: absolute; left: -30px; bottom: 14px; width: 6px; height: 34px; }
+.stn .signal i { position: absolute; top: -14px; left: -3px; width: 12px; height: 12px; border-radius: 50%; transition: all .3s; }
+
+.train { position: absolute; bottom: 156px; left: 0; z-index: 8; }
+.train.moving { transition: left 2.4s cubic-bezier(.45,.05,.35,1); }
+.ghost { position: absolute; bottom: 224px; left: 1120px; z-index: 6; opacity: .55; }
+.ghost .g-tag { position: absolute; left: 50%; top: -20px; transform: translateX(-50%); font-family: 'JetBrains Mono', monospace; font-size: 9px; white-space: nowrap; letter-spacing: .08em; }
+
+/* telemetry card */
+.telemetry { position: absolute; top: 26px; right: 26px; width: 320px; border-radius: 10px; padding: 14px 16px; z-index: 10; }
+.tel-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.tel-run { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; }
+.tel-stage { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.tel-line { font-family: 'JetBrains Mono', monospace; font-size: 11px; margin-bottom: 10px; min-height: 17px; }
+.spark { width: 100%; height: 40px; display: block; }
+.spark polyline { fill: none; stroke-width: 1.5; }
+.tel-foot { display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 10px; margin-top: 6px; }
+
+/* steam puffs (dwelling) */
+.puffs { position: absolute; bottom: 100%; left: 10px; width: 40px; height: 90px; pointer-events: none; }
+.puffs i { position: absolute; bottom: 0; left: 8px; width: 12px; height: 12px; border-radius: 50%; opacity: 0; animation: puff 2.8s ease-out infinite; }
+.puffs i:nth-child(2) { animation-delay: .9s; left: 3px; }
+.puffs i:nth-child(3) { animation-delay: 1.8s; left: 13px; }
+@keyframes puff { 0% { opacity: 0; transform: translateY(0) scale(.5); } 20% { opacity: .7; } 100% { opacity: 0; transform: translateY(-64px) scale(1.9); } }
+.train.moving .puffs i { animation-duration: 1s; }
+
+/* wheels spin only while moving */
+.wheel { border-radius: 50%; }
+.train.moving .wheel { animation: spin .45s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
+
+/* ---------- departure board (hud) ---------- */
+.hud { max-width: 1400px; margin: 18px auto 0; padding: 0 24px; }
+.hud-inner { border-radius: 10px; padding: 12px 16px; font-family: 'JetBrains Mono', monospace; }
+.board-row { display: grid; grid-template-columns: 70px 110px 1fr 130px 150px; gap: 12px; padding: 5px 6px; font-size: 11.5px; border-radius: 5px; }
+.board-row.head { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; }
+.hud-note { font-size: 10px; padding: 8px 6px 0; }
+
+/* ============================================================
+   STYLE 1 — NIGHT LINE (metro diagram, on-brand dark)
+   ============================================================ */
+.r1 .scene { background: linear-gradient(180deg, #171310, #1c1917 60%, #1a1614); border: 1px solid var(--border); }
+.r1 .scene::before { content: ''; position: absolute; inset: 0;
+  background-image: radial-gradient(rgba(245,241,235,.05) 1px, transparent 1.4px); background-size: 26px 26px; }
+.r1 .rail-main { background: linear-gradient(90deg, var(--accent-dim), var(--accent)); box-shadow: 0 0 14px rgba(232,168,124,.25); }
+.r1 .rail-siding { background: var(--border-strong); }
+.r1 .siding-tag { color: var(--text-3); }
+.r1 .stn .node { background: var(--bg-0); border: 3px solid var(--text-1); }
+.r1 .stn.occupied .node { border-color: var(--accent); box-shadow: 0 0 10px rgba(232,168,124,.5); }
+.r1 .stn.done .node { border-color: var(--success); }
+.r1 .stn-label b { color: var(--text-0); } .r1 .stn-label span { color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
+.r1 .stn-dur { color: var(--text-3); }
+.r1 .signal { background: var(--bg-3); }
+.r1 .signal i { background: var(--text-3); }
+.r1 .stn.occupied .signal i { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.r1 .stn.cleared .signal i { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.r1 .train-body { position: relative; width: 78px; height: 26px; background: linear-gradient(180deg, #35302c, #2a2724);
+  border: 1px solid var(--accent-dim); border-radius: 13px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.r1 .train-body::before { content: ''; position: absolute; right: -34px; top: 2px; width: 36px; height: 22px;
+  background: linear-gradient(90deg, rgba(232,168,124,.28), transparent); clip-path: polygon(0 30%, 100% 0, 100% 100%, 0 70%); }
+.r1 .train-body i { width: 8px; height: 8px; border-radius: 2px; background: rgba(232,168,124,.5); }
+.r1 .train:not(.moving) .train-body i { animation: blink 1.8s infinite; }
+.r1 .train-id { position: absolute; left: 50%; top: -20px; transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--accent); }
+.r1 .puffs { display: none; }
+.r1 .ghost .train-body { border-color: var(--warning); opacity: .8; }
+.r1 .ghost .train-body::before { display: none; }
+.r1 .g-tag { color: var(--warning); }
+.r1 .telemetry { background: rgba(25,22,20,.92); border: 1px solid var(--border-strong); }
+.r1 .tel-run { color: var(--accent); } .r1 .tel-stage { color: var(--text-3); }
+.r1 .tel-line { color: var(--success); }
+.r1 .spark polyline { stroke: var(--accent); }
+.r1 .tel-foot { color: var(--text-3); }
+.r1 .hud-inner { background: var(--bg-1); border: 1px solid var(--border); }
+.r1 .board-row { color: var(--text-1); }
+.r1 .board-row.head { color: var(--text-3); }
+.r1 .board-row.live { background: rgba(232,168,124,.08); color: var(--accent); }
+.r1 .board-row.warn-row { color: var(--warning); }
+.r1 .board-row.dim { color: var(--text-3); }
+.r1 .hud-note { color: var(--text-3); }
+
+/* ============================================================
+   STYLE 2 — INK RAIL (comic steam railway on halftone paper)
+   ============================================================ */
+.r2 .scene { background: #f4ecdd; border: 3px solid #17120d;
+  background-image: radial-gradient(rgba(23,18,13,.09) 1.2px, transparent 1.3px); background-size: 9px 9px; }
+.r2 .rail-main { height: 4px; background: #17120d; }
+.r2 .rail-main::before { content: ''; position: absolute; left: 0; right: 0; top: 8px; height: 4px; background: #17120d; }
+.r2 .rail-main::after { content: ''; position: absolute; left: 0; right: 0; top: -4px; height: 20px;
+  background: repeating-linear-gradient(90deg, transparent 0 18px, #17120d 18px 22px); opacity: .55; z-index: -1; }
+.r2 .rail-siding { background: #17120d; height: 4px; }
+.r2 .siding-tag { color: #6b5f4d; }
+.r2 .stn .node { background: #fff; border: 3px solid #17120d; }
+.r2 .stn .node::before { content: ''; position: absolute; left: -12px; bottom: 16px; width: 34px; height: 26px;
+  background: #fff; border: 3px solid #17120d; border-radius: 4px; }
+.r2 .stn .node::after { content: ''; position: absolute; left: -18px; bottom: 40px; width: 46px; height: 10px;
+  background: #e5484d; border: 3px solid #17120d; border-radius: 3px; }
+.r2 .stn:nth-child(2n) .node::after { background: #2f6fed; }
+.r2 .stn.occupied .node { background: #f5c518; }
+.r2 .stn.done .node { background: #8fd49a; }
+.r2 .stn-label b { color: #17120d; font-family: 'Bangers', cursive; font-weight: 400; font-size: 16px; letter-spacing: .05em; }
+.r2 .stn-label span { color: #6b5f4d; }
+.r2 .stn-dur { color: #6b5f4d; }
+.r2 .signal { background: #17120d; }
+.r2 .signal i { background: #fff; border: 2px solid #17120d; }
+.r2 .stn.occupied .signal i { background: #e5484d; }
+.r2 .stn.cleared .signal i { background: #8fd49a; }
+.r2 .loco { position: relative; width: 104px; height: 44px; }
+.r2 .boiler { position: absolute; left: 0; bottom: 8px; width: 62px; height: 24px; background: #2f6fed; border: 3px solid #17120d; border-radius: 12px 6px 6px 6px; }
+.r2 .stack { position: absolute; left: 10px; bottom: 30px; width: 12px; height: 16px; background: #17120d; border-radius: 3px 3px 0 0; }
+.r2 .cab { position: absolute; right: 14px; bottom: 8px; width: 34px; height: 34px; background: #e5484d; border: 3px solid #17120d; border-radius: 6px 6px 4px 4px; }
+.r2 .cab::before { content: ''; position: absolute; inset: 5px 6px auto; height: 11px; background: #fff; border: 2px solid #17120d; border-radius: 3px; }
+.r2 .wheel { position: absolute; bottom: -6px; width: 18px; height: 18px; border: 3px solid #17120d;
+  background: repeating-conic-gradient(#17120d 0 25deg, #f5c518 25deg 90deg); }
+.r2 .wheel.w-a { left: 6px; } .r2 .wheel.w-b { left: 32px; } .r2 .wheel.w-c { right: 20px; }
+.r2 .train-id { position: absolute; right: 18px; bottom: 16px; z-index: 2; font-family: 'Bangers', cursive; font-size: 13px; color: #fff; text-align: center; width: 26px; }
+.r2 .puffs { left: 2px; }
+.r2 .puffs i { background: #fff; border: 2px solid #17120d; }
+.r2 .ghost .boiler { background: #b9b0a0; } .r2 .ghost .cab { background: #b9b0a0; }
+.r2 .g-tag { color: #17120d; background: #f5c518; border: 2px solid #17120d; padding: 1px 6px; border-radius: 4px; top: auto; bottom: -32px; }
+.r2 .telemetry { background: #fff; border: 3px solid #17120d; box-shadow: 6px 6px 0 rgba(23,18,13,.85); }
+.r2 .tel-run { color: #e5484d; } .r2 .tel-stage { color: #6b5f4d; }
+.r2 .tel-line { color: #17120d; }
+.r2 .spark polyline { stroke: #2f6fed; }
+.r2 .tel-foot { color: #6b5f4d; }
+.r2 .hud-inner { background: #fff; border: 3px solid #17120d; box-shadow: 6px 6px 0 rgba(23,18,13,.85); }
+.r2 .board-row { color: #4c4232; }
+.r2 .board-row.head { color: #6b5f4d; }
+.r2 .board-row.live { background: #f5c518; color: #17120d; }
+.r2 .board-row.warn-row { color: #b8860b; }
+.r2 .board-row.dim { color: #a09480; }
+.r2 .hud-note { color: #6b5f4d; }
+.r2 .c-head h2 { font-family: 'Bangers', cursive; font-weight: 400; font-size: 26px; letter-spacing: .04em; }
+
+/* ============================================================
+   STYLE 3 — FLAP HALL (split-flap departure board is the hero)
+   ============================================================ */
+.r3 .scene { background: radial-gradient(900px 420px at 50% 0%, #262019, #17130f 70%); border: 1px solid #322a20; }
+.r3 .rail-main { bottom: 64px; background: #3a322a; }
+.r3 .rail-siding { left: 890px; width: 170px; bottom: 132px; background: #3a322a; }
+.r3 .siding-tag { left: 894px; bottom: 146px; color: #5c5347; }
+.r3 .stn { bottom: 64px; }
+.r3 .stn .node { width: 10px; height: 10px; left: -5px; bottom: -2px; background: #17130f; border: 2px solid #7a6f5f; }
+.r3 .stn.occupied .node { border-color: #ffb84d; box-shadow: 0 0 10px rgba(255,184,77,.6); }
+.r3 .stn.done .node { border-color: var(--success); }
+.r3 .stn .stn-label { top: 16px; }
+.r3 .stn-label b { color: #a89a86; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.r3 .stn-label span, .r3 .stn-dur, .r3 .signal { display: none; }
+.r3 .train { bottom: 70px; }
+.r3 .emu { position: relative; width: 240px; }
+.r3 .emu svg { display: block; width: 100%; height: auto; transform: scaleX(-1); }
+.r3 .emu::after { content: ''; position: absolute; left: 6%; right: 6%; bottom: -9px; height: 14px;
+  background: radial-gradient(50% 100% at 50% 0, rgba(255,184,77,.3), transparent 75%); }
+.r3 .train.moving .emu::before { content: ''; position: absolute; right: -46px; top: 30%; width: 48px; height: 14px;
+  background: linear-gradient(90deg, rgba(255,184,77,.4), transparent); clip-path: polygon(0 35%, 100% 0, 100% 100%, 0 65%); }
+.r3 .train:not(.moving) .train-id { animation: blink 2.4s infinite; }
+.r3 .train-id { position: absolute; left: 50%; top: -16px; transform: translateX(-50%); font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #ffb84d; }
+.r3 .puffs { display: none; }
+.r3 .ghost { bottom: 137px; left: 940px; }
+.r3 .ghost-loco { width: 64px; opacity: .8; }
+.r3 .ghost-loco svg { display: block; width: 100%; height: auto; fill: #57503f; }
+.r3 .g-tag { color: #b8a25c; }
+.r3 .telemetry { top: auto; bottom: 84px; right: 30px; width: 280px; background: rgba(23,19,15,.9); border: 1px solid #3a322a; }
+.r3 .tel-run { color: #ffb84d; } .r3 .tel-stage { color: #7a6f5f; }
+.r3 .tel-line { color: #d8c9b2; }
+.r3 .spark polyline { stroke: #ffb84d; }
+.r3 .tel-foot { color: #7a6f5f; }
+/* the big board */
+.bigboard { position: absolute; left: 50%; top: 34px; transform: translateX(-50%); width: 1080px;
+  background: #0d0b08; border: 2px solid #3a322a; border-radius: 10px; padding: 18px 22px 20px;
+  box-shadow: 0 30px 70px rgba(0,0,0,.6), inset 0 0 60px rgba(0,0,0,.6); z-index: 12; }
+.bigboard .bb-title { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: .3em; color: #7a6f5f; text-transform: uppercase; margin-bottom: 12px; display: flex; justify-content: space-between; }
+.bb-row { display: grid; grid-template-columns: 90px 170px 260px 170px 1fr; gap: 14px; margin-bottom: 8px; }
+.bb-cell { display: flex; gap: 2px; }
+.flap { display: inline-block; width: 15px; height: 24px; line-height: 24px; text-align: center;
+  background: linear-gradient(180deg, #262019 48%, #171310 52%); border-radius: 2.5px;
+  font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; color: #e8d9c0;
+  border: 1px solid rgba(0,0,0,.6); position: relative; }
+.flap::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(0,0,0,.75); }
+.bb-row.live-row .flap { color: #ffb84d; }
+.bb-row.hold-row .flap { color: #e5c678; }
+.bb-row.dim-row .flap { color: #8a7d6a; }
+.flap.flip { animation: flapflip .32s ease-in-out; }
+@keyframes flapflip { 0% { transform: rotateX(0); } 49% { transform: rotateX(-88deg); } 51% { transform: rotateX(88deg); } 100% { transform: rotateX(0); } }
+.bb-head { font-family: 'JetBrains Mono', monospace; font-size: 8.5px; letter-spacing: .2em; color: #5c5347; text-transform: uppercase; display: grid; grid-template-columns: 90px 170px 260px 170px 1fr; gap: 14px; margin-bottom: 6px; }
+.r3 .hud-inner { background: #17130f; border: 1px solid #322a20; }
+.r3 .board-row { color: #a89a86; }
+.r3 .board-row.head { color: #5c5347; }
+.r3 .board-row.live { background: rgba(255,184,77,.08); color: #ffb84d; }
+.r3 .board-row.warn-row { color: #e5c678; }
+.r3 .board-row.dim { color: #5c5347; }
+.r3 .hud-note { color: #5c5347; }
+
+/* ============================================================
+   STYLE 4 — TOY LINE (claymorph daylight landscape)
+   ============================================================ */
+.r4 .scene { background: linear-gradient(180deg, #cfe3ea 0%, #e8e2cd 55%, #e0d2b2 100%); border: 1px solid #d8c5a5; }
+.r4 .hill { position: absolute; border-radius: 50%; }
+.r4 .hill.h1 { left: -140px; bottom: 90px; width: 640px; height: 260px; background: #cdd9a8; }
+.r4 .hill.h2 { left: 380px; bottom: 80px; width: 820px; height: 300px; background: #bccf9c; }
+.r4 .hill.h3 { right: -180px; bottom: 86px; width: 660px; height: 250px; background: #d4dcae; }
+.r4 .cloud { position: absolute; height: 26px; border-radius: 13px; background: rgba(255,255,255,.85); animation: drift 40s linear infinite; }
+.r4 .cloud::before { content: ''; position: absolute; left: 18px; top: -12px; width: 30px; height: 24px; border-radius: 50%; background: inherit; }
+.r4 .cloud.cl1 { left: 140px; top: 54px; width: 76px; }
+.r4 .cloud.cl2 { left: 700px; top: 30px; width: 96px; animation-delay: -18s; }
+.r4 .cloud.cl3 { left: 1120px; top: 74px; width: 60px; animation-delay: -30s; }
+@keyframes drift { from { transform: translateX(0); } to { transform: translateX(240px); } }
+.r4 .sun { position: absolute; right: 70px; top: 34px; width: 52px; height: 52px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ffe9a8, #f5c869); box-shadow: 0 0 40px rgba(245,200,105,.5); }
+.r4 .rail-main { background: #8a7357; height: 8px; box-shadow: inset 0 2px 3px rgba(0,0,0,.2); }
+.r4 .rail-main::after { content: ''; position: absolute; left: 0; right: 0; top: 10px; height: 8px;
+  background: repeating-linear-gradient(90deg, transparent 0 20px, #a08a68 20px 30px); border-radius: 4px; }
+.r4 .rail-siding { background: #8a7357; }
+.r4 .siding-tag { color: #8a7860; }
+.r4 .stn .node { background: #fbf6ee; box-shadow: 0 3px 6px rgba(107,91,72,.35), inset 0 2px 0 rgba(255,255,255,.9); }
+.r4 .stn .node::before { content: ''; position: absolute; left: -16px; bottom: 18px; width: 44px; height: 14px;
+  background: linear-gradient(160deg, #fbf6ee, #e5d6bf); border-radius: 7px; box-shadow: 0 4px 8px rgba(107,91,72,.3); }
+.r4 .stn .node::after { content: ''; position: absolute; left: -20px; bottom: 32px; width: 52px; height: 12px;
+  background: #eb9ba1; border-radius: 8px 8px 3px 3px; box-shadow: inset 0 2px 0 rgba(255,255,255,.5); }
+.r4 .stn:nth-child(2n) .node::after { background: #9fcfe6; }
+.r4 .stn.occupied .node { background: #f5c869; }
+.r4 .stn.done .node { background: #9cc88f; }
+.r4 .stn-label b { color: #4c3f30; font-family: 'Fredoka', sans-serif; font-weight: 600; font-size: 13px; }
+.r4 .stn-label span { color: #8a7860; }
+.r4 .stn-dur { color: #a08f76; }
+.r4 .signal { background: #a08a68; border-radius: 3px; }
+.r4 .signal i { background: #d8c5a5; box-shadow: 0 0 0 2px rgba(255,255,255,.5); }
+.r4 .stn.occupied .signal i { background: #e58888; }
+.r4 .stn.cleared .signal i { background: #8fd49a; }
+.r4 .loco { position: relative; width: 110px; height: 46px; }
+.r4 .train:not(.moving) .loco { animation: bob4 2.6s ease-in-out infinite; }
+@keyframes bob4 { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.r4 .boiler { position: absolute; left: 0; bottom: 8px; width: 60px; height: 28px;
+  background: linear-gradient(160deg, #ffc9a0, #f0a06a); border-radius: 14px 8px 8px 8px;
+  box-shadow: 0 5px 10px rgba(107,91,72,.35), inset 0 3px 0 rgba(255,255,255,.6); }
+.r4 .stack { position: absolute; left: 10px; bottom: 32px; width: 14px; height: 14px;
+  background: linear-gradient(160deg, #fbf6ee, #e5d6bf); border-radius: 6px 6px 0 0; box-shadow: inset 0 2px 0 rgba(255,255,255,.8); }
+.r4 .cab { position: absolute; right: 12px; bottom: 8px; width: 38px; height: 36px;
+  background: linear-gradient(160deg, #cde8f5, #9fcfe6); border-radius: 10px 10px 6px 6px;
+  box-shadow: 0 5px 10px rgba(107,91,72,.35), inset 0 3px 0 rgba(255,255,255,.6); }
+.r4 .cab::before { content: ''; position: absolute; inset: 6px 7px auto; height: 12px; background: #fbf6ee; border-radius: 5px; }
+.r4 .wheel { position: absolute; bottom: -7px; width: 18px; height: 18px; background: #6b5b48;
+  box-shadow: inset 0 0 0 4px #4e4235, inset 0 0 0 6px #8a7860; }
+.r4 .wheel.w-a { left: 6px; } .r4 .wheel.w-b { left: 30px; } .r4 .wheel.w-c { right: 18px; }
+.r4 .train-id { position: absolute; right: 18px; bottom: 15px; z-index: 2; font-family: 'Fredoka', sans-serif; font-weight: 600; font-size: 12px; color: #4c6a7a; text-align: center; width: 26px; }
+.r4 .puffs { left: 4px; }
+.r4 .puffs i { background: rgba(255,255,255,.95); box-shadow: 0 2px 5px rgba(107,91,72,.2); }
+.r4 .ghost .boiler, .r4 .ghost .cab { background: #cfc4b2; }
+.r4 .g-tag { color: #8a7860; background: #fbf6ee; padding: 1px 7px; border-radius: 999px; box-shadow: 0 2px 5px rgba(107,91,72,.25); top: auto; bottom: -30px; }
+.r4 .telemetry { background: #fbf6ee; box-shadow: 0 10px 24px rgba(107,91,72,.3), inset 0 2px 0 rgba(255,255,255,.9); border-radius: 16px; }
+.r4 .tel-run { color: #d97e46; } .r4 .tel-stage { color: #a08f76; }
+.r4 .tel-line { color: #4c3f30; }
+.r4 .spark polyline { stroke: #d97e46; }
+.r4 .tel-foot { color: #a08f76; }
+.r4 .hud-inner { background: #fbf6ee; box-shadow: 0 10px 24px rgba(107,91,72,.25), inset 0 2px 0 rgba(255,255,255,.9); border-radius: 16px; }
+.r4 .board-row { color: #6b5b48; }
+.r4 .board-row.head { color: #a08f76; }
+.r4 .board-row.live { background: #f5c869; color: #4c3f30; }
+.r4 .board-row.warn-row { color: #b8860b; }
+.r4 .board-row.dim { color: #b3a68f; }
+.r4 .hud-note { color: #a08f76; }
+.r4 .c-head h2 { font-family: 'Fredoka', sans-serif; font-weight: 600; }
+
+.outro { border-top: 1px solid var(--border); padding: 44px 32px 72px; max-width: 880px; }
+.outro h2 { font-size: 19px; font-weight: 600; margin-bottom: 12px; }
+.outro p { color: var(--text-1); margin-bottom: 10px; max-width: 740px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="site mono"><b>training</b>.openadminos.com · railway line concepts · pick one</span>
+  <nav>
+    <a href="#r1">1 Night Line</a><a href="#r2">2 Ink Rail</a><a href="#r3">3 Flap Hall</a><a href="#r4">4 Toy Line</a>
+  </nav>
+</div>
+
+<div class="intro">
+  <h1>The training run, as a train</h1>
+  <p>Second direction, replacing the <a href="16-training-conveyor-concepts.html">conveyor concepts</a>. The problem with the belt was time: stages take hours, so constant motion reads as fake. On a railway line, dwelling at a station is the natural state. The run ("r7") sits at a stop with a live dwell timer and stage telemetry; departures are rare, real events. A held run is a train held at REVIEW on a siding, exactly what happened to r5.</p>
+  <p>All four styles share the same mechanics: seven stations, one train per run, a telemetry card that carries the liveliness (loss curve, step counter, elapsed time), signals per station, and a departure board that lists every run honestly, including the held and experimental ones. When no run is active, the line simply shows the last released train at the terminus.</p>
+  <p class="mono-note">demo note: dwell that takes hours in reality lasts seconds here; the timers display the real magnitudes. later the GPU pod posts {run, stage, detail} and the page just renders it.</p>
+</div>
+
+<section class="concept r1" id="r1">
+  <div class="c-head">
+    <span class="c-num">STYLE 01</span>
+    <div>
+      <h2>Night Line</h2>
+      <p>A metro diagram in the product's dark palette. Glowing amber line, ringed station nodes, a tram with a headlight cone. Closest to the brand; the page feels like a system status screen.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="rail-main"></div>
+    <div class="rail-siding"></div><div class="siding-tag">SIDING · HELD RUNS</div>
+    <div class="train" data-train>
+      <div class="train-id">r7</div>
+      <div class="train-body"><i></i><i></i><i></i></div>
+      <div class="puffs"><i></i><i></i><i></i></div>
+    </div>
+    <div class="ghost"><div class="g-tag">r5 · held</div><div class="train-body"><i></i><i></i></div></div>
+    <div class="telemetry" data-telemetry>
+      <div class="tel-head"><span class="tel-run">run r7</span><span class="tel-stage" data-tel-stage></span></div>
+      <div class="tel-line" data-tel-line></div>
+      <svg class="spark" viewBox="0 0 120 32" preserveAspectRatio="none"><polyline data-spark points=""/></svg>
+      <div class="tel-foot"><span>loss · full run</span><span data-tel-elapsed></span></div>
+    </div>
+  </div></div>
+  <div class="hud"><div class="hud-inner" data-board></div></div>
+</section>
+
+<section class="concept r2" id="r2">
+  <div class="c-head">
+    <span class="c-num">STYLE 02</span>
+    <div>
+      <h2>Ink Rail</h2>
+      <p>A comic steam railway on halftone paper: chunky locomotive, spoked wheels that only turn on departure, steam while standing, little depot buildings. Loudest style, best as a shareable poster.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="rail-main"></div>
+    <div class="rail-siding"></div><div class="siding-tag">SIDING · HELD RUNS</div>
+    <div class="train" data-train>
+      <div class="loco">
+        <div class="stack"></div><div class="boiler"></div><div class="cab"></div>
+        <div class="train-id">r7</div>
+        <div class="wheel w-a"></div><div class="wheel w-b"></div><div class="wheel w-c"></div>
+      </div>
+      <div class="puffs"><i></i><i></i><i></i></div>
+    </div>
+    <div class="ghost"><div class="g-tag">r5 · HELD</div><div class="loco"><div class="boiler"></div><div class="cab"></div><div class="wheel w-a"></div><div class="wheel w-c"></div></div></div>
+    <div class="telemetry" data-telemetry>
+      <div class="tel-head"><span class="tel-run">run r7</span><span class="tel-stage" data-tel-stage></span></div>
+      <div class="tel-line" data-tel-line></div>
+      <svg class="spark" viewBox="0 0 120 32" preserveAspectRatio="none"><polyline data-spark points=""/></svg>
+      <div class="tel-foot"><span>loss · full run</span><span data-tel-elapsed></span></div>
+    </div>
+  </div></div>
+  <div class="hud"><div class="hud-inner" data-board></div></div>
+</section>
+
+<section class="concept r3" id="r3">
+  <div class="c-head">
+    <span class="c-num">STYLE 03</span>
+    <div>
+      <h2>Flap Hall</h2>
+      <p>The split-flap departure board is the hero; the line map is a thin strip below it. Flaps physically flip when state changes, which makes rare transitions feel like events. The most honest-timekeeping style.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="bigboard" data-bigboard>
+      <div class="bb-title"><span>OpenAdmin · training departures</span><span data-bb-clock>trained in public</span></div>
+    </div>
+    <div class="rail-main"></div>
+    <div class="train" data-train><div class="train-id">r7</div><div class="emu"><svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="330.48221mm"
+   height="55.728813mm"
+   viewBox="0 0 1171 197.4643"
+   id="svg4147"
+   version="1.1"
+   inkscape:version="0.91 r13725"
+   sodipodi:docname="KTM Class 92.svg">
+  <defs
+     id="defs4149" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(0.5,-899.8622)">
+    <g
+       id="g5398">
+      <path
+         style="fill:#8a7d6a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+         d="m 365,1052.3622 0,13 80,0 0,-13 z"
+         id="path5394"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="cccc" />
+      <path
+         sodipodi:nodetypes="ccccccccc"
+         inkscape:connector-curvature="0"
+         id="path5390"
+         d="m 294.83827,1052.3622 c 3.40927,14.5209 6.69226,16.7938 6.69226,16.7938 5.61233,3.1169 9.09447,0.5276 9.09447,0.5276 l 4.91071,-4e-4 4.82143,-2.767 24.64286,-4e-4 0,12.4464 20,0 0,-27 z"
+         style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="ccccc"
+         inkscape:connector-curvature="0"
+         id="path5367"
+         d="m 551.8393,1077.3265 0,-25 59,0 0,25 z"
+         style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="ccccc"
+         inkscape:connector-curvature="0"
+         id="path5495"
+         d="m 955.8393,1081.3265 0,-29 203,0 0,29 z"
+         style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <g
+         id="g5333"
+         transform="translate(787.8393,-2.03569)">
+        <path
+           sodipodi:nodetypes="cccccc"
+           inkscape:connector-curvature="0"
+           id="path5335"
+           d="m 306,1052.3622 0,31 -2,3 -50,0 -2,-3 0,-31 z"
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <circle
+           r="20"
+           cy="1079.1122"
+           cx="279.25"
+           id="circle5337"
+           style="opacity:1;fill:#26201a;fill-opacity:1;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+        <path
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 174,1052.3622 0,31 -2,3 -50,0 -2,-3 0,-31 z"
+           id="path5339"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccccc" />
+        <circle
+           style="opacity:1;fill:#26201a;fill-opacity:1;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           id="circle5341"
+           cx="147.25"
+           cy="1079.1122"
+           r="20" />
+        <path
+           style="fill:#26201a;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 131.5,1074.8622 0,-8.5 -1,0 0,-10 -1.5,0 0,-2 9.5,0 0,2 -4,0 0,10 -1,0 0,8.5 z"
+           id="path5343"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccccccccccc" />
+        <path
+           sodipodi:nodetypes="cccc"
+           inkscape:connector-curvature="0"
+           id="path5345"
+           d="m 141.5,1066.0622 0,5 13.5,0 0,-5 z"
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 271.5,1066.0622 0,5 13.5,0 0,-5 z"
+           id="path5347"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccc" />
+        <path
+           sodipodi:nodetypes="cccccccccccccccccc"
+           inkscape:connector-curvature="0"
+           id="path5349"
+           d="m 250,1066.8622 c 0,0 -3.79465,0.098 -5,2.5 l 0,18 -61.5,0 -2.5,-3 0,-15 -2.89748,-2.5 -38.60252,0 -1,-1.5 0,-11 44.5,0 c 2.81509,1.4723 5.83539,10.1218 5.83539,10.1218 2.76523,7.8485 8.16461,8.8782 8.16461,8.8782 l 33,0 c 4.86047,-2.0597 6.88077,-8.878 6.88077,-8.878 2.0203,-6.4399 6.11923,-10.122 6.11923,-10.122 l 44,0 0,12.5 z"
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="cccccccccccc"
+           inkscape:connector-curvature="0"
+           id="path5351"
+           d="m 294,1074.8622 0,-8.5 1,0 0,-10 1.5,0 0,-2 -9.5,0 0,2 4,0 0,10 1,0 0,8.5 z"
+           style="fill:#26201a;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 181,1077.6622 -50.25,0 0,-2.4 c 5.9994,0.018 9.25,-4.2 9.25,-4.2 l 41,0 z"
+           id="path5353"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccccc" />
+        <path
+           sodipodi:nodetypes="cccccc"
+           inkscape:connector-curvature="0"
+           id="path5355"
+           d="m 245,1077.6622 50,0 0,-2.4 c -5.9994,0.018 -9.25,-4.2 -9.25,-4.2 l -40.75,0 z"
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="ccccc"
+           inkscape:connector-curvature="0"
+           id="path5357"
+           d="m 202.8,1054.7622 0,18.6 20.5,0 0,-18.6 z"
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="sccsccs"
+           inkscape:connector-curvature="0"
+           id="path5359"
+           d="m 193.25,1060.5622 c 0,-3.0652 2.48483,-5.8 5.55,-5.8 l 28.5,0 c 3.06517,0 5.55,2.7348 5.55,5.8 0,3.0652 -2.48482,5.8 -5.55,5.8 l -28.5,0 c -3.06518,0 -5.55,-2.7348 -5.55,-5.8 z"
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 198.8,1052.7622 0,2 28.5,0 0,-2 z"
+           id="path5361"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccc" />
+      </g>
+      <g
+         transform="translate(-14.1607,-2.03569)"
+         id="g5102-1">
+        <path
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 306,1052.3622 0,31 -2,3 -50,0 -2,-3 0,-31 z"
+           id="path5104-2"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccccc" />
+        <circle
+           style="opacity:1;fill:#26201a;fill-opacity:1;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           id="circle5106-9"
+           cx="279.25"
+           cy="1079.1122"
+           r="20" />
+        <path
+           sodipodi:nodetypes="cccccc"
+           inkscape:connector-curvature="0"
+           id="path5108-5"
+           d="m 174,1052.3622 0,31 -2,3 -50,0 -2,-3 0,-31 z"
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <circle
+           r="20"
+           cy="1079.1122"
+           cx="147.25"
+           id="circle5110-9"
+           style="opacity:1;fill:#26201a;fill-opacity:1;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="cccccccccccc"
+           inkscape:connector-curvature="0"
+           id="path5112-3"
+           d="m 131.5,1074.8622 0,-8.5 -1,0 0,-10 -1.5,0 0,-2 9.5,0 0,2 -4,0 0,10 -1,0 0,8.5 z"
+           style="fill:#26201a;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 141.5,1066.0622 0,5 13.5,0 0,-5 z"
+           id="path5114-2"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccc" />
+        <path
+           sodipodi:nodetypes="cccc"
+           inkscape:connector-curvature="0"
+           id="path5116-0"
+           d="m 271.5,1066.0622 0,5 13.5,0 0,-5 z"
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 250,1066.8622 c 0,0 -3.79465,0.098 -5,2.5 l 0,18 -61.5,0 -2.5,-3 0,-15 -2.89748,-2.5 -38.60252,0 -1,-1.5 0,-11 44.5,0 c 2.81509,1.4723 5.83539,10.1218 5.83539,10.1218 2.76523,7.8485 8.16461,8.8782 8.16461,8.8782 l 33,0 c 4.86047,-2.0597 6.88077,-8.878 6.88077,-8.878 2.0203,-6.4399 6.11923,-10.122 6.11923,-10.122 l 44,0 0,12.5 z"
+           id="path5118-5"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccccccccccccccccc" />
+        <path
+           style="fill:#26201a;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 294,1074.8622 0,-8.5 1,0 0,-10 1.5,0 0,-2 -9.5,0 0,2 4,0 0,10 1,0 0,8.5 z"
+           id="path5120-3"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccccccccccc" />
+        <path
+           sodipodi:nodetypes="cccccc"
+           inkscape:connector-curvature="0"
+           id="path5122-1"
+           d="m 181,1077.6622 -50.25,0 0,-2.4 c 5.9994,0.018 9.25,-4.2 9.25,-4.2 l 41,0 z"
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 245,1077.6622 50,0 0,-2.4 c -5.9994,0.018 -9.25,-4.2 -9.25,-4.2 l -40.75,0 z"
+           id="path5124-0"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cccccc" />
+        <path
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 202.8,1054.7622 0,18.6 20.5,0 0,-18.6 z"
+           id="path5126-4"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccc" />
+        <path
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 193.25,1060.5622 c 0,-3.0652 2.48483,-5.8 5.55,-5.8 l 28.5,0 c 3.06517,0 5.55,2.7348 5.55,5.8 0,3.0652 -2.48482,5.8 -5.55,5.8 l -28.5,0 c -3.06518,0 -5.55,-2.7348 -5.55,-5.8 z"
+           id="path5128-5"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="sccsccs" />
+        <path
+           sodipodi:nodetypes="ccccc"
+           inkscape:connector-curvature="0"
+           id="path5130-9"
+           d="m 198.8,1052.7622 0,2 28.5,0 0,-2 z"
+           style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      </g>
+      <path
+         sodipodi:nodetypes="ccccccccccccccccc"
+         inkscape:connector-curvature="0"
+         id="path8292"
+         d="m 130,910.3622 c -50.535717,0.53572 -55.178572,2.53572 -55.178572,2.53572 C 40.369833,921.80482 22.357,970.75506 22.357,970.75506 6.8212855,1012.8979 1.5,1031.3622 1.5,1031.3622 0.69447987,1033.2324 0,1040.998 0,1040.998 l 0,26.3642 c 4.3562828,-2.8782 18.119611,-5.6561 18.119611,-5.6561 C 72.099637,1054.3825 91,1054.3825 91,1054.3825 l 0,-2.0203 1073,0 0,-5 4,0 2,-38 0,-83 -9,0 c -0.2085,-14.41119 -13,-16 -13,-16 z"
+         style="fill:#e8d9c0;fill-rule:evenodd;stroke:#d99868;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1" />
+      <path
+         style="fill:#e8d9c0;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+         d="m 18.119611,1061.7061 c 0,0 -13.7633282,2.7779 -18.119611,5.6561 l 0,-26.3642 c 0,0 0.69447987,-7.7656 1.5,-9.6358 0,0 5.3212855,-18.4643 20.857,-60.60714 0,0 18.012833,-48.95024 52.464428,-57.85714 0,0 4.642855,-2 55.178572,-2.53572 -2.40696,3.8717 -3.30357,8.25001 -3.30357,8.25001 l 0,5.08928 -3.19643,2.67857 0,5.80357 -3.5,4.17857 -32,0 0,103 -69.88,1 z"
+         id="path4137"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="ccccccccccccccc" />
+      <path
+         sodipodi:nodetypes="cccccccccccc"
+         inkscape:connector-curvature="0"
+         id="path5010"
+         d="m 123.5,926.38006 3.19643,-2.67857 0,-5.08928 c 0,0 0.89661,-4.37831 3.30357,-8.25001 -50.535717,0.53572 -55.178572,2.53572 -55.178572,2.53572 C 40.369833,921.80482 22.357,970.75506 22.357,970.75506 6.8212855,1012.8979 1.5,1031.3622 1.5,1031.3622 c 7.843911,1.0495 10.116755,0.039 10.116755,0.039 10.73287,-24.2437 15.657364,-38.13332 15.657364,-38.13332 11.99556,-36.74429 19.824243,-45.7094 19.824243,-45.7094 C 60.987959,927.8605 72.730983,926.3798 72.730983,926.3798 Z"
+         style="fill:#7a6f5f;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="cccccccc"
+         inkscape:connector-curvature="0"
+         id="path4994"
+         d="m 1170,1000.3622 -1050,0 c 0,0 -71.765216,-0.1491 -113.8973929,16.5 -3.2722857,9.8839 -4.6026071,14.5 -4.6026071,14.5 -0.80552013,1.8702 -1.5,9.6358 -1.5,9.6358 18.814091,-20.2031 64.397224,-27.4004 64.397224,-27.4004 C 93.312843,1007.7893 120,1007.3622 120,1007.3622 l 1050,0 z"
+         style="fill:#ffb84d;fill-rule:evenodd;stroke:none;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="csccccccc"
+         inkscape:connector-curvature="0"
+         id="path4139"
+         d="m 1.5,1031.3622 c 0,0 1.3303214,-4.6161 4.6026071,-14.5 3.2722857,-9.8839 8.4865359,-25.03572 16.2543929,-46.10714 0,0 18.012833,-48.95024 52.464428,-57.85714 0,0 4.642855,-2 55.178572,-2.53572 -1.20348,1.93585 -1.85062,3.65714 -2.55439,5.57689 L 77.276669,916.7392 C 32.020794,926.8609 17.317414,996.26359 5.6189736,1031.7804 Z"
+         style="fill:#ffb84d;fill-rule:evenodd;stroke:#ffb84d;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1" />
+      <rect
+         rx="5"
+         y="944.61218"
+         x="93.75"
+         height="95"
+         width="27"
+         id="rect4141"
+         style="opacity:1;fill:#e8d9c0;fill-opacity:1;stroke:#171310;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <rect
+         style="opacity:1;fill:#171310;fill-opacity:1;stroke:#171310;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         id="rect4143"
+         width="19"
+         height="42"
+         x="97.75"
+         y="948.61218"
+         rx="5" />
+      <path
+         style="display:inline;opacity:1;fill:#e8d9c0;fill-opacity:1;stroke:#171310;stroke-width:1.54177892;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 240,934.3622 -80,0 0,105 80,0 z"
+         id="path4661"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="ccccc" />
+      <path
+         sodipodi:nodetypes="ccccc"
+         inkscape:connector-curvature="0"
+         id="path4904"
+         d="m 232.58928,997.00506 c 0,0 -6.60714,-0.71428 -18.92857,-0.26785 0,0 -15.44643,-0.53572 -43.03571,5.89289 25.89286,-1.5179 39.91071,-3.39289 39.91071,-3.39289 15.625,-0.71429 22.05357,-2.23215 22.05357,-2.23215 z"
+         style="fill:#ffb84d;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="ccccc"
+         inkscape:connector-curvature="0"
+         id="path4906"
+         d="m 235.80357,1002.3622 c -8.57399,3.1368 -17.73385,2.5217 -27.23214,2.8571 0,0 -14.91072,1.0715 -25.53572,2.5 0,0 0,0.8036 7.14286,2.2322 0,0 -17.41071,0.9821 -25.625,4.9107 14.01786,0.9821 41.96429,-3.3929 41.96429,-3.3929 20.53571,-3.8392 29.28571,-9.1071 29.28571,-9.1071 z"
+         style="fill:#3a322a;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <path
+         style="fill:#3a322a;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+         d="m 232.94643,1012.2729 c 0,0 -10.71429,1.875 -22.41072,2.8571 0,0 -20.44642,3.4822 -43.39285,9.8215 25,-1.5179 39.91071,-5.8036 39.91071,-5.8036 17.32143,-2.2322 25.89286,-6.875 25.89286,-6.875 z"
+         id="path4908"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="ccccc" />
+      <path
+         inkscape:connector-curvature="0"
+         id="path4910"
+         d="m 208.39286,1022.9872 c 0,0 -8.48215,-0.7143 -23.66072,3.3929 0,0 -16.25,4.1964 -20.17857,7.5 6.96429,-0.8036 19.10714,-3.2143 19.10714,-3.2143 18.30357,-4.0179 24.73215,-7.6786 24.73215,-7.6786 z"
+         style="fill:#ffb84d;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <path
+         id="rect4657"
+         d="m 184.62087,948.11255 -11.24175,0 c -2.51127,0 -4.53297,2.0217 -4.53297,4.53297 l 0,33.24176 c 0,2.51126 2.0217,4.53297 4.53297,4.53297 l 11.24175,0 c 2.51127,0 4.53297,-2.02171 4.53297,-4.53297 l 0,-33.24176 c 0,-2.51127 -2.0217,-4.53297 -4.53297,-4.53297 z"
+         style="display:inline;opacity:1;fill:#171310;fill-opacity:1;stroke:#4a4136;stroke-width:1.69230771;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         inkscape:connector-curvature="0" />
+      <path
+         sodipodi:nodetypes="ccccccc"
+         inkscape:connector-curvature="0"
+         id="path4914"
+         d="m 170.71428,1035.3086 c 36.60715,-4.0178 59.01786,-6.25 59.01786,-6.25 2.76786,-0.3571 3.48214,-0.089 3.48214,-0.089 -4.19642,3.4819 -15.44642,7.4105 -15.44642,7.4105 -6.42858,1.5625 -14.19643,0.1785 -14.19643,0.1785 14.19643,-1.5179 24.73214,-5.5803 24.73214,-5.5803 -29.28572,4.0178 -57.58929,4.3303 -57.58929,4.3303 z"
+         style="fill:#ffb84d;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <path
+         inkscape:connector-curvature="0"
+         id="path4912"
+         d="m 196.33928,1029.3265 c 28.48215,-10.2679 37.32143,-10.0893 37.32143,-10.0893 0,0 -9.19643,6.9643 -37.32143,10.0893 z"
+         style="fill:#ffb84d;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="cc"
+         inkscape:connector-curvature="0"
+         id="path4659"
+         d="m 199.21505,933.92127 -0.27531,105.00043"
+         style="display:inline;fill:none;fill-rule:evenodd;stroke:#4a4136;stroke-width:3.08355784;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="sssssssss"
+         inkscape:connector-curvature="0"
+         id="rect4896"
+         d="m 226.62089,948.11255 -11.24176,0 c -2.51126,0 -4.53298,2.0217 -4.53298,4.53297 l 0,33.24176 c 0,2.51126 2.02172,4.53297 4.53298,4.53297 l 11.24176,0 c 2.51125,0 4.53296,-2.02171 4.53296,-4.53297 l 0,-33.24176 c 0,-2.51127 -2.02171,-4.53297 -4.53296,-4.53297 z"
+         style="display:inline;opacity:1;fill:#171310;fill-opacity:1;stroke:#4a4136;stroke-width:1.69230771;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <rect
+         y="1041.2505"
+         x="160.10918"
+         height="6"
+         width="80"
+         id="rect4898"
+         style="opacity:1;fill:#26201a;fill-opacity:1;stroke:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="ccccc"
+         inkscape:connector-curvature="0"
+         id="path4902"
+         d="m 240,934.3622 -80,0 0,105 80,0 z"
+         style="display:inline;opacity:1;fill:none;fill-opacity:1;stroke:#171310;stroke-width:1.54177892;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <g
+         transform="translate(395.77089,0)"
+         id="g4930">
+        <path
+           style="display:inline;opacity:1;fill:#e8d9c0;fill-opacity:1;stroke:#171310;stroke-width:1.54177892;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           d="m 240,934.3622 -80,0 0,105 80,0 z"
+           id="path4932"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccc" />
+        <path
+           sodipodi:nodetypes="ccccc"
+           inkscape:connector-curvature="0"
+           id="path4934"
+           d="m 232.58928,997.00506 c 0,0 -6.60714,-0.71428 -18.92857,-0.26785 0,0 -15.44643,-0.53572 -43.03571,5.89289 25.89286,-1.5179 39.91071,-3.39289 39.91071,-3.39289 15.625,-0.71429 22.05357,-2.23215 22.05357,-2.23215 z"
+           style="fill:#ffb84d;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="ccccc"
+           inkscape:connector-curvature="0"
+           id="path4936"
+           d="m 235.80357,1002.3622 c -8.57399,3.1368 -17.73385,2.5217 -27.23214,2.8571 0,0 -14.91072,1.0715 -25.53572,2.5 0,0 0,0.8036 7.14286,2.2322 0,0 -17.41071,0.9821 -25.625,4.9107 14.01786,0.9821 41.96429,-3.3929 41.96429,-3.3929 20.53571,-3.8392 29.28571,-9.1071 29.28571,-9.1071 z"
+           style="fill:#3a322a;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#3a322a;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 232.94643,1012.2729 c 0,0 -10.71429,1.875 -22.41072,2.8571 0,0 -20.44642,3.4822 -43.39285,9.8215 25,-1.5179 39.91071,-5.8036 39.91071,-5.8036 17.32143,-2.2322 25.89286,-6.875 25.89286,-6.875 z"
+           id="path4938"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccc" />
+        <path
+           inkscape:connector-curvature="0"
+           id="path4940"
+           d="m 208.39286,1022.9872 c 0,0 -8.48215,-0.7143 -23.66072,3.3929 0,0 -16.25,4.1964 -20.17857,7.5 6.96429,-0.8036 19.10714,-3.2143 19.10714,-3.2143 18.30357,-4.0179 24.73215,-7.6786 24.73215,-7.6786 z"
+           style="fill:#ffb84d;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           inkscape:connector-curvature="0"
+           id="path4942"
+           d="m -184.62087,948.11255 11.24175,0 c 2.51127,0 4.53297,2.0217 4.53297,4.53297 l 0,33.24176 c 0,2.51126 -2.0217,4.53297 -4.53297,4.53297 l -11.24175,0 c -2.51127,0 -4.53297,-2.02171 -4.53297,-4.53297 l 0,-33.24176 c 0,-2.51127 2.0217,-4.53297 4.53297,-4.53297 z"
+           style="display:inline;opacity:1;fill:#171310;fill-opacity:1;stroke:#4a4136;stroke-width:1.69230771;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           transform="scale(-1,1)" />
+        <path
+           sodipodi:nodetypes="ccccccc"
+           inkscape:connector-curvature="0"
+           id="path4944"
+           d="m 170.71428,1035.3086 c 36.60715,-4.0178 59.01786,-6.25 59.01786,-6.25 2.76786,-0.3571 3.48214,-0.089 3.48214,-0.089 -4.19642,3.4819 -15.44642,7.4105 -15.44642,7.4105 -6.42858,1.5625 -14.19643,0.1785 -14.19643,0.1785 14.19643,-1.5179 24.73214,-5.5803 24.73214,-5.5803 -29.28572,4.0178 -57.58929,4.3303 -57.58929,4.3303 z"
+           style="fill:#ffb84d;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           inkscape:connector-curvature="0"
+           id="path4946"
+           d="m 196.33928,1029.3265 c 28.48215,-10.2679 37.32143,-10.0893 37.32143,-10.0893 0,0 -9.19643,6.9643 -37.32143,10.0893 z"
+           style="fill:#ffb84d;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="cc"
+           inkscape:connector-curvature="0"
+           id="path4948"
+           d="m 199.21505,933.92127 -0.27531,105.00043"
+           style="display:inline;fill:none;fill-rule:evenodd;stroke:#4a4136;stroke-width:3.08355784;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="sssssssss"
+           inkscape:connector-curvature="0"
+           id="path4950"
+           d="m 226.62089,948.11255 -11.24176,0 c -2.51126,0 -4.53298,2.0217 -4.53298,4.53297 l 0,33.24176 c 0,2.51126 2.02172,4.53297 4.53298,4.53297 l 11.24176,0 c 2.51125,0 4.53296,-2.02171 4.53296,-4.53297 l 0,-33.24176 c 0,-2.51127 -2.02171,-4.53297 -4.53296,-4.53297 z"
+           style="display:inline;opacity:1;fill:#171310;fill-opacity:1;stroke:#4a4136;stroke-width:1.69230771;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+        <rect
+           y="1041.2505"
+           x="160.10918"
+           height="6"
+           width="80"
+           id="rect4952"
+           style="opacity:1;fill:#26201a;fill-opacity:1;stroke:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+        <path
+           sodipodi:nodetypes="ccccc"
+           inkscape:connector-curvature="0"
+           id="path4954"
+           d="m 240,934.3622 -80,0 0,105 80,0 z"
+           style="display:inline;opacity:1;fill:none;fill-opacity:1;stroke:#171310;stroke-width:1.54177892;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      </g>
+      <g
+         id="g4956"
+         transform="translate(794.77089,0)">
+        <path
+           sodipodi:nodetypes="ccccc"
+           inkscape:connector-curvature="0"
+           id="path4958"
+           d="m 240,934.3622 -80,0 0,105 80,0 z"
+           style="display:inline;opacity:1;fill:#e8d9c0;fill-opacity:1;stroke:#171310;stroke-width:1.54177892;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+        <path
+           style="fill:#ffb84d;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 232.58928,997.00506 c 0,0 -6.60714,-0.71428 -18.92857,-0.26785 0,0 -15.44643,-0.53572 -43.03571,5.89289 25.89286,-1.5179 39.91071,-3.39289 39.91071,-3.39289 15.625,-0.71429 22.05357,-2.23215 22.05357,-2.23215 z"
+           id="path4960"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccc" />
+        <path
+           style="fill:#3a322a;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 235.80357,1002.3622 c -8.57399,3.1368 -17.73385,2.5217 -27.23214,2.8571 0,0 -14.91072,1.0715 -25.53572,2.5 0,0 0,0.8036 7.14286,2.2322 0,0 -17.41071,0.9821 -25.625,4.9107 14.01786,0.9821 41.96429,-3.3929 41.96429,-3.3929 20.53571,-3.8392 29.28571,-9.1071 29.28571,-9.1071 z"
+           id="path4962"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccc" />
+        <path
+           sodipodi:nodetypes="ccccc"
+           inkscape:connector-curvature="0"
+           id="path4964"
+           d="m 232.94643,1012.2729 c 0,0 -10.71429,1.875 -22.41072,2.8571 0,0 -20.44642,3.4822 -43.39285,9.8215 25,-1.5179 39.91071,-5.8036 39.91071,-5.8036 17.32143,-2.2322 25.89286,-6.875 25.89286,-6.875 z"
+           style="fill:#3a322a;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
+        <path
+           style="fill:#ffb84d;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 208.39286,1022.9872 c 0,0 -8.48215,-0.7143 -23.66072,3.3929 0,0 -16.25,4.1964 -20.17857,7.5 6.96429,-0.8036 19.10714,-3.2143 19.10714,-3.2143 18.30357,-4.0179 24.73215,-7.6786 24.73215,-7.6786 z"
+           id="path4966"
+           inkscape:connector-curvature="0" />
+        <path
+           transform="scale(-1,1)"
+           style="display:inline;opacity:1;fill:#171310;fill-opacity:1;stroke:#4a4136;stroke-width:1.69230771;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           d="m -184.62087,948.11255 11.24175,0 c 2.51127,0 4.53297,2.0217 4.53297,4.53297 l 0,33.24176 c 0,2.51126 -2.0217,4.53297 -4.53297,4.53297 l -11.24175,0 c -2.51127,0 -4.53297,-2.02171 -4.53297,-4.53297 l 0,-33.24176 c 0,-2.51127 2.0217,-4.53297 4.53297,-4.53297 z"
+           id="path4968"
+           inkscape:connector-curvature="0" />
+        <path
+           style="fill:#ffb84d;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 170.71428,1035.3086 c 36.60715,-4.0178 59.01786,-6.25 59.01786,-6.25 2.76786,-0.3571 3.48214,-0.089 3.48214,-0.089 -4.19642,3.4819 -15.44642,7.4105 -15.44642,7.4105 -6.42858,1.5625 -14.19643,0.1785 -14.19643,0.1785 14.19643,-1.5179 24.73214,-5.5803 24.73214,-5.5803 -29.28572,4.0178 -57.58929,4.3303 -57.58929,4.3303 z"
+           id="path4970"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccccc" />
+        <path
+           style="fill:#ffb84d;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 196.33928,1029.3265 c 28.48215,-10.2679 37.32143,-10.0893 37.32143,-10.0893 0,0 -9.19643,6.9643 -37.32143,10.0893 z"
+           id="path4972"
+           inkscape:connector-curvature="0" />
+        <path
+           style="display:inline;fill:none;fill-rule:evenodd;stroke:#4a4136;stroke-width:3.08355784;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+           d="m 199.21505,933.92127 -0.27531,105.00043"
+           id="path4974"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="cc" />
+        <path
+           style="display:inline;opacity:1;fill:#171310;fill-opacity:1;stroke:#4a4136;stroke-width:1.69230771;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           d="m 226.62089,948.11255 -11.24176,0 c -2.51126,0 -4.53298,2.0217 -4.53298,4.53297 l 0,33.24176 c 0,2.51126 2.02172,4.53297 4.53298,4.53297 l 11.24176,0 c 2.51125,0 4.53296,-2.02171 4.53296,-4.53297 l 0,-33.24176 c 0,-2.51127 -2.02171,-4.53297 -4.53296,-4.53297 z"
+           id="path4976"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="sssssssss" />
+        <rect
+           style="opacity:1;fill:#26201a;fill-opacity:1;stroke:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           id="rect4978"
+           width="80"
+           height="6"
+           x="160.10918"
+           y="1041.2505" />
+        <path
+           style="display:inline;opacity:1;fill:none;fill-opacity:1;stroke:#171310;stroke-width:1.54177892;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+           d="m 240,934.3622 -80,0 0,105 80,0 z"
+           id="path4980"
+           inkscape:connector-curvature="0"
+           sodipodi:nodetypes="ccccc" />
+      </g>
+      <rect
+         rx="7"
+         y="953.61194"
+         x="283.75"
+         height="42"
+         width="87"
+         id="rect4982"
+         style="opacity:1;fill:#171310;fill-opacity:1;stroke:#171310;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <rect
+         style="opacity:1;fill:#171310;fill-opacity:1;stroke:#171310;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         id="rect4984"
+         width="87"
+         height="42"
+         x="420.75"
+         y="953.61194"
+         rx="7" />
+      <rect
+         style="opacity:1;fill:#171310;fill-opacity:1;stroke:#171310;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         id="rect4986"
+         width="87"
+         height="42"
+         x="685.75"
+         y="953.61194"
+         rx="7" />
+      <rect
+         rx="7"
+         y="953.61194"
+         x="822.75"
+         height="42"
+         width="87"
+         id="rect4988"
+         style="opacity:1;fill:#171310;fill-opacity:1;stroke:#171310;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <rect
+         style="opacity:1;fill:#171310;fill-opacity:1;stroke:#171310;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         id="rect4992"
+         width="50"
+         height="42"
+         x="1062.75"
+         y="953.61194"
+         rx="7" />
+      <path
+         sodipodi:nodetypes="cccc"
+         inkscape:connector-curvature="0"
+         id="path5008"
+         d="m 50,977.3622 25,0 0,-30 -10,10e-6 z"
+         style="fill:#171310;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" />
+      <path
+         style="fill:#7a6f5f;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+         d="m 1161,926.3622 c -0.2085,-14.41119 -13,-16 -13,-16 l -1018,0 c -2.40696,3.8717 -3.30357,8.25001 -3.30357,8.25001 l 0,5.08928 -3.19643,2.67857 z"
+         id="path5012"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="cccccc" />
+      <rect
+         y="937.18365"
+         x="302.14285"
+         height="8"
+         width="52"
+         id="rect5016"
+         style="opacity:1;fill:#171310;fill-opacity:1;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <path
+         style="fill:#a89a86;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+         d="m 420.00012,914.3622 0,-10 -5.00006,-4 -183.00006,0 -5,4 0,10 z"
+         id="path5020"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="cccccc" />
+      <path
+         sodipodi:nodetypes="cccccccc"
+         inkscape:connector-curvature="0"
+         id="path5022"
+         d="m 275.25,907.3622 3e-5,7 12.06251,0 12.0625,0 24.12502,0 24.12501,0 12.06256,0 7e-5,-7 z"
+         style="fill:#5c5347;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1" />
+      <path
+         sodipodi:nodetypes="cccccc"
+         inkscape:connector-curvature="0"
+         id="path5026"
+         d="m 968.00012,914.3622 0,-10 -5.00006,-4 -183.00006,0 -5,4 0,10 z"
+         style="fill:#a89a86;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1" />
+      <path
+         style="fill:#5c5347;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+         d="m 823.25,907.3622 3e-5,7 12.06251,0 12.0625,0 24.12502,0 24.12501,0 12.06256,0 7e-5,-7 z"
+         id="path5028"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="cccccccc" />
+      <path
+         style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+         d="m 109.76563,1052.3622 -18.76563,0 0,2.0203 c 0,0 -18.900363,0 -72.880389,7.3236 0,0 -13.7633282,2.7779 -18.119611,5.6561 4.8214285,10.8929 14.464286,10.8929 14.464286,10.8929 65.892856,3.2142 91.964284,1.9642 91.964284,1.9642 z"
+         id="path5030"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="ccccc" />
+      <path
+         style="fill:none;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1"
+         d="m 130,910.3622 c -50.535717,0.53572 -55.178572,2.53572 -55.178572,2.53572 C 40.369833,921.80482 22.357,970.75506 22.357,970.75506 6.8212855,1012.8979 1.5,1031.3622 1.5,1031.3622 0.69447987,1033.2324 0,1040.998 0,1040.998 l 0,26.3642 c 4.3562828,-2.8782 18.119611,-5.6561 18.119611,-5.6561 C 72.099637,1054.3825 91,1054.3825 91,1054.3825 l 0,-2.0203 1073,0 0,-5 4,0 2,-38 0,-83 -9,0 c -0.2085,-14.41119 -13,-16 -13,-16 z"
+         id="path5032"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="ccccccccccccccccc" />
+      <rect
+         y="959.86224"
+         x="125"
+         height="75"
+         width="2.5"
+         id="rect5034"
+         style="opacity:1;fill:#7a6f5f;fill-opacity:1;stroke:none;stroke-width:0.5;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1" />
+      <path
+         style="fill:#322a20;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
+         d="m 629.8393,1081.3265 0,-29 225,0 0,29 z"
+         id="path5392"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="ccccc" />
+      <path
+         sodipodi:nodetypes="ccccccccc"
+         inkscape:connector-curvature="0"
+         id="path5396"
+         d="m 403,1065.3622 0,7 -3,0 0,10 11,0 0,-10 -3,0 0,-7 z"
+         style="fill:#26201a;fill-opacity:1;fill-rule:evenodd;stroke:#171310;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1" />
+    </g>
+  </g>
+</svg></div></div>
+    <div class="ghost"><div class="g-tag">r5</div><div class="ghost-loco"><svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 2237.333 1641.252" enable-background="new 0 0 2237.333 1641.252" xml:space="preserve">
+<g>
+	<rect x="28.117" y="1559.413" width="2181.1" height="61.213"/>
+	<path d="M1827.443,1440.21h233.574v-128.869h-211.022l-9.665-328.615c0,0,14.498-46.715,61.213-46.715l-3.222-88.597h-455.872
+		v107.927h-315.728c0,0-14.498-74.099-98.262-74.099s-88.597,77.321-88.597,77.321l-260.959-1.611l-3.222-107.927H493.654v107.927
+		H318.071c0,0-67.656,124.036-8.054,267.402h88.597l-45.104,88.597H185.981v132.09h101.484
+		c18.196,62.662,67.522,111.059,144.977,115.982c82.004,5.211,136.473-41.532,151.42-114.371l115.982,1.61
+		c21.803,68.143,70.86,116.41,146.588,117.593c81.111,1.267,133.349-46.581,149.81-119.203h114.371
+		c22.727,67.47,71.467,118.176,154.642,115.982c83.222-2.196,131.959-51.864,148.199-120.814h115.982
+		c22.168,64.832,67.295,122.738,156.253,120.814C1759.411,1561.041,1806.754,1511.146,1827.443,1440.21z"/>
+	<path d="M743.638,733.657c10.36,0.621,122.465,32.809,173.378-37.979c8.14-11.172,11.195-26.426,22.654-34.9
+		c93.707,13.663,117.304-32.275,128.333-34.924c71.206,41.134,101.89,49.444,186.483-1.026
+		c21.842-13.201,41.393-31.176,53.448-53.902c4.917-6.684,10.193-16.949,19.98-15.636c13.726,6.899,25.184,18.023,40.104,22.678
+		c198.633,64.039,308.06-215.28,148.217-293.761c-22.156-13.033,67.54-201.985-180.086-259.267
+		c-175.557-29.225-275.063,96.246-278.078,188.87c-6.189,32.777,2.229,82.023,2.817,92.502
+		c-33.383,13.757-30.239,26.061-47.862,41.059c-161.745-67.088-257.032,24.802-242.915,132.987
+		c-207.31-31.7-199.488,92.385-208.541,163.113c-2.578,19.336,11.387,35.974,12.27,54.809
+		c-4.028,11.806-57.173,28.069-60.634,68.606c-9.835,23.991-4.965,51.705,6.947,74.049c3.307,4.94,8.469,8.25,12.123,12.923h117.573
+		C672.353,809.637,728.813,738.668,743.638,733.657z"/>
+</g>
+</svg></div></div>
+    <div class="telemetry" data-telemetry>
+      <div class="tel-head"><span class="tel-run">run r7</span><span class="tel-stage" data-tel-stage></span></div>
+      <div class="tel-line" data-tel-line></div>
+      <svg class="spark" viewBox="0 0 120 32" preserveAspectRatio="none"><polyline data-spark points=""/></svg>
+      <div class="tel-foot"><span>loss · full run</span><span data-tel-elapsed></span></div>
+    </div>
+  </div></div>
+  <div class="hud"><div class="hud-inner" data-board></div></div>
+</section>
+
+<section class="concept r4" id="r4">
+  <div class="c-head">
+    <span class="c-num">STYLE 04</span>
+    <div>
+      <h2>Toy Line</h2>
+      <p>A clay model railway in daylight: hills, drifting clouds, a chunky locomotive that idles with a gentle bob and puffs of steam. Softest style; the dry copy keeps it from getting cute.</p>
+    </div>
+  </div>
+  <div class="scene-wrap"><div class="scene">
+    <div class="hill h1"></div><div class="hill h2"></div><div class="hill h3"></div>
+    <div class="sun"></div>
+    <div class="cloud cl1"></div><div class="cloud cl2"></div><div class="cloud cl3"></div>
+    <div class="rail-main"></div>
+    <div class="rail-siding"></div><div class="siding-tag">siding · held runs</div>
+    <div class="train" data-train>
+      <div class="loco">
+        <div class="stack"></div><div class="boiler"></div><div class="cab"></div>
+        <div class="train-id">r7</div>
+        <div class="wheel w-a"></div><div class="wheel w-b"></div><div class="wheel w-c"></div>
+      </div>
+      <div class="puffs"><i></i><i></i><i></i></div>
+    </div>
+    <div class="ghost"><div class="g-tag">r5 · held</div><div class="loco"><div class="boiler"></div><div class="cab"></div><div class="wheel w-a"></div><div class="wheel w-c"></div></div></div>
+    <div class="telemetry" data-telemetry>
+      <div class="tel-head"><span class="tel-run">run r7</span><span class="tel-stage" data-tel-stage></span></div>
+      <div class="tel-line" data-tel-line></div>
+      <svg class="spark" viewBox="0 0 120 32" preserveAspectRatio="none"><polyline data-spark points=""/></svg>
+      <div class="tel-foot"><span>loss · full run</span><span data-tel-elapsed></span></div>
+    </div>
+  </div></div>
+  <div class="hud"><div class="hud-inner" data-board></div></div>
+</section>
+
+<div class="outro">
+  <h2>Why this fits the time profile</h2>
+  <p>Dwelling is the default state of a railway, so a visitor who arrives mid-run sees a stopped train with a growing dwell timer and live telemetry, and that reads as truthful rather than stuck. Departures are rare and therefore feel like events, which is exactly what a stage transition is. Holds have a native vocabulary (a siding, a held service), multiple runs are just multiple trains, and an idle line with the last released train at the terminus is a perfectly normal thing to look at.</p>
+  <p>The integration stays the same as before: the pod posts {run, stage, detail} per transition, the page polls it, and history (scores, suites, the run log with its failures) renders from model/site/public-data.json.</p>
+</div>
+
+<script>
+// Simulated run state. In production: poll /api/run/state (fed by the GPU
+// pod) + public-data.json for history. Demo time is compressed.
+const STATIONS = [
+  { name: 'Generate', x: 120,  dwell: 6,  dur: '~10 m',  baseMin: 4,
+    tel: () => `emitting track f · 405 examples` },
+  { name: 'Validate', x: 310,  dwell: 5,  dur: '~2 m',   baseMin: 1,
+    tel: () => `4,591 / 4,594 admitted · 3 rejected` },
+  { name: 'Train',    x: 500,  dwell: 14, dur: '~9 h',   baseMin: 134,
+    tel: (s) => `step ${s.step.toLocaleString('en-US')}/3,000 · loss ${s.loss.toFixed(2)}` },
+  { name: 'Quantize', x: 690,  dwell: 5,  dur: '~40 m',  baseMin: 12,
+    tel: () => `packing MXFP4 · 12.1 GB` },
+  { name: 'Evaluate', x: 880,  dwell: 8,  dur: '~1.5 h', baseMin: 38,
+    tel: () => `scoring suite-248 · retrieval on` },
+  { name: 'Review',   x: 1070, dwell: 7,  dur: 'human',  baseMin: 22,
+    tel: () => `comparing r7 vs v1(r4)` },
+  { name: 'Release',  x: 1260, dwell: 8,  dur: '~15 m',  baseMin: 6,
+    tel: () => `pushing to HF + Ollama` },
+];
+const SUBLABELS = ['8 synthetic tracks', 'schema gate', 'QLoRA · rented GPU', 'MXFP4 · 12.1 GB', 'suite-248 · mechanical', 'ship or hold', 'HF + Ollama'];
+const STATIC_ROWS = [
+  { cls: 'dim',      cells: ['v1 (r4)', 'in service', 'TERMINUS', '·', 'HF + Ollama'] },
+  { cls: 'warn-row', cells: ['r5',      'held',       'REVIEW',   '·', 'abstention regression'] },
+  { cls: 'dim',      cells: ['r6',      'experiment', 'YARD',     '·', 'not for release'] },
+];
+const fmt = m => m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+
+function buildStations(scene, isR3) {
+  return STATIONS.map((st, i) => {
+    const el = document.createElement('div');
+    el.className = 'stn';
+    el.style.left = st.x + 'px';
+    el.innerHTML = `<i class="node"></i><span class="signal"><i></i></span>
+      <div class="stn-label"><b>${st.name}</b><span>${SUBLABELS[i]}</span></div>
+      <div class="stn-dur">${st.dur}</div>`;
+    scene.appendChild(el);
+    return el;
+  });
+}
+
+function buildBoard(boardEl) {
+  const mk = (cls, cells) => {
+    const r = document.createElement('div');
+    r.className = 'board-row ' + cls;
+    r.innerHTML = cells.map(c => `<span>${c}</span>`).join('');
+    boardEl.appendChild(r);
+    return r;
+  };
+  mk('head', ['run', 'status', 'location', 'dwell', 'next stop']);
+  const live = mk('live', ['r7', '', '', '', '']);
+  STATIC_ROWS.forEach(r => mk(r.cls, r.cells));
+  const note = document.createElement('div');
+  note.className = 'hud-note';
+  note.textContent = 'live source later: GPU pod → POST /api/run/state · history from public-data.json';
+  boardEl.appendChild(note);
+  return live;
+}
+
+// split-flap board (style 3 only)
+function buildBigboard(bb) {
+  const head = document.createElement('div');
+  head.className = 'bb-head';
+  head.innerHTML = ['run', 'status', 'location', 'dwell', 'next stop'].map(c => `<span>${c}</span>`).join('');
+  bb.appendChild(head);
+  const rows = [
+    { cls: 'live-row', cells: ['R7', '', '', '', ''] },
+    { cls: 'dim-row',  cells: ['V1', 'IN SERVICE', 'TERMINUS', '', 'HF+OLLAMA'] },
+    { cls: 'hold-row', cells: ['R5', 'HELD', 'REVIEW', '', 'ABSTENTION'] },
+    { cls: 'dim-row',  cells: ['R6', 'EXPERIMENT', 'YARD', '', ''] },
+  ];
+  const widths = [5, 10, 10, 7, 11];
+  const made = rows.map(row => {
+    const r = document.createElement('div');
+    r.className = 'bb-row ' + row.cls;
+    const cells = row.cells.map((text, ci) => {
+      const cell = document.createElement('span');
+      cell.className = 'bb-cell';
+      const chars = [];
+      for (let k = 0; k < widths[ci]; k++) {
+        const f = document.createElement('span');
+        f.className = 'flap';
+        f.textContent = (text[k] || ' ');
+        cell.appendChild(f); chars.push(f);
+      }
+      r.appendChild(cell);
+      return chars;
+    });
+    bb.appendChild(r);
+    return cells;
+  });
+  return { liveCells: made[0], widths };
+}
+
+function setFlapText(chars, text) {
+  text = text.toUpperCase();
+  chars.forEach((f, k) => {
+    const ch = text[k] || ' ';
+    if (f.textContent !== ch) {
+      f.classList.remove('flip'); void f.offsetWidth; f.classList.add('flip');
+      setTimeout(() => { f.textContent = ch; }, 150);
+    }
+  });
+}
+
+document.querySelectorAll('.concept').forEach((sec, si) => {
+  const scene = sec.querySelector('.scene');
+  const stns = buildStations(scene, sec.id === 'r3');
+  const train = sec.querySelector('[data-train]');
+  const liveRow = buildBoard(sec.querySelector('[data-board]'));
+  const bb = sec.querySelector('[data-bigboard]');
+  const flap = bb ? buildBigboard(bb) : null;
+  const telStage = sec.querySelector('[data-tel-stage]');
+  const telLine = sec.querySelector('[data-tel-line]');
+  const telElapsed = sec.querySelector('[data-tel-elapsed]');
+  const sparkEl = sec.querySelector('[data-spark]');
+
+  const sim = { idx: (si * 2) % STATIONS.length, min: 0, step: 1240, loss: 0.83, moving: false,
+    losses: Array.from({ length: 48 }, (_, i) => 1.9 - i * 0.022) };
+  sim.min = STATIONS[sim.idx].baseMin;
+
+  const centerOn = (x) => { train.style.left = (x - train.offsetWidth / 2) + 'px'; };
+  centerOn(STATIONS[sim.idx].x);
+
+  function paint() {
+    const st = STATIONS[sim.idx];
+    const next = STATIONS[(sim.idx + 1) % STATIONS.length];
+    stns.forEach((el, k) => {
+      el.classList.toggle('occupied', !sim.moving && k === sim.idx);
+      el.classList.toggle('cleared', sim.moving && k === (sim.idx + 1) % STATIONS.length);
+      el.classList.toggle('done', k < sim.idx && !(sim.idx === 0));
+    });
+    const status = sim.moving ? 'en route' : 'dwelling';
+    const loc = sim.moving ? `to ${next.name.toUpperCase()}` : st.name.toUpperCase();
+    const dwell = sim.moving ? '·' : fmt(sim.min);
+    [...liveRow.children].forEach((c, k) => c.textContent = ['r7', status, loc, dwell, next.name.toUpperCase()][k]);
+    if (flap) {
+      const vals = ['R7', status, loc, dwell, next.name];
+      flap.liveCells.forEach((chars, k) => setFlapText(chars, vals[k]));
+    }
+    telStage.textContent = sim.moving ? 'departing' : st.name;
+    telLine.textContent = sim.moving ? `cleared for ${next.name}` : st.tel(sim);
+    telElapsed.textContent = sim.moving ? '' : `at station ${fmt(sim.min)}`;
+    const pts = sim.losses.map((v, i) => `${(i / (sim.losses.length - 1) * 120).toFixed(1)},${(30 - (v / 2) * 28).toFixed(1)}`);
+    sparkEl.setAttribute('points', pts.join(' '));
+  }
+
+  function dwellThenGo() {
+    const st = STATIONS[sim.idx];
+    let left = st.dwell;
+    const t = setInterval(() => {
+      left -= 1;
+      sim.min += 2 + Math.floor(Math.random() * 5);
+      if (sim.idx === 2) { // Train station: loss ticks down
+        sim.step = Math.min(3000, sim.step + 30 + Math.floor(Math.random() * 40));
+        sim.loss = Math.max(0.62, sim.loss - 0.004 - Math.random() * 0.004);
+        sim.losses.push(sim.loss + (Math.random() - 0.5) * 0.05);
+        sim.losses.shift();
+      }
+      paint();
+      if (left <= 0) { clearInterval(t); depart(); }
+    }, 1000);
+    paint();
+  }
+
+  function depart() {
+    const nextIdx = (sim.idx + 1) % STATIONS.length;
+    if (nextIdx === 0) { // loop the demo: new run teleports back to the start
+      train.classList.remove('moving');
+      sim.idx = 0; sim.min = STATIONS[0].baseMin; sim.step = 1240; sim.loss = 0.83;
+      centerOn(STATIONS[0].x); dwellThenGo(); return;
+    }
+    sim.moving = true; train.classList.add('moving');
+    centerOn(STATIONS[nextIdx].x);
+    paint();
+    setTimeout(() => {
+      sim.moving = false; train.classList.remove('moving');
+      sim.idx = nextIdx; sim.min = STATIONS[nextIdx].baseMin;
+      dwellThenGo();
+    }, 2500);
+  }
+
+  dwellThenGo();
+});
+</script>
+</body>
+</html>

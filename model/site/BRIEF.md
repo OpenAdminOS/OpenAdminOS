@@ -12,7 +12,7 @@ marketing page second, so **it must never overstate**.
 
 ## The one integration point
 
-The pipeline emits **`site/public-data.json`** (schemaVersion 1). The site
+The pipeline emits **`site/public-data.json`** (schemaVersion 2). The site
 reads that file and renders it. Nothing else. Regenerate it with
 `node site/export-public-data.mjs` from `~/oaos-model-pipeline`.
 
@@ -32,14 +32,15 @@ finishes; the site is otherwise static.
 | `taskCategories` | the nine categories and what each one tests |
 | `trainingRuns` | per-run log: what it trained on, outcome, lesson learned |
 | `scores` | every scored run: label, passed/total, per-category breakdown, retrieval on/off, suite |
+| `featured` | ordered benchmark-chart series, resolved only from scores with explicit suite and retrieval provenance |
 
 ## Pages worth building
 
 1. **Overview** — what OpenAdmin is, current released version, install one-liners
    (`ollama run openadminos/openadmin`, HF links), hardware requirements.
 2. **Benchmarks** — the per-category comparison across checkpoints. Grouped bars
-   per category, one series per model. Must state the suite name and hash, and
-   whether retrieval was on.
+   per category, using the ordered `featured` series rather than guessing from
+   score labels. Must state the suite name and hash, and whether retrieval was on.
 3. **Training runs** — a timeline of r1, r2, ... with what each trained on, the
    outcome, and the lesson. The failures are the most interesting content here;
    keep them.
@@ -71,9 +72,10 @@ palette). Treat it as a reference for *content structure*, not final visual
 design; the public site should follow the OpenAdminOS design system in
 `docs/mockups/_design.css`.
 
-## Status at time of writing (2026-08-28)
+## Status at time of writing (2026-08-29)
 
 - **v1 is published** (HF + Ollama) and is checkpoint r4.
-- r5 and r6 are internal experiments; r5 was **held** on review rather than
-  shipped, and that decision is documented in `trainingRuns`.
-- A small-model tier for 8GB machines is under evaluation and **not decided**.
+- The training log includes r1 through r9 and lite-r1, preserving failed and
+  held checkpoints as well as the released marker.
+- r6 is the strongest non-released checkpoint on suite-200 with retrieval.
+- The small-model tier remains under evaluation and is **not released**.

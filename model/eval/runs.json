@@ -58,7 +58,8 @@
         "23 retrieval-QA + abstention"
       ],
       "outcome": "22/24 on the small suite, best score at the time, but UNPUBLISHABLE: trained without harmony channel markers, so it needs a custom chat template and breaks in stock Ollama/llama.cpp.",
-      "lesson": "Render training text with the real chat template; the assistant turn must carry <|channel|>final."
+      "lesson": "Render training text with the real chat template; the assistant turn must carry <|channel|>final.",
+      "track": "20b"
     },
     {
       "id": "r2",
@@ -71,7 +72,8 @@
         "60 retrieval-QA + abstention"
       ],
       "outcome": "20/24. Format fixed (works in stock tooling) and abstention fixed, but date arithmetic regressed.",
-      "lesson": "Training only on final answers suppressed the model's reasoning channel: it stopped thinking before answering."
+      "lesson": "Training only on final answers suppressed the model's reasoning channel: it stopped thinking before answering.",
+      "track": "20b"
     },
     {
       "id": "r3",
@@ -83,7 +85,8 @@
         "100 fleet-reasoning examples with mechanically-computed reasoning traces rendered into the analysis channel"
       ],
       "outcome": "20/24 small suite, 86/108 on the expanded suite. Reasoning recovered; gentler hyperparameters under-trained other categories.",
-      "lesson": "Mechanically-verified reasoning traces work. Also caught a contamination near-miss: generated device names collided with eval fixtures."
+      "lesson": "Mechanically-verified reasoning traces work. Also caught a contamination near-miss: generated device names collided with eval fixtures.",
+      "track": "20b"
     },
     {
       "id": "r4",
@@ -96,7 +99,8 @@
         "stronger hyperparameters (back to 3 epochs at 2e-4)"
       ],
       "outcome": "96/108 with retrieval vs base 73/108. Wins every category incl. held-out Graph endpoints. Stock-format valid. PROMOTED and published as OpenAdmin v1.",
-      "lesson": "Same data, better hyperparameters, +10 tasks. Change one variable at a time."
+      "lesson": "Same data, better hyperparameters, +10 tasks. Change one variable at a time.",
+      "track": "20b"
     },
     {
       "id": "r5",
@@ -110,7 +114,74 @@
         "500 reasoning traces + 74 identity examples"
       ],
       "outcome": "suite-200 with retrieval: 153 vs v1 142 vs base 141. Repaired the agentic collapse (trajectories 31->45) and improved safety (15->18) even without safety training data. But it regressed doc facts (-4), Graph planning (-2) and abstention (-1), and is 15 worse without retrieval. On 48 independently-authored trajectory families it scored 34/48, with two clear holes: cross-resource joins 1/6 and wrong-resource/error handling 0/6. Held on review.",
-      "lesson": "Identity was fixed WITHOUT retraining: the harmony template's model_identity default asserts 'You are ChatGPT', which every training example inherited. Patching that default in the shipped template moved identity 0/12 -> 11/12 and safety 18/20 -> 19/20."
+      "lesson": "Identity was fixed WITHOUT retraining: the harmony template's model_identity default asserts 'You are ChatGPT', which every training example inherited. Patching that default in the shipped template moved identity 0/12 -> 11/12 and safety 18/20 -> 19/20.",
+      "track": "20b"
+    },
+    {
+      "id": "r6",
+      "date": "2026-08-28",
+      "examples": 1766,
+      "recipe": "QLoRA r16, 2 epochs, lr 2e-4, trained under the OpenAdmin identity",
+      "trainedOn": [
+        "200 manifests (capped from 1,062: they were 73% of training tokens while accuracy stayed flat)",
+        "296 join and error-handling trajectories targeting r5's two measured holes",
+        "60 write-safety examples (we previously had none), plus 405 trajectories, 500 reasoning traces, 216 Graph plans"
+      ],
+      "outcome": "Best checkpoint so far: 173/200 with retrieval on GPU (v1 154, r5 164, base 147). Trajectories reached 49/60, beating even the base model, and safety returned to 20/20. But abstention regressed to 10/15, so it fails the no-regression release gate.",
+      "lesson": "Rebalancing by training tokens works: cutting manifest dominance and adding targeted tracks moved the categories we aimed at. Training heavily on acting appears to cost willingness to decline \u2014 abstention is the trade-off to watch. Operationally: never terminate a pod with a download in flight; the r6 GGUF aborted at 269MB, though the adapter was already safe.",
+      "track": "20b"
+    },
+    {
+      "id": "r7",
+      "date": "2026-08-28",
+      "examples": 1910,
+      "recipe": "QLoRA r16, 2 epochs, lr 2e-4",
+      "trainedOn": [
+        "r6's mix plus 159 mechanically-generated abstention examples (5.1% of tokens, up from 0.1%)",
+        "invented feature names disjoint from the eval set, with a quarter counter-examples where the feature is real"
+      ],
+      "outcome": "164/200 with retrieval. Abstention fixed (10 -> 14/15, our best) and reasoning reached 23/23, but trajectories collapsed 49 -> 39 and Graph planning 11 -> 7. Fails the gate.",
+      "lesson": "All 159 examples emitted the identical string 'NOT IN DOCS', which taught a shortcut ('when unsure, refuse') rather than a skill ('judge whether the evidence supports an answer'). The refusal then fired during tool-use tasks where evidence WAS available. Uniform target strings are a trap: vary the surface form or the model learns the string, not the behaviour.",
+      "track": "20b"
+    },
+    {
+      "id": "r8",
+      "date": "2026-08-28",
+      "examples": 1888,
+      "recipe": "QLoRA r16, 1.5 epochs, lr 1e-4 (halved), step checkpoints; ratios per adversarial review",
+      "trainedOn": [
+        "track I replaced by track J: 115 matched counterfactuals differing only in evidence state (no passage -> decline; tenant question with a tool -> CALL the tool; empty tool result -> report emptiness), with varied refusal wording",
+        "manifests trimmed 200 -> 150, Graph planning duplicated 2x, reasoning trimmed"
+      ],
+      "outcome": "164/200. Trajectories recovered to 45 and abstention to 12, a middle point rather than both. Still fails the gate: Doc facts 41 vs v1's 44, Graph planning 6 vs 10, abstention 12 vs 15.",
+      "lesson": "Counterfactuals beat uniform refusals (trajectories 39 -> 45 while abstention held above r6), so the diagnosis was right, but the fix was not sufficient alone. Separately: duplicating Graph-planning examples 2x made that category WORSE (10 -> 6). Oversampling identical rows teaches memorization, not the skill; the track is combinatorially capped at 216 unique examples and needs new endpoint sources, not repetition.",
+      "track": "20b"
+    },
+    {
+      "id": "r9",
+      "date": "2026-08-28",
+      "examples": 1762,
+      "recipe": "QLoRA r16, 1.5 epochs, lr 1e-4",
+      "trainedOn": [
+        "track K: 90 examples over 12 endpoints mined from production Intune tooling, all with unique phrasings",
+        "36 pagination trajectories teaching the model to follow @odata.nextLink instead of answering from page one"
+      ],
+      "outcome": "162/200 on the frozen suite, but 34/48 on the independent trajectory families: the best any checkpoint has scored there (r6 32, v1 26). Safety held at 20/20 and abstention improved to 13/15.",
+      "lesson": "Pagination generalised. The independent families are held-out reasoning shapes the model never trained on, so teaching it to follow nextLink improved agentic reasoning broadly, not just the trained pattern. Also: neither our training data nor our eval suite covered pagination at all, while real admin tooling depends on it constantly. A benchmark can only measure what it thinks to ask.",
+      "track": "20b"
+    },
+    {
+      "id": "lite-r1",
+      "track": "8b",
+      "date": "2026-08-28",
+      "examples": 1910,
+      "recipe": "QLoRA r32, 4 epochs, lr 1e-4, Mistral [INST] format",
+      "trainedOn": [
+        "the r7 dataset re-rendered from harmony into Mistral format: reasoning traces became short plain-text preambles, since this base is not a reasoning model",
+        "identity rewritten so the small model never claims to be the 20B"
+      ],
+      "outcome": "150/200 with retrieval, up from a 107 baseline: +43 points. Abstention 15/15 and safety 20/20 with no fabricated features, so it clears both release gates. Matches or beats the published v1 on doc facts, abstention, safety and voice at 40% of the size.",
+      "lesson": "A small model given one coherent job cleared its gate on the first attempt, while the 20B has now missed five times carrying nine competing behaviours in one adapter. Its real weakness is exactly where capacity matters: multi-step trajectories (30/60 against the flagship's 46). Four separate incompatibilities had to be fixed before training would start (FP8 weights the GPU could not take, an unknown tokenizer class, and two malformed tokenizer fields); all are now encoded in the script."
     }
   ],
   "suites": [
@@ -125,6 +196,24 @@
       "count": 248,
       "sha256": "080be977e930896d",
       "what": "suite-200 plus 48 independently-authored trajectory tasks across 8 distinct reasoning families (joins, missing evidence, empty sets, superlatives, two-condition filters, group-and-rank, wrong-resource, distractors). Built after review showed the first trajectory batch measured template interpolation rather than generalization."
+    }
+  ],
+  "tracks": [
+    {
+      "id": "20b",
+      "name": "OpenAdmin (20B)",
+      "base": "gpt-oss-20b (Apache 2.0, MoE, 3.6B active)",
+      "size": "12 GB \u00b7 needs ~16 GB RAM",
+      "role": "Flagship. Full agentic work: multi-step tool use, joins across Graph collections, error recovery.",
+      "published": "v1 (r4) on Hugging Face and Ollama"
+    },
+    {
+      "id": "8b",
+      "name": "OpenAdmin Lite (8B)",
+      "base": "Ministral 3 8B Instruct (Apache 2.0, dense, Dec 2025)",
+      "size": "4.9 GB \u00b7 runs on 8 GB machines",
+      "role": "Small tier for laptops that cannot host the flagship. Retrieval-grounded answers, safety and abstention at flagship quality; complex multi-step work escalates to the 20B.",
+      "published": "not yet released"
     }
   ]
 }

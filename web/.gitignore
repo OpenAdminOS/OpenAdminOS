@@ -50,3 +50,5 @@ yarn-error.log*
 /landing-*.png
 # Synced from stats/agents.json by scripts/sync-stats.mjs at build time
 /public/stats/
+# Synced from model/site/public-data.json by scripts/sync-training-data.mjs
+/src/data/training/public-data.json

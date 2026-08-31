@@ -1,0 +1,1411 @@
+.training-root {
+  --hall-0: #131009;
+  --hall-1: #17130f;
+  --hall-2: #1d1812;
+  --hall-3: #26201a;
+  --line-0: #322a20;
+  --line-1: #3a322a;
+  --ink-0: #e8d9c0;
+  --ink-1: #a89a86;
+  --ink-2: #7a6f5f;
+  --ink-3: #5c5347;
+  --amber: #ffb84d;
+  --amber-dim: #c98a3a;
+  --ok: #9cc88f;
+  --warn: #e5c678;
+  --danger: #e58888;
+  min-height: 100vh;
+  overflow-x: clip;
+  background: var(--hall-0);
+  color: var(--ink-0);
+  color-scheme: dark;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.training-root *,
+.training-root *::before,
+.training-root *::after {
+  box-sizing: border-box;
+}
+
+.training-root a {
+  color: var(--amber);
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.training-root a:hover {
+  text-decoration: underline;
+}
+
+.training-root a:focus-visible,
+.training-root summary:focus-visible,
+.training-bar-track:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+}
+
+.training-mono,
+.training-release-line,
+.training-status-line,
+.training-stale-notice,
+.training-codebox,
+.training-footer-data {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.training-skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 5px;
+  background: var(--ink-0);
+  color: var(--hall-0) !important;
+  transform: translateY(-180%);
+}
+
+.training-skip-link:focus {
+  transform: translateY(0);
+}
+
+.training-topnav {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 52px;
+  padding: 10px 28px;
+  border-bottom: 1px solid var(--line-0);
+  background: rgba(19, 16, 9, 0.94);
+  backdrop-filter: blur(10px);
+}
+
+.training-wordmark {
+  color: var(--ink-0) !important;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.training-wordmark b {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.training-nav-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--line-1);
+  border-radius: 3px;
+  color: var(--ink-2);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+}
+
+.training-topnav nav {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.training-topnav nav a {
+  padding: 6px 9px;
+  border-radius: 5px;
+  color: var(--ink-1);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.training-topnav nav a:hover {
+  background: var(--hall-2);
+  color: var(--ink-0);
+  text-decoration: none;
+}
+
+.training-hall {
+  max-width: 1448px;
+  margin: 0 auto;
+  padding: 36px 24px 0;
+}
+
+.training-hall-head {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 0 22px;
+  text-align: center;
+}
+
+.training-section-label {
+  margin: 0 0 10px;
+  color: var(--ink-3);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+.training-hall-head h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.14;
+}
+
+.training-hall-head > p:not(.training-section-label) {
+  max-width: 680px;
+  margin: 12px auto 0;
+  color: var(--ink-1);
+  font-size: 15px;
+}
+
+.training-release-line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px 8px;
+  margin-top: 15px;
+  color: var(--ink-2);
+  font-size: 10.5px;
+}
+
+.training-release-line b {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.training-live-line {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.training-status-line {
+  min-height: 38px;
+  margin: 0 auto 10px;
+  color: var(--ink-1);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.training-stale-notice {
+  margin: -6px 0 12px;
+  color: var(--warn);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.training-hall-desktop {
+  display: none;
+}
+
+.training-scene {
+  position: relative;
+  height: 570px;
+  overflow: hidden;
+  border: 1px solid var(--line-0);
+  border-radius: 16px;
+  background: radial-gradient(900px 430px at 50% 0%, #262019, var(--hall-1) 72%);
+}
+
+.training-bigboard {
+  position: absolute;
+  top: 30px;
+  left: 50%;
+  z-index: 12;
+  width: min(calc(100% - 72px), 1080px);
+  padding: 18px 22px 20px;
+  transform: translateX(-50%);
+  border: 2px solid var(--line-1);
+  border-radius: 10px;
+  background: #0d0b08;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6),
+    inset 0 0 60px rgba(0, 0, 0, 0.6);
+}
+
+.training-board-title {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: var(--ink-1);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+.training-scene--live .training-board-title span:last-child {
+  color: var(--amber);
+}
+
+.training-scene--stale .training-board-title span:last-child {
+  color: var(--warn);
+}
+
+.training-board-head,
+.training-board-row {
+  display: grid;
+  grid-template-columns: 136px 192px 192px minmax(200px, 1fr);
+  gap: 12px;
+}
+
+.training-board-head {
+  margin-bottom: 6px;
+  color: var(--ink-2);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.training-board-row {
+  margin-bottom: 8px;
+}
+
+.training-flap-cell {
+  display: flex;
+  min-width: 0;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.training-flap {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 11px;
+  width: 11px;
+  height: 24px;
+  border: 1px solid rgba(0, 0, 0, 0.65);
+  border-radius: 2.5px;
+  background: linear-gradient(180deg, #262019 48%, #171310 52%);
+  color: var(--ink-0);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 22px;
+  text-align: center;
+  animation: training-flap-flip 320ms ease-in-out;
+}
+
+.training-flap::after {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.78);
+  content: "";
+}
+
+.training-board-row--released .training-flap {
+  color: var(--amber);
+}
+
+.training-board-row--held .training-flap {
+  color: var(--warn);
+}
+
+.training-board-row--experiment .training-flap {
+  color: #8a7d6a;
+}
+
+@keyframes training-flap-flip {
+  0% { transform: rotateX(0); }
+  49% { transform: rotateX(-88deg); }
+  51% { transform: rotateX(88deg); }
+  100% { transform: rotateX(0); }
+}
+
+.training-rail {
+  position: absolute;
+  right: 5%;
+  bottom: 91px;
+  left: 5%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-1);
+}
+
+.training-siding {
+  position: absolute;
+  right: 19%;
+  bottom: 155px;
+  width: 18%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-1);
+  opacity: 0.8;
+  transform: rotate(-8deg);
+  transform-origin: right center;
+}
+
+.training-siding-label {
+  position: absolute;
+  right: 20%;
+  bottom: 165px;
+  color: var(--ink-2);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.training-station {
+  position: absolute;
+  bottom: 90px;
+  width: 0;
+}
+
+.training-station-node {
+  position: absolute;
+  bottom: -4px;
+  left: -6px;
+  display: block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ink-2);
+  border-radius: 50%;
+  background: var(--hall-1);
+}
+
+.training-station--current .training-station-node {
+  border-color: var(--amber);
+  box-shadow: 0 0 11px rgba(255, 184, 77, 0.62);
+}
+
+.training-scene--stale .training-station--current .training-station-node {
+  border-color: var(--warn);
+  box-shadow: none;
+}
+
+.training-station--passed .training-station-node {
+  border-color: var(--ok);
+}
+
+.training-station-label {
+  position: absolute;
+  top: 18px;
+  left: -56px;
+  width: 112px;
+  color: var(--ink-0);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.training-train {
+  --train-position: 91%;
+  position: absolute;
+  bottom: 99px;
+  left: var(--train-position);
+  z-index: 8;
+  width: clamp(170px, 17vw, 240px);
+  transform: translateX(-50%);
+  transition: left 900ms cubic-bezier(0.45, 0.05, 0.35, 1);
+}
+
+.training-train-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  transform: scaleX(-1);
+}
+
+.training-train-id {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--amber);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  animation: training-blink 2.4s infinite;
+}
+
+.training-train--idle .training-train-id,
+.training-train--stale .training-train-id {
+  animation: none;
+}
+
+.training-train--stale {
+  opacity: 0.7;
+}
+
+@keyframes training-blink {
+  0%, 100% { opacity: 0.32; }
+  50% { opacity: 1; }
+}
+
+.training-telemetry {
+  position: absolute;
+  right: 3%;
+  bottom: 158px;
+  z-index: 10;
+  width: min(280px, 24%);
+  min-height: 112px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  background: rgba(23, 19, 15, 0.94);
+}
+
+.training-telemetry-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.training-telemetry-head strong {
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.training-telemetry-head span {
+  color: var(--ink-2);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.training-telemetry p {
+  margin: 0;
+  color: var(--ink-0);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.training-telemetry-detail {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-2);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.training-pipeline-mobile {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 18px;
+  border: 1px solid var(--line-0);
+  border-radius: 12px;
+  background: radial-gradient(480px 220px at 50% 0%, #262019, var(--hall-1));
+}
+
+.training-pipeline-mobile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--line-0);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.training-pipeline-mobile-head div {
+  display: flex;
+  flex-direction: column;
+}
+
+.training-pipeline-mobile-head span {
+  color: var(--ink-2);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.training-pipeline-mobile-head strong {
+  margin-top: 3px;
+  color: var(--amber);
+  font-size: 14px;
+}
+
+.training-pipeline-mobile-head > b {
+  color: var(--ink-2);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.training-pipeline-mobile--live .training-pipeline-mobile-head > b {
+  color: var(--amber);
+}
+
+.training-pipeline-mobile--stale .training-pipeline-mobile-head > b {
+  color: var(--warn);
+}
+
+.training-pipeline-mobile ol {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.training-pipeline-mobile li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 11px;
+  min-height: 48px;
+  padding: 2px 0 13px;
+  color: var(--ink-2);
+}
+
+.training-pipeline-mobile li:not(:last-child)::after {
+  position: absolute;
+  top: 15px;
+  bottom: -2px;
+  left: 6px;
+  width: 2px;
+  background: var(--line-1);
+  content: "";
+}
+
+.training-pipeline-mobile li > span {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: var(--hall-1);
+}
+
+.training-pipeline-mobile li b {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.training-pipeline-mobile li small {
+  grid-column: 2;
+  color: var(--ink-1);
+  font-size: 11px;
+}
+
+.training-pipeline-mobile li.is-passed {
+  color: var(--ok);
+}
+
+.training-pipeline-mobile li.is-current {
+  color: var(--amber);
+}
+
+.training-pipeline-mobile--stale li.is-current {
+  color: var(--warn);
+}
+
+.training-root section {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 68px 32px 8px;
+}
+
+.training-root section[id],
+.training-hall[id] {
+  scroll-margin-top: 68px;
+}
+
+.training-stat-section {
+  padding-top: 34px !important;
+}
+
+.training-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.training-stat {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line-0);
+  border-radius: 10px;
+  background: var(--hall-2);
+}
+
+.training-stat b {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--ink-0);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.training-stat span {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.training-section-heading h2 {
+  margin: 0 0 8px;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.training-section-heading > p:last-child {
+  max-width: 760px;
+  margin: 0 0 28px;
+  color: var(--ink-1);
+}
+
+.training-download-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 20px;
+}
+
+.training-card {
+  padding: 20px 22px;
+  border: 1px solid var(--line-0);
+  border-radius: 12px;
+  background: var(--hall-2);
+}
+
+.training-card h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.training-codebox {
+  margin: 10px 0 14px;
+  padding: 12px 16px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: #0d0b08;
+  color: var(--amber);
+  font-size: 13px;
+}
+
+.training-codebox span {
+  color: var(--ink-3);
+  user-select: none;
+}
+
+.training-pill-row,
+.training-suite-banner,
+.training-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.training-pill {
+  padding: 3px 9px;
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  background: var(--hall-3);
+  color: var(--ink-1);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.training-fineprint {
+  margin: 13px 0 0;
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+
+.training-download-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.training-download-list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-0);
+  font-size: 12px;
+}
+
+.training-download-list li:last-child {
+  border-bottom: 0;
+}
+
+.training-download-list li > span {
+  flex: 0 0 auto;
+  color: var(--ink-1);
+}
+
+.training-download-list a {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  text-align: right;
+}
+
+.training-suite-banner {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 20px;
+}
+
+.training-suite-banner article {
+  display: grid;
+  grid-template-columns: 9px 1fr;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line-0);
+  border-radius: 8px;
+  background: var(--hall-2);
+}
+
+.training-series-mark {
+  display: block;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 2px;
+}
+
+.training-suite-banner b,
+.training-suite-banner small {
+  display: block;
+}
+
+.training-suite-banner b {
+  color: var(--ink-0);
+  font-size: 12px;
+}
+
+.training-suite-banner small {
+  color: var(--ink-2);
+  font-size: 10px;
+}
+
+.training-suite-banner p {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.training-legend {
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.training-legend span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-1);
+  font-size: 12px;
+}
+
+.training-legend i {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+}
+
+.training-benchmark-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.9fr);
+  gap: 30px;
+  align-items: start;
+}
+
+.training-chart-title {
+  margin: 0 0 9px;
+  color: var(--ink-1);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.training-chart-axis {
+  display: grid;
+  grid-template-columns: 155px 1fr;
+  gap: 14px;
+  margin-bottom: 5px;
+  color: var(--ink-3);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+}
+
+.training-chart-axis > div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.training-chart-row {
+  display: grid;
+  grid-template-columns: 155px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(50, 42, 32, 0.55);
+}
+
+.training-chart-label {
+  min-width: 0;
+}
+
+.training-chart-label b,
+.training-chart-label span {
+  display: block;
+}
+
+.training-chart-label b {
+  color: var(--ink-0);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.training-chart-label span {
+  color: var(--ink-3);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+}
+
+.training-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 0;
+  background-image: linear-gradient(90deg, rgba(122, 111, 95, 0.15) 1px, transparent 1px);
+  background-size: 25% 100%;
+}
+
+.training-bar-track {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 12px;
+  border-radius: 0 4px 4px 0;
+  cursor: help;
+}
+
+.training-bar {
+  display: block;
+  width: var(--bar-width);
+  min-width: 2px;
+  height: 11px;
+  border-radius: 0 4px 4px 0;
+  background-color: var(--series-color);
+  transition: filter 120ms ease;
+}
+
+.training-bar--striped {
+  background-color: color-mix(in srgb, var(--series-color) 32%, transparent);
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--series-color) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.training-bar-track:hover .training-bar,
+.training-bar-track:focus-visible .training-bar {
+  filter: brightness(1.25);
+}
+
+.training-bar-tooltip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: min(var(--bar-width), 80%);
+  z-index: 30;
+  display: none;
+  width: max-content;
+  max-width: min(420px, 80vw);
+  padding: 7px 9px;
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  background: #0d0b08;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  color: var(--ink-0);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.training-bar-track:hover .training-bar-tooltip,
+.training-bar-track:focus-visible .training-bar-tooltip {
+  display: block;
+}
+
+.training-chart-foot {
+  max-width: 520px;
+  margin: 13px 0 0;
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.training-table-view {
+  margin-top: 20px;
+}
+
+.training-table-view summary {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: var(--ink-1);
+  cursor: pointer;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.training-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line-0);
+  border-radius: 8px;
+}
+
+.training-table-view table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-table-view th,
+.training-table-view td {
+  padding: 7px 12px;
+  border-right: 1px solid var(--line-0);
+  border-bottom: 1px solid var(--line-0);
+  color: var(--ink-1);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.training-table-view th:first-child,
+.training-table-view td:first-child {
+  text-align: left;
+}
+
+.training-table-view thead th {
+  color: var(--ink-2);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.training-caveat {
+  margin: -12px 0 20px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--amber-dim);
+  background: rgba(201, 138, 58, 0.06);
+  color: var(--ink-1);
+  font-size: 11.5px;
+}
+
+.training-runlog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.training-run {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 22px;
+  padding: 20px 22px;
+  border: 1px solid var(--line-0);
+  border-radius: 12px;
+  background: var(--hall-2);
+}
+
+.training-run-id {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.training-run-id > b {
+  color: var(--ink-0);
+  font-size: 17px;
+}
+
+.training-run-id > span:not(.training-run-tag),
+.training-run-id time {
+  color: var(--ink-3);
+  font-size: 9.5px;
+}
+
+.training-run-tag {
+  display: inline-block;
+  margin-top: 9px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.training-run-tag--released {
+  border: 1px solid rgba(255, 184, 77, 0.3);
+  background: rgba(255, 184, 77, 0.12);
+  color: var(--amber);
+}
+
+.training-run-tag--held {
+  border: 1px solid rgba(229, 198, 120, 0.3);
+  background: rgba(229, 198, 120, 0.1);
+  color: var(--warn);
+}
+
+.training-run-tag--failed {
+  border: 1px solid rgba(229, 136, 136, 0.28);
+  background: rgba(229, 136, 136, 0.08);
+  color: var(--danger);
+}
+
+.training-recipe {
+  margin: 0 0 10px;
+  color: var(--ink-2);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.training-trained-on {
+  margin-bottom: 11px;
+  color: var(--ink-1);
+  font-size: 12px;
+}
+
+.training-trained-on > b {
+  color: var(--ink-2);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.training-trained-on ul,
+.training-info-card ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.training-outcome {
+  margin: 0 0 12px;
+  color: var(--ink-1);
+  font-size: 13px;
+}
+
+.training-lesson {
+  padding: 3px 0 3px 12px;
+  border-left: 2px solid var(--amber-dim);
+}
+
+.training-lesson > b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--amber-dim);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.training-lesson p {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 12.5px;
+}
+
+.training-built-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.training-info-card h3 > span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--amber-dim);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+
+.training-info-card p,
+.training-info-card li {
+  color: var(--ink-1);
+  font-size: 12px;
+}
+
+.training-info-card p {
+  margin: 8px 0 0;
+}
+
+.training-info-card li + li {
+  margin-top: 5px;
+}
+
+.training-hash-list {
+  padding: 8px 12px;
+  border: 1px solid var(--line-0);
+  border-radius: 6px;
+  background: #0d0b08;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.training-hash-list p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 10px;
+}
+
+.training-hash-list p + p {
+  margin-top: 7px;
+}
+
+.training-category-list {
+  columns: 2;
+  column-gap: 24px;
+}
+
+.training-category-list li {
+  break-inside: avoid;
+  margin-bottom: 7px;
+}
+
+.training-category-list b {
+  color: var(--ink-0);
+  font-weight: 500;
+}
+
+.training-footer {
+  display: flex;
+  max-width: 1160px;
+  justify-content: space-between;
+  gap: 28px;
+  margin: 72px auto 0;
+  padding: 28px 32px 48px;
+  border-top: 1px solid var(--line-0);
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+
+.training-footer p {
+  max-width: 760px;
+  margin: 0;
+}
+
+.training-footer p + p {
+  margin-top: 5px;
+}
+
+.training-footer-data {
+  flex: 0 0 300px;
+  overflow-wrap: anywhere;
+  color: var(--ink-3);
+  font-size: 9.5px;
+  text-align: right;
+}
+
+@media (min-width: 1024px) {
+  .training-hall-desktop {
+    display: block;
+  }
+
+  .training-pipeline-mobile {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .training-benchmark-grid,
+  .training-download-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .training-suite-banner {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .training-topnav {
+    padding: 10px 18px;
+  }
+
+  .training-topnav nav {
+    display: none;
+  }
+
+  .training-nav-tag {
+    margin-left: auto;
+  }
+
+  .training-hall {
+    padding: 20px 18px 0;
+  }
+
+  .training-hall-head {
+    padding-top: 18px;
+  }
+
+  .training-root section {
+    padding: 54px 18px 8px;
+  }
+
+  .training-stat-section {
+    padding-top: 26px !important;
+  }
+
+  .training-stats,
+  .training-built-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .training-stat b {
+    font-size: 16px;
+  }
+
+  .training-chart-axis {
+    display: none;
+  }
+
+  .training-chart-row {
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 10px 0;
+  }
+
+  .training-chart-label span {
+    display: inline;
+    margin-left: 6px;
+  }
+
+  .training-chart-label span::before {
+    content: "· ";
+  }
+
+  .training-run {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .training-run-id {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 12px;
+  }
+
+  .training-run-id > b,
+  .training-run-id .training-run-tag {
+    grid-row: span 2;
+  }
+
+  .training-category-list {
+    columns: 1;
+  }
+
+  .training-footer {
+    flex-direction: column;
+    margin-top: 56px;
+    padding: 26px 18px 38px;
+  }
+
+  .training-footer-data {
+    flex-basis: auto;
+    text-align: left;
+  }
+}
+
+@media (max-width: 430px) {
+  .training-nav-tag {
+    display: none;
+  }
+
+  .training-hall-head > p:not(.training-section-label) {
+    font-size: 14px;
+  }
+
+  .training-card {
+    padding: 18px;
+  }
+
+  .training-download-list li {
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .training-download-list a {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .training-root {
+    scroll-behavior: auto;
+  }
+
+  .training-flap,
+  .training-train-id {
+    animation: none !important;
+  }
+
+  .training-train,
+  .training-bar {
+    transition: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .training-root a:focus-visible,
+  .training-root summary:focus-visible,
+  .training-bar-track:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .training-bar,
+  .training-station-node,
+  .training-pipeline-mobile li > span {
+    forced-color-adjust: none;
+  }
+}
