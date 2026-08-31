@@ -1452,6 +1452,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
+            recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               if (agentSuggestions.length > 0) {
@@ -1960,6 +1961,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
+            recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               sendProgress({
                 message: "Model response started.",
@@ -2339,11 +2341,63 @@ export class IntuneChatService {
   }
 }
 
+
+/**
+ * Observed agentic capability, per provider+model.
+ *
+ * Model names are a poor proxy for whether a model can hold the
+ * investigative JSON protocol: a name-based rule both misses capable
+ * models and keeps re-attempting models that provably cannot emit the
+ * tool schema, burning a round trip on every question before falling
+ * back. Record what actually happened instead and stop retrying a model
+ * that has failed repeatedly.
+ *
+ * Deliberately in-memory: if the user pulls a better build of the same
+ * tag, or the failures were caused by a transient provider problem, a
+ * restart re-evaluates rather than permanently branding the model.
+ */
+const AGENTIC_FAILURE_LIMIT = 2;
+const agenticFailuresByModel = new Map<string, number>();
+
+function agenticModelKey(providerId: string, model: string | undefined): string {
+  return `${providerId}::${model ?? "default"}`;
+}
+
+export function recordAgenticOutcome(
+  providerId: string,
+  model: string | undefined,
+  ok: boolean,
+): void {
+  const key = agenticModelKey(providerId, model);
+  if (ok) {
+    agenticFailuresByModel.delete(key);
+    return;
+  }
+  agenticFailuresByModel.set(key, (agenticFailuresByModel.get(key) ?? 0) + 1);
+}
+
+function agenticModelHasFailedRepeatedly(
+  providerId: string,
+  model: string | undefined,
+): boolean {
+  return (
+    (agenticFailuresByModel.get(agenticModelKey(providerId, model)) ?? 0) >=
+    AGENTIC_FAILURE_LIMIT
+  );
+}
+
 type AgenticCapabilityDecision = {
   enabled: boolean;
   reason: "setting" | "capable" | "capability-fallback";
   notice?: string;
 };
+
+/** Test seam for the capability decision; not used by app code. */
+export function resolveAgenticCapabilityForTest(
+  input: Parameters<typeof resolveAgenticCapability>[0],
+): AgenticCapabilityDecision {
+  return resolveAgenticCapability(input);
+}
 
 function resolveAgenticCapability(input: {
   mode: ChatInvestigationMode;
@@ -2357,10 +2411,19 @@ function resolveAgenticCapability(input: {
   if (input.mode === "always-deterministic") {
     return { enabled: false, reason: "setting" };
   }
+  const observedModel =
+    input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0];
+  if (agenticModelHasFailedRepeatedly(input.providerId, observedModel)) {
+    return {
+      enabled: false,
+      reason: "capability-fallback",
+      notice: `Deterministic retrieval - ${observedModel ?? input.providerId} did not hold the investigative format, so this answer skips it.`,
+    };
+  }
   if (input.provider?.isLocal === false) {
     return { enabled: true, reason: "capable" };
   }
-  const model = input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0];
+  const model = observedModel;
   if (modelSuggestsSmallLocalModel(model)) {
     return {
       enabled: false,

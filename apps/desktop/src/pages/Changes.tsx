@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
+import { Select } from "../components/Select";
 import { Card } from "../components/Card";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OutputPane, OutputPaneSection } from "../components/OutputPane";
@@ -901,6 +902,21 @@ export default function Changes() {
     }
   };
 
+  // Empty selection means "roll back everything currently drifted",
+  // which keeps the default one click.
+  const [rollbackSelection, setRollbackSelection] = useState<ReadonlySet<string>>(
+    new Set<string>(),
+  );
+  const toggleRollbackSelection = (entry: DriftBaselineDriftEntry) => {
+    const key = baselineDriftEntryKey(entry);
+    setRollbackSelection((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const closeBaselineRollbackModal = () => {
     if (baselineRollbackBusy) return;
     setBaselineRollbackOpen(false);
@@ -919,7 +935,20 @@ export default function Changes() {
           "Baseline rollback is unavailable in this build. The desktop bridge does not expose the rollback method.",
         );
       }
-      const run = await startBaselineRollback({ tenantId: activeTenant.id });
+      const picked = baselineDrift?.entries.filter((entry) =>
+        rollbackSelection.has(baselineDriftEntryKey(entry)),
+      );
+      const run = await startBaselineRollback({
+        tenantId: activeTenant.id,
+        ...(picked && picked.length > 0
+          ? {
+              selections: picked.map((entry) => ({
+                resource: entry.resource,
+                graphId: entry.graphId,
+              })),
+            }
+          : {}),
+      });
       setBaselineRollbackOpen(false);
       navigate(`/runs/${run.id}`);
     } catch (caught) {
@@ -984,6 +1013,8 @@ export default function Changes() {
           />
         ) : segment === "baselines" && baselinesAvailable ? (
           <BaselinesSegment
+            rollbackSelection={rollbackSelection}
+            onToggleRollbackSelection={toggleRollbackSelection}
             loading={baselineLoading}
             error={baselineError}
             activeBaseline={activeBaseline}
@@ -1173,7 +1204,12 @@ export default function Changes() {
       />
       <BaselineRollbackModal
         open={baselineRollbackOpen}
-        entryCount={tenantBaselineDrift?.entries.length ?? 0}
+        entryCount={
+          rollbackSelection.size > 0
+            ? rollbackSelection.size
+            : tenantBaselineDrift?.entries.length ?? 0
+        }
+        selectionActive={rollbackSelection.size > 0}
         error={baselineRollbackError}
         busy={baselineRollbackBusy}
         onClose={closeBaselineRollbackModal}
@@ -1379,7 +1415,7 @@ function CompareSegment({
               <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                 Tenant B
               </span>
-              <select
+              <Select
                 id="compare-tenant-b"
                 name="compare-tenant-b"
                 aria-label="Tenant B"
@@ -1393,7 +1429,7 @@ function CompareSegment({
                     {tenant.displayName}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="flex min-h-10 items-start gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
               <input
@@ -2071,6 +2107,8 @@ function BaselinesSegment({
   onRetire,
   onRollback,
   onRetry,
+  rollbackSelection,
+  onToggleRollbackSelection,
 }: {
   loading: boolean;
   error: string | null;
@@ -2079,6 +2117,8 @@ function BaselinesSegment({
   retiredBaselines: DriftBaseline[];
   expandedEntry: string | null;
   onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
+  rollbackSelection: ReadonlySet<string>;
+  onToggleRollbackSelection: (entry: DriftBaselineDriftEntry) => void;
   onCreate: () => void;
   onRename: () => void;
   onRetire: () => void;
@@ -2132,6 +2172,8 @@ function BaselinesSegment({
 
       {activeBaseline && drift ? (
         <BaselineDriftEntries
+          selected={rollbackSelection}
+          onToggleSelected={onToggleRollbackSelection}
           drift={drift}
           expandedEntry={expandedEntry}
           onToggleEntry={onToggleEntry}
@@ -2315,11 +2357,16 @@ function BaselineDriftEntries({
   expandedEntry,
   onToggleEntry,
   onRollback,
+  selected,
+  onToggleSelected,
 }: {
   drift: DriftBaselineDriftResult;
   expandedEntry: string | null;
   onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
   onRollback?: () => void;
+  /** Keys of entries picked for rollback. Empty means roll back all. */
+  selected: ReadonlySet<string>;
+  onToggleSelected: (entry: DriftBaselineDriftEntry) => void;
 }) {
   return (
     <Card className="overflow-hidden">
@@ -2363,13 +2410,23 @@ function BaselineDriftEntries({
             const name = entry.displayName ?? entry.graphId;
             return (
               <div key={key}>
+                <div className="flex items-start">
+                  <label className="flex shrink-0 items-center self-stretch pl-5 pr-1">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(key)}
+                      onChange={() => onToggleSelected(entry)}
+                      aria-label={`Select ${name} for rollback`}
+                      className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                    />
+                  </label>
                 <button
                   type="button"
                   aria-expanded={expanded}
                   aria-controls={detailId}
                   aria-label={`${expanded ? "Collapse" : "Expand"} baseline drift details for ${name}`}
                   onClick={() => onToggleEntry(entry)}
-                  className={`grid w-full gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
+                  className={`grid w-full min-w-0 gap-3 py-3 pl-1 pr-5 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
                 >
                   <span className="min-w-0">
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -2400,6 +2457,7 @@ function BaselineDriftEntries({
                     />
                   </span>
                 </button>
+                </div>
                 {expanded ? (
                   <div
                     id={detailId}
@@ -2514,7 +2572,7 @@ function FiltersRow({
         className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--color-surface)] px-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
       >
         <span>Resource</span>
-        <select
+        <Select
           id="changes-resource-filter"
           name="changes-resource-filter"
           aria-label="Resource"
@@ -2529,7 +2587,7 @@ function FiltersRow({
               {resource.resourceLabel}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
 
       <label
@@ -2537,7 +2595,7 @@ function FiltersRow({
         className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--color-surface)] px-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
       >
         <span>Range</span>
-        <select
+        <Select
           id="changes-date-range"
           name="changes-date-range"
           aria-label="Date range"
@@ -2551,7 +2609,7 @@ function FiltersRow({
               {range.label}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
 
       <div className="relative min-w-[240px] flex-1 sm:flex-none">
@@ -3412,6 +3470,7 @@ function RetireBaselineModal({
 function BaselineRollbackModal({
   open,
   entryCount,
+  selectionActive,
   error,
   busy,
   onClose,
@@ -3419,6 +3478,7 @@ function BaselineRollbackModal({
 }: {
   open: boolean;
   entryCount: number;
+  selectionActive: boolean;
   error: string | null;
   busy: boolean;
   onClose: () => void;
@@ -3433,9 +3493,10 @@ function BaselineRollbackModal({
       />
       <div className="space-y-4 p-6">
         <p className="text-[13px] leading-6 text-[var(--color-text-soft)]">
-          This builds a rollback plan for the drifted objects below. Nothing is
-          applied until you review the plan and type the confirmation phrase on
-          the run page.
+          This builds a rollback plan for{" "}
+          {selectionActive ? "the entries you selected" : "the drifted objects below"}.
+          Nothing is applied until you review the plan and type the confirmation
+          phrase on the run page.
         </p>
         <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           {entryCount.toLocaleString()} drifted{" "}
@@ -3506,7 +3567,7 @@ function PinChangeToWorkspaceModal({
             <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               Workspace
             </span>
-            <select
+            <Select
               id="pin-change-workspace"
               name="pin-change-workspace"
               value={selectedWorkspaceId}
@@ -3518,7 +3579,7 @@ function PinChangeToWorkspaceModal({
                   {workspace.title}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         )}
         <div className="max-h-44 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 font-mono text-[10.5px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">

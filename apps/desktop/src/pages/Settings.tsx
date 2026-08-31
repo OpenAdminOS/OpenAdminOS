@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
+import { Select } from "../components/Select";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
 import { Button } from "../components/Button";
@@ -1749,7 +1750,7 @@ function ChatSettingsSection() {
               <label htmlFor="periodic-cache-refresh-interval" className="sr-only">
                 Periodic cache refresh interval
               </label>
-              <select
+              <Select
                 id="periodic-cache-refresh-interval"
                 name="periodic-cache-refresh-interval"
                 value={scheduleInterval}
@@ -1767,7 +1768,7 @@ function ChatSettingsSection() {
                 <option value={360}>Every 6 hours</option>
                 <option value={720}>Every 12 hours</option>
                 <option value={1440}>Every 24 hours</option>
-              </select>
+              </Select>
               <Button
                 size="sm"
                 variant={cacheStatus?.schedule?.enabled ? "secondary" : "primary"}
@@ -2252,7 +2253,7 @@ function GatewaySection({
                   >
                     Bound tenant
                   </label>
-                  <select
+                  <Select
                     id="gateway-tenant"
                     name="gateway-tenant"
                     required
@@ -2270,7 +2271,7 @@ function GatewaySection({
                         </option>
                       ))
                     )}
-                  </select>
+                  </Select>
                 </div>
                 <div>
                   <label

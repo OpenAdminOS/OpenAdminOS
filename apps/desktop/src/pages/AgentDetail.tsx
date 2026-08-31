@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
@@ -630,6 +630,12 @@ export default function AgentDetail({
               }}
             />
 
+            <DeliveryDisclosure
+              configured={Boolean(
+                agent.delivery &&
+                  Object.values(agent.delivery).some((entry) => entry != null),
+              )}
+            >
             <AgentTeamsDeliveryCard
               delivery={agent.delivery?.teams}
               onOpenConnectors={() => navigate("/connectors")}
@@ -711,6 +717,7 @@ export default function AgentDetail({
                 );
               }}
             />
+            </DeliveryDisclosure>
 
             <Card>
               <div className="p-5">
@@ -2566,4 +2573,57 @@ function compareSemver(left: string, right: string): number {
     if (diff !== 0) return diff > 0 ? 1 : -1;
   }
   return 0;
+}
+
+/**
+ * Run delivery is six connector cards, and on an install with no
+ * connectors set up each one renders its own "connect this first"
+ * warning. That wall of near-identical warnings dominates the sidebar
+ * and tells the admin nothing they can act on six times over. Collapse
+ * it to a single entry point until this agent actually has delivery
+ * configured.
+ */
+function DeliveryDisclosure({
+  configured,
+  children,
+}: {
+  configured: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(configured);
+  if (open) {
+    return (
+      <div className="flex flex-col gap-6">
+        {children}
+        {!configured && (
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="self-start text-[11px] text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
+          >
+            Hide delivery options
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <Card>
+      <div className="p-5">
+        <SectionLabel>Delivery</SectionLabel>
+        <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+          Run reports stay in local history. You can also send them to Teams,
+          WhatsApp, Outlook, Slack, Discord, or Signal once a connector is set up.
+        </p>
+        <Button
+          className="mt-3"
+          size="sm"
+          variant="secondary"
+          onClick={() => setOpen(true)}
+        >
+          Set up run delivery
+        </Button>
+      </div>
+    </Card>
+  );
 }

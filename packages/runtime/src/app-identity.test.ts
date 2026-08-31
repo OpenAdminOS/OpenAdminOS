@@ -41,3 +41,13 @@ describe("app identity resolution", () => {
     }
   });
 });
+
+describe("legacy tenant migration contract", () => {
+  it("keeps the Graph CLI client id available for tenants connected before v0.5", () => {
+    // The desktop state loader pins this id onto tenant records that
+    // predate the OpenAdminOS registration, so their refresh tokens stay
+    // usable. Removing the constant would silently force every existing
+    // install to reconnect.
+    assert.equal(GRAPH_CLI_CLIENT_ID, "14d82eec-204b-4c2f-b7e8-296a70dab67e");
+  });
+});

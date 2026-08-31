@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Avatar } from "../components/Avatar";
 import { Button } from "../components/Button";
+import { Select } from "../components/Select";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
 import { IconChanges, IconFleet, IconRefresh } from "../components/icons";
@@ -128,14 +129,14 @@ export default function Fleet() {
             <label htmlFor="fleet-group" className="sr-only">
               Tenant group
             </label>
-            <select
+            <Select
               id="fleet-group"
               name="fleet-group"
               aria-label="Tenant group"
               value={selectedGroupId}
               disabled={loading}
               onChange={(event) => setSelectedGroupId(event.target.value)}
-              className="h-9 min-w-[180px] rounded-lg bg-[var(--color-surface)] px-3 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border)] focus:ring-2 focus:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-w-[180px]"
             >
               <option value="">All tenants</option>
               {groups.map((group) => (
@@ -143,7 +144,7 @@ export default function Fleet() {
                   {group.name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Button
               size="md"
               leadingIcon={<IconRefresh size={13} />}
@@ -233,7 +234,10 @@ export default function Fleet() {
               </div>
             ) : null}
 
-            <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+            {/* The base column must be minmax(0,1fr), not auto: an auto column
+                grows to the table's min-width and pushes the whole page into a
+                horizontal scroll instead of scrolling inside the card. */}
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
               <FleetTable
                 tenants={fleet.tenants}
                 switchingTenantId={switchingTenantId}
@@ -262,15 +266,15 @@ function FleetTable({
       <div className="overflow-x-auto">
         <table
           aria-label="Tenant fleet drift status"
-          className="w-full min-w-[900px] border-collapse text-left text-[12px]"
+          className="w-full border-collapse text-left text-[12px]"
         >
           <thead>
             <tr className="bg-[var(--color-bg-raised)] text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               <th scope="col" className="px-4 py-3">Tenant</th>
               <th scope="col" className="px-4 py-3">Baseline</th>
               <th scope="col" className="px-4 py-3">Drift</th>
-              <th scope="col" className="px-4 py-3">Last capture</th>
-              <th scope="col" className="px-4 py-3 text-right">Objects</th>
+              <th scope="col" className="hidden px-4 py-3 lg:table-cell">Last capture</th>
+              <th scope="col" className="hidden px-4 py-3 text-right lg:table-cell">Objects</th>
               <th scope="col" className="px-4 py-3"><span className="sr-only">Action</span></th>
             </tr>
           </thead>
@@ -319,7 +323,7 @@ function FleetTenantRow({
   return (
     <tr className="transition-colors hover:bg-[var(--color-surface-hover)]">
       <th scope="row" className="px-4 py-3 font-normal">
-        <div className="flex min-w-[190px] items-center gap-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
           <Avatar name={tenant.tenantName} size={28} />
           <div className="min-w-0">
             <div className="truncate font-medium text-[var(--color-text)]">
@@ -365,7 +369,7 @@ function FleetTenantRow({
           <span className="text-[11px] text-[var(--color-text-muted)]">Not evaluated</span>
         )}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 font-mono text-[10.5px] text-[var(--color-text-soft)]">
+      <td className="hidden whitespace-nowrap px-4 py-3 font-mono text-[10.5px] text-[var(--color-text-soft)] lg:table-cell">
         {tenant.lastCaptureAt ? (
           <time dateTime={tenant.lastCaptureAt} title={formatDateTime(tenant.lastCaptureAt)}>
             {formatRelative(tenant.lastCaptureAt)}
@@ -374,7 +378,7 @@ function FleetTenantRow({
           <span className="text-[var(--color-text-muted)]">No capture</span>
         )}
       </td>
-      <td className="px-4 py-3 text-right font-mono text-[11px] text-[var(--color-text-soft)] tabular-nums">
+      <td className="hidden px-4 py-3 text-right font-mono text-[11px] text-[var(--color-text-soft)] tabular-nums lg:table-cell">
         {tenant.trackedObjectCount.toLocaleString()}
       </td>
       <td className="px-4 py-3 text-right">

@@ -95,7 +95,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             to: "/fleet",
             label: "Fleet",
             icon: <IconFleet size={16} />,
-            badge: state.tenants.length,
+            // No badge: a bare tenant count reads like an alert count.
+            // The number worth surfacing here is tenants with drift, and
+            // that needs a fleet evaluation the sidebar should not run.
           },
         ]
       : []),

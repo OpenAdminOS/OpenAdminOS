@@ -12,6 +12,7 @@ import {
   createAppleFoundationLlm,
   createLmStudioLlm,
   DEFAULT_AUTHORITY,
+  GRAPH_CLI_CLIENT_ID,
   authorityForDirectory,
   createMsalClient,
   defaultClientId,
@@ -5173,7 +5174,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     {
 
-      const tenants = Array.isArray(parsed.tenants) ? parsed.tenants : [];
+      // v0.5 migration: tenants connected before the app shipped its own
+      // Entra registration were signed in with the Graph CLI client, and
+      // MSAL binds refresh tokens to the issuing client id. Pin that
+      // client to those records so they keep refreshing silently instead
+      // of forcing every existing install to reconnect. New connections
+      // use the OpenAdminOS registration.
+      const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : []).map(
+        (tenant) =>
+          isPlainRecordValue(tenant) && tenant.appRegistration === undefined
+            ? {
+                ...tenant,
+                appRegistration: {
+                  kind: "openadminos" as const,
+                  clientId: GRAPH_CLI_CLIENT_ID,
+                },
+              }
+            : tenant,
+      );
       const activeTenantId =
         typeof parsed.activeTenantId === "string" &&
         tenants.some((tenant) => tenant.id === parsed.activeTenantId)

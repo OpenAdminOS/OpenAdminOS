@@ -6,9 +6,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Baseline rollback can now target individual drifted objects instead of the whole drift set: each entry has a checkbox, and the pre-flight says whether the plan covers your selection or everything.
+
 - Tenant sign-in now uses the OpenAdminOS Entra app registration, so the consent screen names OpenAdminOS and tenant audit logs attribute activity to it rather than to Microsoft's Graph command line app. Admins whose organizations do not allow third-party multi-tenant apps can choose "Connect with your own app registration" and supply their own client ID (a public client; no client secret is needed or accepted). Each tenant remembers the registration it was connected with, and existing tenants need to reconnect once after upgrading.
 
 ### Changed
+
+- Dropdowns across Fleet, Settings, and Changes now use one styled control instead of the browser default, which rendered with mismatched arrows and focus rings.
+- An agent's delivery options are collapsed behind a single entry point until delivery is configured, replacing a stack of near-identical "connect this first" warnings.
+- The Fleet navigation entry no longer shows a bare tenant count, which read like an alert count.
 
 - Windows no longer stacks a native title bar and menu bar above the app's own header: the window controls are overlaid on the app chrome and the menu is reachable with Alt, which gives back two rows of vertical space. Linux drops the macOS title-bar spacer it never needed.
 - The window now opens on the app's own background color instead of an older darker shade, so launch no longer flashes a mismatched background, and the Windows window-control strip blends into the app chrome instead of painting as a lighter block.
@@ -16,6 +22,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Removed
 
 ### Fixed
+
+- The Fleet view no longer forces the whole window into a horizontal scroll on narrow displays. The two lowest-value columns now fold away below large widths instead.
+- Tenants connected before this release keep working after the app-registration change. Their records are pinned to the app identity that issued their tokens, so silent refresh continues instead of forcing everyone to reconnect.
+- Chat no longer decides whether a local model can drive investigative mode from its name, which both misjudged capable models and re-attempted models that provably could not hold the tool format on every question. It now remembers what actually happened per model and stops retrying after repeated failures, and recovers automatically if the model starts succeeding.
 
 ### Security
 
