@@ -13,6 +13,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Settings now states the update behaviour in full: updates download in the background before the restart prompt, and choosing Later applies them on the next quit. The previous wording mentioned only the prompt.
+
 - Benchmark figures are generated from scored runs by `model/site-benchmarks/export-benchmark-data.mjs` and committed as a contract the page parses at build time, so a marketing claim cannot drift from a measurement.
 - Windows code signing runs through Azure Artifact Signing (formerly Trusted Signing): the certificate is short-lived and rotated by Microsoft, the key never leaves Microsoft's HSM, CI holds only a revocable service principal credential, and SmartScreen reputation is established faster than with the previous OV certificate.
 - `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
@@ -23,6 +25,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - The training status page, its run-state API, the pod-side stage reporting in the training pipeline, and the two Supabase tables that backed it. The published run log went with it; the 8B model card no longer claims that log is public.
 
 ### Fixed
+
+- Testing the OpenAI Codex provider no longer opens a text editor window over the app. The CLI runs with a scrubbed environment that carried no editor setting, so anything it wanted to open fell through to the operating system default, which on Windows is Notepad.
 
 - Sending the first message in a new conversation no longer flashes "Conversation not found" while the answer is being fetched. The route moved to the new conversation before the sidebar list had reloaded, so the app briefly judged its own conversation to be missing while the send was working normally.
 

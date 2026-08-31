@@ -187,6 +187,15 @@ export function createCodexProcessEnv(input: {
     }
   }
 
+  // The CLI runs headless inside the app: nothing it does should open a
+  // window. With no EDITOR/VISUAL in the scrubbed environment it falls
+  // back to the OS default handler, which on Windows pops the file open
+  // in Notepad in front of the user. Point both at a no-op and mark the
+  // session non-interactive.
+  env.EDITOR = process.platform === "win32" ? "cmd /c exit 0" : "/usr/bin/true";
+  env.VISUAL = env.EDITOR;
+  env.CI = "1";
+
   return env;
 }
 

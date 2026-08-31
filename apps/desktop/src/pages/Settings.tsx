@@ -3969,8 +3969,8 @@ function PrivacySection({
             platform === "linux"
               ? "Stable-only. Linux updates are installed through the signed apt repository or by downloading the next package; the app does not replace unsigned Linux executables automatically."
               : platform === "windows"
-                ? "Stable-only. Microsoft Store builds update through the Store. Other signed builds check the release channel and ask before restarting."
-                : "Stable-only. Signed builds check the release channel on launch and every four hours, then ask before restarting."
+                ? "Stable-only, never pre-releases. Microsoft Store builds update through the Store. Other signed builds check the release channel, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit."
+                : "Stable-only, never pre-releases. Signed builds check the release channel on launch and every four hours, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit."
           }
           control={
             <Pill tone="success">

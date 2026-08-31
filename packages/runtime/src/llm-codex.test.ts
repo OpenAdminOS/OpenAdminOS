@@ -47,6 +47,29 @@ describe("createCodexProcessEnv", () => {
       LANG: "en_US.UTF-8",
       SSL_CERT_FILE: "/certs/root.pem",
       TMPDIR: "/tmp/openadminos",
+      // Forced so the headless CLI can never open a GUI editor.
+      EDITOR: process.platform === "win32" ? "cmd /c exit 0" : "/usr/bin/true",
+      VISUAL: process.platform === "win32" ? "cmd /c exit 0" : "/usr/bin/true",
+      CI: "1",
     });
+  });
+});
+
+describe("codex child environment", () => {
+  it("never lets the CLI open a GUI editor in front of the user", () => {
+    const env = createCodexProcessEnv({ source: { PATH: "/usr/bin" } });
+    // Without these the CLI falls back to the OS default handler, which on
+    // Windows opens instructions.md in Notepad over the app.
+    assert.ok(env.EDITOR && env.EDITOR.length > 0);
+    assert.equal(env.VISUAL, env.EDITOR);
+    assert.equal(env.CI, "1");
+  });
+
+  it("does not inherit an editor the user happens to have configured", () => {
+    const env = createCodexProcessEnv({
+      source: { PATH: "/usr/bin", EDITOR: "code --wait", VISUAL: "code --wait" },
+    });
+    assert.notEqual(env.EDITOR, "code --wait");
+    assert.notEqual(env.VISUAL, "code --wait");
   });
 });
