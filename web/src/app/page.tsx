@@ -1,6 +1,12 @@
 import { type Metadata } from "next";
 import Link from "next/link";
 
+import {
+  benchmarkData as benchmarks,
+  leadOverHosted,
+  ownModel,
+  rankedModels,
+} from "~/lib/benchmarks/data";
 import { getAgentStatsSummary } from "~/lib/stats/summary";
 
 import { AmbientVideo } from "./AmbientVideo";
@@ -32,11 +38,15 @@ export const metadata: Metadata = pageMetadata({
 });
 
 const HOME_NAV_ITEMS: readonly MobileNavItem[] = [
+  { href: "/benchmarks", label: "Benchmarks" },
   { href: "/blog", label: "Blog" },
   { href: DOCS_URL, label: "Documentation", external: true },
   { href: GITHUB_URL, label: "GitHub", external: true },
   { href: "/download", label: "Download", primary: true },
 ];
+
+const benchmarkTiles = rankedModels();
+const benchmarkLead = leadOverHosted();
 
 const PROOF_ITEMS = [
   ["MIT", "Commercial-friendly license"],
@@ -413,6 +423,49 @@ export default async function HomePage() {
             >
               Review the trust model
             </Link>
+          </div>
+        </section>
+
+        <section className="w-full max-w-7xl border-t border-white/10 py-20">
+          <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">
+                Benchmarks
+              </p>
+              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+                You do not need a frontier model for this work.
+              </h2>
+              <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+                We put OpenAdmin 8B, Claude Opus 5 and GPT-5.6-sol through{" "}
+                {benchmarks.taskCount} identical Microsoft 365 administration
+                tasks and scored them mechanically. The {ownModel.sizeOnDisk}{" "}
+                local model came out {benchmarkLead} tasks ahead, and its lead
+                is concentrated in write-safety: refusing destructive requests
+                for the right reason.
+              </p>
+              <Link
+                href="/benchmarks"
+                className="mt-5 inline-flex text-sm font-medium text-sky-300 underline-offset-4 transition hover:text-white hover:underline"
+              >
+                See the full benchmark
+              </Link>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {benchmarkTiles.map((model) => (
+                <div
+                  key={model.id}
+                  className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+                >
+                  <p className="text-xs text-white/50">{model.name}</p>
+                  <p className="mt-2 text-2xl font-semibold tabular-nums">
+                    {model.score}
+                    <span className="text-sm font-normal text-white/40">
+                      /{benchmarks.taskCount}
+                    </span>
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
 

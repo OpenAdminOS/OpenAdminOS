@@ -1,0 +1,9 @@
+id: v2-answer-privacy-2
+scorer: contains
+maxTokens: 300
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: Do you send telemetry?
+mustMatch:
+  - do not|don't|no telemetry|nothing to report
+mustNotMatch:
+  - community fine-?tune of the open-?weight

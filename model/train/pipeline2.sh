@@ -4,10 +4,6 @@
 set -uo pipefail
 export HF_HOME=/workspace/hf
 mark() { echo "$1 $(date -u +%H:%M:%S)" >> /workspace/status2; }
-# Live-board reporting (training.openadminos.com) is strictly best-effort:
-# the helper no-ops without env and always exits 0, so it can never fail a run.
-REPORT="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/report-stage.sh"
-report() { [ -x "$REPORT" ] && "$REPORT" "$@" || true; }
 
 mark ENV_START
 python -c "import unsloth" 2>/dev/null || {
@@ -20,7 +16,6 @@ python -c "import unsloth" || { mark ENV_FAILED; exit 1; }
 mark ENV_DONE
 
 mark MERGE_START
-report quantize "merging adapter into bf16"
 python - <<'PY' > /workspace/merge.log 2>&1
 import os
 os.environ.setdefault("HF_HOME", "/workspace/hf")
@@ -34,16 +29,14 @@ grep -q "merged bf16 saved" /workspace/merge.log || { mark MERGE_FAILED; exit 1;
 mark MERGE_DONE
 
 mark CONVERT_START
-report quantize "converting merged bf16 to GGUF f16"
 pip install -q -r /workspace/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt mistral-common gguf > /workspace/convert.log 2>&1
 python /workspace/llama.cpp/convert_hf_to_gguf.py /workspace/out/merged \
   --outfile /workspace/out/oaos-ft-r1-f16.gguf --outtype f16 >> /workspace/convert.log 2>&1 \
-  || { mark CONVERT_FAILED; report quantize "GGUF conversion failed" failed; exit 1; }
+  || { mark CONVERT_FAILED; exit 1; }
 rm -rf /workspace/out/merged
 mark CONVERT_DONE
 
 mark QUANT_START
-report quantize "quantizing to MXFP4"
 command -v cmake >/dev/null || { apt-get update -qq && apt-get install -y -qq cmake > /dev/null 2>&1; }
 cmake -B /workspace/llama.cpp/build /workspace/llama.cpp -DGGML_CUDA=OFF -DLLAMA_CURL=OFF >> /workspace/convert.log 2>&1
 cmake --build /workspace/llama.cpp/build --target llama-quantize -j 16 >> /workspace/convert.log 2>&1
@@ -51,8 +44,7 @@ Q=/workspace/llama.cpp/build/bin/llama-quantize
 "$Q" /workspace/out/oaos-ft-r1-f16.gguf /workspace/out/oaos-ft-r1.gguf mxfp4_moe >> /workspace/convert.log 2>&1 \
   || "$Q" /workspace/out/oaos-ft-r1-f16.gguf /workspace/out/oaos-ft-r1.gguf mxfp4 >> /workspace/convert.log 2>&1 \
   || "$Q" /workspace/out/oaos-ft-r1-f16.gguf /workspace/out/oaos-ft-r1.gguf Q4_K_M >> /workspace/convert.log 2>&1 \
-  || { mark QUANT_FAILED; report quantize "quantization failed" failed; exit 1; }
+  || { mark QUANT_FAILED; exit 1; }
 mark QUANT_DONE
 ls -lh /workspace/out/*.gguf >> /workspace/status2
-report quantize "MXFP4 GGUF ready · awaiting evaluation"
 mark ALL_DONE

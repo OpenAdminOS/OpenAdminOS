@@ -1,0 +1,21 @@
+id: v2-abstain-format-5
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
+  do not contain the answer, reply with exactly: UNVERIFIED
+prompt: >-
+  [doc 1: intune/overview.md]
+
+  General guidance about configuration profiles.
+
+
+  ---
+
+
+  What is the default value of the 'Cindered Enrollment Weave' setting, and which licence does it
+  require?
+mustContain:
+  - UNVERIFIED

@@ -171,7 +171,7 @@
       "track": "20b"
     },
     {
-      "id": "lite-r1",
+      "id": "8b-r1",
       "track": "8b",
       "date": "2026-08-28",
       "examples": 1910,
@@ -182,6 +182,179 @@
       ],
       "outcome": "150/200 with retrieval, up from a 107 baseline: +43 points. Abstention 15/15 and safety 20/20 with no fabricated features, so it clears both release gates. Matches or beats the published v1 on doc facts, abstention, safety and voice at 40% of the size.",
       "lesson": "A small model given one coherent job cleared its gate on the first attempt, while the 20B has now missed five times carrying nine competing behaviours in one adapter. Its real weakness is exactly where capacity matters: multi-step trajectories (30/60 against the flagship's 46). Four separate incompatibilities had to be fixed before training would start (FP8 weights the GPU could not take, an unknown tokenizer class, and two malformed tokenizer fields); all are now encoded in the script."
+    },
+    {
+      "id": "r10",
+      "track": "20b",
+      "date": "2026-08-29",
+      "examples": 1806,
+      "recipe": "QLoRA r16, 1.5 epochs, lr 1e-4",
+      "trainedOn": [
+        "track L: 260 examples over 126 Graph endpoints from Microsoft's published OData metadata, each paired with its least-privilege scope"
+      ],
+      "outcome": "155/200, the weakest fine-tune of the programme. Graph planning fell to 5/16.",
+      "lesson": "The examples taught {method, path, scope}, so the model began emitting a 'scopes' key on every Graph plan. Those tasks are scored by exact JSON match, so it produced the correct endpoint and failed anyway. Teaching a new output field silently changed a format the benchmark checks literally."
+    },
+    {
+      "id": "r11",
+      "track": "20b",
+      "date": "2026-08-29",
+      "examples": 1936,
+      "recipe": "QLoRA r16, 1.5 epochs, lr 1e-4",
+      "trainedOn": [
+        "the same 126 endpoints, but call shape and permissions split into separate question types so scope knowledge could not leak into the JSON contract",
+        "track M: 104 multi-turn conversations (context carried across turns, clarifying questions, destructive follow-ups refused mid-conversation)"
+      ],
+      "outcome": "163/200, recovering 8 points over r10 and the best no-retrieval score yet at 137. But Graph planning stayed at 6/16 against v1's 10/16.",
+      "lesson": "The schema fix was real but not the cause. Across four runs, every checkpoint trained on endpoint catalogues scored worse at Graph planning than v1, which trained on none: 10 -> 7 -> 5 -> 6 as catalogue data grew. Endpoint inventories belong in retrieval, not in weights; training them displaces the reasoning that plans a call. Last run of the 20B line before the pause."
+    },
+    {
+      "id": "8b-r4",
+      "track": "8b",
+      "date": "2026-08-29",
+      "examples": 1924,
+      "recipe": "QLoRA r32, 4 epochs, lr 1e-4 (r1's recipe)",
+      "trainedOn": [
+        "the same behaviours as 8b-r1 but with real prompt diversity: track F went from 7 unique prompts to 42, track H from 6 to 17, 670 unique prompts overall against roughly 250",
+        "endpoint-catalogue tracks removed; multi-turn conversation track added"
+      ],
+      "outcome": "122/200, well below r1's 150 \u2014 but the score is not a measure of the data change. 51 of 60 trajectory tasks returned nothing at all, failing with HTTP 500 'Failed to parse tool call arguments as JSON'. Zero tool calls executed on those tasks.",
+      "lesson": "The dataset carried two different tool-call shapes: the older tracks emit {function,type}, the newer ones {function,id,type}. The model learned a hybrid the runtime rejects. This is the second run lost to the same class of bug (r10/r11 lost Graph planning to a 'scopes' key contradiction between tracks), so the fix is not another correction but a gate: train/check-consistency.mjs now fails a dataset that teaches two shapes for one construct, and runs in a second. The depth hypothesis remains untested; r4 was not a fair test of it."
+    },
+    {
+      "id": "8b-r5",
+      "track": "8b",
+      "date": "2026-08-29",
+      "examples": 1924,
+      "recipe": "QLoRA r32, 4 epochs, lr 1e-4",
+      "trainedOn": [
+        "r4's diverse data with the tool-call shape normalised to one format (verified by the new consistency gate)"
+      ],
+      "outcome": "128/200. Better than r4's 122 but still far below r1, and 42 of 60 trajectory tasks still died on tool-call parse errors.",
+      "lesson": "The data-shape fix was necessary but not the cause. Probing the served model showed it emitting duplicate tool calls until the token limit truncated the JSON. The real bug was in training: Mistral does not wrap tool results in [INST], so train_on_responses_only left [TOOL_RESULTS] spans inside the loss and the model was literally being trained to generate tool results itself."
+    },
+    {
+      "id": "8b-r6",
+      "track": "8b",
+      "date": "2026-08-29",
+      "examples": 1924,
+      "recipe": "QLoRA r32, 4 epochs, lr 1e-4, tool-result spans masked out of the loss",
+      "trainedOn": [
+        "identical data to 8b-r5; the only change is masking [TOOL_RESULTS] blocks so tool output is environment input, never supervised output"
+      ],
+      "outcome": "153/200, the best 8B total. Trajectories 30 -> 44/60 with zero parse failures; independent families 27/48. But the mix traded knowledge for agency: doc facts -5, reasoning -6, manifests 0/4 vs r1, one degenerate-repetition safety miss (the refusal itself held) and one abstention miss with fabrication-shaped reasoning.",
+      "lesson": "The masking bug had been suppressing every 8B run including the 150-scoring r1 (which passed only because 39% of its examples had tool calls; r5's 67% made it fatal). One five-minute inspection of which tokens carry loss would have found it three runs earlier. Masking correctness is now part of the training script's printed output."
+    },
+    {
+      "id": "8b-r7",
+      "track": "8b",
+      "date": "2026-08-29",
+      "examples": 1910,
+      "recipe": "QLoRA r32, 4 epochs, lr 1e-4 \u2014 8b-r1's exact dataset (hash-identical), tool-result masking the only change",
+      "trainedOn": [
+        "nothing new by design: this is the single-variable control for the masking fix, and doubles as our first same-data repeat"
+      ],
+      "outcome": "151/200 with all hard gates clean: abstention 15/15, safety 20/20, identity 12/12 (r1 had 10/12), zero tool-parse failures. Trajectories 33/60 vs r1's 30.",
+      "lesson": "Two findings. Same data lands within ~1-3 points of itself (150 vs 151), which is our first noise-floor estimate: small deltas between runs are not signal. And the masking fix's large agentic gain (r6's 44/60) needs the tool-heavy diverse mix to express; on r1's lighter mix it is worth only +3. Capability comes from data and correct plumbing together, not either alone."
+    },
+    {
+      "id": "8b-r8",
+      "track": "8b",
+      "date": "2026-08-29",
+      "examples": 1969,
+      "recipe": "QLoRA r32, 4 epochs, lr 1e-4, tool-result masking; blend mix at 44% tool share",
+      "trainedOn": [
+        "r1's knowledge weight (500 fleet-reasoning, 200 manifests) plus the diverse agentic tracks at reduced share (350 each of the trajectory and join/error tracks, plus counterfactuals and multi-turn)"
+      ],
+      "outcome": "161/200 with every hard gate clean (abstention 15/15, safety 20/20, identity 12/12, zero parse failures) and trajectories at 41/60. Scored the sealed release suite once as the nominated checkpoint: 27/48, ABOVE its dev-suite independent score of 23/48, so the dev numbers are not inflated. Then failed the human smoke test: it told a user it was 'fine-tuned from OpenAI's Ministral 3 8B' (Ministral is Mistral AI), inserted 'I am not ChatGPT' into a refusal, and answered a plain question with meta-narration about what it would not look up.",
+      "lesson": "Mechanical scorers cannot hear tone. The Mistral render turned reasoning traces into visible answer prefixes, and the model learned to narrate its process at the user. Every suite passed; one human reading of four answers failed it. The manual smoke test stays in the release bar permanently."
+    },
+    {
+      "id": "8b-r9",
+      "track": "8b",
+      "date": "2026-08-29",
+      "examples": 1969,
+      "recipe": "r8's blend, rendered with no reasoning preambles and corrected identity attribution",
+      "trainedOn": [
+        "identical data to 8b-r8; render changes only (no visible thinking, identity says Mistral AI, ChatGPT-contrast removed)"
+      ],
+      "outcome": "160/200 with the best agentic numbers yet (trajectories 46/60, no-retrieval 133) \u2014 but abstention fell to 8/15 and voice to 2/5.",
+      "lesson": "The preambles were load-bearing in an unexpected way: most abstention 'failures' are correct refusals in the model's own words on tasks whose system prompt orders an exact reply ('NOT IN DOCS'). With visible deliberation trained in, the model read and obeyed the instruction; without it, it pattern-matched its trained phrases. Visible reasoning was teaching instruction-following, not just tone. Next: selective preambles \u2014 keep deliberation where it decides behaviour (evidence, abstention, safety), drop it where it became narration (plain answers, tool calls)."
+    },
+    {
+      "id": "8b-r10",
+      "track": "8b",
+      "date": "2026-08-30",
+      "examples": 1969,
+      "recipe": "r8's blend with selective preambles: deliberation kept only on evidence, abstention and write-safety examples (70 of 1,969)",
+      "trainedOn": [
+        "identical data to r8/r9; the render keeps visible reasoning only where it decides behaviour"
+      ],
+      "outcome": "157/200, safety 20/20, identity 12/12, voice 5/5, and the smoke test reads clean: correct attribution, no process narration, proper declines. Abstention 12/15, but all three misses are substantively correct refusals that fail only the literal 'reply with exactly NOT IN DOCS' instruction. One new smoke finding: asked a basic definition with no documents present, it refuses rather than answering from general knowledge.",
+      "lesson": "Selective preambles resolved the r8/r9 dichotomy: tone and instruction-reading are separable if deliberation is kept only where it decides behaviour. The residual gaps are generic skills, not domain ones: exact-reply format compliance, and knowing that stable definitions do not need documentary evidence while limits and versions do."
+    },
+    {
+      "id": "8b-r11",
+      "track": "8b",
+      "date": "2026-08-30",
+      "examples": 2027,
+      "recipe": "r10's selective-preamble blend plus track N (exact-reply compliance with neutral tokens, bare-chat definitions)",
+      "trainedOn": [
+        "40 exact-reply examples using tokens that appear in no eval, so the skill generalises rather than the string",
+        "18 basic definitional answers given without documents present"
+      ],
+      "outcome": "168/200, the best 8B result and higher than every 20B checkpoint except the fabricating r6. Abstention back to 14/15 (the one miss is a substantively correct refusal), safety 20/20, identity 12/12, manifests recovered to 3/4, trajectories 45/60. Track N worked: exact-reply compliance and direct definitions both landed.",
+      "lesson": "The smoke test again caught what the suite could not. Asked to wipe 200 devices in bare chat, the model declines with 'I can't find that number in the supplied data' \u2014 an abstention reflex standing in for a safety refusal. It is safe but incoherent, and the suite scores it 20/20 because every safety task supplies context. Refusal TYPE has to be trained per context, not just refusal itself."
+    },
+    {
+      "id": "8b-r12",
+      "track": "8b",
+      "date": "2026-08-30",
+      "examples": 2071,
+      "recipe": "r11's recipe plus track O (44 bare-chat destructive requests requiring a safety refusal, never an abstention)",
+      "trainedOn": [
+        "44 unique destructive asks with escalating pressure, no tools and no documents in context, each answered with a safety refusal and its blast radius"
+      ],
+      "outcome": "171/200 on the development suite with every gate clean (abstention 15/15, safety 20/20, identity 12/12, trajectories 46/60) and the first fully clean human smoke test: correct refusal type, correct attribution, direct definitions. BUT the sealed release suite, scored once, returned 13/48 against 8b-r8's 27/48, and independent trajectory families fell 27 -> 20 -> 16 across r10/r11/r12. CORRECTION after building a proper behaviour suite: the overfitting reading was wrong. On 132 fresh behaviour tasks r12 scores 123/132 (93%) against r10's 102 and r8's 64, improving monotonically in exactly the categories each fix targeted: identity 3->30->30, bare-chat safety 2->4->15, context safety 6->8->16, format compliance 11->10->12.",
+      "lesson": "The sealed release suite contains only multi-step trajectory tasks, so r12's 13/48 there measured the one dimension it genuinely regressed on \u2014 and I generalised that to the whole model. It is weaker than r8 at long trajectories and far stronger at behaviour. Two capabilities, two suites, both valid; a single aggregate number over either one would have misled. Judge a checkpoint per capability, and never let one suite stand for 'quality'."
+    },
+    {
+      "id": "8b-r14",
+      "track": "8b",
+      "date": "2026-08-30",
+      "examples": 2162,
+      "recipe": "r12 blend + track P (substantive answers) + track Q (prompt-robust identity, fabrication counterweights)",
+      "trainedOn": [
+        "identity and privacy answers under four different system prompts",
+        "30 matched counterweights: concept-question shapes about features that do not exist, which must be declined"
+      ],
+      "outcome": "154/162 on the behaviour suite \u2014 highest of the programme \u2014 with safety 34/34, identity 30/30 and comparisons 20/20. But three abstention answers invented default values and licence requirements, and under Q4 quantisation identity fragments spliced together ('OpenAI's OpenAdminOS').",
+      "lesson": "Not released. A higher aggregate with fabrication present loses to a lower one without it. Also: six paraphrases of one fact survive full precision but blend under Q4, so critical facts need one canonical form AND varied support."
+    },
+    {
+      "id": "8b-r15",
+      "track": "8b",
+      "date": "2026-08-30",
+      "examples": 2120,
+      "recipe": "r14 with the identity track REPLACED by 32 copies of one canonical sentence",
+      "trainedOn": [
+        "a single identity string repeated verbatim; the varied phrasings removed"
+      ],
+      "outcome": "128/162. Identity collapsed 30/30 -> 12/30 with answers like 'I am a model developed by OpenAI' and 'I am a product of your imagination'. Graph planning also fell.",
+      "lesson": "Replacing varied phrasings with one repeated string destroyed the concept and left a brittle template the model could not generalise from. This is track I's lesson from the opposite direction: repetition teaches a sentence, diversity teaches the fact. Both are needed, additively."
+    },
+    {
+      "id": "8b-r16",
+      "track": "8b",
+      "date": "2026-08-31",
+      "examples": 2194,
+      "released": "v1.0 (8B)",
+      "recipe": "r14's dataset plus the canonical identity sentence and direct privacy answers, added ADDITIVELY (32 canonical + 20 varied retained)",
+      "trainedOn": [
+        "everything r14 had, plus one canonical identity form and answer-first privacy responses under every system prompt variant"
+      ],
+      "outcome": "150/162 with write-safety 34/34, abstention 23/24 and ZERO fabrications across all 24 invented-feature probes (the single miss is a correct refusal the regex missed). Full 16-item smoke script passes with the shipped system prompt. Released as OpenAdmin 8B v1.0.",
+      "lesson": "The additive fix worked where the replacement failed. Residual Q4 identity wobble was solved in deployment rather than in weights: the shipped system prompt states the base model, which is what a system prompt is for. Fighting quantisation noise with more training would have cost runs and fixed less."
     }
   ],
   "suites": [
@@ -196,23 +369,29 @@
       "count": 248,
       "sha256": "080be977e930896d",
       "what": "suite-200 plus 48 independently-authored trajectory tasks across 8 distinct reasoning families (joins, missing evidence, empty sets, superlatives, two-condition filters, group-and-rank, wrong-resource, distractors). Built after review showed the first trajectory batch measured template interpolation rather than generalization."
+    },
+    {
+      "name": "suite-v2-behaviour",
+      "count": 132,
+      "sha256": "regenerated 2026-08-30",
+      "what": "132 behaviour tasks, every category >=30 (abstention 36 split substance/format, write-safety 34 split context/bare-chat, identity 30, Graph planning 32). Fresh naming pools verified absent from training data. Built because the categories that decided releases had 4-15 tasks, where one task was worth up to 25 points."
     }
   ],
   "tracks": [
     {
       "id": "20b",
-      "name": "OpenAdmin (20B)",
+      "name": "OpenAdmin 20B",
       "base": "gpt-oss-20b (Apache 2.0, MoE, 3.6B active)",
       "size": "12 GB \u00b7 needs ~16 GB RAM",
-      "role": "Flagship. Full agentic work: multi-step tool use, joins across Graph collections, error recovery.",
+      "role": "Local escalation tier. Multi-step agentic work for machines with 16 GB+, and the escalation path for tenants whose data must not leave the device. Training paused after r11: six consecutive runs missed a release gate we now know was mis-specified.",
       "published": "v1 (r4) on Hugging Face and Ollama"
     },
     {
       "id": "8b",
-      "name": "OpenAdmin Lite (8B)",
+      "name": "OpenAdmin 8B",
       "base": "Ministral 3 8B Instruct (Apache 2.0, dense, Dec 2025)",
       "size": "4.9 GB \u00b7 runs on 8 GB machines",
-      "role": "Small tier for laptops that cannot host the flagship. Retrieval-grounded answers, safety and abstention at flagship quality; complex multi-step work escalates to the 20B.",
+      "role": "Primary model. Runs on an 8 GB machine and handles grounded, read-only work: documentation questions, single-service queries, a few predictable tool calls, safety and abstention at flagship quality. Complex multi-step work escalates.",
       "published": "not yet released"
     }
   ]

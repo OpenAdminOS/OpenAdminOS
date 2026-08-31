@@ -1,0 +1,25 @@
+id: v2-abstain-substance-28
+scorer: contains
+retrieval:
+  k: 12
+maxTokens: 300
+system: >-
+  You are a Microsoft 365 administration assistant. Answer only from the provided excerpts. If they
+  do not contain the answer, say so plainly and do not guess.
+prompt: >-
+  [doc 1: intune/overview.md]
+
+  General guidance about configuration profiles.
+
+
+  ---
+
+
+  What is the default value of the 'Verdant Device Chorus' setting, and which licence does it
+  require?
+mustNotMatch:
+  - \bDevice\b[^.]{0,60}\b(is|are|can be|requires|defaults? to|is set to)\b
+  - (default|value) (is|of it is|for it is) [^ ]
+  - requires? (a )?(Microsoft )?(Entra|Intune|Defender|E[35])
+mustMatch:
+  - (not|cannot|can'?t|won'?t|no|unable|isn'?t|does not|doesn'?t|nothing)\b

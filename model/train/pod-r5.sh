@@ -3,10 +3,6 @@
 set -uo pipefail
 export HF_HOME=/workspace/hf
 mark() { echo "$1 $(date -u +%H:%M:%S)" >> /workspace/status-r5; }
-# Live-board reporting (training.openadminos.com) is strictly best-effort:
-# the helper no-ops without env and always exits 0, so it can never fail a run.
-REPORT="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/report-stage.sh"
-report() { [ -x "$REPORT" ] && "$REPORT" "$@" || true; }
 
 mark ENV_START
 # Order matters: llama.cpp's convert requirements pull CPU torch, so install
@@ -22,28 +18,24 @@ command -v cmake >/dev/null || { apt-get update -qq && apt-get install -y -qq cm
 mark ENV_DONE
 
 mark TRAIN_START
-report train "starting QLoRA on the pod"
 python /workspace/train.py > /workspace/train-r5.log 2>&1
-grep -q "merged bf16 saved" /workspace/train-r5.log || { mark TRAIN_FAILED; report train "training failed on the pod" failed; exit 1; }
+grep -q "merged bf16 saved" /workspace/train-r5.log || { mark TRAIN_FAILED; exit 1; }
 mark TRAIN_DONE
 
 sed -i 's/"tokenizer_class": "TokenizersBackend"/"tokenizer_class": "PreTrainedTokenizerFast"/' /workspace/out/merged/tokenizer_config.json
 mark CONVERT_START
-report quantize "converting merged bf16 to GGUF f16"
 python /workspace/llama.cpp/convert_hf_to_gguf.py /workspace/out/merged \
   --outfile /workspace/out/oaos-ft-r5-f16.gguf --outtype f16 > /workspace/convert-r5.log 2>&1 \
-  || { mark CONVERT_FAILED; report quantize "GGUF conversion failed" failed; exit 1; }
+  || { mark CONVERT_FAILED; exit 1; }
 rm -rf /workspace/out/merged
 mark CONVERT_DONE
 
 mark QUANT_START
-report quantize "quantizing to MXFP4"
 cmake -B /workspace/llama.cpp/build /workspace/llama.cpp -DGGML_CUDA=OFF -DLLAMA_CURL=OFF >> /workspace/convert-r5.log 2>&1
 cmake --build /workspace/llama.cpp/build --target llama-quantize -j 16 >> /workspace/convert-r5.log 2>&1
 /workspace/llama.cpp/build/bin/llama-quantize /workspace/out/oaos-ft-r5-f16.gguf /workspace/out/oaos-ft-r5.gguf mxfp4_moe >> /workspace/convert-r5.log 2>&1 \
-  || { mark QUANT_FAILED; report quantize "quantization failed" failed; exit 1; }
+  || { mark QUANT_FAILED; exit 1; }
 rm -f /workspace/out/oaos-ft-r5-f16.gguf
 mark QUANT_DONE
 ls -lh /workspace/out/*.gguf /workspace/out/adapter >> /workspace/status-r5
-report quantize "MXFP4 GGUF ready · awaiting evaluation"
 mark ALL_DONE

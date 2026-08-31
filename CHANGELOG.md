@@ -6,28 +6,28 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Baseline rollback can now target individual drifted objects instead of the whole drift set: each entry has a checkbox, and the pre-flight says whether the plan covers your selection or everything.
+- Second concept round for the same page (`docs/mockups/17-training-railway-concepts.html`): the conveyor metaphor replaced by a railway line where the training run is a train that dwells at stations, with dwell timers, stage telemetry, a held-run siding, and a departure board. Four styles: metro diagram, comic steam railway, split-flap board, clay model railway. The split-flap style now uses real public-domain train art (recolored CC0 SVGs from FreeSVG, catalogued in `docs/mockups/assets/trains/`).
 
-- Tenant sign-in now uses the OpenAdminOS Entra app registration, so the consent screen names OpenAdminOS and tenant audit logs attribute activity to it rather than to Microsoft's Graph command line app. Admins whose organizations do not allow third-party multi-tenant apps can choose "Connect with your own app registration" and supply their own client ID (a public client; no client secret is needed or accepted). Each tenant remembers the registration it was connected with, and existing tenants need to reconnect once after upgrading.
+- Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.
+- Release publishing verifies the Windows Authenticode signature and signer common name before uploading, and fails with the actual certificate subject when it does not match the configured publisher.
 
 ### Changed
 
-- Every dropdown in the app now uses one styled control instead of the browser default, which rendered with mismatched arrows and focus rings. This covers Chat, Agents, Connectors, Workspaces, Changes, Fleet, and Settings.
-- An agent's delivery options are collapsed behind a single entry point until delivery is configured, replacing a stack of near-identical "connect this first" warnings.
-- The Fleet navigation entry no longer shows a bare tenant count, which read like an alert count.
-
-- Windows no longer stacks a native title bar and menu bar above the app's own header: the window controls are overlaid on the app chrome and the menu is reachable with Alt, which gives back two rows of vertical space. Linux drops the macOS title-bar spacer it never needed.
-- The window now opens on the app's own background color instead of an older darker shade, so launch no longer flashes a mismatched background, and the Windows window-control strip blends into the app chrome instead of painting as a lighter block.
+- Benchmark figures are generated from scored runs by `model/site-benchmarks/export-benchmark-data.mjs` and committed as a contract the page parses at build time, so a marketing claim cannot drift from a measurement.
+- Windows code signing runs through Azure Artifact Signing (formerly Trusted Signing): the certificate is short-lived and rotated by Microsoft, the key never leaves Microsoft's HSM, CI holds only a revocable service principal credential, and SmartScreen reputation is established faster than with the previous OV certificate.
+- `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
+- Documented Windows installation, including how to verify the publisher and what to expect from SmartScreen while the organization-validated certificate accrues download reputation.
 
 ### Removed
 
+- The training status page, its run-state API, the pod-side stage reporting in the training pipeline, and the two Supabase tables that backed it. The published run log went with it; the 8B model card no longer claims that log is public.
+
 ### Fixed
 
-- The Fleet view no longer forces the whole window into a horizontal scroll on narrow displays. The two lowest-value columns now fold away below large widths instead.
-- Tenants connected before this release keep working after the app-registration change. Their records are pinned to the app identity that issued their tokens, so silent refresh continues instead of forcing everyone to reconnect.
-- Chat no longer decides whether a local model can drive investigative mode from its name, which both misjudged capable models and re-attempted models that provably could not hold the tool format on every question. It now remembers what actually happened per model and stops retrying after repeated failures, and recovers automatically if the model starts succeeding.
-
 ### Security
+
+- The Windows release gate fails closed when DigiCert KeyLocker credentials are missing, and the signing hook refuses to emit an unsigned build unless packaging validation opts in explicitly.
+- Windows signing is pinned to SHA-256 only. electron-builder's default also performs a SHA-1 pass, which spends an extra KeyLocker signature per file and fails against a modern certificate.
 
 ## [0.5.0] - 2026-08-31
 
@@ -46,11 +46,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Configuration compare in the Changes view: diff a tenant against itself between two dates (with an explicit warning when retention limits the window), or diff two tenants side by side. Cross-tenant matching uses unique display names, never guesses on duplicates, and excludes tenant-specific fields and, by default, assignments.
 - The drift timeline now tracks Entra configuration surfaces: named locations, authentication methods, authorization, and cross-tenant access policies, directory roles, administrative units, app registrations, service principals, and domains.
 - Chat now reads Entra and Defender data as first-class cached resources: named locations, authentication methods policy, authorization policy, cross-tenant access policy, directory roles, administrative units, app registrations and service principals (including credential expiry), domains, Defender alerts and incidents, and Secure Score history and controls. Tenant consent gains "Identity and access" and extended "Security and sign-ins" groups, and a tenant consented before this release gets a clear reconnect path instead of a raw Graph 403 when refreshing the new resources.
-- The training pipeline now reports stage transitions and a five-minute training heartbeat to the live board at training.openadminos.com. Reporting is strictly best-effort: it is inert unless the pod sets the reporting env vars and can never fail a run.
 - Four animated concept mockups for the training.openadminos.com status page (`docs/mockups/16-training-conveyor-concepts.html`): a side-view factory conveyor of the model training pipeline, to be driven later by run-state posts from the GPU pod.
 - Second concept round for the same page (`docs/mockups/17-training-railway-concepts.html`): the conveyor metaphor replaced by a railway line where the training run is a train that dwells at stations, with dwell timers, stage telemetry, a held-run siding, and a departure board. Four styles: metro diagram, comic steam railway, split-flap board, clay model railway. The split-flap style now uses real public-domain train art (recolored CC0 SVGs from FreeSVG, catalogued in `docs/mockups/assets/trains/`).
-- training.openadminos.com now ships as a production `/training` route in `web/` in the chosen Flap Hall design: a split-flap departure board and railway line rendered from `model/site/public-data.json`, idle by default with live run state only from the authenticated `/api/training/run-state` endpoint, plus server-rendered benchmarks (suite and retrieval condition attached to every score), the full run log including failed and held runs, and downloads. The interim single-file concept mockup was removed.
-- The training-data exporter (`model/site/export-public-data.mjs`) emits schemaVersion 2: a `featured` benchmark-series selection that only admits scores with explicit suite and retrieval provenance, a data-derived released version, and the full r1 to r9 plus lite-r1 run log.
 
 - Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.
 - Release publishing verifies the Windows Authenticode signature and signer common name before uploading, and fails with the actual certificate subject when it does not match the configured publisher.

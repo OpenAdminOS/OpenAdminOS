@@ -1,0 +1,11 @@
+id: v2-answer-compare-18
+scorer: contains
+maxTokens: 320
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: Compare a security baseline with a configuration profile.
+mustMatch:
+  - recommend|microsoft-?published|preconfigur
+  - custom|your own|build
+mustNotMatch:
+  - can't find|cannot find|not in the (docs|supplied|provided)
+  - serve different purposes.?$

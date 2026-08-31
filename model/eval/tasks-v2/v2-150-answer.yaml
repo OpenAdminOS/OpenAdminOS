@@ -1,0 +1,11 @@
+id: v2-answer-compare-19
+scorer: contains
+maxTokens: 320
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: Compare a device group with a user group.
+mustMatch:
+  - device|machine
+  - user|person|people
+mustNotMatch:
+  - can't find|cannot find|not in the (docs|supplied|provided)
+  - serve different purposes.?$

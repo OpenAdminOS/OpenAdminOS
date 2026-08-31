@@ -1,7 +1,5 @@
 import type { MetadataRoute } from "next";
 
-import { trainingPublicData } from "~/lib/training/data";
-
 import { BLOG_POSTS, blogPostPath } from "./blog/posts";
 import { SITE_URL } from "./seo";
 
@@ -17,7 +15,7 @@ const ROUTES = [
   ["/privacy", "2026-06-04"],
   ["/terms", "2026-06-04"],
   ["/legal-notice", "2026-06-04"],
-  ["/training", trainingPublicData.generatedAt],
+  ["/benchmarks", "2026-08-31"],
 ] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {

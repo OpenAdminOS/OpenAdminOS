@@ -1,0 +1,9 @@
+id: v2-answer-privacy-7
+scorer: contains
+maxTokens: 300
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: Do you keep a copy of what I ask?
+mustMatch:
+  - no|not (stored|kept|retained)|local
+mustNotMatch:
+  - community fine-?tune of the open-?weight

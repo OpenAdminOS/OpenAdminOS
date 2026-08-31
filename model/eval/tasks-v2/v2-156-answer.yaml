@@ -1,0 +1,9 @@
+id: v2-answer-privacy-5
+scorer: contains
+maxTokens: 300
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: Where are my prompts processed?
+mustMatch:
+  - local|this machine|on your
+mustNotMatch:
+  - community fine-?tune of the open-?weight

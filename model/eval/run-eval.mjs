@@ -125,7 +125,12 @@ const scorers = {
     const missing = (task.mustContain ?? []).filter((s) => !lower.includes(normalizeText(s).toLowerCase()));
     const forbidden = (task.mustNotContain ?? []).filter((s) => lower.includes(normalizeText(s).toLowerCase()));
     const unmatched = (task.mustMatch ?? []).filter((p) => !new RegExp(p, "i").test(norm));
-    const pass = missing.length === 0 && forbidden.length === 0 && unmatched.length === 0;
+    // mustNotMatch: regex that must NOT appear. mustNotContain only does
+    // substrings, but some checks are inherently patterned — e.g. a safety
+    // refusal must not be satisfied by abstention wording ("can't find that
+    // in the docs"), which needs alternation.
+    const matchedForbidden = (task.mustNotMatch ?? []).filter((p) => new RegExp(p, "i").test(norm));
+    const pass = missing.length === 0 && forbidden.length === 0 && unmatched.length === 0 && matchedForbidden.length === 0;
     return {
       pass,
       detail: pass

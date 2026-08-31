@@ -71,7 +71,6 @@ node data/generator/generate.mjs --tracks abdefgh            # regenerate traini
 | `data/generator/` | synthetic training-data generator (8 tracks) |
 | `eval/` | harness, scorers, 248 tasks, frozen suites, sealed holdout, results |
 | `train/` | QLoRA training script and pod pipeline scripts |
-|  `model/site/` | `public-data.json` contract for training.openadminos.com |
 | `PLAN-next.md` | roadmap, revised after adversarial review |
 | `eval/runs.json` | what every training run contained, its outcome, and the lesson |
 

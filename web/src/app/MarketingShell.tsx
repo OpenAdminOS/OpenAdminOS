@@ -5,6 +5,7 @@ import { MobileNav, type MobileNavItem } from "./MobileNav";
 import { DOCS_URL, GITHUB_URL, LINKEDIN_URL } from "./seo";
 
 const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
+  { href: "/benchmarks", label: "Benchmarks" },
   { href: "/blog", label: "Blog" },
   { href: DOCS_URL, label: "Documentation", external: true },
   { href: GITHUB_URL, label: "GitHub", external: true },

@@ -22,20 +22,6 @@ const config = {
       },
     ];
   },
-  async rewrites() {
-    return {
-      beforeFiles: [
-        {
-          source: "/:path((?!_next|api).*)",
-          has: [{ type: "host", value: "training.openadminos.com" }],
-          destination: "/training/:path",
-          // TODO(ugur): attach training.openadminos.com to the Vercel project for this to serve
-        },
-      ],
-      afterFiles: [],
-      fallback: [],
-    };
-  },
   turbopack: {
     root: webRoot,
   },

@@ -9,7 +9,7 @@ MAX_SEQ = 4096
 # Mistral ships FP8 weights, which Unsloth refuses below compute capability 8.9
 # (our A40 is 8.6). Unsloth mirrors the same model unquantized.
 BASE = "unsloth/Ministral-3-8B-Instruct-2512"
-IDENTITY = ("You are OpenAdmin Lite, an open-source model for Microsoft 365 administration, "
+IDENTITY = ("You are OpenAdmin 8B, an open-source model for Microsoft 365 administration, "
             "fine-tuned from Ministral 3 8B by the OpenAdminOS community.")
 
 rows = [json.loads(l) for l in open("/workspace/data/train.jsonl") if l.strip()]
@@ -106,7 +106,43 @@ trainer = SFTTrainer(
 # capacity learning to predict user turns and tool output.
 from unsloth.chat_templates import train_on_responses_only
 trainer = train_on_responses_only(trainer, instruction_part="[INST]", response_part="[/INST]")
-print("loss masked to assistant turns", flush=True)
+
+# train_on_responses_only marks everything from [/INST] to the next [INST] as
+# the model's output. Mistral does NOT wrap tool results in [INST], so the
+# span [TOOL_RESULTS]...[/TOOL_RESULTS] was landing inside the loss and the
+# model was being trained to invent tool results. At inference it then emits
+# tool call after tool call instead of stopping, until it hits the token limit
+# and the truncated JSON fails to parse: 42 of 60 trajectory tasks in 8b-r5.
+# Tool results are environment input, never model output. Mask them.
+import torch as _torch
+
+_TR_OPEN = tokenizer.encode("[TOOL_RESULTS]", add_special_tokens=False)
+_TR_CLOSE = tokenizer.encode("[/TOOL_RESULTS]", add_special_tokens=False)
+
+
+def _mask_tool_results(ds):
+    def _fix(ex):
+        ids, labels = ex["input_ids"], list(ex["labels"])
+        n, i = len(ids), 0
+        while i < n:
+            if ids[i:i + len(_TR_OPEN)] == _TR_OPEN:
+                j = i
+                while j < n and ids[j:j + len(_TR_CLOSE)] != _TR_CLOSE:
+                    j += 1
+                for k in range(i, min(j + len(_TR_CLOSE), n)):
+                    labels[k] = -100
+                i = j + len(_TR_CLOSE)
+            else:
+                i += 1
+        ex["labels"] = labels
+        return ex
+    return ds.map(_fix, desc="masking tool results")
+
+
+trainer.train_dataset = _mask_tool_results(trainer.train_dataset)
+_supervised = sum(1 for l in trainer.train_dataset[0]["labels"] if l != -100)
+print(f"loss masked to assistant turns; tool results excluded "
+      f"({_supervised} supervised tokens in example 0)", flush=True)
 
 print(trainer.train(), flush=True)
 model.save_pretrained("/workspace/out/adapter")

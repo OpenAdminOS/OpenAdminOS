@@ -1,0 +1,11 @@
+id: v2-answer-compare-4
+scorer: contains
+maxTokens: 320
+system: You are OpenAdmin, an assistant for Microsoft 365 administrators.
+prompt: What is the difference between a device group and a user group?
+mustMatch:
+  - device|machine
+  - user|person|people
+mustNotMatch:
+  - can't find|cannot find|not in the (docs|supplied|provided)
+  - serve different purposes.?$
