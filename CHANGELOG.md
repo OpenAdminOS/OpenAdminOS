@@ -13,6 +13,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- The four copy-pasted per-run pod scripts are replaced by a single `model/train/pod-run.sh <run-id> [--tier 8b|20b]`, covering both model tiers, restartable at stage granularity, and with the pip ordering and tokenizer patch that earlier runs each rediscovered encoded once.
+
 - Benchmark figures are generated from scored runs by `model/site-benchmarks/export-benchmark-data.mjs` and committed as a contract the page parses at build time, so a marketing claim cannot drift from a measurement.
 - Windows code signing runs through Azure Artifact Signing (formerly Trusted Signing): the certificate is short-lived and rotated by Microsoft, the key never leaves Microsoft's HSM, CI holds only a revocable service principal credential, and SmartScreen reputation is established faster than with the previous OV certificate.
 - `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
