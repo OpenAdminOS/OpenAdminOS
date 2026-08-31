@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "sync-stats": "node ./scripts/sync-stats.mjs",
-    "sync-training-data": "node ./scripts/sync-training-data.mjs",
-    "predev": "npm run sync-stats && npm run sync-training-data",
-    "prebuild": "npm run sync-stats && npm run sync-training-data",
+    "predev": "npm run sync-stats",
+    "prebuild": "npm run sync-stats",
     "build": "next build",
     "postbuild": "node ./scripts/ensure-vercel-root-manifest.mjs",
     "dev": "next dev --turbo",
