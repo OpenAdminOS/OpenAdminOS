@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 import { formatRetrievedContext } from "./retrieval.js";
@@ -18,5 +19,29 @@ describe("documentation grounding in prompts", () => {
 
   it("renders nothing when no passages were retrieved", () => {
     assert.equal(formatRetrievedContext([]), "");
+  });
+});
+
+describe("every answer path is grounded", () => {
+  it("passes documentation into all four chat answer paths", async () => {
+    const service = await readFile(
+      new URL("../intune-chat/service.ts", import.meta.url),
+      "utf8",
+    );
+    // Two deterministic paths (streaming and not) build their prompt via
+    // buildAnswerPrompt; two agentic call sites pass `documentation`.
+    // Hosted providers always route agentic, so missing that side would
+    // silently leave every hosted user ungrounded.
+    assert.equal(
+      (service.match(/buildAnswerPrompt\(answerPack/g) ?? []).length,
+      2,
+      "both deterministic paths should build a grounded prompt",
+    );
+    assert.equal(
+      (service.match(/documentation: await this\.retrieveDocumentationSafely/g) ?? [])
+        .length,
+      2,
+      "both agentic call sites should pass retrieved documentation",
+    );
   });
 });

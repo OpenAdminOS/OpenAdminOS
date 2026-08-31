@@ -30,6 +30,12 @@ export const AGENTIC_TOOL_PROTOCOL = [
 
 export interface RunAgenticChatInput {
   question: string;
+  /**
+   * Documentation passages retrieved for this question. Empty when no
+   * index is installed. Included so investigative answers are grounded
+   * in product behaviour the same way deterministic answers are.
+   */
+  documentation?: ReadonlyArray<{ file: string; title?: string; text: string }>;
   tenant: TenantRecord;
   providerId: ProviderId;
   providerIsLocal: boolean;
@@ -235,7 +241,16 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string 
       return `Assistant:\n${turn.content}`;
     })
     .join("\n\n");
+  const documentation = (input.documentation ?? [])
+    .map(
+      (chunk, index) =>
+        `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
+    )
+    .join("\n\n");
   return [
+    documentation
+      ? `Microsoft documentation retrieved locally. It describes general product behaviour, not this tenant's state. Cite it as [1], [2] when you rely on it.\n\n${documentation}`
+      : "",
     `Admin question:\n${input.question}`,
     transcript ? `Conversation so far:\n${transcript}` : "",
     "Next response:",

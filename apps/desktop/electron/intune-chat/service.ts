@@ -1448,6 +1448,7 @@ export class IntuneChatService {
           if (capability.enabled) {
             const agentic = await runAgenticChat({
               question: modelQuestion,
+              documentation: await this.retrieveDocumentationSafely(modelQuestion),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -1856,9 +1857,11 @@ export class IntuneChatService {
           assistantContent = prefix;
           emitDelta(assistantContent, prefix);
         }
+        const streamDocumentation =
+          await this.retrieveDocumentationSafely(modelQuestion);
         for await (const chunk of llm.stream({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
+          prompt: buildAnswerPrompt(answerPack, streamDocumentation),
           ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
@@ -1906,6 +1909,7 @@ export class IntuneChatService {
             });
             const agentic = await runAgenticChat({
               question: modelQuestion,
+              documentation: await this.retrieveDocumentationSafely(modelQuestion),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,

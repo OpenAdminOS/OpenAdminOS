@@ -6,7 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Documentation grounding now reaches answers. Chat retrieves passages from a locally installed Microsoft documentation index and puts them in front of the tenant data, labelled as general product behaviour rather than tenant state, and asks the model to cite the source file so a claim can be checked. When no index is installed, answers fall back to tenant data only and say so.
+- Documentation grounding now reaches answers on every path: streaming and non-streaming, deterministic and investigative. Chat retrieves passages from a locally installed Microsoft documentation index and puts them in front of the tenant data, labelled as general product behaviour rather than tenant state, and asks the model to cite the source file so a claim can be checked. Grounding is independent of which model answers, so hosted providers benefit as much as local ones. When no index is installed, answers fall back to tenant data only.
 - A documentation index can be downloaded from the published GitHub release in one click, or installed from a folder on machines without network access. Downloads are verified against a published SHA-256 manifest and staged, so a truncated, corrupted, or substituted file is discarded rather than replacing a working index.
 - Query embedding runs through the local Ollama the app already manages, using `nomic-embed-text`, instead of requiring a second embedding server. Non-loopback endpoints are refused, so a question never leaves the device.
 
