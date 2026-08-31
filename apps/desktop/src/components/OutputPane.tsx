@@ -11,6 +11,7 @@ import { MarkdownPreview } from "./MarkdownPreview";
 import { Pill } from "./Pill";
 import { IconChevronDown, IconCopy } from "./icons";
 import { copyTextToClipboard } from "../shared/clipboard";
+import { Select } from "./Select";
 
 const focusRingClass =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
@@ -241,7 +242,7 @@ export function OutputFilterSelect({
       className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
     >
       <span>{label}</span>
-      <select
+      <Select
         id={selectId}
         name={selectId}
         value={value}
@@ -253,7 +254,7 @@ export function OutputFilterSelect({
             {option.label}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }

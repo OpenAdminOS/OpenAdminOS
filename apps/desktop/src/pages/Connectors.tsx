@@ -44,6 +44,7 @@ import {
   IconWarning,
 } from "../components/icons";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
+import { Select } from "../components/Select";
 
 type BrandIcon = (props: { size?: number }) => ReactElement;
 type WhatsAppTargetDraft = {
@@ -1068,7 +1069,7 @@ function WhatsAppWebCard({
                   {loadingGroups ? "Loading…" : "Refresh groups"}
                 </Button>
               </div>
-              <select
+              <Select
                 aria-label="WhatsApp group"
                 name="whatsapp-group"
                 value={recipient}
@@ -1098,7 +1099,7 @@ function WhatsAppWebCard({
                       : ""}
                   </option>
                 ))}
-              </select>
+              </Select>
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 Group names are read from the linked local session.
               </p>
@@ -1876,7 +1877,7 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
           <span>Team</span>
-          <select
+          <Select
             name="teams-team"
             value={teamId}
             onChange={(e) => {
@@ -1894,11 +1895,11 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
                 {team.displayName}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
           <span>Channel</span>
-          <select
+          <Select
             name="teams-channel"
             value={channelId}
             onChange={(e) => setChannelId(e.target.value)}
@@ -1920,7 +1921,7 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
                   : ""}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
       {error && (

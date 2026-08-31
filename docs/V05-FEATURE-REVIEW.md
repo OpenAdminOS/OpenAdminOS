@@ -102,7 +102,7 @@ Fixed in commit `6361e10`, all verified:
 
 - **1 Fleet overflow** - fixed and *empirically re-verified*: the capture harness now passes the same strict 900 px assertion for `/fleet` that every other route passes. The first two attempts (grid column sizing, then removing the table min-width) reduced but did not eliminate it; the fix that worked was folding the two lowest-value columns away below large widths.
 - **2 and 3 model routing** - replaced name-guessing with observed capability: a model that fails the investigative JSON format twice stops being retried, and a later success clears the record. Covered by three tests, including that an explicit user setting is never overridden.
-- **4 native selects** - one `Select` primitive now backs all seven call sites.
+- **4 native selects** - one `Select` primitive now backs every dropdown in the app. **Correction to this review:** the finding said "4 places / 7 call sites", which was wrong. That count came from grepping only the three files the screenshots had drawn my attention to. A re-check after the fix pass found 16 more in Chat, Agents, Connectors, Workspaces, the agent schedule card, the output pane, and two modals. All 23 are now converted, and a grep for `<select` outside the primitive returns nothing.
 - **5 delivery rail** - collapsed behind a single "Set up run delivery" entry until delivery is configured.
 - **6 per-entry rollback** - checkboxes on drift entries feed the engine's existing `selections` parameter; empty selection still means roll back everything.
 - **7 Fleet badge** - removed.

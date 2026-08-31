@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
@@ -1223,7 +1224,7 @@ function AgentTeamsDeliveryCard({
 
               {!useDefaultTarget && (
                 <div className="grid gap-2">
-                  <select
+                  <Select
                     value={teamId}
                     onChange={(event) => {
                       setTeamId(event.target.value);
@@ -1237,8 +1238,8 @@ function AgentTeamsDeliveryCard({
                         {team.displayName}
                       </option>
                     ))}
-                  </select>
-                  <select
+                  </Select>
+                  <Select
                     value={channelId}
                     disabled={!teamId}
                     onChange={(event) => setChannelId(event.target.value)}
@@ -1256,7 +1257,7 @@ function AgentTeamsDeliveryCard({
                         {channel.displayName}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               )}
 
@@ -1671,7 +1672,7 @@ function AgentWhatsAppWebDeliveryCard({
                           {loadingGroups ? "Loading…" : "Refresh groups"}
                         </button>
                       </div>
-                      <select
+                      <Select
                         value={recipient}
                         disabled={!connected || loadingGroups}
                         onChange={(event) => {
@@ -1704,7 +1705,7 @@ function AgentWhatsAppWebDeliveryCard({
                               : ""}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </div>
                   )}
 

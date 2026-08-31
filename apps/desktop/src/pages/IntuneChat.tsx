@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
+import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
@@ -2306,7 +2307,7 @@ function MultiTenantComposerControls({
           <label htmlFor={savedQuerySelectId} className="sr-only">
             Saved multi-tenant query
           </label>
-          <select
+          <Select
             id={savedQuerySelectId}
             name="saved-multi-tenant-query"
             value={selectedSavedQueryId}
@@ -2323,7 +2324,7 @@ function MultiTenantComposerControls({
                 {query.title}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
       {scopeMode === "selected" && (
@@ -2427,7 +2428,7 @@ function WorkspaceContextControls({
         <label htmlFor={workspaceSelectId} className="sr-only">
           Attach workspace context
         </label>
-        <select
+        <Select
           id={workspaceSelectId}
           name="attached-workspace-context"
           value={attachedWorkspaceId}
@@ -2441,7 +2442,7 @@ function WorkspaceContextControls({
               {entry.title}
             </option>
           ))}
-        </select>
+        </Select>
         {hasAttachment && <Pill tone="accent">Attached</Pill>}
         {!attachedWorkspaceId && (
           <div className="flex flex-wrap gap-1.5">
@@ -2708,7 +2709,7 @@ function ScopeReviewCard({
               Agent batch
             </div>
             <div className="mt-2 flex gap-2">
-              <select
+              <Select
                 value={selectedBatchAgentSlug}
                 onChange={(event) => onSelectedBatchAgentSlugChange(event.target.value)}
                 disabled={running || installedAgents.length === 0}
@@ -2721,7 +2722,7 @@ function ScopeReviewCard({
                     {formatAgentDisplayName(agent)} · {agent.mode}
                   </option>
                 ))}
-              </select>
+              </Select>
               <Button
                 size="sm"
                 variant="secondary"
@@ -3248,7 +3249,7 @@ function PinMessageToWorkspaceModal({
           <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Workspace
           </span>
-          <select
+          <Select
             id="pin-answer-workspace"
             name="pin-answer-workspace"
             value={selectedWorkspaceId}
@@ -3260,7 +3261,7 @@ function PinMessageToWorkspaceModal({
                 {workspace.title}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         {message && (
           <div className="max-h-36 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 text-[12px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
