@@ -1092,6 +1092,33 @@ Evaluated", remediations, Windows Update, policy conflicts, audit, and stale
 device investigations. Tests assert that every banked question plans all declared
 cache resources, so the prompt examples and planner cannot drift silently.
 
+The cache is a fast path, not the boundary of what Chat can read. Live
+reads are bounded by the consented access token rather than by a
+client-side allowlist: the token cannot exceed what the admin approved,
+Graph enforces that server-side, and Chat is GET-only. An endpoint whose
+documented permissions fall outside the scopes this app requests is
+refused by name, before any call is made. Scopes are never widened
+mid-answer, because asking for more would raise an interactive consent
+prompt the admin did not initiate.
+
+An earlier rule refused any endpoint whose permissions the bundled
+catalog did not document. Because the catalog carries permission data
+for only a fraction of its entries, that rejected roughly 14,000 read
+endpoints for missing metadata rather than for being out of bounds, and
+limited Chat to about 5% of Graph reads. Path validation against the
+catalog is retained, so a typo or invented path is still refused with
+suggestions.
+
+Counts are never inferred from sample rows. Breakdowns are computed in
+SQL across every cached row, and `$count` with `ConsistencyLevel:
+eventual` is requested for the directory resources that support it, so a
+"how many" answer holds above the cache row limit. Where detail rows
+cover only part of the tenant, the answer must say so.
+
+Cache freshness is per resource, not a single interval: sign-in and audit
+data expires in minutes, device and user inventory in hours, and slow
+configuration such as Autopilot profiles in a day.
+
 Initial cache targets:
 
 - `/deviceManagement/managedDevices`
