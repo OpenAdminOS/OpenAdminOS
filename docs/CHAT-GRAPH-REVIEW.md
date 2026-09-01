@@ -1,5 +1,9 @@
 # Chat: how Graph data is fetched, and where it breaks
 
+> **Status: all findings below are fixed.** Each section keeps the
+> original diagnosis and records what changed. A seventh problem, found
+> only by running the pipeline against a real 8B model, is in section 9.
+
 A review of the Chat answer path, focused on the Graph fetch layer. Chat is
 the feature admins will use most, so the failure modes below matter more than
 their line count suggests.
@@ -302,3 +306,50 @@ gate.
 That plus finding 1 (true counts) and finding 2 (resource planning) is what
 turns Chat from a good answerer of anticipated questions into one that
 handles arbitrary ones.
+
+
+---
+
+## 9. The finding that only appeared under a real small model
+
+Everything above was found by reading the code. Running 50 unanticipated
+questions through the real pipeline against `openadmin-8b` surfaced a
+problem no amount of reading would have shown, and it made the coverage
+work in section 8 irrelevant for local models.
+
+**Investigative mode never ran.** The model would emit a correct tool
+choice with slightly malformed JSON, twice, and the loop abandoned the
+investigation and fell back to keyword-planned context. The measured
+failure was consistent and structural rather than random:
+
+- The model dropped a closing brace on an otherwise correct call.
+- Given a `filters: [{field, op, value}]` schema, it wrote bare
+  `{"field": "value"}` pairs inside the array, which is not valid JSON
+  at all and so could not be repaired by balancing brackets.
+- After a filter matched nothing, it had no way to learn which fields
+  the rows actually had, so it concluded the tenant had none of whatever
+  was asked about.
+
+Three changes, in the order they mattered:
+
+1. **Repair structural slips.** A tool call missing a closing brace is
+   completed rather than discarded. Repairs are structural only, so no
+   key, value, or tool name is ever invented.
+2. **Simplify the schema.** `where` accepts a plain field-to-value map,
+   which is the shape a small model reaches for and can emit correctly.
+   The explicit `filters` form stays for other operators, and bare pairs
+   inside it are read as equality rather than rejected.
+3. **Make a dead end teachable.** A filter matching nothing returns the
+   field names the cached rows actually have, so the next call can be
+   corrected.
+
+The retry budget also went from one to three, since a single slip used
+to end the investigation.
+
+Before: two malformed replies, investigation abandoned, deterministic
+fallback, no answer. After: the model self-corrects across turns and
+answers from the data it gathered.
+
+The general lesson is that the tool contract, not the model size, was
+the limit. A schema an 8B can express correctly is worth more than
+tolerant parsing, and an error that teaches is worth more than both.
