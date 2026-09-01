@@ -470,7 +470,12 @@ describe("an empty query result is not evidence of an empty tenant", () => {
         9,
         "the model must be told the resource is populated, or it reports the tenant as empty",
       );
-      assert.match(record.note, /not evidence that the tenant has none/i);
+      assert.match(record.note, /must not answer that it has none/i);
+      assert.match(
+        result.trace.resultSummary,
+        /9 rows are cached/,
+        "the summary must not read as an empty cache when only the filter missed",
+      );
       assert.ok(record.availableFields?.includes("operatingSystem"));
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -487,6 +492,49 @@ describe("an empty query result is not evidence of an empty tenant", () => {
       const record = result.result as { cachedRowsForResource: number; note: string };
       assert.equal(record.cachedRowsForResource, 0);
       assert.match(record.note, /Nothing is cached/i);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cached rows advertise the fields available to filter on", () => {
+  it("lists field names on a successful query, not only after one fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-fields-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 5));
+      const result = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        limit: 3,
+      });
+      const record = result.result as {
+        returnedRows: number;
+        availableFields?: string[];
+      };
+      assert.ok(record.returnedRows > 0);
+      assert.ok(
+        record.availableFields?.includes("complianceState"),
+        `fields must be advertised on a successful read; got ${JSON.stringify(record.availableFields)}`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("lists field names per populated resource in the cache inventory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-fields-inv-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 5));
+      const result = await executeIntuneChatTool(ctx, "list_cached_resources", {});
+      const record = result.result as {
+        resources: Array<{ resource: string; rows: number; availableFields?: string[] }>;
+      };
+      const devices = record.resources.find((r) => r.resource === "managedDevices");
+      assert.ok(devices && devices.rows > 0);
+      assert.ok(devices?.availableFields?.includes("operatingSystem"));
+      // Resources with nothing cached must not claim fields.
+      const empty = record.resources.find((r) => r.rows === 0);
+      assert.equal(empty?.availableFields, undefined);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -20,10 +20,13 @@ import {
  * Tool calls allowed per question. Six was reached by questions that
  * genuinely need cross-referencing, for example matching installed apps
  * against what was deployed, and those fell back rather than finishing.
- * Most questions use two or three, so the higher ceiling costs latency
- * only on the questions that were failing at the old one.
+ *
+ * Eight rather than a larger number: across 50 questions measured
+ * against a real tenant, exactly one used more than six calls, and it
+ * used eight. A higher ceiling buys no additional completed
+ * investigation and only widens the worst-case wait.
  */
-export const MAX_AGENTIC_ITERATIONS = 10;
+export const MAX_AGENTIC_ITERATIONS = 8;
 
 /**
  * How many malformed replies to coach through before giving up. One

@@ -282,6 +282,8 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         resource.rows === 0 ||
         !Number.isFinite(refreshedMs) ||
         nowMs - refreshedMs > staleAfterMs;
+      const availableFields =
+        resource.rows > 0 ? fieldsForResource(ctx, resource.resource) : undefined;
       return {
         resource: resource.resource,
         label: resource.label,
@@ -291,6 +293,7 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         pages: resource.pages,
         pageLimitReached: resource.pageLimitReached,
         lastError: resource.lastError,
+        ...(availableFields ? { availableFields } : {}),
       };
     }),
   };
@@ -327,20 +330,11 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
       // Fall back to reporting zero rather than failing the tool call.
     }
     if (cachedRowsForResource > 0) {
-      const sample = ctx.store.queryGraphCache({
-        tenantId: ctx.tenantId,
-        resource,
-        limit: 1,
-      });
-      const row = sample.rows[0]?.row;
-      const availableFields =
-        row && typeof row === "object" && !Array.isArray(row)
-          ? Object.keys(row as Record<string, unknown>).slice(0, 40)
-          : undefined;
+      const availableFields = fieldsForResource(ctx, resource);
       emptyHint = {
         cachedRowsForResource,
         ...(availableFields ? { availableFields } : {}),
-        note: `No row matched this query, but ${resource} holds ${cachedRowsForResource} cached rows. This is not evidence that the tenant has none. The filter may name a field or value that does not exist; the listed fields are the ones these rows actually have.`,
+        note: `No row matched this filter, but ${resource} holds ${cachedRowsForResource} cached rows, so the tenant is NOT empty and you must not answer that it has none. The filter named a field or value that does not exist on these rows. Retry using one of availableFields above, matching the field whose name is closest to what the question asks about.`,
       };
     } else {
       emptyHint = {
@@ -350,12 +344,14 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     }
   }
 
+  const availableFields = fieldsForResource(ctx, resource);
   return {
     resource,
     totalCount: result.totalCount,
     returnedRows: result.returnedRows,
     limit: result.limit,
     capped: result.totalCount > result.returnedRows,
+    ...(availableFields ? { availableFields } : {}),
     ...(emptyHint ?? {}),
     rows: result.rows.map((entry) => ({
       refreshedAt: entry.refreshedAt,
@@ -365,6 +361,39 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
 }
 
 export const FIND_ENDPOINT_LIMIT_CAP = 15;
+
+/** How many field names to advertise for a resource. */
+const FIELD_HINT_CAP = 40;
+
+/**
+ * Field names present on the cached rows of a resource.
+ *
+ * A model cannot filter on a field it does not know exists. Measured
+ * against a real tenant, "which laptops are not encrypted" was answered
+ * with "none" while six of nine devices carried `isEncrypted: false`,
+ * simply because the model never saw that the field was available.
+ * Advertising the field list on every read, rather than only after a
+ * query has already failed, is what makes an unanticipated question
+ * answerable.
+ */
+function fieldsForResource(
+  ctx: IntuneChatToolContext,
+  resource: GraphCacheResourceKind,
+): string[] | undefined {
+  try {
+    const sample = ctx.store.queryGraphCache({
+      tenantId: ctx.tenantId,
+      resource,
+      limit: 1,
+    });
+    const row = sample.rows[0]?.row;
+    if (!row || typeof row !== "object" || Array.isArray(row)) return undefined;
+    const keys = Object.keys(row as Record<string, unknown>);
+    return keys.length > 0 ? keys.slice(0, FIELD_HINT_CAP) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Endpoint discovery. A small local model cannot reliably recall Graph
@@ -668,6 +697,16 @@ function summarizeToolResult(
     return `${resources.length} cache resources listed · ${stale} stale`;
   }
   if (tool === "query_cache") {
+    // totalCount counts rows matching the filter, so a filter that
+    // matched nothing used to summarise as "0 of 0 cached rows", which
+    // reads as an empty cache and contradicts the result body. Report
+    // the unfiltered total in that case.
+    if (Number(record.returnedRows ?? 0) === 0) {
+      const cached = Number(record.cachedRowsForResource ?? 0);
+      return cached > 0
+        ? `no rows matched this filter; ${cached.toLocaleString()} rows are cached for this resource`
+        : "nothing is cached for this resource yet";
+    }
     return `${Number(record.returnedRows ?? 0).toLocaleString()} of ${Number(record.totalCount ?? 0).toLocaleString()} cached rows returned`;
   }
   if (tool === "find_graph_endpoint") {
