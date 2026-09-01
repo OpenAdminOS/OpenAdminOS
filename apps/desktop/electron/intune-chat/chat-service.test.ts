@@ -368,7 +368,9 @@ describe("Intune Chat host service", () => {
       defaultModel: "llama3.1:8b",
       async complete() {
         return {
-          text: "```json\n{\"tool\":\"query_cache\",\n```",
+          // Unrepairable: the tool name is cut off mid-token, so no
+          // amount of brace balancing recovers a call from it.
+          text: "```json\n{\"tool\": \"query_ca\n```",
           model: "llama3.1:8b",
         };
       },
@@ -402,7 +404,7 @@ describe("Intune Chat host service", () => {
       );
 
       assert.equal(result.assistantMessage.status, "completed");
-      assert.match(result.assistantMessage.content, /malformed tool JSON twice/i);
+      assert.match(result.assistantMessage.content, /malformed tool JSON/i);
       assert.match(result.assistantMessage.content, /Deterministic answer/);
       assert.equal(result.assistantMessage.toolTrace?.length ?? 0, 0);
     } finally {

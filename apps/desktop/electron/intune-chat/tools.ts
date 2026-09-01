@@ -69,7 +69,7 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
   {
     name: "query_cache",
     description:
-      "Read cached rows for one resource kind with simple predicates, sort, and a hard return cap of 50 rows.",
+      'Read cached rows for one resource kind. Filter with "where", for example {"resource":"managedDevices","where":{"complianceState":"noncompliant"},"limit":25}. Returns at most 50 rows.',
     params: {
       type: "object",
       required: ["resource"],
@@ -78,10 +78,15 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
           type: "string",
           enum: GRAPH_CACHE_RESOURCES.map((entry) => entry.resource),
         },
+        where: {
+          type: "object",
+          description:
+            'Simplest filter: a map of field to required value, for example {"complianceState":"noncompliant"}. Prefer this.',
+        },
         filters: {
           type: "array",
           description:
-            "Predicates: {field, op, value}. Ops: eq, neq, contains, startsWith, in, lt, lte, gt, gte.",
+            'Only for comparisons other than equality: [{"field":"lastSyncDateTime","op":"lt","value":"2026-01-01"}]. Ops: eq, neq, contains, startsWith, in, lt, lte, gt, gte.',
         },
         sort: {
           type: "object",
@@ -303,12 +308,33 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     sort,
     limit: Math.min(limit, QUERY_CACHE_ROW_CAP),
   });
+  // A filter that matches nothing is usually a guessed field name. Say
+  // which fields the cached rows actually have so the next call can be
+  // corrected, instead of leaving the model to conclude the tenant has
+  // none of whatever it asked about.
+  let fieldHint: { availableFields: string[]; note: string } | undefined;
+  if (result.returnedRows === 0 && filters && filters.length > 0) {
+    const sample = ctx.store.queryGraphCache({
+      tenantId: ctx.tenantId,
+      resource,
+      limit: 1,
+    });
+    const row = sample.rows[0]?.row;
+    if (row && typeof row === "object" && !Array.isArray(row)) {
+      fieldHint = {
+        availableFields: Object.keys(row as Record<string, unknown>).slice(0, 40),
+        note: "No row matched. These are the fields these rows actually have; the filter may name a field that does not exist.",
+      };
+    }
+  }
+
   return {
     resource,
     totalCount: result.totalCount,
     returnedRows: result.returnedRows,
     limit: result.limit,
     capped: result.totalCount > result.returnedRows,
+    ...(fieldHint ?? {}),
     rows: result.rows.map((entry) => ({
       refreshedAt: entry.refreshedAt,
       row: compactValue(entry.row),
@@ -725,28 +751,66 @@ function isGraphCacheResourceKind(value: string): value is GraphCacheResourceKin
   return GRAPH_CACHE_RESOURCES.some((entry) => entry.resource === value);
 }
 
+/**
+ * Read the filter predicates from a tool call.
+ *
+ * Two shapes are accepted. `where` is a plain map of field to value,
+ * which is what a small model reaches for and what it can emit without
+ * mangling. `filters` is the explicit {field, op, value} form, kept for
+ * operators other than equality. Entries in `filters` that arrive as a
+ * bare {field: value} pair are read as equality rather than rejected,
+ * because refusing them cost a whole investigation over a shape the
+ * model had otherwise chosen correctly.
+ */
 function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
-  const filters =
+  const record =
     params && typeof params === "object" && !Array.isArray(params)
-      ? (params as Record<string, unknown>).filters
+      ? (params as Record<string, unknown>)
       : undefined;
-  if (!Array.isArray(filters)) return undefined;
-  return filters.slice(0, 8).map((filter) => {
-    if (!filter || typeof filter !== "object" || Array.isArray(filter)) {
-      throw new Error("query_cache filters must be objects.");
+  if (!record) return undefined;
+  const predicates: GraphCacheQueryPredicate[] = [];
+
+  const where = record.where;
+  if (where && typeof where === "object" && !Array.isArray(where)) {
+    for (const [field, value] of Object.entries(where as Record<string, unknown>)) {
+      predicates.push({ field, op: "eq", value: value as GraphCacheQueryPredicate["value"] });
     }
-    const record = filter as Record<string, unknown>;
-    const field = typeof record.field === "string" ? record.field : "";
-    const op = typeof record.op === "string" ? record.op : "";
-    if (!isGraphCacheQueryOperator(op)) {
-      throw new Error(`Unsupported query_cache operator: ${op}`);
+  }
+
+  const filters = record.filters;
+  if (Array.isArray(filters)) {
+    for (const filter of filters) {
+      if (!filter || typeof filter !== "object" || Array.isArray(filter)) {
+        // Stray scalars inside the array are ignored rather than fatal.
+        continue;
+      }
+      const entry = filter as Record<string, unknown>;
+      if (typeof entry.field === "string") {
+        const op = typeof entry.op === "string" ? entry.op : "eq";
+        if (!isGraphCacheQueryOperator(op)) {
+          throw new Error(
+            `Unsupported query_cache operator: ${op}. Use eq, neq, contains, startsWith, in, lt, lte, gt, or gte.`,
+          );
+        }
+        predicates.push({
+          field: entry.field,
+          op,
+          value: entry.value as GraphCacheQueryPredicate["value"],
+        });
+        continue;
+      }
+      // A bare {field: value} pair.
+      for (const [field, value] of Object.entries(entry)) {
+        predicates.push({
+          field,
+          op: "eq",
+          value: value as GraphCacheQueryPredicate["value"],
+        });
+      }
     }
-    return {
-      field,
-      op,
-      value: record.value as GraphCacheQueryPredicate["value"],
-    };
-  });
+  }
+
+  return predicates.length > 0 ? predicates.slice(0, 8) : undefined;
 }
 
 function isGraphCacheQueryOperator(value: string): value is GraphCacheQueryPredicate["op"] {

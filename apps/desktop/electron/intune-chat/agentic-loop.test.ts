@@ -74,18 +74,38 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
-  it("falls back after two malformed tool JSON responses", async () => {
+  it("falls back only after repeated malformed tool JSON", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
     try {
-      const llm = scriptedLlm([
-        "```json\n{\"tool\":\"query_cache\",\n```",
-        "```json\n{\"tool\":\"query_cache\",\n```",
-      ]);
+      // Unrepairable: the tool name itself is cut off mid-token.
+      const llm = scriptedLlm(
+        Array.from({ length: 5 }, () => '```json\n{"tool": "query_ca\n```'),
+      );
       const result = await runAgenticChat(baseInput(store, llm));
       assert.equal(result.ok, false);
       assert.equal(result.reason, "malformed-output");
-      assert.match(result.fallbackNotice, /malformed tool JSON twice/i);
+      assert.match(result.fallbackNotice, /malformed tool JSON/i);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs an unbalanced tool call instead of abandoning the investigation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      // Exactly what an 8B model emits: correct tool and params, one
+      // missing closing brace.
+      const llm = scriptedLlm([
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}\n```',
+        '```json\n{"final":true,"answer":"5 devices reviewed."}\n```',
+      ]);
+      const result = await runAgenticChat(baseInput(store, llm));
+      assert.equal(result.ok, true, `expected the repaired call to run: ${JSON.stringify(result)}`);
+      assert.equal(result.toolTrace[0]?.tool, "query_cache");
+      assert.equal(result.toolTrace[0]?.error, undefined);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
