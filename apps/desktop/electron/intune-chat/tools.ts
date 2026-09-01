@@ -308,22 +308,44 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     sort,
     limit: Math.min(limit, QUERY_CACHE_ROW_CAP),
   });
-  // A filter that matches nothing is usually a guessed field name. Say
-  // which fields the cached rows actually have so the next call can be
-  // corrected, instead of leaving the model to conclude the tenant has
-  // none of whatever it asked about.
-  let fieldHint: { availableFields: string[]; note: string } | undefined;
-  if (result.returnedRows === 0 && filters && filters.length > 0) {
-    const sample = ctx.store.queryGraphCache({
-      tenantId: ctx.tenantId,
-      resource,
-      limit: 1,
-    });
-    const row = sample.rows[0]?.row;
-    if (row && typeof row === "object" && !Array.isArray(row)) {
-      fieldHint = {
-        availableFields: Object.keys(row as Record<string, unknown>).slice(0, 40),
-        note: "No row matched. These are the fields these rows actually have; the filter may name a field that does not exist.",
+  // A query returning nothing is the most misread result in the whole
+  // tool surface: models reported "the tenant has no managed devices"
+  // when nine were cached and only the filter had missed. Always say
+  // how many rows the resource holds unfiltered, and name the fields
+  // that exist so a guessed field name can be corrected.
+  let emptyHint:
+    | { cachedRowsForResource: number; availableFields?: string[]; note: string }
+    | undefined;
+  if (result.returnedRows === 0) {
+    let cachedRowsForResource = 0;
+    try {
+      cachedRowsForResource = ctx.store.aggregateGraphResource(
+        ctx.tenantId,
+        resource,
+      ).total;
+    } catch {
+      // Fall back to reporting zero rather than failing the tool call.
+    }
+    if (cachedRowsForResource > 0) {
+      const sample = ctx.store.queryGraphCache({
+        tenantId: ctx.tenantId,
+        resource,
+        limit: 1,
+      });
+      const row = sample.rows[0]?.row;
+      const availableFields =
+        row && typeof row === "object" && !Array.isArray(row)
+          ? Object.keys(row as Record<string, unknown>).slice(0, 40)
+          : undefined;
+      emptyHint = {
+        cachedRowsForResource,
+        ...(availableFields ? { availableFields } : {}),
+        note: `No row matched this query, but ${resource} holds ${cachedRowsForResource} cached rows. This is not evidence that the tenant has none. The filter may name a field or value that does not exist; the listed fields are the ones these rows actually have.`,
+      };
+    } else {
+      emptyHint = {
+        cachedRowsForResource: 0,
+        note: `Nothing is cached for ${resource}, so this query cannot show whether the tenant has any. Refresh the resource before concluding anything about it.`,
       };
     }
   }
@@ -334,7 +356,7 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     returnedRows: result.returnedRows,
     limit: result.limit,
     capped: result.totalCount > result.returnedRows,
-    ...(fieldHint ?? {}),
+    ...(emptyHint ?? {}),
     rows: result.rows.map((entry) => ({
       refreshedAt: entry.refreshedAt,
       row: compactValue(entry.row),

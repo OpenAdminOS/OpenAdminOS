@@ -970,6 +970,7 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
     "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
     "If the context is missing, stale, partial, or has Graph errors, say that plainly.",
     "Do not invent tenant state, counts, users, devices, policies, or remediation results.",
+    "A tool returning zero rows means zero matched that query, not that the tenant has none. Never state that a tenant has none of something on the strength of an empty result; check the unfiltered count first.",
     "For any question about how many, use tenantTotal when present, otherwise the breakdowns, which are counted over every cached row. Never count the sampleRows: they are a small illustrative subset, and counting them undercounts.",
     "When cachedRows is below tenantTotal, or pageLimitReached is true, say that the detail rows cover only part of the tenant.",
     "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",

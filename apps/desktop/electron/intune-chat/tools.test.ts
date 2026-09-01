@@ -448,3 +448,47 @@ describe("Graph endpoint discovery and reachability", () => {
     }
   });
 });
+
+describe("an empty query result is not evidence of an empty tenant", () => {
+  it("reports the unfiltered row count when a filter matches nothing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-empty-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 9));
+      const result = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        where: { operatingSystem: "SolarisNotAThing" },
+      });
+      const record = result.result as {
+        returnedRows: number;
+        cachedRowsForResource: number;
+        availableFields?: string[];
+        note: string;
+      };
+      assert.equal(record.returnedRows, 0);
+      assert.equal(
+        record.cachedRowsForResource,
+        9,
+        "the model must be told the resource is populated, or it reports the tenant as empty",
+      );
+      assert.match(record.note, /not evidence that the tenant has none/i);
+      assert.ok(record.availableFields?.includes("operatingSystem"));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("distinguishes an uncached resource from an empty one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-uncached-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 9));
+      const result = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "users",
+      });
+      const record = result.result as { cachedRowsForResource: number; note: string };
+      assert.equal(record.cachedRowsForResource, 0);
+      assert.match(record.note, /Nothing is cached/i);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
