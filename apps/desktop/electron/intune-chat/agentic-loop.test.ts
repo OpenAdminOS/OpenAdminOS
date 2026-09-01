@@ -262,3 +262,35 @@ function toolContext(store: IntelligenceSqliteStore): IntuneChatToolContext {
     }),
   };
 }
+
+describe("repair turns do not consume the investigation budget", () => {
+  it("still completes six tool calls after the model slips twice", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-budget-"));
+    const store = seededStore(dir);
+    try {
+      const llm = scriptedLlm([
+        // Two unrepairable slips before any real work, then a full
+        // investigation. Counting the slips as iterations would hit the
+        // tool-call cap before the model could finish.
+        '```json\n{"tool": "query_ca\n```',
+        '```json\n{"tool": "query_ca\n```',
+        ...Array.from(
+          { length: 5 },
+          () =>
+            '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
+        ),
+        '```json\n{"final":true,"answer":"Done."}\n```',
+      ]);
+      const result = await runAgenticChat(baseInput(store, llm));
+      assert.equal(
+        result.ok,
+        true,
+        `slips must not spend the tool budget: ${JSON.stringify(result)}`,
+      );
+      assert.equal(result.toolTrace.length, 5);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

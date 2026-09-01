@@ -115,7 +115,15 @@ export async function runAgenticChat(
   let malformedCount = 0;
   let responseModel = input.model;
 
-  for (let iteration = 1; iteration <= MAX_AGENTIC_ITERATIONS; iteration += 1) {
+  // Turns spent coaching the model back into valid JSON must not eat
+  // the investigation budget: a model that slips twice and then works
+  // correctly was reaching the tool-call cap with only three or four
+  // actual tool calls made, and losing the investigation to a fallback.
+  let iteration = 0;
+  let attempts = 0;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + 1;
+  while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
+    attempts += 1;
     assertNotCancelled(input.signal);
     const completion = await input.llm.complete({
       system: buildAgenticSystemPrompt(input),
@@ -159,6 +167,7 @@ export async function runAgenticChat(
     }
 
     malformedCount = 0;
+    iteration += 1;
     if (action.kind === "final") {
       return {
         ok: true,
