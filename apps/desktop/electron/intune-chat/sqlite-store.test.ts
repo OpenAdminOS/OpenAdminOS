@@ -985,3 +985,68 @@ async function readDefaultScopeNames(): Promise<string[]> {
   );
   return [...source.matchAll(/name:\s*"([^"]+)"/g)].map((match) => match[1] ?? "");
 }
+
+describe("exact aggregate counts for how-many questions", () => {
+  it("counts every cached row, not just the sample the prompt can carry", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agg-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      // 500 devices, 120 of them non-compliant. The answer pack can
+      // only carry a few dozen sample rows, so counting the sample
+      // would report roughly a fifth of the real figure.
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        label: "Intune managed devices",
+        scopeSet: ["DeviceManagementManagedDevices.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: Array.from({ length: 500 }, (_, index) => ({
+          id: `device-${index}`,
+          deviceName: `WIN-${index}`,
+          operatingSystem: index < 400 ? "Windows" : "macOS",
+          complianceState: index < 120 ? "noncompliant" : "compliant",
+        })),
+      });
+
+      const aggregate = store.aggregateGraphResource("tenant-1", "managedDevices");
+      assert.equal(aggregate.total, 500);
+      assert.equal(aggregate.breakdowns.complianceState?.noncompliant, 120);
+      assert.equal(aggregate.breakdowns.complianceState?.compliant, 380);
+      assert.equal(aggregate.breakdowns.operatingSystem?.Windows, 400);
+      assert.equal(aggregate.breakdowns.operatingSystem?.["macOS"], 100);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the tenant-wide total reported by Graph even when it exceeds the cache", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-total-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "users",
+        label: "Users",
+        scopeSet: ["User.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        pageLimitReached: true,
+        tenantTotal: 8421,
+        rows: Array.from({ length: 1000 }, (_, index) => ({
+          id: `user-${index}`,
+          displayName: `User ${index}`,
+        })),
+      });
+
+      const [status] = store.getGraphCacheStatus("tenant-1", [
+        { resource: "users", label: "Users", scopes: ["User.Read.All"] },
+      ]);
+      assert.equal(status?.rows, 1000, "the cache holds the capped page set");
+      assert.equal(status?.tenantTotal, 8421, "the true tenant total must survive the cap");
+      assert.equal(status?.pageLimitReached, true);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

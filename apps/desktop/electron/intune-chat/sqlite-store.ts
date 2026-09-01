@@ -68,6 +68,7 @@ interface ResourceStatusRow {
   refreshed_at: string | null;
   scope_set_json: string;
   last_error: string | null;
+  tenant_total: number | null;
 }
 
 interface ResourceRow {
@@ -651,6 +652,7 @@ export class IntelligenceSqliteStore {
     rows: unknown[];
     pageCount?: number;
     pageLimitReached?: boolean;
+    tenantTotal?: number;
     refreshedAt: string;
   }): void {
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
@@ -705,9 +707,9 @@ export class IntelligenceSqliteStore {
         .prepare(
           `INSERT INTO graph_cache_status (
             tenant_id, resource, label, row_count, page_count, page_limit_reached,
-            refreshed_at, scope_set_json, last_error
+            refreshed_at, scope_set_json, last_error, tenant_total
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
           ON CONFLICT(tenant_id, resource) DO UPDATE SET
             label = excluded.label,
             row_count = excluded.row_count,
@@ -715,6 +717,7 @@ export class IntelligenceSqliteStore {
             page_limit_reached = excluded.page_limit_reached,
             refreshed_at = excluded.refreshed_at,
             scope_set_json = excluded.scope_set_json,
+            tenant_total = excluded.tenant_total,
             last_error = NULL`,
         )
         .run(
@@ -726,6 +729,7 @@ export class IntelligenceSqliteStore {
           input.pageLimitReached ? 1 : 0,
           input.refreshedAt,
           JSON.stringify(input.scopeSet),
+          input.tenantTotal ?? null,
         );
       this.db.exec("COMMIT");
     } catch (error) {
@@ -913,7 +917,7 @@ export class IntelligenceSqliteStore {
     const rows = this.db
       .prepare(
         `SELECT resource, label, row_count, page_count, page_limit_reached,
-                refreshed_at, scope_set_json, last_error
+                refreshed_at, scope_set_json, last_error, tenant_total
          FROM graph_cache_status
          WHERE tenant_id = ?`,
       )
@@ -938,8 +942,60 @@ export class IntelligenceSqliteStore {
         refreshedAt: row.refreshed_at ?? undefined,
         scopeSet: readJson<string[]>(row.scope_set_json, definition.scopes),
         lastError: row.last_error ?? undefined,
+        tenantTotal: row.tenant_total ?? undefined,
       };
     });
+  }
+
+  /**
+   * Exact counts over everything cached for a resource.
+   *
+   * The answer pack can only carry a few dozen sample rows, and
+   * breakdowns used to be counted from that sample, so a question like
+   * "how many devices are non-compliant" was answered from 40 rows out
+   * of a cache of up to a thousand. Counting in SQL costs one indexed
+   * scan and gives the model a number it can state outright.
+   */
+  aggregateGraphResource(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+  ): { total: number; breakdowns: Record<string, Record<string, number>> } {
+    const totalRow = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total FROM graph_resources
+         WHERE tenant_id = ? AND resource = ?`,
+      )
+      .get(tenantId, resource) as unknown as { total: number } | undefined;
+
+    const breakdowns: Record<string, Record<string, number>> = {};
+    const columns: Array<{ field: string; expression: string }> = [
+      { field: "operatingSystem", expression: "operating_system" },
+      { field: "complianceState", expression: "compliance_state" },
+      { field: "userType", expression: "json_extract(raw_json, '$.userType')" },
+      { field: "accountEnabled", expression: "json_extract(raw_json, '$.accountEnabled')" },
+      { field: "trustType", expression: "json_extract(raw_json, '$.trustType')" },
+    ];
+    for (const column of columns) {
+      const grouped = this.db
+        .prepare(
+          `SELECT ${column.expression} AS bucket, COUNT(*) AS count
+           FROM graph_resources
+           WHERE tenant_id = ? AND resource = ?
+           GROUP BY bucket`,
+        )
+        .all(tenantId, resource) as unknown as Array<{
+        bucket: string | number | null;
+        count: number;
+      }>;
+      const counts: Record<string, number> = {};
+      for (const entry of grouped) {
+        if (entry.bucket === null) continue;
+        counts[String(entry.bucket)] = entry.count;
+      }
+      if (Object.keys(counts).length > 0) breakdowns[column.field] = counts;
+    }
+
+    return { total: totalRow?.total ?? 0, breakdowns };
   }
 
   listDriftSnapshots(
@@ -3328,6 +3384,9 @@ export class IntelligenceSqliteStore {
       )
       .run(new Date().toISOString());
     ensureColumn(this.db, "graph_cache_status", "page_count", "INTEGER NOT NULL DEFAULT 0");
+    // Tenant-wide total reported by Graph via $count, which can exceed
+    // the number of rows the cache holds.
+    ensureColumn(this.db, "graph_cache_status", "tenant_total", "INTEGER");
     ensureColumn(
       this.db,
       "graph_cache_status",

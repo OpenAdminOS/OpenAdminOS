@@ -1052,6 +1052,17 @@ export function buildAnswerPack(input: {
   tenant: TenantRecord;
   cacheStatus: GraphCacheResourceStatus[];
   rows: Record<GraphCacheResourceKind, unknown[]>;
+  /**
+   * Exact counts over the whole cached set, keyed by resource. Sample
+   * rows are capped for context budget, so without these the model can
+   * only count what it can see and has no way to answer "how many".
+   */
+  aggregates?: Partial<
+    Record<
+      GraphCacheResourceKind,
+      { total: number; breakdowns: Record<string, Record<string, number>> }
+    >
+  >;
   hasWriteIntent: boolean;
   agentSuggestions: IntuneChatAgentSuggestion[];
   generatedAt?: string;
@@ -1075,10 +1086,16 @@ export function buildAnswerPack(input: {
       const sampleRows = selectedRows
         .slice(0, maxSampleRowsPerResource)
         .map(compactGraphObject);
+      const aggregate = input.aggregates?.[status.resource];
       return {
         resource: status.resource,
         label: status.label,
         cachedRows: status.rows,
+        // Tenant-wide total from Graph. When present it is the correct
+        // answer to "how many", even where it exceeds cachedRows.
+        ...(status.tenantTotal !== undefined
+          ? { tenantTotal: status.tenantTotal }
+          : {}),
         pages: status.pages,
         pageLimitReached: status.pageLimitReached,
         selectedRows: selectedRows.length,
@@ -1087,7 +1104,11 @@ export function buildAnswerPack(input: {
         refreshedAt: status.refreshedAt,
         lastError: status.lastError,
         sampleRows,
-        breakdowns: buildBreakdowns(selectedRows),
+        // Counted across every cached row, not just the sample above.
+        // Quote these for any "how many" question; counting sampleRows
+        // would undercount by the sampling ratio.
+        breakdowns: aggregate?.breakdowns ?? buildBreakdowns(selectedRows),
+        breakdownsCoverAllCachedRows: aggregate !== undefined,
       };
     });
 

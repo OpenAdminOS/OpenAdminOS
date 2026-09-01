@@ -68,6 +68,7 @@ import {
   buildTenantComparison,
   emptyMultiTenantSummary,
   estimateChatProgressPercent,
+  COUNTABLE_GRAPH_RESOURCES,
   GRAPH_REFRESH_CONCURRENCY,
   fetchGraphCachePages,
   hashTenantId,
@@ -1200,12 +1201,21 @@ export class IntuneChatService {
         if (request.select && request.select.length > 0) {
           query.$select = request.select.join(",");
         }
+        // Ask Graph for the tenant-wide total alongside the first page.
+        // The cache holds at most a thousand rows, so without this a
+        // question about a larger collection can only be answered from
+        // a sample.
+        const headers: Record<string, string> = { ...(request.headers ?? {}) };
+        if (COUNTABLE_GRAPH_RESOURCES.has(resource)) {
+          query.$count = "true";
+          headers.ConsistencyLevel = "eventual";
+        }
         const pageResult = await fetchGraphCachePages(
           graph,
           {
             path: request.path,
             query,
-            headers: request.headers,
+            ...(Object.keys(headers).length > 0 ? { headers } : {}),
           },
           signal,
         );
@@ -1217,6 +1227,9 @@ export class IntuneChatService {
           rows: pageResult.rows,
           pageCount: pageResult.pages,
           pageLimitReached: pageResult.pageLimitReached,
+          ...(pageResult.totalCount !== undefined
+            ? { tenantTotal: pageResult.totalCount }
+            : {}),
           refreshedAt,
         });
         slots[slot] = {
@@ -1299,6 +1312,37 @@ export class IntuneChatService {
           entry !== undefined,
       ),
     };
+  }
+
+  /**
+   * Exact per-resource counts for the answer pack. Cheap indexed
+   * aggregates; failures are non-fatal because a missing count only
+   * costs precision, and the model still has the sample rows.
+   */
+  private graphAggregatesFor(
+    store: IntelligenceSqliteStore,
+    tenantId: string,
+    resources: readonly GraphCacheResourceKind[],
+  ): Partial<
+    Record<
+      GraphCacheResourceKind,
+      { total: number; breakdowns: Record<string, Record<string, number>> }
+    >
+  > {
+    const aggregates: Partial<
+      Record<
+        GraphCacheResourceKind,
+        { total: number; breakdowns: Record<string, Record<string, number>> }
+      >
+    > = {};
+    for (const resource of resources) {
+      try {
+        aggregates[resource] = store.aggregateGraphResource(tenantId, resource);
+      } catch {
+        // Leave this resource without exact counts.
+      }
+    }
+    return aggregates;
   }
 
   async sendIntuneChatMessage(
@@ -1445,6 +1489,7 @@ export class IntuneChatService {
           tenant,
           cacheStatus,
           rows,
+          aggregates: this.graphAggregatesFor(store, tenant.id, planned.resources),
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,
@@ -1889,6 +1934,7 @@ export class IntuneChatService {
           tenant,
           cacheStatus,
           rows,
+          aggregates: this.graphAggregatesFor(store, tenant.id, planned.resources),
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,

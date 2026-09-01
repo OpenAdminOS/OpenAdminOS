@@ -952,6 +952,12 @@ export interface GraphCacheResourceStatus {
   refreshedAt?: string;
   scopeSet: string[];
   lastError?: string;
+  /**
+   * Total this resource holds in the tenant, as reported by Graph via
+   * `$count`. Can exceed `rows`, which is capped by the cache page
+   * limit, and is what a "how many" question must be answered from.
+   */
+  tenantTotal?: number;
 }
 
 export interface GraphCacheStatus {
