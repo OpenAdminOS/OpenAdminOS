@@ -1272,6 +1272,13 @@ export interface RetrievalStatus {
   embeddingModel?: string;
   dim?: number;
   reason?: string;
+  /** Whether the local Ollama answered at all. */
+  ollamaReachable?: boolean;
+  /**
+   * Whether the embedding model the index needs is present in Ollama.
+   * The index alone cannot ground answers without it.
+   */
+  embeddingModelInstalled?: boolean;
 }
 
 // ─── MCP write-gateway (v0.5) ────────────────────────────────────────────

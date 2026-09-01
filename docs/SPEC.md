@@ -1092,6 +1092,15 @@ Evaluated", remediations, Windows Update, policy conflicts, audit, and stale
 device investigations. Tests assert that every banked question plans all declared
 cache resources, so the prompt examples and planner cannot drift silently.
 
+Documentation grounding has two prerequisites and both install themselves:
+the versioned index (downloaded from the published release into userData)
+and the embedding model it was built with (`nomic-embed-text`, pulled
+through the local Ollama). One Settings switch governs both. The app never
+installs Ollama itself; when Ollama is absent the model pull is skipped
+and Settings names the missing prerequisite instead of showing grounding
+as available. Embedding always runs against loopback, so questions never
+leave the device regardless of which provider answers them.
+
 The cache is a fast path, not the boundary of what Chat can read. Live
 reads are bounded by the consented access token rather than by a
 client-side allowlist: the token cannot exceed what the admin approved,

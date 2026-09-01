@@ -293,7 +293,7 @@ export function ollamaEmbedQuery(
   };
 }
 
-function assertLoopback(endpoint: string): void {
+export function assertLoopback(endpoint: string): void {
   const url = new URL(endpoint);
   if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
     throw new Error(

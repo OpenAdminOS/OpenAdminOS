@@ -6260,6 +6260,7 @@ if (!gotLock) {
     // Fetch or update the documentation index in the background. Never
     // blocks startup and never raises a dialog; Settings shows the state.
     void store.autoInstallRetrievalIndex();
+    void store.autoInstallEmbeddingModel();
     debugStartupLog("registered ipc handlers");
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());

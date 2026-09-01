@@ -185,6 +185,11 @@ import {
   type RetrievalStatus,
 } from "./retrieval/retrieval.js";
 import {
+  embeddingEndpoint,
+  embeddingModelState,
+  pullEmbeddingModel,
+} from "./retrieval/embedding-model.js";
+import {
   DEFAULT_INDEX_BASE_URL,
   downloadIndex,
   fetchIndexManifest,
@@ -288,6 +293,8 @@ interface PersistedState {
   retrievalAutoInstall?: boolean;
   /** Last automatic attempt, so a failure does not retry every launch. */
   retrievalAutoInstallAttemptedAt?: string;
+  /** Last background attempt to pull the embedding model via Ollama. */
+  embeddingModelPullAttemptedAt?: string;
   /**
    * MCP write-gateway configuration. The pairing token is never stored
    * here; it lives in provider-style safeStorage. Off by default.
@@ -1523,11 +1530,17 @@ export class AppStateStore {
   /** Status plus, when known, a newer published index version. */
   async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
     const status = await this.getRetrievalStatus();
-    if (!status.available) return status;
+    const embedding = await embeddingModelState();
+    const withEmbedding: RetrievalStatus = {
+      ...status,
+      ollamaReachable: embedding.ollamaReachable,
+      embeddingModelInstalled: embedding.installed,
+    };
+    if (!withEmbedding.available) return withEmbedding;
     const manifest = await fetchIndexManifest();
-    return manifest && manifest.version !== status.version
-      ? { ...status, updateAvailable: manifest.version }
-      : status;
+    return manifest && manifest.version !== withEmbedding.version
+      ? { ...withEmbedding, updateAvailable: manifest.version }
+      : withEmbedding;
   }
 
   async getRetrievalStatus(): Promise<RetrievalStatus> {
@@ -1590,7 +1603,10 @@ export class AppStateStore {
       const current = await this.read();
       await this.write({ ...current, retrievalAutoInstall: enabled });
     });
-    if (enabled) void this.autoInstallRetrievalIndex();
+    if (enabled) {
+      void this.autoInstallRetrievalIndex();
+      void this.autoInstallEmbeddingModel();
+    }
     return this.getRetrievalStatus();
   }
 
@@ -1643,6 +1659,45 @@ export class AppStateStore {
       // ungrounded, which the Settings panel states plainly.
       console.info(
         "[retrieval] automatic index install skipped:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  /**
+   * Pull the embedding model in the background when Ollama is running
+   * and the model is missing. Same contract as the index install: never
+   * blocks, never dialogs, honours the same auto-install switch, and a
+   * failed pull is retried at most once a day. An unreachable Ollama is
+   * not counted as an attempt, so starting Ollama later gets the model
+   * on the next launch rather than a day later.
+   */
+  async autoInstallEmbeddingModel(): Promise<void> {
+    try {
+      const persisted = await this.read();
+      if (persisted.retrievalAutoInstall === false) return;
+      const endpoint = embeddingEndpoint();
+      const state = await embeddingModelState(endpoint);
+      if (!state.ollamaReachable || state.installed) return;
+
+      const lastAttempt = persisted.embeddingModelPullAttemptedAt;
+      if (lastAttempt) {
+        const age = Date.now() - new Date(lastAttempt).getTime();
+        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
+      }
+      await this.serialize(async () => {
+        const current = await this.read();
+        await this.write({
+          ...current,
+          embeddingModelPullAttemptedAt: new Date().toISOString(),
+        });
+      });
+
+      await pullEmbeddingModel(endpoint);
+      this.emitStateChanged("retrieval-embedding-installed");
+    } catch (error) {
+      console.info(
+        "[retrieval] automatic embedding model pull skipped:",
         error instanceof Error ? error.message : error,
       );
     }
@@ -5374,6 +5429,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       if (typeof parsed.retrievalAutoInstallAttemptedAt === "string") {
         state.retrievalAutoInstallAttemptedAt = parsed.retrievalAutoInstallAttemptedAt;
+      }
+      if (typeof parsed.embeddingModelPullAttemptedAt === "string") {
+        state.embeddingModelPullAttemptedAt = parsed.embeddingModelPullAttemptedAt;
       }
       if (isPlainRecordValue(parsed.gateway)) {
         const gateway = parsed.gateway as Record<string, unknown>;
