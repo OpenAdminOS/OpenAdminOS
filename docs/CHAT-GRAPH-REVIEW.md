@@ -377,6 +377,18 @@ discovery tool being the second most used confirms the diagnosis in
 section 8: the model does not know Graph paths, and given a way to look
 them up it uses it constantly.
 
+Re-running only the questions that failed, after the repair-budget fix
+in section 9, 5 of the 8 completed a full investigation (3 to 5 tool
+calls each) rather than falling back. Of the 3 that still fall back:
+
+- One genuinely exhausted the six-call budget on a question that needs
+  cross-referencing app inventory against deployment records. Raising
+  the cap would fix it at a cost in latency.
+- Two are open-ended synthesis questions ("summarise our posture for the
+  board", "what would an auditor find missing") where the model produced
+  malformed JSON repeatedly. Both still answered through the
+  deterministic path, so the fallback is doing its job.
+
 Remaining weaknesses, honestly recorded:
 
 - **Latency.** Median 54 seconds per question, one timeout at 240s. An
