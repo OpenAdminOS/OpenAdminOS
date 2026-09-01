@@ -445,3 +445,37 @@ prompt scaffolding.
 The eval harness lives outside this repository, at
 `eval/chat-tenant/` in the model pipeline, because its fixture holds
 real tenant data that must never be committed.
+
+
+---
+
+## 12. A caveat that invalidates part of the method above
+
+Running one question three times against the same fixture, same model,
+same code produced three materially different answers: a fabricated
+count of iPhones in a tenant with none, a statement about unsupported
+OS versions, and a refusal for lack of matching records.
+
+The model is not stable enough for a single run to measure anything at
+the level of an individual question. That undermines the before-and-after
+comparisons made on single questions earlier in this document: where a
+question was re-run once and looked fixed, the change may have been
+variance rather than the fix.
+
+What remains reliable:
+
+- Structural measurements that do not involve the model at all:
+  endpoint reachability, keyword planning, retry behaviour, refresh
+  concurrency, SQL aggregate counts. These are deterministic and covered
+  by tests.
+- Large aggregate effects across all 50 questions, such as tool usage
+  going from zero to forty-seven, which is far too big to be variance.
+
+What is not reliable, and was previously presented as if it were:
+
+- Any claim that a specific question was fixed on the strength of one
+  re-run.
+
+Evaluating this model properly needs several runs per question and a
+comparison of distributions, not single samples. That belongs in the
+eval programme, which is why the harness now lives there.
