@@ -1626,6 +1626,19 @@ export class AppStateStore {
       const persisted = await this.read();
       if (persisted.retrievalAutoInstall === false) return;
 
+      // Grounding cannot work without the local Ollama to embed
+      // questions, so a machine without it would download 264 MB it can
+      // never use. Skip quietly; a later launch after Ollama appears
+      // fetches the index and the model together. Not counted as an
+      // attempt, so no daily backoff applies to this case.
+      const embedding = await embeddingModelState();
+      if (!embedding.ollamaReachable) {
+        console.info(
+          "[retrieval] automatic index install skipped: Ollama is not reachable, so grounding could not use the index yet.",
+        );
+        return;
+      }
+
       // Follow the published pointer so a rebuilt index reaches existing
       // installs too, not just fresh ones. No manifest (offline, blocked,
       // not yet published) means fall back to installing the pinned

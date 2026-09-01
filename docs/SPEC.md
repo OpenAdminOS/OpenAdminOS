@@ -1092,6 +1092,14 @@ Evaluated", remediations, Windows Update, policy conflicts, audit, and stale
 device investigations. Tests assert that every banked question plans all declared
 cache resources, so the prompt examples and planner cannot drift silently.
 
+Ollama (or a future local embedding runtime) is a prerequisite for
+documentation grounding, not for the app: every provider works without it,
+and hosted-provider setups simply answer without documentation passages.
+Grounding downloads are gated on the runtime being reachable, so a machine
+that cannot embed queries never fetches the index. Making a local runtime
+a hard product requirement was considered and deliberately deferred: the
+positioning is local-first by default, not local-only.
+
 Documentation grounding has two prerequisites and both install themselves:
 the versioned index (downloaded from the published release into userData)
 and the embedding model it was built with (`nomic-embed-text`, pulled

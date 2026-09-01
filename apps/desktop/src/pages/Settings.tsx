@@ -3998,8 +3998,10 @@ function PrivacySection({
                     <StatusDot tone="muted" /> Not documentation-grounded yet
                   </div>
                   <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                    {retrievalStatus?.reason ??
-                      "No local documentation index is available yet."}
+                    {retrievalStatus?.ollamaReachable === false
+                      ? "Documentation grounding needs the local Ollama runtime, which isn't running. Once Ollama is available, the index and embedding model install automatically in the background."
+                      : (retrievalStatus?.reason ??
+                        "No local documentation index is available yet.")}
                   </p>
                 </div>
               )}
