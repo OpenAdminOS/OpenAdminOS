@@ -3108,6 +3108,12 @@ export interface GraphRequestInput {
    * `Content-Type: application/json`.
    */
   body?: unknown;
+  /**
+   * Optional cancellation signal. When it aborts, the in-flight request
+   * is abandoned and no retry is attempted, so a user pressing Stop is
+   * never mistaken for a transient network fault.
+   */
+  signal?: AbortSignal;
 }
 
 export interface LlmOptions {
