@@ -333,3 +333,118 @@ function toolContext(
       })),
   };
 }
+
+describe("Graph endpoint discovery and reachability", () => {
+  it("finds candidate endpoints from plain words so a path need not be recalled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 1));
+      const found = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "conditional access named locations",
+      });
+      const result = found.result as {
+        candidates: Array<{ path: string; usable: boolean }>;
+      };
+      assert.equal(found.trace.error, undefined);
+      assert.ok(result.candidates.length > 0, "expected candidate endpoints");
+      assert.ok(
+        result.candidates.some((entry) => entry.path.includes("namedLocations")),
+        `expected a namedLocations path, got ${result.candidates.map((c) => c.path).join(", ")}`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("caps how many candidates are returned", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-cap-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 1));
+      const found = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "user",
+        limit: 500,
+      });
+      const result = found.result as { candidates: unknown[] };
+      assert.ok(result.candidates.length <= 15);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("attempts a read endpoint whose permissions the catalog does not document", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-unknown-"));
+    try {
+      let requested: string | undefined;
+      const ctx = toolContext(seededStore(dir, 1), {
+        graphForScopes: async () => ({
+          async listManagedDevices() {
+            return [];
+          },
+          async retireManagedDevice() {
+            throw new Error("write should not run");
+          },
+          async request(input) {
+            requested = input.path;
+            return { value: [{ id: "a" }] };
+          },
+        }),
+      });
+
+      // A real catalog path the bundled docs carry no permissions for.
+      // Previously rejected as "outside Chat's read-only scope
+      // allowlist" purely because of that missing metadata.
+      const result = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/admin/edge/internetExplorerMode",
+      });
+
+      assert.equal(result.trace.error, undefined, `unexpected error: ${result.trace.error}`);
+      assert.equal(requested, "/admin/edge/internetExplorerMode");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an endpoint needing a permission this app never requests, without calling Graph", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-refuse-"));
+    try {
+      let called = false;
+      const ctx = toolContext(seededStore(dir, 1), {
+        graphForScopes: async () => ({
+          async listManagedDevices() {
+            return [];
+          },
+          async retireManagedDevice() {
+            throw new Error("write should not run");
+          },
+          async request() {
+            called = true;
+            return { value: [] };
+          },
+        }),
+      });
+
+      const result = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/me/messages",
+      });
+
+      assert.ok(result.trace.error, "reading mail must be refused");
+      assert.match(result.trace.error ?? "", /does not request/);
+      assert.equal(called, false, "no Graph call may be made for a refused endpoint");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still rejects a path that does not exist in the catalog", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-bogus-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 1));
+      const result = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/totallyMadeUpThing",
+      });
+      assert.match(result.trace.error ?? "", /Unknown Microsoft Graph GET path/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

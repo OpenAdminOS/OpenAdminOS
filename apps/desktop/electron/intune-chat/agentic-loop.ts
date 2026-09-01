@@ -368,6 +368,7 @@ function isToolName(value: string): value is IntuneChatInvestigationToolName {
   return (
     value === "list_cached_resources" ||
     value === "query_cache" ||
+    value === "find_graph_endpoint" ||
     value === "graph_get" ||
     value === "refresh_resource" ||
     value === "query_drift"

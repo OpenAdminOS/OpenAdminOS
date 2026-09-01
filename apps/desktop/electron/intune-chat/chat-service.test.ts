@@ -1210,7 +1210,7 @@ describe("Graph cache refresh concurrency and cancellation", () => {
       assert.ok(peak > 1, `expected concurrent refreshes, peak was ${peak}`);
       assert.ok(peak <= 4, `expected at most 4 concurrent refreshes, peak was ${peak}`);
     } finally {
-      store.dispose?.();
+
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1247,7 +1247,7 @@ describe("Graph cache refresh concurrency and cancellation", () => {
         `aborting must stop the refresh early; ${requests} requests were made`,
       );
     } finally {
-      store.dispose?.();
+
       await rm(dir, { recursive: true, force: true });
     }
   });

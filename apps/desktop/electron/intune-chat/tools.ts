@@ -11,6 +11,8 @@ import type {
   RunGraphApi,
 } from "@openadminos/agent-sdk";
 
+import { DEFAULT_SCOPE_METADATA } from "@openadminos/runtime";
+
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
@@ -93,9 +95,28 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
     },
   },
   {
+    name: "find_graph_endpoint",
+    description:
+      "Find the Microsoft Graph GET path for a subject before calling graph_get. Search in plain words, for example 'conditional access named locations' or 'mailbox settings'. Returns candidate paths with a summary and whether this tenant's consent covers them. Use this whenever the exact path is not already known; do not guess a path.",
+    params: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: {
+          type: "string",
+          description: "Plain-word description of the data being looked for.",
+        },
+        limit: {
+          type: "number",
+          description: "How many candidates to return. Defaults to 8, capped at 15.",
+        },
+      },
+    },
+  },
+  {
     name: "graph_get",
     description:
-      "Perform a live Microsoft Graph GET when cache is not enough. Non-GET methods are rejected. $top is capped at 50.",
+      "Perform a live Microsoft Graph GET when cache is not enough. Non-GET methods are rejected. $top is capped at 50. Prefer a path returned by find_graph_endpoint over one recalled from memory.",
     params: {
       type: "object",
       required: ["path"],
@@ -228,6 +249,8 @@ function executeToolUnchecked(
       return Promise.resolve(listCachedResources(ctx, params));
     case "query_cache":
       return Promise.resolve(queryCache(ctx, params));
+    case "find_graph_endpoint":
+      return Promise.resolve(findGraphEndpoint(params));
     case "graph_get":
       return graphGet(ctx, params);
     case "refresh_resource":
@@ -290,6 +313,49 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
       refreshedAt: entry.refreshedAt,
       row: compactValue(entry.row),
     })),
+  };
+}
+
+export const FIND_ENDPOINT_LIMIT_CAP = 15;
+
+/**
+ * Endpoint discovery. A small local model cannot reliably recall Graph
+ * paths, and a guessed path costs a failed tool call and a repair turn.
+ * Searching the bundled catalog turns "recall the path" into "pick from
+ * a list", which is a far easier task and the difference between an 8B
+ * model answering an unanticipated question and giving up.
+ */
+function findGraphEndpoint(params: unknown): unknown {
+  const query = stringParam(params, "query");
+  if (!query || query.trim().length === 0) {
+    throw new Error("find_graph_endpoint requires a query describing the data needed.");
+  }
+  const requested = numberParam(params, "limit") ?? 8;
+  const limit = Math.max(1, Math.min(FIND_ENDPOINT_LIMIT_CAP, Math.trunc(requested)));
+  const matches = searchEndpoints(query, { method: "GET", limit });
+  const candidates = matches.map((endpoint) => {
+    const documented = endpoint.scopesDelegated;
+    const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
+    const usable = documented.length === 0 || consented.length > 0;
+    return {
+      path: endpoint.path,
+      summary: endpoint.summary,
+      usable,
+      ...(usable
+        ? {}
+        : { blockedReason: `Needs ${documented.slice(0, 2).join(" or ")}, which is not consented.` }),
+    };
+  });
+  return {
+    query,
+    candidates,
+    ...(candidates.length === 0
+      ? {
+          note: "No endpoint matched. Try different words, or answer from cached resources instead.",
+        }
+      : {
+          note: "Call graph_get with one of these paths. Paths ending in a placeholder such as {id} need a real id substituted.",
+        }),
   };
 }
 
@@ -384,6 +450,27 @@ async function queryDrift(
   });
 }
 
+/** Read scopes this app asks a tenant to consent to. */
+const CONSENTED_SCOPES = new Set(DEFAULT_SCOPE_METADATA.map((entry) => entry.name));
+
+/**
+ * Decide whether a Graph GET may be attempted, and with which scopes.
+ *
+ * Chat previously refused any endpoint whose delegated permissions were
+ * absent from a small allowlist derived from the cached resources. The
+ * bundled catalog only carries permission data for a fraction of its
+ * entries, so that rule rejected roughly 14,000 read endpoints for
+ * having no metadata rather than for being out of bounds, and left Chat
+ * able to reach about 5% of Graph reads.
+ *
+ * The access token is the real boundary: it cannot exceed what the
+ * admin consented to, Graph enforces that server-side, and this tool is
+ * GET-only. So an endpoint is attempted when its permissions are
+ * unknown, and refused with a specific message when they are known and
+ * fall outside what this app requests. Scopes are never widened beyond
+ * the consented set, because asking for more would trigger an
+ * interactive consent prompt in the middle of an answer.
+ */
 function validateGraphGetPath(path: string): {
   scopes: string[];
   summary?: string;
@@ -399,19 +486,18 @@ function validateGraphGetPath(path: string): {
         : "Unknown Microsoft Graph GET path.",
     );
   }
-  const allowedScopes = new Set(
-    GRAPH_CACHE_RESOURCES.flatMap((resource) => resource.scopes),
-  );
-  const endpointScopes = endpoint.scopesDelegated.filter((scope) =>
-    allowedScopes.has(scope),
-  );
-  const resourceScopes = resourceScopesForPath(path);
-  const scopes = [...new Set([...endpointScopes, ...resourceScopes])].sort();
-  if (scopes.length === 0) {
+  const documented = endpoint.scopesDelegated;
+  const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
+  if (documented.length > 0 && consented.length === 0) {
     throw new Error(
-      "Graph path is known, but it is outside Chat's read-only scope allowlist.",
+      `This endpoint requires ${documented.slice(0, 3).join(" or ")}, which OpenAdminOS does not request. No tenant data was read.`,
     );
   }
+  // Where the catalog documents no permissions, fall back to the token
+  // already held for this tenant. Graph rejects anything the consent
+  // does not cover, and that rejection is surfaced verbatim.
+  const resourceScopes = resourceScopesForPath(path);
+  const scopes = [...new Set([...consented, ...resourceScopes])].sort();
   return { scopes, summary: endpoint.summary };
 }
 
@@ -536,6 +622,13 @@ function summarizeToolResult(
   if (tool === "query_cache") {
     return `${Number(record.returnedRows ?? 0).toLocaleString()} of ${Number(record.totalCount ?? 0).toLocaleString()} cached rows returned`;
   }
+  if (tool === "find_graph_endpoint") {
+    const candidates = Array.isArray(record.candidates) ? record.candidates : [];
+    const usable = candidates.filter((entry) =>
+      Boolean((entry as { usable?: unknown }).usable),
+    ).length;
+    return `${candidates.length} candidate endpoints · ${usable} within consent`;
+  }
   if (tool === "graph_get") {
     if (typeof record.rowCountInPage === "number") {
       return `${Number(record.returnedRows ?? 0).toLocaleString()} of ${record.rowCountInPage.toLocaleString()} live rows returned${record.truncated ? " · truncated" : ""}`;
@@ -561,6 +654,9 @@ export function summarizeToolCallForProgress(
   if (tool === "list_cached_resources") return "Inspecting cache inventory.";
   if (tool === "query_cache") {
     return `Querying cache: ${String(record.resource ?? "resource")}.`;
+  }
+  if (tool === "find_graph_endpoint") {
+    return `Looking up Graph endpoints for: ${String(record.query ?? "")}.`;
   }
   if (tool === "graph_get") {
     return `Running Graph GET: ${String(record.path ?? "path")}.`;

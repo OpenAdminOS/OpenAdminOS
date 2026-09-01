@@ -859,6 +859,7 @@ export interface IntuneChatMessage {
 export type IntuneChatInvestigationToolName =
   | "list_cached_resources"
   | "query_cache"
+  | "find_graph_endpoint"
   | "graph_get"
   | "refresh_resource"
   | "query_drift";
