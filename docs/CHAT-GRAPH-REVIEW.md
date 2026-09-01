@@ -401,3 +401,47 @@ Remaining weaknesses, honestly recorded:
   Most of those questions genuinely could not be answered from the
   synthetic tenant, so this number says more about the fixture than the
   pipeline, and should be re-measured against a real tenant.
+
+
+---
+
+## 11. What a real tenant showed that synthetic data could not
+
+The 50 questions were re-run against a read-only snapshot of a real lab
+tenant. The pipeline held up: 44 of 50 answered, 39 investigated with
+tools, only 2 protocol fallbacks. It also exposed a failure class the
+synthetic fixture had hidden completely.
+
+**Five answers asserted the tenant had none of something it had.** The
+clearest: "the tenant has no managedDevices, so the count is 0", against
+a tenant holding nine. The model had run a filtered query, matched
+nothing, and reported that as absence.
+
+Three things were wrong at once, and only the first was obvious:
+
+1. `query_cache` reported rows matching the filter with no indication of
+   how many existed unfiltered, so "0 matched" and "0 exist" were
+   indistinguishable.
+2. The one-line trace summary said "0 of 0 cached rows returned",
+   because the count it quoted was also filtered. This is the most
+   salient line in the observation, and it actively contradicted the
+   corrective note added to fix (1).
+3. Field names were advertised only after a query had already failed,
+   so the model had to guess field names on its first attempt and
+   frequently guessed a plausible but non-existent nested field.
+
+All three are fixed. Empty results now carry the unfiltered count, the
+summary reports "no rows matched this filter; N rows are cached", and
+field names are advertised on every read.
+
+The false absence claims are gone. Correctness on these questions is
+not solved: asked which laptops are unencrypted, the model now retries
+rather than answering "none", but still does not pick `isEncrypted` out
+of forty field names, and answers a related question instead. That is a
+model field-selection limitation rather than a pipeline defect, and it
+belongs in the evaluation and fine-tuning programme rather than in more
+prompt scaffolding.
+
+The eval harness lives outside this repository, at
+`eval/chat-tenant/` in the model pipeline, because its fixture holds
+real tenant data that must never be committed.

@@ -282,8 +282,6 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         resource.rows === 0 ||
         !Number.isFinite(refreshedMs) ||
         nowMs - refreshedMs > staleAfterMs;
-      const availableFields =
-        resource.rows > 0 ? fieldsForResource(ctx, resource.resource) : undefined;
       return {
         resource: resource.resource,
         label: resource.label,
@@ -293,7 +291,6 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         pages: resource.pages,
         pageLimitReached: resource.pageLimitReached,
         lastError: resource.lastError,
-        ...(availableFields ? { availableFields } : {}),
       };
     }),
   };
@@ -375,6 +372,11 @@ const FIELD_HINT_CAP = 40;
  * Advertising the field list on every read, rather than only after a
  * query has already failed, is what makes an unanticipated question
  * answerable.
+ *
+ * Only `query_cache` carries this. The cache inventory covers every
+ * resource at once, so attaching field lists there added dozens of
+ * names per resource to a single observation and slowed the model down
+ * far more than it helped.
  */
 function fieldsForResource(
   ctx: IntuneChatToolContext,

@@ -521,20 +521,19 @@ describe("cached rows advertise the fields available to filter on", () => {
     }
   });
 
-  it("lists field names per populated resource in the cache inventory", async () => {
+  it("keeps the cache inventory lean, since it covers every resource at once", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-fields-inv-"));
     try {
       const ctx = toolContext(seededStore(dir, 5));
       const result = await executeIntuneChatTool(ctx, "list_cached_resources", {});
       const record = result.result as {
-        resources: Array<{ resource: string; rows: number; availableFields?: string[] }>;
+        resources: Array<{ resource: string; availableFields?: string[] }>;
       };
-      const devices = record.resources.find((r) => r.resource === "managedDevices");
-      assert.ok(devices && devices.rows > 0);
-      assert.ok(devices?.availableFields?.includes("operatingSystem"));
-      // Resources with nothing cached must not claim fields.
-      const empty = record.resources.find((r) => r.rows === 0);
-      assert.equal(empty?.availableFields, undefined);
+      assert.ok(record.resources.length > 10);
+      assert.ok(
+        record.resources.every((entry) => entry.availableFields === undefined),
+        "field lists across every resource make this observation too expensive",
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
