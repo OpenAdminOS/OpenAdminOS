@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 import type { RunLlmApi, TenantRecord } from "@openadminos/agent-sdk";
 
-import { runAgenticChat } from "./agentic-loop.js";
+import { MAX_AGENTIC_ITERATIONS, runAgenticChat } from "./agentic-loop.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
 
@@ -118,14 +118,14 @@ describe("Intune Chat agentic loop", () => {
     try {
       const llm = scriptedLlm(
         Array.from(
-          { length: 6 },
+          { length: MAX_AGENTIC_ITERATIONS },
           () => '```json\n{"tool":"list_cached_resources","params":{}}\n```',
         ),
       );
       const result = await runAgenticChat(baseInput(store, llm));
       assert.equal(result.ok, false);
       assert.equal(result.reason, "iteration-cap");
-      assert.equal(result.toolTrace.length, 6);
+      assert.equal(result.toolTrace.length, MAX_AGENTIC_ITERATIONS);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });

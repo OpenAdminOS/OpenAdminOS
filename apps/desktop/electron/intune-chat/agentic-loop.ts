@@ -16,7 +16,14 @@ import {
   type IntuneChatToolContext,
 } from "./tools.js";
 
-const MAX_AGENTIC_ITERATIONS = 6;
+/**
+ * Tool calls allowed per question. Six was reached by questions that
+ * genuinely need cross-referencing, for example matching installed apps
+ * against what was deployed, and those fell back rather than finishing.
+ * Most questions use two or three, so the higher ceiling costs latency
+ * only on the questions that were failing at the old one.
+ */
+export const MAX_AGENTIC_ITERATIONS = 10;
 
 /**
  * How many malformed replies to coach through before giving up. One
