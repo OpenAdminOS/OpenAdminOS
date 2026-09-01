@@ -353,3 +353,39 @@ answers from the data it gathered.
 The general lesson is that the tool contract, not the model size, was
 the limit. A schema an 8B can express correctly is worth more than
 tolerant parsing, and an error that teaches is worth more than both.
+
+
+---
+
+## 10. Measured against a real 8B model
+
+50 questions, none drawn from the in-app prompt suggestions or the
+researched question bank, run through the real pipeline with
+`openadmin-8b` via Ollama. Tenant data was synthetic, so this measures
+whether the pipeline works end to end, not answer quality against a real
+tenant.
+
+| | Before the protocol fixes | After |
+| --- | --- | --- |
+| Questions using investigative tools | 0 | 47 of 50 |
+| Fell back on malformed JSON | every question | 2 of 50 |
+| Answered | via keyword-planned context only | 49 of 50 |
+
+Tool usage across the run: `query_cache` 62, `find_graph_endpoint` 36,
+`graph_get` 12, `query_drift` 1, `list_cached_resources` 1. The
+discovery tool being the second most used confirms the diagnosis in
+section 8: the model does not know Graph paths, and given a way to look
+them up it uses it constantly.
+
+Remaining weaknesses, honestly recorded:
+
+- **Latency.** Median 54 seconds per question, one timeout at 240s. An
+  8B doing four sequential turns is inherently slow; concurrency helps
+  the fetch, not the reasoning.
+- **Arithmetic.** At least one answer stated a total that disagreed with
+  the list it then printed. Exact counts are now in the context, but
+  nothing forces the model to use them over its own counting.
+- **Coverage of the fixture.** 33 answers declined for lack of data.
+  Most of those questions genuinely could not be answered from the
+  synthetic tenant, so this number says more about the fixture than the
+  pipeline, and should be re-measured against a real tenant.
