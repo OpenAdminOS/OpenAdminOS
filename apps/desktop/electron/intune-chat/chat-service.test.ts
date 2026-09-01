@@ -171,11 +171,22 @@ describe("Intune Chat host service", () => {
         content: "Which stale Windows devices have not synced recently?",
       });
 
-      assert.deepEqual(graphRequests, [
-        "GET /deviceManagement/managedDevices",
-        "GET /deviceManagement/managedDevices?skip=page-2",
-        "GET /devices",
-      ]);
+      // Resources refresh concurrently, so the order they interleave in
+      // is not meaningful. What must hold is that each planned resource
+      // was fetched, and that paging within a resource stayed ordered.
+      assert.deepEqual(
+        [...graphRequests].sort(),
+        [
+          "GET /deviceManagement/managedDevices",
+          "GET /deviceManagement/managedDevices?skip=page-2",
+          "GET /devices",
+        ].sort(),
+      );
+      assert.ok(
+        graphRequests.indexOf("GET /deviceManagement/managedDevices") <
+          graphRequests.indexOf("GET /deviceManagement/managedDevices?skip=page-2"),
+        "pages within a resource must still be fetched in order",
+      );
       assert.match(answerPackPrompt, /WIN-01/);
       assert.match(answerPackPrompt, /WIN-02/);
       assert.doesNotMatch(answerPackPrompt, /admin@contoso\.example/);
@@ -1120,6 +1131,123 @@ describe("Intune Chat host service", () => {
       assert.match(result.assistantMessage.content, /Hosted answer/);
     } finally {
       store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Graph cache refresh concurrency and cancellation", () => {
+  const now = "2026-06-01T10:00:00.000Z";
+
+  async function makeStore(
+    dir: string,
+    graph: RunGraphApi,
+    llm: RunLlmApi,
+  ): Promise<AppStateStore> {
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        activeProviderId: "ollama",
+        activeModelByProviderId: { ollama: "mock-chat" },
+        installedAgents: [],
+        runs: [],
+        tenants: [
+          {
+            id: "tenant-1",
+            displayName: "Contoso",
+            username: "admin@contoso.example",
+            homeAccountId: "home-account-1",
+            addedAt: now,
+          },
+        ],
+        activeTenantId: "tenant-1",
+      }),
+      "utf8",
+    );
+    return new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => graph,
+      llmFactory: () => llm,
+    });
+  }
+
+  const quietLlm: RunLlmApi = {
+    available: true,
+    defaultModel: "mock-chat",
+    async complete() {
+      return { text: "ok", model: "mock-chat" };
+    },
+    async *stream() {
+      yield { delta: "ok", accumulated: "ok", done: true, model: "mock-chat" };
+    },
+  };
+
+  it("refreshes several resources at once instead of strictly serially", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-conc-"));
+    let inFlight = 0;
+    let peak = 0;
+    const graph: RunGraphApi = {
+      listManagedDevices: async () => [],
+      retireManagedDevice: async () => undefined,
+      async request() {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        inFlight -= 1;
+        return { value: [] };
+      },
+    };
+    const store = await makeStore(dir, graph, quietLlm);
+    try {
+      // A question that plans several resources.
+      await store.sendIntuneChatMessage({
+        content: "Which compliance policies target user groups?",
+      });
+      assert.ok(peak > 1, `expected concurrent refreshes, peak was ${peak}`);
+      assert.ok(peak <= 4, `expected at most 4 concurrent refreshes, peak was ${peak}`);
+    } finally {
+      store.dispose?.();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops fetching the remaining resources when the caller aborts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-abort-"));
+    const controller = new AbortController();
+    let requests = 0;
+    const graph: RunGraphApi = {
+      listManagedDevices: async () => [],
+      retireManagedDevice: async () => undefined,
+      async request() {
+        requests += 1;
+        // Abort while the first wave is still in flight.
+        if (requests === 1) controller.abort();
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { value: [] };
+      },
+    };
+    const store = await makeStore(dir, graph, quietLlm);
+    try {
+      await store
+        .streamIntuneChatMessage(
+          { content: "Which compliance policies target user groups?" },
+          () => undefined,
+          { signal: controller.signal },
+        )
+        .catch(() => undefined);
+      // Without the signal reaching the refresh loop every planned
+      // resource would have been fetched before the cancellation was
+      // noticed.
+      assert.ok(
+        requests < 6,
+        `aborting must stop the refresh early; ${requests} requests were made`,
+      );
+    } finally {
+      store.dispose?.();
       await rm(dir, { recursive: true, force: true });
     }
   });

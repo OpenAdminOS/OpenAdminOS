@@ -653,6 +653,15 @@ export function readPlannedChatRows(
 export const GRAPH_CACHE_PAGE_LIMIT = 10;
 
 
+/**
+ * How many resources refresh at once. Graph throttles per resource
+ * unit, so a handful of different resources in flight together stays
+ * well inside normal limits while removing most of the wait before an
+ * answer can start.
+ */
+export const GRAPH_REFRESH_CONCURRENCY = 4;
+
+
 export const GRAPH_CACHE_ROW_LIMIT = 1000;
 
 
@@ -675,6 +684,7 @@ export interface GraphCollectionPage {
 export async function fetchGraphCachePages(
   graph: RunGraphApi,
   request: GraphCacheRequestPage,
+  signal?: AbortSignal,
 ): Promise<{ rows: unknown[]; pages: number; pageLimitReached: boolean }> {
   const rows: unknown[] = [];
   let pages = 0;
@@ -693,6 +703,7 @@ export async function fetchGraphCachePages(
         ? { query: nextRequest.query }
         : {}),
       ...(nextRequest.headers ? { headers: nextRequest.headers } : {}),
+      ...(signal ? { signal } : {}),
     });
     const page = unwrapGraphCollectionPage(response);
     pages += 1;

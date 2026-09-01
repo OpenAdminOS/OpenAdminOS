@@ -68,6 +68,7 @@ import {
   buildTenantComparison,
   emptyMultiTenantSummary,
   estimateChatProgressPercent,
+  GRAPH_REFRESH_CONCURRENCY,
   fetchGraphCachePages,
   hashTenantId,
   intuneChatProviderBudget,
@@ -1162,6 +1163,7 @@ export class IntuneChatService {
   private async refreshGraphCacheInternal(
     options: RefreshGraphCacheOptions = {},
     onProgress?: (event: GraphCacheRefreshProgressEvent) => void,
+    signal?: AbortSignal,
   ): Promise<GraphCacheRefreshResult> {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
@@ -1175,9 +1177,14 @@ export class IntuneChatService {
     const graph = this.host.graphFactory
       ? this.host.graphFactory({ tenantId: tenant.id, scopes, log })
       : (await this.host.buildGraph(tenant.id, scopes)).createGraph(log);
-    const results: GraphCacheRefreshResult["resources"] = [];
+    // Slots are filled by index so the reported order matches the
+    // requested order regardless of which refresh finishes first.
+    const slots = new Array<GraphCacheRefreshResult["resources"][number] | undefined>(
+      resources.length,
+    );
+    let completed = 0;
 
-    for (const resource of resources) {
+    const refreshOne = async (resource: GraphCacheResourceKind, slot: number) => {
       const definition = definitionForResource(resource);
       const request = pathForResource(resource);
       const refreshedAt = new Date().toISOString();
@@ -1185,7 +1192,7 @@ export class IntuneChatService {
         type: "resource-start",
         resource,
         label: definition.label,
-        completed: results.length,
+        completed,
         total: resources.length,
       });
       try {
@@ -1193,11 +1200,15 @@ export class IntuneChatService {
         if (request.select && request.select.length > 0) {
           query.$select = request.select.join(",");
         }
-        const pageResult = await fetchGraphCachePages(graph, {
-          path: request.path,
-          query,
-          headers: request.headers,
-        });
+        const pageResult = await fetchGraphCachePages(
+          graph,
+          {
+            path: request.path,
+            query,
+            headers: request.headers,
+          },
+          signal,
+        );
         store.replaceGraphResources({
           tenantId: tenant.id,
           resource,
@@ -1208,7 +1219,7 @@ export class IntuneChatService {
           pageLimitReached: pageResult.pageLimitReached,
           refreshedAt,
         });
-        results.push({
+        slots[slot] = {
           resource,
           label: definition.label,
           rows: pageResult.rows.length,
@@ -1216,11 +1227,12 @@ export class IntuneChatService {
           pageLimitReached: pageResult.pageLimitReached,
           refreshedAt,
           ok: true,
-        });
+        };
+        completed += 1;
         onProgress?.({
           type: "resource-complete",
-          result: results.at(-1)!,
-          completed: results.length,
+          result: slots[slot]!,
+          completed,
           total: resources.length,
         });
       } catch (error) {
@@ -1239,28 +1251,53 @@ export class IntuneChatService {
           error: message,
           now: refreshedAt,
         });
-        results.push({
+        slots[slot] = {
           resource,
           label: definition.label,
           rows: 0,
           refreshedAt,
           ok: false,
           error: message,
-        });
+        };
+        completed += 1;
         onProgress?.({
           type: "resource-complete",
-          result: results.at(-1)!,
-          completed: results.length,
+          result: slots[slot]!,
+          completed,
           total: resources.length,
         });
       }
-    }
+    };
+
+    // Refreshes used to run strictly one after another, so a question
+    // planning a dozen resources waited for a dozen sequential Graph
+    // list calls, each of which routinely takes tens of seconds. Graph
+    // throttles per resource unit, so a small amount of cross-resource
+    // parallelism is well within normal limits, and 429 responses are
+    // already retried with Retry-After by the adapter.
+    let next = 0;
+    const workers = Array.from(
+      { length: Math.min(GRAPH_REFRESH_CONCURRENCY, resources.length) },
+      async () => {
+        while (true) {
+          const slot = next++;
+          const resource = resources[slot];
+          if (resource === undefined) return;
+          if (signal?.aborted) return;
+          await refreshOne(resource, slot);
+        }
+      },
+    );
+    await Promise.all(workers);
 
     return {
       tenantId: tenant.id,
       startedAt,
       finishedAt: new Date().toISOString(),
-      resources: results,
+      resources: slots.filter(
+        (entry): entry is GraphCacheRefreshResult["resources"][number] =>
+          entry !== undefined,
+      ),
     };
   }
 
@@ -1748,6 +1785,11 @@ export class IntuneChatService {
               stage: "refreshing-cache",
             });
           },
+          // Stop used to be checked only before and after the whole
+          // refresh, so pressing it mid-refresh let every remaining
+          // Graph call run to completion before the result was thrown
+          // away. The signal now reaches the requests themselves.
+          options.signal,
         );
         store.insertToolCall({
           id: `tool_${randomUUID()}`,

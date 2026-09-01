@@ -1,0 +1,304 @@
+# Chat: how Graph data is fetched, and where it breaks
+
+A review of the Chat answer path, focused on the Graph fetch layer. Chat is
+the feature admins will use most, so the failure modes below matter more than
+their line count suggests.
+
+Every claim here was checked against the code, and the planner findings were
+produced by running `planChatContext` against real question phrasings rather
+than by reading the rules.
+
+## How it works today
+
+A question goes through five stages:
+
+1. `planChatContext(question)` picks which Graph resources are relevant, by
+   substring-matching the question against keyword lists.
+2. Any picked resource whose cache is empty or older than 6 hours is
+   refreshed from Graph.
+3. `fetchGraphCachePages` pages each resource: up to 10 pages, hard stop at
+   1,000 rows, `$top=250` on most resources.
+4. Rows land in SQLite. An answer pack is built from at most 40 rows per
+   resource, of which at most 20 are shown to the model.
+5. The model answers from that pack, plus retrieved documentation.
+
+The design is sound. The problems are concentrated in stages 1, 3, and 4.
+
+---
+
+## 1. Aggregate questions are answered from a 20-row sample
+
+**Severity: high. This is the most serious finding.**
+
+"How many devices are non-compliant?" is the archetypal admin question, and
+the pipeline cannot answer it correctly on any tenant above ~1,000 objects.
+
+Three truncations stack:
+
+| Stage | Cap | Set in |
+| --- | --- | --- |
+| Tenant to cache | 1,000 rows | `GRAPH_CACHE_ROW_LIMIT` |
+| Cache to answer pack | 40 rows | `intuneChatProviderBudget` |
+| Answer pack to prompt | 20 sample rows | `maxSampleRowsPerResource` |
+
+`buildBreakdowns` computes `complianceState` counts over the **selected rows**,
+not the cached set and not the tenant. On a tenant with 3,000 devices of which
+400 are non-compliant, the model receives a breakdown like
+`{compliant: 33, noncompliant: 7}` derived from 40 rows.
+
+There is no true total anywhere in the pipeline to correct it with: the
+sqlite store contains **zero `COUNT(*)` queries**, and no request sends
+`$count=true`.
+
+The model is told `cachedRows` and `pageLimitReached`, and the system prompt
+tells it to disclose partial data, so a well-behaved model says "I cannot
+determine this". That is the *best* case, and it is still a non-answer to the
+most common question. A weaker local model reports 7.
+
+**Fix.** Two changes, both small:
+
+- Send `$count=true` with `ConsistencyLevel: eventual` on the directory
+  resources that support it (users, groups, devices, applications, service
+  principals) and read `@odata.count`. That is an exact tenant total in one
+  request, with no paging.
+- Add `COUNT(*)` and `GROUP BY` aggregate reads to the sqlite store for the
+  fields already in `buildBreakdowns`, and put the true counts in the answer
+  pack alongside the sample. The model then has an exact number to quote and
+  the sample only serves as illustration.
+
+This turns "I cannot determine this" into "412 of 3,000 devices are
+non-compliant" without enlarging the prompt.
+
+---
+
+## 2. Keyword planning fetches the wrong resources, and far too many
+
+**Severity: high.**
+
+`matchesAny` is a plain substring test:
+
+```ts
+function matchesAny(value: string, needles: string[]): boolean {
+  return needles.some((needle) => value.includes(needle));
+}
+```
+
+With no word boundaries, short needles match inside unrelated words. Measured
+output from the current rules:
+
+| Question | Resources planned | Problem |
+| --- | --- | --- |
+| "Please respond with a list of our conditional access policies" | **17** | `resp`**`ond`** contains `esp`, pulling in the whole Autopilot group |
+| "Summarize what happened in the tenant this week" | 3, all wrong | `h`**`app`**`ened` matches `app`; `summarize` never matches `summary`; the audit rules need the literal phrase "what changed" |
+| "What is the cost of our licenses?" | 3 | `c`**`os`**`t` matches `os` |
+| "What does Autopilot pre-provisioning require?" | 7 | A documentation question that fetches seven tenant resources |
+| "hi" | 3 | A greeting triggers a Graph refresh |
+
+The first row is the expensive one: 17 resources for a question that needs
+exactly one. The second is the dangerous one, because it is not merely
+wasteful, it is **wrong**: an admin asking what happened in the tenant gets
+app inventory instead of audit logs, and nothing in the answer signals that
+the relevant data was never fetched.
+
+**Fix**, in increasing order of effort:
+
+- Match on word boundaries rather than substrings, and drop needles shorter
+  than four characters (`os`, `esp`, `dem`, `mam`, `asr`) or anchor them.
+  This alone removes every false positive in the table above.
+- Add the missing synonyms the rules already imply: `summarize`, `what
+  happened`, `recent activity`.
+- Cap planned resources at roughly 5, ranked by how many rules matched, so
+  no question can trigger 17 refreshes.
+- Skip the refresh entirely for messages with no admin intent, so "hi" and
+  "thanks" do not hit Graph.
+
+Longer term the right answer is to let the model choose resources through the
+existing tool layer rather than guessing ahead of it, keeping keywords only as
+the fallback for models too small to call tools reliably.
+
+---
+
+## 3. A single network blip discards the whole refresh
+
+**Severity: high. Most likely cause of real-world failure reports.**
+
+`graphRequest` retries thoroughly on HTTP status: 429 always, 5xx when the
+request is idempotent, honouring `Retry-After`, up to 3 attempts. That part is
+well built.
+
+But the `catch` around `fetch` **throws immediately**:
+
+```ts
+} catch (error) {
+  ...
+  throw new Error(message);   // no retry
+}
+```
+
+Timeouts and network errors are never retried. The target user is an admin on
+a laptop, frequently behind a VPN, who closes the lid. On a question that
+planned 17 resources, one dropped connection on request 40 of 68 fails that
+resource outright, and the answer is silently built from less data.
+
+**Fix.** Retry transient network errors and timeouts with the same attempt
+budget and exponential backoff. Keep the current behaviour for non-idempotent
+methods. This is a handful of lines in the existing loop and is the single
+highest reliability return in this document.
+
+---
+
+## 4. Refreshes run strictly serially
+
+**Severity: medium, and it is what makes every other latency issue visible.**
+
+`refreshGraphCacheInternal` is a plain `for` loop, and `fetchGraphCachePages`
+pages serially inside it. Worst measured case, the 17-resource question, is up
+to 68 sequential round trips before the model produces a single token. Graph
+list calls routinely take 30 to 45 seconds, which is why the adapter timeout
+is 60 seconds.
+
+**Fix.** Run resource refreshes with bounded concurrency, 4 to 6 at a time.
+Graph throttles per resource unit, so modest parallelism across different
+resources is well within normal limits, and the existing 429 handling already
+covers the case where it is not. Combined with finding 2 this turns a
+multi-minute wait into a few seconds.
+
+Paging within a resource should stay serial, since `nextLink` is inherently
+sequential.
+
+---
+
+## 5. Stop does not stop anything
+
+**Severity: medium, user-visible.**
+
+In the streaming path, cancellation is checked before the refresh block
+(line 1664) and after it (line 1783), but never inside. `options.signal` is
+never passed into `refreshGraphCacheInternal`, `fetchGraphCachePages`, or the
+Graph adapter.
+
+So pressing Stop during "Refreshing Intune managed devices" lets all remaining
+resources fetch to completion, then discards the result. On a large tenant the
+UI claims to have stopped while minutes of work continue in the background.
+
+**Fix.** Thread the `AbortSignal` through the refresh into `graphRequest`,
+which already builds an `AbortController` per request and only needs the
+caller's signal chained to it. Check the signal between resources and between
+pages.
+
+---
+
+## 6. Freshness is invisible until it is wrong
+
+**Severity: medium, UX.**
+
+The cache TTL is 6 hours, hard-coded in two places (`service.ts:1345` and
+`service.ts:1720`). An answer built from data 5 hours and 59 minutes old is
+presented identically to one built from data fetched a second ago. The
+`refreshedAt` timestamp reaches the model, and the sources row carries it, but
+nothing in the answer itself states the age.
+
+For a question like "which devices are non-compliant", six hours is often
+fine. For "did the policy I just deployed apply", it is completely wrong, and
+the admin has no signal that they are reading stale state.
+
+**Fix.**
+
+- Show the data age next to the answer, not only in the sources detail.
+- Offer a one-click "refresh and re-answer" on any answer built from cached
+  data, rather than requiring the admin to know the cache exists.
+- Vary the TTL by resource. Audit logs and sign-ins age in minutes; compliance
+  policies and Autopilot profiles age in days. One constant for both is wrong
+  in both directions.
+
+---
+
+## 7. Smaller items
+
+- **Silent row loss.** `fetchGraphCachePages` truncates the final page to the
+  1,000 row cap but only sets `pageLimitReached` when a `nextLink` is present.
+  A single page overflowing the cap with no `nextLink` drops rows and reports
+  the result as complete. Narrow, but it is a silent failure, which the
+  project's constraints forbid.
+- **No delta queries.** `managedDevices`, `users`, and `groups` all support
+  Graph delta queries. Every refresh currently re-reads the full collection.
+  Delta would make the 6-hour TTL cheap enough to shorten substantially.
+- **`$select` but no `$filter`.** Requests trim fields but never rows, so a
+  "stale devices" question downloads all 1,000 devices and filters locally.
+  Pushing the obvious predicates into Graph would cut both latency and the
+  truncation exposure in finding 1.
+- **Non-streaming path has no progress.** `sendIntuneChatMessage` calls
+  `refreshGraphCache` without the progress callback the streaming path uses,
+  so any consumer on that path waits with no feedback at all.
+
+---
+
+## Suggested order
+
+Ranked by reliability gained per unit of work:
+
+1. Retry network errors and timeouts (finding 3). Smallest change, largest
+   reliability gain.
+2. Word-boundary keyword matching and a resource cap (finding 2). Removes the
+   17-resource case and the wrong-context case.
+3. True counts via `$count` and sqlite aggregates (finding 1). Makes the most
+   common question class answerable.
+4. Bounded-concurrency refresh (finding 4).
+5. Honour the abort signal (finding 5).
+6. Freshness surfacing and per-resource TTL (finding 6).
+
+Items 1, 2, and 4 together should take the 17-resource question from minutes
+to seconds. Item 3 is what makes the answers trustworthy enough to act on.
+
+---
+
+## 8. Coverage: which questions can Chat answer at all?
+
+Measured against the bundled Graph catalog, not estimated.
+
+There are three ceilings, and they bind in this order:
+
+**Ceiling 1, the model.** If the provider is local and the model name suggests
+a small model, or if the model has failed the investigative format twice in
+this session, `resolveAgenticCapability` disables tool calling entirely. Chat
+then answers only from the 45 pre-defined cached resources. This is the
+default experience for a local-first user, and it is by far the tightest
+limit. The demotion counter is in-memory, so it resets on restart.
+
+**Ceiling 2, the endpoint allowlist.** With tool calling active, `graph_get`
+can reach:
+
+| | Count |
+| --- | --- |
+| GET endpoints in the catalog | 16,684 |
+| GET endpoints with delegated-scope metadata | 2,730 |
+| **Reachable through `validateGraphGetPath`** | **879 (5.3%)** |
+| Rejected for having no scope metadata | 13,954 |
+
+The 13,954 are not blocked because the tenant lacks permission. They are
+blocked because `api-docs-index.json` carries permission data for only a
+fraction of the catalog, and `validateGraphGetPath` treats "no known scope"
+as "outside the allowlist".
+
+**Ceiling 3, consent.** 21 read scopes are requested. Widening the allowlist
+from the 18 scopes the cached resources happen to use to all 21 consented
+scopes adds only 29 endpoints (879 to 908), so consent is not the binding
+constraint today.
+
+### What "answer any question" would require
+
+The allowlist is a second enforcement layer sitting behind a token that
+already cannot exceed what the tenant consented to. Graph itself rejects
+anything outside the granted scopes, and `graph_get` is already restricted to
+GET, so the allowlist is not what keeps writes or unconsented data out.
+
+Replacing "reject unless the catalog knows a matching scope" with "attempt any
+GET the token permits and let Graph's own 403 be authoritative" moves
+coverage from 879 endpoints to every read endpoint the consented scopes
+cover, without widening what the app can actually see. The catalog stays
+useful for path validation, suggestions, and scope hints; it stops being a
+gate.
+
+That plus finding 1 (true counts) and finding 2 (resource planning) is what
+turns Chat from a good answerer of anticipated questions into one that
+handles arbitrary ones.
