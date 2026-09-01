@@ -671,6 +671,38 @@ export const GRAPH_REFRESH_CONCURRENCY = 4;
  * supported across `/deviceManagement`, and sending it there fails the
  * whole request.
  */
+/**
+ * How long a cached resource stays usable before a question triggers a
+ * refresh. A single six-hour rule was wrong in both directions: sign-in
+ * and audit data is stale within minutes, while Autopilot profiles and
+ * enrollment configurations change a few times a year and were being
+ * re-fetched needlessly.
+ */
+const RESOURCE_STALENESS_MS: Readonly<Record<string, number>> = {
+  signIns: 15 * 60 * 1000,
+  directoryAudits: 15 * 60 * 1000,
+  intuneAuditEvents: 15 * 60 * 1000,
+  securityAlerts: 15 * 60 * 1000,
+  securityIncidents: 15 * 60 * 1000,
+  troubleshootingEvents: 30 * 60 * 1000,
+  autopilotEvents: 30 * 60 * 1000,
+  managedDevices: 6 * 60 * 60 * 1000,
+  entraDevices: 6 * 60 * 60 * 1000,
+  users: 6 * 60 * 60 * 1000,
+  groups: 6 * 60 * 60 * 1000,
+  detectedApps: 12 * 60 * 60 * 1000,
+  managedDeviceEncryptionStates: 12 * 60 * 60 * 1000,
+  secureScores: 12 * 60 * 60 * 1000,
+};
+
+/** Resources not listed above change rarely; a day is plenty. */
+export const DEFAULT_RESOURCE_STALENESS_MS = 24 * 60 * 60 * 1000;
+
+export function resourceStalenessMs(resource: string): number {
+  return RESOURCE_STALENESS_MS[resource] ?? DEFAULT_RESOURCE_STALENESS_MS;
+}
+
+
 export const COUNTABLE_GRAPH_RESOURCES: ReadonlySet<string> = new Set([
   "users",
   "groups",

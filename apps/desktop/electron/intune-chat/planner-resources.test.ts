@@ -4,6 +4,10 @@ import { describe, it } from "node:test";
 import { GRAPH_CACHE_RESOURCE_KINDS } from "@openadminos/agent-sdk";
 
 import {
+  DEFAULT_RESOURCE_STALENESS_MS,
+  resourceStalenessMs,
+} from "../state-helpers.js";
+import {
   GRAPH_CACHE_RESOURCES,
   MAX_PLANNED_RESOURCES,
   definitionForResource,
@@ -153,5 +157,24 @@ describe("planner keyword matching is anchored to word boundaries", () => {
       "policy compliance app autopilot update remediation sign-in audit assignment group user device defender secure score domain",
     );
     assert.ok(noisy.length <= MAX_PLANNED_RESOURCES);
+  });
+});
+
+describe("per-resource cache freshness", () => {
+  it("expires fast-moving signal sooner than slow-moving configuration", () => {
+    assert.ok(
+      resourceStalenessMs("signIns") < resourceStalenessMs("managedDevices"),
+      "sign-in data must go stale sooner than device inventory",
+    );
+    assert.ok(
+      resourceStalenessMs("managedDevices") <
+        resourceStalenessMs("windowsAutopilotProfiles"),
+      "device inventory must go stale sooner than Autopilot profiles",
+    );
+    assert.equal(resourceStalenessMs("directoryAudits"), 15 * 60 * 1000);
+    assert.equal(
+      resourceStalenessMs("windowsAutopilotProfiles"),
+      DEFAULT_RESOURCE_STALENESS_MS,
+    );
   });
 });

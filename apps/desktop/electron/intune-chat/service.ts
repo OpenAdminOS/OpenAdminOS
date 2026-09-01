@@ -69,6 +69,7 @@ import {
   emptyMultiTenantSummary,
   estimateChatProgressPercent,
   COUNTABLE_GRAPH_RESOURCES,
+  resourceStalenessMs,
   GRAPH_REFRESH_CONCURRENCY,
   fetchGraphCachePages,
   hashTenantId,
@@ -1423,7 +1424,10 @@ export class IntuneChatService {
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
         if (!status || status.rows === 0 || !status.refreshedAt) return true;
-        return Date.now() - new Date(status.refreshedAt).getTime() > 6 * 60 * 60 * 1000;
+        return (
+          Date.now() - new Date(status.refreshedAt).getTime() >
+          resourceStalenessMs(resource)
+        );
       });
       if (staleResources.length > 0) {
         refreshResult = await this.refreshGraphCache({
@@ -1799,7 +1803,10 @@ export class IntuneChatService {
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
         if (!status || status.rows === 0 || !status.refreshedAt) return true;
-        return Date.now() - new Date(status.refreshedAt).getTime() > 6 * 60 * 60 * 1000;
+        return (
+          Date.now() - new Date(status.refreshedAt).getTime() >
+          resourceStalenessMs(resource)
+        );
       });
       progressRefreshResources = staleResources;
       if (staleResources.length > 0) {
