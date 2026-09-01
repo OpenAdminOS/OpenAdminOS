@@ -5,6 +5,7 @@ import { GRAPH_CACHE_RESOURCE_KINDS } from "@openadminos/agent-sdk";
 
 import {
   GRAPH_CACHE_RESOURCES,
+  MAX_PLANNED_RESOURCES,
   definitionForResource,
   pathForResource,
   planChatContext,
@@ -84,5 +85,73 @@ describe("planner prefetch hints for Entra and Defender questions", () => {
   it("prefetches cross-tenant access policy for B2B questions", () => {
     const resources = planned("What does our cross-tenant B2B collaboration policy allow?");
     assert.ok(resources.includes("crossTenantAccessPolicy"));
+  });
+});
+
+describe("planner keyword matching is anchored to word boundaries", () => {
+  const planned = (question: string) => planChatContext(question).resources;
+
+  it("does not match a keyword inside an unrelated word", () => {
+    // "esp" used to match "respond" and pull in the whole Autopilot
+    // group; "app" used to match "happened"; "os" used to match "cost".
+    const respond = planned("Please respond with a list of our conditional access policies");
+    assert.ok(
+      !respond.includes("windowsAutopilotDevices"),
+      `"respond" must not plan Autopilot resources; planned ${respond.join(", ")}`,
+    );
+
+    const happened = planned("Summarize what happened in the tenant this week");
+    assert.ok(
+      !happened.includes("detectedApps"),
+      `"happened" must not plan app inventory; planned ${happened.join(", ")}`,
+    );
+
+    const cost = planned("What is the cost of our licenses?");
+    assert.ok(
+      !cost.includes("entraDevices"),
+      `"cost" must not match the "os" keyword; planned ${cost.join(", ")}`,
+    );
+  });
+
+  it("still matches plural and inflected forms of a keyword", () => {
+    assert.ok(planned("Show me sign-ins that failed").includes("signIns"));
+    assert.ok(planned("How many devices do we have?").includes("managedDevices"));
+    assert.ok(
+      planned("Why did a newly enrolled device get local admin?").includes(
+        "windowsAutopilotProfiles",
+      ),
+      "'enrolled' must match the 'enroll' keyword",
+    );
+    assert.ok(
+      planned("Which platforms have the highest noncompliance rate?").includes(
+        "deviceCompliancePolicies",
+      ),
+      "'noncompliance' must match the compliance rule",
+    );
+  });
+
+  it("routes a change question to audit history rather than app inventory", () => {
+    const resources = planned("Summarize what happened in the tenant this week");
+    assert.ok(resources.includes("directoryAudits"));
+    assert.ok(resources.includes("intuneAuditEvents"));
+  });
+
+  it("plans no Graph refresh for small talk", () => {
+    for (const greeting of ["hi", "Hello", "thanks!", "ok"]) {
+      assert.deepEqual(
+        planChatContext(greeting).resources,
+        [],
+        `${greeting} must not trigger a tenant refresh`,
+      );
+    }
+    // A real question that merely starts politely still plans context.
+    assert.ok(planChatContext("Hello, how many devices do we have?").resources.length > 0);
+  });
+
+  it("never plans more resources than the runaway guard allows", () => {
+    const noisy = planned(
+      "policy compliance app autopilot update remediation sign-in audit assignment group user device defender secure score domain",
+    );
+    assert.ok(noisy.length <= MAX_PLANNED_RESOURCES);
   });
 });

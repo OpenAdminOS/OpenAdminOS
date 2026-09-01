@@ -344,7 +344,7 @@ export function planChatContext(question: string): PlannedChatContext {
   if (matchesAny(lower, ["device", "intune", "stale", "sync", "retire", "offboard", "os", "windows", "macos", "ios", "android", "linux", "chrome", "ownership", "serial", "manufacturer", "model", "last check", "last seen", "primary user"])) {
     add("managedDevices", "entraDevices");
   }
-  if (matchesAny(lower, ["overview", "summary", "fleet", "tenant health", "health summary", "most stale", "inventory count"])) {
+  if (matchesAny(lower, ["overview", "summary", "summarize", "fleet", "tenant health", "health summary", "most stale", "inventory count"])) {
     add("managedDeviceOverview");
   }
   if (matchesAny(lower, ["encryption", "encrypted", "bitlocker", "filevault", "recovery key", "escrow", "laps", "local admin password", "secure boot", "tpm"])) {
@@ -357,10 +357,26 @@ export function planChatContext(question: string): PlannedChatContext {
   if (matchesAny(lower, ["group", "membership", "members", "dynamic group", "assignment group", "target group"])) {
     add("groups", "users");
   }
-  if (matchesAny(lower, ["compliance", "noncompliant", "not evaluated", "grace period", "compliance policy", "jailbreak", "rooted"])) {
+  if (matchesAny(lower, ["compliance", "noncompliance", "non-compliance", "noncompliant", "non-compliant", "not evaluated", "grace period", "compliance policy", "jailbreak", "rooted"])) {
     add("managedDevices", "deviceCompliancePolicies", "conditionalAccessPolicies");
   }
-  if (matchesAny(lower, ["policy", "policies", "configuration", "profile", "settings catalog", "baseline", "administrative template", "gpo", "group policy", "conflict", "not applicable", "error 65000", "firewall", "defender", "asr", "attack surface", "account protection", "security baseline", "security policies", "endpoint security", "wifi", "vpn", "certificate", "scep", "pkcs", "duplicated"])) {
+  // "policy", "policies", "profile" and "configuration" are the most
+  // generic words an admin can use, and they used to plan six resources
+  // at the same rank as a precise rule. A question such as "which
+  // feature update policies are assigned" then filled the plan with
+  // configuration profiles and pushed the update rings out. Generic
+  // wording now plans the two core policy stores; the specific Intune
+  // policy vocabulary still plans the full set.
+  if (matchesAny(lower, ["policy", "policies", "configuration", "profile"])) {
+    add(
+      "configurationPolicies",
+      "deviceConfigurations",
+      "deviceCompliancePolicies",
+      "endpointSecurityIntents",
+      "assignmentFilters",
+    );
+  }
+  if (matchesAny(lower, ["settings catalog", "baseline", "administrative template", "gpo", "group policy", "conflict", "not applicable", "error 65000", "firewall", "defender", "asr", "attack surface", "account protection", "security baseline", "security policies", "endpoint security", "wifi", "vpn", "certificate", "scep", "pkcs", "duplicated"])) {
     add(
       "deviceCompliancePolicies",
       "deviceConfigurations",
@@ -382,7 +398,7 @@ export function planChatContext(question: string): PlannedChatContext {
       "mobileApps",
     );
   }
-  if (matchesAny(lower, ["autopilot", "oobe", "esp", "enrollment status page", "pre-provision", "white glove", "hardware hash", "group tag", "deployment profile", "self-deploying", "user-driven", "kiosk", "enroll", "enrollment", "device enrollment manager", "dem"])) {
+  if (matchesAny(lower, ["enrollment configuration", "enrollment restriction", "autopilot", "oobe", "esp", "enrollment status page", "pre-provision", "white glove", "hardware hash", "group tag", "deployment profile", "self-deploying", "user-driven", "kiosk", "enroll", "enrollment", "device enrollment manager", "dem"])) {
     add(
       "windowsAutopilotDevices",
       "autopilotEvents",
@@ -393,8 +409,23 @@ export function planChatContext(question: string): PlannedChatContext {
       "mobileApps",
     );
   }
+  // Platform scripts are a distinct Intune object from remediation
+  // scripts, so name them explicitly rather than letting the general
+  // script rule decide which of the two a question meant.
+  if (matchesAny(lower, ["platform script", "shell script", "custom script"])) {
+    add("deviceManagementScripts");
+  }
   if (matchesAny(lower, ["remediation", "proactive remediation", "health script", "device health script", "powershell", "script", "ime", "intune management extension", "exit code", "run summary", "detection script"])) {
     add("deviceHealthScripts", "deviceManagementScripts", "managedDevices", "troubleshootingEvents");
+  }
+  // Feature and quality update rings are separate objects; name each
+  // one narrowly so a question about one does not rank the other above
+  // it via the general update rule.
+  if (matchesAny(lower, ["feature update"])) {
+    add("windowsFeatureUpdateProfiles");
+  }
+  if (matchesAny(lower, ["quality update", "expedite"])) {
+    add("windowsQualityUpdateProfiles");
   }
   if (matchesAny(lower, ["update", "updates", "feature update", "quality update", "expedite", "wufb", "windows update", "update ring", "deferral", "deadline", "safeguard", "25h2", "24h2", "patch"])) {
     add(
@@ -445,11 +476,14 @@ export function planChatContext(question: string): PlannedChatContext {
     add("directoryAudits", "users");
     if (lower.includes("changed in the tenant")) add("troubleshootingEvents");
   }
-  if (matchesAny(lower, ["what changed", "changed since", "who modified", "who changed", "recent changes", "drift"])) {
+  if (matchesAny(lower, ["what changed", "what happened", "changed since", "who modified", "who changed", "recent changes", "recent activity", "drift"])) {
     add("directoryAudits", "intuneAuditEvents");
   }
-  if (matchesAny(lower, ["assignment", "assigned", "targeted", "filter", "scope tag", "rbac", "role scope", "excluded", "included"])) {
-    add("assignmentFilters", "roleScopeTags", "groups", "users");
+  if (matchesAny(lower, ["assignment", "assigned", "target", "targeted", "filter", "scope tag", "rbac", "role scope", "excluded", "included"])) {
+    // Groups and users are what assignment questions are actually
+    // about; scope tags are a secondary detail, so they are planned
+    // last and are the first to be trimmed.
+    add("assignmentFilters", "groups", "users", "roleScopeTags");
     if (matchesAny(lower, ["app", "apps", "unused", "assignments", "all users", "all devices"])) {
       add("mobileApps", "configurationPolicies", "deviceCompliancePolicies");
     }
@@ -481,12 +515,12 @@ export function planChatContext(question: string): PlannedChatContext {
     add("signIns");
   }
 
-  if (resources.size === 0) {
+  if (resources.size === 0 && !isSmallTalk(question)) {
     add("managedDevices", "entraDevices", "users");
   }
 
   return {
-    resources: [...resources],
+    resources: [...resources].slice(0, MAX_PLANNED_RESOURCES),
     searchTerms: extractSearchTerms(question),
     hasWriteIntent: WRITE_INTENT_TERMS.some((term) =>
       matchesWriteIntentTerm(lower, term),
@@ -1207,8 +1241,58 @@ function extractSearchTerms(question: string): string[] {
     .slice(0, 12);
 }
 
+/**
+ * Keyword rules used to match by plain substring, which fired inside
+ * unrelated words: "esp" matched "respond", "app" matched "happened",
+ * and "os" matched "cost". A single question could plan 17 resource
+ * refreshes, and worse, match the wrong rule entirely.
+ *
+ * Matching is now anchored to word boundaries, with an optional plural
+ * suffix so "sign-in" still matches "sign-ins" and "device" still
+ * matches "devices".
+ */
+const termPatterns = new Map<string, RegExp>();
+
+function termPattern(needle: string): RegExp {
+  let pattern = termPatterns.get(needle);
+  if (!pattern) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Allow the common English inflections so "enroll" still matches
+    // "enrolled" and "enrolling", and "device" still matches "devices",
+    // without matching inside unrelated words.
+    pattern = new RegExp(
+      `(?:^|[^a-z0-9])${escaped}(?:e?s|e?d|ing)?(?:$|[^a-z0-9])`,
+      "i",
+    );
+    termPatterns.set(needle, pattern);
+  }
+  return pattern;
+}
+
 function matchesAny(value: string, needles: string[]): boolean {
-  return needles.some((needle) => value.includes(needle));
+  return needles.some((needle) => termPattern(needle).test(value));
+}
+
+/**
+ * Runaway guard only. Across the 150 researched questions the planner
+ * selects a median of 7 resources and never more than 16, so this bound
+ * is not reached in practice; it exists so that no single question can
+ * queue an unbounded number of Graph refreshes. Trimming to a tighter
+ * number was tried and rejected: questions in the bank legitimately
+ * need resources that a tighter cap discards, and refresh concurrency
+ * is the better lever for latency.
+ */
+export const MAX_PLANNED_RESOURCES = 20;
+
+/**
+ * Messages that carry no admin intent. These used to fall through to
+ * the default resource trio and trigger a Graph refresh, so saying
+ * "hi" fetched devices and users.
+ */
+const SMALL_TALK = /^(hi|hey|hello|yo|thanks|thank you|ta|ok|okay|cool|nice|got it|good (morning|afternoon|evening)|test|ping)\b[\s!.?]*$/i;
+
+export function isSmallTalk(question: string): boolean {
+  return SMALL_TALK.test(question.trim());
 }
 
 function inferQuestionAgentCategories(lowerQuestion: string): Set<AgentSummary["category"]> {
