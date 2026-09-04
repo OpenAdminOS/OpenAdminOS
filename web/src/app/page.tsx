@@ -92,6 +92,25 @@ function formatStat(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+const testimonials = [
+  {
+    name: "Merill Fernando",
+    role: "Founder at Jozra",
+    href: "https://www.linkedin.com/in/merill/",
+    image: "/testimonials/merill-fernando.jpg",
+    quote:
+      "I'm a huge fan of OpenAdminOS. It's the first tool that let me use local AI with 100% privacy to manage my tenants.",
+  },
+  {
+    name: "Ugur Koc",
+    role: "Founder of OpenAdminOS and UgurLabs",
+    href: "https://www.linkedin.com/in/ugurkocde/",
+    image: "/testimonials/ugur-koc.jpg",
+    quote:
+      "This just proves that you don't need any expensive licenses to run agents and that you don't have to compromise on privacy at all.",
+  },
+] as const;
+
 export default async function HomePage() {
   const [latestRelease, githubRepoStats, agentStatsSummary] = await Promise.all([
     getLatestReleaseDownloads(),
@@ -132,7 +151,7 @@ export default async function HomePage() {
       softwareApplicationSchema({
         version: latestRelease.version,
         downloadUrl: latestRelease.releaseNotesUrl,
-        operatingSystem: "macOS, Linux",
+        operatingSystem: "Windows, macOS, Linux",
       }),
       webPageSchema({
         path: "/",
@@ -266,9 +285,9 @@ export default async function HomePage() {
               </Link>
             </div>
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
-              <div
-                aria-describedby="windows-download-status"
-                className="inline-flex h-11 w-full cursor-default items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-white/10 bg-white/[0.03] px-4 text-sm font-medium text-white/40"
+              <a
+                href={latestRelease.windowsExeUrl}
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
                 <svg
                   aria-hidden
@@ -278,16 +297,13 @@ export default async function HomePage() {
                   <path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z" />
                 </svg>
                 Download for Windows
-                <span className="ml-1 text-[10px] font-normal uppercase tracking-wider text-white/30">
-                  Soon
-                </span>
-              </div>
-              <p
-                id="windows-download-status"
-                className="min-h-4 text-center text-[11px] leading-4 text-white/35"
+              </a>
+              <Link
+                href="/download#windows-packages"
+                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
-                Pending signing.
-              </p>
+                Signed per-user installer. No admin rights needed.
+              </Link>
             </div>
           </div>
 
@@ -326,6 +342,43 @@ export default async function HomePage() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section
+          aria-label="What admins say"
+          className="mt-12 grid w-full max-w-7xl gap-4 sm:mt-16 lg:grid-cols-2"
+        >
+          {testimonials.map((item) => (
+            <figure
+              key={item.name}
+              className="flex flex-col justify-between rounded-lg border border-white/10 bg-white/[0.03] p-6 sm:p-8"
+            >
+              <blockquote className="text-lg leading-8 text-white/85 sm:text-xl sm:leading-9">
+                &ldquo;{item.quote}&rdquo;
+              </blockquote>
+              <figcaption className="mt-7 flex items-center gap-4">
+                <img
+                  src={item.image}
+                  alt=""
+                  width="56"
+                  height="56"
+                  loading="lazy"
+                  className="h-14 w-14 rounded-full border border-white/10 object-cover"
+                />
+                <div className="min-w-0">
+                  <Link
+                    href={item.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-base font-semibold text-white transition hover:text-sky-200"
+                  >
+                    {item.name}
+                  </Link>
+                  <p className="text-sm text-white/50">{item.role}</p>
+                </div>
+              </figcaption>
+            </figure>
+          ))}
         </section>
 
         <section className="w-full max-w-7xl py-20">
