@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- The landing page shows two testimonials, from Merill Fernando and Ugur Koc, directly under the traction strip so the install and star counts are followed by named admins.
+
 ### Changed
 
 ### Removed

@@ -92,6 +92,25 @@ function formatStat(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
+const testimonials = [
+  {
+    name: "Merill Fernando",
+    role: "Founder at Jozra",
+    href: "https://www.linkedin.com/in/merill/",
+    image: "/testimonials/merill-fernando.jpg",
+    quote:
+      "I'm a huge fan of OpenAdminOS. It's the first tool that let me use local AI with 100% privacy to manage my tenants.",
+  },
+  {
+    name: "Ugur Koc",
+    role: "Founder of OpenAdminOS and UgurLabs",
+    href: "https://www.linkedin.com/in/ugurkocde/",
+    image: "/testimonials/ugur-koc.jpg",
+    quote:
+      "This just proves that you don't need any expensive licenses to run agents and that you don't have to compromise on privacy at all.",
+  },
+] as const;
+
 export default async function HomePage() {
   const [latestRelease, githubRepoStats, agentStatsSummary] = await Promise.all([
     getLatestReleaseDownloads(),
@@ -326,6 +345,43 @@ export default async function HomePage() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section
+          aria-label="What admins say"
+          className="mt-12 grid w-full max-w-7xl gap-4 sm:mt-16 lg:grid-cols-2"
+        >
+          {testimonials.map((item) => (
+            <figure
+              key={item.name}
+              className="flex flex-col justify-between rounded-lg border border-white/10 bg-white/[0.03] p-5 sm:p-6"
+            >
+              <blockquote className="text-base leading-7 text-white/80 sm:text-lg">
+                &ldquo;{item.quote}&rdquo;
+              </blockquote>
+              <figcaption className="mt-6 flex items-center gap-3">
+                <img
+                  src={item.image}
+                  alt=""
+                  width="48"
+                  height="48"
+                  loading="lazy"
+                  className="h-12 w-12 rounded-full border border-white/10 object-cover"
+                />
+                <div className="min-w-0">
+                  <Link
+                    href={item.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-semibold text-white transition hover:text-sky-200"
+                  >
+                    {item.name}
+                  </Link>
+                  <p className="text-xs text-white/50">{item.role}</p>
+                </div>
+              </figcaption>
+            </figure>
+          ))}
         </section>
 
         <section className="w-full max-w-7xl py-20">
