@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
+import { Select } from "../components/Select";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
+import { OutputJsonBlock } from "../components/OutputPane";
 import { useReportIssue } from "../components/ReportIssueModal";
 import {
   IconCheck,
@@ -36,11 +38,13 @@ import {
   type DriftHistoryPruneResult,
   type DriftRetentionSettings,
   type GraphCacheStatus,
+  type GatewayPublicStatus,
   type LocalDataSummary,
   type ProviderId,
   type ProviderTestResult,
   type ProviderSummary,
   type ReleaseDiagnostics,
+  type RetrievalStatus,
   type RunHistoryPruneResult,
   type RunHistoryRetentionSettings,
   type SandboxSettings,
@@ -50,7 +54,9 @@ import {
   type SetAzureOpenAIProviderConfigInput,
   type TenantRecord,
   type TrustState,
+  type UsageTelemetryPayload,
 } from "../shared/openAdminOS";
+import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -102,6 +108,7 @@ export default function Settings() {
     disconnectTenant,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
+    setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
   const { openSetup } = useSetupFlow();
@@ -316,6 +323,12 @@ export default function Settings() {
             />
           )}
           {section === "chat" && <ChatSettingsSection />}
+          {section === "gateway" && (
+            <GatewaySection
+              tenants={state.tenants}
+              activeTenantId={state.activeTenantId}
+            />
+          )}
           {section === "general" && <GeneralSection />}
           {section === "privacy" && (
             <PrivacySection
@@ -324,8 +337,10 @@ export default function Settings() {
               registryRefreshError={state.registryRefreshError}
               lastRegistryRefresh={state.lastRegistryRefresh}
               registryInstallCountsEnabled={state.registryInstallCountsEnabled}
+              usageTelemetryEnabled={state.usageTelemetryEnabled ?? false}
               onSetRegistrySource={setRegistrySource}
               onSetRegistryInstallCountsEnabled={setRegistryInstallCountsEnabled}
+              onSetUsageTelemetryEnabled={setUsageTelemetryEnabled}
             />
           )}
           {section === "about" && <AboutSection />}
@@ -1735,7 +1750,7 @@ function ChatSettingsSection() {
               <label htmlFor="periodic-cache-refresh-interval" className="sr-only">
                 Periodic cache refresh interval
               </label>
-              <select
+              <Select
                 id="periodic-cache-refresh-interval"
                 name="periodic-cache-refresh-interval"
                 value={scheduleInterval}
@@ -1753,7 +1768,7 @@ function ChatSettingsSection() {
                 <option value={360}>Every 6 hours</option>
                 <option value={720}>Every 12 hours</option>
                 <option value={1440}>Every 24 hours</option>
-              </select>
+              </Select>
               <Button
                 size="sm"
                 variant={cacheStatus?.schedule?.enabled ? "secondary" : "primary"}
@@ -1974,6 +1989,633 @@ function ClearLocalDataModal({
       </div>
     </Modal>
   );
+}
+
+function GatewaySection({
+  tenants,
+  activeTenantId,
+}: {
+  tenants: TenantRecord[];
+  activeTenantId?: string;
+}) {
+  const fallbackTenantId = activeTenantId ?? tenants[0]?.id ?? "";
+  const [gatewayStatus, setGatewayStatus] =
+    useState<GatewayPublicStatus | null>(null);
+  const [selectedTenantId, setSelectedTenantId] = useState(fallbackTenantId);
+  const [portInput, setPortInput] = useState("");
+  const [pairingToken, setPairingToken] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [endpointCopied, setEndpointCopied] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<
+    | { kind: "regenerate" }
+    | { kind: "revoke"; clientId: string; clientName: string }
+    | { kind: "disable" }
+    | null
+  >(null);
+  const gatewayAvailable = Boolean(
+    window.openAdminOS?.getGatewayStatus &&
+      window.openAdminOS.enableGateway &&
+      window.openAdminOS.disableGateway &&
+      window.openAdminOS.regenerateGatewayToken &&
+      window.openAdminOS.revokeGatewayClient,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = window.openAdminOS;
+    if (!api?.getGatewayStatus) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    void api
+      .getGatewayStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setGatewayStatus(status);
+        setSelectedTenantId(status.boundTenantId ?? fallbackTenantId);
+      })
+      .catch((caught: unknown) => {
+        if (!cancelled) {
+          setError(
+            gatewayActionError(
+              "Gateway status could not be loaded",
+              caught,
+              "Restart OpenAdminOS, then open Gateway settings again.",
+            ),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fallbackTenantId]);
+
+  const boundTenant = gatewayStatus?.boundTenantId
+    ? tenants.find((tenant) => tenant.id === gatewayStatus.boundTenantId)
+    : undefined;
+  const listeningPort = gatewayStatus
+    ? (gatewayStatus.listeningPort ?? gatewayStatus.port)
+    : undefined;
+  const endpoint = listeningPort
+    ? `http://127.0.0.1:${listeningPort}/`
+    : undefined;
+
+  const enableGateway = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const api = window.openAdminOS;
+    if (!api?.enableGateway || busyAction) return;
+    if (!selectedTenantId) {
+      setError("Select a connected tenant before enabling the gateway.");
+      return;
+    }
+    const trimmedPort = portInput.trim();
+    const parsedPort = trimmedPort ? Number(trimmedPort) : undefined;
+    if (
+      parsedPort !== undefined &&
+      (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65_535)
+    ) {
+      setError("Port must be a whole number between 1 and 65535.");
+      return;
+    }
+    setBusyAction("enable");
+    setError(null);
+    try {
+      const result = await api.enableGateway({
+        boundTenantId: selectedTenantId,
+        ...(parsedPort !== undefined ? { port: parsedPort } : {}),
+      });
+      setGatewayStatus(result.status);
+      setPairingToken(result.token);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The gateway could not be enabled",
+          caught,
+          "Check that the port is available, then try again.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const regenerateToken = async () => {
+    const api = window.openAdminOS;
+    if (!api?.regenerateGatewayToken || busyAction) return;
+    setBusyAction("regenerate");
+    setError(null);
+    try {
+      const result = await api.regenerateGatewayToken();
+      setGatewayStatus(result.status);
+      setPairingToken(result.token);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The pairing token could not be regenerated",
+          caught,
+          "The existing token remains active. Try again after checking the gateway status.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const revokeClient = async (clientId: string) => {
+    const api = window.openAdminOS;
+    if (!api?.revokeGatewayClient || busyAction) return;
+    setBusyAction(`revoke:${clientId}`);
+    setError(null);
+    try {
+      setGatewayStatus(await api.revokeGatewayClient(clientId));
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The client pairing could not be revoked",
+          caught,
+          "Check that the gateway is available, then try again.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const disableGateway = async () => {
+    const api = window.openAdminOS;
+    if (!api?.disableGateway || busyAction) return;
+    setBusyAction("disable");
+    setError(null);
+    try {
+      setGatewayStatus(await api.disableGateway());
+      setPairingToken(null);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The gateway could not be disabled",
+          caught,
+          "Check the listener status, then try again.",
+        ),
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const copyEndpoint = async () => {
+    if (!endpoint) return;
+    try {
+      await copyTextToClipboard(endpoint);
+      setEndpointCopied(true);
+      window.setTimeout(() => setEndpointCopied(false), 1500);
+    } catch (caught) {
+      setError(
+        gatewayActionError(
+          "The loopback URL could not be copied",
+          caught,
+          "Select the URL and copy it manually.",
+        ),
+      );
+    }
+  };
+
+  const confirmGatewayAction = async () => {
+    if (!pendingConfirmation || busyAction) return;
+    if (pendingConfirmation.kind === "regenerate") {
+      await regenerateToken();
+    } else if (pendingConfirmation.kind === "revoke") {
+      await revokeClient(pendingConfirmation.clientId);
+    } else {
+      await disableGateway();
+    }
+    setPendingConfirmation(null);
+  };
+
+  const confirmationCopy = gatewayConfirmationCopy(pendingConfirmation);
+
+  return (
+    <div className="max-w-[820px]">
+      <SectionTitle
+        title="Gateway"
+        subtitle="Pair local MCP clients with one tenant-scoped OpenAdminOS session."
+      />
+
+      <div className="mt-6 flex flex-col gap-4">
+        {!gatewayAvailable ? (
+          <Card>
+            <div className="p-5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              Gateway controls are unavailable in this build. Open this section in
+              the desktop app with gateway support enabled.
+            </div>
+          </Card>
+        ) : loading ? (
+          <Card>
+            <div role="status" className="p-5 text-[12.5px] text-[var(--color-text-muted)]">
+              Loading local gateway status…
+            </div>
+          </Card>
+        ) : gatewayStatus === null ? (
+          <Card>
+            <div className="p-5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              Gateway status is unavailable. Use the recovery below, then reload
+              this section.
+            </div>
+          </Card>
+        ) : !gatewayStatus?.enabled ? (
+          <Card>
+            <form onSubmit={(event) => void enableGateway(event)} className="p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="max-w-[620px]">
+                  <div className="text-[13px] font-medium text-[var(--color-text)]">
+                    Local MCP gateway
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                    The gateway is a local, loopback-only MCP server. It lets
+                    external AI clients read one bound tenant and propose changes
+                    that you still confirm by hand.
+                  </p>
+                </div>
+                <Pill>Off</Pill>
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_180px]">
+                <div>
+                  <label
+                    htmlFor="gateway-tenant"
+                    className="block text-[11px] font-medium text-[var(--color-text-soft)]"
+                  >
+                    Bound tenant
+                  </label>
+                  <Select
+                    id="gateway-tenant"
+                    name="gateway-tenant"
+                    required
+                    value={selectedTenantId}
+                    onChange={(event) => setSelectedTenantId(event.target.value)}
+                    disabled={busyAction !== null || tenants.length === 0}
+                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {tenants.length === 0 ? (
+                      <option value="">No connected tenant</option>
+                    ) : (
+                      tenants.map((tenant) => (
+                        <option key={tenant.id} value={tenant.id}>
+                          {tenant.displayName}
+                        </option>
+                      ))
+                    )}
+                  </Select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="gateway-port"
+                    className="block text-[11px] font-medium text-[var(--color-text-soft)]"
+                  >
+                    Port (optional)
+                  </label>
+                  <input
+                    id="gateway-port"
+                    name="gateway-port"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={65_535}
+                    step={1}
+                    autoComplete="off"
+                    value={portInput}
+                    onChange={(event) => setPortInput(event.target.value)}
+                    placeholder={String(gatewayStatus?.port ?? 47_891)}
+                    disabled={busyAction !== null}
+                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 font-mono text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 border-l-2 border-[var(--color-success)] bg-[var(--color-success-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+                Reads are scoped to the selected tenant. Every write is only a
+                proposal that requires typed confirmation in this app. Nothing an
+                external client sends can apply a change.
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={busyAction !== null || !selectedTenantId}
+                  leadingIcon={<IconLock size={12} />}
+                >
+                  {busyAction === "enable" ? "Enabling…" : "Enable gateway"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        ) : (
+          <>
+            <Card>
+              <div className="p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[13px] font-medium text-[var(--color-text)]">
+                      Local gateway
+                    </div>
+                    <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                      The listener accepts paired clients on this device only.
+                    </p>
+                  </div>
+                  <Pill tone={gatewayStatus.running ? "success" : "warning"}>
+                    <StatusDot tone={gatewayStatus.running ? "success" : "warning"} />
+                    {gatewayStatus.running ? "Running" : "Listener stopped"}
+                  </Pill>
+                </div>
+
+                <dl className="mt-4 grid gap-3 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)] sm:grid-cols-3">
+                  <GatewayFact
+                    label="Bound tenant"
+                    value={
+                      boundTenant?.displayName ??
+                      gatewayStatus.boundTenantId ??
+                      "No tenant"
+                    }
+                  />
+                  <GatewayFact
+                    label="Listener port"
+                    value={listeningPort ? String(listeningPort) : "Not listening"}
+                    mono
+                  />
+                  <GatewayFact
+                    label="Pairing token"
+                    value={gatewayStatus.hasToken ? "Configured" : "Not configured"}
+                  />
+                </dl>
+
+                {endpoint && (
+                  <div className="mt-4">
+                    <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                      Loopback URL
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+                      <code className="min-w-0 flex-1 break-all font-mono text-[12px] text-[var(--color-text)]">
+                        {endpoint}
+                      </code>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void copyEndpoint()}
+                        aria-label="Copy loopback URL"
+                      >
+                        {endpointCopied ? "Copied" : "Copy"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 border-l-2 border-[var(--color-success)] bg-[var(--color-success-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+                  Reads are scoped to {boundTenant?.displayName ?? "the bound tenant"}.
+                  Every write is only a proposal that requires typed confirmation
+                  in this app. Nothing an external client sends can apply a change.
+                </div>
+              </div>
+            </Card>
+
+            {pairingToken && (
+              <Card>
+                <div className="p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                        Pairing token
+                      </h3>
+                      <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                        This token is shown once. Copy it now. You can regenerate a
+                        replacement later.
+                      </p>
+                    </div>
+                    <Pill tone="warning">Shown once</Pill>
+                  </div>
+                  <OutputJsonBlock
+                    value={pairingToken}
+                    copyLabel="Copy pairing token"
+                    className="mt-4"
+                  />
+                </div>
+              </Card>
+            )}
+
+            <Card>
+              <div className="border-b border-[var(--color-border-soft)] px-5 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                      Connected clients
+                    </h3>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+                      {gatewayStatus.clients.length.toLocaleString()} paired client
+                      {gatewayStatus.clients.length === 1 ? "" : "s"} for this local gateway.
+                    </p>
+                  </div>
+                  <div className="max-w-[360px] text-right">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={busyAction !== null}
+                      leadingIcon={<IconRefresh size={11} />}
+                      onClick={() => setPendingConfirmation({ kind: "regenerate" })}
+                    >
+                      {busyAction === "regenerate" ? "Regenerating…" : "Regenerate token"}
+                    </Button>
+                    <p className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-warning)]">
+                      Paired clients must re-pair after regeneration.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {gatewayStatus.clients.length === 0 ? (
+                <div className="px-5 py-6 text-[12px] text-[var(--color-text-muted)]">
+                  No clients are paired with this gateway.
+                </div>
+              ) : (
+                <ul aria-label="Connected gateway clients" className="divide-y divide-[var(--color-border-soft)]">
+                  {gatewayStatus.clients.map((client) => (
+                    <li
+                      key={client.id}
+                      className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+                          {client.name}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                          Paired {formatDateTime(client.createdAt)}
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="danger"
+                        disabled={busyAction !== null}
+                        onClick={() =>
+                          setPendingConfirmation({
+                            kind: "revoke",
+                            clientId: client.id,
+                            clientName: client.name,
+                          })
+                        }
+                        aria-label={`Revoke ${client.name}`}
+                      >
+                        {busyAction === `revoke:${client.id}` ? "Revoking…" : "Revoke"}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-border-soft)] px-5 py-4">
+                <p className="max-w-[560px] text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+                  Disabling stops the loopback listener. Existing client records
+                  remain available when the gateway is enabled again.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="danger"
+                  disabled={busyAction !== null}
+                  onClick={() => setPendingConfirmation({ kind: "disable" })}
+                >
+                  {busyAction === "disable" ? "Disabling…" : "Disable gateway"}
+                </Button>
+              </div>
+            </Card>
+          </>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+          >
+            {error}
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={pendingConfirmation !== null}
+        onClose={() => {
+          if (!busyAction) setPendingConfirmation(null);
+        }}
+        size="md"
+      >
+        <ModalHeader
+          title={confirmationCopy.title}
+          subtitle="This changes local gateway access."
+          onClose={() => {
+            if (!busyAction) setPendingConfirmation(null);
+          }}
+        />
+        <div className="p-6">
+          <p className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            {confirmationCopy.detail}
+          </p>
+          <div className="mt-6 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busyAction !== null}
+              onClick={() => setPendingConfirmation(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={busyAction !== null}
+              onClick={() => void confirmGatewayAction()}
+            >
+              {busyAction ? confirmationCopy.busyLabel : confirmationCopy.confirmLabel}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function GatewayFact({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </dt>
+      <dd
+        className={`mt-1 truncate text-[12px] text-[var(--color-text)] ${mono ? "font-mono" : ""}`}
+        title={value}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function gatewayActionError(
+  prefix: string,
+  caught: unknown,
+  recovery: string,
+): string {
+  const raw = caught instanceof Error ? caught.message : String(caught);
+  const reason = userFacingErrorReason(raw);
+  return reason ? `${prefix}: ${reason} ${recovery}` : `${prefix}. ${recovery}`;
+}
+
+function gatewayConfirmationCopy(
+  confirmation:
+    | { kind: "regenerate" }
+    | { kind: "revoke"; clientId: string; clientName: string }
+    | { kind: "disable" }
+    | null,
+): { title: string; detail: string; confirmLabel: string; busyLabel: string } {
+  if (confirmation?.kind === "regenerate") {
+    return {
+      title: "Regenerate pairing token?",
+      detail:
+        "The current token will stop working. Every paired client must pair again with the replacement token.",
+      confirmLabel: "Regenerate pairing token",
+      busyLabel: "Regenerating…",
+    };
+  }
+  if (confirmation?.kind === "revoke") {
+    return {
+      title: `Revoke ${confirmation.clientName}?`,
+      detail:
+        "This client will lose gateway access immediately. It can connect again only after pairing with a valid token.",
+      confirmLabel: "Revoke client",
+      busyLabel: "Revoking…",
+    };
+  }
+  return {
+    title: "Disable gateway?",
+    detail:
+      "The loopback listener will stop. Existing client records remain available if the gateway is enabled again.",
+    confirmLabel: "Disable gateway now",
+    busyLabel: "Disabling…",
+  };
 }
 
 function GeneralSection() {
@@ -2861,25 +3503,180 @@ function PrivacySection({
   registryRefreshError,
   lastRegistryRefresh,
   registryInstallCountsEnabled,
+  usageTelemetryEnabled,
   onSetRegistrySource,
   onSetRegistryInstallCountsEnabled,
+  onSetUsageTelemetryEnabled,
 }: {
   trust: TrustState;
   registrySource: string;
   registryRefreshError: string | null;
   lastRegistryRefresh: string | null;
   registryInstallCountsEnabled: boolean;
+  usageTelemetryEnabled: boolean;
   onSetRegistrySource: (
     url: string,
     options?: { confirmExternalSource?: boolean },
   ) => Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }>;
   onSetRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
+  onSetUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
 }) {
   const platform = window.openAdminOS?.platform ?? "unknown";
   const [savingInstallCounts, setSavingInstallCounts] = useState(false);
   const [installCountsError, setInstallCountsError] = useState<string | null>(null);
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
+  const [telemetryPreview, setTelemetryPreview] = useState<{
+    enabled: boolean;
+    endpointConfigured: boolean;
+    payload: UsageTelemetryPayload;
+  } | null>(null);
+  const [telemetryPreviewLoading, setTelemetryPreviewLoading] = useState(true);
+  const [telemetrySaving, setTelemetrySaving] = useState(false);
+  const [telemetryTestSending, setTelemetryTestSending] = useState(false);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const [telemetryTestResult, setTelemetryTestResult] = useState<string | null>(null);
+  const [retrievalStatus, setRetrievalStatus] = useState<RetrievalStatus | null>(null);
+  const [retrievalLoading, setRetrievalLoading] = useState(true);
+  const [retrievalRefreshing, setRetrievalRefreshing] = useState(false);
+  const [retrievalInstalling, setRetrievalInstalling] = useState(false);
+  const [retrievalError, setRetrievalError] = useState<string | null>(null);
   const isOfficialRegistry = isOfficialRegistrySource(registrySource);
+  const telemetryToggleAvailable = Boolean(
+    window.openAdminOS?.setUsageTelemetryEnabled,
+  );
+
+  const loadTelemetryPreview = useCallback(async () => {
+    const getPreview = window.openAdminOS?.getUsageTelemetryPreview;
+    setTelemetryPreviewLoading(true);
+    setTelemetryError(null);
+    if (!getPreview) {
+      setTelemetryPreview(null);
+      setTelemetryError("The exact telemetry preview is unavailable in this build.");
+      setTelemetryPreviewLoading(false);
+      return;
+    }
+
+    try {
+      setTelemetryPreview(await getPreview());
+    } catch (error) {
+      setTelemetryError(
+        error instanceof Error
+          ? error.message
+          : "The exact telemetry preview could not be loaded.",
+      );
+    } finally {
+      setTelemetryPreviewLoading(false);
+    }
+  }, []);
+
+  const loadRetrievalStatus = useCallback(async () => {
+    const getStatus = window.openAdminOS?.getRetrievalStatus;
+    setRetrievalLoading(true);
+    setRetrievalError(null);
+    if (!getStatus) {
+      setRetrievalStatus({
+        available: false,
+        reason: "Documentation retrieval is unavailable in this build.",
+      });
+      setRetrievalLoading(false);
+      return;
+    }
+
+    try {
+      setRetrievalStatus(await getStatus());
+    } catch (error) {
+      setRetrievalStatus(null);
+      setRetrievalError(
+        error instanceof Error
+          ? error.message
+          : "The documentation index status could not be checked.",
+      );
+    } finally {
+      setRetrievalLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTelemetryPreview();
+  }, [loadTelemetryPreview, usageTelemetryEnabled]);
+
+  useEffect(() => {
+    void loadRetrievalStatus();
+  }, [loadRetrievalStatus]);
+
+  const toggleUsageTelemetry = async () => {
+    setTelemetrySaving(true);
+    setTelemetryError(null);
+    setTelemetryTestResult(null);
+    try {
+      await onSetUsageTelemetryEnabled(!usageTelemetryEnabled);
+    } catch (error) {
+      setTelemetryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTelemetrySaving(false);
+    }
+  };
+
+  const sendTelemetryTest = async () => {
+    const sendTest = window.openAdminOS?.sendUsageTelemetryTest;
+    if (!sendTest) {
+      setTelemetryTestResult("Test pings are unavailable in this build.");
+      return;
+    }
+
+    setTelemetryTestSending(true);
+    setTelemetryError(null);
+    setTelemetryTestResult(null);
+    try {
+      const result = await sendTest();
+      setTelemetryTestResult(
+        result.sent ? "Test ping sent." : "Test ping was not sent.",
+      );
+    } catch (error) {
+      setTelemetryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTelemetryTestSending(false);
+    }
+  };
+
+  const refreshRetrievalStatus = async () => {
+    const refreshIndex = window.openAdminOS?.refreshRetrievalIndex;
+    if (!refreshIndex) {
+      setRetrievalError("Documentation index refresh is unavailable in this build.");
+      return;
+    }
+
+    setRetrievalRefreshing(true);
+    setRetrievalError(null);
+    try {
+      setRetrievalStatus(await refreshIndex());
+    } catch (error) {
+      setRetrievalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRetrievalRefreshing(false);
+    }
+  };
+
+  const installRetrievalIndex = async (source: "download" | "folder" = "download") => {
+    const install = window.openAdminOS?.installRetrievalIndex;
+    if (!install || retrievalInstalling) return;
+    setRetrievalInstalling(true);
+    setRetrievalError(null);
+    try {
+      // No argument opens a folder picker in the host. An index copied
+      // onto the machine works without any network access, which is the
+      // only option some tenants allow.
+      // "download" fetches the published release asset; "folder" opens a
+      // picker in the host so an air-gapped machine can install a copy.
+      setRetrievalStatus(await install(source === "download" ? { source } : {}));
+    } catch (caught) {
+      setRetrievalError(
+        caught instanceof Error ? caught.message : String(caught),
+      );
+    } finally {
+      setRetrievalInstalling(false);
+    }
+  };
 
   const toggleRegistryInstallCounts = async () => {
     setSavingInstallCounts(true);
@@ -2902,13 +3699,112 @@ function PrivacySection({
       <div className="mt-6 flex flex-col gap-3">
         <SettingRow
           id="tenant-telemetry"
-          description="No tenant data, prompts, run results, analytics events, or error-reporting data are collected. Optional aggregate agent-install counts are controlled separately below. Crash logs stay on this device."
+          description="Tenant data, prompts, run results, and error-reporting data are never collected. Optional usage telemetry and aggregate registry install counts are controlled separately below. Crash logs stay on this device."
           control={
             <Pill tone="success">
               <StatusDot tone="success" /> Not collected
             </Pill>
           }
         />
+        <Card>
+          <section aria-labelledby="usage-telemetry-title">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
+              <div className="min-w-0 max-w-[520px]">
+                <h3
+                  id="usage-telemetry-title"
+                  className="text-[13px] font-medium text-[var(--color-text)]"
+                >
+                  Usage telemetry
+                </h3>
+                <p
+                  id="usage-telemetry-description"
+                  className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]"
+                >
+                  Tenant, agent, and run counts are converted to bucketed ranges on
+                  this device. Tenant content, prompts, and results are never sent.
+                  Nothing is sent unless this setting is on and this build has a
+                  collector configured.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                  {usageTelemetryEnabled ? "On" : "Off"}
+                </span>
+                <SettingsSwitch
+                  checked={usageTelemetryEnabled}
+                  disabled={!telemetryToggleAvailable || telemetrySaving}
+                  label="Usage telemetry"
+                  describedBy="usage-telemetry-description"
+                  onClick={() => void toggleUsageTelemetry()}
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h4 className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-soft)]">
+                  Exactly what a ping contains
+                </h4>
+                <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+                  counts and versions only
+                </span>
+              </div>
+              <OutputJsonBlock
+                value={telemetryPreview?.payload ?? null}
+                copyLabel="Copy telemetry payload"
+                className="mt-2"
+              />
+              {telemetryPreviewLoading && (
+                <p
+                  role="status"
+                  className="mt-2 text-[11px] text-[var(--color-text-muted)]"
+                >
+                  Loading exact payload…
+                </p>
+              )}
+              {telemetryPreview && !telemetryPreview.endpointConfigured && (
+                <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  This build has no telemetry collector configured, so nothing is
+                  sent even when this is on.
+                </p>
+              )}
+              {telemetryError && (
+                <div
+                  role="alert"
+                  className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+                >
+                  {telemetryError}
+                </div>
+              )}
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <p className="max-w-[420px] text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  A test ping sends the preview once. It does not change this setting.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={
+                    !usageTelemetryEnabled ||
+                    !telemetryPreview?.endpointConfigured ||
+                    telemetryTestSending
+                  }
+                  onClick={() => void sendTelemetryTest()}
+                >
+                  {telemetryTestSending ? "Sending…" : "Send a test ping"}
+                </Button>
+              </div>
+              {telemetryTestResult && (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="mt-2 text-right text-[11px] text-[var(--color-text-soft)]"
+                >
+                  {telemetryTestResult}
+                </p>
+              )}
+            </div>
+          </section>
+        </Card>
         <SettingRow
           id="registry-install-counts"
           description="When enabled, installing a public registry agent sends only agent slug, app version, platform, and a yearly per-agent hash for aggregate counts. No tenant data, prompts, run results, or Graph data are sent."
@@ -2966,6 +3862,160 @@ function PrivacySection({
             {registryRefreshError}
           </div>
         )}
+        <Card>
+          <section aria-labelledby="documentation-grounding-title" className="px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 max-w-[520px]">
+                <h3
+                  id="documentation-grounding-title"
+                  className="text-[13px] font-medium text-[var(--color-text)]"
+                >
+                  Documentation grounding
+                </h3>
+                <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                  Retrieval grounds answers in local Microsoft documentation. It runs
+                  on this device and never sends the question to a remote service when
+                  a local provider is selected.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                leadingIcon={<IconRefresh size={12} />}
+                disabled={
+                  retrievalLoading ||
+                  retrievalRefreshing ||
+                  !window.openAdminOS?.refreshRetrievalIndex
+                }
+                onClick={() => void refreshRetrievalStatus()}
+              >
+                {retrievalRefreshing
+                  ? "Checking…"
+                  : retrievalStatus?.available
+                    ? "Refresh"
+                    : "Check for index"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={
+                  retrievalLoading ||
+                  retrievalInstalling ||
+                  !window.openAdminOS?.installRetrievalIndex
+                }
+                onClick={() => void installRetrievalIndex("download")}
+              >
+                {retrievalInstalling ? "Installing…" : "Download index"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={
+                  retrievalLoading ||
+                  retrievalInstalling ||
+                  !window.openAdminOS?.installRetrievalIndex
+                }
+                onClick={() => void installRetrievalIndex("folder")}
+              >
+                Install from folder…
+              </Button>
+            </div>
+
+            <div aria-live="polite" aria-busy={retrievalLoading || retrievalRefreshing}>
+              {retrievalLoading ? (
+                <div
+                  role="status"
+                  className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                >
+                  Checking the local documentation index…
+                </div>
+              ) : retrievalStatus?.available ? (
+                <div className="mt-4">
+                  <Pill tone="success">
+                    <StatusDot tone="success" /> Available
+                  </Pill>
+                  {retrievalStatus.updateAvailable ? (
+                    <p className="mt-2 text-[12px] text-[var(--color-text-muted)]">
+                      Version {retrievalStatus.updateAvailable} is available and
+                      installs automatically in the background.
+                    </p>
+                  ) : null}
+                  <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <RetrievalDetail
+                      label="Version"
+                      value={retrievalStatus.version ?? "Not recorded"}
+                    />
+                    <RetrievalDetail
+                      label="Built"
+                      value={
+                        retrievalStatus.builtAt
+                          ? formatRetrievalBuildDate(retrievalStatus.builtAt)
+                          : "Not recorded"
+                      }
+                      dateTime={retrievalStatus.builtAt}
+                    />
+                    <RetrievalDetail
+                      label="Chunks"
+                      value={
+                        retrievalStatus.chunkCount === undefined
+                          ? "Not recorded"
+                          : retrievalStatus.chunkCount.toLocaleString()
+                      }
+                    />
+                    <RetrievalDetail
+                      label="Embedding model"
+                      value={retrievalStatus.embeddingModel ?? "Not recorded"}
+                      mono
+                    />
+                  </dl>
+                  {retrievalStatus.embeddingModelInstalled === false ? (
+                    <p className="mt-2 text-[12px] text-[var(--color-warning)]">
+                      {retrievalStatus.ollamaReachable
+                        ? "The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives."
+                        : "Ollama isn't running, so the embedding model can't be fetched and questions can't be matched against the index. Start Ollama and it installs automatically."}
+                    </p>
+                  ) : null}
+                  <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                    Built from Microsoft's published documentation for Intune,
+                    Entra, and Defender, used under{" "}
+                    <a
+                      href="https://creativecommons.org/licenses/by/4.0/"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-soft)]"
+                    >
+                      CC BY 4.0
+                    </a>
+                    . Microsoft does not endorse this project.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
+                  <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-text-soft)]">
+                    <StatusDot tone="muted" /> Not documentation-grounded yet
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                    {retrievalStatus?.ollamaReachable === false
+                      ? "Documentation grounding needs the local Ollama runtime, which isn't running. Once Ollama is available, the index and embedding model install automatically in the background."
+                      : (retrievalStatus?.reason ??
+                        "No local documentation index is available yet.")}
+                  </p>
+                </div>
+              )}
+            </div>
+            {retrievalError && (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+              >
+                {retrievalError}
+              </div>
+            )}
+          </section>
+        </Card>
         <SettingRow
           id="crash-reporting"
           description="No crash reports are sent. Errors stay local."
@@ -2999,8 +4049,8 @@ function PrivacySection({
             platform === "linux"
               ? "Stable-only. Linux updates are installed through the signed apt repository or by downloading the next package; the app does not replace unsigned Linux executables automatically."
               : platform === "windows"
-                ? "Stable-only. Microsoft Store builds update through the Store. Other signed builds check the release channel and ask before restarting."
-                : "Stable-only. Signed builds check the release channel on launch and every four hours, then ask before restarting."
+                ? "Stable-only, never pre-releases. Microsoft Store builds update through the Store. Other signed builds check the release channel, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit."
+                : "Stable-only, never pre-releases. Signed builds check the release channel on launch and every four hours, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit."
           }
           control={
             <Pill tone="success">
@@ -3027,6 +4077,71 @@ function PrivacySection({
         onClose={() => setRegistryModalOpen(false)}
         onSave={onSetRegistrySource}
       />
+    </div>
+  );
+}
+
+function SettingsSwitch({
+  checked,
+  disabled,
+  label,
+  describedBy,
+  onClick,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  describedBy?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      aria-describedby={describedBy}
+      disabled={disabled}
+      onClick={onClick}
+      className={`relative h-6 w-10 rounded-full ring-1 transition-colors duration-150 enabled:hover:ring-[var(--color-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 ${
+        checked
+          ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
+          : "bg-[var(--color-bg-raised)] ring-[var(--color-border-strong)]"
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`absolute left-1 top-1 h-4 w-4 rounded-full transition-transform duration-150 ${
+          checked
+            ? "translate-x-4 bg-[var(--color-on-accent)]"
+            : "translate-x-0 bg-[var(--color-text-muted)]"
+        }`}
+      />
+    </button>
+  );
+}
+
+function RetrievalDetail({
+  label,
+  value,
+  dateTime,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  dateTime?: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </dt>
+      <dd
+        className={`mt-1 break-words text-[11px] text-[var(--color-text-soft)] ${mono ? "font-mono" : ""}`}
+      >
+        {dateTime ? <time dateTime={dateTime}>{value}</time> : value}
+      </dd>
     </div>
   );
 }
@@ -3700,6 +4815,16 @@ function formatFuture(iso: string): string {
   if (ms < 60 * 60 * 1000) return `${Math.ceil(ms / 60_000)}m`;
   if (ms < 24 * 60 * 60 * 1000) return `${Math.ceil(ms / (60 * 60_000))}h`;
   return new Date(iso).toLocaleDateString();
+}
+
+function formatRetrievalBuildDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
 }
 
 function formatDateTime(value: string) {

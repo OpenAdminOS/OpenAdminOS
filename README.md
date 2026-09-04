@@ -17,7 +17,7 @@
 
 [**Download**](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) · [**Website**](https://openadminos.com) · [**Docs**](docs/SPEC.md) · [**Contributing**](CONTRIBUTING.md) · [**Changelog**](CHANGELOG.md)
 
-![OpenAdminOS Intune Chat with sourced device findings and a matching agent](docs/screenshots/app/chat-transcript.png)
+![OpenAdminOS chat with sourced device findings and a matching agent](docs/screenshots/app/chat-transcript.png)
 
 </div>
 
@@ -96,17 +96,22 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 
 ### What's shipped vs what's coming
 
-| Area | Shipped in v0.2.5 | Coming next |
+| Area | Shipped | Coming next |
 |---|---|---|
-| Tenant connect | The Chat-first shell opens immediately. MSAL sign-in and grouped permission review appear contextually when an action needs a tenant. Multi-tenant switching, tenant groups, and explicit multi-tenant chat scope review are implemented. | Further tenant readiness polish as live pilots find gaps. |
-| Intune Chat | Single-tenant chat, explicit multi-tenant read aggregation, saved queries, readiness preflight, local exports, and hosted-provider confirmations are implemented. | Broader answer panes and more resource-specific investigation views. |
+| Tenant connect | A fresh install opens tenant setup automatically. MSAL sign-in and grouped permission review otherwise appear contextually when an action needs a tenant. Multi-tenant switching, tenant groups, and explicit multi-tenant chat scope review are implemented. | An OpenAdminOS-branded, publisher-verified app registration to replace the Microsoft Graph CLI first-party app, plus bring-your-own registration. |
+| Chat (Intune, Entra, Defender) | Single-tenant chat, explicit multi-tenant read aggregation, saved queries, readiness preflight, local exports, and hosted-provider confirmations are implemented. Chat reads Intune, Entra (roles, policies, admin units, app credentials, domains), and Defender (alerts, incidents, Secure Score) as first-class cached surfaces. | Broader answer panes and Defender hunting queries. |
+| Drift, baselines, and rollback | The Changes view captures a versioned drift timeline across Intune and Entra configuration, pins named baselines, compares two points in time or two tenants, exports a baseline as a portable bundle, and rolls drift back to baseline through the typed write-confirmation gate. | Scheduled baseline evaluation routed through connector delivery, and per-object rollback selection. |
+| Fleet | For two or more tenants, a Fleet view aggregates per-tenant baseline drift, filterable by tenant group. | Fleet-wide actions with per-tenant confirmation. |
+| Governed MCP gateway | A local, loopback-only, token-authenticated MCP server (off by default) lets external AI clients read one tenant and propose writes that still require your typed confirmation in the app. | Entra Agent ID interop. |
+| Documentation grounding | A local retrieval engine ranks an installed documentation index against questions, on-device, with source provenance and an honest state when no index is present. | First-run index download and on-device embedding serving. |
+| Usage telemetry | Opt-in, off by default, counts and versions only, with the exact payload shown before it can ever be sent. | A hosted collector and public install counter. |
 | Workspaces | Single-tenant investigation workspaces with pinned evidence, notes, linked chats, linked runs, local instructions, and local dossier export are implemented. | More workspace import/export polish. |
 | Agent registry | Agent Hub fetches `agents/index.json`, caches locally, version-pins installs, reviews scope-diff updates, and supports custom registry sources. | More maintainer workflow automation. |
 | Build your own Agent | Guided manifest drafting, validation, repair, editable YAML review, local preflight, install, edit, export, and public "Share with community" issue intake are implemented. | More examples and better Graph QA messages. |
 | Reference agents | The repo includes investigator, advisor, dashboard, cleanup, and one experimental script agent. | More agents after maintainer review. |
 | Connectors | Outbound-only Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal delivery are implemented. They send terminal run reports and do not read messages or inboxes. | ServiceNow and other enterprise connectors remain future work. |
 | Schedules | Per-agent schedules use the OS scheduler on macOS and Windows after tenant sign-in. Scheduled runs still use the signed app and local state. | More schedule health and audit polish. |
-| macOS menu bar | The signed app includes a menu-bar companion for active tenant/provider state, schedules, recent activity, and a compact read-only Intune Chat prompt. | Windows/Linux companion surfaces are not planned for 0.3. |
+| macOS menu bar | The signed app includes a menu-bar companion for active tenant/provider state, schedules, recent activity, and a compact read-only chat prompt. | Windows/Linux companion surfaces are not planned for 0.3. |
 | LLM providers | Ollama, Apple Foundation Models on compatible macOS, and OpenAI through the local Codex CLI are implemented. | Anthropic via Claude Code CLI, LM Studio, and Azure OpenAI are planned for 0.3. |
 | MXC sandbox | The Intune Device Posture Auditor uses `execution.kind: script` behind the experimental MXC setting. Normal community agents remain YAML templates. | Hardened sandbox policy before arbitrary community script agents. |
 | Installers | macOS DMG/PKG builds are signed and notarized. Windows x64 ships a code-signed NSIS installer. Linux x64 AppImage, `.deb`, `.rpm`, and the apt repository are published. | Microsoft Store (AppX) distribution. |

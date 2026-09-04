@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { Select } from "./Select";
 import { useNavigate } from "react-router";
 
 import { Button } from "./Button";
@@ -792,7 +793,7 @@ function BuilderSelect({
   return (
     <label className="block text-[11.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
       {label}
-      <select
+      <Select
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -803,7 +804,7 @@ function BuilderSelect({
             {option}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }

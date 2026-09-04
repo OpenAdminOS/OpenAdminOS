@@ -337,6 +337,113 @@ export class RunService {
     return queued.queuedRun;
   }
 
+  /**
+   * Queue a host-generated baseline-rollback run. The plan is built
+   * deterministically by the drift service; this method only records it
+   * and parks the run at the standard typed confirmation gate. Nothing
+   * applies until `confirmRun` receives the exact phrase.
+   */
+  async startRollbackRun(input: {
+    tenantId: string;
+    baselineId: string;
+    plan: NonNullable<RunRecord["plan"]>;
+    requiredScopes: string[];
+    manualCount: number;
+  }): Promise<RunRecord> {
+    if (input.plan.actions.length === 0) {
+      throw new Error(
+        "No drifted objects can be rolled back automatically. Review the manual items in the drift detail.",
+      );
+    }
+    const queuedAt = new Date().toISOString();
+    const run: RunRecord = {
+      id: `run_${randomUUID()}`,
+      agentSlug: "baseline-rollback",
+      origin: "baseline-rollback",
+      rollback: {
+        baselineId: input.baselineId,
+        requiredScopes: input.requiredScopes,
+        manualCount: input.manualCount,
+      },
+      status: "awaiting-confirmation",
+      queuedAt,
+      trigger: "manual",
+      summary: input.plan.summary,
+      steps: [],
+      logs: [],
+      plan: input.plan,
+      tenantId: input.tenantId,
+    };
+    await this.host.serialize(async () => {
+      const persisted = await this.host.read();
+      await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
+    });
+    this.host.recordLearningEventSafely({
+      tenantId: input.tenantId,
+      agentSlug: "baseline-rollback",
+      eventType: "drift.rollback-plan-queued",
+      source: "run",
+      payload: {
+        runId: run.id,
+        baselineId: input.baselineId,
+        actionCount: input.plan.actions.length,
+        manualCount: input.manualCount,
+      },
+    });
+    return run;
+  }
+
+  /**
+   * Queue an external gateway proposal as a system run. The plan was
+   * validated by the gateway host; it parks at the same typed
+   * confirmation gate and can never apply without a human in the app.
+   */
+  async startExternalProposalRun(input: {
+    tenantId: string;
+    clientName: string;
+    plan: NonNullable<RunRecord["plan"]>;
+    requiredScopes: string[];
+  }): Promise<RunRecord> {
+    if (input.plan.actions.length === 0) {
+      throw new Error("A proposal needs at least one action.");
+    }
+    const queuedAt = new Date().toISOString();
+    const run: RunRecord = {
+      id: `run_${randomUUID()}`,
+      agentSlug: "external-proposal",
+      origin: "external-proposal",
+      external: {
+        clientName: input.clientName,
+        requiredScopes: input.requiredScopes,
+      },
+      status: "awaiting-confirmation",
+      queuedAt,
+      trigger: "manual",
+      summary: input.plan.summary,
+      steps: [],
+      logs: [],
+      plan: input.plan,
+      tenantId: input.tenantId,
+    };
+    await this.host.serialize(async () => {
+      const persisted = await this.host.read();
+      await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
+    });
+    this.host.recordLearningEventSafely({
+      tenantId: input.tenantId,
+      agentSlug: "external-proposal",
+      eventType: "gateway.proposal-queued",
+      source: "run",
+      payload: {
+        runId: run.id,
+        clientName: input.clientName,
+        actionCount: input.plan.actions.length,
+      },
+    });
+    this.host.emitStateChanged("gateway-proposal-queued", run.id);
+    return run;
+  }
+
   async confirmRun(runId: string, phrase: string): Promise<RunRecord> {
     const transition = await this.host.serialize(async () => {
       const persisted = await this.host.read();
@@ -354,6 +461,31 @@ export class RunService {
       }
       if (phrase !== run.plan.confirmationPhrase) {
         throw new Error("Confirmation phrase does not match.");
+      }
+
+      // System runs (baseline rollback, external gateway proposals) are
+      // host-generated and have no installed agent behind them;
+      // everything above (existence, status, stored plan, exact typed
+      // phrase) is enforced identically.
+      if (run.origin !== undefined) {
+        const confirmedAt = new Date().toISOString();
+        const updated: RunRecord = {
+          ...run,
+          status: "running",
+          confirmedAt,
+          startedAt: confirmedAt,
+          summary:
+            run.origin === "baseline-rollback"
+              ? "Rollback is applying."
+              : "Approved proposal is applying.",
+        };
+        await this.host.write({
+          ...persisted,
+          runs: persisted.runs.map((existing) =>
+            existing.id === runId ? updated : existing,
+          ),
+        });
+        return { kind: "rollback" as const, updated };
       }
 
       const agent = persisted.installedAgents.find(
@@ -393,8 +525,26 @@ export class RunService {
           persisted.activeModelByProviderId,
         ).model;
 
-      return { agent, providerId, model, updated };
+      return { kind: "agent" as const, agent, providerId, model, updated };
     });
+
+    if (transition.kind === "rollback") {
+      void this.driveSystemApply({ run: transition.updated });
+      this.host.recordLearningEventSafely({
+        tenantId: transition.updated.tenantId,
+        agentSlug: transition.updated.agentSlug,
+        eventType:
+          transition.updated.origin === "baseline-rollback"
+            ? "drift.rollback-plan-confirmed"
+            : "gateway.proposal-confirmed",
+        source: "run",
+        payload: {
+          runId: transition.updated.id,
+          actionCount: transition.updated.plan?.actions.length ?? 0,
+        },
+      });
+      return transition.updated;
+    }
 
     void this.driveApply({
       run: transition.updated,
@@ -530,6 +680,113 @@ export class RunService {
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
+    }
+  }
+
+  /**
+   * Apply a confirmed system-run plan (baseline rollback or approved
+   * gateway proposal). Actions run strictly in order and the apply is
+   * fail-stop: the first Graph error marks the run failed with an
+   * exact count of what was applied, and nothing after the failed
+   * action is attempted. The stored plan is the only source of
+   * requests; nothing is re-rendered at apply time.
+   */
+  private async driveSystemApply(input: { run: RunRecord }): Promise<void> {
+    const plan = input.run.plan;
+    const isRollback = input.run.origin === "baseline-rollback";
+    const noun = isRollback ? "Rollback" : "Proposal";
+    try {
+      if (!plan) throw new Error(`${noun} run has no plan.`);
+      const scopes =
+        input.run.rollback?.requiredScopes ??
+        input.run.external?.requiredScopes ??
+        [];
+      const selection = await this.host.buildGraph(input.run.tenantId, scopes);
+      const graph = selection.createGraph((level, message, metadata) => {
+        void this.appendRunLog(input.run.id, level, message, metadata);
+      });
+      let run = this.stampTenant(input.run, selection.tenantId);
+      let applied = 0;
+      for (const [index, action] of plan.actions.entries()) {
+        const startedAt = new Date().toISOString();
+        const step = {
+          id: `step_rollback_${index}`,
+          runId: run.id,
+          label: action.label,
+          status: "running" as const,
+          ...(action.description ? { detail: action.description } : {}),
+          startedAt,
+        };
+        run = { ...run, steps: [...run.steps, step] };
+        await this.persistRunSnapshot(run);
+        try {
+          if (!action.request) {
+            throw new Error(`${noun} action carries no Graph request.`);
+          }
+          await graph.request({
+            method: action.request.method,
+            path: action.request.path,
+            ...(action.request.body !== undefined
+              ? { body: action.request.body }
+              : {}),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const finishedAt = new Date().toISOString();
+          run = {
+            ...run,
+            steps: run.steps.map((existing) =>
+              existing.id === step.id
+                ? { ...existing, status: "failed", finishedAt, detail: message }
+                : existing,
+            ),
+            status: "failed",
+            finishedAt,
+            error: message,
+            summary: `${noun} stopped at "${action.label}" after applying ${applied} of ${plan.actions.length} actions. Nothing after the failed action was attempted.`,
+          };
+          await this.persistRunSnapshot(run);
+          return;
+        }
+        applied += 1;
+        run = {
+          ...run,
+          steps: run.steps.map((existing) =>
+            existing.id === step.id
+              ? { ...existing, status: "completed", finishedAt: new Date().toISOString() }
+              : existing,
+          ),
+        };
+        await this.persistRunSnapshot(run);
+      }
+      const manualCount = input.run.rollback?.manualCount ?? 0;
+      run = {
+        ...run,
+        status: "completed",
+        finishedAt: new Date().toISOString(),
+        summary:
+          (isRollback
+            ? applied === 1
+              ? "1 object rolled back to its baseline state."
+              : `${applied} objects rolled back to their baseline state.`
+            : applied === 1
+              ? "1 proposed change applied."
+              : `${applied} proposed changes applied.`) +
+          (manualCount > 0
+            ? ` ${manualCount} ${manualCount === 1 ? "change" : "changes"} still need manual review.`
+            : ""),
+        result: { appliedActions: applied, manualItems: manualCount },
+      };
+      await this.persistRunSnapshot(run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.persistRunSnapshot({
+        ...input.run,
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+        summary: `${noun} failed before any action was applied: ${message}`,
+        error: message,
+      });
     }
   }
 

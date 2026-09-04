@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Select } from "./Select";
 import { Button } from "./Button";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
@@ -138,7 +139,7 @@ export function AgentScheduleCard({
           <label className="sr-only" htmlFor="custom-schedule-unit">
             Custom schedule unit
           </label>
-          <select
+          <Select
             id="custom-schedule-unit"
             name="custom-schedule-unit"
             value={customUnit}
@@ -150,7 +151,7 @@ export function AgentScheduleCard({
           >
             <option value="minutes">minutes</option>
             <option value="hours">hours</option>
-          </select>
+          </Select>
           <Button
             variant="secondary"
             size="sm"

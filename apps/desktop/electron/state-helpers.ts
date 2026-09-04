@@ -529,7 +529,7 @@ export function buildMultiTenantDossierMarkdown(input: {
   rows: MultiTenantDeviceRow[];
 }): string {
   const lines = [
-    "# Multi-tenant Intune Chat dossier",
+    "# Multi-tenant Chat dossier",
     "",
     `Generated: ${input.generatedAt}`,
     `Provider: ${input.providerName}${input.model ? ` · ${input.model}` : ""}`,
@@ -653,6 +653,66 @@ export function readPlannedChatRows(
 export const GRAPH_CACHE_PAGE_LIMIT = 10;
 
 
+/**
+ * How many resources refresh at once. Graph throttles per resource
+ * unit, so a handful of different resources in flight together stays
+ * well inside normal limits while removing most of the wait before an
+ * answer can start.
+ */
+export const GRAPH_REFRESH_CONCURRENCY = 4;
+
+
+/**
+ * Directory resources that support `$count=true` with
+ * `ConsistencyLevel: eventual`. Asking for the count returns the true
+ * tenant-wide total in the same request, which is the only way to
+ * answer "how many" correctly once a collection exceeds the cache row
+ * limit. Intune resources are deliberately excluded: `$count` is not
+ * supported across `/deviceManagement`, and sending it there fails the
+ * whole request.
+ */
+/**
+ * How long a cached resource stays usable before a question triggers a
+ * refresh. A single six-hour rule was wrong in both directions: sign-in
+ * and audit data is stale within minutes, while Autopilot profiles and
+ * enrollment configurations change a few times a year and were being
+ * re-fetched needlessly.
+ */
+const RESOURCE_STALENESS_MS: Readonly<Record<string, number>> = {
+  signIns: 15 * 60 * 1000,
+  directoryAudits: 15 * 60 * 1000,
+  intuneAuditEvents: 15 * 60 * 1000,
+  securityAlerts: 15 * 60 * 1000,
+  securityIncidents: 15 * 60 * 1000,
+  troubleshootingEvents: 30 * 60 * 1000,
+  autopilotEvents: 30 * 60 * 1000,
+  managedDevices: 6 * 60 * 60 * 1000,
+  entraDevices: 6 * 60 * 60 * 1000,
+  users: 6 * 60 * 60 * 1000,
+  groups: 6 * 60 * 60 * 1000,
+  detectedApps: 12 * 60 * 60 * 1000,
+  managedDeviceEncryptionStates: 12 * 60 * 60 * 1000,
+  secureScores: 12 * 60 * 60 * 1000,
+};
+
+/** Resources not listed above change rarely; a day is plenty. */
+export const DEFAULT_RESOURCE_STALENESS_MS = 24 * 60 * 60 * 1000;
+
+export function resourceStalenessMs(resource: string): number {
+  return RESOURCE_STALENESS_MS[resource] ?? DEFAULT_RESOURCE_STALENESS_MS;
+}
+
+
+export const COUNTABLE_GRAPH_RESOURCES: ReadonlySet<string> = new Set([
+  "users",
+  "groups",
+  "entraDevices",
+  "applications",
+  "servicePrincipals",
+  "administrativeUnits",
+]);
+
+
 export const GRAPH_CACHE_ROW_LIMIT = 1000;
 
 
@@ -668,6 +728,8 @@ export interface GraphCacheRequestPage {
 export interface GraphCollectionPage {
   rows: unknown[];
   nextLink?: string;
+  /** `@odata.count` when the request asked for it. */
+  totalCount?: number;
 }
 
 
@@ -675,8 +737,15 @@ export interface GraphCollectionPage {
 export async function fetchGraphCachePages(
   graph: RunGraphApi,
   request: GraphCacheRequestPage,
-): Promise<{ rows: unknown[]; pages: number; pageLimitReached: boolean }> {
+  signal?: AbortSignal,
+): Promise<{
+  rows: unknown[];
+  pages: number;
+  pageLimitReached: boolean;
+  totalCount?: number;
+}> {
   const rows: unknown[] = [];
+  let totalCount: number | undefined;
   let pages = 0;
   let nextRequest: GraphCacheRequestPage | undefined = request;
   let pendingNextLink: string | undefined;
@@ -693,8 +762,12 @@ export async function fetchGraphCachePages(
         ? { query: nextRequest.query }
         : {}),
       ...(nextRequest.headers ? { headers: nextRequest.headers } : {}),
+      ...(signal ? { signal } : {}),
     });
     const page = unwrapGraphCollectionPage(response);
+    if (totalCount === undefined && page.totalCount !== undefined) {
+      totalCount = page.totalCount;
+    }
     pages += 1;
     const remainingRows = GRAPH_CACHE_ROW_LIMIT - rows.length;
     rows.push(...page.rows.slice(0, remainingRows));
@@ -707,7 +780,11 @@ export async function fetchGraphCachePages(
   return {
     rows,
     pages,
-    pageLimitReached: Boolean(pendingNextLink),
+    // A final page that overflows the row cap without advertising a
+    // nextLink would otherwise be reported as complete while rows were
+    // dropped, which is a silent truncation.
+    pageLimitReached: Boolean(pendingNextLink) || rows.length >= GRAPH_CACHE_ROW_LIMIT,
+    ...(totalCount !== undefined ? { totalCount } : {}),
   };
 }
 
@@ -829,13 +906,21 @@ export function unwrapGraphCollectionPage(response: unknown): GraphCollectionPag
     response !== null &&
     Array.isArray((response as { value?: unknown }).value)
   ) {
-    const record = response as { value: unknown[]; "@odata.nextLink"?: unknown };
+    const record = response as {
+      value: unknown[];
+      "@odata.nextLink"?: unknown;
+      "@odata.count"?: unknown;
+    };
+    const count = record["@odata.count"];
     return {
       rows: record.value,
       nextLink:
         typeof record["@odata.nextLink"] === "string"
           ? record["@odata.nextLink"]
           : undefined,
+      ...(typeof count === "number" && Number.isFinite(count)
+        ? { totalCount: count }
+        : {}),
     };
   }
   return { rows: response === undefined || response === null ? [] : [response] };
@@ -881,10 +966,13 @@ export function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProv
 
 export function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
   return [
-    "You are OpenAdminOS Intune Chat.",
+    "You are OpenAdminOS Chat.",
     "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
     "If the context is missing, stale, partial, or has Graph errors, say that plainly.",
     "Do not invent tenant state, counts, users, devices, policies, or remediation results.",
+    "A tool returning zero rows means zero matched that query, not that the tenant has none. Never state that a tenant has none of something on the strength of an empty result; check the unfiltered count first.",
+    "For any question about how many, use tenantTotal when present, otherwise the breakdowns, which are counted over every cached row. Never count the sampleRows: they are a small illustrative subset, and counting them undercounts.",
+    "When cachedRows is below tenantTotal, or pageLimitReached is true, say that the detail rows cover only part of the tenant.",
     "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",
     isLocalProvider
       ? "The selected provider is local; keep wording consistent with local-only trust."

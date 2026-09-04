@@ -58,6 +58,9 @@ export default function RunResult() {
     : undefined;
   const isLive = run?.status === "queued" || run?.status === "running";
   const isAwaiting = run?.status === "awaiting-confirmation";
+  const isBaselineRollback = run?.origin === "baseline-rollback";
+  const isExternalProposal = run?.origin === "external-proposal";
+  const isSystemRun = run?.origin !== undefined;
   const runTenant = run?.tenantId
     ? state.tenants.find((tenant) => tenant.id === run.tenantId)
     : undefined;
@@ -164,7 +167,15 @@ export default function RunResult() {
             <IconArrowLeft size={12} aria-hidden="true" /> Run history
           </button>
         }
-        title={agent ? formatAgentDisplayName(agent) : run.agentSlug}
+        title={
+          isBaselineRollback
+            ? "Baseline rollback"
+            : isExternalProposal
+              ? `External proposal from ${run.external?.clientName ?? "unknown client"}`
+              : agent
+                ? formatAgentDisplayName(agent)
+                : run.agentSlug
+        }
         subtitle={
           <div className="flex flex-col gap-1">
             <span className="inline-flex flex-wrap items-center gap-2">
@@ -196,6 +207,16 @@ export default function RunResult() {
                 </Pill>
               )}
             </span>
+            {isExternalProposal && (
+              <span className="inline-flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]">
+                <IconLock size={10} aria-hidden="true" />
+                <span>
+                  Required scopes: {run.external?.requiredScopes.length
+                    ? run.external.requiredScopes.join(", ")
+                    : "none declared"}
+                </span>
+              </span>
+            )}
             <span className="inline-flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
               <span>Run result</span>
               <span className="opacity-50">·</span>
@@ -291,7 +312,7 @@ export default function RunResult() {
                 </Button>
               </>
             )}
-            {!isLive && !isAwaiting && (
+            {!isLive && !isAwaiting && !isSystemRun && (
               <Button
                 variant="primary"
                 size="md"
@@ -306,30 +327,34 @@ export default function RunResult() {
         }
       />
       <PageBody>
-        <TenantDriftNote
-          runTenantId={run.tenantId}
-          activeTenantId={state.activeTenantId}
-          tenants={state.tenants}
-          onRetargetCurrent={() => {
-            if (
-              !requireTenantAndProvider(
-                createPendingIntent({
-                  kind: "agent-run",
-                  slug: run.agentSlug,
-                  ...(state.activeTenantId ? { tenantId: state.activeTenantId } : {}),
-                  returnTo: `/runs/${encodeURIComponent(run.id)}`,
-                }),
-              )
-            ) {
-              return;
-            }
-            const options: { tenantId?: string } = {};
-            if (state.activeTenantId) options.tenantId = state.activeTenantId;
-            void startRun(run.agentSlug, options).then((nextRun) =>
-              navigate(`/runs/${nextRun.id}`),
-            );
-          }}
-        />
+        {!isSystemRun ? (
+          <TenantDriftNote
+            runTenantId={run.tenantId}
+            activeTenantId={state.activeTenantId}
+            tenants={state.tenants}
+            onRetargetCurrent={() => {
+              if (
+                !requireTenantAndProvider(
+                  createPendingIntent({
+                    kind: "agent-run",
+                    slug: run.agentSlug,
+                    ...(state.activeTenantId
+                      ? { tenantId: state.activeTenantId }
+                      : {}),
+                    returnTo: `/runs/${encodeURIComponent(run.id)}`,
+                  }),
+                )
+              ) {
+                return;
+              }
+              const options: { tenantId?: string } = {};
+              if (state.activeTenantId) options.tenantId = state.activeTenantId;
+              void startRun(run.agentSlug, options).then((nextRun) =>
+                navigate(`/runs/${nextRun.id}`),
+              );
+            }}
+          />
+        ) : null}
 
         <OutcomeCard
           run={run}
@@ -462,6 +487,12 @@ function OutcomeCard({
               </Pill>
             )}
           </div>
+          {run.rollback && run.rollback.manualCount > 0 ? (
+            <div className="mt-3 text-[12px] text-[var(--color-text-muted)]">
+              {run.rollback.manualCount.toLocaleString()} changes need manual
+              review and are not part of this plan.
+            </div>
+          ) : null}
         </div>
         <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] p-6 lg:border-l lg:border-t-0">
           <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">

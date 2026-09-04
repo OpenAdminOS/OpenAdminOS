@@ -223,6 +223,53 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-drift-object-history", input),
   getDriftStatus: (tenantId: string) =>
     ipcRenderer.invoke("openadminos:get-drift-status", tenantId),
+  listDriftBaselines: (input) =>
+    ipcRenderer.invoke("openadminos:list-drift-baselines", input),
+  createDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:create-drift-baseline", input),
+  renameDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:rename-drift-baseline", input),
+  retireDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:retire-drift-baseline", input),
+  getDriftBaselineDrift: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-baseline-drift", input),
+  getDriftTimeCompare: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-time-compare", input),
+  getDriftTenantCompare: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-tenant-compare", input),
+  startBaselineRollback: (input) =>
+    ipcRenderer.invoke("openadminos:start-baseline-rollback", input),
+  getFleetDriftStatus: (input) =>
+    ipcRenderer.invoke("openadminos:get-fleet-drift-status", input),
+  getUsageTelemetryPreview: () =>
+    ipcRenderer.invoke("openadminos:get-usage-telemetry-preview"),
+  setUsageTelemetryEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-usage-telemetry-enabled", enabled),
+  sendUsageTelemetryTest: () =>
+    ipcRenderer.invoke("openadminos:send-usage-telemetry-test"),
+  getRetrievalStatus: () =>
+    ipcRenderer.invoke("openadminos:get-retrieval-status"),
+  refreshRetrievalIndex: () =>
+    ipcRenderer.invoke("openadminos:refresh-retrieval-index"),
+  installRetrievalIndex: (input) =>
+    ipcRenderer.invoke("openadminos:install-retrieval-index", input),
+  getRetrievalAutoInstall: () =>
+    ipcRenderer.invoke("openadminos:get-retrieval-auto-install"),
+  setRetrievalAutoInstall: (enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-retrieval-auto-install", enabled),
+  getGatewayStatus: () => ipcRenderer.invoke("openadminos:get-gateway-status"),
+  enableGateway: (input) => ipcRenderer.invoke("openadminos:enable-gateway", input),
+  disableGateway: () => ipcRenderer.invoke("openadminos:disable-gateway"),
+  regenerateGatewayToken: () =>
+    ipcRenderer.invoke("openadminos:regenerate-gateway-token"),
+  revokeGatewayClient: (clientId: string) =>
+    ipcRenderer.invoke("openadminos:revoke-gateway-client", clientId),
+  exportDriftBaseline: (input) =>
+    ipcRenderer.invoke("openadminos:export-drift-baseline", input),
+  readDriftBundleFile: () =>
+    ipcRenderer.invoke("openadminos:read-drift-bundle-file"),
+  getDriftBundleCompare: (input) =>
+    ipcRenderer.invoke("openadminos:get-drift-bundle-compare", input),
   getGraphCacheRefreshSchedule: (tenantId?: string) =>
     ipcRenderer.invoke("openadminos:get-graph-cache-refresh-schedule", tenantId),
   setGraphCacheRefreshSchedule: (input) =>
@@ -381,7 +428,8 @@ const api: OpenAdminOSApi = {
   listTenants: () => ipcRenderer.invoke("openadminos:list-tenants"),
   getRequestedScopes: () =>
     ipcRenderer.invoke("openadminos:get-requested-scopes"),
-  connectTenant: () => ipcRenderer.invoke("openadminos:connect-tenant"),
+  connectTenant: (options?) =>
+    ipcRenderer.invoke("openadminos:connect-tenant", options),
   cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:set-active-tenant", id),

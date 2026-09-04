@@ -16,13 +16,32 @@ import {
   type IntuneChatToolContext,
 } from "./tools.js";
 
-const MAX_AGENTIC_ITERATIONS = 6;
+/**
+ * Tool calls allowed per question. Six was reached by questions that
+ * genuinely need cross-referencing, for example matching installed apps
+ * against what was deployed, and those fell back rather than finishing.
+ *
+ * Eight rather than a larger number: across 50 questions measured
+ * against a real tenant, exactly one used more than six calls, and it
+ * used eight. A higher ceiling buys no additional completed
+ * investigation and only widens the worst-case wait.
+ */
+export const MAX_AGENTIC_ITERATIONS = 8;
+
+/**
+ * How many malformed replies to coach through before giving up. One
+ * retry was too few for local models: a single slip ended investigative
+ * mode and dropped the question back to keyword-planned context.
+ */
+const MAX_MALFORMED_RETRIES = 3;
 const DEFAULT_OBSERVATION_CHAR_BUDGET = 36_000;
 
 export const AGENTIC_TOOL_PROTOCOL = [
   "Use one tool call per iteration.",
   "To call a tool, respond with only a fenced JSON block:",
-  '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":25}}\n```',
+  '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","where":{"complianceState":"noncompliant"},"limit":25}}\n```',
+  "Every brace and bracket you open must be closed.",
+  "If you do not know the Graph path for something, call find_graph_endpoint first rather than guessing a path.",
   "Do not call write tools. No write tools exist.",
   "When you have enough evidence, either answer in plain prose or return:",
   '```json\n{"final":true,"answer":"..."}\n```',
@@ -30,6 +49,12 @@ export const AGENTIC_TOOL_PROTOCOL = [
 
 export interface RunAgenticChatInput {
   question: string;
+  /**
+   * Documentation passages retrieved for this question. Empty when no
+   * index is installed. Included so investigative answers are grounded
+   * in product behaviour the same way deterministic answers are.
+   */
+  documentation?: ReadonlyArray<{ file: string; title?: string; text: string }>;
   tenant: TenantRecord;
   providerId: ProviderId;
   providerIsLocal: boolean;
@@ -97,10 +122,18 @@ export async function runAgenticChat(
 
   const turns: LoopTurn[] = [];
   const toolTrace: IntuneChatToolTraceEntry[] = [];
-  let repairAttempted = false;
+  let malformedCount = 0;
   let responseModel = input.model;
 
-  for (let iteration = 1; iteration <= MAX_AGENTIC_ITERATIONS; iteration += 1) {
+  // Turns spent coaching the model back into valid JSON must not eat
+  // the investigation budget: a model that slips twice and then works
+  // correctly was reaching the tool-call cap with only three or four
+  // actual tool calls made, and losing the investigation to a fallback.
+  let iteration = 0;
+  let attempts = 0;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + 1;
+  while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
+    attempts += 1;
     assertNotCancelled(input.signal);
     const completion = await input.llm.complete({
       system: buildAgenticSystemPrompt(input),
@@ -116,27 +149,35 @@ export async function runAgenticChat(
 
     const action = parseModelAction(assistantText);
     if (action.kind === "malformed") {
-      if (repairAttempted) {
+      malformedCount += 1;
+      if (malformedCount > MAX_MALFORMED_RETRIES) {
         return {
           ok: false,
           reason: "malformed-output",
-          fallbackNotice:
-            "Investigative mode returned malformed tool JSON twice. Deterministic retrieval was used instead.",
+          fallbackNotice: `Investigative mode returned malformed tool JSON ${malformedCount} times. Deterministic retrieval was used instead.`,
           toolTrace,
           iterations: iteration,
           ...(responseModel ? { model: responseModel } : {}),
         };
       }
-      repairAttempted = true;
       turns.push({
         role: "repair",
-        content:
-          "Your last message was not valid tool JSON for OpenAdminOS. Reply with exactly one fenced JSON block using either {\"tool\":\"...\",\"params\":{...}} or {\"final\":true,\"answer\":\"...\"}. Do not include any write action.",
+        content: [
+          "That was not valid tool JSON. Reply with exactly one fenced JSON block and nothing else.",
+          "To read cached rows:",
+          '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":25}}\n```',
+          "To find a Graph path when you do not know it:",
+          '```json\n{"tool":"find_graph_endpoint","params":{"query":"conditional access named locations"}}\n```',
+          "To finish:",
+          '```json\n{"final":true,"answer":"..."}\n```',
+          "Every brace and bracket you open must be closed.",
+        ].join("\n"),
       });
       continue;
     }
 
-    repairAttempted = false;
+    malformedCount = 0;
+    iteration += 1;
     if (action.kind === "final") {
       return {
         ok: true,
@@ -235,7 +276,16 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string 
       return `Assistant:\n${turn.content}`;
     })
     .join("\n\n");
+  const documentation = (input.documentation ?? [])
+    .map(
+      (chunk, index) =>
+        `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
+    )
+    .join("\n\n");
   return [
+    documentation
+      ? `Microsoft documentation retrieved locally. It describes general product behaviour, not this tenant's state. Cite it as [1], [2] when you rely on it.\n\n${documentation}`
+      : "",
     `Admin question:\n${input.question}`,
     transcript ? `Conversation so far:\n${transcript}` : "",
     "Next response:",
@@ -286,11 +336,8 @@ function extractLastJsonObject(text: string):
   );
   if (fenced.length > 0) {
     for (const block of fenced.slice().reverse()) {
-      try {
-        return { found: true, valid: true, value: JSON.parse(block) as unknown };
-      } catch {
-        // Keep looking; report malformed if none parse.
-      }
+      const parsed = parseLenient(block);
+      if (parsed.ok) return { found: true, valid: true, value: parsed.value };
     }
     return { found: true, valid: false, reason: "Fenced JSON did not parse." };
   }
@@ -302,13 +349,68 @@ function extractLastJsonObject(text: string):
       : { found: false };
   }
   for (const candidate of candidates.slice().reverse()) {
-    try {
-      return { found: true, valid: true, value: JSON.parse(candidate) as unknown };
-    } catch {
-      // Try earlier candidates.
-    }
+    const parsed = parseLenient(candidate);
+    if (parsed.ok) return { found: true, valid: true, value: parsed.value };
   }
   return { found: true, valid: false, reason: "JSON object did not parse." };
+}
+
+/**
+ * Parse a model's JSON, repairing the small mistakes local models make.
+ *
+ * An 8B model reliably picks the right tool but often drops a closing
+ * brace or leaves a trailing comma. Treating that as a protocol failure
+ * threw away a correct tool call and, after two strikes, abandoned
+ * investigative mode altogether, which is the difference between a
+ * small model being able to answer an unanticipated question and not.
+ * Repairs are structural only: no key, value, or tool name is invented.
+ */
+function parseLenient(block: string): { ok: true; value: unknown } | { ok: false } {
+  const attempts = [block, repairJsonText(block)];
+  for (const attempt of attempts) {
+    if (!attempt) continue;
+    try {
+      return { ok: true, value: JSON.parse(attempt) as unknown };
+    } catch {
+      // Fall through to the repaired form.
+    }
+  }
+  return { ok: false };
+}
+
+function repairJsonText(block: string): string | undefined {
+  let text = block.trim();
+  if (!text.startsWith("{")) return undefined;
+  // Drop a trailing comma before the end, then close any structures the
+  // model left open, innermost first.
+  text = text.replace(/,\s*$/, "");
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{" || char === "[") stack.push(char);
+    else if (char === "}" || char === "]") stack.pop();
+  }
+  if (inString) text += '"';
+  if (stack.length === 0) return undefined;
+  text = text.replace(/,\s*$/, "");
+  while (stack.length > 0) {
+    text += stack.pop() === "{" ? "}" : "]";
+  }
+  return text;
 }
 
 function findBalancedJsonCandidates(text: string): string[] {
@@ -353,6 +455,7 @@ function isToolName(value: string): value is IntuneChatInvestigationToolName {
   return (
     value === "list_cached_resources" ||
     value === "query_cache" ||
+    value === "find_graph_endpoint" ||
     value === "graph_get" ||
     value === "refresh_resource" ||
     value === "query_drift"

@@ -12,10 +12,15 @@ import { overlayStackSize } from "../shared/overlay-stack";
 // Reserve space at the top of the window for the macOS traffic-light buttons
 // (titleBarStyle: "hiddenInset" leaves them floating over the renderer) and
 // make that strip draggable so users can move the window from the top edge.
-// Harmless on Windows/Linux: just a thin extra header band.
+// On Windows the same strip is the drag region that the system window
+// controls are overlaid onto (titleBarOverlay), which is why it keeps its
+// height there. On Linux the native frame is still drawn, so the strip
+// would be nothing but wasted vertical space and is omitted.
 const TITLE_BAR_HEIGHT = 32;
 
 export function TitleBarInset() {
+  const platform = window.openAdminOS?.platform;
+  if (platform === "linux") return null;
   return (
     <div
       aria-hidden

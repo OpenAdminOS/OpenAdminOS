@@ -68,6 +68,7 @@ interface ResourceStatusRow {
   refreshed_at: string | null;
   scope_set_json: string;
   last_error: string | null;
+  tenant_total: number | null;
 }
 
 interface ResourceRow {
@@ -122,6 +123,15 @@ interface DriftObjectVersionRow {
   first_seen_at: string;
   removed_snapshot_id: string | null;
   removed_at: string | null;
+}
+
+interface DriftBaselineRow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  status: "active" | "retired";
+  created_at: string;
+  retired_at: string | null;
 }
 
 interface QueryCacheRow extends ResourceRow {
@@ -352,6 +362,26 @@ export interface DriftResourceStatsRecord {
   snapshotCount: number;
   totalTrackedVersions: number;
   currentObjectCount: number;
+}
+
+export interface DriftBaselineRecord {
+  id: string;
+  tenantId: string;
+  name: string;
+  status: "active" | "retired";
+  createdAt: string;
+  retiredAt?: string;
+  pinnedObjectCount: number;
+  resources: GraphCacheResourceKind[];
+}
+
+export interface DriftBaselineChangeRecord {
+  resource: GraphCacheResourceKind;
+  graphId: string;
+  kind: "added" | "removed" | "modified";
+  displayName?: string;
+  pinnedRawJson?: string;
+  currentRawJson?: string;
 }
 
 export class IntelligenceSqliteStore {
@@ -622,6 +652,7 @@ export class IntelligenceSqliteStore {
     rows: unknown[];
     pageCount?: number;
     pageLimitReached?: boolean;
+    tenantTotal?: number;
     refreshedAt: string;
   }): void {
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
@@ -676,9 +707,9 @@ export class IntelligenceSqliteStore {
         .prepare(
           `INSERT INTO graph_cache_status (
             tenant_id, resource, label, row_count, page_count, page_limit_reached,
-            refreshed_at, scope_set_json, last_error
+            refreshed_at, scope_set_json, last_error, tenant_total
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
           ON CONFLICT(tenant_id, resource) DO UPDATE SET
             label = excluded.label,
             row_count = excluded.row_count,
@@ -686,6 +717,7 @@ export class IntelligenceSqliteStore {
             page_limit_reached = excluded.page_limit_reached,
             refreshed_at = excluded.refreshed_at,
             scope_set_json = excluded.scope_set_json,
+            tenant_total = excluded.tenant_total,
             last_error = NULL`,
         )
         .run(
@@ -697,6 +729,7 @@ export class IntelligenceSqliteStore {
           input.pageLimitReached ? 1 : 0,
           input.refreshedAt,
           JSON.stringify(input.scopeSet),
+          input.tenantTotal ?? null,
         );
       this.db.exec("COMMIT");
     } catch (error) {
@@ -884,7 +917,7 @@ export class IntelligenceSqliteStore {
     const rows = this.db
       .prepare(
         `SELECT resource, label, row_count, page_count, page_limit_reached,
-                refreshed_at, scope_set_json, last_error
+                refreshed_at, scope_set_json, last_error, tenant_total
          FROM graph_cache_status
          WHERE tenant_id = ?`,
       )
@@ -909,8 +942,60 @@ export class IntelligenceSqliteStore {
         refreshedAt: row.refreshed_at ?? undefined,
         scopeSet: readJson<string[]>(row.scope_set_json, definition.scopes),
         lastError: row.last_error ?? undefined,
+        tenantTotal: row.tenant_total ?? undefined,
       };
     });
+  }
+
+  /**
+   * Exact counts over everything cached for a resource.
+   *
+   * The answer pack can only carry a few dozen sample rows, and
+   * breakdowns used to be counted from that sample, so a question like
+   * "how many devices are non-compliant" was answered from 40 rows out
+   * of a cache of up to a thousand. Counting in SQL costs one indexed
+   * scan and gives the model a number it can state outright.
+   */
+  aggregateGraphResource(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+  ): { total: number; breakdowns: Record<string, Record<string, number>> } {
+    const totalRow = this.db
+      .prepare(
+        `SELECT COUNT(*) AS total FROM graph_resources
+         WHERE tenant_id = ? AND resource = ?`,
+      )
+      .get(tenantId, resource) as unknown as { total: number } | undefined;
+
+    const breakdowns: Record<string, Record<string, number>> = {};
+    const columns: Array<{ field: string; expression: string }> = [
+      { field: "operatingSystem", expression: "operating_system" },
+      { field: "complianceState", expression: "compliance_state" },
+      { field: "userType", expression: "json_extract(raw_json, '$.userType')" },
+      { field: "accountEnabled", expression: "json_extract(raw_json, '$.accountEnabled')" },
+      { field: "trustType", expression: "json_extract(raw_json, '$.trustType')" },
+    ];
+    for (const column of columns) {
+      const grouped = this.db
+        .prepare(
+          `SELECT ${column.expression} AS bucket, COUNT(*) AS count
+           FROM graph_resources
+           WHERE tenant_id = ? AND resource = ?
+           GROUP BY bucket`,
+        )
+        .all(tenantId, resource) as unknown as Array<{
+        bucket: string | number | null;
+        count: number;
+      }>;
+      const counts: Record<string, number> = {};
+      for (const entry of grouped) {
+        if (entry.bucket === null) continue;
+        counts[String(entry.bucket)] = entry.count;
+      }
+      if (Object.keys(counts).length > 0) breakdowns[column.field] = counts;
+    }
+
+    return { total: totalRow?.total ?? 0, breakdowns };
   }
 
   listDriftSnapshots(
@@ -1178,6 +1263,457 @@ export class IntelligenceSqliteStore {
     });
   }
 
+  createDriftBaseline(input: {
+    tenantId: string;
+    name: string;
+    now: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): DriftBaselineRecord {
+    const name = normalizeDriftBaselineName(input.name);
+    const existing = this.getActiveDriftBaseline(input.tenantId);
+    if (existing) {
+      throw new Error(
+        `An active baseline already exists for this tenant ("${existing.name}"). Retire it before creating a new one.`,
+      );
+    }
+
+    const id = `baseline-${input.now}-${randomUUID().slice(0, 8)}`;
+    this.db.exec("BEGIN");
+    try {
+      const insertPin = this.db.prepare(
+        `INSERT INTO drift_baseline_pins (
+          baseline_id, tenant_id, resource, graph_id, version, content_hash
+        )
+        VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      let pinned = 0;
+      for (const resource of input.resources) {
+        for (const [graphId, latest] of this.readLatestDriftVersions(
+          input.tenantId,
+          resource,
+        )) {
+          if (latest.removed_at) continue;
+          insertPin.run(
+            id,
+            input.tenantId,
+            resource,
+            graphId,
+            latest.version,
+            latest.content_hash,
+          );
+          pinned += 1;
+        }
+      }
+      if (pinned === 0) {
+        throw new Error(
+          "No tracked configuration has been captured yet for this tenant. Refresh the tenant cache first, then create the baseline.",
+        );
+      }
+      this.db
+        .prepare(
+          `INSERT INTO drift_baselines (id, tenant_id, name, status, created_at)
+           VALUES (?, ?, ?, 'active', ?)`,
+        )
+        .run(id, input.tenantId, name, input.now);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    const record = this.getDriftBaseline(input.tenantId, id);
+    if (!record) throw new Error("Baseline was not persisted.");
+    return record;
+  }
+
+  listDriftBaselines(tenantId: string): DriftBaselineRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, tenant_id, name, status, created_at, retired_at
+         FROM drift_baselines
+         WHERE tenant_id = ?
+         ORDER BY created_at DESC, id DESC`,
+      )
+      .all(tenantId) as unknown as DriftBaselineRow[];
+    return rows.map((row) => this.baselineRecordFromRow(row));
+  }
+
+  getDriftBaseline(tenantId: string, baselineId: string): DriftBaselineRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT id, tenant_id, name, status, created_at, retired_at
+         FROM drift_baselines
+         WHERE tenant_id = ? AND id = ?`,
+      )
+      .get(tenantId, baselineId) as unknown as DriftBaselineRow | undefined;
+    return row ? this.baselineRecordFromRow(row) : undefined;
+  }
+
+  getActiveDriftBaseline(tenantId: string): DriftBaselineRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT id, tenant_id, name, status, created_at, retired_at
+         FROM drift_baselines
+         WHERE tenant_id = ? AND status = 'active'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(tenantId) as unknown as DriftBaselineRow | undefined;
+    return row ? this.baselineRecordFromRow(row) : undefined;
+  }
+
+  renameDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+    name: string,
+  ): DriftBaselineRecord {
+    const normalized = normalizeDriftBaselineName(name);
+    const result = this.db
+      .prepare(
+        `UPDATE drift_baselines SET name = ? WHERE tenant_id = ? AND id = ?`,
+      )
+      .run(normalized, tenantId, baselineId);
+    if (Number(result.changes ?? 0) === 0) {
+      throw new Error("Baseline was not found for this tenant.");
+    }
+    const record = this.getDriftBaseline(tenantId, baselineId);
+    if (!record) throw new Error("Baseline was not found for this tenant.");
+    return record;
+  }
+
+  retireDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+    now: string,
+  ): DriftBaselineRecord {
+    const result = this.db
+      .prepare(
+        `UPDATE drift_baselines
+         SET status = 'retired', retired_at = ?
+         WHERE tenant_id = ? AND id = ? AND status = 'active'`,
+      )
+      .run(now, tenantId, baselineId);
+    if (Number(result.changes ?? 0) === 0) {
+      throw new Error("No active baseline with this id exists for this tenant.");
+    }
+    const record = this.getDriftBaseline(tenantId, baselineId);
+    if (!record) throw new Error("Baseline was not found for this tenant.");
+    return record;
+  }
+
+  /**
+   * Set difference between a baseline's pinned versions and the latest
+   * live versions: pinned-and-changed → modified, pinned-and-gone →
+   * removed, live-and-unpinned → added. Raw JSON for both sides comes
+   * from the retained drift_object_versions rows.
+   */
+  listDriftBaselineChanges(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): DriftBaselineChangeRecord[] {
+    const pins = this.db
+      .prepare(
+        `SELECT resource, graph_id, version, content_hash
+         FROM drift_baseline_pins
+         WHERE tenant_id = ? AND baseline_id = ?`,
+      )
+      .all(input.tenantId, input.baselineId) as unknown as Array<{
+      resource: GraphCacheResourceKind;
+      graph_id: string;
+      version: number;
+      content_hash: string;
+    }>;
+    const pinsByResource = new Map<
+      GraphCacheResourceKind,
+      Map<string, { version: number; contentHash: string }>
+    >();
+    for (const pin of pins) {
+      const byId = pinsByResource.get(pin.resource) ?? new Map();
+      byId.set(pin.graph_id, { version: pin.version, contentHash: pin.content_hash });
+      pinsByResource.set(pin.resource, byId);
+    }
+
+    const changes: DriftBaselineChangeRecord[] = [];
+    for (const resource of input.resources) {
+      const pinned = pinsByResource.get(resource) ?? new Map<string, { version: number; contentHash: string }>();
+      const live = this.readLatestDriftVersions(input.tenantId, resource);
+
+      for (const [graphId, latest] of live) {
+        if (latest.removed_at) continue;
+        const pin = pinned.get(graphId);
+        if (!pin) {
+          const current = this.getDriftObjectVersionRow(
+            input.tenantId,
+            resource,
+            graphId,
+            latest.version,
+          );
+          changes.push({
+            resource,
+            graphId,
+            kind: "added",
+            ...(current?.display_name ? { displayName: current.display_name } : {}),
+            ...(current ? { currentRawJson: current.raw_json } : {}),
+          });
+        } else if (pin.contentHash !== latest.content_hash) {
+          const current = this.getDriftObjectVersionRow(
+            input.tenantId,
+            resource,
+            graphId,
+            latest.version,
+          );
+          const before = this.getDriftObjectVersionRow(
+            input.tenantId,
+            resource,
+            graphId,
+            pin.version,
+          );
+          changes.push({
+            resource,
+            graphId,
+            kind: "modified",
+            ...(current?.display_name
+              ? { displayName: current.display_name }
+              : before?.display_name
+                ? { displayName: before.display_name }
+                : {}),
+            ...(before ? { pinnedRawJson: before.raw_json } : {}),
+            ...(current ? { currentRawJson: current.raw_json } : {}),
+          });
+        }
+      }
+
+      for (const [graphId, pin] of pinned) {
+        const latest = live.get(graphId);
+        if (latest && !latest.removed_at) continue;
+        const before = this.getDriftObjectVersionRow(
+          input.tenantId,
+          resource,
+          graphId,
+          pin.version,
+        );
+        changes.push({
+          resource,
+          graphId,
+          kind: "removed",
+          ...(before?.display_name ? { displayName: before.display_name } : {}),
+          ...(before ? { pinnedRawJson: before.raw_json } : {}),
+        });
+      }
+    }
+    return changes;
+  }
+
+  /**
+   * The tracked-configuration state as of `atIso`, reconstructed from
+   * retained version intervals: per object, the highest version whose
+   * first_seen_at is at or before the moment, excluded when the object
+   * was already removed by then. Versions increase monotonically with
+   * first_seen_at, so MAX(version) among earlier-seen rows is the state.
+   */
+  readDriftStateAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+    atIso: string,
+  ): Map<
+    string,
+    { version: number; contentHash: string; rawJson: string; displayName?: string }
+  > {
+    const rows = this.db
+      .prepare(
+        `SELECT v.graph_id, v.version, v.content_hash, v.raw_json, v.display_name, v.removed_at
+         FROM drift_object_versions v
+         INNER JOIN (
+           SELECT graph_id, MAX(version) AS version
+           FROM drift_object_versions
+           WHERE tenant_id = ? AND resource = ? AND first_seen_at <= ?
+           GROUP BY graph_id
+         ) latest
+           ON latest.graph_id = v.graph_id AND latest.version = v.version
+         WHERE v.tenant_id = ? AND v.resource = ?`,
+      )
+      .all(tenantId, resource, atIso, tenantId, resource) as unknown as Array<{
+      graph_id: string;
+      version: number;
+      content_hash: string;
+      raw_json: string;
+      display_name: string | null;
+      removed_at: string | null;
+    }>;
+    const state = new Map<
+      string,
+      { version: number; contentHash: string; rawJson: string; displayName?: string }
+    >();
+    for (const row of rows) {
+      if (row.removed_at !== null && row.removed_at <= atIso) continue;
+      state.set(row.graph_id, {
+        version: row.version,
+        contentHash: row.content_hash,
+        rawJson: row.raw_json,
+        ...(row.display_name ? { displayName: row.display_name } : {}),
+      });
+    }
+    return state;
+  }
+
+  getOldestDriftSnapshotAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+  ): string | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT captured_at
+         FROM drift_snapshots
+         WHERE tenant_id = ? AND resource = ?
+         ORDER BY captured_at ASC, id ASC
+         LIMIT 1`,
+      )
+      .get(tenantId, resource) as { captured_at?: string } | undefined;
+    return row?.captured_at;
+  }
+
+  /** Every pinned object of a baseline with its retained raw JSON. */
+  listDriftBaselinePinnedObjects(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): Array<{
+    resource: GraphCacheResourceKind;
+    graphId: string;
+    displayName?: string;
+    rawJson: string;
+  }> {
+    const wanted = new Set(input.resources);
+    const rows = this.db
+      .prepare(
+        `SELECT p.resource, p.graph_id, v.raw_json, v.display_name
+         FROM drift_baseline_pins p
+         INNER JOIN drift_object_versions v
+           ON v.tenant_id = p.tenant_id
+          AND v.resource = p.resource
+          AND v.graph_id = p.graph_id
+          AND v.version = p.version
+         WHERE p.tenant_id = ? AND p.baseline_id = ?`,
+      )
+      .all(input.tenantId, input.baselineId) as unknown as Array<{
+      resource: GraphCacheResourceKind;
+      graph_id: string;
+      raw_json: string;
+      display_name: string | null;
+    }>;
+    return rows
+      .filter((row) => wanted.has(row.resource))
+      .map((row) => ({
+        resource: row.resource,
+        graphId: row.graph_id,
+        rawJson: row.raw_json,
+        ...(row.display_name ? { displayName: row.display_name } : {}),
+      }));
+  }
+
+  /**
+   * Baseline drift counts without fetching raw JSON: pins compared to
+   * the latest live version hashes. Cheap enough to run across a fleet.
+   */
+  countDriftBaselineChanges(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): { added: number; removed: number; modified: number } {
+    const pins = this.db
+      .prepare(
+        `SELECT resource, graph_id, content_hash
+         FROM drift_baseline_pins
+         WHERE tenant_id = ? AND baseline_id = ?`,
+      )
+      .all(input.tenantId, input.baselineId) as unknown as Array<{
+      resource: GraphCacheResourceKind;
+      graph_id: string;
+      content_hash: string;
+    }>;
+    const pinsByResource = new Map<GraphCacheResourceKind, Map<string, string>>();
+    for (const pin of pins) {
+      const byId = pinsByResource.get(pin.resource) ?? new Map<string, string>();
+      byId.set(pin.graph_id, pin.content_hash);
+      pinsByResource.set(pin.resource, byId);
+    }
+    let added = 0;
+    let removed = 0;
+    let modified = 0;
+    for (const resource of input.resources) {
+      const pinned = pinsByResource.get(resource) ?? new Map<string, string>();
+      const live = this.readLatestDriftVersions(input.tenantId, resource);
+      for (const [graphId, latest] of live) {
+        if (latest.removed_at) continue;
+        const pinnedHash = pinned.get(graphId);
+        if (pinnedHash === undefined) added += 1;
+        else if (pinnedHash !== latest.content_hash) modified += 1;
+      }
+      for (const [graphId] of pinned) {
+        const latest = live.get(graphId);
+        if (!latest || latest.removed_at) removed += 1;
+      }
+    }
+    return { added, removed, modified };
+  }
+
+  /**
+   * Versions pinned by a non-retired baseline must survive retention
+   * pruning, or the baseline could no longer explain what it protects.
+   */
+  private readActiveBaselinePinKeys(tenantId: string | null): Set<string> {
+    const rows = (tenantId
+      ? this.db
+          .prepare(
+            `SELECT p.tenant_id, p.resource, p.graph_id, p.version
+             FROM drift_baseline_pins p
+             INNER JOIN drift_baselines b ON b.id = p.baseline_id
+             WHERE b.status = 'active' AND p.tenant_id = ?`,
+          )
+          .all(tenantId)
+      : this.db
+          .prepare(
+            `SELECT p.tenant_id, p.resource, p.graph_id, p.version
+             FROM drift_baseline_pins p
+             INNER JOIN drift_baselines b ON b.id = p.baseline_id
+             WHERE b.status = 'active'`,
+          )
+          .all()) as unknown as Array<{
+      tenant_id: string;
+      resource: string;
+      graph_id: string;
+      version: number;
+    }>;
+    return new Set(
+      rows.map((row) => driftPinKey(row.tenant_id, row.resource, row.graph_id, row.version)),
+    );
+  }
+
+  private baselineRecordFromRow(row: DriftBaselineRow): DriftBaselineRecord {
+    const pinStats = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM drift_baseline_pins
+         WHERE baseline_id = ?`,
+      )
+      .get(row.id) as { count?: number } | undefined;
+    const resourceRows = this.db
+      .prepare(
+        `SELECT DISTINCT resource FROM drift_baseline_pins WHERE baseline_id = ? ORDER BY resource`,
+      )
+      .all(row.id) as unknown as Array<{ resource: GraphCacheResourceKind }>;
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      name: row.name,
+      status: row.status,
+      createdAt: row.created_at,
+      ...(row.retired_at ? { retiredAt: row.retired_at } : {}),
+      pinnedObjectCount: typeof pinStats?.count === "number" ? pinStats.count : 0,
+      resources: resourceRows.map((entry) => entry.resource),
+    };
+  }
+
   pruneDriftHistory(tenantId: string | null, retentionDays: number): DriftPruneResult {
     const days = Number.isFinite(retentionDays) ? Math.max(0, retentionDays) : 0;
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -1206,6 +1742,7 @@ export class IntelligenceSqliteStore {
             )
             .all();
       const grouped = groupDriftVersions(rows as unknown as DriftObjectVersionRow[]);
+      const baselinePins = this.readActiveBaselinePinKeys(tenantId);
       const deleteVersion = this.db.prepare(
         `DELETE FROM drift_object_versions
          WHERE tenant_id = ? AND resource = ? AND graph_id = ? AND version = ?`,
@@ -1219,6 +1756,18 @@ export class IntelligenceSqliteStore {
           const isLiveCurrent =
             latest.version === version.version && latest.removed_at === null;
           if (isLiveCurrent) continue;
+          if (
+            baselinePins.has(
+              driftPinKey(
+                version.tenant_id,
+                version.resource,
+                version.graph_id,
+                version.version,
+              ),
+            )
+          ) {
+            continue;
+          }
           const shouldDelete =
             objectRemovedBeforeCutoff ||
             (version.version < latest.version && version.first_seen_at < cutoff) ||
@@ -1300,6 +1849,8 @@ export class IntelligenceSqliteStore {
         "graph_cache_status",
         "drift_object_versions",
         "drift_snapshots",
+        "drift_baseline_pins",
+        "drift_baselines",
         "learning_events",
         "audit_events",
         "self_training_suggestions",
@@ -2640,6 +3191,31 @@ export class IntelligenceSqliteStore {
       CREATE INDEX IF NOT EXISTS idx_drift_versions_lookup
         ON drift_object_versions (tenant_id, resource, first_seen_at);
 
+      CREATE TABLE IF NOT EXISTS drift_baselines (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        retired_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_drift_baselines_tenant
+        ON drift_baselines (tenant_id, status);
+
+      CREATE TABLE IF NOT EXISTS drift_baseline_pins (
+        baseline_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        graph_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        PRIMARY KEY (baseline_id, resource, graph_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_drift_baseline_pins_tenant
+        ON drift_baseline_pins (tenant_id, resource);
+
       CREATE TABLE IF NOT EXISTS learning_events (
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
@@ -2808,6 +3384,9 @@ export class IntelligenceSqliteStore {
       )
       .run(new Date().toISOString());
     ensureColumn(this.db, "graph_cache_status", "page_count", "INTEGER NOT NULL DEFAULT 0");
+    // Tenant-wide total reported by Graph via $count, which can exceed
+    // the number of rows the cache holds.
+    ensureColumn(this.db, "graph_cache_status", "tenant_total", "INTEGER");
     ensureColumn(
       this.db,
       "graph_cache_status",
@@ -3146,6 +3725,22 @@ function readDriftObjectVersion(row: DriftObjectVersionRow): DriftObjectVersionR
     ...(row.removed_snapshot_id ? { removedSnapshotId: row.removed_snapshot_id } : {}),
     ...(row.removed_at ? { removedAt: row.removed_at } : {}),
   };
+}
+
+function driftPinKey(
+  tenantId: string,
+  resource: string,
+  graphId: string,
+  version: number,
+): string {
+  return `${tenantId} ${resource} ${graphId} ${version}`;
+}
+
+function normalizeDriftBaselineName(name: string): string {
+  const trimmed = name.trim().replace(/\s+/g, " ");
+  if (!trimmed) throw new Error("Baseline name is required.");
+  if (trimmed.length > 80) throw new Error("Baseline name is too long.");
+  return trimmed;
 }
 
 function groupDriftVersions(

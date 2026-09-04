@@ -438,6 +438,11 @@ export const DEFAULT_GRAPH_READ_SCOPE_NAMES = [
   "AuditLog.Read.All",
   "IdentityRiskyUser.Read.All",
   "SecurityEvents.Read.All",
+  "RoleManagement.Read.Directory",
+  "AdministrativeUnit.Read.All",
+  "Domain.Read.All",
+  "SecurityAlert.Read.All",
+  "SecurityIncident.Read.All",
 ] as const;
 
 /**
@@ -481,6 +486,44 @@ export interface TenantRecord {
    * run yet or returned no relevant SKUs.
    */
   relevantLicenses?: TenantLicense[];
+  /**
+   * Which Entra app registration this tenant was connected with. Token
+   * refresh must reuse the same client id that issued the tokens, so
+   * this is pinned per tenant at connect time. Absent on tenants
+   * connected before app-identity choice existed; those fall back to
+   * the app default.
+   */
+  appRegistration?: TenantAppRegistration;
+}
+
+/**
+ * The Entra application identity used to sign in to a tenant.
+ *
+ * `kind: "openadminos"` is the published, publisher-verified
+ * OpenAdminOS multi-tenant app. `kind: "custom"` is an admin's own
+ * registration, for organizations that do not permit third-party
+ * multi-tenant service principals.
+ *
+ * Public clients only: OpenAdminOS uses Authorization Code + PKCE with
+ * a loopback redirect, so there is never a client secret. A secret
+ * cannot be protected inside a distributed desktop binary.
+ */
+export interface TenantAppRegistration {
+  kind: "openadminos" | "custom";
+  clientId: string;
+  /**
+   * Full MSAL authority. Single-tenant custom registrations need their
+   * directory id here; multi-tenant apps use the common authority.
+   */
+  authority?: string;
+}
+
+export interface ConnectTenantOptions {
+  /**
+   * Custom registration to sign in with. Omit to use the OpenAdminOS
+   * app. `directoryTenantId` is required only for single-tenant apps.
+   */
+  appRegistration?: { clientId: string; directoryTenantId?: string };
 }
 
 /** A subscribed SKU surfaced in the Settings → Tenants license panel. */
@@ -535,6 +578,25 @@ export interface RunLogRecord {
 export interface RunRecord {
   id: string;
   agentSlug: string;
+  /**
+   * Set for host-generated system runs. These carry a host-validated
+   * plan, are not backed by an installed agent, and apply their
+   * graph-write actions in the host after the same typed confirmation
+   * gate as agent write plans. "baseline-rollback" plans are built
+   * deterministically from drift; "external-proposal" plans arrive
+   * through the MCP gateway and can never self-apply.
+   */
+  origin?: "baseline-rollback" | "external-proposal";
+  rollback?: {
+    baselineId: string;
+    requiredScopes: string[];
+    /** Drift changes that need manual review and are not in the plan. */
+    manualCount: number;
+  };
+  external?: {
+    clientName: string;
+    requiredScopes: string[];
+  };
   status: RunStatus;
   queuedAt: string;
   startedAt?: string;
@@ -727,6 +789,7 @@ export interface AppState {
   registrySource: string;
   /** Whether packaged builds report aggregate public registry install counts. */
   registryInstallCountsEnabled: boolean;
+  usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
 }
 
@@ -796,6 +859,7 @@ export interface IntuneChatMessage {
 export type IntuneChatInvestigationToolName =
   | "list_cached_resources"
   | "query_cache"
+  | "find_graph_endpoint"
   | "graph_get"
   | "refresh_resource"
   | "query_drift";
@@ -862,6 +926,19 @@ export const GRAPH_CACHE_RESOURCE_KINDS = [
   "managedDeviceOverview",
   "managedDeviceEncryptionStates",
   "troubleshootingEvents",
+  "namedLocations",
+  "authenticationMethodsPolicy",
+  "authorizationPolicy",
+  "crossTenantAccessPolicy",
+  "directoryRoles",
+  "administrativeUnits",
+  "applications",
+  "servicePrincipals",
+  "domains",
+  "securityAlerts",
+  "securityIncidents",
+  "secureScores",
+  "secureScoreControlProfiles",
 ] as const;
 
 export type GraphCacheResourceKind = (typeof GRAPH_CACHE_RESOURCE_KINDS)[number];
@@ -875,6 +952,12 @@ export interface GraphCacheResourceStatus {
   refreshedAt?: string;
   scopeSet: string[];
   lastError?: string;
+  /**
+   * Total this resource holds in the tenant, as reported by Graph via
+   * `$count`. Can exceed `rows`, which is capped by the cache page
+   * limit, and is what a "how many" question must be answered from.
+   */
+  tenantTotal?: number;
 }
 
 export interface GraphCacheStatus {
@@ -993,6 +1076,301 @@ export interface DriftResourceStatus {
 export interface DriftStatus {
   tenantId: string;
   resources: DriftResourceStatus[];
+}
+
+// ─── Named drift baselines (v0.5) ────────────────────────────────────────
+//
+// A baseline pins the exact live object versions (per resource, graph id,
+// version, and content hash) at creation time. Baseline drift is the set
+// difference between those pins and the latest live versions, so it
+// survives snapshot retention pruning: pinned versions are never pruned
+// while their baseline is active.
+
+export type DriftBaselineStatus = "active" | "retired";
+
+export interface DriftBaseline {
+  id: string;
+  tenantId: string;
+  name: string;
+  status: DriftBaselineStatus;
+  createdAt: string;
+  retiredAt?: string;
+  pinnedObjectCount: number;
+  resources: GraphCacheResourceKind[];
+}
+
+export interface CreateDriftBaselineInput {
+  tenantId: string;
+  name: string;
+}
+
+export interface RenameDriftBaselineInput {
+  tenantId: string;
+  baselineId: string;
+  name: string;
+}
+
+export interface RetireDriftBaselineInput {
+  tenantId: string;
+  baselineId: string;
+}
+
+export interface ListDriftBaselinesInput {
+  tenantId: string;
+}
+
+export interface DriftBaselineResourceDrift {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  added: number;
+  removed: number;
+  modified: number;
+}
+
+export interface DriftBaselineDriftEntry {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  graphId: string;
+  displayName?: string;
+  changeKind: "added" | "removed" | "modified";
+  fieldChangeCount: number;
+  changes: DriftFieldChange[];
+  truncated?: boolean;
+}
+
+export interface DriftBaselineDriftInput {
+  tenantId: string;
+  baselineId?: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+}
+
+export interface DriftBaselineDriftResult {
+  tenantId: string;
+  baseline: DriftBaseline;
+  evaluatedAt: string;
+  resources: DriftBaselineResourceDrift[];
+  entries: DriftBaselineDriftEntry[];
+  hasMore: boolean;
+  limit: number;
+}
+
+// ─── Point-in-time compare (v0.5) ────────────────────────────────────────
+//
+// Compares the tracked-configuration state at two moments, reconstructed
+// from retained drift version intervals. Entries and per-resource counts
+// share the baseline-drift shapes.
+
+export type DriftCompareEntry = DriftBaselineDriftEntry;
+export type DriftCompareResourceCounts = DriftBaselineResourceDrift;
+
+export interface DriftTimeCompareInput {
+  tenantId: string;
+  from: string;
+  to: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+}
+
+export interface DriftTimeCompareResult {
+  tenantId: string;
+  from: string;
+  to: string;
+  evaluatedAt: string;
+  resources: DriftCompareResourceCounts[];
+  entries: DriftCompareEntry[];
+  hasMore: boolean;
+  limit: number;
+  /**
+   * True when `from` predates the oldest retained drift snapshot for at
+   * least one compared resource, so the "before" side may be partial.
+   */
+  retentionLimited?: boolean;
+}
+
+// ─── Baseline export bundles (v0.5) ──────────────────────────────────────
+//
+// A baseline export is a portable, local JSON copy of a baseline's pinned
+// configuration with tenant-specific fields stripped, so it can be
+// compared against another tenant (the MSP golden-tenant workflow). No
+// third-party baseline content is ever bundled with the app.
+
+export interface DriftBaselineExportObject {
+  displayName?: string;
+  body: Record<string, unknown>;
+}
+
+export interface DriftBaselineExportBundle {
+  format: "openadminos-baseline-export";
+  version: 1;
+  exportedAt: string;
+  sourceTenantName: string;
+  baselineName: string;
+  resources: Array<{
+    resource: GraphCacheResourceKind;
+    objects: DriftBaselineExportObject[];
+  }>;
+}
+
+export interface ExportDriftBaselineInput {
+  tenantId: string;
+  baselineId?: string;
+}
+
+export interface ExportDriftBaselineResult {
+  canceled: boolean;
+  filePath?: string;
+  objectCount?: number;
+}
+
+export interface DriftBundleCompareInput {
+  tenantId: string;
+  bundle: DriftBaselineExportBundle;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+  includeAssignments?: boolean;
+}
+
+export interface DriftBundleCompareResult {
+  tenantId: string;
+  baselineName: string;
+  sourceTenantName: string;
+  evaluatedAt: string;
+  includeAssignments: boolean;
+  tenantHasData: boolean;
+  resources: DriftTenantCompareResourceCounts[];
+  entries: DriftTenantCompareEntry[];
+  hasMore: boolean;
+  limit: number;
+}
+
+// ─── Opt-in usage telemetry (v0.5) ───────────────────────────────────────
+
+export interface UsageTelemetryPayload {
+  schema: "openadminos-usage-1";
+  installId: string;
+  appVersion: string;
+  os: string;
+  arch: string;
+  providerClass: "local" | "hosted";
+  tenants: string;
+  agents: string;
+  runs: string;
+  retrievalIndex: boolean;
+}
+
+// ─── Documentation retrieval (v0.5) ──────────────────────────────────────
+
+export interface RetrievalStatus {
+  available: boolean;
+  /** Installed index version, e.g. "2026-08-26". */
+  version?: string;
+  /** Newer version available from the published manifest, when known. */
+  updateAvailable?: string;
+  builtAt?: string;
+  chunkCount?: number;
+  embeddingModel?: string;
+  dim?: number;
+  reason?: string;
+  /** Whether the local Ollama answered at all. */
+  ollamaReachable?: boolean;
+  /**
+   * Whether the embedding model the index needs is present in Ollama.
+   * The index alone cannot ground answers without it.
+   */
+  embeddingModelInstalled?: boolean;
+}
+
+// ─── MCP write-gateway (v0.5) ────────────────────────────────────────────
+
+export interface GatewayPublicStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  listeningPort?: number;
+  boundTenantId?: string;
+  hasToken: boolean;
+  clients: Array<{ id: string; name: string; createdAt: string }>;
+}
+
+// ─── Fleet drift status (v0.5) ───────────────────────────────────────────
+
+export interface FleetTenantDriftStatus {
+  tenantId: string;
+  tenantName: string;
+  /** Absent when the tenant has no active baseline. */
+  baseline?: { id: string; name: string; createdAt: string };
+  /** Absent when drift could not be evaluated (no baseline or no data). */
+  drift?: { added: number; removed: number; modified: number; evaluatedAt: string };
+  lastCaptureAt?: string;
+  trackedObjectCount: number;
+}
+
+export interface FleetDriftStatusInput {
+  /** Optional tenant group filter; all connected tenants otherwise. */
+  groupId?: string;
+}
+
+export interface FleetDriftStatusResult {
+  tenants: FleetTenantDriftStatus[];
+  evaluatedAt: string;
+}
+
+export interface StartBaselineRollbackInput {
+  tenantId: string;
+  baselineId?: string;
+  /** Optional subset; when set, only these objects roll back. */
+  selections?: Array<{ resource: GraphCacheResourceKind; graphId: string }>;
+}
+
+// ─── Cross-tenant compare (v0.5) ─────────────────────────────────────────
+//
+// Graph object ids are tenant-specific, so objects match across tenants
+// by unique display name (or structurally, when a resource has exactly
+// one object per tenant, which covers the policy singletons). Names that
+// appear more than once inside a tenant are counted as ambiguous and
+// never guess-matched. Tenant-specific fields (ids, timestamps, scope
+// tags, and by default assignments) are excluded from the equality diff.
+
+export interface DriftTenantCompareInput {
+  tenantIdA: string;
+  tenantIdB: string;
+  resources?: GraphCacheResourceKind[];
+  limit?: number;
+  includeAssignments?: boolean;
+}
+
+export interface DriftTenantCompareResourceCounts {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  matchedSame: number;
+  different: number;
+  onlyInA: number;
+  onlyInB: number;
+  ambiguous: number;
+}
+
+export interface DriftTenantCompareEntry {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  displayName: string;
+  bucket: "different" | "only-in-a" | "only-in-b";
+  fieldChangeCount: number;
+  changes: DriftFieldChange[];
+  truncated?: boolean;
+}
+
+export interface DriftTenantCompareResult {
+  tenantIdA: string;
+  tenantIdB: string;
+  evaluatedAt: string;
+  includeAssignments: boolean;
+  tenantAHasData: boolean;
+  tenantBHasData: boolean;
+  resources: DriftTenantCompareResourceCounts[];
+  entries: DriftTenantCompareEntry[];
+  hasMore: boolean;
+  limit: number;
 }
 
 export interface RefreshGraphCacheOptions {
@@ -1881,6 +2259,54 @@ export interface OpenAdminOSApi {
     input: DriftObjectHistoryInput,
   ): Promise<DriftObjectHistoryResult>;
   getDriftStatus?(tenantId: string): Promise<DriftStatus>;
+  listDriftBaselines?(input: ListDriftBaselinesInput): Promise<DriftBaseline[]>;
+  createDriftBaseline?(input: CreateDriftBaselineInput): Promise<DriftBaseline>;
+  renameDriftBaseline?(input: RenameDriftBaselineInput): Promise<DriftBaseline>;
+  retireDriftBaseline?(input: RetireDriftBaselineInput): Promise<DriftBaseline>;
+  getDriftBaselineDrift?(
+    input: DriftBaselineDriftInput,
+  ): Promise<DriftBaselineDriftResult>;
+  getDriftTimeCompare?(
+    input: DriftTimeCompareInput,
+  ): Promise<DriftTimeCompareResult>;
+  getDriftTenantCompare?(
+    input: DriftTenantCompareInput,
+  ): Promise<DriftTenantCompareResult>;
+  startBaselineRollback?(input: StartBaselineRollbackInput): Promise<RunRecord>;
+  getFleetDriftStatus?(input: FleetDriftStatusInput): Promise<FleetDriftStatusResult>;
+  getGatewayStatus?(): Promise<GatewayPublicStatus>;
+  enableGateway?(input: {
+    boundTenantId: string;
+    port?: number;
+  }): Promise<{ status: GatewayPublicStatus; token: string }>;
+  disableGateway?(): Promise<GatewayPublicStatus>;
+  regenerateGatewayToken?(): Promise<{ status: GatewayPublicStatus; token: string }>;
+  revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
+  getRetrievalStatus?(): Promise<RetrievalStatus>;
+  refreshRetrievalIndex?(): Promise<RetrievalStatus>;
+  getRetrievalAutoInstall?(): Promise<boolean>;
+  setRetrievalAutoInstall?(enabled: boolean): Promise<RetrievalStatus>;
+  installRetrievalIndex?(input: {
+    /** "download" fetches the published index; omit to pick a folder. */
+    source?: "download";
+    baseUrl?: string;
+  }): Promise<RetrievalStatus>;
+  getUsageTelemetryPreview?(): Promise<{
+    enabled: boolean;
+    endpointConfigured: boolean;
+    payload: UsageTelemetryPayload;
+  }>;
+  setUsageTelemetryEnabled?(enabled: boolean): Promise<AppState>;
+  sendUsageTelemetryTest?(): Promise<{ sent: boolean }>;
+  exportDriftBaseline?(
+    input: ExportDriftBaselineInput,
+  ): Promise<ExportDriftBaselineResult>;
+  readDriftBundleFile?(): Promise<
+    { canceled: true } | { canceled: false; bundle: DriftBaselineExportBundle }
+  >;
+  getDriftBundleCompare?(
+    input: DriftBundleCompareInput,
+  ): Promise<DriftBundleCompareResult>;
   getGraphCacheRefreshSchedule(tenantId?: string): Promise<GraphCacheRefreshScheduleSettings>;
   setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,
@@ -2087,7 +2513,7 @@ export interface OpenAdminOSApi {
    * what is actually requested.
    */
   getRequestedScopes(): Promise<RequestedScope[]>;
-  connectTenant(): Promise<AppState>;
+  connectTenant(options?: ConnectTenantOptions): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
@@ -2696,6 +3122,12 @@ export interface GraphRequestInput {
    * `Content-Type: application/json`.
    */
   body?: unknown;
+  /**
+   * Optional cancellation signal. When it aborts, the in-flight request
+   * is abandoned and no retry is attempted, so a user pressing Stop is
+   * never mistaken for a transient network fault.
+   */
+  signal?: AbortSignal;
 }
 
 export interface LlmOptions {

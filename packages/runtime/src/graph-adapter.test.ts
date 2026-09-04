@@ -242,3 +242,156 @@ describe("createGraphAdapter", () => {
     );
   });
 });
+
+describe("createGraphAdapter transient network faults", () => {
+  it("retries an idempotent GET after a dropped connection and succeeds", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      maxRetries: 3,
+      retryBackoffMs: 0,
+      fetchImpl: mockFetch(
+        [
+          () => {
+            throw new TypeError("fetch failed");
+          },
+          jsonResponse({ value: [{ id: "x" }] }),
+        ],
+        calls,
+      ),
+    });
+
+    const result = await adapter.request({ method: "GET", path: "/users" });
+
+    assert.deepEqual(result, { value: [{ id: "x" }] });
+    assert.equal(calls.length, 2, "the dropped connection must be retried, not fatal");
+  });
+
+  it("retries a GET that times out", async () => {
+    const calls: RecordedCall[] = [];
+    const abortError = new Error("aborted");
+    abortError.name = "AbortError";
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      maxRetries: 2,
+      retryBackoffMs: 0,
+      fetchImpl: mockFetch(
+        [
+          () => {
+            throw abortError;
+          },
+          jsonResponse({ value: [] }),
+        ],
+        calls,
+      ),
+    });
+
+    await adapter.request({ method: "GET", path: "/users" });
+    assert.equal(calls.length, 2);
+  });
+
+  it("gives up after the retry budget and reports the network error", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      maxRetries: 2,
+      retryBackoffMs: 0,
+      fetchImpl: mockFetch(
+        [
+          () => {
+            throw new TypeError("fetch failed");
+          },
+          () => {
+            throw new TypeError("fetch failed");
+          },
+          () => {
+            throw new TypeError("fetch failed");
+          },
+        ],
+        calls,
+      ),
+    });
+
+    await assert.rejects(
+      () => adapter.request({ method: "GET", path: "/users" }),
+      /Graph request failed/,
+    );
+    assert.equal(calls.length, 3, "one initial attempt plus maxRetries");
+  });
+
+  it("does NOT retry a POST that failed mid-flight", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      maxRetries: 3,
+      retryBackoffMs: 0,
+      fetchImpl: mockFetch(
+        [
+          () => {
+            throw new TypeError("fetch failed");
+          },
+          jsonResponse({}),
+        ],
+        calls,
+      ),
+    });
+
+    await assert.rejects(
+      () =>
+        adapter.request({
+          method: "POST",
+          path: "/deviceManagement/managedDevices/abc/retire",
+        }),
+      /Graph request failed/,
+    );
+    assert.equal(
+      calls.length,
+      1,
+      "a timed-out write may already have applied upstream; retrying could double-apply it",
+    );
+  });
+
+  it("treats caller cancellation as cancellation, not a retryable fault", async () => {
+    const calls: RecordedCall[] = [];
+    const controller = new AbortController();
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      maxRetries: 3,
+      retryBackoffMs: 0,
+      fetchImpl: mockFetch(
+        [
+          () => {
+            controller.abort();
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            throw err;
+          },
+          jsonResponse({ value: [] }),
+        ],
+        calls,
+      ),
+    });
+
+    await assert.rejects(
+      () => adapter.request({ method: "GET", path: "/users", signal: controller.signal }),
+      /cancelled/i,
+    );
+    assert.equal(calls.length, 1, "a user stop must not be retried");
+  });
+
+  it("does not start a request when the caller signal is already aborted", async () => {
+    const calls: RecordedCall[] = [];
+    const controller = new AbortController();
+    controller.abort();
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => "t",
+      fetchImpl: mockFetch([jsonResponse({ value: [] })], calls),
+    });
+
+    await assert.rejects(
+      () => adapter.request({ method: "GET", path: "/users", signal: controller.signal }),
+      /cancelled/i,
+    );
+    assert.equal(calls.length, 0);
+  });
+});

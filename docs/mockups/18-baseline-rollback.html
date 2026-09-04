@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>16 · Baseline rollback · OpenAdminOS</title>
+  <link rel="stylesheet" href="_design.css">
+  <style>
+    body { min-width: 1120px; min-height: 720px; }
+    button, input { font: inherit; }
+    button:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    svg { stroke-linecap: round; stroke-linejoin: round; }
+    .content { flex: 1; padding: 22px 32px 36px; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+    .tab {
+      border: 0;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--text-2);
+      padding: 8px 12px 9px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .tab.active { border-color: var(--accent); color: var(--text-0); }
+    .baseline-card {
+      display: grid;
+      grid-template-columns: minmax(260px, 1.35fr) repeat(3, minmax(100px, .55fr)) auto;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 22px;
+      border-left: 2px solid var(--success);
+    }
+    .baseline-name { font-size: 15px; font-weight: 600; }
+    .baseline-meta { margin-top: 4px; color: var(--text-2); font: 10px 'JetBrains Mono', monospace; }
+    .metric { border-left: 1px solid var(--border); padding-left: 16px; }
+    .metric-label { color: var(--text-3); font: 9px 'JetBrains Mono', monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .metric-value { margin-top: 3px; font: 600 17px 'JetBrains Mono', monospace; }
+    .metric-value.added { color: var(--success); }
+    .metric-value.removed { color: var(--danger); }
+    .metric-value.modified { color: var(--warning); }
+    .resource-summary {
+      width: 100%;
+      margin: 14px 0 22px;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-1);
+      font-size: 11px;
+    }
+    .resource-summary th, .resource-summary td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+    .resource-summary tr:last-child td { border-bottom: 0; }
+    .resource-summary th { background: var(--bg-2); color: var(--text-3); font: 9px 'JetBrains Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .resource-summary .count { width: 88px; text-align: right; font-family: 'JetBrains Mono', monospace; }
+    .drift-list { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg-1); }
+    .drift-row { display: grid; grid-template-columns: 112px minmax(220px, 1fr) minmax(170px, .7fr) 150px; align-items: center; gap: 14px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+    .drift-row:last-child { border-bottom: 0; }
+    .drift-row.expanded { background: var(--bg-2); }
+    .change-kind { display: inline-flex; width: fit-content; align-items: center; gap: 6px; font: 10px 'JetBrains Mono', monospace; }
+    .change-kind.modified { color: var(--warning); }
+    .change-kind.added { color: var(--success); }
+    .change-kind.removed { color: var(--danger); }
+    .object-name { font-size: 12px; font-weight: 600; }
+    .object-meta, .actor { margin-top: 2px; color: var(--text-3); font: 10px 'JetBrains Mono', monospace; }
+    .resource { color: var(--text-2); font-size: 11px; }
+    .row-action { justify-self: end; color: var(--accent); font-size: 11px; }
+    .field-diff { grid-column: 1 / -1; margin: 2px 0 4px 126px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg-1); }
+    .field-line { display: grid; grid-template-columns: minmax(200px, .8fr) 1fr 1fr; border-bottom: 1px solid var(--border); }
+    .field-line:last-child { border-bottom: 0; }
+    .field-line > div { min-width: 0; padding: 8px 10px; border-right: 1px solid var(--border); font: 10px/1.5 'JetBrains Mono', monospace; }
+    .field-line > div:last-child { border-right: 0; }
+    .field-path { color: var(--accent); }
+    .before { color: var(--danger); background: rgba(229, 136, 136, .04); }
+    .after { color: var(--success); background: rgba(156, 200, 143, .04); }
+    .modal-overlay { place-items: center end; padding: 26px 30px; background: rgba(11, 9, 8, .72); }
+    .rollback-modal { width: min(720px, calc(100vw - 300px)); max-height: calc(100vh - 70px); }
+    .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 17px 20px; border-bottom: 1px solid var(--border); }
+    .modal-title { font-size: 16px; font-weight: 600; }
+    .modal-subtitle { margin-top: 3px; color: var(--text-2); font-size: 11px; }
+    .step-line { display: flex; gap: 7px; padding: 11px 20px 0; }
+    .step { border: 1px solid var(--border); border-radius: 999px; padding: 4px 8px; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .step.done { border-color: rgba(156, 200, 143, .28); color: var(--success); }
+    .step.active { border-color: rgba(229, 136, 136, .35); background: rgba(229, 136, 136, .08); color: var(--danger); }
+    .modal-body { min-height: 0; overflow-y: auto; padding: 15px 20px 18px; }
+    .preflight { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 13px; }
+    .preflight-item { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2); padding: 9px 10px; }
+    .preflight-item span { display: block; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; text-transform: uppercase; }
+    .preflight-item strong { display: block; margin-top: 3px; font-size: 12px; }
+    .action-list { border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+    .action-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 11px; border-bottom: 1px solid var(--border); }
+    .action-row:last-child { border-bottom: 0; }
+    .method { color: var(--warning); font: 600 10px 'JetBrains Mono', monospace; }
+    .action-row.destructive { background: rgba(229, 136, 136, .06); }
+    .action-row.destructive .method, .action-row.destructive .action-severity { color: var(--danger); }
+    .action-name { font-size: 11px; font-weight: 600; }
+    .action-path { margin-top: 2px; color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .action-severity { color: var(--text-2); font: 9px 'JetBrains Mono', monospace; }
+    .manual-note { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; border: 1px solid rgba(229, 198, 120, .24); border-radius: 7px; background: rgba(229, 198, 120, .08); padding: 10px 11px; color: var(--warning); font-size: 11px; }
+    .manual-note small { display: block; margin-top: 2px; color: var(--text-2); font-size: 10px; }
+    .confirm-block { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .confirm-block label { display: block; margin-bottom: 6px; color: var(--text-1); font-size: 11px; }
+    .typed-input { border-color: rgba(229, 136, 136, .45); color: var(--danger); letter-spacing: .04em; }
+    .modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 20px; border-top: 1px solid var(--border); }
+    .impact { color: var(--text-3); font: 9px 'JetBrains Mono', monospace; }
+    .actions { display: flex; gap: 8px; }
+    @media (max-width: 1240px) {
+      .baseline-card { grid-template-columns: minmax(220px, 1fr) repeat(3, 92px); }
+      .baseline-card .btn { grid-column: 1 / -1; justify-self: end; }
+      .drift-row { grid-template-columns: 100px minmax(190px, 1fr) 150px 120px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <div class="traffic-lights" aria-label="Window controls"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+      <div class="titlebar-title">OpenAdminOS · Changes · Baselines</div>
+      <div class="titlebar-status"><span class="pulse"></span><span>local · v0.5 reference</span></div>
+    </header>
+
+    <aside class="sidebar" aria-label="Application navigation">
+      <div class="brand"><div class="brand-mark">O</div><div><div class="brand-name">OpenAdminOS</div><div class="brand-sub">LOCAL ADMIN RUNTIME</div></div></div>
+      <div class="nav-section">
+        <div class="nav-label">Workspace</div>
+        <a class="nav-item" href="15-contextual-setup.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>Chat</a>
+        <a class="nav-item" href="03-agents-grid.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><circle cx="12" cy="12" r="3"/></svg>Agents</a>
+        <a class="nav-item active" href="18-baseline-rollback.html"><svg class="nav-icon" viewBox="0 0 24 24"><path d="M7 3v14M7 7h8a3 3 0 0 1 3 3v1M17 21V7M17 17H9a3 3 0 0 1-3-3v-1"/></svg>Changes<span class="nav-badge">6</span></a>
+        <a class="nav-item" href="21-telemetry.html"><svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5a7 7 0 0 0 0-3l2-1.5-2-3.4-2.4 1A8 8 0 0 0 14 5l-.4-2.6H9.7L9.3 5a8 8 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 3l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 9.3 19l.4 2.6h3.9L14 19a8 8 0 0 0 2.6-1.5l2.4 1 2-3.4z"/></svg>Settings</a>
+      </div>
+      <a class="tenant-switcher" href="08-tenant-switcher.html"><span class="tenant-avatar">CT</span><span class="tenant-info"><span class="tenant-name">Contoso Production</span><span class="tenant-id">8a72f1...be31 · active</span></span></a>
+    </aside>
+
+    <main class="main">
+      <header class="main-header">
+        <div><h1 class="page-title">Changes</h1><div class="page-subtitle">Local snapshot history · Contoso Production</div></div>
+        <div class="header-actions"><button class="btn">Capture now</button><button class="btn btn-primary">Create baseline</button></div>
+      </header>
+
+      <div class="content">
+        <nav class="tabs" aria-label="Changes sections"><button class="tab">Timeline</button><button class="tab active">Baselines</button></nav>
+
+        <section class="card baseline-card" aria-labelledby="baseline-title">
+          <div><div class="tag tag-read">Active baseline</div><div class="baseline-name" id="baseline-title">Contoso production baseline</div><div class="baseline-meta">Created 18 Aug 2026, 09:14 · 184 pinned object versions</div></div>
+          <div class="metric"><div class="metric-label">Added</div><div class="metric-value added">2</div></div>
+          <div class="metric"><div class="metric-label">Removed</div><div class="metric-value removed">1</div></div>
+          <div class="metric"><div class="metric-label">Modified</div><div class="metric-value modified">3</div></div>
+          <button class="btn btn-danger">Roll back drift</button>
+        </section>
+
+        <div class="section-head"><h2 class="section-title">// Drift by resource</h2><span class="section-link">6 objects differ from baseline</span></div>
+        <table class="resource-summary">
+          <thead><tr><th scope="col">Resource</th><th scope="col" class="count">Added</th><th scope="col" class="count">Removed</th><th scope="col" class="count">Modified</th></tr></thead>
+          <tbody>
+            <tr><td>Conditional Access policies</td><td class="count">1</td><td class="count">0</td><td class="count">1</td></tr>
+            <tr><td>Settings catalog policies</td><td class="count">0</td><td class="count">0</td><td class="count">2</td></tr>
+            <tr><td>Device compliance policies</td><td class="count">1</td><td class="count">0</td><td class="count">0</td></tr>
+            <tr><td>App registrations</td><td class="count">0</td><td class="count">1</td><td class="count">0</td></tr>
+          </tbody>
+        </table>
+
+        <div class="section-head"><h2 class="section-title">// Drift entries</h2><span class="section-link">Compared with latest local versions</span></div>
+        <section class="drift-list" aria-label="Baseline drift entries">
+          <article class="drift-row expanded">
+            <div><span class="change-kind modified"><span class="dot-status warn"></span>Modified</span></div>
+            <div><div class="object-name">Require MFA for administrators</div><div class="object-meta">changed today at 09:42</div></div>
+            <div><div class="resource">Conditional Access</div><div class="actor">actor unknown · audit cache stale</div></div>
+            <div class="row-action">Field diff expanded</div>
+            <div class="field-diff" aria-label="Expanded field-level diff">
+              <div class="field-line"><div class="field-path">conditions.locations.excludeLocations[0]</div><div class="before">before: null</div><div class="after">after: "AllTrusted"</div></div>
+              <div class="field-line"><div class="field-path">grantControls.operator</div><div class="before">before: "AND"</div><div class="after">after: "OR"</div></div>
+            </div>
+          </article>
+          <article class="drift-row"><div><span class="change-kind added"><span class="dot-status ok"></span>Added</span></div><div><div class="object-name">Temporary VPN exception</div><div class="object-meta">changed yesterday at 16:07</div></div><div><div class="resource">Conditional Access</div><div class="actor">linda@contoso.example</div></div><button class="btn btn-ghost row-action">Inspect</button></article>
+          <article class="drift-row"><div><span class="change-kind modified"><span class="dot-status warn"></span>Modified</span></div><div><div class="object-name">Windows 11 security baseline</div><div class="object-meta">changed 2 days ago</div></div><div><div class="resource">Settings catalog</div><div class="actor">Intune automation</div></div><button class="btn btn-ghost row-action">Inspect</button></article>
+          <article class="drift-row"><div><span class="change-kind removed"><span class="dot-status danger"></span>Removed</span></div><div><div class="object-name">Contoso Legacy VPN</div><div class="object-meta">missing from latest capture</div></div><div><div class="resource">App registration</div><div class="actor">actor unknown</div></div><button class="btn btn-ghost row-action">Inspect</button></article>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay">
+    <section class="modal rollback-modal" role="dialog" aria-modal="true" aria-labelledby="rollback-title">
+      <header class="modal-head"><div><h2 class="modal-title" id="rollback-title">Roll back drift</h2><p class="modal-subtitle">Pre-flight complete. Review every action before applying baseline values.</p></div><button class="btn btn-ghost" aria-label="Close rollback review">Close</button></header>
+      <div class="step-line" aria-label="Rollback steps"><span class="step done">1 · Pre-flight complete</span><span class="step active">2 · Typed confirmation</span><span class="step">3 · Apply in order</span></div>
+      <div class="modal-body">
+        <div class="preflight">
+          <div class="preflight-item"><span>Tenant</span><strong>Contoso Production</strong></div>
+          <div class="preflight-item"><span>Baseline</span><strong>18 Aug 2026</strong></div>
+          <div class="preflight-item"><span>Graph actions</span><strong>4 validated</strong></div>
+        </div>
+        <div class="section-head"><h3 class="section-title">// Rollback run confirmation</h3><span class="tag tag-write">Write · review required</span></div>
+        <div class="action-list">
+          <div class="action-row"><span class="method">PATCH</span><div><div class="action-name">Require MFA for administrators</div><div class="action-path">conditionalAccess/policies · restore 2 fields</div></div><span class="action-severity">modify</span></div>
+          <div class="action-row"><span class="method">PATCH</span><div><div class="action-name">Windows 11 security baseline</div><div class="action-path">configurationPolicies · restore 4 settings</div></div><span class="action-severity">modify</span></div>
+          <div class="action-row destructive"><span class="method">DELETE</span><div><div class="action-name">Temporary VPN exception</div><div class="action-path">conditionalAccess/policies/7d8e...4a1c · added after baseline</div></div><span class="action-severity">destructive</span></div>
+          <div class="action-row"><span class="method">POST</span><div><div class="action-name">Android personally owned compliance</div><div class="action-path">deviceCompliancePolicies · recreate from pinned version</div></div><span class="action-severity">create</span></div>
+        </div>
+        <div class="manual-note"><span aria-hidden="true">△</span><div><strong>2 changes need manual review</strong><small>App registration credentials and directory role assignments are report-only. OpenAdminOS will not guess rollback operations for them.</small></div></div>
+        <div class="confirm-block">
+          <label for="rollback-phrase">Type <strong class="mono">ROLLBACK 4 OBJECTS</strong> to confirm this run</label>
+          <input class="form-input mono typed-input" id="rollback-phrase" value="ROLLBACK 4 OBJECTS" aria-describedby="rollback-impact">
+        </div>
+      </div>
+      <footer class="modal-foot"><span class="impact" id="rollback-impact">Fail-stop apply · the first Graph failure ends the run</span><div class="actions"><button class="btn">Cancel</button><button class="btn btn-danger">Roll back 4 objects</button></div></footer>
+    </section>
+  </div>
+</body>
+</html>

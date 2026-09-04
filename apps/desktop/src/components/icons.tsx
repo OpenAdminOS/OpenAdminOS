@@ -57,6 +57,14 @@ export const IconChanges = ({ size = 18, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconFleet = ({ size = 18, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M4 20 V9 L12 4 L20 9 V20" />
+    <path d="M2 20 H22" />
+    <path d="M8 20 V14 H16 V20" />
+  </svg>
+);
+
 export const IconChat = ({ size = 18, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <path d="M4.5 5.5 H19.5 A1.8 1.8 0 0 1 21.3 7.3 V16.2 A1.8 1.8 0 0 1 19.5 18 H9.2 L4 21 V7.3 A1.8 1.8 0 0 1 5.8 5.5" />

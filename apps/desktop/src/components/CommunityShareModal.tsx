@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { Select } from "./Select";
 
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
@@ -146,7 +147,7 @@ export function CommunityShareModal({
               <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
                 Category
               </span>
-              <select
+              <Select
                 value={metadata.category}
                 onChange={(event) =>
                   updateMetadata("category", event.target.value as AgentCategory)
@@ -158,7 +159,7 @@ export function CommunityShareModal({
                     {category}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <TextField
               label="Maintainer"

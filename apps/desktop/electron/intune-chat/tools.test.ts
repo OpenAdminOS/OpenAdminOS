@@ -121,6 +121,54 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("graph_get accepts Entra and Defender read paths with their scopes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    try {
+      const store = seededStore(dir, 1);
+      const graphRequests: Array<{ scopes: string[]; path: string }> = [];
+      let currentScopes: string[] = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() {
+          return [];
+        },
+        async retireManagedDevice() {
+          throw new Error("write should not run");
+        },
+        async request(input) {
+          graphRequests.push({ scopes: currentScopes, path: input.path });
+          return { value: [] };
+        },
+      };
+      const ctx = toolContext(store, {
+        graphForScopes: async (scopes) => {
+          currentScopes = scopes;
+          return graph;
+        },
+      });
+
+      const cases: Array<{ path: string; scope: string }> = [
+        { path: "/identity/conditionalAccess/namedLocations", scope: "Policy.Read.All" },
+        { path: "/directoryRoles", scope: "RoleManagement.Read.Directory" },
+        { path: "/security/alerts_v2", scope: "SecurityAlert.Read.All" },
+        { path: "/security/incidents", scope: "SecurityIncident.Read.All" },
+        { path: "/security/secureScores", scope: "SecurityEvents.Read.All" },
+      ];
+      for (const [index, entry] of cases.entries()) {
+        const execution = await executeIntuneChatTool(ctx, "graph_get", {
+          path: entry.path,
+        });
+        assert.equal(execution.trace.error, undefined, `${entry.path} should be allowed`);
+        assert.equal(graphRequests[index]?.path, entry.path);
+        assert.ok(
+          graphRequests[index]?.scopes.includes(entry.scope),
+          `${entry.path} should request ${entry.scope}, got ${graphRequests[index]?.scopes.join(", ")}`,
+        );
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refresh_resource triggers the provided refresh callback", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     try {
@@ -285,3 +333,209 @@ function toolContext(
       })),
   };
 }
+
+describe("Graph endpoint discovery and reachability", () => {
+  it("finds candidate endpoints from plain words so a path need not be recalled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 1));
+      const found = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "conditional access named locations",
+      });
+      const result = found.result as {
+        candidates: Array<{ path: string; usable: boolean }>;
+      };
+      assert.equal(found.trace.error, undefined);
+      assert.ok(result.candidates.length > 0, "expected candidate endpoints");
+      assert.ok(
+        result.candidates.some((entry) => entry.path.includes("namedLocations")),
+        `expected a namedLocations path, got ${result.candidates.map((c) => c.path).join(", ")}`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("caps how many candidates are returned", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-cap-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 1));
+      const found = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "user",
+        limit: 500,
+      });
+      const result = found.result as { candidates: unknown[] };
+      assert.ok(result.candidates.length <= 15);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("attempts a read endpoint whose permissions the catalog does not document", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-unknown-"));
+    try {
+      let requested: string | undefined;
+      const ctx = toolContext(seededStore(dir, 1), {
+        graphForScopes: async () => ({
+          async listManagedDevices() {
+            return [];
+          },
+          async retireManagedDevice() {
+            throw new Error("write should not run");
+          },
+          async request(input) {
+            requested = input.path;
+            return { value: [{ id: "a" }] };
+          },
+        }),
+      });
+
+      // A real catalog path the bundled docs carry no permissions for.
+      // Previously rejected as "outside Chat's read-only scope
+      // allowlist" purely because of that missing metadata.
+      const result = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/admin/edge/internetExplorerMode",
+      });
+
+      assert.equal(result.trace.error, undefined, `unexpected error: ${result.trace.error}`);
+      assert.equal(requested, "/admin/edge/internetExplorerMode");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an endpoint needing a permission this app never requests, without calling Graph", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-refuse-"));
+    try {
+      let called = false;
+      const ctx = toolContext(seededStore(dir, 1), {
+        graphForScopes: async () => ({
+          async listManagedDevices() {
+            return [];
+          },
+          async retireManagedDevice() {
+            throw new Error("write should not run");
+          },
+          async request() {
+            called = true;
+            return { value: [] };
+          },
+        }),
+      });
+
+      const result = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/me/messages",
+      });
+
+      assert.ok(result.trace.error, "reading mail must be refused");
+      assert.match(result.trace.error ?? "", /does not request/);
+      assert.equal(called, false, "no Graph call may be made for a refused endpoint");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still rejects a path that does not exist in the catalog", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-bogus-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 1));
+      const result = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/totallyMadeUpThing",
+      });
+      assert.match(result.trace.error ?? "", /Unknown Microsoft Graph GET path/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("an empty query result is not evidence of an empty tenant", () => {
+  it("reports the unfiltered row count when a filter matches nothing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-empty-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 9));
+      const result = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        where: { operatingSystem: "SolarisNotAThing" },
+      });
+      const record = result.result as {
+        returnedRows: number;
+        cachedRowsForResource: number;
+        availableFields?: string[];
+        note: string;
+      };
+      assert.equal(record.returnedRows, 0);
+      assert.equal(
+        record.cachedRowsForResource,
+        9,
+        "the model must be told the resource is populated, or it reports the tenant as empty",
+      );
+      assert.match(record.note, /must not answer that it has none/i);
+      assert.match(
+        result.trace.resultSummary,
+        /9 rows are cached/,
+        "the summary must not read as an empty cache when only the filter missed",
+      );
+      assert.ok(record.availableFields?.includes("operatingSystem"));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("distinguishes an uncached resource from an empty one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-uncached-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 9));
+      const result = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "users",
+      });
+      const record = result.result as { cachedRowsForResource: number; note: string };
+      assert.equal(record.cachedRowsForResource, 0);
+      assert.match(record.note, /Nothing is cached/i);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cached rows advertise the fields available to filter on", () => {
+  it("lists field names on a successful query, not only after one fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-fields-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 5));
+      const result = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        limit: 3,
+      });
+      const record = result.result as {
+        returnedRows: number;
+        availableFields?: string[];
+      };
+      assert.ok(record.returnedRows > 0);
+      assert.ok(
+        record.availableFields?.includes("complianceState"),
+        `fields must be advertised on a successful read; got ${JSON.stringify(record.availableFields)}`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the cache inventory lean, since it covers every resource at once", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-fields-inv-"));
+    try {
+      const ctx = toolContext(seededStore(dir, 5));
+      const result = await executeIntuneChatTool(ctx, "list_cached_resources", {});
+      const record = result.result as {
+        resources: Array<{ resource: string; availableFields?: string[] }>;
+      };
+      assert.ok(record.resources.length > 10);
+      assert.ok(
+        record.resources.every((entry) => entry.availableFields === undefined),
+        "field lists across every resource make this observation too expensive",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+// Publish a documentation retrieval index as a GitHub release asset.
+//
+// GitHub release assets allow files just under 2 GiB and are downloaded
+// without bandwidth limits or charges, which suits a ~264 MB index far
+// better than the marketing site's host (Vercel caps static uploads at
+// 100 MB on Hobby, and Blob egress is billed per GB).
+//
+// The index ships on its own tag so it can be rebuilt on the
+// documentation's cadence without cutting an app release. The tag must
+// match DEFAULT_INDEX_BASE_URL in apps/desktop/electron/retrieval/install.ts.
+//
+// Usage:
+//   node scripts/publish-docs-index.mjs <index-dir> [tag]
+
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { readFile, stat, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { basename, join, resolve } from "node:path";
+
+const FILES = ["index-meta.json", "chunks.jsonl", "embeddings.f32"];
+
+const indexDir = resolve(process.argv[2] ?? "");
+if (!process.argv[2]) {
+  console.error("Usage: node scripts/publish-docs-index.mjs <index-dir> [tag]");
+  process.exit(2);
+}
+
+const metaPath = join(indexDir, "index-meta.json");
+const meta = JSON.parse(await readFile(metaPath, "utf8"));
+const built = typeof meta.when === "string" ? meta.when : meta.builtAt;
+const version = meta.version ?? String(built).slice(0, 10);
+const tag = process.argv[3] ?? `docs-index-${version}`;
+
+// Stamp the version into the metadata so an installed index can say
+// which release it is, and the app can tell when a newer one exists.
+if (meta.version !== version) {
+  meta.version = version;
+  await writeFile(metaPath, JSON.stringify(meta));
+  console.log(`stamped index version ${version}`);
+}
+
+async function sha256(path) {
+  return await new Promise((resolveHash, reject) => {
+    const hash = createHash("sha256");
+    createReadStream(path)
+      .on("data", (chunk) => hash.update(chunk))
+      .on("error", reject)
+      .on("end", () => resolveHash(hash.digest("hex")));
+  });
+}
+
+const lines = [];
+let total = 0;
+for (const file of FILES) {
+  const path = join(indexDir, file);
+  const info = await stat(path);
+  total += info.size;
+  if (info.size >= 2 * 1024 ** 3) {
+    console.error(`${file} is ${info.size} bytes, over the 2 GiB release asset limit.`);
+    process.exit(1);
+  }
+  lines.push(`${await sha256(path)}  ${basename(path)}`);
+  console.log(`hashed ${file} (${(info.size / 1024 ** 2).toFixed(1)} MB)`);
+}
+
+const sumsPath = join(indexDir, "SHA256SUMS.txt");
+await writeFile(sumsPath, lines.join("\n") + "\n");
+console.log(`\nindex: ${meta.count ?? meta.chunkCount} chunks, dim ${meta.dim}, ${(total / 1024 ** 2).toFixed(0)} MB`);
+console.log(`tag:   ${tag}`);
+
+// The stable pointer every install polls. Publishing a new index means
+// uploading its assets under a new tag, then rewriting this one file on
+// the fixed `docs-index` tag.
+const manifest = {
+  version,
+  baseUrl: `https://github.com/OpenAdminOS/OpenAdminOS/releases/download/${tag}`,
+  chunkCount: meta.count ?? meta.chunkCount,
+  builtAt: built,
+};
+const manifestPath = join(indexDir, "index-latest.json");
+await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+
+if (process.env.DRY_RUN === "1") {
+  console.log("\nDRY_RUN=1, not publishing.");
+  console.log("manifest:", JSON.stringify(manifest));
+  process.exit(0);
+}
+
+const notes = [
+  "Documentation retrieval index used to ground OpenAdminOS answers in Microsoft product documentation.",
+  "",
+  `- Version: ${version}`,
+  `- ${meta.count ?? meta.chunkCount} chunks, ${meta.dim}-dimension vectors`,
+  `- Corpora: ${(meta.corpora ?? []).join(", ") || "unspecified"}`,
+  `- Embedding model: nomic-embed-text (nomic-embed-text-v1.5)`,
+  `- Built: ${built}`,
+  "",
+  "The desktop app installs and updates this automatically. It can also be downloaded and installed from a folder on machines without outbound network access. Every file is verified against SHA256SUMS.txt.",
+  "",
+  "## Attribution",
+  "",
+  "Derived from Microsoft's public documentation for Intune, Microsoft Entra, and Microsoft Defender, published by Microsoft under the Creative Commons Attribution 4.0 International licence (CC BY 4.0). The text is chunked and embedded; it is not modified in substance. Microsoft does not endorse this project.",
+  "",
+  "Licence: https://creativecommons.org/licenses/by/4.0/",
+].join("\n");
+
+const args = [
+  "release", "create", tag,
+  ...FILES.map((f) => join(indexDir, f)),
+  sumsPath,
+  "--title", `Documentation index ${String(built).slice(0, 10)}`,
+  "--notes", notes,
+];
+console.log(`\ngh ${args.slice(0, 3).join(" ")} ...`);
+const result = spawnSync("gh", args, { stdio: "inherit" });
+if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
+
+// Move the stable pointer last, so it never names a release that does
+// not exist yet.
+console.log("\nupdating the docs-index pointer");
+spawnSync("gh", ["release", "delete-asset", "docs-index", "index-latest.json", "--yes"], {
+  stdio: "ignore",
+});
+const pointer = spawnSync(
+  "gh",
+  ["release", "upload", "docs-index", manifestPath, "--clobber"],
+  { stdio: "inherit" },
+);
+if ((pointer.status ?? 1) !== 0) {
+  console.error(
+    "\nAssets published, but the docs-index pointer was not updated. Create a release tagged `docs-index` once, then re-run.",
+  );
+}
+process.exit(pointer.status ?? 1);

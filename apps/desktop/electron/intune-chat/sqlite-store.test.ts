@@ -448,7 +448,7 @@ describe("Intune Chat SQLite store", () => {
           },
         ],
         assistantText: "Contoso has one non-compliant Windows device; Fabrikam failed.",
-        exportDossierMarkdown: "# Multi-tenant Intune Chat dossier\n",
+        exportDossierMarkdown: "# Multi-tenant Chat dossier\n",
       };
       store.upsertMultiTenantJob(job);
       assert.equal(store.getMultiTenantJob(job.id)?.summary.failedTenants, 1);
@@ -888,6 +888,18 @@ function isAcceptedPermissionSuperset(
   ) {
     return true;
   }
+  // Microsoft's permissions reference lists Policy.Read.AuthenticationMethod
+  // as least-privileged for GET /policies/authenticationMethodsPolicy and
+  // Policy.Read.All as the documented higher-privileged alternative. The
+  // initial consent set already carries Policy.Read.All, so requesting the
+  // narrower duplicate would only add consent-screen noise.
+  if (
+    resource === "authenticationMethodsPolicy" &&
+    scope === "Policy.Read.All" &&
+    documentedScopes.includes("Policy.Read.AuthenticationMethod")
+  ) {
+    return true;
+  }
   return scope === "User.Read.All" && documentedScopes.includes("User.ReadBasic.All");
 }
 
@@ -949,6 +961,19 @@ function graphPmResourceName(
     managedDeviceOverview: "managedDeviceOverview",
     managedDeviceEncryptionStates: "managedDeviceEncryptionState",
     troubleshootingEvents: "deviceManagementTroubleshootingEvent",
+    namedLocations: "namedLocation",
+    authenticationMethodsPolicy: "authenticationMethodsPolicy",
+    authorizationPolicy: "authorizationPolicy",
+    crossTenantAccessPolicy: "crossTenantAccessPolicy",
+    directoryRoles: "directoryRole",
+    administrativeUnits: "administrativeUnit",
+    applications: "application",
+    servicePrincipals: "servicePrincipal",
+    domains: "domain",
+    securityAlerts: "alert",
+    securityIncidents: "incident",
+    secureScores: "secureScore",
+    secureScoreControlProfiles: "secureScoreControlProfile",
   };
   return resourceNames[resource];
 }
@@ -960,3 +985,68 @@ async function readDefaultScopeNames(): Promise<string[]> {
   );
   return [...source.matchAll(/name:\s*"([^"]+)"/g)].map((match) => match[1] ?? "");
 }
+
+describe("exact aggregate counts for how-many questions", () => {
+  it("counts every cached row, not just the sample the prompt can carry", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agg-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      // 500 devices, 120 of them non-compliant. The answer pack can
+      // only carry a few dozen sample rows, so counting the sample
+      // would report roughly a fifth of the real figure.
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        label: "Intune managed devices",
+        scopeSet: ["DeviceManagementManagedDevices.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: Array.from({ length: 500 }, (_, index) => ({
+          id: `device-${index}`,
+          deviceName: `WIN-${index}`,
+          operatingSystem: index < 400 ? "Windows" : "macOS",
+          complianceState: index < 120 ? "noncompliant" : "compliant",
+        })),
+      });
+
+      const aggregate = store.aggregateGraphResource("tenant-1", "managedDevices");
+      assert.equal(aggregate.total, 500);
+      assert.equal(aggregate.breakdowns.complianceState?.noncompliant, 120);
+      assert.equal(aggregate.breakdowns.complianceState?.compliant, 380);
+      assert.equal(aggregate.breakdowns.operatingSystem?.Windows, 400);
+      assert.equal(aggregate.breakdowns.operatingSystem?.["macOS"], 100);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the tenant-wide total reported by Graph even when it exceeds the cache", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-total-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "users",
+        label: "Users",
+        scopeSet: ["User.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        pageLimitReached: true,
+        tenantTotal: 8421,
+        rows: Array.from({ length: 1000 }, (_, index) => ({
+          id: `user-${index}`,
+          displayName: `User ${index}`,
+        })),
+      });
+
+      const [status] = store.getGraphCacheStatus("tenant-1", [
+        { resource: "users", label: "Users", scopes: ["User.Read.All"] },
+      ]);
+      assert.equal(status?.rows, 1000, "the cache holds the capped page set");
+      assert.equal(status?.tenantTotal, 8421, "the true tenant total must survive the cap");
+      assert.equal(status?.pageLimitReached, true);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

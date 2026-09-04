@@ -6,6 +6,7 @@ import { Button } from "../components/Button";
 import {
   createMockAppState,
   makeMockBridge,
+  mockProviders,
   renderWithAppState,
 } from "../test/test-utils";
 import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
@@ -83,5 +84,119 @@ describe("contextual tenant setup", () => {
       await screen.findByRole("heading", { name: "Pick an LLM provider" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Tenant connected" })).not.toBeInTheDocument();
+  });
+
+  it("connects with the OpenAdminOS registration by default", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectTenant = vi.fn(async () => createMockAppState());
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge({ connectTenant }, emptyState),
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+    );
+    // No options means the default app identity.
+    expect(connectTenant).toHaveBeenCalledWith(undefined);
+  });
+
+  it("connects with a custom app registration when the admin supplies one", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectTenant = vi.fn(async () => createMockAppState());
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge({ connectTenant }, emptyState),
+    });
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Connect with your own app registration",
+      }),
+    );
+    await user.type(
+      screen.getByLabelText(/Application \(client\) ID/i),
+      "d1de0a94-f67a-421d-8804-a235955ffd69",
+    );
+    await user.type(
+      screen.getByLabelText(/Directory \(tenant\) ID/i),
+      "contoso.onmicrosoft.com",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Connect with your own app registration" }),
+    );
+
+    expect(connectTenant).toHaveBeenCalledWith({
+      appRegistration: {
+        clientId: "d1de0a94-f67a-421d-8804-a235955ffd69",
+        directoryTenantId: "contoso.onmicrosoft.com",
+      },
+    });
+  });
+
+  it("never asks for a client secret", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge({}, emptyState),
+    });
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Connect with your own app registration",
+      }),
+    );
+    expect(screen.queryByLabelText(/secret/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/No client secret is needed or accepted/i)).toBeInTheDocument();
+  });
+
+  it("opens setup automatically when a launch has no connected tenants", async () => {
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge({}, emptyState),
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+    ).toBeInTheDocument();
+  });
+
+  it("stays contextual when a tenant is already connected", async () => {
+    renderWithAppState(<div>App content</div>, { route: "/chat" });
+
+    await screen.findByText("App content");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      screen.queryByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("continues first-run setup into provider selection when no provider is connected", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) => ({
+      ...provider,
+      status: "available" as const,
+    }));
+    const emptyState = createMockAppState({
+      tenants: [],
+      activeTenantId: undefined,
+      providers,
+    });
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge({}, emptyState),
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Pick an LLM provider" }),
+    ).toBeInTheDocument();
   });
 });

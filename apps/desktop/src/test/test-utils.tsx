@@ -204,6 +204,7 @@ export function createMockAppState(overrides: Partial<AppState> = {}): AppState 
     registryRefreshError: null,
     registrySource: "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents",
     registryInstallCountsEnabled: true,
+    usageTelemetryEnabled: false,
     ...overrides,
   };
 }
@@ -272,6 +273,36 @@ export function makeMockBridge(
     setRegistryInstallCountsEnabled: vi.fn(async (enabled: boolean) =>
       updateState({ ...appState, registryInstallCountsEnabled: enabled }),
     ),
+    getUsageTelemetryPreview: vi.fn(async () => ({
+      enabled: appState.usageTelemetryEnabled ?? false,
+      endpointConfigured: true,
+      payload: {
+        schema: "openadminos-usage-1" as const,
+        installId: "oao_test_install",
+        appVersion: appState.appVersion,
+        os: "linux",
+        arch: "x64",
+        providerClass: appState.trust.isLocal ? "local" as const : "hosted" as const,
+        tenants: "1",
+        agents: "1",
+        runs: "0",
+        retrievalIndex: false,
+      },
+    })),
+    setUsageTelemetryEnabled: vi.fn(async (enabled: boolean) =>
+      updateState({ ...appState, usageTelemetryEnabled: enabled }),
+    ),
+    sendUsageTelemetryTest: vi.fn(async () => ({
+      sent: appState.usageTelemetryEnabled ?? false,
+    })),
+    getRetrievalStatus: vi.fn(async () => ({
+      available: false,
+      reason: "not documentation-grounded yet",
+    })),
+    refreshRetrievalIndex: vi.fn(async () => ({
+      available: false,
+      reason: "not documentation-grounded yet",
+    })),
     listInstalledAgents: vi.fn(async () => appState.installedAgents),
     listAgents: vi.fn(async () => appState.installedAgents),
     listProviders: vi.fn(async () => appState.providers),

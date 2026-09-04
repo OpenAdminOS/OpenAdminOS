@@ -16,6 +16,7 @@ import {
   type GraphCacheStatus,
   type HostedProviderBatchConsent,
   type IntuneChatConversation,
+  type IntuneChatInvestigationToolName,
   type IntuneChatMessage,
   type IntuneChatProgressStep,
   type IntuneChatStreamEvent,
@@ -67,6 +68,9 @@ import {
   buildTenantComparison,
   emptyMultiTenantSummary,
   estimateChatProgressPercent,
+  COUNTABLE_GRAPH_RESOURCES,
+  resourceStalenessMs,
+  GRAPH_REFRESH_CONCURRENCY,
   fetchGraphCachePages,
   hashTenantId,
   intuneChatProviderBudget,
@@ -103,7 +107,7 @@ import {
   requiredScopesForResources,
   selfTrainingCandidateFromPrompt,
 } from "./planner.js";
-import type { IntuneChatToolContext } from "./tools.js";
+import { executeIntuneChatTool, type IntuneChatToolContext } from "./tools.js";
 
 type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
@@ -155,6 +159,14 @@ export interface ChatServiceHost {
   }>;
   startRun(agentSlug: string, options?: StartRunOptions): Promise<RunRecord>;
   getDriftTimeline(input: DriftTimelineInput): Promise<DriftTimelineResult>;
+  /**
+   * Passages from the local documentation index for this question, with
+   * their source paths. Returns [] when no index is installed, so the
+   * answer degrades to tenant-data-only rather than failing.
+   */
+  retrieveDocumentation?(query: string): Promise<
+    Array<{ file: string; title?: string; text: string; score: number }>
+  >;
   readonly appVersion: string;
   readonly userDataPath: string | undefined;
   readonly intelligenceStore: IntelligenceSqliteStore | undefined;
@@ -916,7 +928,7 @@ export class IntuneChatService {
     const persisted = await this.host.read();
     const activeTenant = this.host.resolveTenant(persisted);
     if (persisted.tenants.length === 0) {
-      throw new Error("Connect at least one tenant before using multi-tenant Intune Chat.");
+      throw new Error("Connect at least one tenant before using multi-tenant Chat.");
     }
     const groups = store.listTenantGroups();
     const resolvedGroups = resolveTenantGroups(input.tenantScope, groups);
@@ -1056,7 +1068,7 @@ export class IntuneChatService {
       const completion = await llm.complete({
         system: buildIntuneChatSystemPrompt(input.provider?.isLocal === true),
         prompt: [
-          "Summarize this read-only multi-tenant Intune Chat result for an admin.",
+          "Summarize this read-only multi-tenant Chat result for an admin.",
           "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
           `Question: ${input.prompt}`,
           JSON.stringify(
@@ -1153,6 +1165,7 @@ export class IntuneChatService {
   private async refreshGraphCacheInternal(
     options: RefreshGraphCacheOptions = {},
     onProgress?: (event: GraphCacheRefreshProgressEvent) => void,
+    signal?: AbortSignal,
   ): Promise<GraphCacheRefreshResult> {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
@@ -1166,9 +1179,14 @@ export class IntuneChatService {
     const graph = this.host.graphFactory
       ? this.host.graphFactory({ tenantId: tenant.id, scopes, log })
       : (await this.host.buildGraph(tenant.id, scopes)).createGraph(log);
-    const results: GraphCacheRefreshResult["resources"] = [];
+    // Slots are filled by index so the reported order matches the
+    // requested order regardless of which refresh finishes first.
+    const slots = new Array<GraphCacheRefreshResult["resources"][number] | undefined>(
+      resources.length,
+    );
+    let completed = 0;
 
-    for (const resource of resources) {
+    const refreshOne = async (resource: GraphCacheResourceKind, slot: number) => {
       const definition = definitionForResource(resource);
       const request = pathForResource(resource);
       const refreshedAt = new Date().toISOString();
@@ -1176,7 +1194,7 @@ export class IntuneChatService {
         type: "resource-start",
         resource,
         label: definition.label,
-        completed: results.length,
+        completed,
         total: resources.length,
       });
       try {
@@ -1184,11 +1202,24 @@ export class IntuneChatService {
         if (request.select && request.select.length > 0) {
           query.$select = request.select.join(",");
         }
-        const pageResult = await fetchGraphCachePages(graph, {
-          path: request.path,
-          query,
-          headers: request.headers,
-        });
+        // Ask Graph for the tenant-wide total alongside the first page.
+        // The cache holds at most a thousand rows, so without this a
+        // question about a larger collection can only be answered from
+        // a sample.
+        const headers: Record<string, string> = { ...(request.headers ?? {}) };
+        if (COUNTABLE_GRAPH_RESOURCES.has(resource)) {
+          query.$count = "true";
+          headers.ConsistencyLevel = "eventual";
+        }
+        const pageResult = await fetchGraphCachePages(
+          graph,
+          {
+            path: request.path,
+            query,
+            ...(Object.keys(headers).length > 0 ? { headers } : {}),
+          },
+          signal,
+        );
         store.replaceGraphResources({
           tenantId: tenant.id,
           resource,
@@ -1197,9 +1228,12 @@ export class IntuneChatService {
           rows: pageResult.rows,
           pageCount: pageResult.pages,
           pageLimitReached: pageResult.pageLimitReached,
+          ...(pageResult.totalCount !== undefined
+            ? { tenantTotal: pageResult.totalCount }
+            : {}),
           refreshedAt,
         });
-        results.push({
+        slots[slot] = {
           resource,
           label: definition.label,
           rows: pageResult.rows.length,
@@ -1207,15 +1241,22 @@ export class IntuneChatService {
           pageLimitReached: pageResult.pageLimitReached,
           refreshedAt,
           ok: true,
-        });
+        };
+        completed += 1;
         onProgress?.({
           type: "resource-complete",
-          result: results.at(-1)!,
-          completed: results.length,
+          result: slots[slot]!,
+          completed,
           total: resources.length,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const raw = error instanceof Error ? error.message : String(error);
+        // A 403 on a read resource almost always means the tenant was
+        // consented before this permission existed in the requested set.
+        // Surface the recovery path instead of the raw Graph body.
+        const message = raw.includes("HTTP 403")
+          ? `Microsoft Graph denied read access for ${definition.label}. This tenant was likely connected before OpenAdminOS requested ${definition.scopes.join(", ")}. Reconnect the tenant to grant the new read permissions, then refresh again.`
+          : raw;
         store.recordGraphResourceError({
           tenantId: tenant.id,
           resource,
@@ -1224,29 +1265,85 @@ export class IntuneChatService {
           error: message,
           now: refreshedAt,
         });
-        results.push({
+        slots[slot] = {
           resource,
           label: definition.label,
           rows: 0,
           refreshedAt,
           ok: false,
           error: message,
-        });
+        };
+        completed += 1;
         onProgress?.({
           type: "resource-complete",
-          result: results.at(-1)!,
-          completed: results.length,
+          result: slots[slot]!,
+          completed,
           total: resources.length,
         });
       }
-    }
+    };
+
+    // Refreshes used to run strictly one after another, so a question
+    // planning a dozen resources waited for a dozen sequential Graph
+    // list calls, each of which routinely takes tens of seconds. Graph
+    // throttles per resource unit, so a small amount of cross-resource
+    // parallelism is well within normal limits, and 429 responses are
+    // already retried with Retry-After by the adapter.
+    let next = 0;
+    const workers = Array.from(
+      { length: Math.min(GRAPH_REFRESH_CONCURRENCY, resources.length) },
+      async () => {
+        while (true) {
+          const slot = next++;
+          const resource = resources[slot];
+          if (resource === undefined) return;
+          if (signal?.aborted) return;
+          await refreshOne(resource, slot);
+        }
+      },
+    );
+    await Promise.all(workers);
 
     return {
       tenantId: tenant.id,
       startedAt,
       finishedAt: new Date().toISOString(),
-      resources: results,
+      resources: slots.filter(
+        (entry): entry is GraphCacheRefreshResult["resources"][number] =>
+          entry !== undefined,
+      ),
     };
+  }
+
+  /**
+   * Exact per-resource counts for the answer pack. Cheap indexed
+   * aggregates; failures are non-fatal because a missing count only
+   * costs precision, and the model still has the sample rows.
+   */
+  private graphAggregatesFor(
+    store: IntelligenceSqliteStore,
+    tenantId: string,
+    resources: readonly GraphCacheResourceKind[],
+  ): Partial<
+    Record<
+      GraphCacheResourceKind,
+      { total: number; breakdowns: Record<string, Record<string, number>> }
+    >
+  > {
+    const aggregates: Partial<
+      Record<
+        GraphCacheResourceKind,
+        { total: number; breakdowns: Record<string, Record<string, number>> }
+      >
+    > = {};
+    for (const resource of resources) {
+      try {
+        aggregates[resource] = store.aggregateGraphResource(tenantId, resource);
+      } catch {
+        // Leave this resource without exact counts.
+      }
+    }
+    return aggregates;
   }
 
   async sendIntuneChatMessage(
@@ -1327,7 +1424,10 @@ export class IntuneChatService {
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
         if (!status || status.rows === 0 || !status.refreshedAt) return true;
-        return Date.now() - new Date(status.refreshedAt).getTime() > 6 * 60 * 60 * 1000;
+        return (
+          Date.now() - new Date(status.refreshedAt).getTime() >
+          resourceStalenessMs(resource)
+        );
       });
       if (staleResources.length > 0) {
         refreshResult = await this.refreshGraphCache({
@@ -1393,14 +1493,16 @@ export class IntuneChatService {
           tenant,
           cacheStatus,
           rows,
+          aggregates: this.graphAggregatesFor(store, tenant.id, planned.resources),
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
+        const documentation = await this.retrieveDocumentationSafely(modelQuestion);
         const completion = await llm.complete({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
+          prompt: buildAnswerPrompt(answerPack, documentation),
           ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
@@ -1432,6 +1534,7 @@ export class IntuneChatService {
           if (capability.enabled) {
             const agentic = await runAgenticChat({
               question: modelQuestion,
+              documentation: await this.retrieveDocumentationSafely(modelQuestion),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -1445,6 +1548,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
+            recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               if (agentSuggestions.length > 0) {
@@ -1699,7 +1803,10 @@ export class IntuneChatService {
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
         if (!status || status.rows === 0 || !status.refreshedAt) return true;
-        return Date.now() - new Date(status.refreshedAt).getTime() > 6 * 60 * 60 * 1000;
+        return (
+          Date.now() - new Date(status.refreshedAt).getTime() >
+          resourceStalenessMs(resource)
+        );
       });
       progressRefreshResources = staleResources;
       if (staleResources.length > 0) {
@@ -1730,6 +1837,11 @@ export class IntuneChatService {
               stage: "refreshing-cache",
             });
           },
+          // Stop used to be checked only before and after the whole
+          // refresh, so pressing it mid-refresh let every remaining
+          // Graph call run to completion before the result was thrown
+          // away. The signal now reaches the requests themselves.
+          options.signal,
         );
         store.insertToolCall({
           id: `tool_${randomUUID()}`,
@@ -1829,6 +1941,7 @@ export class IntuneChatService {
           tenant,
           cacheStatus,
           rows,
+          aggregates: this.graphAggregatesFor(store, tenant.id, planned.resources),
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,
@@ -1839,9 +1952,11 @@ export class IntuneChatService {
           assistantContent = prefix;
           emitDelta(assistantContent, prefix);
         }
+        const streamDocumentation =
+          await this.retrieveDocumentationSafely(modelQuestion);
         for await (const chunk of llm.stream({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`,
+          prompt: buildAnswerPrompt(answerPack, streamDocumentation),
           ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
@@ -1889,6 +2004,7 @@ export class IntuneChatService {
             });
             const agentic = await runAgenticChat({
               question: modelQuestion,
+              documentation: await this.retrieveDocumentationSafely(modelQuestion),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -1953,6 +2069,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
+            recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               sendProgress({
                 message: "Model response started.",
@@ -2088,6 +2205,55 @@ export class IntuneChatService {
     return result;
   }
 
+  /**
+   * Execute a single read-only chat tool for a fixed tenant. Used by
+   * the MCP gateway to expose the exact same read surface (allowlist,
+   * caps, drift access) to external AI clients without going through
+   * the conversational loop.
+   */
+  async executeReadTool(
+    tenantId: string,
+    name: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    const allowed: readonly IntuneChatInvestigationToolName[] = [
+      "list_cached_resources",
+      "query_cache",
+      "graph_get",
+      "query_drift",
+    ];
+    const match = allowed.find((candidate) => candidate === name);
+    if (!match) {
+      throw new Error(`Tool is not available through the gateway: ${name}`);
+    }
+    const ctx = this.buildChatToolContext(tenantId);
+    const execution = await executeIntuneChatTool(ctx, match, params);
+    if (execution.trace.error) {
+      throw new Error(execution.trace.error);
+    }
+    return execution.result;
+  }
+
+  /**
+   * Documentation retrieval must never take an answer down: a missing
+   * index, an embedding model that was not pulled, or a stopped Ollama
+   * all degrade to an ungrounded answer rather than an error.
+   */
+  private async retrieveDocumentationSafely(
+    query: string,
+  ): Promise<Array<{ file: string; title?: string; text: string; score: number }>> {
+    if (!this.host.retrieveDocumentation) return [];
+    try {
+      return await this.host.retrieveDocumentation(query);
+    } catch (error) {
+      console.info(
+        "[intune-chat] documentation retrieval unavailable:",
+        error instanceof Error ? error.message : error,
+      );
+      return [];
+    }
+  }
+
   private buildChatToolContext(tenantId: string): IntuneChatToolContext {
     const store = this.host.requireIntelligenceStore();
     const log = (
@@ -2163,7 +2329,7 @@ export class IntuneChatService {
     const consent = input.hostedProviderConsent;
     if (!consent) {
       throw new Error(
-        "Hosted provider confirmation is required before Intune Chat can send tenant context to the selected provider.",
+        "Hosted provider confirmation is required before Chat can send tenant context to the selected provider.",
       );
     }
 
@@ -2303,11 +2469,63 @@ export class IntuneChatService {
   }
 }
 
+
+/**
+ * Observed agentic capability, per provider+model.
+ *
+ * Model names are a poor proxy for whether a model can hold the
+ * investigative JSON protocol: a name-based rule both misses capable
+ * models and keeps re-attempting models that provably cannot emit the
+ * tool schema, burning a round trip on every question before falling
+ * back. Record what actually happened instead and stop retrying a model
+ * that has failed repeatedly.
+ *
+ * Deliberately in-memory: if the user pulls a better build of the same
+ * tag, or the failures were caused by a transient provider problem, a
+ * restart re-evaluates rather than permanently branding the model.
+ */
+const AGENTIC_FAILURE_LIMIT = 2;
+const agenticFailuresByModel = new Map<string, number>();
+
+function agenticModelKey(providerId: string, model: string | undefined): string {
+  return `${providerId}::${model ?? "default"}`;
+}
+
+export function recordAgenticOutcome(
+  providerId: string,
+  model: string | undefined,
+  ok: boolean,
+): void {
+  const key = agenticModelKey(providerId, model);
+  if (ok) {
+    agenticFailuresByModel.delete(key);
+    return;
+  }
+  agenticFailuresByModel.set(key, (agenticFailuresByModel.get(key) ?? 0) + 1);
+}
+
+function agenticModelHasFailedRepeatedly(
+  providerId: string,
+  model: string | undefined,
+): boolean {
+  return (
+    (agenticFailuresByModel.get(agenticModelKey(providerId, model)) ?? 0) >=
+    AGENTIC_FAILURE_LIMIT
+  );
+}
+
 type AgenticCapabilityDecision = {
   enabled: boolean;
   reason: "setting" | "capable" | "capability-fallback";
   notice?: string;
 };
+
+/** Test seam for the capability decision; not used by app code. */
+export function resolveAgenticCapabilityForTest(
+  input: Parameters<typeof resolveAgenticCapability>[0],
+): AgenticCapabilityDecision {
+  return resolveAgenticCapability(input);
+}
 
 function resolveAgenticCapability(input: {
   mode: ChatInvestigationMode;
@@ -2321,10 +2539,19 @@ function resolveAgenticCapability(input: {
   if (input.mode === "always-deterministic") {
     return { enabled: false, reason: "setting" };
   }
+  const observedModel =
+    input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0];
+  if (agenticModelHasFailedRepeatedly(input.providerId, observedModel)) {
+    return {
+      enabled: false,
+      reason: "capability-fallback",
+      notice: `Deterministic retrieval - ${observedModel ?? input.providerId} did not hold the investigative format, so this answer skips it.`,
+    };
+  }
   if (input.provider?.isLocal === false) {
     return { enabled: true, reason: "capable" };
   }
-  const model = input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0];
+  const model = observedModel;
   if (modelSuggestsSmallLocalModel(model)) {
     return {
       enabled: false,
@@ -2358,4 +2585,34 @@ function writeIntentBlockedMessage(
       ? `This looks like work for ${writeAgent.agentName}. Use the installed write agent so the normal plan and confirmation flow stays in force.`
       : "Use an installed write agent so the normal plan and confirmation flow stays in force.",
   ].join("\n\n");
+}
+
+/**
+ * Put Microsoft documentation in front of the tenant data, and say
+ * plainly which is which. The model must not present documentation as
+ * observed tenant state, and it must cite the file a claim came from so
+ * an admin can check it.
+ */
+function buildAnswerPrompt(
+  answerPack: string,
+  documentation: ReadonlyArray<{ file: string; title?: string; text: string }>,
+): string {
+  if (documentation.length === 0) {
+    return `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`;
+  }
+  const passages = documentation
+    .map(
+      (chunk, index) =>
+        `[${index + 1}] ${chunk.title ? `${chunk.title} - ` : ""}${chunk.file}\n${chunk.text.trim()}`,
+    )
+    .join("\n\n");
+  return [
+    "Microsoft documentation passages retrieved locally for this question:",
+    passages,
+    "",
+    "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. If it does not cover the question, say so rather than guessing.",
+    "",
+    "Retrieved tenant context, which is this tenant's actual state:",
+    answerPack,
+  ].join("\n");
 }

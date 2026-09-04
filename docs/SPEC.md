@@ -1,4 +1,4 @@
-# OpenAdminOS — Product Specification
+# OpenAdminOS: Product Specification
 
 > Source of truth for product decisions, architecture, design system, and roadmap. Read this before writing code. If reality diverges from this doc, update the doc as part of the same change.
 
@@ -24,7 +24,7 @@ There is no separate CLI. Power users get the same GUI; contributor tooling (age
 
 ### Why this exists
 
-Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose, cloud-only, no extensibility. OpenAdminOS is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for Microsoft 365 admins** — local-first runtime, GitHub-hosted integrations, opinionated UX.
+Most AI tools for IT admins today are wrappers around ChatGPT: single-purpose, cloud-only, no extensibility. OpenAdminOS is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for Microsoft 365 admins**: local-first runtime, GitHub-hosted integrations, opinionated UX.
 
 ---
 
@@ -36,7 +36,7 @@ Most AI tools for IT admins today are wrappers around ChatGPT — single-purpose
 openadminos/
 ├── apps/
 │   └── desktop/              # Electron main + preload + renderer (Vite + React)
-├── web/                      # Public marketing site (openadminos.com) — Next.js
+├── web/                      # Public marketing site (openadminos.com): Next.js
 ├── packages/
 │   ├── runtime/              # Agent execution engine
 │   ├── llm/                  # Provider abstraction + concrete providers
@@ -70,7 +70,7 @@ We previously planned for Tauri (smaller binaries, native webview). After analyz
 - **MSAL is a desktop dependency as well as a runtime dependency.** Electron main imports `@azure/msal-node` types directly for tenant state, so `apps/desktop` declares the package explicitly. This keeps npm and pnpm workspaces from resolving separate MSAL type identities between Electron main and `@openadminos/runtime`.
 - **Open-source contributor pool.** Community contributions (agents and UI) come from JS/TS devs. Tauri's Rust shell raises the bar for any contributor who wants to fix more than an agent.
 - **UI fidelity.** Chromium everywhere = identical rendering on Win/Mac/Linux. The design language (dense, dark, custom scrollbars, GPU-accelerated transitions) is more reliable on Chromium than on platform-native webviews.
-- **Proven path for this category.** Claude Desktop, VS Code, Linear, Slack, Figma, 1Password — all Electron. The "Electron is bloated" critique mattered more on 8GB-RAM machines than on modern admin workstations.
+- **Proven path for this category.** Claude Desktop, VS Code, Linear, Slack, Figma, 1Password: all Electron. The "Electron is bloated" critique mattered more on 8GB-RAM machines than on modern admin workstations.
 - **Electron fits the runtime model.** The architecture supports `node-pty`, long-lived subprocess work, and Node-based provider adapters directly.
 
 The cost we accept: ~80–150MB installer size (vs ~5–10MB Tauri), ~150–250MB idle memory per window. For an IT-admin tool on managed devices this can pinch corporate deployment limits, but it's not a blocker. Trust posture is *architectural* (no tenant-content telemetry, local-first, write confirmation), not framework-derived.
@@ -149,7 +149,7 @@ your Microsoft 365 tenant. Run locally, approved by you."), a pre-rendered
 product demo video, a traction strip, a three-step "How it works" section, the
 write-gate diff demo, the top most-installed registry agents, and open
 source + FAQ + final CTA. The traction strip and CTA star count only render
-real numbers — GitHub stars from the unauthenticated repo API (revalidated
+real numbers: GitHub stars from the unauthenticated repo API (revalidated
 hourly) and agent/install counts from the synced `public/stats/agents.json`;
 when either source is unavailable the cell is omitted, never faked. Registry
 agent display metadata (names, descriptions, mode, scopes) is curated in
@@ -159,7 +159,7 @@ from the top-level `remotion/` project (not part of the npm workspace, never
 installed on Vercel) into committed `web/public/videos/` assets; the embed is
 a muted autoplay loop that falls back to a static poster when
 `prefers-reduced-motion` is set. The composition is a faithful recreation of
-the real desktop app UI — it uses the design tokens from
+the real desktop app UI: it uses the design tokens from
 `apps/desktop/src/styles/globals.css` (warm stone palette, amber accent) and
 mirrors the actual chrome (sidebar, tenant card, status strip) against
 `web/public/openadminos-app.png`; it must not drift into an invented visual
@@ -311,11 +311,11 @@ Per-agent model overrides are required: an agent's manifest can specify a prefer
 
 ### Agent contract
 
-**Every agent invokes the LLM at least once.** The model is load-bearing, not optional polish. Agent Template manifests MUST declare at least one step with `format: llm`; the runtime hard-fails any LLM step that is reached without a connected provider (no silent skipping), and `startRun` preflights the active provider before queueing. This is what makes an agent an *agent* and not just a Graph query — the deterministic transforms shape the data, but the model is the part that reasons and produces the headline the admin reads.
+**Every agent invokes the LLM at least once.** The model is load-bearing, not optional polish. Agent Template manifests MUST declare at least one step with `format: llm`; the runtime hard-fails any LLM step that is reached without a connected provider (no silent skipping), and `startRun` preflights the active provider before queueing. This is what makes an agent an *agent* and not just a Graph query: the deterministic transforms shape the data, but the model is the part that reasons and produces the headline the admin reads.
 
 Concretely:
 - The agent's `result.summary` should reference the LLM step's output (e.g. `{{ summarize.output.text | default("...") }}`), not a deterministic count template. The deterministic counts belong in `result.data` for structured rendering.
-- Write agents use the LLM to *explain* the plan in plain language before the typed-confirmation prompt — they don't get a pass.
+- Write agents use the LLM to *explain* the plan in plain language before the typed-confirmation prompt: they don't get a pass.
 - If a write agent produces zero actions after applying its filters, the run completes as a no-op result. Typed confirmation is required for every non-empty write plan, but an empty plan must not be reported as a failure.
 - If you genuinely don't need an LLM (e.g. a pure data export), this product is the wrong tool; reach for `Get-MgDeviceManagementManagedDevice | Export-Csv` or a similar deterministic script instead.
 
@@ -352,45 +352,45 @@ export default {
     preferredModel: 'claude-sonnet-4-7',
   },
   async run(ctx: AgentContext) {
-    // ctx.graph — the Graph API client (auto-scoped to tenant)
-    // ctx.llm — the LLM provider (auto-configured)
-    // ctx.connectors — egress adapters declared in the manifest (see Connector abstraction)
-    // ctx.log — structured logging that streams to the UI
-    // ctx.confirm(diff) — required for write agents; throws if user rejects
+    // ctx.graph: the Graph API client (auto-scoped to tenant)
+    // ctx.llm: the LLM provider (auto-configured)
+    // ctx.connectors: egress adapters declared in the manifest (see Connector abstraction)
+    // ctx.log: structured logging that streams to the UI
+    // ctx.confirm(diff): required for write agents; throws if user rejects
   },
 };
 ```
 
-Agents may declare optional or required `connectors:` — see Connector abstraction below.
+Agents may declare optional or required `connectors:`: see Connector abstraction below.
 
 ### Connector abstraction
 
-Agents bring data *in* from Graph. Connectors push results *out* — Teams channel, WhatsApp number, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
+Agents bring data *in* from Graph. Connectors push results *out*: Teams channel, WhatsApp number, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
 
 **Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk`. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. Runtime injection, the Connectors sidebar entry, Microsoft Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal are implemented. The v0.2.4 connector expansion is intentionally notification-only: these connectors send terminal run reports and do not read inboxes, chats, channels, messages, reactions, or files.
 
-The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships — retrofitting them after agents start consuming the API is what makes ecosystems brittle.
+The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships: retrofitting them after agents start consuming the API is what makes ecosystems brittle.
 
 #### Auth source classes
 
 Three classes, each with a distinct trust posture:
 
-- `graph-delegated` — piggybacks on the active tenant's MSAL token; adds Graph scopes (Teams, Outlook, SharePoint, Planner). No new credentials, no second consent dance. Data stays inside the customer's M365 tenant boundary.
-- `graph-application` — app-only consent via Resource-Specific Consent or per-resource installation. Deferred past v1.0; the interface accommodates it so we don't have to break agents to add it later.
-- `external` — owns credentials in the OS keychain or a local auth session (WhatsApp Web, ServiceNow, Jira, Slack). Data leaves the tenant boundary; trust messaging must say so explicitly. External connectors implement a uniform setup surface where practical, but device-paired flows such as WhatsApp Web can expose a connector-specific QR step.
+- `graph-delegated`: piggybacks on the active tenant's MSAL token; adds Graph scopes (Teams, Outlook, SharePoint, Planner). No new credentials, no second consent dance. Data stays inside the customer's M365 tenant boundary.
+- `graph-application`: app-only consent via Resource-Specific Consent or per-resource installation. Deferred past v1.0; the interface accommodates it so we don't have to break agents to add it later.
+- `external`: owns credentials in the OS keychain or a local auth session (WhatsApp Web, ServiceNow, Jira, Slack). Data leaves the tenant boundary; trust messaging must say so explicitly. External connectors implement a uniform setup surface where practical, but device-paired flows such as WhatsApp Web can expose a connector-specific QR step.
 
 #### Capability kinds → confirmation tiers
 
-Every capability declares a `kind` that maps to a confirmation tier. Mixing connectors with destructive Graph operations under one `mode: 'write'` flag would be sloppy — most connector use is *additive notification*, not destruction, and conflating the two erodes the typed-diff gate's signal value.
+Every capability declares a `kind` that maps to a confirmation tier. Mixing connectors with destructive Graph operations under one `mode: 'write'` flag would be sloppy: most connector use is *additive notification*, not destruction, and conflating the two erodes the typed-diff gate's signal value.
 
 | Kind          | Side effect                       | Confirmation                                     | Examples                                  |
 |---------------|-----------------------------------|--------------------------------------------------|-------------------------------------------|
 | `read`        | None                              | None                                             | `listTeams`, `listChannels`               |
-| `notify`      | Additive (creates a new artifact) | **Preview & send** modal — rendered output + target, one-click confirm | `post-channel-message`, `send-message`, `create-incident` |
-| `mutating`    | Modifies an existing artifact     | Diff modal — before/after, one-click confirm     | `edit-message`, `update-incident-status`  |
+| `notify`      | Additive (creates a new artifact) | **Preview & send** modal: rendered output + target, one-click confirm | `post-channel-message`, `send-message`, `create-incident` |
+| `mutating`    | Modifies an existing artifact     | Diff modal: before/after, one-click confirm     | `edit-message`, `update-incident-status`  |
 | `destructive` | Removes an artifact               | Typed-phrase confirmation, same gate as destructive Graph ops | `delete-message`, `close-incident`        |
 
-The agent's `mode: 'read' | 'write'` continues to describe Graph behavior unchanged. The agent's **effective trust tier** at install and run time is `max(agent.mode, max(declared capability kinds))`. UI presents both axes — "Reads Intune devices · Posts to Microsoft Teams" — never collapses them into one tag.
+The agent's `mode: 'read' | 'write'` continues to describe Graph behavior unchanged. The agent's **effective trust tier** at install and run time is `max(agent.mode, max(declared capability kinds))`. UI presents both axes: "Reads Intune devices · Posts to Microsoft Teams": never collapses them into one tag.
 
 #### Versioning
 
@@ -458,7 +458,7 @@ interface ConnectorBuildContext {
   idempotencyKeyFor(stepId: string, iteration: number): string;
 }
 
-/** Module-augmentable registry — see "Type-safe registry" below. */
+/** Module-augmentable registry: see "Type-safe registry" below. */
 interface ConnectorRegistry {} // intentionally empty; populated by connector packages
 ```
 
@@ -475,7 +475,7 @@ interface AgentConnectorRequirement {
 
 #### Error contract
 
-Connectors throw typed errors; the runtime maps each to a designed UI state with the correct recovery action. No generic `Error` throws — every failure has a designed remediation.
+Connectors throw typed errors; the runtime maps each to a designed UI state with the correct recovery action. No generic `Error` throws: every failure has a designed remediation.
 
 ```ts
 type ConnectorRecovery = 'retry' | 'reauth' | 'reconfigure' | 'fatal';
@@ -535,12 +535,12 @@ interface ConnectorAuditEntry {
 
 Lifecycle, in order, per run:
 
-1. **Manifest load** — connector requirements validated against the host's known registry. Unknown ids or unsatisfiable `minVersion` constraints reject the run before queue.
-2. **Preflight** — for each required connector: factory `build()` is called, then `healthCheck()`. Failures surface as designed error states (see §5 Critical) before any LLM/Graph call runs.
-3. **Capability invocation** — `ctx.connectors[id].capabilities.foo(args)` calls go through a runtime wrapper that: emits audit entry start, applies confirmation tier (preview/diff/typed), supplies `idempotencyKey`, catches `ConnectorError`, applies retry/reauth policy, emits audit entry finish.
-4. **Disposal** — `dispose()` called for every built instance at run end, success or failure.
+1. **Manifest load**: connector requirements validated against the host's known registry. Unknown ids or unsatisfiable `minVersion` constraints reject the run before queue.
+2. **Preflight**: for each required connector: factory `build()` is called, then `healthCheck()`. Failures surface as designed error states (see §5 Critical) before any LLM/Graph call runs.
+3. **Capability invocation**: `ctx.connectors[id].capabilities.foo(args)` calls go through a runtime wrapper that: emits audit entry start, applies confirmation tier (preview/diff/typed), supplies `idempotencyKey`, catches `ConnectorError`, applies retry/reauth policy, emits audit entry finish.
+4. **Disposal**: `dispose()` called for every built instance at run end, success or failure.
 
-Required vs optional: a `required: true` connector that's not connected fails preflight. A `required: false` connector that's not connected makes `ctx.connectors[id]` `undefined`; agents check before use. The typed signature reflects this — `ctx.connectors.teams?` not `ctx.connectors.teams!`.
+Required vs optional: a `required: true` connector that's not connected fails preflight. A `required: false` connector that's not connected makes `ctx.connectors[id]` `undefined`; agents check before use. The typed signature reflects this: `ctx.connectors.teams?` not `ctx.connectors.teams!`.
 
 #### Type-safe registry via module augmentation
 
@@ -589,11 +589,11 @@ The host (in `packages/runtime`) discovers connectors via a static import map fo
 - Connectors page: operational summary first, then live connector configuration panels with status pill (`connected` / `needs setup` / `needs scope` / `error`) and task-first setup controls. Teams shows the default channel picker; WhatsApp Web shows QR linking only when setup is needed, hides phone steps after a session is linked, and keeps default target selection/test sending visible. Default connector targets autosave as soon as a valid target is selected; there is no separate save button. Capabilities, required scopes, trust-boundary text, routing-rule details, and future connector backlog entries live in compact disclosures so connected connectors stay visually lightweight. The public GitBook carries the full connector setup reference; the in-app page links to it and keeps routine setup fields compact.
 - Per-agent install: when the manifest declares connectors, install adds a connector-setup step before the agent appears installed. The step itemizes egress targets and capability kinds so the user knows what they're authorizing.
 - Run status: when a run uses connectors, the status-strip trust cell expands to list each egress target. Capability invocations stream into the run timeline with the kind-appropriate confirmation modal.
-- Error states: every `ConnectorError` subclass has a designed remediation tile in §06 — `auth expired → reauth`, `missing scope → re-consent`, `rate limited → retry in Xs`, `not configured → open Connectors page`.
+- Error states: every `ConnectorError` subclass has a designed remediation tile in §06: `auth expired → reauth`, `missing scope → re-consent`, `rate limited → retry in Xs`, `not configured → open Connectors page`.
 
 #### Teams connector (first to ship)
 
-The Teams connector lands first because it is the cheapest credible connector — `graph-delegated`, so it reuses the existing MSAL flow; data stays in the tenant; each capability is one Graph call. It validates the abstraction without paying for a new trust surface.
+The Teams connector lands first because it is the cheapest credible connector: `graph-delegated`, so it reuses the existing MSAL flow; data stays in the tenant; each capability is one Graph call. It validates the abstraction without paying for a new trust surface.
 
 ```yaml
 descriptor:
@@ -649,8 +649,8 @@ interface TeamsConnectorCapabilities {
 
 Decisions locked for the first release:
 - **Delegated permissions only.** Posts attributed to the signed-in admin ("{admin} · via OpenAdminOS"). No Resource-Specific Consent, no per-team app installation. Application permissions are a v1.1+ concern; the descriptor's `authSource` field is the seam where that decision can change without breaking agents.
-- **Teams scopes folded into the MSAL consent screen.** Granted once at tenant connect. Admins who declined initial consent see `status: 'needs-scope'` and a single re-consent button — no separate auth flow.
-- **`post-*-message` is `kind: notify`.** Users see a "Send to Teams?" preview modal with the rendered markdown and the target channel — one-click confirm, not typed phrase. Typed-phrase confirmation is reserved for destructive Graph operations; debasing it for routine notifications dulls its trust signal.
+- **Teams scopes folded into the MSAL consent screen.** Granted once at tenant connect. Admins who declined initial consent see `status: 'needs-scope'` and a single re-consent button: no separate auth flow.
+- **`post-*-message` is `kind: notify`.** Users see a "Send to Teams?" preview modal with the rendered markdown and the target channel: one-click confirm, not typed phrase. Typed-phrase confirmation is reserved for destructive Graph operations; debasing it for routine notifications dulls its trust signal.
 - **`configSchema` covers default channel/chat selection.** Per-install setting; agents can override at invocation time.
 - **Run activity includes delivery.** When per-agent Teams delivery is enabled, terminal runs append a post-run activity step showing whether the delivery rule matched the run, whether the report was sent, failed, or skipped, and the user-facing channel label.
 
@@ -717,11 +717,11 @@ For Slack and Discord, secrets are write-only from the renderer's perspective. T
 
 #### Connector shipping order
 
-Teams proves the contract generalizes across capabilities while keeping the trust surface unchanged from today. WhatsApp Web proves the `external` class with a local, device-paired session and no enterprise API access. ServiceNow remains the canonical enterprise external connector — instance URL configuration, keychain-stored credentials, and "data leaves your tenant" trust messaging — but it no longer has to be the second connector.
+Teams proves the contract generalizes across capabilities while keeping the trust surface unchanged from today. WhatsApp Web proves the `external` class with a local, device-paired session and no enterprise API access. ServiceNow remains the canonical enterprise external connector: instance URL configuration, keychain-stored credentials, and "data leaves your tenant" trust messaging: but it no longer has to be the second connector.
 
 ### Registry model
 
-The OpenAdminOS repository **is** the registry. Agents live in `/agents/<slug>/` in this repo (`OpenAdminOS/OpenAdminOS`), each directory containing `manifest.yaml`, `README.md`, and optional fixtures. There is no separate `openadminos-registry` repo and no two-tier "bundled vs. community" trust split — everything is community-by-default, contributed via PR to this repo.
+The OpenAdminOS repository **is** the registry. Agents live in `/agents/<slug>/` in this repo (`OpenAdminOS/OpenAdminOS`), each directory containing `manifest.yaml`, `README.md`, and optional fixtures. There is no separate `openadminos-registry` repo and no two-tier "bundled vs. community" trust split: everything is community-by-default, contributed via PR to this repo.
 
 The app binary ships with **zero agents**. At runtime the desktop app fetches the agent index (`/agents/index.json`, generated by CI from the manifests on every push to `main`) from the configured registry source, caches it to userData, and lets the user browse and install agents on demand. Installed agents are version-pinned; updates are surfaced as explicit "update available" badges and never auto-applied.
 
@@ -739,12 +739,12 @@ Cache lifecycle:
 - On every subsequent launch (online): refresh `index.json` in the background. Compare to cached per-agent versions, surface per-agent update badges.
 - Registry source URLs must use HTTPS, must not include credentials, query strings, fragments, or an `index.json` suffix, and are normalized before persistence. Localhost/private registry sources are blocked unless an explicit dev-only override is enabled (`OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE=1` in an unpackaged app).
 - Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source. Official cached indexes must also record a successful signature verification, so legacy unsigned cache content is not trusted.
-- Failed refresh is silent — keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
+- Failed refresh is silent: keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
 - App works fully offline against the cached set after the first successful fetch.
 
 Agent Hub UX should feel like an app store for admin agents, but without fake editorial weight. Until there is real curation data, do not render a giant "Featured" hero based on list order or split the same catalog into separate top-level surfaces. Use one consistent browse grid, dynamic category/mode/install filters, clear install/open actions, install counts where available, and trust/permission badges that help admins decide what to install. Registry freshness is diagnostic detail; do not make remote/cache state a primary card. Agent detail/manifest views should be decision-first: show what the agent does, install state, required scopes, mode, and tenant impact before exposing raw YAML. Installing from Agent Hub requires an explicit permission review step; a card click opens details, while the actual install action confirms the declared Graph scopes.
 
-This is modeled on **Home Assistant integrations** (https://developers.home-assistant.io/docs/creating_integration_file_structure/) — one repo, PR-driven contribution, explicit version pinning per install.
+This is modeled on **Home Assistant integrations** (https://developers.home-assistant.io/docs/creating_integration_file_structure/): one repo, PR-driven contribution, explicit version pinning per install.
 
 ### Local storage
 
@@ -1092,6 +1092,50 @@ Evaluated", remediations, Windows Update, policy conflicts, audit, and stale
 device investigations. Tests assert that every banked question plans all declared
 cache resources, so the prompt examples and planner cannot drift silently.
 
+Ollama (or a future local embedding runtime) is a prerequisite for
+documentation grounding, not for the app: every provider works without it,
+and hosted-provider setups simply answer without documentation passages.
+Grounding downloads are gated on the runtime being reachable, so a machine
+that cannot embed queries never fetches the index. Making a local runtime
+a hard product requirement was considered and deliberately deferred: the
+positioning is local-first by default, not local-only.
+
+Documentation grounding has two prerequisites and both install themselves:
+the versioned index (downloaded from the published release into userData)
+and the embedding model it was built with (`nomic-embed-text`, pulled
+through the local Ollama). One Settings switch governs both. The app never
+installs Ollama itself; when Ollama is absent the model pull is skipped
+and Settings names the missing prerequisite instead of showing grounding
+as available. Embedding always runs against loopback, so questions never
+leave the device regardless of which provider answers them.
+
+The cache is a fast path, not the boundary of what Chat can read. Live
+reads are bounded by the consented access token rather than by a
+client-side allowlist: the token cannot exceed what the admin approved,
+Graph enforces that server-side, and Chat is GET-only. An endpoint whose
+documented permissions fall outside the scopes this app requests is
+refused by name, before any call is made. Scopes are never widened
+mid-answer, because asking for more would raise an interactive consent
+prompt the admin did not initiate.
+
+An earlier rule refused any endpoint whose permissions the bundled
+catalog did not document. Because the catalog carries permission data
+for only a fraction of its entries, that rejected roughly 14,000 read
+endpoints for missing metadata rather than for being out of bounds, and
+limited Chat to about 5% of Graph reads. Path validation against the
+catalog is retained, so a typo or invented path is still refused with
+suggestions.
+
+Counts are never inferred from sample rows. Breakdowns are computed in
+SQL across every cached row, and `$count` with `ConsistencyLevel:
+eventual` is requested for the directory resources that support it, so a
+"how many" answer holds above the cache row limit. Where detail rows
+cover only part of the tenant, the answer must say so.
+
+Cache freshness is per resource, not a single interval: sign-in and audit
+data expires in minutes, device and user inventory in hours, and slow
+configuration such as Autopilot profiles in a day.
+
 Initial cache targets:
 
 - `/deviceManagement/managedDevices`
@@ -1178,10 +1222,40 @@ useful to an Intune/Entra admin: compliance policies, configuration profiles,
 settings catalog policies, Conditional Access policies, apps and app-management
 policies, scripts/remediations, Autopilot/enrollment profiles, Windows update
 policies, endpoint security intents, group policy configurations, assignment
-filters, and scope tags. High-churn inventory and event resources such as
-managed devices, detected apps, sign-ins, troubleshooting events, overview
-aggregates, and encryption state stay out of drift tracking so the timeline does
-not become noise or a storage sink.
+filters, and scope tags. Since v0.5 the tracked set also covers Entra
+configuration surfaces: named locations, authentication methods policy,
+authorization policy, cross-tenant access policy, directory roles,
+administrative units, app registrations, service principals, and domains.
+High-churn inventory and event resources such as managed devices, detected
+apps, sign-ins, troubleshooting events, overview aggregates, encryption state,
+and Defender alerts/incidents/Secure Score stay out of drift tracking so the
+timeline does not become noise or a storage sink.
+
+**Named baselines (v0.5).** A baseline pins the exact live object versions
+(per resource, Graph id, version, and content hash) at creation time, not
+snapshot ids, so baseline drift survives snapshot retention. At most one
+baseline per tenant is active; retiring keeps the baseline and its pins but
+releases its pruning protection. Retention pruning never deletes an object
+version pinned by an active baseline. Baseline drift (added, removed, and
+modified objects with deterministic field-level diffs) is computed on demand
+from the pinned set against the latest live versions; nothing calls Graph.
+
+**Baseline rollback (v0.5).** Rollback plans are built deterministically by
+the host, never by an LLM: modified objects become PATCH actions carrying the
+pinned baseline values (read-only fields stripped), drifted additions become
+destructive-severity DELETE actions, and objects deleted since the baseline
+become POST recreations where Graph supports it. Every generated action is
+validated against the bundled Graph endpoint catalog; anything undocumented,
+plus deliberately report-only surfaces (directory roles, app registration and
+service principal credentials, domains), is listed for manual review instead
+of guessed. The plan flows through the existing run machinery as a
+host-generated system run (`origin: "baseline-rollback"`): same stored plan,
+same exact-match typed confirmation phrase (for example ROLLBACK 4 OBJECTS),
+same reject path, same audit and run history. Apply is fail-stop: actions run
+strictly in order, the first Graph failure terminates the run with an exact
+count of what was applied, and nothing after the failed action is attempted.
+Rollback runs are not backed by an installed agent and cannot be re-run;
+each rollback builds a fresh plan from current drift.
 
 Snapshots are created only when the normal Graph cache refresh writes a tracked
 resource. A first refresh establishes a baseline; later refreshes compare the
@@ -1463,7 +1537,7 @@ Closer to portal/IDE density than to consumer-app density. Compare to:
 These are visible in the mockups and need to be built as proper React components:
 
 - **Sidebar nav** with collapsible sections
-- **Status strip** (4 cells: tenant, LLM, active runs, data residency) — appears at top of every main screen
+- **Status strip** (4 cells: tenant, LLM, active runs, data residency): appears at top of every main screen
 - **Agent card** with read/write tag, verified/community badge, recent run indicator
 - **Run timeline** (stepped pipeline visualization)
 - **Telemetry strip** (used in live run modal)
@@ -1478,7 +1552,7 @@ These are visible in the mockups and need to be built as proper React components
 
 ### Trust messaging consistency
 
-The phrase "Local-only · No data leaves this device" appears in multiple places. It is a **single source of truth** — when the user selects a hosted LLM, every instance of this messaging must flip simultaneously to honestly state where data goes (e.g., "Anthropic API · US"). Implement this as a single derived state, not as duplicated copy.
+The phrase "Local-only · No data leaves this device" appears in multiple places. It is a **single source of truth**: when the user selects a hosted LLM, every instance of this messaging must flip simultaneously to honestly state where data goes (e.g., "Anthropic API · US"). Implement this as a single derived state, not as duplicated copy.
 
 The cost cell follows the same pattern: green `$0.00 local` for local providers, real cost numbers for hosted.
 
@@ -1532,19 +1606,23 @@ Three workspace destinations plus Settings. The primary order stays fixed across
 | Agents | `/agents` | Tabs: Installed · Hub · Schedules |
 | Changes | `/changes` | Tenant drift timeline |
 | Settings | `/settings` | Providers, tenants, workspaces, connectors, general, privacy |
+| Workspaces | `/workspaces` | Saved multi-tenant working sets (More group) |
+| Connectors | `/connectors` | External integrations (More group) |
 
 Demoted from top-level nav (routes remain, reachable via Settings and the command palette):
-- **Workspaces** and **Connectors** — power-user surfaces; irrelevant until a user has more than one tenant or an external integration. Linked from Settings.
-- **Activity** — run history remains available through search, run links, and agent surfaces without adding another daily destination.
-- **Agent Hub** — a tab inside Agents, not a sibling of it.
+- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. The primary group stays the four daily destinations, so the v0.4 goal of a compact nav still holds. A renderer test asserts both facts.
+- **Activity**: run history remains available through search, run links, and agent surfaces without adding another daily destination.
+- **Agent Hub**: a tab inside Agents, not a sibling of it.
 
 Removed from navigation:
-- **Home** — its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
-- **Report issue** — available in Settings → About and contextual failure recovery, not as permanent primary navigation.
+- **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
+- **Report issue**: available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
-### First run and contextual activation (locked for v0.4)
+### First run and contextual activation (updated for v0.5)
 
-Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`. Users can inspect Chat, Agents, Changes, and Settings, select a suggested question, and edit a local draft before granting tenant access. The empty-state heading, explanation, and suggested questions stay centered as one block immediately above the composer rather than floating in the middle of the transcript area.
+Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`.
+
+**v0.5 decision (2026-08-29):** a launch with zero connected tenants opens the shared setup dialog automatically (permissions review, then Microsoft sign-in, then provider selection when no provider is connected), so a fresh install starts guided instead of presenting an inert chat screen. The dialog is dismissible and auto-opens at most once per launch; a restored pending intent takes precedence; the menu-bar companion window and renderer-only development never auto-open. Once at least one tenant exists, setup returns to being purely contextual. Users can still dismiss the dialog and inspect Chat, Agents, Changes, and Settings, select a suggested question, and edit a local draft before granting tenant access. The empty-state heading, explanation, and suggested questions stay centered as one block immediately above the composer rather than floating in the middle of the transcript area.
 
 Setup opens only when an action needs tenant context: sending Chat, starting or rerunning an agent, opening tenant Changes from its empty state, refreshing tenant cache data, or explicitly choosing Connect tenant. The shared setup dialog follows this order:
 
@@ -1559,7 +1637,7 @@ The persistent status strip and tenant switcher are the canonical Connect tenant
 
 Answered chat question means the local chat store contains at least one completed assistant message. Empty draft conversations, failed responses, and stopped responses do not count.
 
-North-star metric: time from install to first successful result, target under 5 minutes. Measured locally only (no telemetry — consistent with constraint 1).
+North-star metric: time from install to first successful result, target under 5 minutes. Measured locally only (no telemetry: consistent with constraint 1).
 
 ### Glossary (naming decisions)
 
@@ -1595,14 +1673,14 @@ North-star metric: time from install to first successful result, target under 5 
 
 ### Deliberately not done in v0.4
 
-- No merge of Workspaces/Connectors page code into Settings.tsx — they stay separate routes, only nav placement changes (cheap, reversible).
-- No LLM-driven agent suggestions in chat — matching is deterministic, local keyword/category matching against installed manifests.
+- No merge of Workspaces/Connectors page code into Settings.tsx: they stay separate routes, only nav placement changes (cheap, reversible).
+- No LLM-driven agent suggestions in chat: matching is deterministic, local keyword/category matching against installed manifests.
 - No platform-specific screen-reader integration or release-evidence gate. Platform-neutral keyboard, focus, semantic, contrast, forced-colors, and reduced-motion support remains part of the production UI.
 - Usability validation with 3–5 external Intune admins is still owed; these decisions are the best pre-validation guess and should be revisited against real hesitation points.
 
 ---
 
-## 5a. v0.1 — Public preview foundation
+## 5a. v0.1: Public preview foundation
 
 The first public-preview milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest while establishing the public preview path toward real-tenant deployment.
 
@@ -1624,7 +1702,7 @@ The first public-preview milestone. Goal: a polished Electron app that visually 
 - Persistent SQLite (in-memory + localStorage acceptable for v0.1)
 - Code signing (build pipeline ready; certs deferred)
 - Auto-update
-- Audit log export and advanced notification routing — v1.0 territory
+- Audit log export and advanced notification routing: v1.0 territory
 
 ### v0.1 acceptance criteria
 
@@ -1643,7 +1721,7 @@ The detailed phased plan to reach these acceptance criteria lives in `tasks/todo
 
 ## 5b. Bundled agent philosophy
 
-The agents that ship in this repo are the platform's first impression. If they read like "PowerShell with an LLM blurb tacked on" — *count rows, summarise the count* — the platform looks redundant. So the bundled set is organised around a tiering decision that's load-bearing for the trust story.
+The agents that ship in this repo are the platform's first impression. If they read like "PowerShell with an LLM blurb tacked on": *count rows, summarise the count*: the platform looks redundant. So the bundled set is organised around a tiering decision that's load-bearing for the trust story.
 
 ### Three tiers
 
@@ -1665,10 +1743,10 @@ Anyone evaluating the platform looks at the bundled catalog first. If the first 
 
 Three step kinds carry the bundled investigators today:
 
-- **`graph`** — load one or more Graph endpoints into named outputs.
-- **`transform`** — reshape (count-by-field, filter-by-age, group-by-field, sort-by, correlate-stale-devices). Single source per transform; multiple transforms stacked is how multi-source correlation gets expressed today (each transform reads from a prior step by id). Destructive stale-device plans are conservative by default: the offboarding correlation transform skips in-flight Intune devices and can exclude personal/BYOD devices before any retire action is built.
-- **`llm`** — read any subset of prior step outputs via the templating engine. Multi-input reasoning is achieved through the template, not a separate `inputs:` block.
-- **`map`** *(new in v0.2)* — iterate a source array and run an inner sub-pipeline per item. This is the step that enables per-item LLM reasoning (risky-sign-in triage classifies each entry individually with shared context). The map step's output is the array of last-sub-step outputs from each iteration.
+- **`graph`**: load one or more Graph endpoints into named outputs.
+- **`transform`**: reshape (count-by-field, filter-by-age, group-by-field, sort-by, correlate-stale-devices). Single source per transform; multiple transforms stacked is how multi-source correlation gets expressed today (each transform reads from a prior step by id). Destructive stale-device plans are conservative by default: the offboarding correlation transform skips in-flight Intune devices and can exclude personal/BYOD devices before any retire action is built.
+- **`llm`**: read any subset of prior step outputs via the templating engine. Multi-input reasoning is achieved through the template, not a separate `inputs:` block.
+- **`map`** *(new in v0.2)*: iterate a source array and run an inner sub-pipeline per item. This is the step that enables per-item LLM reasoning (risky-sign-in triage classifies each entry individually with shared context). The map step's output is the array of last-sub-step outputs from each iteration.
 
 Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent that needs *correlation across sources* stacks graph + transform + llm with template references.
 
@@ -1680,17 +1758,17 @@ Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent 
 
 These must exist and work well before any public release.
 
-1. **Contextual first-run activation** — the real Chat-first shell opens immediately. Tenant permissions, browser sign-in, and provider readiness appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
-2. **MSAL consent flow** — Lawyer-grade transparency about Graph scopes requested. Read scopes only by default; write scopes requested per-agent at install time.
-3. **LLM provider configuration** — All 5 providers, test connection, model dropdowns populated by querying the provider, per-agent overrides.
-4. **Diff confirmation for write agents** — Side-by-side before/after, scope summary, typed confirmation for destructive actions.
-5. **Error and failure states** — Designed states for: auth expired, Graph throttling, Ollama unreachable, model JSON validation fail, missing scope, hosted quota exceeded, tenant drift, network offline. (Reference: `docs/mockups/06-error-states.html`.)
-6. **Empty states** — Zero agents installed, zero runs, zero tenants. These teach new users what the product is for.
-7. **Registry browse** — Search, filter (author, mode, model requirements), install, signing/verification status, screenshots, changelog.
-8. **Multi-tenant switcher done properly** — Search, color-coding, "currently scoped to" badges, scope guard against running an agent on the wrong tenant.
-9. **Teams connector (graph-delegated)** — first connector to validate the abstraction. Channel + chat picker, post-message capabilities, Teams scopes folded into the MSAL consent flow, trust messaging integrated with the status strip. See §2 Connector abstraction.
-10. **WhatsApp Web connector (external local session)** — second connector to validate QR-based local setup and non-Graph egress. QR linking, default/test target selection, outbound-only run notifications, no incoming-message access, Baileys reconnect handling, and explicit "delivered by WhatsApp" trust messaging. See §2 Connector abstraction.
-11. **Notification connector set** — Outlook, Slack, Discord, and Signal are implemented as outbound-only run-report targets. Outlook uses delegated Graph `Mail.Send`; Slack uses a stored bot token; Discord uses a stored webhook URL; Signal uses local `signal-cli` or a local REST bridge. None of these connectors read inboxes or chat histories.
+1. **Guided first-run activation**: the real Chat-first shell opens immediately, and a zero-tenant launch auto-opens the setup dialog (see §4a). Tenant permissions, browser sign-in, and provider readiness otherwise appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
+2. **MSAL consent flow**: Lawyer-grade transparency about Graph scopes requested. Read scopes only by default; write scopes requested per-agent at install time.
+3. **LLM provider configuration**: All 5 providers, test connection, model dropdowns populated by querying the provider, per-agent overrides.
+4. **Diff confirmation for write agents**: Side-by-side before/after, scope summary, typed confirmation for destructive actions.
+5. **Error and failure states**: Designed states for: auth expired, Graph throttling, Ollama unreachable, model JSON validation fail, missing scope, hosted quota exceeded, tenant drift, network offline. (Reference: `docs/mockups/06-error-states.html`.)
+6. **Empty states**: Zero agents installed, zero runs, zero tenants. These teach new users what the product is for.
+7. **Registry browse**: Search, filter (author, mode, model requirements), install, signing/verification status, screenshots, changelog.
+8. **Multi-tenant switcher done properly**: Search, color-coding, "currently scoped to" badges, scope guard against running an agent on the wrong tenant.
+9. **Teams connector (graph-delegated)**: first connector to validate the abstraction. Channel + chat picker, post-message capabilities, Teams scopes folded into the MSAL consent flow, trust messaging integrated with the status strip. See §2 Connector abstraction.
+10. **WhatsApp Web connector (external local session)**: second connector to validate QR-based local setup and non-Graph egress. QR linking, default/test target selection, outbound-only run notifications, no incoming-message access, Baileys reconnect handling, and explicit "delivered by WhatsApp" trust messaging. See §2 Connector abstraction.
+11. **Notification connector set**: Outlook, Slack, Discord, and Signal are implemented as outbound-only run-report targets. Outlook uses delegated Graph `Mail.Send`; Slack uses a stored bot token; Discord uses a stored webhook URL; Signal uses local `signal-cli` or a local REST bridge. None of these connectors read inboxes or chat histories.
 
 ### Important (in v1.0, doesn't have to be perfect)
 
@@ -1714,7 +1792,7 @@ These must exist and work well before any public release.
 
 ### Designed before launch (not strict blockers)
 
-- **Enterprise external connector: ServiceNow (`external` auth)** — proves the Connector abstraction generalizes to enterprise ticketing. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed after the Teams and WhatsApp Web connector surfaces stabilize.
+- **Enterprise external connector: ServiceNow (`external` auth)**: proves the Connector abstraction generalizes to enterprise ticketing. Instance URL, keychain credentials, "data leaves your tenant" trust messaging. Designed after the Teams and WhatsApp Web connector surfaces stabilize.
 - Agent signing / verification (registry supply-chain integrity)
 - Sandbox / dry-run mode for read agents (preview Graph calls before executing). v0.2.3 adds an experimental MXC probe/runner behind `OPENADMINOS_EXPERIMENTAL_MXC=1`, but YAML Agent Templates remain the default execution model.
 - Cost budgets & rate limits (per-agent or per-day spend caps for hosted LLMs)
@@ -1743,7 +1821,7 @@ Enterprise host preparation is explicitly admin-owned. On Windows, MXC's `wxc-ho
 - Light theme + high-contrast theme
 - Visual diff for complex objects (CA policies, conditional access)
 - Run comparison ("what changed between last week and this week?")
-- Sharing / collaboration (deep link to run, PDF export — TenantPDF integration)
+- Sharing / collaboration (deep link to run, PDF export: TenantPDF integration)
 - Agent authoring DX (`openadminos agent init` scaffold, local dev/test mode, publish flow)
 - Marketplace metadata (screenshots, video demos, changelog, support links per agent)
 - Health dashboard (aggregated trust score across all agents on a tenant)
@@ -1776,9 +1854,9 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 
 ### Systemic concerns to track
 
-- **Trust messaging consistency** — single source of truth across all surfaces (see §3)
-- **Hosted-provider flip UX** — the moment an admin switches from local to hosted is the most important UX moment in the app
-- **Documentation surface** — in-app help, web docs, GitHub issues, Discord — needs a coherent answer before launch
+- **Trust messaging consistency**: single source of truth across all surfaces (see §3)
+- **Hosted-provider flip UX**: the moment an admin switches from local to hosted is the most important UX moment in the app
+- **Documentation surface**: in-app help, web docs, GitHub issues, Discord: needs a coherent answer before launch
 
 ---
 
@@ -1805,6 +1883,10 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `15-contextual-setup.html` | Chat-first contextual tenant and provider activation | ✅ Done |
 | `16-training-conveyor-concepts.html` | training.openadminos.com direction exploration (conveyor metaphor) | ⚪ Superseded |
 | `17-training-railway-concepts.html` | training.openadminos.com style exploration (railway metaphor, four styles) | ⚪ Superseded ("Flap Hall" chosen) |
+| `18-baseline-rollback.html` | v0.5 baseline drift, field-level evidence, and typed rollback confirmation | ✅ Done |
+| `19-fleet.html` | v0.5 multi-tenant fleet drift status and per-tenant write confirmation | ✅ Done |
+| `20-mcp-gateway.html` | v0.5 gateway settings, pairing, connected clients, and pending external proposals | ✅ Done |
+| `21-telemetry.html` | v0.5 opt-in usage telemetry with the exact payload preview | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
 
@@ -1826,7 +1908,7 @@ main site, linked from the landing page and the primary navigation.
 - **No invented figures**: where a value was not disclosed by a vendor or not
   measured by us, the page says so. Cost is expressed as measured output
   volume, never as a currency figure we cannot verify.
-- **Stated limits**: the page carries its own caveats — the task set is ours,
+- **Stated limits**: the page carries its own caveats: the task set is ours,
   the hosted models were reached through assistant CLIs rather than raw
   endpoints, the scorers are mechanical and imperfect, and the timing subset
   is smaller than the scoring set.
@@ -1852,18 +1934,36 @@ These are explicitly unresolved. Don't pick a default without asking.
 - Hybrid AD agents (the audience and patterns are different enough to be a separate product)
 - General Intune/Entra admin consulting features (this is an agent runner, not an admin tool)
 - A web-hosted SaaS version (would betray the local-first positioning)
-- Agents for non-Microsoft platforms (AWS, GCP) — possibly later, but the v1 thesis is depth-in-Microsoft, not breadth
+- Agents for non-Microsoft platforms (AWS, GCP): possibly later, but the v1 thesis is depth-in-Microsoft, not breadth
 - Agent-authoring inside the desktop app (authors use their own editor + the SDK; the app is a runtime, not an IDE)
+- Defender for Endpoint device actions (isolate machine, live response, etc.). These use the separate `api.security.microsoft.com` API rather than Microsoft Graph. v0.5 is Graph-only; Defender is a read/report surface (alerts, incidents, Secure Score), not an action surface. Revisit if there is demand for a second non-Graph client.
+- Third-party configuration baseline content (for example OpenIntuneBaseline). Decided 2026-08-29: OpenAdminOS ships no bundled or derived third-party baselines, ever. Baseline content is user-generated only, via own-tenant exports.
+
+---
+
+## 8a. v0.5 capability surfaces
+
+v0.5 adds four capability areas on top of the drift timeline; each maps to an acquirer-visible signal.
+
+**Governed MCP write-gateway.** A local, loopback-only (127.0.0.1) MCP server, off by default, authenticated by a single pairing token held in safeStorage and bound to exactly one tenant at enable time. External AI clients get the same read-only tool allowlist as Chat. The only write capability is `propose_write_plan`: proposed actions are validated against the bundled Graph endpoint catalog (unknown endpoints rejected), turned into a standard `WritePlan`, and queued as an `external-proposal` system run that requires the normal typed confirmation in the desktop app. No external client can apply a change; a proposal can only be reviewed, confirmed, or rejected by a human. Apply is fail-stop and shares the rollback apply path.
+
+**Retrieval.** Local documentation grounding ported from the model bench's `retrieve.mjs`: a locally installed index (Intune/Entra/Defender docs, matched to one embedding model) is cosine-ranked against the question, with source-file provenance on every hit. Query embedding hits a loopback embedding server and refuses any non-loopback endpoint, so a local provider never sends the question off-device. A missing index is a designed "not documentation-grounded yet" state, not an error. Index distribution uses GitHub release assets on a dedicated `docs-index-<date>` tag: release assets allow files just under 2 GiB and are downloaded with no bandwidth limit or charge, which suits a 264 MB index, while the marketing host caps static uploads at 100 MB on its lower tier and bills egress on blob storage. The index ships on its own tag so it can be rebuilt on the documentation's cadence without cutting an app release, and `scripts/publish-docs-index.mjs` generates the SHA-256 manifest and creates the release. Downloads are hash-verified and staged before replacing a working index. Machines without network access install the same files from a folder.
+
+Query embedding reuses the Ollama instance the app already manages (`nomic-embed-text`, 768 dimensions, matching the index) rather than supervising a second embedding server, and refuses non-loopback endpoints.
+
+**Opt-in usage telemetry.** Off by default. Counts and versions only: a resettable anonymous install id, app version, OS/arch, whether the active provider is local or hosted, and bucketed (never exact) tenant/agent/run counts, plus whether a retrieval index is installed. Never tenant content, tenant ids, prompts, run results, or error text. The Privacy preview shows the exact JSON, and the send path serializes that same payload, so preview and wire can never diverge. Nothing is sent unless the user opts in AND the build has a collector URL configured (empty by default).
+
+**Fleet.** For installs with two or more tenants, a Fleet view aggregates each tenant's active baseline, drift counts, and last capture time, filterable by tenant group. Multi-tenant runs keep per-tenant confirmation for writes.
 
 ---
 
 ## 9. Adjacent products in the OpenAdminOS portfolio
 
-For context — these exist or are in flight, and may interact with OpenAdminOS over time:
+For context: these exist or are in flight, and may interact with OpenAdminOS over time:
 
-- **TenantPDF** (tenantpdf.com) — hosted SaaS for branded tenant documentation PDFs. Future integration: OpenAdminOS run reports could export via TenantPDF.
-- **IntuneDocumentation** (legacy) — frontend PDF generation tool.
-- **IntuneGet-FrontBackend** (legacy) — multi-tenant auth experiment.
-- **IntuneTUI** (deprecated) — terminal-based Intune tool. The lesson from this project drove OpenAdminOS' decision to use a desktop GUI instead of a terminal — admins are not developer-y enough for TUIs as a primary surface.
+- **TenantPDF** (tenantpdf.com): hosted SaaS for branded tenant documentation PDFs. Future integration: OpenAdminOS run reports could export via TenantPDF.
+- **IntuneDocumentation** (legacy): frontend PDF generation tool.
+- **IntuneGet-FrontBackend** (legacy): multi-tenant auth experiment.
+- **IntuneTUI** (deprecated): terminal-based Intune tool. The lesson from this project drove OpenAdminOS' decision to use a desktop GUI instead of a terminal: admins are not developer-y enough for TUIs as a primary surface.
 
 OpenAdminOS is the flagship community project. The others are either narrow paid products (TenantPDF) or instructive prior art.

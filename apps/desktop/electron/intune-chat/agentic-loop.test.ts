@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 
 import type { RunLlmApi, TenantRecord } from "@openadminos/agent-sdk";
 
-import { runAgenticChat } from "./agentic-loop.js";
+import { MAX_AGENTIC_ITERATIONS, runAgenticChat } from "./agentic-loop.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
 
@@ -74,18 +74,38 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
-  it("falls back after two malformed tool JSON responses", async () => {
+  it("falls back only after repeated malformed tool JSON", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
     try {
-      const llm = scriptedLlm([
-        "```json\n{\"tool\":\"query_cache\",\n```",
-        "```json\n{\"tool\":\"query_cache\",\n```",
-      ]);
+      // Unrepairable: the tool name itself is cut off mid-token.
+      const llm = scriptedLlm(
+        Array.from({ length: 5 }, () => '```json\n{"tool": "query_ca\n```'),
+      );
       const result = await runAgenticChat(baseInput(store, llm));
       assert.equal(result.ok, false);
       assert.equal(result.reason, "malformed-output");
-      assert.match(result.fallbackNotice, /malformed tool JSON twice/i);
+      assert.match(result.fallbackNotice, /malformed tool JSON/i);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs an unbalanced tool call instead of abandoning the investigation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      // Exactly what an 8B model emits: correct tool and params, one
+      // missing closing brace.
+      const llm = scriptedLlm([
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}\n```',
+        '```json\n{"final":true,"answer":"5 devices reviewed."}\n```',
+      ]);
+      const result = await runAgenticChat(baseInput(store, llm));
+      assert.equal(result.ok, true, `expected the repaired call to run: ${JSON.stringify(result)}`);
+      assert.equal(result.toolTrace[0]?.tool, "query_cache");
+      assert.equal(result.toolTrace[0]?.error, undefined);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -98,14 +118,14 @@ describe("Intune Chat agentic loop", () => {
     try {
       const llm = scriptedLlm(
         Array.from(
-          { length: 6 },
+          { length: MAX_AGENTIC_ITERATIONS },
           () => '```json\n{"tool":"list_cached_resources","params":{}}\n```',
         ),
       );
       const result = await runAgenticChat(baseInput(store, llm));
       assert.equal(result.ok, false);
       assert.equal(result.reason, "iteration-cap");
-      assert.equal(result.toolTrace.length, 6);
+      assert.equal(result.toolTrace.length, MAX_AGENTIC_ITERATIONS);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -242,3 +262,35 @@ function toolContext(store: IntelligenceSqliteStore): IntuneChatToolContext {
     }),
   };
 }
+
+describe("repair turns do not consume the investigation budget", () => {
+  it("still completes six tool calls after the model slips twice", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-budget-"));
+    const store = seededStore(dir);
+    try {
+      const llm = scriptedLlm([
+        // Two unrepairable slips before any real work, then a full
+        // investigation. Counting the slips as iterations would hit the
+        // tool-call cap before the model could finish.
+        '```json\n{"tool": "query_ca\n```',
+        '```json\n{"tool": "query_ca\n```',
+        ...Array.from(
+          { length: 5 },
+          () =>
+            '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
+        ),
+        '```json\n{"final":true,"answer":"Done."}\n```',
+      ]);
+      const result = await runAgenticChat(baseInput(store, llm));
+      assert.equal(
+        result.ok,
+        true,
+        `slips must not spend the tool budget: ${JSON.stringify(result)}`,
+      );
+      assert.equal(result.toolTrace.length, 5);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

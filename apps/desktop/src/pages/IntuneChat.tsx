@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
+import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
@@ -76,6 +77,15 @@ const promptGroups = [
     ],
   },
   {
+    label: "Users",
+    prompts: [
+      "Which user accounts are disabled?",
+      "Which guest users have not signed in recently?",
+      "Which users are linked to noncompliant managed devices?",
+      "Which users appear in recent directory audit events?",
+    ],
+  },
+  {
     label: "Apps",
     prompts: [
       "Which required apps are assigned but not installed on targeted devices?",
@@ -85,39 +95,39 @@ const promptGroups = [
     ],
   },
   {
-    label: "Autopilot",
+    label: "Policies",
     prompts: [
-      "Which Autopilot devices are in failed enrollment state?",
-      "Which deployment profiles make the enrolling user a local admin?",
-      "Which Win32 apps are assigned during Autopilot ESP?",
-      "Why is this Autopilot device stuck during ESP?",
+      "Which compliance policies were modified most recently?",
+      "Which Conditional Access policies are disabled or report-only?",
+      "Which configuration policies have the highest setting counts?",
+      "Which policies changed recently?",
+    ],
+  },
+  {
+    label: "Sign-ins",
+    prompts: [
+      "Which recent sign-ins failed because of Conditional Access?",
+      "Which users have repeated failed sign-ins?",
+      "Which risky sign-ins need review?",
+      "Which applications have the most sign-in failures?",
+    ],
+  },
+  {
+    label: "Identity",
+    prompts: [
+      "Which Entra devices are not managed in Intune?",
+      "Which app registration secrets or certificates expire soon?",
+      "Which users hold privileged directory roles?",
+      "Which Conditional Access policies exclude guest or external identities?",
     ],
   },
   {
     label: "Security",
     prompts: [
-      "Which recent sign-ins failed because of Conditional Access?",
-      "Which Conditional Access policies depend on device compliance?",
-      "Which endpoint security policies are assigned to all devices?",
-      "What are the top risks visible from cached tenant data?",
-    ],
-  },
-  {
-    label: "Updates",
-    prompts: [
-      "Which devices should have received 25H2 but have not?",
-      "Which update rings might conflict with feature update policies?",
-      "Which Windows devices are below the supported OS build?",
-      "Why are feature updates not offered to active devices?",
-    ],
-  },
-  {
-    label: "Scripts",
-    prompts: [
-      "Which remediation scripts have not reported results recently?",
-      "Which devices are likely affected by Intune Management Extension delays?",
-      "Which scripts run as the logged-on user versus system?",
-      "Why are remediation results missing even though scripts ran locally?",
+      "Which high-severity Defender incidents are open?",
+      "Which Defender alerts were raised this week?",
+      "How has Secure Score changed over the last 90 days?",
+      "Which Secure Score improvement actions rank highest?",
     ],
   },
 ];
@@ -202,6 +212,15 @@ export default function IntuneChat() {
   const { state, startRun, refresh, loading } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
+  /**
+   * The conversation the host reported creating for an in-flight send.
+   *
+   * The sidebar list is reloaded asynchronously and can legitimately not
+   * contain it yet, so the route must not depend on the list alone to
+   * decide whether the open conversation exists.
+   */
+  const [pendingConversation, setPendingConversation] =
+    useState<IntuneChatConversation | null>(null);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     routeConversationId ?? null,
   );
@@ -283,6 +302,25 @@ export default function IntuneChat() {
   const copiedClearTimerRef = useRef<number | null>(null);
   const draftConversationRef = useRef<string | null | undefined>(undefined);
   const skipDraftWriteRef = useRef(false);
+
+  /**
+   * Put a conversation into the sidebar list immediately.
+   *
+   * Sending the first message creates the conversation in the host and
+   * routes to /chat/<id> before the sidebar list has been reloaded. Without
+   * this the route points at an id the renderer has not seen yet, and the
+   * "Conversation not found" empty state flashes over a send that is in
+   * fact working.
+   */
+  const upsertConversation = (conversation: IntuneChatConversation) => {
+    setConversations((current) =>
+      current.some((entry) => entry.id === conversation.id)
+        ? current.map((entry) =>
+            entry.id === conversation.id ? conversation : entry,
+          )
+        : [conversation, ...current],
+    );
+  };
 
   const openConversation = (
     conversationId: string | null,
@@ -461,7 +499,13 @@ export default function IntuneChat() {
       api.getGraphCacheStatus().catch(() => null),
     ]);
     setConversations((current) => {
-      if (!query || !activeConversationId) return nextConversations;
+      if (!activeConversationId) return nextConversations;
+      // Keep the open conversation in the list when the reload does not
+      // return it. This was written for search (a filtered list hides the
+      // open conversation), but the same staleness happens right after a
+      // conversation is created: the route already points at it while the
+      // list still predates it, and dropping it here renders the
+      // "Conversation not found" state over a send that is working.
       const activeConversation = current.find(
         (conversation) => conversation.id === activeConversationId,
       );
@@ -802,6 +846,8 @@ export default function IntuneChat() {
       setPreflightPrompt("");
       setInput("");
       setMessages([result.userMessage, result.assistantMessage]);
+      setPendingConversation(result.conversation);
+      upsertConversation(result.conversation);
       openConversation(result.conversation.id, { replace: true });
       await loadShell(result.conversation.id);
     } catch (caught) {
@@ -933,6 +979,8 @@ export default function IntuneChat() {
           if (event.type === "started") {
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
+            setPendingConversation(event.conversation);
+            upsertConversation(event.conversation);
             openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
@@ -1017,6 +1065,8 @@ export default function IntuneChat() {
           }
         },
       );
+      setPendingConversation(result.conversation);
+      upsertConversation(result.conversation);
       openConversation(result.conversation.id, { replace: true });
       setCacheStatus(result.cacheStatus);
       if (result.assistantMessage.status === "completed") {
@@ -1511,9 +1561,13 @@ export default function IntuneChat() {
     return newest ? `Updated ${formatDateTime(newest)}` : "Cache ready";
   }, [cacheStatus]);
 
-  const activeConversation = conversations.find(
-    (conversation) => conversation.id === activeConversationId,
-  );
+  const activeConversation =
+    conversations.find(
+      (conversation) => conversation.id === activeConversationId,
+    ) ??
+    (pendingConversation && pendingConversation.id === activeConversationId
+      ? pendingConversation
+      : undefined);
   const unknownConversation = Boolean(
     shellLoaded &&
       routeConversationId &&
@@ -2297,7 +2351,7 @@ function MultiTenantComposerControls({
           <label htmlFor={savedQuerySelectId} className="sr-only">
             Saved multi-tenant query
           </label>
-          <select
+          <Select
             id={savedQuerySelectId}
             name="saved-multi-tenant-query"
             value={selectedSavedQueryId}
@@ -2314,7 +2368,7 @@ function MultiTenantComposerControls({
                 {query.title}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
       {scopeMode === "selected" && (
@@ -2418,7 +2472,7 @@ function WorkspaceContextControls({
         <label htmlFor={workspaceSelectId} className="sr-only">
           Attach workspace context
         </label>
-        <select
+        <Select
           id={workspaceSelectId}
           name="attached-workspace-context"
           value={attachedWorkspaceId}
@@ -2432,7 +2486,7 @@ function WorkspaceContextControls({
               {entry.title}
             </option>
           ))}
-        </select>
+        </Select>
         {hasAttachment && <Pill tone="accent">Attached</Pill>}
         {!attachedWorkspaceId && (
           <div className="flex flex-wrap gap-1.5">
@@ -2699,7 +2753,7 @@ function ScopeReviewCard({
               Agent batch
             </div>
             <div className="mt-2 flex gap-2">
-              <select
+              <Select
                 value={selectedBatchAgentSlug}
                 onChange={(event) => onSelectedBatchAgentSlugChange(event.target.value)}
                 disabled={running || installedAgents.length === 0}
@@ -2712,7 +2766,7 @@ function ScopeReviewCard({
                     {formatAgentDisplayName(agent)} · {agent.mode}
                   </option>
                 ))}
-              </select>
+              </Select>
               <Button
                 size="sm"
                 variant="secondary"
@@ -3239,7 +3293,7 @@ function PinMessageToWorkspaceModal({
           <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Workspace
           </span>
-          <select
+          <Select
             id="pin-answer-workspace"
             name="pin-answer-workspace"
             value={selectedWorkspaceId}
@@ -3251,7 +3305,7 @@ function PinMessageToWorkspaceModal({
                 {workspace.title}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         {message && (
           <div className="max-h-36 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 text-[12px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
@@ -4178,6 +4232,19 @@ function chatResourceLabel(resource: GraphCacheResourceKind): string {
     windowsAutopilotProfiles: "Windows Autopilot profiles",
     windowsFeatureUpdateProfiles: "Windows feature update policies",
     windowsQualityUpdateProfiles: "Windows quality update policies",
+    namedLocations: "Named locations",
+    authenticationMethodsPolicy: "Authentication methods policy",
+    authorizationPolicy: "Authorization policy",
+    crossTenantAccessPolicy: "Cross-tenant access policy",
+    directoryRoles: "Directory roles",
+    administrativeUnits: "Administrative units",
+    applications: "App registrations",
+    servicePrincipals: "Service principals",
+    domains: "Domains",
+    securityAlerts: "Defender alerts",
+    securityIncidents: "Defender incidents",
+    secureScores: "Secure Score history",
+    secureScoreControlProfiles: "Secure Score controls",
   };
   return labels[resource];
 }

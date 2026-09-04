@@ -124,4 +124,82 @@ describe("RunResult write confirmation", () => {
     expect(screen.getByText(/Microsoft Graph changes may not be reversible/)).toBeInTheDocument();
     expect(screen.queryByText(/will be retired/i)).not.toBeInTheDocument();
   });
+
+  it("renders rollback runs without a rerun action and reports manual changes", async () => {
+    const run = createAwaitingConfirmationRun({
+      id: "run-baseline-rollback",
+      agentSlug: "baseline-rollback",
+      origin: "baseline-rollback",
+      status: "completed",
+      finishedAt: "2026-07-05T10:01:00.000Z",
+      rollback: {
+        baselineId: "baseline-1",
+        requiredScopes: ["DeviceManagementConfiguration.ReadWrite.All"],
+        manualCount: 3,
+      },
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ installedAgents: [], runs: [run] }),
+    );
+
+    renderRoute(<RunResult />, {
+      path: "/runs/:id",
+      route: `/runs/${run.id}`,
+      bridge,
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Baseline rollback" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Run again" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "3 changes need manual review and are not part of this plan.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("labels external proposals with their client and scopes without a rerun action", async () => {
+    const run = createAwaitingConfirmationRun({
+      id: "run-external-proposal",
+      agentSlug: "external-proposal",
+      origin: "external-proposal",
+      status: "completed",
+      finishedAt: "2026-08-29T10:01:00.000Z",
+      external: {
+        clientName: "Claude Code",
+        requiredScopes: [
+          "Policy.ReadWrite.ConditionalAccess",
+          "Directory.Read.All",
+        ],
+      },
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ installedAgents: [], runs: [run] }),
+    );
+
+    renderRoute(<RunResult />, {
+      path: "/runs/:id",
+      route: `/runs/${run.id}`,
+      bridge,
+    });
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "External proposal from Claude Code",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Required scopes: Policy.ReadWrite.ConditionalAccess, Directory.Read.All",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Run again" }),
+    ).not.toBeInTheDocument();
+  });
 });

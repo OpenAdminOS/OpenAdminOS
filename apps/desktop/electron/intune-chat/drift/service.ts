@@ -1,26 +1,57 @@
 import type {
+  CreateDriftBaselineInput,
+  DriftBaseline,
+  DriftBaselineExportBundle,
+  DriftBaselineExportObject,
+  DriftBundleCompareInput,
+  DriftBundleCompareResult,
+  DriftBaselineDriftEntry,
+  DriftBaselineDriftInput,
+  DriftBaselineDriftResult,
+  DriftBaselineResourceDrift,
   DriftEntryDetail,
   DriftEntryDetailInput,
   DriftFieldChange,
   DriftObjectHistoryInput,
   DriftObjectHistoryResult,
   DriftStatus,
+  DriftTenantCompareEntry,
+  DriftTenantCompareInput,
+  DriftTenantCompareResourceCounts,
+  DriftTenantCompareResult,
+  DriftTimeCompareInput,
+  DriftTimeCompareResult,
   DriftTimelineEntry,
   DriftTimelineInput,
   DriftTimelineResult,
+  FleetDriftStatusInput,
+  FleetDriftStatusResult,
+  FleetTenantDriftStatus,
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
+  ListDriftBaselinesInput,
+  RenameDriftBaselineInput,
+  RetireDriftBaselineInput,
+  TenantGroup,
   TenantRecord,
 } from "@openadminos/agent-sdk";
 import { definitionForResource } from "../planner.js";
 import type {
   CachedGraphResourceRecord,
+  DriftBaselineChangeRecord,
+  DriftBaselineRecord,
   DriftObjectVersionRecord,
   DriftResourceStatsRecord,
   DriftSnapshotChangeRecord,
   DriftSnapshotRecord,
 } from "../sqlite-store.js";
+import { lookupEndpoint } from "../../graph-catalog.js";
 import { attributeDriftChange, type DriftAuditCache } from "./attribution.js";
+import {
+  buildRollbackPlan,
+  sanitizeGraphWriteBody,
+  type RollbackPlanDraft,
+} from "./rollback.js";
 import {
   diffDriftObjects,
   isTimestampOnlyChange,
@@ -76,6 +107,61 @@ export interface DriftServiceHost {
     tenantId: string,
     resources: readonly GraphCacheResourceKind[],
   ): DriftResourceStatsRecord[];
+  createDriftBaseline(input: {
+    tenantId: string;
+    name: string;
+    now: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): DriftBaselineRecord;
+  listDriftBaselines(tenantId: string): DriftBaselineRecord[];
+  getDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+  ): DriftBaselineRecord | undefined;
+  getActiveDriftBaseline(tenantId: string): DriftBaselineRecord | undefined;
+  renameDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+    name: string,
+  ): DriftBaselineRecord;
+  retireDriftBaseline(
+    tenantId: string,
+    baselineId: string,
+    now: string,
+  ): DriftBaselineRecord;
+  listDriftBaselineChanges(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): DriftBaselineChangeRecord[];
+  readDriftStateAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+    atIso: string,
+  ): Map<
+    string,
+    { version: number; contentHash: string; rawJson: string; displayName?: string }
+  >;
+  getOldestDriftSnapshotAt(
+    tenantId: string,
+    resource: GraphCacheResourceKind,
+  ): string | undefined;
+  countDriftBaselineChanges(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): { added: number; removed: number; modified: number };
+  listTenantGroups(): TenantGroup[];
+  listDriftBaselinePinnedObjects(input: {
+    tenantId: string;
+    baselineId: string;
+    resources: readonly GraphCacheResourceKind[];
+  }): Array<{
+    resource: GraphCacheResourceKind;
+    graphId: string;
+    displayName?: string;
+    rawJson: string;
+  }>;
 }
 
 export class DriftService {
@@ -270,6 +356,436 @@ export class DriftService {
     };
   }
 
+  async createBaseline(input: CreateDriftBaselineInput): Promise<DriftBaseline> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.createDriftBaseline({
+      tenantId: tenant.id,
+      name: input.name,
+      now: new Date().toISOString(),
+      resources: TRACKED_RESOURCES,
+    });
+  }
+
+  async listBaselines(input: ListDriftBaselinesInput): Promise<DriftBaseline[]> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.listDriftBaselines(tenant.id);
+  }
+
+  async renameBaseline(input: RenameDriftBaselineInput): Promise<DriftBaseline> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.renameDriftBaseline(tenant.id, input.baselineId, input.name);
+  }
+
+  async retireBaseline(input: RetireDriftBaselineInput): Promise<DriftBaseline> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    return this.host.retireDriftBaseline(
+      tenant.id,
+      input.baselineId,
+      new Date().toISOString(),
+    );
+  }
+
+  async getBaselineDrift(
+    input: DriftBaselineDriftInput,
+  ): Promise<DriftBaselineDriftResult> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    const baseline = input.baselineId
+      ? this.host.getDriftBaseline(tenant.id, input.baselineId)
+      : this.host.getActiveDriftBaseline(tenant.id);
+    if (!baseline) {
+      throw new Error(
+        input.baselineId
+          ? "Baseline was not found for this tenant."
+          : "No active baseline exists for this tenant. Create one from the Changes view first.",
+      );
+    }
+    const resources = normalizeTrackedResources(input.resources);
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+    const changes = this.host.listDriftBaselineChanges({
+      tenantId: tenant.id,
+      baselineId: baseline.id,
+      resources,
+    });
+
+    const countsByResource = new Map<
+      GraphCacheResourceKind,
+      { added: number; removed: number; modified: number }
+    >();
+    for (const resource of resources) {
+      countsByResource.set(resource, { added: 0, removed: 0, modified: 0 });
+    }
+    const entries: DriftBaselineDriftEntry[] = [];
+    for (const change of changes) {
+      const counts = countsByResource.get(change.resource);
+      if (counts) counts[change.kind] += 1;
+      entries.push(baselineDriftEntry(change));
+    }
+    entries.sort(compareBaselineEntries);
+
+    return {
+      tenantId: tenant.id,
+      baseline,
+      evaluatedAt: new Date().toISOString(),
+      resources: resources.map((resource): DriftBaselineResourceDrift => {
+        const counts = countsByResource.get(resource) ?? {
+          added: 0,
+          removed: 0,
+          modified: 0,
+        };
+        return {
+          resource,
+          resourceLabel: labelForResource(resource),
+          ...counts,
+        };
+      }),
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+    };
+  }
+
+  async getTimeCompare(input: DriftTimeCompareInput): Promise<DriftTimeCompareResult> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    const from = requireIsoInstant(input.from, "from");
+    const to = requireIsoInstant(input.to, "to");
+    if (Date.parse(from) >= Date.parse(to)) {
+      throw new Error("Compare requires the from moment to be before the to moment.");
+    }
+    const resources = normalizeTrackedResources(input.resources);
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+
+    let retentionLimited = false;
+    const countsByResource = new Map<
+      GraphCacheResourceKind,
+      { added: number; removed: number; modified: number }
+    >();
+    const entries: DriftBaselineDriftEntry[] = [];
+
+    for (const resource of resources) {
+      const counts = { added: 0, removed: 0, modified: 0 };
+      countsByResource.set(resource, counts);
+      const oldest = this.host.getOldestDriftSnapshotAt(tenant.id, resource);
+      if (oldest !== undefined && from < oldest) retentionLimited = true;
+
+      const before = this.host.readDriftStateAt(tenant.id, resource, from);
+      const after = this.host.readDriftStateAt(tenant.id, resource, to);
+
+      for (const [graphId, current] of after) {
+        const previous = before.get(graphId);
+        if (!previous) {
+          counts.added += 1;
+          entries.push(
+            baselineDriftEntry({
+              resource,
+              graphId,
+              kind: "added",
+              ...(current.displayName ? { displayName: current.displayName } : {}),
+              currentRawJson: current.rawJson,
+            }),
+          );
+        } else if (previous.contentHash !== current.contentHash) {
+          counts.modified += 1;
+          entries.push(
+            baselineDriftEntry({
+              resource,
+              graphId,
+              kind: "modified",
+              ...(current.displayName
+                ? { displayName: current.displayName }
+                : previous.displayName
+                  ? { displayName: previous.displayName }
+                  : {}),
+              pinnedRawJson: previous.rawJson,
+              currentRawJson: current.rawJson,
+            }),
+          );
+        }
+      }
+      for (const [graphId, previous] of before) {
+        if (after.has(graphId)) continue;
+        counts.removed += 1;
+        entries.push(
+          baselineDriftEntry({
+            resource,
+            graphId,
+            kind: "removed",
+            ...(previous.displayName ? { displayName: previous.displayName } : {}),
+            pinnedRawJson: previous.rawJson,
+          }),
+        );
+      }
+    }
+    entries.sort(compareBaselineEntries);
+
+    return {
+      tenantId: tenant.id,
+      from,
+      to,
+      evaluatedAt: new Date().toISOString(),
+      resources: resources.map((resource) => ({
+        resource,
+        resourceLabel: labelForResource(resource),
+        ...(countsByResource.get(resource) ?? { added: 0, removed: 0, modified: 0 }),
+      })),
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+      ...(retentionLimited ? { retentionLimited: true } : {}),
+    };
+  }
+
+  /**
+   * Deterministic rollback plan for current drift against a baseline.
+   * The caller (run integration) owns turning this into a confirmed
+   * write run; this method never applies anything.
+   */
+  async buildBaselineRollbackPlan(input: {
+    tenantId: string;
+    baselineId?: string;
+    selections?: ReadonlyArray<{
+      resource: GraphCacheResourceKind;
+      graphId: string;
+    }>;
+  }): Promise<{ tenantId: string; baselineId: string; draft: RollbackPlanDraft }> {
+    const tenant = await this.resolveTenant(input.tenantId);
+    const baseline = input.baselineId
+      ? this.host.getDriftBaseline(tenant.id, input.baselineId)
+      : this.host.getActiveDriftBaseline(tenant.id);
+    if (!baseline) {
+      throw new Error(
+        input.baselineId
+          ? "Baseline was not found for this tenant."
+          : "No active baseline exists for this tenant. Create one from the Changes view first.",
+      );
+    }
+    const changes = this.host.listDriftBaselineChanges({
+      tenantId: tenant.id,
+      baselineId: baseline.id,
+      resources: TRACKED_RESOURCES,
+    });
+    const draft = buildRollbackPlan({
+      changes,
+      labelForResource,
+      resolveEndpoint: (method, path) => lookupEndpoint(method, path),
+      ...(input.selections ? { selections: input.selections } : {}),
+    });
+    return { tenantId: tenant.id, baselineId: baseline.id, draft };
+  }
+
+  /** Portable baseline bundle: pinned objects with tenant fields stripped. */
+  async buildBaselineExport(input: {
+    tenantId: string;
+    baselineId?: string;
+  }): Promise<DriftBaselineExportBundle> {
+    const persisted = await this.host.read();
+    const tenant = this.host.resolveTenant(persisted, input.tenantId);
+    const baseline = input.baselineId
+      ? this.host.getDriftBaseline(tenant.id, input.baselineId)
+      : this.host.getActiveDriftBaseline(tenant.id);
+    if (!baseline) {
+      throw new Error(
+        input.baselineId
+          ? "Baseline was not found for this tenant."
+          : "No active baseline exists for this tenant. Create one from the Changes view first.",
+      );
+    }
+    const pinned = this.host.listDriftBaselinePinnedObjects({
+      tenantId: tenant.id,
+      baselineId: baseline.id,
+      resources: TRACKED_RESOURCES,
+    });
+    const byResource = new Map<GraphCacheResourceKind, DriftBaselineExportObject[]>();
+    for (const object of pinned) {
+      const body = sanitizeGraphWriteBody(object.rawJson);
+      if (body === undefined) continue;
+      const list = byResource.get(object.resource) ?? [];
+      list.push({
+        ...(object.displayName ? { displayName: object.displayName } : {}),
+        body,
+      });
+      byResource.set(object.resource, list);
+    }
+    return {
+      format: "openadminos-baseline-export",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      sourceTenantName: tenant.displayName,
+      baselineName: baseline.name,
+      resources: [...byResource.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([resource, objects]) => ({ resource, objects })),
+    };
+  }
+
+  /** Compare the tenant's current configuration against an imported bundle. */
+  async compareTenantToBundle(
+    input: DriftBundleCompareInput,
+  ): Promise<DriftBundleCompareResult> {
+    const persisted = await this.host.read();
+    const tenant = this.host.resolveTenant(persisted, input.tenantId);
+    const bundle = input.bundle;
+    if (bundle.format !== "openadminos-baseline-export" || bundle.version !== 1) {
+      throw new Error("This file is not an OpenAdminOS baseline export.");
+    }
+    const bundleByResource = new Map<
+      GraphCacheResourceKind,
+      DriftBaselineExportObject[]
+    >();
+    for (const entry of bundle.resources) {
+      ensureTrackedResource(entry.resource);
+      bundleByResource.set(entry.resource, entry.objects);
+    }
+    const resources = input.resources
+      ? normalizeTrackedResources(input.resources)
+      : [...bundleByResource.keys()];
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+    const includeAssignments = input.includeAssignments === true;
+    const now = new Date().toISOString();
+
+    let tenantHasData = false;
+    const counts: DriftTenantCompareResourceCounts[] = [];
+    const entries: DriftTenantCompareEntry[] = [];
+    for (const resource of resources) {
+      const stateA = this.host.readDriftStateAt(tenant.id, resource, now);
+      if (stateA.size > 0) tenantHasData = true;
+      const stateB = new Map<string, CompareObjectState>();
+      for (const [index, object] of (bundleByResource.get(resource) ?? []).entries()) {
+        stateB.set(`bundle-${index}`, {
+          version: 1,
+          contentHash: "",
+          rawJson: JSON.stringify(object.body),
+          ...(object.displayName ? { displayName: object.displayName } : {}),
+        });
+      }
+      counts.push(
+        compareStateMaps({
+          resource,
+          resourceLabel: labelForResource(resource),
+          stateA,
+          stateB,
+          includeAssignments,
+          entries,
+        }),
+      );
+    }
+    entries.sort(compareTenantEntries);
+    return {
+      tenantId: tenant.id,
+      baselineName: bundle.baselineName,
+      sourceTenantName: bundle.sourceTenantName,
+      evaluatedAt: now,
+      includeAssignments,
+      tenantHasData,
+      resources: counts,
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+    };
+  }
+
+  async getFleetDriftStatus(
+    input: FleetDriftStatusInput,
+  ): Promise<FleetDriftStatusResult> {
+    const persisted = await this.host.read();
+    let tenants = persisted.tenants;
+    if (input.groupId) {
+      const group = this.host
+        .listTenantGroups()
+        .find((candidate) => candidate.id === input.groupId);
+      if (!group) throw new Error("Tenant group was not found.");
+      const members = new Set(group.tenantIds);
+      tenants = tenants.filter((tenant) => members.has(tenant.id));
+    }
+    const evaluatedAt = new Date().toISOString();
+    const statuses: FleetTenantDriftStatus[] = tenants.map((tenant) => {
+      const stats = this.host.getDriftResourceStats(tenant.id, TRACKED_RESOURCES);
+      const lastCaptureAt = stats
+        .map((stat) => stat.lastSnapshotAt)
+        .filter((value): value is string => typeof value === "string")
+        .sort()
+        .at(-1);
+      const trackedObjectCount = stats.reduce(
+        (sum, stat) => sum + stat.currentObjectCount,
+        0,
+      );
+      const baseline = this.host.getActiveDriftBaseline(tenant.id);
+      const status: FleetTenantDriftStatus = {
+        tenantId: tenant.id,
+        tenantName: tenant.displayName,
+        trackedObjectCount,
+        ...(lastCaptureAt ? { lastCaptureAt } : {}),
+      };
+      if (baseline) {
+        status.baseline = {
+          id: baseline.id,
+          name: baseline.name,
+          createdAt: baseline.createdAt,
+        };
+        status.drift = {
+          ...this.host.countDriftBaselineChanges({
+            tenantId: tenant.id,
+            baselineId: baseline.id,
+            resources: TRACKED_RESOURCES,
+          }),
+          evaluatedAt,
+        };
+      }
+      return status;
+    });
+    return { tenants: statuses, evaluatedAt };
+  }
+
+  async getTenantCompare(
+    input: DriftTenantCompareInput,
+  ): Promise<DriftTenantCompareResult> {
+    const persisted = await this.host.read();
+    const tenantA = this.host.resolveTenant(persisted, input.tenantIdA);
+    const tenantB = this.host.resolveTenant(persisted, input.tenantIdB);
+    if (tenantA.id === tenantB.id) {
+      throw new Error("Cross-tenant compare requires two different tenants.");
+    }
+    const resources = normalizeTrackedResources(input.resources);
+    const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
+    const includeAssignments = input.includeAssignments === true;
+    const now = new Date().toISOString();
+
+    let tenantAHasData = false;
+    let tenantBHasData = false;
+    const counts: DriftTenantCompareResourceCounts[] = [];
+    const entries: DriftTenantCompareEntry[] = [];
+
+    for (const resource of resources) {
+      const stateA = this.host.readDriftStateAt(tenantA.id, resource, now);
+      const stateB = this.host.readDriftStateAt(tenantB.id, resource, now);
+      if (stateA.size > 0) tenantAHasData = true;
+      if (stateB.size > 0) tenantBHasData = true;
+      counts.push(
+        compareStateMaps({
+          resource,
+          resourceLabel: labelForResource(resource),
+          stateA,
+          stateB,
+          includeAssignments,
+          entries,
+        }),
+      );
+    }
+
+    entries.sort(compareTenantEntries);
+    return {
+      tenantIdA: tenantA.id,
+      tenantIdB: tenantB.id,
+      evaluatedAt: now,
+      includeAssignments,
+      tenantAHasData,
+      tenantBHasData,
+      resources: counts,
+      entries: entries.slice(0, limit),
+      hasMore: entries.length > limit,
+      limit,
+    };
+  }
+
   private async resolveTenant(tenantId: string): Promise<TenantRecord> {
     const persisted = await this.host.read();
     return this.host.resolveTenant(persisted, tenantId);
@@ -345,6 +861,40 @@ function timelineEntryMatches(entry: DriftTimelineEntry, query: string): boolean
     .includes(needle);
 }
 
+function baselineDriftEntry(change: DriftBaselineChangeRecord): DriftBaselineDriftEntry {
+  const base = {
+    resource: change.resource,
+    resourceLabel: labelForResource(change.resource),
+    graphId: change.graphId,
+    ...(change.displayName ? { displayName: change.displayName } : {}),
+    changeKind: change.kind,
+  };
+  if (rawTooLarge(change.pinnedRawJson) || rawTooLarge(change.currentRawJson)) {
+    return { ...base, fieldChangeCount: 0, changes: [], truncated: true };
+  }
+  const changes = diffDriftObjects(
+    change.kind === "added" ? {} : parseRawJson(change.pinnedRawJson),
+    change.kind === "removed" ? {} : parseRawJson(change.currentRawJson),
+    change.resource,
+  );
+  return { ...base, fieldChangeCount: changes.length, changes };
+}
+
+function compareBaselineEntries(
+  left: DriftBaselineDriftEntry,
+  right: DriftBaselineDriftEntry,
+): number {
+  if (left.resource !== right.resource) {
+    return left.resource.localeCompare(right.resource);
+  }
+  if (left.changeKind !== right.changeKind) {
+    return left.changeKind.localeCompare(right.changeKind);
+  }
+  const leftName = left.displayName ?? left.graphId;
+  const rightName = right.displayName ?? right.graphId;
+  return leftName.localeCompare(rightName);
+}
+
 function fieldChangesFor(change: DriftSnapshotChangeRecord): DriftFieldChange[] {
   if (change.kind === "added") {
     return diffDriftObjects({}, parseRawJson(change.currentRawJson), change.resource);
@@ -375,6 +925,194 @@ function ensureTrackedResource(resource: GraphCacheResourceKind): void {
   if (!DRIFT_TRACKED_RESOURCES.has(resource)) {
     throw new Error(`Resource is not tracked for drift: ${resource}`);
   }
+}
+
+// Fields that are inherently tenant-specific and must not count as a
+// configuration difference when comparing two tenants.
+const CROSS_TENANT_IGNORED_TOP_FIELDS = new Set([
+  "id",
+  "createdDateTime",
+  "modifiedDateTime",
+  "lastModifiedDateTime",
+  "version",
+  "roleScopeTagIds",
+  "supportsScopeTags",
+]);
+
+// Assignments target tenant-specific groups and filters; excluded from
+// cross-tenant equality by default, with a visible opt-in.
+const CROSS_TENANT_ASSIGNMENT_TOP_FIELDS = new Set(["assignments", "isAssigned"]);
+
+function crossTenantChangeRelevant(
+  change: DriftFieldChange,
+  includeAssignments: boolean,
+): boolean {
+  const top = change.path.split(/[.[]/)[0] ?? change.path;
+  if (CROSS_TENANT_IGNORED_TOP_FIELDS.has(top)) return false;
+  if (!includeAssignments && CROSS_TENANT_ASSIGNMENT_TOP_FIELDS.has(top)) return false;
+  return true;
+}
+
+interface CompareObjectState {
+  version: number;
+  contentHash: string;
+  rawJson: string;
+  displayName?: string;
+}
+
+/**
+ * Shared pairing and diffing for cross-tenant and bundle compare:
+ * structural match when each side has exactly one object (the policy
+ * singletons), otherwise unique-display-name matching with duplicates
+ * counted as ambiguous, tenant-specific fields excluded, assignments
+ * excluded unless opted in.
+ */
+function compareStateMaps(input: {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  stateA: Map<string, CompareObjectState>;
+  stateB: Map<string, CompareObjectState>;
+  includeAssignments: boolean;
+  entries: DriftTenantCompareEntry[];
+}): DriftTenantCompareResourceCounts {
+  const { resource, resourceLabel, stateA, stateB, includeAssignments, entries } =
+    input;
+  const resourceCounts: DriftTenantCompareResourceCounts = {
+    resource,
+    resourceLabel,
+    matchedSame: 0,
+    different: 0,
+    onlyInA: 0,
+    onlyInB: 0,
+    ambiguous: 0,
+  };
+
+  const pairs: Array<{ displayName: string; rawA?: string; rawB?: string }> = [];
+  if (stateA.size === 1 && stateB.size === 1) {
+    const objectA = [...stateA.values()][0]!;
+    const objectB = [...stateB.values()][0]!;
+    pairs.push({
+      displayName: objectA.displayName ?? objectB.displayName ?? resourceLabel,
+      rawA: objectA.rawJson,
+      rawB: objectB.rawJson,
+    });
+  } else {
+    const byNameA = groupByCompareName(stateA);
+    const byNameB = groupByCompareName(stateB);
+    resourceCounts.ambiguous += byNameA.ambiguous + byNameB.ambiguous;
+    const names = new Set([...byNameA.unique.keys(), ...byNameB.unique.keys()]);
+    for (const name of [...names].sort()) {
+      const objectA = byNameA.unique.get(name);
+      const objectB = byNameB.unique.get(name);
+      pairs.push({
+        displayName: objectA?.displayName ?? objectB?.displayName ?? name,
+        ...(objectA ? { rawA: objectA.rawJson } : {}),
+        ...(objectB ? { rawB: objectB.rawJson } : {}),
+      });
+    }
+  }
+
+  for (const pair of pairs) {
+    if (pair.rawA !== undefined && pair.rawB === undefined) {
+      resourceCounts.onlyInA += 1;
+      entries.push({
+        resource,
+        resourceLabel,
+        displayName: pair.displayName,
+        bucket: "only-in-a",
+        fieldChangeCount: 0,
+        changes: [],
+      });
+      continue;
+    }
+    if (pair.rawA === undefined && pair.rawB !== undefined) {
+      resourceCounts.onlyInB += 1;
+      entries.push({
+        resource,
+        resourceLabel,
+        displayName: pair.displayName,
+        bucket: "only-in-b",
+        fieldChangeCount: 0,
+        changes: [],
+      });
+      continue;
+    }
+    if (rawTooLarge(pair.rawA) || rawTooLarge(pair.rawB)) {
+      resourceCounts.different += 1;
+      entries.push({
+        resource,
+        resourceLabel,
+        displayName: pair.displayName,
+        bucket: "different",
+        fieldChangeCount: 0,
+        changes: [],
+        truncated: true,
+      });
+      continue;
+    }
+    const changes = diffDriftObjects(
+      parseRawJson(pair.rawA),
+      parseRawJson(pair.rawB),
+      resource,
+    ).filter((change) => crossTenantChangeRelevant(change, includeAssignments));
+    if (changes.length === 0) {
+      resourceCounts.matchedSame += 1;
+      continue;
+    }
+    resourceCounts.different += 1;
+    entries.push({
+      resource,
+      resourceLabel,
+      displayName: pair.displayName,
+      bucket: "different",
+      fieldChangeCount: changes.length,
+      changes,
+    });
+  }
+  return resourceCounts;
+}
+
+function groupByCompareName(state: Map<string, CompareObjectState>): {
+  unique: Map<string, CompareObjectState>;
+  ambiguous: number;
+} {
+  const byName = new Map<string, CompareObjectState[]>();
+  let unnamed = 0;
+  for (const object of state.values()) {
+    const name = object.displayName?.trim().toLocaleLowerCase();
+    if (!name) {
+      unnamed += 1;
+      continue;
+    }
+    byName.set(name, [...(byName.get(name) ?? []), object]);
+  }
+  const unique = new Map<string, CompareObjectState>();
+  let ambiguous = unnamed;
+  for (const [name, objects] of byName) {
+    if (objects.length === 1) unique.set(name, objects[0]!);
+    else ambiguous += objects.length;
+  }
+  return { unique, ambiguous };
+}
+
+function compareTenantEntries(
+  left: DriftTenantCompareEntry,
+  right: DriftTenantCompareEntry,
+): number {
+  if (left.resource !== right.resource) {
+    return left.resource.localeCompare(right.resource);
+  }
+  if (left.bucket !== right.bucket) {
+    return left.bucket.localeCompare(right.bucket);
+  }
+  return left.displayName.localeCompare(right.displayName);
+}
+
+function requireIsoInstant(value: string, label: "from" | "to"): string {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`Compare ${label} must be an ISO timestamp.`);
+  }
+  return value;
 }
 
 function normalizeLimit(value: unknown, fallback: number): number {

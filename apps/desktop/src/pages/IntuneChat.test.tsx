@@ -34,7 +34,7 @@ describe("IntuneChat guest exploration", () => {
     });
 
     const composer = await screen.findByPlaceholderText(
-      "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
+      "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
     );
     await user.click(
       screen.getByRole("button", {
@@ -71,8 +71,14 @@ describe("IntuneChat guest exploration", () => {
       bridge,
     });
 
+    // A fresh install auto-opens setup; this test covers the contextual
+    // path, so dismiss the first-run dialog before drafting a question.
+    await user.click(
+      await screen.findByRole("button", { name: "Close" }),
+    );
+
     const composer = await screen.findByPlaceholderText(
-      "Ask about devices, users, apps, policies, or sign-ins. Connect a tenant when you send.",
+      "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
     );
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -86,6 +92,71 @@ describe("IntuneChat guest exploration", () => {
 
     await user.click(screen.getByRole("button", { name: "Send your question" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+  });
+});
+
+describe("IntuneChat new conversation routing", () => {
+  it("never flashes 'Conversation not found' while the first message is sending", async () => {
+    const user = userEvent.setup();
+    const newConversation: IntuneChatConversation = {
+      id: "conversation-new",
+      title: "Which Windows devices are stale?",
+      createdAt: "2026-08-31T12:00:00.000Z",
+      updatedAt: "2026-08-31T12:00:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    // Reproduces the real sequence: the host emits "started" with a
+    // conversation the sidebar list has not returned yet, and the route
+    // moves to it. The list stays stale on purpose, so the route can only
+    // stay valid if the conversation is seeded into local state.
+    const bridge = makeMockBridge(
+      {
+        listIntuneChatConversations: vi.fn(async () => []),
+        streamIntuneChatMessage: vi.fn(async (input, onEvent) => {
+          const result = {
+            conversation: newConversation,
+            userMessage: {
+              id: "message-user-new",
+              conversationId: newConversation.id,
+              role: "user" as const,
+              content: input.content,
+              status: "completed" as const,
+              createdAt: newConversation.createdAt,
+            },
+            assistantMessage: {
+              id: "message-assistant-new",
+              conversationId: newConversation.id,
+              role: "assistant" as const,
+              content: "",
+              status: "pending" as const,
+              createdAt: newConversation.createdAt,
+            },
+            cacheStatus: { tenantId: "tenant-1", resources: [] },
+          };
+          onEvent({ type: "started", ...result });
+          return result as never;
+        }),
+      },
+      createMockAppState(),
+    );
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    const composer = await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
+    await user.type(composer, "Which Windows devices are stale?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(bridge.streamIntuneChatMessage).toHaveBeenCalled(),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Conversation not found")).not.toBeInTheDocument(),
+    );
   });
 });
 

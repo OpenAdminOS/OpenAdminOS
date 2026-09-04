@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Select } from "../components/Select";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { Pill } from "../components/Pill";
@@ -577,7 +578,7 @@ function LinkPicker({
 }) {
   return (
     <div className="flex gap-2">
-      <select
+      <Select
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
@@ -589,7 +590,7 @@ function LinkPicker({
             {option.label}
           </option>
         ))}
-      </select>
+      </Select>
       <Button size="sm" variant="secondary" disabled={!value} onClick={onLink}>
         Link
       </Button>
@@ -637,7 +638,7 @@ function CreateWorkspaceModal({
           <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
             Tenant
           </span>
-          <select
+          <Select
             id="workspace-tenant"
             name="workspace-tenant"
             value={tenantId}
@@ -649,7 +650,7 @@ function CreateWorkspaceModal({
                 {tenant.displayName}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           Workspaces cannot mix tenant evidence. Multi-tenant chat results must be split into tenant-specific evidence entries.

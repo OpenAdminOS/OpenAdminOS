@@ -22,6 +22,11 @@ export interface GraphAdapterOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   maxRetries?: number;
+  /**
+   * Base delay for the transient-fault backoff, doubling per attempt.
+   * Defaults to 1s; set to 0 in tests to keep them fast.
+   */
+  retryBackoffMs?: number;
   timeoutMs?: number;
   /**
    * When set, the adapter emits a `debug`-level log at request start
@@ -80,6 +85,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
   const baseUrl = options.baseUrl ?? "https://graph.microsoft.com/beta";
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxRetries = options.maxRetries ?? 3;
+  const retryBackoffMs = options.retryBackoffMs ?? 1000;
   // 60s default: audit-log and sign-in queries on real tenants
   // routinely take 30-45s. Agents that need shorter timeouts can
   // pass `timeoutMs` explicitly when constructing the adapter.
@@ -102,6 +108,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
           tokenProvider: options.tokenProvider,
           fetchImpl,
           maxRetries,
+          retryBackoffMs,
           timeoutMs,
           baseUrl,
           log: options.log,
@@ -129,6 +136,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         tokenProvider: options.tokenProvider,
         fetchImpl,
         maxRetries,
+        retryBackoffMs,
         timeoutMs,
         expectJson: false,
         idempotent: false,
@@ -172,6 +180,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         tokenProvider: options.tokenProvider,
         fetchImpl,
         maxRetries,
+        retryBackoffMs,
         timeoutMs,
         expectJson: method !== "DELETE",
         extraHeaders: input.headers,
@@ -179,6 +188,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         idempotent: method === "GET" || method === "PUT" || method === "DELETE",
         baseUrl,
         log: options.log,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
     },
   };
@@ -207,6 +217,7 @@ interface GraphRequestInput {
   tokenProvider: () => Promise<string>;
   fetchImpl: typeof fetch;
   maxRetries: number;
+  retryBackoffMs: number;
   timeoutMs: number;
   expectJson?: boolean;
   extraHeaders?: Record<string, string>;
@@ -227,6 +238,12 @@ interface GraphRequestInput {
   baseUrl?: string;
   /** Optional adapter logger; emits debug/info/warn at request boundaries. */
   log?: GraphAdapterLogger;
+  /**
+   * Caller cancellation. Distinct from the per-attempt timeout: when
+   * this aborts the request is abandoned without a retry, because the
+   * user asked to stop rather than the network failing.
+   */
+  signal?: AbortSignal;
 }
 
 async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
@@ -249,9 +266,18 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
 
   while (true) {
     attempt += 1;
+    if (input.signal?.aborted) {
+      throw new Error(GRAPH_REQUEST_CANCELLED);
+    }
     const token = await input.tokenProvider();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+    // Caller cancellation aborts the same controller the timeout uses;
+    // the two are told apart afterwards by inspecting input.signal.
+    const onCallerAbort = () => controller.abort();
+    input.signal?.addEventListener("abort", onCallerAbort, { once: true });
+    const releaseSignal = () =>
+      input.signal?.removeEventListener("abort", onCallerAbort);
 
     const headers: Record<string, string> = {
       authorization: `Bearer ${token}`,
@@ -279,11 +305,46 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
       });
     } catch (error) {
       clearTimeout(timer);
+      releaseSignal();
       const durationMs = Date.now() - startMs;
+      if (input.signal?.aborted) {
+        throw new Error(GRAPH_REQUEST_CANCELLED);
+      }
       const isTimeout = error instanceof Error && error.name === "AbortError";
       const message = isTimeout
         ? `Graph request timed out after ${input.timeoutMs}ms: ${input.url}`
         : `Graph request failed (${input.url}): ${describe(error)}`;
+      // Timeouts and dropped connections are the common failure on a
+      // laptop that sleeps, roams between networks, or sits behind a
+      // VPN. They were previously fatal on the first occurrence, which
+      // discarded an entire multi-request refresh. Retry them on the
+      // same budget as 5xx, but only when the method is idempotent: a
+      // POST that timed out may already have been applied upstream, and
+      // repeating it could duplicate a write.
+      const idempotentRequest = input.idempotent ?? true;
+      if (idempotentRequest && attempt <= input.maxRetries) {
+        if (input.log) {
+          input.log(
+            "warn",
+            `${input.method} ${shortPath} retrying after ${isTimeout ? "timeout" : "network error"} (attempt ${attempt} of ${input.maxRetries + 1})`,
+            {
+              graphCall: {
+                phase: "retry",
+                method: input.method,
+                path: shortPath,
+                ...(query ? { query } : {}),
+                ok: false,
+                status: isTimeout ? "timeout" : "network-error",
+                durationMs,
+                attempts: attempt,
+                error: message,
+              },
+            },
+          );
+        }
+        await sleep(backoffMs(input.retryBackoffMs, attempt));
+        continue;
+      }
       if (input.log) {
         input.log(
           "warn",
@@ -306,6 +367,7 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
       throw new Error(message);
     }
     clearTimeout(timer);
+    releaseSignal();
 
     if (response.ok) {
       const status = response.status;
@@ -580,6 +642,17 @@ function parseRetryAfter(value: string | null): number | undefined {
     );
   }
   return undefined;
+}
+
+/**
+ * Marker used for user-initiated cancellation so callers can tell it
+ * apart from a genuine Graph failure and stay quiet about it.
+ */
+export const GRAPH_REQUEST_CANCELLED = "Graph request cancelled.";
+
+/** Exponential backoff for transient faults, doubling per attempt. */
+function backoffMs(base: number, attempt: number): number {
+  return Math.min(base * 8, base * 2 ** (attempt - 1));
 }
 
 function sleep(ms: number): Promise<void> {

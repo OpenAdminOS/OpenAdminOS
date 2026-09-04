@@ -11,7 +11,11 @@ import {
   createCodexLlm,
   createAppleFoundationLlm,
   createLmStudioLlm,
+  DEFAULT_AUTHORITY,
+  GRAPH_CLI_CLIENT_ID,
+  authorityForDirectory,
   createMsalClient,
+  defaultClientId,
   createOllamaLlm,
   createRegistryInstallCountPayload,
   createTenantSession,
@@ -59,19 +63,38 @@ import type {
   RunHistoryRetentionSettings,
   ProviderTestResult,
   StartRunOptions,
+  TenantAppRegistration,
+  ConnectTenantOptions,
   TenantRecord,
   TenantSession,
   AzureOpenAIProviderConfig,
   GraphCacheRefreshResult,
   GraphCacheRefreshScheduleSettings,
   GraphCacheStatus,
+  CreateDriftBaselineInput,
+  DriftBaseline,
+  DriftBaselineDriftInput,
+  DriftBaselineDriftResult,
   DriftEntryDetail,
   DriftEntryDetailInput,
   DriftObjectHistoryInput,
   DriftObjectHistoryResult,
   DriftStatus,
+  DriftTenantCompareInput,
+  DriftTenantCompareResult,
+  DriftTimeCompareInput,
+  DriftTimeCompareResult,
   DriftTimelineInput,
   DriftTimelineResult,
+  DriftBaselineExportBundle,
+  DriftBundleCompareInput,
+  DriftBundleCompareResult,
+  FleetDriftStatusInput,
+  FleetDriftStatusResult,
+  ListDriftBaselinesInput,
+  StartBaselineRollbackInput,
+  RenameDriftBaselineInput,
+  RetireDriftBaselineInput,
   ImportMultiTenantResultToWorkspacesInput,
   ImportMultiTenantResultToWorkspacesResult,
   CreateWorkspaceInput,
@@ -155,6 +178,27 @@ import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { IntuneChatService } from "./intune-chat/service.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
+import { GatewayService } from "./gateway/service.js";
+import {
+  RetrievalIndex,
+  ollamaEmbedQuery,
+  type RetrievalStatus,
+} from "./retrieval/retrieval.js";
+import {
+  embeddingEndpoint,
+  embeddingModelState,
+  pullEmbeddingModel,
+} from "./retrieval/embedding-model.js";
+import {
+  DEFAULT_INDEX_BASE_URL,
+  downloadIndex,
+  fetchIndexManifest,
+  installIndexFromDirectory,
+} from "./retrieval/install.js";
+import {
+  buildUsageTelemetryPayload,
+  type UsageTelemetryPayload,
+} from "./telemetry/usage.js";
 import { RunService } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
@@ -234,6 +278,33 @@ interface PersistedState {
    * Defaults to true; users can disable it from Settings -> Privacy.
    */
   registryInstallCountsEnabled?: boolean;
+  /**
+   * Opt-in install and usage telemetry (counts and versions only).
+   * Absent or false means off; the ping never fires until the user
+   * turns it on from Settings -> Privacy.
+   */
+  usageTelemetryEnabled?: boolean;
+  /**
+   * Automatic documentation-index install. On by default: grounding
+   * measurably improves answers, so every admin should get it without
+   * having to find a setting. Admins on restricted or metered networks
+   * can turn it off, and it never runs while it is off.
+   */
+  retrievalAutoInstall?: boolean;
+  /** Last automatic attempt, so a failure does not retry every launch. */
+  retrievalAutoInstallAttemptedAt?: string;
+  /** Last background attempt to pull the embedding model via Ollama. */
+  embeddingModelPullAttemptedAt?: string;
+  /**
+   * MCP write-gateway configuration. The pairing token is never stored
+   * here; it lives in provider-style safeStorage. Off by default.
+   */
+  gateway?: {
+    enabled: boolean;
+    port: number;
+    boundTenantId?: string;
+    clients: Array<{ id: string; name: string; createdAt: string }>;
+  };
   /**
    * Enables experimental MXC-backed code execution for preview script
    * agents. Undefined means "no saved preference yet" so the host may
@@ -781,6 +852,24 @@ function auditEventWithinRange(
   return true;
 }
 
+function requireClientId(value: string): string {
+  const trimmed = value.trim();
+  if (
+    !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+      trimmed,
+    )
+  ) {
+    throw new Error(
+      "Application (client) ID must be a GUID from your Entra app registration.",
+    );
+  }
+  return trimmed;
+}
+
+function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parseAuditExportBoundary(value: string | undefined, label: string): number | undefined {
   if (value === undefined) return undefined;
   const timestamp = Date.parse(value);
@@ -924,6 +1013,18 @@ export interface AppStateStoreOptions {
    * deployment URL.
    */
   statsApiUrl?: string;
+  /**
+   * Factory for a per-client-id token cache when a tenant is connected
+   * with a bring-your-own app registration. Custom registrations must
+   * not share the default identity's cache. Omit in tests.
+   */
+  tokenStoreFor?(clientId: string): TokenCacheStorage;
+  /**
+   * Base URL for the opt-in usage-telemetry collector. Empty (the
+   * default) means usage pings never fire regardless of the user's
+   * opt-in. Set per build once a collector is hosted.
+   */
+  usageTelemetryUrl?: string;
   /** Version string POSTed alongside install events, e.g. `0.1.5`. */
   appVersion?: string;
   /** Initial MXC setting used when state.json has no saved preference. */
@@ -990,7 +1091,10 @@ export class AppStateStore {
   private readonly onStateChanged:
     | ((info: { reason: string; runId?: string }) => void)
     | undefined;
+  private readonly msalClients = new Map<string, PublicClientApplication>();
+  private readonly tokenStoreFor: AppStateStoreOptions["tokenStoreFor"];
   private readonly statsApiUrl: string;
+  private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
   private readonly sandboxedCodeDefault: boolean;
   private readonly userDataPath: string | undefined;
@@ -998,6 +1102,8 @@ export class AppStateStore {
   private readonly chatService: IntuneChatService;
   private readonly driftService: DriftService;
   private readonly runService: RunService;
+  private readonly gatewayService: GatewayService;
+  private retrievalIndexInstance: RetrievalIndex | undefined;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
   private readonly providerListFactory:
@@ -1016,7 +1122,6 @@ export class AppStateStore {
     | undefined;
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
-  private msalClient: PublicClientApplication | undefined;
   private tenantConnectController: AbortController | undefined;
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
@@ -1036,6 +1141,8 @@ export class AppStateStore {
       this.onRunFinished = undefined;
       this.onStateChanged = undefined;
       this.statsApiUrl = "";
+      this.tokenStoreFor = undefined;
+      this.usageTelemetryUrl = "";
       this.appVersion = "0.0.0";
       this.sandboxedCodeDefault = false;
       this.userDataPath = undefined;
@@ -1060,6 +1167,14 @@ export class AppStateStore {
         typeof options.statsApiUrl === "string"
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
+      this.tokenStoreFor = options.tokenStoreFor;
+      // No default: usage telemetry stays inert until a collector URL is
+      // configured for the build AND the user opts in. // TODO(ugur):
+      // decide where the usage collector is hosted and set it here.
+      this.usageTelemetryUrl =
+        typeof options.usageTelemetryUrl === "string"
+          ? options.usageTelemetryUrl
+          : "";
       this.appVersion = options.appVersion ?? "0.0.0";
       this.sandboxedCodeDefault = options.sandboxedCodeDefault === true;
       this.userDataPath = options.userDataPath;
@@ -1096,6 +1211,7 @@ export class AppStateStore {
         host.buildGraph(pinnedTenantId, agentScopes),
       startRun: (agentSlug, options) => host.startRun(agentSlug, options),
       getDriftTimeline: (input) => host.getDriftTimeline(input),
+      retrieveDocumentation: (query) => host.retrieveDocumentation(query),
       appVersion: this.appVersion,
       get userDataPath() {
         return host.userDataPath;
@@ -1136,6 +1252,29 @@ export class AppStateStore {
         ),
       getDriftResourceStats: (tenantId, resources) =>
         host.requireIntelligenceStore().getDriftResourceStats(tenantId, resources),
+      createDriftBaseline: (input) =>
+        host.requireIntelligenceStore().createDriftBaseline(input),
+      listDriftBaselines: (tenantId) =>
+        host.requireIntelligenceStore().listDriftBaselines(tenantId),
+      getDriftBaseline: (tenantId, baselineId) =>
+        host.requireIntelligenceStore().getDriftBaseline(tenantId, baselineId),
+      getActiveDriftBaseline: (tenantId) =>
+        host.requireIntelligenceStore().getActiveDriftBaseline(tenantId),
+      renameDriftBaseline: (tenantId, baselineId, name) =>
+        host.requireIntelligenceStore().renameDriftBaseline(tenantId, baselineId, name),
+      retireDriftBaseline: (tenantId, baselineId, now) =>
+        host.requireIntelligenceStore().retireDriftBaseline(tenantId, baselineId, now),
+      listDriftBaselineChanges: (input) =>
+        host.requireIntelligenceStore().listDriftBaselineChanges(input),
+      readDriftStateAt: (tenantId, resource, atIso) =>
+        host.requireIntelligenceStore().readDriftStateAt(tenantId, resource, atIso),
+      getOldestDriftSnapshotAt: (tenantId, resource) =>
+        host.requireIntelligenceStore().getOldestDriftSnapshotAt(tenantId, resource),
+      countDriftBaselineChanges: (input) =>
+        host.requireIntelligenceStore().countDriftBaselineChanges(input),
+      listTenantGroups: () => host.requireIntelligenceStore().listTenantGroups(),
+      listDriftBaselinePinnedObjects: (input) =>
+        host.requireIntelligenceStore().listDriftBaselinePinnedObjects(input),
     });
     this.runService = new RunService({
       read: () => host.read(),
@@ -1159,6 +1298,35 @@ export class AppStateStore {
       get intelligenceStore() {
         return host.intelligenceStore;
       },
+    });
+    this.gatewayService = new GatewayService({
+      readConfig: async () => {
+        const persisted = await host.read();
+        return (
+          persisted.gateway ?? { enabled: false, port: 8092, clients: [] }
+        );
+      },
+      writeConfig: async (config) => {
+        await host.serialize(async () => {
+          const persisted = await host.read();
+          await host.write({ ...persisted, gateway: config });
+        });
+        host.emitStateChanged("gateway-config-changed");
+      },
+      readToken: () => this.gatewaySecrets().get("token"),
+      writeToken: (token) => this.gatewaySecrets().set("token", token),
+      clearToken: () => this.gatewaySecrets().remove("token"),
+      tenantName: async (tenantId) => {
+        const persisted = await host.read();
+        return persisted.tenants.find((entry) => entry.id === tenantId)?.displayName;
+      },
+      executeReadTool: (tenantId, name, input) =>
+        this.chatService.executeReadTool(tenantId, name, input),
+      queueExternalProposal: (input) =>
+        this.runService.startExternalProposalRun(input),
+      getRun: (runId) => this.runService.getRun(runId),
+      log: (message, metadata) =>
+        console.info("[gateway]", message, metadata ?? ""),
     });
     this.runDeliveryService = new RunDeliveryService({
       read: () => host.read(),
@@ -1189,6 +1357,7 @@ export class AppStateStore {
 
   close(): void {
     this.whatsappWebClientInstance?.dispose();
+    void this.gatewayService.stop();
     this.intelligenceStore?.close();
   }
 
@@ -1242,6 +1411,318 @@ export class AppStateStore {
     );
   }
 
+  // The gateway pairing token reuses the provider safeStorage vault
+  // under a reserved id so it never lands in plaintext state.json.
+  private gatewaySecrets(): SecretAccessor {
+    return (
+      this.providerSecretsForOverride?.("__gateway__" as ProviderId) ??
+      this.providerSecretStore?.forProvider("__gateway__") ??
+      noSecrets
+    );
+  }
+
+  async getGatewayStatus() {
+    return this.gatewayService.getStatus();
+  }
+
+  async enableGateway(input: { boundTenantId: string; port?: number }) {
+    return this.gatewayService.enable(input);
+  }
+
+  async disableGateway() {
+    return this.gatewayService.disable();
+  }
+
+  async regenerateGatewayToken() {
+    return this.gatewayService.regenerateToken();
+  }
+
+  async revokeGatewayClient(clientId: string) {
+    return this.gatewayService.revokeClient(clientId);
+  }
+
+  async startGatewayIfEnabled(): Promise<void> {
+    await this.gatewayService.startIfEnabled();
+  }
+
+  private async buildUsageTelemetry(): Promise<{
+    payload: UsageTelemetryPayload;
+    enabled: boolean;
+  }> {
+    const persisted = await this.read();
+    const providers = await this.listProviders();
+    const activeProvider = providers.find(
+      (provider) => provider.id === persisted.activeProviderId,
+    );
+    const retrievalStatus = await this.getRetrievalStatus();
+    const installId = persisted.installId ?? "anonymous";
+    const payload = buildUsageTelemetryPayload({
+      installId,
+      appVersion: this.appVersion,
+      platform: process.platform,
+      arch: process.arch,
+      providerIsLocal: activeProvider?.isLocal === true,
+      tenantCount: persisted.tenants.length,
+      installedAgentCount: persisted.installedAgents.length,
+      runCount: persisted.runs.length,
+      retrievalIndexInstalled: retrievalStatus.available,
+    });
+    return { payload, enabled: persisted.usageTelemetryEnabled === true };
+  }
+
+  /** The exact JSON the Privacy preview shows and a ping would send. */
+  async getUsageTelemetryPreview(): Promise<{
+    enabled: boolean;
+    endpointConfigured: boolean;
+    payload: UsageTelemetryPayload;
+  }> {
+    const { payload, enabled } = await this.buildUsageTelemetry();
+    return {
+      enabled,
+      endpointConfigured: this.usageTelemetryUrl.length > 0,
+      payload,
+    };
+  }
+
+  async setUsageTelemetryEnabled(enabled: boolean): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      await this.write({ ...current, usageTelemetryEnabled: enabled });
+    });
+    if (enabled) void this.sendUsageTelemetry();
+    return this.getAppState();
+  }
+
+  /**
+   * Send one usage ping. No-op unless the user enabled telemetry AND a
+   * collector endpoint is configured. Errors are swallowed; telemetry
+   * must never affect the app.
+   */
+  async sendUsageTelemetry(): Promise<{ sent: boolean }> {
+    const { payload, enabled } = await this.buildUsageTelemetry();
+    if (!enabled || this.usageTelemetryUrl.length === 0) {
+      return { sent: false };
+    }
+    try {
+      await fetch(`${this.usageTelemetryUrl.replace(/\/$/, "")}/api/usage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5_000),
+      });
+      return { sent: true };
+    } catch (error) {
+      console.debug("[telemetry] usage ping failed:", error);
+      return { sent: false };
+    }
+  }
+
+  private retrievalIndex(): RetrievalIndex | undefined {
+    if (!this.userDataPath) return undefined;
+    if (!this.retrievalIndexInstance) {
+      this.retrievalIndexInstance = new RetrievalIndex(
+        join(this.userDataPath, "retrieval-index"),
+      );
+    }
+    return this.retrievalIndexInstance;
+  }
+
+  /** Status plus, when known, a newer published index version. */
+  async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
+    const status = await this.getRetrievalStatus();
+    const embedding = await embeddingModelState();
+    const withEmbedding: RetrievalStatus = {
+      ...status,
+      ollamaReachable: embedding.ollamaReachable,
+      embeddingModelInstalled: embedding.installed,
+    };
+    if (!withEmbedding.available) return withEmbedding;
+    const manifest = await fetchIndexManifest();
+    return manifest && manifest.version !== withEmbedding.version
+      ? { ...withEmbedding, updateAvailable: manifest.version }
+      : withEmbedding;
+  }
+
+  async getRetrievalStatus(): Promise<RetrievalStatus> {
+    const index = this.retrievalIndex();
+    if (!index) {
+      return {
+        available: false,
+        reason:
+          "The documentation index is not installed. Answers are not documentation-grounded yet.",
+      };
+    }
+    return index.status();
+  }
+
+  /**
+   * Top documentation passages for a question. Empty when no index is
+   * installed, so chat simply answers from tenant data instead.
+   */
+  async retrieveDocumentation(
+    query: string,
+  ): Promise<Array<{ file: string; title?: string; text: string; score: number }>> {
+    const index = this.retrievalIndex();
+    if (!index || !index.status().available) return [];
+    const endpoint =
+      process.env.OPENADMINOS_EMBEDDING_ENDPOINT ?? "http://127.0.0.1:11434";
+    return index.retrieve(query, ollamaEmbedQuery(endpoint), { k: 12 });
+  }
+
+  /** Install an index from a local folder or a URL, then reload it. */
+  async installRetrievalIndex(input: {
+    sourceDir?: string;
+    baseUrl?: string;
+  }): Promise<RetrievalStatus> {
+    if (!this.userDataPath) {
+      throw new Error("Installing a documentation index needs a configured userData directory.");
+    }
+    const targetDir = join(this.userDataPath, "retrieval-index");
+    if (input.sourceDir) {
+      await installIndexFromDirectory({ sourceDir: input.sourceDir, targetDir });
+    } else {
+      // Default to the published release asset; callers can override the
+      // URL for a private mirror.
+      await downloadIndex({
+        baseUrl: input.baseUrl ?? DEFAULT_INDEX_BASE_URL,
+        targetDir,
+      });
+    }
+    this.retrievalIndexInstance?.reset();
+    this.retrievalIndexInstance = undefined;
+    return this.getRetrievalStatus();
+  }
+
+  async getRetrievalAutoInstallEnabled(): Promise<boolean> {
+    const persisted = await this.read();
+    return persisted.retrievalAutoInstall !== false;
+  }
+
+  async setRetrievalAutoInstallEnabled(enabled: boolean): Promise<RetrievalStatus> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      await this.write({ ...current, retrievalAutoInstall: enabled });
+    });
+    if (enabled) {
+      void this.autoInstallRetrievalIndex();
+      void this.autoInstallEmbeddingModel();
+    }
+    return this.getRetrievalStatus();
+  }
+
+  /**
+   * Fetch the documentation index in the background on launch.
+   *
+   * Grounding is worth having for every admin, so this does not wait to
+   * be discovered in Settings. It is still bounded: it never runs when
+   * the admin turned it off, never runs when an index is already
+   * installed, retries at most once a day after a failure so a blocked
+   * network is not hammered, and never blocks startup or surfaces an
+   * error dialog. Settings shows the resulting state either way.
+   */
+  async autoInstallRetrievalIndex(): Promise<void> {
+    try {
+      if (!this.userDataPath) return;
+      const persisted = await this.read();
+      if (persisted.retrievalAutoInstall === false) return;
+
+      // Grounding cannot work without the local Ollama to embed
+      // questions, so a machine without it would download 264 MB it can
+      // never use. Skip quietly; a later launch after Ollama appears
+      // fetches the index and the model together. Not counted as an
+      // attempt, so no daily backoff applies to this case.
+      const embedding = await embeddingModelState();
+      if (!embedding.ollamaReachable) {
+        console.info(
+          "[retrieval] automatic index install skipped: Ollama is not reachable, so grounding could not use the index yet.",
+        );
+        return;
+      }
+
+      // Follow the published pointer so a rebuilt index reaches existing
+      // installs too, not just fresh ones. No manifest (offline, blocked,
+      // not yet published) means fall back to installing the pinned
+      // release when nothing is installed at all.
+      const status = await this.getRetrievalStatus();
+      const manifest = await fetchIndexManifest();
+      if (status.available) {
+        if (!manifest || manifest.version === status.version) return;
+      }
+
+      const lastAttempt = persisted.retrievalAutoInstallAttemptedAt;
+      if (lastAttempt) {
+        const age = Date.now() - new Date(lastAttempt).getTime();
+        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
+      }
+      await this.serialize(async () => {
+        const current = await this.read();
+        await this.write({
+          ...current,
+          retrievalAutoInstallAttemptedAt: new Date().toISOString(),
+        });
+      });
+
+      await this.installRetrievalIndex(
+        manifest ? { baseUrl: manifest.baseUrl } : {},
+      );
+      this.emitStateChanged("retrieval-index-installed");
+    } catch (error) {
+      // Never user-facing: a missing release, an offline machine or a
+      // proxy that blocks the download all simply leave answers
+      // ungrounded, which the Settings panel states plainly.
+      console.info(
+        "[retrieval] automatic index install skipped:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  /**
+   * Pull the embedding model in the background when Ollama is running
+   * and the model is missing. Same contract as the index install: never
+   * blocks, never dialogs, honours the same auto-install switch, and a
+   * failed pull is retried at most once a day. An unreachable Ollama is
+   * not counted as an attempt, so starting Ollama later gets the model
+   * on the next launch rather than a day later.
+   */
+  async autoInstallEmbeddingModel(): Promise<void> {
+    try {
+      const persisted = await this.read();
+      if (persisted.retrievalAutoInstall === false) return;
+      const endpoint = embeddingEndpoint();
+      const state = await embeddingModelState(endpoint);
+      if (!state.ollamaReachable || state.installed) return;
+
+      const lastAttempt = persisted.embeddingModelPullAttemptedAt;
+      if (lastAttempt) {
+        const age = Date.now() - new Date(lastAttempt).getTime();
+        if (Number.isFinite(age) && age < 24 * 60 * 60 * 1000) return;
+      }
+      await this.serialize(async () => {
+        const current = await this.read();
+        await this.write({
+          ...current,
+          embeddingModelPullAttemptedAt: new Date().toISOString(),
+        });
+      });
+
+      await pullEmbeddingModel(endpoint);
+      this.emitStateChanged("retrieval-embedding-installed");
+    } catch (error) {
+      console.info(
+        "[retrieval] automatic embedding model pull skipped:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  async refreshRetrievalIndex(): Promise<RetrievalStatus> {
+    // Rebuilding/downloading the index is host infrastructure; here we
+    // drop the cache so a freshly installed index is picked up.
+    this.retrievalIndexInstance?.reset();
+    return this.getRetrievalStatus();
+  }
+
   private emptyAzureOpenAIConfig(): AzureOpenAIProviderConfig {
     return {
       endpoint: "",
@@ -1272,7 +1753,7 @@ export class AppStateStore {
   }
 
   private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
-    const client = this.getMsalClient();
+    const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     return createTenantSession({
       client,
@@ -1384,18 +1865,47 @@ export class AppStateStore {
   }
 
   private getMsalClient(): PublicClientApplication {
-    if (this.msalClient) return this.msalClient;
+    return this.msalClientFor(undefined);
+  }
+
+  /**
+   * MSAL clients are cached per (clientId, authority). Tokens are bound
+   * to the client id that issued them, so silent refresh for a tenant
+   * must reuse the exact registration it was connected with. Custom
+   * registrations get their own token cache file; the default identity
+   * keeps the original `tokens.bin` so existing installs are untouched.
+   */
+  private msalClientFor(
+    registration: TenantAppRegistration | undefined,
+  ): PublicClientApplication {
+    const clientId = registration?.clientId ?? defaultClientId();
+    const authority = registration?.authority ?? DEFAULT_AUTHORITY;
+    const key = `${clientId}|${authority}`;
+    const cached = this.msalClients.get(key);
+    if (cached) return cached;
+
+    const isDefault = clientId === defaultClientId();
+    const store =
+      isDefault || !this.tokenStoreFor
+        ? this.tokenStore
+        : this.tokenStoreFor(clientId);
     const cacheStorage: TokenCacheStorage = {
-      read: () => this.tokenStore.read(),
-      write: (serialized) => this.tokenStore.write(serialized),
+      read: () => store.read(),
+      write: (serialized) => store.write(serialized),
     };
-    this.msalClient = createMsalClient({ storage: cacheStorage });
-    return this.msalClient;
+    const client = createMsalClient({ storage: cacheStorage, clientId, authority });
+    this.msalClients.set(key, client);
+    return client;
+  }
+
+  /** The MSAL client that issued this tenant's tokens. */
+  private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
+    return this.msalClientFor(tenant.appRegistration);
   }
 
   private requireIntelligenceStore(): IntelligenceSqliteStore {
     if (!this.intelligenceStore) {
-      throw new Error("Intune Chat requires a configured userData directory.");
+      throw new Error("Chat requires a configured userData directory.");
     }
     return this.intelligenceStore;
   }
@@ -1410,7 +1920,7 @@ export class AppStateStore {
       : undefined;
     if (!tenant) {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before using Intune Chat.",
+        "No tenant connected. Connect a Microsoft 365 tenant before using Chat.",
       );
     }
     return tenant;
@@ -1654,6 +2164,7 @@ export class AppStateStore {
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
       registryInstallCountsEnabled: persisted.registryInstallCountsEnabled !== false,
+      usageTelemetryEnabled: persisted.usageTelemetryEnabled === true,
       schedulerStatus: this.deriveSchedulerStatus(persisted),
     };
     if (persisted.activeModelByProviderId) {
@@ -2012,6 +2523,74 @@ export class AppStateStore {
 
   async getDriftStatus(tenantId: string): Promise<DriftStatus> {
     return this.driftService.getDriftStatus(tenantId);
+  }
+
+  async listDriftBaselines(input: ListDriftBaselinesInput): Promise<DriftBaseline[]> {
+    return this.driftService.listBaselines(input);
+  }
+
+  async createDriftBaseline(input: CreateDriftBaselineInput): Promise<DriftBaseline> {
+    return this.driftService.createBaseline(input);
+  }
+
+  async renameDriftBaseline(input: RenameDriftBaselineInput): Promise<DriftBaseline> {
+    return this.driftService.renameBaseline(input);
+  }
+
+  async retireDriftBaseline(input: RetireDriftBaselineInput): Promise<DriftBaseline> {
+    return this.driftService.retireBaseline(input);
+  }
+
+  async getDriftBaselineDrift(
+    input: DriftBaselineDriftInput,
+  ): Promise<DriftBaselineDriftResult> {
+    return this.driftService.getBaselineDrift(input);
+  }
+
+  async getDriftTimeCompare(
+    input: DriftTimeCompareInput,
+  ): Promise<DriftTimeCompareResult> {
+    return this.driftService.getTimeCompare(input);
+  }
+
+  async getDriftTenantCompare(
+    input: DriftTenantCompareInput,
+  ): Promise<DriftTenantCompareResult> {
+    return this.driftService.getTenantCompare(input);
+  }
+
+  async buildDriftBaselineExport(input: {
+    tenantId: string;
+    baselineId?: string;
+  }): Promise<DriftBaselineExportBundle> {
+    return this.driftService.buildBaselineExport(input);
+  }
+
+  async getDriftBundleCompare(
+    input: DriftBundleCompareInput,
+  ): Promise<DriftBundleCompareResult> {
+    return this.driftService.compareTenantToBundle(input);
+  }
+
+  async getFleetDriftStatus(
+    input: FleetDriftStatusInput,
+  ): Promise<FleetDriftStatusResult> {
+    return this.driftService.getFleetDriftStatus(input);
+  }
+
+  async startBaselineRollback(input: StartBaselineRollbackInput): Promise<RunRecord> {
+    const built = await this.driftService.buildBaselineRollbackPlan(input);
+    return this.runService.startRollbackRun({
+      tenantId: built.tenantId,
+      baselineId: built.baselineId,
+      plan: {
+        summary: built.draft.summary,
+        confirmationPhrase: built.draft.confirmationPhrase,
+        actions: built.draft.actions,
+      },
+      requiredScopes: built.draft.requiredScopes,
+      manualCount: built.draft.manual.length,
+    });
   }
 
   async getGraphCacheRefreshSchedule(
@@ -4334,11 +4913,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }));
   }
 
-  async connectTenant(): Promise<AppState> {
+  async connectTenant(options: ConnectTenantOptions = {}): Promise<AppState> {
     this.tenantConnectController?.abort();
     const controller = new AbortController();
     this.tenantConnectController = controller;
-    const client = this.getMsalClient();
+    // Resolve which Entra app identity signs in. A custom registration
+    // must be a public client (Authorization Code + PKCE, loopback
+    // redirect); there is deliberately no client secret to supply.
+    const registration: TenantAppRegistration | undefined = options.appRegistration
+      ? {
+          kind: "custom",
+          clientId: requireClientId(options.appRegistration.clientId),
+          authority: authorityForDirectory(
+            options.appRegistration.directoryTenantId,
+          ),
+        }
+      : { kind: "openadminos", clientId: defaultClientId() };
+    const client = this.msalClientFor(registration);
     let result;
     try {
       result = await runInteractiveFlow({
@@ -4376,6 +4967,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: account.username,
       addedAt,
       lastUsedAt: addedAt,
+      ...(registration ? { appRegistration: registration } : {}),
     };
 
     await this.serialize(async () => {
@@ -4443,7 +5035,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (recent && !licensesMissing && !options.force) {
       return;
     }
-    const client = this.getMsalClient();
+    const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const session = createTenantSession({
       client,
@@ -4508,7 +5100,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (target) {
         try {
           await removeAccount({
-            client: this.getMsalClient(),
+            client: this.msalClientForTenant(target),
             homeAccountId: target.homeAccountId,
           });
         } catch (cause) {
@@ -4669,7 +5261,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
       );
     }
-    const client = this.getMsalClient();
+    const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const tenantSession = createTenantSession({
       client,
@@ -4786,7 +5378,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     {
 
-      const tenants = Array.isArray(parsed.tenants) ? parsed.tenants : [];
+      // v0.5 migration: tenants connected before the app shipped its own
+      // Entra registration were signed in with the Graph CLI client, and
+      // MSAL binds refresh tokens to the issuing client id. Pin that
+      // client to those records so they keep refreshing silently instead
+      // of forcing every existing install to reconnect. New connections
+      // use the OpenAdminOS registration.
+      const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : []).map(
+        (tenant) =>
+          isPlainRecordValue(tenant) && tenant.appRegistration === undefined
+            ? {
+                ...tenant,
+                appRegistration: {
+                  kind: "openadminos" as const,
+                  clientId: GRAPH_CLI_CLIENT_ID,
+                },
+              }
+            : tenant,
+      );
       const activeTenantId =
         typeof parsed.activeTenantId === "string" &&
         tenants.some((tenant) => tenant.id === parsed.activeTenantId)
@@ -4824,6 +5433,41 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       if (typeof parsed.registryInstallCountsEnabled === "boolean") {
         state.registryInstallCountsEnabled = parsed.registryInstallCountsEnabled;
+      }
+      if (typeof parsed.usageTelemetryEnabled === "boolean") {
+        state.usageTelemetryEnabled = parsed.usageTelemetryEnabled;
+      }
+      if (typeof parsed.retrievalAutoInstall === "boolean") {
+        state.retrievalAutoInstall = parsed.retrievalAutoInstall;
+      }
+      if (typeof parsed.retrievalAutoInstallAttemptedAt === "string") {
+        state.retrievalAutoInstallAttemptedAt = parsed.retrievalAutoInstallAttemptedAt;
+      }
+      if (typeof parsed.embeddingModelPullAttemptedAt === "string") {
+        state.embeddingModelPullAttemptedAt = parsed.embeddingModelPullAttemptedAt;
+      }
+      if (isPlainRecordValue(parsed.gateway)) {
+        const gateway = parsed.gateway as Record<string, unknown>;
+        if (
+          typeof gateway.enabled === "boolean" &&
+          typeof gateway.port === "number" &&
+          Array.isArray(gateway.clients)
+        ) {
+          state.gateway = {
+            enabled: gateway.enabled,
+            port: gateway.port,
+            ...(typeof gateway.boundTenantId === "string"
+              ? { boundTenantId: gateway.boundTenantId }
+              : {}),
+            clients: gateway.clients.filter(
+              (client): client is { id: string; name: string; createdAt: string } =>
+                isPlainRecordValue(client) &&
+                typeof (client as Record<string, unknown>).id === "string" &&
+                typeof (client as Record<string, unknown>).name === "string" &&
+                typeof (client as Record<string, unknown>).createdAt === "string",
+            ),
+          };
+        }
       }
       if (typeof parsed.sandboxedCodeEnabled === "boolean") {
         state.sandboxedCodeEnabled = parsed.sandboxedCodeEnabled;

@@ -18,7 +18,40 @@ import {
 } from "@openadminos/agent-sdk";
 
 export const GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
+
+/**
+ * The OpenAdminOS multi-tenant app registration: public client,
+ * `http://localhost` loopback redirect, public-client flows enabled,
+ * delegated read scopes only.
+ *
+ * An application (client) id is a public identifier, not a secret. It
+ * appears in every authorization URL the browser sees, so shipping it
+ * in the open is expected for a public client.
+ */
+export const OPENADMINOS_CLIENT_ID = "d1de0a94-f67a-421d-8804-a235955ffd69";
+
+/** The client id the app signs in with when the user does not bring their own. */
+export function defaultClientId(): string {
+  return OPENADMINOS_CLIENT_ID || GRAPH_CLI_CLIENT_ID;
+}
+
 export const DEFAULT_AUTHORITY = "https://login.microsoftonline.com/common";
+
+/**
+ * Build the MSAL authority for a bring-your-own registration. Custom
+ * apps registered as single-tenant must authenticate against their own
+ * directory; multi-tenant apps use /common.
+ */
+export function authorityForDirectory(directoryTenantId?: string): string {
+  const trimmed = directoryTenantId?.trim();
+  if (!trimmed) return DEFAULT_AUTHORITY;
+  if (!/^[0-9a-zA-Z.-]{1,100}$/.test(trimmed)) {
+    throw new Error(
+      "Directory (tenant) ID must be a GUID or a verified domain name.",
+    );
+  }
+  return `https://login.microsoftonline.com/${trimmed}`;
+}
 // Bundled at initial sign-in so the admin sees ONE Microsoft consent
 // screen, every bundled read-only agent can run without a second
 // consent prompt, and Intune Chat can refresh its core read-only cache
@@ -145,6 +178,36 @@ export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
     rationale:
       "Reads Microsoft Secure Score controls so the Secure score prioritizer can rank improvement actions by impact.",
   },
+  {
+    name: "RoleManagement.Read.Directory",
+    mode: "read",
+    rationale:
+      "Reads Entra directory roles so Chat can answer which admin roles exist and how policies target privileged users. Never modifies role assignments.",
+  },
+  {
+    name: "AdministrativeUnit.Read.All",
+    mode: "read",
+    rationale:
+      "Reads administrative units so scoped-administration questions can be answered with the tenant's actual delegation structure.",
+  },
+  {
+    name: "Domain.Read.All",
+    mode: "read",
+    rationale:
+      "Reads verified domains and their authentication type so Chat can explain federation and domain configuration questions.",
+  },
+  {
+    name: "SecurityAlert.Read.All",
+    mode: "read",
+    rationale:
+      "Reads Microsoft Defender alerts so Chat can summarize open alerts by severity and service. Alert data is read-only; triage actions are never taken.",
+  },
+  {
+    name: "SecurityIncident.Read.All",
+    mode: "read",
+    rationale:
+      "Reads Microsoft Defender incidents so Chat can report incident status, classification, and assignment. Incidents are never modified.",
+  },
 ];
 
 const SUCCESS_TEMPLATE = `<!doctype html>
@@ -210,7 +273,7 @@ export function createMsalClient(input: {
 }): PublicClientApplication {
   return new PublicClientApplication({
     auth: {
-      clientId: input.clientId ?? GRAPH_CLI_CLIENT_ID,
+      clientId: input.clientId ?? defaultClientId(),
       authority: input.authority ?? DEFAULT_AUTHORITY,
     },
     cache: {

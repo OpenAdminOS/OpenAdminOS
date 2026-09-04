@@ -18,7 +18,7 @@ import {
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
@@ -50,7 +50,14 @@ import type {
   CompanionRunDueReadSchedulesResult,
   CompanionSnapshot,
   CreateWorkspaceInput,
+  DriftBaselineDriftInput,
   DriftEntryDetailInput,
+  ConnectTenantOptions,
+  DriftBaselineExportBundle,
+  DriftBundleCompareInput,
+  DriftTenantCompareInput,
+  DriftTimeCompareInput,
+  StartBaselineRollbackInput,
   DriftObjectHistoryInput,
   DriftTimelineInput,
   ExportAuditLogInput,
@@ -3661,7 +3668,7 @@ function validateWorkspacePromptContextInput(
 
 function validateSendIntuneChatMessageInput(value: unknown): SendIntuneChatMessageInput {
   if (!isPlainRecord(value)) {
-    throw new Error("Intune Chat message input must be an object.");
+    throw new Error("Chat message input must be an object.");
   }
   if (value.refreshIfStale !== undefined && typeof value.refreshIfStale !== "boolean") {
     throw new Error("refreshIfStale must be a boolean.");
@@ -4007,6 +4014,186 @@ function validateDriftObjectHistoryInput(value: unknown): DriftObjectHistoryInpu
   };
   if (value.limit !== undefined) {
     input.limit = requireBoundedInteger(value.limit, "drift object history limit", 1, 500);
+  }
+  return input;
+}
+
+function validateDriftBaselineDriftInput(value: unknown): DriftBaselineDriftInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Baseline drift input must be an object.");
+  }
+  const input: DriftBaselineDriftInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+  };
+  if (value.baselineId !== undefined) {
+    input.baselineId = requireBoundedString(value.baselineId, "baselineId", 300);
+  }
+  if (value.resources !== undefined) {
+    input.resources = validateDriftResourceArray(value.resources, "resources");
+  }
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "baseline drift limit", 1, 5_000);
+  }
+  return input;
+}
+
+function validateDriftTimeCompareInput(value: unknown): DriftTimeCompareInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Time compare input must be an object.");
+  }
+  const from = validateOptionalDriftBoundary(value.from, "from");
+  const to = validateOptionalDriftBoundary(value.to, "to");
+  if (from === undefined || to === undefined) {
+    throw new Error("Time compare requires both from and to timestamps.");
+  }
+  if (Date.parse(from) >= Date.parse(to)) {
+    throw new Error("Time compare from date must be before the to date.");
+  }
+  const input: DriftTimeCompareInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+    from,
+    to,
+  };
+  if (value.resources !== undefined) {
+    input.resources = validateDriftResourceArray(value.resources, "resources");
+  }
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "time compare limit", 1, 5_000);
+  }
+  return input;
+}
+
+function validateDriftBundle(value: unknown): DriftBaselineExportBundle {
+  if (!isPlainRecord(value)) {
+    throw new Error("Baseline export bundle must be an object.");
+  }
+  if (value.format !== "openadminos-baseline-export" || value.version !== 1) {
+    throw new Error("This file is not an OpenAdminOS baseline export.");
+  }
+  const sourceTenantName = requireBoundedString(
+    value.sourceTenantName,
+    "sourceTenantName",
+    200,
+  );
+  const baselineName = requireBoundedString(value.baselineName, "baselineName", 80);
+  const exportedAt = requireBoundedString(value.exportedAt, "exportedAt", 80);
+  if (!Array.isArray(value.resources) || value.resources.length > 100) {
+    throw new Error("Baseline export resources must be an array with at most 100 entries.");
+  }
+  const resources = value.resources.map((entry, index) => {
+    if (!isPlainRecord(entry)) {
+      throw new Error(`resources[${index}] must be an object.`);
+    }
+    const resource = validateDriftResource(entry.resource, `resources[${index}].resource`);
+    if (!Array.isArray(entry.objects) || entry.objects.length > 5_000) {
+      throw new Error(
+        `resources[${index}].objects must be an array with at most 5000 entries.`,
+      );
+    }
+    const objects = entry.objects.map((object, objectIndex) => {
+      if (!isPlainRecord(object) || !isPlainRecord(object.body)) {
+        throw new Error(
+          `resources[${index}].objects[${objectIndex}] must carry an object body.`,
+        );
+      }
+      return {
+        ...(typeof object.displayName === "string" && object.displayName.length <= 512
+          ? { displayName: object.displayName }
+          : {}),
+        body: object.body as Record<string, unknown>,
+      };
+    });
+    return { resource, objects };
+  });
+  return {
+    format: "openadminos-baseline-export",
+    version: 1,
+    exportedAt,
+    sourceTenantName,
+    baselineName,
+    resources,
+  };
+}
+
+function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
+  if (value === undefined || value === null) return {};
+  if (!isPlainRecord(value)) {
+    throw new Error("Connect tenant options must be an object.");
+  }
+  if (value.appRegistration === undefined) return {};
+  if (!isPlainRecord(value.appRegistration)) {
+    throw new Error("appRegistration must be an object.");
+  }
+  const registration = value.appRegistration;
+  const options: ConnectTenantOptions = {
+    appRegistration: {
+      clientId: requireBoundedString(registration.clientId, "clientId", 64),
+    },
+  };
+  if (
+    registration.directoryTenantId !== undefined &&
+    registration.directoryTenantId !== ""
+  ) {
+    options.appRegistration!.directoryTenantId = requireBoundedString(
+      registration.directoryTenantId,
+      "directoryTenantId",
+      128,
+    );
+  }
+  return options;
+}
+
+function validateStartBaselineRollbackInput(
+  value: unknown,
+): StartBaselineRollbackInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Rollback input must be an object.");
+  }
+  const input: StartBaselineRollbackInput = {
+    tenantId: requireBoundedString(value.tenantId, "tenantId", 256),
+  };
+  if (value.baselineId !== undefined) {
+    input.baselineId = requireBoundedString(value.baselineId, "baselineId", 300);
+  }
+  if (value.selections !== undefined) {
+    if (!Array.isArray(value.selections) || value.selections.length > 500) {
+      throw new Error("Rollback selections must be an array with at most 500 entries.");
+    }
+    input.selections = value.selections.map((entry, index) => {
+      if (!isPlainRecord(entry)) {
+        throw new Error(`selections[${index}] must be an object.`);
+      }
+      return {
+        resource: validateDriftResource(entry.resource, `selections[${index}].resource`),
+        graphId: requireBoundedString(entry.graphId, `selections[${index}].graphId`, 512),
+      };
+    });
+  }
+  return input;
+}
+
+function validateDriftTenantCompareInput(value: unknown): DriftTenantCompareInput {
+  if (!isPlainRecord(value)) {
+    throw new Error("Tenant compare input must be an object.");
+  }
+  const input: DriftTenantCompareInput = {
+    tenantIdA: requireBoundedString(value.tenantIdA, "tenantIdA", 256),
+    tenantIdB: requireBoundedString(value.tenantIdB, "tenantIdB", 256),
+  };
+  if (input.tenantIdA === input.tenantIdB) {
+    throw new Error("Tenant compare requires two different tenants.");
+  }
+  if (value.resources !== undefined) {
+    input.resources = validateDriftResourceArray(value.resources, "resources");
+  }
+  if (value.limit !== undefined) {
+    input.limit = requireBoundedInteger(value.limit, "tenant compare limit", 1, 5_000);
+  }
+  if (value.includeAssignments !== undefined) {
+    if (typeof value.includeAssignments !== "boolean") {
+      throw new Error("includeAssignments must be a boolean.");
+    }
+    input.includeAssignments = value.includeAssignments;
   }
   return input;
 }
@@ -4481,9 +4668,34 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: "#0a0c10",
+    backgroundColor: "#1c1917",
     show: false,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Windows: draw our own chrome and overlay the system buttons on it,
+    // so the app header replaces the native title bar instead of stacking
+    // under it. macOS keeps the inset traffic lights. Linux keeps the
+    // native frame because titleBarOverlay is not supported there.
+    titleBarStyle:
+      process.platform === "darwin"
+        ? "hiddenInset"
+        : process.platform === "win32"
+          ? "hidden"
+          : "default",
+    ...(process.platform === "win32"
+      ? {
+          titleBarOverlay: {
+            // Must match --color-bg and --color-text-muted in
+            // src/styles/globals.css. Any drift paints the window-control
+            // strip as a visibly different block from the app chrome.
+            color: "#1c1917",
+            symbolColor: "#9a9085",
+            height: 32,
+          },
+        }
+      : {}),
+    // The menu is reachable with Alt on Windows and Linux; showing it
+    // permanently costs a full row above a UI that already has its own
+    // navigation.
+    autoHideMenuBar: process.platform !== "darwin",
     webPreferences: {
       preload: join(currentDir, "preload.cjs"),
       contextIsolation: true,
@@ -5079,6 +5291,276 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:list-drift-baselines",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("List baselines input must be an object.");
+      }
+      return store.listDriftBaselines({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:create-drift-baseline",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Create baseline input must be an object.");
+      }
+      return store.createDriftBaseline({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        name: requireBoundedString(input.name, "baseline name", 80),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:rename-drift-baseline",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Rename baseline input must be an object.");
+      }
+      return store.renameDriftBaseline({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        baselineId: requireBoundedString(input.baselineId, "baselineId", 300),
+        name: requireBoundedString(input.name, "baseline name", 80),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:retire-drift-baseline",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Retire baseline input must be an object.");
+      }
+      return store.retireDriftBaseline({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        baselineId: requireBoundedString(input.baselineId, "baselineId", 300),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-baseline-drift",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftBaselineDrift(validateDriftBaselineDriftInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-time-compare",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftTimeCompare(validateDriftTimeCompareInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-tenant-compare",
+    handleTrusted((_event, input: unknown) =>
+      store.getDriftTenantCompare(validateDriftTenantCompareInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:start-baseline-rollback",
+    handleTrusted((_event, input: unknown) =>
+      store.startBaselineRollback(validateStartBaselineRollbackInput(input)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:export-drift-baseline",
+    handleTrusted(async (_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Baseline export input must be an object.");
+      }
+      const bundle = await store.buildDriftBaselineExport({
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        ...(input.baselineId !== undefined
+          ? { baselineId: requireBoundedString(input.baselineId, "baselineId", 300) }
+          : {}),
+      });
+      const objectCount = bundle.resources.reduce(
+        (sum, entry) => sum + entry.objects.length,
+        0,
+      );
+      const parent = mainWindow ?? undefined;
+      const defaultPath = `openadminos-baseline-${bundle.baselineName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")}-${bundle.exportedAt.slice(0, 10)}.json`;
+      const dialogOptions = {
+        title: "Export baseline",
+        defaultPath,
+        filters: [{ name: "OpenAdminOS baseline export", extensions: ["json"] }],
+      };
+      const result = parent
+        ? await dialog.showSaveDialog(parent, dialogOptions)
+        : await dialog.showSaveDialog(dialogOptions);
+      if (result.canceled || !result.filePath) {
+        return { canceled: true };
+      }
+      await writeFile(result.filePath, JSON.stringify(bundle, null, 2), "utf8");
+      return { canceled: false, filePath: result.filePath, objectCount };
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:read-drift-bundle-file",
+    handleTrusted(async () => {
+      const parent = mainWindow ?? undefined;
+      const dialogOptions = {
+        title: "Open baseline export",
+        filters: [{ name: "OpenAdminOS baseline export", extensions: ["json"] }],
+        properties: ["openFile" as const],
+      };
+      const result = parent
+        ? await dialog.showOpenDialog(parent, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
+      const filePath = result.filePaths[0];
+      if (result.canceled || !filePath) {
+        return { canceled: true };
+      }
+      const fileStat = await stat(filePath);
+      if (fileStat.size > 25 * 1024 * 1024) {
+        throw new Error("Baseline export files larger than 25 MB are not supported.");
+      }
+      const raw = await readFile(filePath, "utf8");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error("This file is not valid JSON.");
+      }
+      return { canceled: false, bundle: validateDriftBundle(parsed) };
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-drift-bundle-compare",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Bundle compare input must be an object.");
+      }
+      const compare: DriftBundleCompareInput = {
+        tenantId: requireBoundedString(input.tenantId, "tenantId", 256),
+        bundle: validateDriftBundle(input.bundle),
+      };
+      if (input.resources !== undefined) {
+        compare.resources = validateDriftResourceArray(input.resources, "resources");
+      }
+      if (input.limit !== undefined) {
+        compare.limit = requireBoundedInteger(input.limit, "bundle compare limit", 1, 5_000);
+      }
+      if (input.includeAssignments !== undefined) {
+        if (typeof input.includeAssignments !== "boolean") {
+          throw new Error("includeAssignments must be a boolean.");
+        }
+        compare.includeAssignments = input.includeAssignments;
+      }
+      return store.getDriftBundleCompare(compare);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-usage-telemetry-preview",
+    handleTrusted(() => store.getUsageTelemetryPreview()),
+  );
+  ipcMain.handle(
+    "openadminos:set-usage-telemetry-enabled",
+    handleTrusted((_event, enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("Usage telemetry enabled must be a boolean.");
+      }
+      return store.setUsageTelemetryEnabled(enabled);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:send-usage-telemetry-test",
+    handleTrusted(() => store.sendUsageTelemetry()),
+  );
+  ipcMain.handle(
+    "openadminos:get-retrieval-status",
+    handleTrusted(() => store.getRetrievalStatusWithUpdates()),
+  );
+  ipcMain.handle(
+    "openadminos:set-retrieval-auto-install",
+    handleTrusted((_event, enabled: unknown) => {
+      if (typeof enabled !== "boolean") {
+        throw new Error("Automatic index install must be a boolean.");
+      }
+      return store.setRetrievalAutoInstallEnabled(enabled);
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:get-retrieval-auto-install",
+    handleTrusted(() => store.getRetrievalAutoInstallEnabled()),
+  );
+  ipcMain.handle(
+    "openadminos:install-retrieval-index",
+    handleTrusted(async (_event, input: unknown) => {
+      const record = isPlainRecord(input) ? input : {};
+      if (record.source === "download") {
+        return store.installRetrievalIndex(
+          typeof record.baseUrl === "string" && record.baseUrl.length > 0
+            ? { baseUrl: requireBoundedString(record.baseUrl, "baseUrl", 2048) }
+            : {},
+        );
+      }
+      const parent = mainWindow ?? undefined;
+      const options = {
+        title: "Select the documentation index folder",
+        properties: ["openDirectory" as const],
+      };
+      const picked = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options);
+      const sourceDir = picked.filePaths[0];
+      if (picked.canceled || !sourceDir) return store.getRetrievalStatus();
+      return store.installRetrievalIndex({ sourceDir });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:refresh-retrieval-index",
+    handleTrusted(() => store.refreshRetrievalIndex()),
+  );
+  ipcMain.handle(
+    "openadminos:get-gateway-status",
+    handleTrusted(() => store.getGatewayStatus()),
+  );
+  ipcMain.handle(
+    "openadminos:enable-gateway",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) {
+        throw new Error("Enable gateway input must be an object.");
+      }
+      return store.enableGateway({
+        boundTenantId: requireBoundedString(input.boundTenantId, "boundTenantId", 256),
+        ...(input.port !== undefined
+          ? { port: requireBoundedInteger(input.port, "port", 1024, 65_535) }
+          : {}),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:disable-gateway",
+    handleTrusted(() => store.disableGateway()),
+  );
+  ipcMain.handle(
+    "openadminos:regenerate-gateway-token",
+    handleTrusted(() => store.regenerateGatewayToken()),
+  );
+  ipcMain.handle(
+    "openadminos:revoke-gateway-client",
+    handleTrusted((_event, clientId: unknown) =>
+      store.revokeGatewayClient(requireBoundedString(clientId, "clientId", 128)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:get-fleet-drift-status",
+    handleTrusted((_event, input: unknown) => {
+      if (input !== undefined && !isPlainRecord(input)) {
+        throw new Error("Fleet drift status input must be an object.");
+      }
+      const groupId =
+        input !== undefined
+          ? optionalBoundedString((input as Record<string, unknown>).groupId, "groupId", 128)
+          : undefined;
+      return store.getFleetDriftStatus(groupId ? { groupId } : {});
+    }),
+  );
+  ipcMain.handle(
     "openadminos:get-graph-cache-refresh-schedule",
     handleTrusted((_event, tenantId?: unknown) =>
       store.getGraphCacheRefreshSchedule(
@@ -5438,8 +5920,8 @@ function registerIpcHandlers() {
     "openadminos:get-requested-scopes",
     handleTrusted(() => store.listRequestedScopes()),
   );
-  ipcMain.handle("openadminos:connect-tenant", handleTrusted(async () => {
-    const state = await store.connectTenant();
+  ipcMain.handle("openadminos:connect-tenant", handleTrusted(async (_event, input?: unknown) => {
+    const state = await store.connectTenant(validateConnectTenantOptions(input));
     void registerSchedulerIfReady("tenant");
     return state;
   }));
@@ -5708,6 +6190,13 @@ if (!gotLock) {
 
     const userDataDir = app.getPath("userData");
     const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
+    // Bring-your-own registrations get an isolated token cache: MSAL
+    // binds tokens to a client id, so mixing caches would surface
+    // accounts that the active client can never refresh.
+    const tokenStoreFor = (clientId: string) =>
+      new SafeStorageTokenCacheStore(
+        join(userDataDir, `tokens-${clientId.replace(/[^0-9a-zA-Z-]/g, "")}.bin`),
+      );
     seedIntuneChatSmokeState(userDataDir);
     seedReportIssueSmokeState(userDataDir);
     try {
@@ -5730,6 +6219,7 @@ if (!gotLock) {
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
       tokenStore,
+      tokenStoreFor,
       userDataPath: userDataDir,
       userAgentsDir: join(userDataDir, "agents"),
       // Only packaged production builds report installs to the public
@@ -5764,6 +6254,13 @@ if (!gotLock) {
     void store.processPendingRunDeliveries();
     debugStartupLog("registered ipc handlers");
     void store.processPendingRunDeliveries();
+    void store.startGatewayIfEnabled().catch((error) => {
+      console.error("[gateway] failed to start on launch", error);
+    });
+    // Fetch or update the documentation index in the background. Never
+    // blocks startup and never raises a dialog; Settings shows the state.
+    void store.autoInstallRetrievalIndex();
+    void store.autoInstallEmbeddingModel();
     debugStartupLog("registered ipc handlers");
     installSecurityGuards();
     Menu.setApplicationMenu(buildAppMenu());

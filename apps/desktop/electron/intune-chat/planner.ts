@@ -19,6 +19,13 @@ const SCOPES = {
   groups: ["GroupMember.Read.All"],
   audit: ["AuditLog.Read.All"],
   policy: ["Policy.Read.All"],
+  roles: ["RoleManagement.Read.Directory"],
+  adminUnits: ["AdministrativeUnit.Read.All"],
+  applications: ["Application.Read.All"],
+  domains: ["Domain.Read.All"],
+  securityAlerts: ["SecurityAlert.Read.All"],
+  securityIncidents: ["SecurityIncident.Read.All"],
+  secureScore: ["SecurityEvents.Read.All"],
 } satisfies Record<string, string[]>;
 
 export const GRAPH_CACHE_RESOURCES: readonly GraphCacheResourceDefinition[] = [
@@ -182,6 +189,71 @@ export const GRAPH_CACHE_RESOURCES: readonly GraphCacheResourceDefinition[] = [
     label: "Troubleshooting events",
     scopes: SCOPES.managedDevices,
   },
+  {
+    resource: "namedLocations",
+    label: "Named locations",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "authenticationMethodsPolicy",
+    label: "Authentication methods policy",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "authorizationPolicy",
+    label: "Authorization policy",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "crossTenantAccessPolicy",
+    label: "Cross-tenant access policy",
+    scopes: SCOPES.policy,
+  },
+  {
+    resource: "directoryRoles",
+    label: "Directory roles",
+    scopes: SCOPES.roles,
+  },
+  {
+    resource: "administrativeUnits",
+    label: "Administrative units",
+    scopes: SCOPES.adminUnits,
+  },
+  {
+    resource: "applications",
+    label: "App registrations",
+    scopes: SCOPES.applications,
+  },
+  {
+    resource: "servicePrincipals",
+    label: "Service principals",
+    scopes: SCOPES.applications,
+  },
+  {
+    resource: "domains",
+    label: "Domains",
+    scopes: SCOPES.domains,
+  },
+  {
+    resource: "securityAlerts",
+    label: "Defender alerts",
+    scopes: SCOPES.securityAlerts,
+  },
+  {
+    resource: "securityIncidents",
+    label: "Defender incidents",
+    scopes: SCOPES.securityIncidents,
+  },
+  {
+    resource: "secureScores",
+    label: "Secure Score history",
+    scopes: SCOPES.secureScore,
+  },
+  {
+    resource: "secureScoreControlProfiles",
+    label: "Secure Score controls",
+    scopes: SCOPES.secureScore,
+  },
 ] as const;
 
 export interface PlannedChatContext {
@@ -272,7 +344,7 @@ export function planChatContext(question: string): PlannedChatContext {
   if (matchesAny(lower, ["device", "intune", "stale", "sync", "retire", "offboard", "os", "windows", "macos", "ios", "android", "linux", "chrome", "ownership", "serial", "manufacturer", "model", "last check", "last seen", "primary user"])) {
     add("managedDevices", "entraDevices");
   }
-  if (matchesAny(lower, ["overview", "summary", "fleet", "tenant health", "health summary", "most stale", "inventory count"])) {
+  if (matchesAny(lower, ["overview", "summary", "summarize", "fleet", "tenant health", "health summary", "most stale", "inventory count"])) {
     add("managedDeviceOverview");
   }
   if (matchesAny(lower, ["encryption", "encrypted", "bitlocker", "filevault", "recovery key", "escrow", "laps", "local admin password", "secure boot", "tpm"])) {
@@ -285,10 +357,26 @@ export function planChatContext(question: string): PlannedChatContext {
   if (matchesAny(lower, ["group", "membership", "members", "dynamic group", "assignment group", "target group"])) {
     add("groups", "users");
   }
-  if (matchesAny(lower, ["compliance", "noncompliant", "not evaluated", "grace period", "compliance policy", "jailbreak", "rooted"])) {
+  if (matchesAny(lower, ["compliance", "noncompliance", "non-compliance", "noncompliant", "non-compliant", "not evaluated", "grace period", "compliance policy", "jailbreak", "rooted"])) {
     add("managedDevices", "deviceCompliancePolicies", "conditionalAccessPolicies");
   }
-  if (matchesAny(lower, ["policy", "policies", "configuration", "profile", "settings catalog", "baseline", "administrative template", "gpo", "group policy", "conflict", "not applicable", "error 65000", "firewall", "defender", "asr", "attack surface", "account protection", "security baseline", "security policies", "endpoint security", "wifi", "vpn", "certificate", "scep", "pkcs", "duplicated"])) {
+  // "policy", "policies", "profile" and "configuration" are the most
+  // generic words an admin can use, and they used to plan six resources
+  // at the same rank as a precise rule. A question such as "which
+  // feature update policies are assigned" then filled the plan with
+  // configuration profiles and pushed the update rings out. Generic
+  // wording now plans the two core policy stores; the specific Intune
+  // policy vocabulary still plans the full set.
+  if (matchesAny(lower, ["policy", "policies", "configuration", "profile"])) {
+    add(
+      "configurationPolicies",
+      "deviceConfigurations",
+      "deviceCompliancePolicies",
+      "endpointSecurityIntents",
+      "assignmentFilters",
+    );
+  }
+  if (matchesAny(lower, ["settings catalog", "baseline", "administrative template", "gpo", "group policy", "conflict", "not applicable", "error 65000", "firewall", "defender", "asr", "attack surface", "account protection", "security baseline", "security policies", "endpoint security", "wifi", "vpn", "certificate", "scep", "pkcs", "duplicated"])) {
     add(
       "deviceCompliancePolicies",
       "deviceConfigurations",
@@ -310,7 +398,7 @@ export function planChatContext(question: string): PlannedChatContext {
       "mobileApps",
     );
   }
-  if (matchesAny(lower, ["autopilot", "oobe", "esp", "enrollment status page", "pre-provision", "white glove", "hardware hash", "group tag", "deployment profile", "self-deploying", "user-driven", "kiosk", "enroll", "enrollment", "device enrollment manager", "dem"])) {
+  if (matchesAny(lower, ["enrollment configuration", "enrollment restriction", "autopilot", "oobe", "esp", "enrollment status page", "pre-provision", "white glove", "hardware hash", "group tag", "deployment profile", "self-deploying", "user-driven", "kiosk", "enroll", "enrollment", "device enrollment manager", "dem"])) {
     add(
       "windowsAutopilotDevices",
       "autopilotEvents",
@@ -321,8 +409,23 @@ export function planChatContext(question: string): PlannedChatContext {
       "mobileApps",
     );
   }
+  // Platform scripts are a distinct Intune object from remediation
+  // scripts, so name them explicitly rather than letting the general
+  // script rule decide which of the two a question meant.
+  if (matchesAny(lower, ["platform script", "shell script", "custom script"])) {
+    add("deviceManagementScripts");
+  }
   if (matchesAny(lower, ["remediation", "proactive remediation", "health script", "device health script", "powershell", "script", "ime", "intune management extension", "exit code", "run summary", "detection script"])) {
     add("deviceHealthScripts", "deviceManagementScripts", "managedDevices", "troubleshootingEvents");
+  }
+  // Feature and quality update rings are separate objects; name each
+  // one narrowly so a question about one does not rank the other above
+  // it via the general update rule.
+  if (matchesAny(lower, ["feature update"])) {
+    add("windowsFeatureUpdateProfiles");
+  }
+  if (matchesAny(lower, ["quality update", "expedite"])) {
+    add("windowsQualityUpdateProfiles");
   }
   if (matchesAny(lower, ["update", "updates", "feature update", "quality update", "expedite", "wufb", "windows update", "update ring", "deferral", "deadline", "safeguard", "25h2", "24h2", "patch"])) {
     add(
@@ -335,16 +438,52 @@ export function planChatContext(question: string): PlannedChatContext {
   }
   if (matchesAny(lower, ["sign-in", "signin", "signed in", "accessing microsoft 365", "login", "failure", "risk", "risks", "mfa", "conditional access", "ca policy", "blocked", "grant control", "session control", "trusted location", "named location"])) {
     add("signIns", "conditionalAccessPolicies", "users", "groups");
+    if (matchesAny(lower, ["trusted location", "named location", "ip range", "country"])) {
+      add("namedLocations");
+    }
+    if (matchesAny(lower, ["mfa", "authentication method", "authenticator", "passkey", "fido"])) {
+      add("authenticationMethodsPolicy");
+    }
+  }
+  if (matchesAny(lower, ["directory role", "admin role", "global admin", "privileged", "role assignment", "role member"])) {
+    add("directoryRoles", "users");
+  }
+  if (matchesAny(lower, ["administrative unit", "admin unit", "scoped administration", "delegated administration"])) {
+    add("administrativeUnits", "users", "groups");
+  }
+  if (matchesAny(lower, ["app registration", "app secret", "client secret", "certificate expiry", "expiring certificate", "expiring secret", "service principal", "enterprise application", "app credential"])) {
+    add("applications", "servicePrincipals");
+  }
+  if (matchesAny(lower, ["domain", "domains", "federated", "federation", "dns", "verified domain"])) {
+    add("domains");
+  }
+  if (matchesAny(lower, ["alert", "alerts", "incident", "incidents", "defender", "sentinel", "threat", "malware", "phishing", "compromised", "security operations", "soc"])) {
+    add("securityAlerts", "securityIncidents");
+  }
+  if (matchesAny(lower, ["secure score", "securescore", "security posture", "improvement action", "security recommendation"])) {
+    add("secureScores", "secureScoreControlProfiles");
+  }
+  if (matchesAny(lower, ["guest", "external user", "b2b", "cross-tenant", "external collaboration"])) {
+    add("users");
+    if (matchesAny(lower, ["cross-tenant", "b2b", "external collaboration", "inbound", "outbound"])) {
+      add("crossTenantAccessPolicy");
+    }
+    if (matchesAny(lower, ["invite", "default role", "user consent", "authorization policy"])) {
+      add("authorizationPolicy");
+    }
   }
   if (matchesAny(lower, ["audit", "changed", "created", "deleted", "modified"])) {
     add("directoryAudits", "users");
     if (lower.includes("changed in the tenant")) add("troubleshootingEvents");
   }
-  if (matchesAny(lower, ["what changed", "changed since", "who modified", "who changed", "recent changes", "drift"])) {
+  if (matchesAny(lower, ["what changed", "what happened", "changed since", "who modified", "who changed", "recent changes", "recent activity", "drift"])) {
     add("directoryAudits", "intuneAuditEvents");
   }
-  if (matchesAny(lower, ["assignment", "assigned", "targeted", "filter", "scope tag", "rbac", "role scope", "excluded", "included"])) {
-    add("assignmentFilters", "roleScopeTags", "groups", "users");
+  if (matchesAny(lower, ["assignment", "assigned", "target", "targeted", "filter", "scope tag", "rbac", "role scope", "excluded", "included"])) {
+    // Groups and users are what assignment questions are actually
+    // about; scope tags are a secondary detail, so they are planned
+    // last and are the first to be trimmed.
+    add("assignmentFilters", "groups", "users", "roleScopeTags");
     if (matchesAny(lower, ["app", "apps", "unused", "assignments", "all users", "all devices"])) {
       add("mobileApps", "configurationPolicies", "deviceCompliancePolicies");
     }
@@ -376,12 +515,12 @@ export function planChatContext(question: string): PlannedChatContext {
     add("signIns");
   }
 
-  if (resources.size === 0) {
+  if (resources.size === 0 && !isSmallTalk(question)) {
     add("managedDevices", "entraDevices", "users");
   }
 
   return {
-    resources: [...resources],
+    resources: [...resources].slice(0, MAX_PLANNED_RESOURCES),
     searchTerms: extractSearchTerms(question),
     hasWriteIntent: WRITE_INTENT_TERMS.some((term) =>
       matchesWriteIntentTerm(lower, term),
@@ -707,6 +846,125 @@ export function pathForResource(resource: GraphCacheResourceKind): {
         select: ["id", "eventDateTime", "correlationId", "troubleshootingErrorDetails"],
         query: { "$top": "250" },
       };
+    case "namedLocations":
+      return {
+        path: "/identity/conditionalAccess/namedLocations",
+        select: ["id", "displayName", "createdDateTime", "modifiedDateTime"],
+      };
+    // The three policy singletons return one object, not a collection;
+    // fetchGraphCachePages unwraps both shapes.
+    case "authenticationMethodsPolicy":
+      return {
+        path: "/policies/authenticationMethodsPolicy",
+      };
+    case "authorizationPolicy":
+      return {
+        path: "/policies/authorizationPolicy",
+      };
+    case "crossTenantAccessPolicy":
+      return {
+        path: "/policies/crossTenantAccessPolicy",
+      };
+    case "directoryRoles":
+      return {
+        path: "/directoryRoles",
+        select: ["id", "displayName", "description", "roleTemplateId"],
+      };
+    case "administrativeUnits":
+      return {
+        // Beta exposes administrative units at the root; v1.0 moved them
+        // under /directory. The cache client pins beta.
+        path: "/administrativeUnits",
+        select: ["id", "displayName", "description", "visibility"],
+      };
+    case "applications":
+      return {
+        path: "/applications",
+        select: [
+          "id",
+          "appId",
+          "displayName",
+          "createdDateTime",
+          "signInAudience",
+          "passwordCredentials",
+          "keyCredentials",
+        ],
+      };
+    case "servicePrincipals":
+      return {
+        path: "/servicePrincipals",
+        select: [
+          "id",
+          "appId",
+          "displayName",
+          "accountEnabled",
+          "servicePrincipalType",
+          "appOwnerOrganizationId",
+          "passwordCredentials",
+          "keyCredentials",
+        ],
+      };
+    case "domains":
+      return {
+        path: "/domains",
+        select: ["id", "isDefault", "isInitial", "isVerified", "authenticationType"],
+      };
+    case "securityAlerts":
+      return {
+        path: "/security/alerts_v2",
+        select: [
+          "id",
+          "title",
+          "severity",
+          "status",
+          "detectionSource",
+          "serviceSource",
+          "createdDateTime",
+          "lastUpdateDateTime",
+        ],
+        query: { "$top": "250", "$orderby": "createdDateTime desc" },
+      };
+    case "securityIncidents":
+      return {
+        path: "/security/incidents",
+        select: [
+          "id",
+          "displayName",
+          "severity",
+          "status",
+          "classification",
+          "determination",
+          "assignedTo",
+          "createdDateTime",
+          "lastUpdateDateTime",
+        ],
+        query: { "$top": "250", "$orderby": "createdDateTime desc" },
+      };
+    case "secureScores":
+      // Daily snapshots, newest first by default; ~90 days of history.
+      return {
+        path: "/security/secureScores",
+        select: ["id", "createdDateTime", "currentScore", "maxScore", "activeUserCount", "licensedUserCount"],
+        query: { "$top": "90" },
+      };
+    case "secureScoreControlProfiles":
+      return {
+        path: "/security/secureScoreControlProfiles",
+        select: [
+          "id",
+          "title",
+          "controlCategory",
+          "actionType",
+          "service",
+          "maxScore",
+          "rank",
+          "deprecated",
+          "implementationCost",
+          "userImpact",
+          "tier",
+        ],
+        query: { "$top": "250" },
+      };
   }
 }
 
@@ -794,6 +1052,17 @@ export function buildAnswerPack(input: {
   tenant: TenantRecord;
   cacheStatus: GraphCacheResourceStatus[];
   rows: Record<GraphCacheResourceKind, unknown[]>;
+  /**
+   * Exact counts over the whole cached set, keyed by resource. Sample
+   * rows are capped for context budget, so without these the model can
+   * only count what it can see and has no way to answer "how many".
+   */
+  aggregates?: Partial<
+    Record<
+      GraphCacheResourceKind,
+      { total: number; breakdowns: Record<string, Record<string, number>> }
+    >
+  >;
   hasWriteIntent: boolean;
   agentSuggestions: IntuneChatAgentSuggestion[];
   generatedAt?: string;
@@ -817,10 +1086,16 @@ export function buildAnswerPack(input: {
       const sampleRows = selectedRows
         .slice(0, maxSampleRowsPerResource)
         .map(compactGraphObject);
+      const aggregate = input.aggregates?.[status.resource];
       return {
         resource: status.resource,
         label: status.label,
         cachedRows: status.rows,
+        // Tenant-wide total from Graph. When present it is the correct
+        // answer to "how many", even where it exceeds cachedRows.
+        ...(status.tenantTotal !== undefined
+          ? { tenantTotal: status.tenantTotal }
+          : {}),
         pages: status.pages,
         pageLimitReached: status.pageLimitReached,
         selectedRows: selectedRows.length,
@@ -829,7 +1104,11 @@ export function buildAnswerPack(input: {
         refreshedAt: status.refreshedAt,
         lastError: status.lastError,
         sampleRows,
-        breakdowns: buildBreakdowns(selectedRows),
+        // Counted across every cached row, not just the sample above.
+        // Quote these for any "how many" question; counting sampleRows
+        // would undercount by the sampling ratio.
+        breakdowns: aggregate?.breakdowns ?? buildBreakdowns(selectedRows),
+        breakdownsCoverAllCachedRows: aggregate !== undefined,
       };
     });
 
@@ -930,7 +1209,7 @@ function buildDeterministicFindings(input: {
 
 export function chatTitleForPrompt(prompt: string): string {
   const cleaned = prompt.replace(/\s+/g, " ").trim();
-  if (cleaned.length <= 54) return cleaned || "Intune chat";
+  if (cleaned.length <= 54) return cleaned || "Chat";
   return `${cleaned.slice(0, 51).trim()}...`;
 }
 
@@ -983,8 +1262,58 @@ function extractSearchTerms(question: string): string[] {
     .slice(0, 12);
 }
 
+/**
+ * Keyword rules used to match by plain substring, which fired inside
+ * unrelated words: "esp" matched "respond", "app" matched "happened",
+ * and "os" matched "cost". A single question could plan 17 resource
+ * refreshes, and worse, match the wrong rule entirely.
+ *
+ * Matching is now anchored to word boundaries, with an optional plural
+ * suffix so "sign-in" still matches "sign-ins" and "device" still
+ * matches "devices".
+ */
+const termPatterns = new Map<string, RegExp>();
+
+function termPattern(needle: string): RegExp {
+  let pattern = termPatterns.get(needle);
+  if (!pattern) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Allow the common English inflections so "enroll" still matches
+    // "enrolled" and "enrolling", and "device" still matches "devices",
+    // without matching inside unrelated words.
+    pattern = new RegExp(
+      `(?:^|[^a-z0-9])${escaped}(?:e?s|e?d|ing)?(?:$|[^a-z0-9])`,
+      "i",
+    );
+    termPatterns.set(needle, pattern);
+  }
+  return pattern;
+}
+
 function matchesAny(value: string, needles: string[]): boolean {
-  return needles.some((needle) => value.includes(needle));
+  return needles.some((needle) => termPattern(needle).test(value));
+}
+
+/**
+ * Runaway guard only. Across the 150 researched questions the planner
+ * selects a median of 7 resources and never more than 16, so this bound
+ * is not reached in practice; it exists so that no single question can
+ * queue an unbounded number of Graph refreshes. Trimming to a tighter
+ * number was tried and rejected: questions in the bank legitimately
+ * need resources that a tighter cap discards, and refresh concurrency
+ * is the better lever for latency.
+ */
+export const MAX_PLANNED_RESOURCES = 20;
+
+/**
+ * Messages that carry no admin intent. These used to fall through to
+ * the default resource trio and trigger a Graph refresh, so saying
+ * "hi" fetched devices and users.
+ */
+const SMALL_TALK = /^(hi|hey|hello|yo|thanks|thank you|ta|ok|okay|cool|nice|got it|good (morning|afternoon|evening)|test|ping)\b[\s!.?]*$/i;
+
+export function isSmallTalk(question: string): boolean {
+  return SMALL_TALK.test(question.trim());
 }
 
 function inferQuestionAgentCategories(lowerQuestion: string): Set<AgentSummary["category"]> {

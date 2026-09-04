@@ -1,7 +1,7 @@
 {
   "name": "@openadminos/desktop",
   "private": true,
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Open-source, local-first agents for Microsoft 365 admins.",
   "author": {
     "name": "OpenAdminOS",
@@ -31,9 +31,10 @@
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
     "@microsoft/mxc-sdk": "0.6.1",
-    "@openadminos/agent-sdk": "0.4.3",
-    "@openadminos/connector-whatsapp-web": "0.4.3",
-    "@openadminos/runtime": "0.4.3",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@openadminos/agent-sdk": "0.5.0",
+    "@openadminos/connector-whatsapp-web": "0.5.0",
+    "@openadminos/runtime": "0.5.0",
     "electron-updater": "^6.6.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -122,9 +123,24 @@
         }
       ],
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
-        { "target": "pkg", "arch": ["arm64"] },
-        { "target": "zip", "arch": ["arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "pkg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
       ]
     },
     "dmg": {
@@ -162,7 +178,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "signtoolOptions": {
@@ -190,7 +208,9 @@
       "identityName": "OpenAdminOS.OpenAdminOS.OpenAdminOS",
       "publisher": "CN=E5B1EEE1-CB55-4BCF-9214-2A6446BB2580",
       "publisherDisplayName": "OpenAdminOS",
-      "languages": ["en-US"],
+      "languages": [
+        "en-US"
+      ],
       "showNameOnTiles": true
     },
     "linux": {

@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import {
+  type ConnectTenantOptions,
   deriveTrustState,
   providerCatalog,
   type AgentDraft,
@@ -55,11 +56,12 @@ interface AppStateContextValue {
   setActiveProvider: (id: ProviderId) => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
   setRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
+  setUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
   startRun: (agentSlug: string, options?: StartRunOptions) => Promise<RunRecord>;
   confirmRun: (runId: string, phrase: string) => Promise<RunRecord>;
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
-  connectTenant: () => Promise<TenantRecord | undefined>;
+  connectTenant: (options?: ConnectTenantOptions) => Promise<TenantRecord | undefined>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
@@ -389,6 +391,28 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const setUsageTelemetryEnabled = useCallback(async (enabled: boolean) => {
+    const api = getOpenAdminOSApi();
+    if (!api?.setUsageTelemetryEnabled) {
+      const fallbackError = new Error(
+        "Usage telemetry settings are unavailable in this build.",
+      );
+      setError(fallbackError);
+      throw fallbackError;
+    }
+
+    setError(null);
+    try {
+      const nextState = await api.setUsageTelemetryEnabled(enabled);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const settingsError = toError(caughtError);
+      setError(settingsError);
+      throw settingsError;
+    }
+  }, []);
+
   const startRun = useCallback(
     async (agentSlug: string, options?: StartRunOptions) => {
       const api = getOpenAdminOSApi();
@@ -448,7 +472,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     return api.getRequestedScopes();
   }, []);
 
-  const connectTenant = useCallback(async () => {
+  const connectTenant = useCallback(async (options?: ConnectTenantOptions) => {
     const api = getOpenAdminOSApi();
     if (!api) {
       const fallbackError = new Error(
@@ -459,7 +483,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
     setError(null);
     try {
-      const nextState = await api.connectTenant();
+      const nextState = await api.connectTenant(options);
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
       const id = nextState.activeTenantId;
@@ -991,6 +1015,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveModel,
       setActiveProvider,
       setRegistryInstallCountsEnabled,
+      setUsageTelemetryEnabled,
       startRun,
       confirmRun,
       rejectRun,
@@ -1040,6 +1065,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveModel,
       setActiveProvider,
       setRegistryInstallCountsEnabled,
+      setUsageTelemetryEnabled,
       setRegistrySource,
       setActiveTenant,
       startRun,

@@ -92,9 +92,9 @@ export default function MenuBarCompanion() {
   const askBlocker = !hasBridge
     ? "Open the Electron app to use tenant chat."
     : !snapshot.activeTenant
-      ? "Connect a tenant before asking Intune Chat."
+      ? "Connect a tenant before using Chat."
       : !providerReady
-        ? "Configure a connected LLM provider before asking Intune Chat."
+        ? "Configure a connected LLM provider before using Chat."
         : undefined;
 
   const openMain = async (route = "/chat") => {
@@ -116,7 +116,7 @@ export default function MenuBarCompanion() {
       return;
     }
     if (!snapshot.provider || snapshot.provider.status !== "connected") {
-      setNotice("Open provider settings and connect an LLM before asking Intune Chat.");
+      setNotice("Open provider settings and connect an LLM before using Chat.");
       await openMain("/settings");
       return;
     }
@@ -216,7 +216,7 @@ export default function MenuBarCompanion() {
         status: "Continue in app",
         sources: [],
       });
-      setNotice("Continue in the full app to use Intune Chat.");
+      setNotice("Continue in the full app to use Chat.");
     } finally {
       sendingRef.current = false;
     }
@@ -422,7 +422,7 @@ function AskPanel({
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[12px] font-semibold text-[var(--color-text)]">
             <IconChat size={13} />
-            Intune Chat
+            Chat
           </div>
           <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
             {blocker ?? chat.status}
@@ -481,7 +481,7 @@ function AskPanel({
             onSend();
           }
         }}
-        placeholder={canAsk ? "Ask about stale devices, app assignments, policy drift..." : "Open setup in the full app first"}
+        placeholder={canAsk ? "Ask about devices, users, apps, policies, sign-ins, or identity…" : "Open setup in the full app first"}
         className="companion-textarea"
       />
       <div className="mt-2 flex items-center justify-between gap-2">
