@@ -354,30 +354,30 @@ export default async function HomePage() {
           {testimonials.map((item) => (
             <figure
               key={item.name}
-              className="flex flex-col justify-between rounded-lg border border-white/10 bg-white/[0.03] p-5 sm:p-6"
+              className="flex flex-col justify-between rounded-lg border border-white/10 bg-white/[0.03] p-6 sm:p-8"
             >
-              <blockquote className="text-base leading-7 text-white/80 sm:text-lg">
+              <blockquote className="text-lg leading-8 text-white/85 sm:text-xl sm:leading-9">
                 &ldquo;{item.quote}&rdquo;
               </blockquote>
-              <figcaption className="mt-6 flex items-center gap-3">
+              <figcaption className="mt-7 flex items-center gap-4">
                 <img
                   src={item.image}
                   alt=""
-                  width="48"
-                  height="48"
+                  width="56"
+                  height="56"
                   loading="lazy"
-                  className="h-12 w-12 rounded-full border border-white/10 object-cover"
+                  className="h-14 w-14 rounded-full border border-white/10 object-cover"
                 />
                 <div className="min-w-0">
                   <Link
                     href={item.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-sm font-semibold text-white transition hover:text-sky-200"
+                    className="text-base font-semibold text-white transition hover:text-sky-200"
                   >
                     {item.name}
                   </Link>
-                  <p className="text-xs text-white/50">{item.role}</p>
+                  <p className="text-sm text-white/50">{item.role}</p>
                 </div>
               </figcaption>
             </figure>
