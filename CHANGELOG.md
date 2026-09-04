@@ -7,6 +7,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Added
 
 - The landing page shows two testimonials, from Merill Fernando and Ugur Koc, directly under the traction strip so the install and star counts are followed by named admins.
+- The website offers the Windows installer. The landing page's Download for Windows button and a Windows section on the download page resolve to the signed x64 installer from the latest GitHub release, with its SHA-256 hash, the same way the macOS and Linux downloads already did. The structured data now lists Windows as a supported operating system.
 
 ### Changed
 

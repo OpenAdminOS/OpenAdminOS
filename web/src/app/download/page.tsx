@@ -16,9 +16,9 @@ import {
 
 export const revalidate = 900;
 
-const TITLE = "Download for macOS and Linux";
+const TITLE = "Download for Windows, macOS, and Linux";
 const DESCRIPTION =
-  "Download OpenAdminOS for macOS or Linux, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
+  "Download OpenAdminOS for Windows, macOS, or Linux, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -47,6 +47,18 @@ export default async function DownloadPage() {
       href: latestRelease.macosPkg.url,
       label: ".pkg",
       meta: "Apple Silicon · signed and notarized",
+    },
+  ];
+  const windowsPackages = [
+    {
+      actionLabel: "Download .exe",
+      badge: "Default",
+      detail: "Per-user installer. Does not need local administrator rights.",
+      hash: latestRelease.windowsExe.sha256,
+      href: latestRelease.windowsExe.url,
+      label: ".exe",
+      meta: "Windows x64 · signed",
+      primary: true,
     },
   ];
   const linuxPackages = [
@@ -84,14 +96,14 @@ export default async function DownloadPage() {
       websiteSchema(),
       softwareApplicationSchema({
         downloadUrl: latestRelease.releaseNotesUrl,
-        operatingSystem: "macOS, Linux",
+        operatingSystem: "Windows, macOS, Linux",
         version: latestRelease.version,
       }),
       webPageSchema({
         path: "/download",
         name: TITLE,
         description: DESCRIPTION,
-        dateModified: "2026-06-05",
+        dateModified: "2026-09-04",
       }),
       breadcrumbSchema([
         { name: "Home", path: "/" },
@@ -151,18 +163,12 @@ export default async function DownloadPage() {
           items={linuxPackages}
           title="Linux x64"
         />
-        <section className="grid gap-4 border-t border-white/10 py-6 md:grid-cols-[180px_1fr]">
-          <div>
-            <h2 className="text-base font-semibold text-white">Windows</h2>
-            <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/35">
-              Planned
-            </p>
-          </div>
-          <p className="max-w-2xl text-sm leading-6 text-white/55">
-            Windows packaging is planned after signing is complete. The app
-            surface and write-confirmation rules are the same across platforms.
-          </p>
-        </section>
+        <DownloadGroup
+          description="Signed per-user installer, no administrator rights needed. If SmartScreen warns, confirm the publisher is Ugurlabs UG (haftungsbeschränkt) or verify the SHA-256 hash."
+          id="windows-packages"
+          items={windowsPackages}
+          title="Windows x64"
+        />
       </section>
 
       <section className="mt-12 grid gap-8 border-t border-white/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
