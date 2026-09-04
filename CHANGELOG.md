@@ -6,61 +6,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Chat can now reach almost any Microsoft Graph read endpoint rather than a small allowlist. Previously an endpoint was refused unless the bundled catalog documented a permission for it, which rejected around 14,000 read endpoints for missing metadata rather than for being out of bounds, leaving roughly 5% of Graph reachable. The consented access token is the real boundary: it cannot exceed what an admin approved, Graph enforces that, and Chat is read-only. Endpoints whose permissions fall outside what the app requests are still refused, by name, without a call being made.
-- A new endpoint lookup lets Chat search Graph in plain words before reading anything, so an answer no longer depends on the model recalling an exact path from memory. This is what allows a small local model to answer a question nobody anticipated.
-- How-many questions are answered from exact counts. Counts and breakdowns are computed in SQL across every cached row, and Graph is asked for the tenant-wide total where the endpoint supports it, so a figure is no longer inferred from the handful of sample rows a prompt can carry. Answers say plainly when detail rows cover only part of the tenant.
-
-- Documentation grounding now reaches answers on every path: streaming and non-streaming, deterministic and investigative. Chat retrieves passages from a locally installed Microsoft documentation index and puts them in front of the tenant data, labelled as general product behaviour rather than tenant state, and asks the model to cite the source file so a claim can be checked. Grounding is independent of which model answers, so hosted providers benefit as much as local ones. When no index is installed, answers fall back to tenant data only.
-- The documentation index installs itself. On launch the app fetches the current index in the background, and picks up later index releases the same way, so grounding is on for every admin without anyone finding a setting. It never blocks startup, never raises a dialog, retries at most once a day if the network refuses, and can be turned off for restricted or metered networks. The index is versioned, and Settings shows the installed version, its build date, and whether a newer one is on the way.
-- Grounding downloads are gated on the local runtime actually being there. A machine without Ollama used to fetch the 264 MB index it could never use; now nothing downloads until Ollama is reachable, at which point the index and embedding model arrive together on the next launch. Settings explains the missing prerequisite instead of showing a healthy index with dead grounding. Hosted-provider setups keep working exactly as before, just without documentation grounding.
-- The embedding model retrieval depends on installs itself too. The index is only half of grounding; matching a question against it needs the `nomic-embed-text` model in the local Ollama, which nothing previously installed, so the index could sit there healthy while every grounded answer failed. The app now pulls the model silently in the background under the same Settings switch as the index, retries a failed pull at most once a day, and skips quietly when Ollama is not running rather than counting that as an attempt. Settings says plainly when the model is missing and whether Ollama is reachable, so grounding status is never misleadingly green. Everything runs against loopback only.
-- Settings credits the documentation the index is built from: Microsoft's published Intune, Entra, and Defender documentation, used under CC BY 4.0.
-- The index can still be installed by hand from a folder, for machines with no outbound network access. Every download is verified against a published SHA-256 manifest and staged, so a truncated, corrupted, or substituted file is discarded rather than replacing a working index.
-- Query embedding runs through the local Ollama the app already manages, using `nomic-embed-text`, instead of requiring a second embedding server. Non-loopback endpoints are refused, so a question never leaves the device.
-
-- Second concept round for the same page (`docs/mockups/17-training-railway-concepts.html`): the conveyor metaphor replaced by a railway line where the training run is a train that dwells at stations, with dwell timers, stage telemetry, a held-run siding, and a departure board. Four styles: metro diagram, comic steam railway, split-flap board, clay model railway. The split-flap style now uses real public-domain train art (recolored CC0 SVGs from FreeSVG, catalogued in `docs/mockups/assets/trains/`).
-
-- Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.
-- Release publishing verifies the Windows Authenticode signature and signer common name before uploading, and fails with the actual certificate subject when it does not match the configured publisher.
-
 ### Changed
-
-- Workspaces and Connectors are reachable from the sidebar again, in a subordinate "More" group below Settings. They were previously only findable through Settings, which hid two of the more distinctive surfaces. The primary navigation group is unchanged.
-- Settings now states the update behaviour in full: updates download in the background before the restart prompt, and choosing Later applies them on the next quit. The previous wording mentioned only the prompt.
-
-- The four copy-pasted per-run pod scripts are replaced by a single `model/train/pod-run.sh <run-id> [--tier 8b|20b]`, covering both model tiers, restartable at stage granularity, and with the pip ordering and tokenizer patch that earlier runs each rediscovered encoded once.
-
-- Benchmark figures are generated from scored runs by `model/site-benchmarks/export-benchmark-data.mjs` and committed as a contract the page parses at build time, so a marketing claim cannot drift from a measurement.
-- Windows code signing runs through Azure Artifact Signing (formerly Trusted Signing): the certificate is short-lived and rotated by Microsoft, the key never leaves Microsoft's HSM, CI holds only a revocable service principal credential, and SmartScreen reputation is established faster than with the previous OV certificate.
-- `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
-- Documented Windows installation, including how to verify the publisher and what to expect from SmartScreen while the organization-validated certificate accrues download reputation.
 
 ### Removed
 
-- The training status page, its run-state API, the pod-side stage reporting in the training pipeline, and the two Supabase tables that backed it. The published run log went with it; the 8B model card no longer claims that log is public.
-
 ### Fixed
-
-- A single dropped connection or timed-out request no longer discards a whole tenant refresh. Transient network faults are retried with backoff, on the same budget as server errors, which matters most on a laptop that sleeps or roams between networks. Writes are deliberately excluded: a write that timed out may already have been applied, so repeating it could double-apply a change.
-- Question keywords are matched on word boundaries instead of as substrings. "respond" no longer matched "esp" and planned a dozen unrelated Autopilot lookups, "happened" no longer matched "app" and answered a question about tenant changes with app inventory, and "cost" no longer matched "os". Common inflections still match, so "enrolled" finds enrollment and "noncompliance" finds compliance.
-- Tenant data sources refresh several at a time instead of strictly one after another, removing most of the wait before an answer starts on questions that need more than one source.
-- Stop now stops. Cancelling was previously noticed only after every planned refresh had already run to completion, so the interface reported a halt while minutes of work continued.
-- Cached data expires at a rate that matches how fast each source actually changes, rather than one six-hour rule for everything. Sign-in and audit data goes stale in minutes; Autopilot profiles and enrollment configuration are no longer re-fetched needlessly.
-- A greeting no longer triggers a tenant data refresh.
-- A query that matches nothing no longer reads as an empty tenant. Answers were stating that a tenant had no managed devices while nine were cached and only the filter had missed. Every empty result now carries the unfiltered row count for that resource, the field names the rows actually have, and an instruction to retry rather than conclude absence. The one-line summary was the worst offender, reporting "0 of 0 cached rows" when only the filter had failed.
-- Cached rows advertise which fields can be filtered on, on every read rather than only after a query has already failed, so a question can be answered without the model having to guess field names.
-- Investigative mode survives the small formatting slips local models make. A tool call missing a closing brace is repaired rather than discarded, filters can be written as a plain field-to-value map, and a filter that matches nothing reports which fields the rows actually have so the next attempt can be corrected. Previously two slips ended the investigation and fell back to keyword-planned context.
-- A final page that overflowed the cache row limit without advertising more results was reported as complete while rows were dropped.
-
-- Testing the OpenAI Codex provider no longer opens a text editor window over the app. The CLI runs with a scrubbed environment that carried no editor setting, so anything it wanted to open fell through to the operating system default, which on Windows is Notepad.
-- Sending the first message in a new conversation no longer flashes "Conversation not found" while the answer is being fetched. The route moved to the new conversation before the sidebar list had reloaded, so the app briefly judged its own conversation to be missing while the send was working normally.
 
 ### Security
 
-- The Windows release gate fails closed when DigiCert KeyLocker credentials are missing, and the signing hook refuses to emit an unsigned build unless packaging validation opts in explicitly.
-- Windows signing is pinned to SHA-256 only. electron-builder's default also performs a SHA-1 pass, which spends an extra KeyLocker signature per file and fails against a modern certificate.
-
-## [0.5.0] - 2026-08-31
+## [0.5.0] - 2026-09-04
 
 ### Added
 
@@ -79,26 +33,53 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Chat now reads Entra and Defender data as first-class cached resources: named locations, authentication methods policy, authorization policy, cross-tenant access policy, directory roles, administrative units, app registrations and service principals (including credential expiry), domains, Defender alerts and incidents, and Secure Score history and controls. Tenant consent gains "Identity and access" and extended "Security and sign-ins" groups, and a tenant consented before this release gets a clear reconnect path instead of a raw Graph 403 when refreshing the new resources.
 - Four animated concept mockups for the training.openadminos.com status page (`docs/mockups/16-training-conveyor-concepts.html`): a side-view factory conveyor of the model training pipeline, to be driven later by run-state posts from the GPU pod.
 - Second concept round for the same page (`docs/mockups/17-training-railway-concepts.html`): the conveyor metaphor replaced by a railway line where the training run is a train that dwells at stations, with dwell timers, stage telemetry, a held-run siding, and a departure board. Four styles: metro diagram, comic steam railway, split-flap board, clay model railway. The split-flap style now uses real public-domain train art (recolored CC0 SVGs from FreeSVG, catalogued in `docs/mockups/assets/trains/`).
-
 - Tagged releases now build, sign, and publish a Windows x64 NSIS installer, plus `latest.yml` so electron-updater can auto-update Windows installs. The installer is per-user, so installing and updating never require local administrator rights.
 - Release publishing verifies the Windows Authenticode signature and signer common name before uploading, and fails with the actual certificate subject when it does not match the configured publisher.
+- Chat can now reach almost any Microsoft Graph read endpoint rather than a small allowlist. Previously an endpoint was refused unless the bundled catalog documented a permission for it, which rejected around 14,000 read endpoints for missing metadata rather than for being out of bounds, leaving roughly 5% of Graph reachable. The consented access token is the real boundary: it cannot exceed what an admin approved, Graph enforces that, and Chat is read-only. Endpoints whose permissions fall outside what the app requests are still refused, by name, without a call being made.
+- A new endpoint lookup lets Chat search Graph in plain words before reading anything, so an answer no longer depends on the model recalling an exact path from memory. This is what allows a small local model to answer a question nobody anticipated.
+- How-many questions are answered from exact counts. Counts and breakdowns are computed in SQL across every cached row, and Graph is asked for the tenant-wide total where the endpoint supports it, so a figure is no longer inferred from the handful of sample rows a prompt can carry. Answers say plainly when detail rows cover only part of the tenant.
+- Documentation grounding now reaches answers on every path: streaming and non-streaming, deterministic and investigative. Chat retrieves passages from a locally installed Microsoft documentation index and puts them in front of the tenant data, labelled as general product behaviour rather than tenant state, and asks the model to cite the source file so a claim can be checked. Grounding is independent of which model answers, so hosted providers benefit as much as local ones. When no index is installed, answers fall back to tenant data only.
+- The documentation index installs itself. On launch the app fetches the current index in the background, and picks up later index releases the same way, so grounding is on for every admin without anyone finding a setting. It never blocks startup, never raises a dialog, retries at most once a day if the network refuses, and can be turned off for restricted or metered networks. The index is versioned, and Settings shows the installed version, its build date, and whether a newer one is on the way.
+- Grounding downloads are gated on the local runtime actually being there. A machine without Ollama used to fetch the 264 MB index it could never use; now nothing downloads until Ollama is reachable, at which point the index and embedding model arrive together on the next launch. Settings explains the missing prerequisite instead of showing a healthy index with dead grounding. Hosted-provider setups keep working exactly as before, just without documentation grounding.
+- The embedding model retrieval depends on installs itself too. The index is only half of grounding; matching a question against it needs the `nomic-embed-text` model in the local Ollama, which nothing previously installed, so the index could sit there healthy while every grounded answer failed. The app now pulls the model silently in the background under the same Settings switch as the index, retries a failed pull at most once a day, and skips quietly when Ollama is not running rather than counting that as an attempt. Settings says plainly when the model is missing and whether Ollama is reachable, so grounding status is never misleadingly green. Everything runs against loopback only.
+- Settings credits the documentation the index is built from: Microsoft's published Intune, Entra, and Defender documentation, used under CC BY 4.0.
+- The index can still be installed by hand from a folder, for machines with no outbound network access. Every download is verified against a published SHA-256 manifest and staged, so a truncated, corrupted, or substituted file is discarded rather than replacing a working index.
+- Query embedding runs through the local Ollama the app already manages, using `nomic-embed-text`, instead of requiring a second embedding server. Non-loopback endpoints are refused, so a question never leaves the device.
 
 ### Changed
 
 - Renamed remaining user-facing "Intune Chat" copy to "Chat" and broadened chat prompts across devices, users, apps, policies, sign-ins, and identity.
-
 - Windows code signing runs through Azure Artifact Signing (formerly Trusted Signing): the certificate is short-lived and rotated by Microsoft, the key never leaves Microsoft's HSM, CI holds only a revocable service principal credential, and SmartScreen reputation is established faster than with the previous OV certificate.
 - `appx` is no longer the default Windows build target. Microsoft Store packaging validation remains available as an opt-in manual workflow job and is still never published.
 - Documented Windows installation, including how to verify the publisher and what to expect from SmartScreen while the organization-validated certificate accrues download reputation.
+- Workspaces and Connectors are reachable from the sidebar again, in a subordinate "More" group below Settings. They were previously only findable through Settings, which hid two of the more distinctive surfaces. The primary navigation group is unchanged.
+- Settings now states the update behaviour in full: updates download in the background before the restart prompt, and choosing Later applies them on the next quit. The previous wording mentioned only the prompt.
+- The four copy-pasted per-run pod scripts are replaced by a single `model/train/pod-run.sh <run-id> [--tier 8b|20b]`, covering both model tiers, restartable at stage granularity, and with the pip ordering and tokenizer patch that earlier runs each rediscovered encoded once.
+- Benchmark figures are generated from scored runs by `model/site-benchmarks/export-benchmark-data.mjs` and committed as a contract the page parses at build time, so a marketing claim cannot drift from a measurement.
 
 ### Removed
 
+- The training status page, its run-state API, the pod-side stage reporting in the training pipeline, and the two Supabase tables that backed it. The published run log went with it; the 8B model card no longer claims that log is public.
+
 ### Fixed
+
+- A single dropped connection or timed-out request no longer discards a whole tenant refresh. Transient network faults are retried with backoff, on the same budget as server errors, which matters most on a laptop that sleeps or roams between networks. Writes are deliberately excluded: a write that timed out may already have been applied, so repeating it could double-apply a change.
+- Question keywords are matched on word boundaries instead of as substrings. "respond" no longer matched "esp" and planned a dozen unrelated Autopilot lookups, "happened" no longer matched "app" and answered a question about tenant changes with app inventory, and "cost" no longer matched "os". Common inflections still match, so "enrolled" finds enrollment and "noncompliance" finds compliance.
+- Tenant data sources refresh several at a time instead of strictly one after another, removing most of the wait before an answer starts on questions that need more than one source.
+- Stop now stops. Cancelling was previously noticed only after every planned refresh had already run to completion, so the interface reported a halt while minutes of work continued.
+- Cached data expires at a rate that matches how fast each source actually changes, rather than one six-hour rule for everything. Sign-in and audit data goes stale in minutes; Autopilot profiles and enrollment configuration are no longer re-fetched needlessly.
+- A greeting no longer triggers a tenant data refresh.
+- A query that matches nothing no longer reads as an empty tenant. Answers were stating that a tenant had no managed devices while nine were cached and only the filter had missed. Every empty result now carries the unfiltered row count for that resource, the field names the rows actually have, and an instruction to retry rather than conclude absence. The one-line summary was the worst offender, reporting "0 of 0 cached rows" when only the filter had failed.
+- Cached rows advertise which fields can be filtered on, on every read rather than only after a query has already failed, so a question can be answered without the model having to guess field names.
+- Investigative mode survives the small formatting slips local models make. A tool call missing a closing brace is repaired rather than discarded, filters can be written as a plain field-to-value map, and a filter that matches nothing reports which fields the rows actually have so the next attempt can be corrected. Previously two slips ended the investigation and fell back to keyword-planned context.
+- A final page that overflowed the cache row limit without advertising more results was reported as complete while rows were dropped.
+- Testing the OpenAI Codex provider no longer opens a text editor window over the app. The CLI runs with a scrubbed environment that carried no editor setting, so anything it wanted to open fell through to the operating system default, which on Windows is Notepad.
+- Sending the first message in a new conversation no longer flashes "Conversation not found" while the answer is being fetched. The route moved to the new conversation before the sidebar list had reloaded, so the app briefly judged its own conversation to be missing while the send was working normally.
 
 ### Security
 
-- The Windows release gate fails closed when DigiCert KeyLocker credentials are missing, and the signing hook refuses to emit an unsigned build unless packaging validation opts in explicitly.
-- Windows signing is pinned to SHA-256 only. electron-builder's default also performs a SHA-1 pass, which spends an extra KeyLocker signature per file and fails against a modern certificate.
+- The Windows release gate fails closed when any Azure signing setting is missing on a tagged run, and the signing hook refuses to emit an unsigned build unless a manual packaging run opts in explicitly.
+- Windows signing is pinned to SHA-256 only. electron-builder's default also performs a SHA-1 pass, which spends an extra signature per file and fails against a modern certificate.
 
 ## [0.4.3] - 2026-08-07
 
