@@ -132,7 +132,8 @@ execution paths. The fixes apply in the shared runtime; individual agent manifes
   MSAL wait, including callers that omit a timeout. Late authorization results
   cannot resume cancelled Graph work. The active pipeline step and logs explain
   the sign-in wait and the Cancel run recovery action.
-- Scheduled runs refuse interactive consent and return instructions to run the
+- Scheduled runs and their Teams/Outlook notifications refuse interactive consent.
+  Agent execution returns instructions to run the
   agent manually to restore permissions. Startup marks abandoned queued/running
   records failed, preserves evidence and pending approvals, and never replays writes.
 - Confirmation resolves provider information before persisting its running state.
@@ -151,7 +152,7 @@ cancellation, cancellation during token acquisition, cancellation between templa
 and system writes, LLM signal propagation, a queued-snapshot cancellation race,
 startup recovery, scheduled consent refusal, and provider discovery failure.
 
-Local verification of the fixes: 379 backend tests and 93 renderer tests passed,
+Local verification of the fixes: 380 backend tests and 93 renderer tests passed,
 along with typecheck, build, 168 registry QA checks, generated-document checks,
 and release compatibility checks. Renderer tests on the local Node 26 runtime
 used `NODE_OPTIONS=--no-experimental-webstorage` so jsdom supplies browser storage;

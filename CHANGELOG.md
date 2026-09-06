@@ -30,7 +30,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Microsoft sign-in requests now expire after five minutes, including additional permission requests made by agents. The active step explains the browser sign-in wait and how to cancel it. Closing the system browser still requires Cancel run or timeout because browser closure is not reported to the app.
 - Cancel run now interrupts authentication and provider/Graph work and prevents subsequent approved actions. Results from requests already sent remain in the run history; cancellation does not reverse remote changes that already happened.
-- Scheduled agents return actionable sign-in instructions when credentials or permissions need attention, instead of opening an unattended browser and blocking later runs indefinitely.
+- Scheduled agents and their Teams/Outlook notifications return actionable sign-in instructions when credentials or permissions need attention, instead of opening an unattended browser and blocking later runs indefinitely.
 - Restarting the app marks interrupted runs failed with recovery instructions, preserving pending write approvals and avoiding automatic write retries. Provider discovery failures during confirmation leave the plan awaiting approval rather than stranded as running.
 
 ### Security
