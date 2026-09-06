@@ -6,6 +6,19 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.5.1] - 2026-09-06
+
+### Added
+
+- Included a lifecycle audit covering all 14 registry agents, with regression coverage for sign-in, cancellation, scheduling, and interrupted execution.
 - The landing page shows two testimonials, from Merill Fernando and Ugur Koc, directly under the traction strip so the install and star counts are followed by named admins.
 - The website offers the Windows installer. The landing page's Download for Windows button and a Windows section on the download page resolve to the signed x64 installer from the latest GitHub release, with its SHA-256 hash, the same way the macOS and Linux downloads already did. The structured data now lists Windows as a supported operating system.
 
@@ -14,6 +27,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Removed
 
 ### Fixed
+
+- Microsoft sign-in requests now expire after five minutes, including additional permission requests made by agents. The active step explains the browser sign-in wait and how to cancel it. Closing the system browser still requires Cancel run or timeout because browser closure is not reported to the app.
+- Cancel run now interrupts authentication and provider/Graph work and prevents subsequent approved actions. Results from requests already sent remain in the run history; cancellation does not reverse remote changes that already happened.
+- Scheduled agents and their Teams/Outlook notifications return actionable sign-in instructions when credentials or permissions need attention, instead of opening an unattended browser and blocking later runs indefinitely.
+- Restarting the app marks interrupted runs failed with recovery instructions, preserving pending write approvals and avoiding automatic write retries. Provider discovery failures during confirmation leave the plan awaiting approval rather than stranded as running.
 
 ### Security
 

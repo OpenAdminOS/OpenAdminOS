@@ -551,13 +551,20 @@ export class RunDeliveryService {
 
     const client = this.host.getMsalClient();
     const openBrowser = this.host.openBrowser;
+    let scheduledAuthRequired = false;
+    const authRecovery = "Scheduled notification needs Microsoft sign-in or additional permissions. Open Connectors and test the connection before retrying delivery.";
     const tenantSession = createTenantSession({
       client,
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        runInteractiveFlow({ client, scopes, openBrowser }),
+      acquireInteractive: async (scopes) => {
+        if (run.trigger === "schedule") {
+          scheduledAuthRequired = true;
+          throw new Error(authRecovery);
+        }
+        return runInteractiveFlow({ client, scopes, openBrowser });
+      },
     });
 
     let instance: Awaited<ReturnType<typeof factory.build>> | undefined;
@@ -615,7 +622,7 @@ export class RunDeliveryService {
       });
       return { retryable: false };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = scheduledAuthRequired ? authRecovery : error instanceof Error ? error.message : String(error);
       const audit = createDeliveryAuditEntry({
         runId: run.id,
         stepId,
@@ -643,7 +650,7 @@ export class RunDeliveryService {
           connectorAudit: audit as unknown as Record<string, unknown>,
         },
       );
-      return { retryable: true, error: message };
+      return { retryable: !scheduledAuthRequired, error: message };
     } finally {
       await instance?.dispose().catch(() => undefined);
     }
@@ -865,13 +872,20 @@ export class RunDeliveryService {
 
     const client = this.host.getMsalClient();
     const openBrowser = this.host.openBrowser;
+    let scheduledAuthRequired = false;
+    const authRecovery = "Scheduled notification needs Microsoft sign-in or additional permissions. Open Connectors and test the connection before retrying delivery.";
     const tenantSession = createTenantSession({
       client,
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        runInteractiveFlow({ client, scopes, openBrowser }),
+      acquireInteractive: async (scopes) => {
+        if (run.trigger === "schedule") {
+          scheduledAuthRequired = true;
+          throw new Error(authRecovery);
+        }
+        return runInteractiveFlow({ client, scopes, openBrowser });
+      },
     });
 
     let instance: Awaited<ReturnType<typeof factory.build>> | undefined;
@@ -931,7 +945,7 @@ export class RunDeliveryService {
       });
       return { retryable: false };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = scheduledAuthRequired ? authRecovery : error instanceof Error ? error.message : String(error);
       const audit = createDeliveryAuditEntry({
         runId: run.id,
         stepId,
@@ -954,7 +968,7 @@ export class RunDeliveryService {
         connectorId: OUTLOOK_CONNECTOR_ID,
         connectorAudit: audit as unknown as Record<string, unknown>,
       });
-      return { retryable: isRetryableDeliveryError(error), error: message };
+      return { retryable: !scheduledAuthRequired && isRetryableDeliveryError(error), error: message };
     } finally {
       await instance?.dispose().catch(() => undefined);
     }

@@ -46,7 +46,9 @@ export function installConnectorConfirmBridge(input: {
  */
 export async function requestConnectorConfirmation(
   info: ConnectorInvocationInfo,
+  signal?: AbortSignal,
 ): Promise<ConfirmationDecision> {
+  signal?.throwIfAborted();
   const window = getMainWindow();
   if (!window || window.isDestroyed()) {
     return { approved: false, reason: "No renderer attached to receive confirmation." };
@@ -72,7 +74,15 @@ export async function requestConnectorConfirmation(
   };
 
   return new Promise<ConfirmationDecision>((resolve) => {
-    pending.set(requestId, { resolve });
+    const finish = (decision: ConfirmationDecision) => {
+      signal?.removeEventListener("abort", abort);
+      pending.delete(requestId);
+      resolve(decision);
+    };
+    const abort = () => finish({ approved: false, reason: "Run cancelled by user." });
+    pending.set(requestId, { resolve: finish });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) { abort(); return; }
     window.webContents.send("openadminos:connector-confirm-request", payload);
   });
 }

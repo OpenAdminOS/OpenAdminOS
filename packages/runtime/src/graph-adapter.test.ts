@@ -395,3 +395,22 @@ describe("createGraphAdapter transient network faults", () => {
     assert.equal(calls.length, 0);
   });
 });
+
+describe("cancellation while acquiring a Graph token", () => {
+  it("rejects promptly and never dispatches a late token after cancellation", async () => {
+    const controller = new AbortController();
+    let finish!: (token: string) => void;
+    let fetchCount = 0;
+    const graph = createGraphAdapter({
+      signal: controller.signal,
+      tokenProvider: () => new Promise<string>((resolve) => { finish = resolve; }),
+      fetchImpl: async () => { fetchCount += 1; return new Response("{}"); },
+    });
+    const request = graph.request({ method: "PATCH", path: "/users/test", body: { accountEnabled: false } });
+    controller.abort(new Error("Cancelled test"));
+    await assert.rejects(request, /Cancelled test/);
+    finish("late-token");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(fetchCount, 0);
+  });
+});

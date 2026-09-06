@@ -1854,6 +1854,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 
 ### Systemic concerns to track
 
+- **Agent execution lifecycle (v0.5.1)**: all Microsoft interactive sign-ins have a five-minute deadline. Runs explicitly show when Microsoft sign-in is needed; Cancel stops the wait and prevents subsequent work. The system browser does not report window closure, so closing it requires explicit run cancellation or deadline expiry. Scheduled runs fail with manual sign-in instructions instead of opening a browser. Startup marks interrupted queued/running records failed without replaying writes or discarding pending approvals. Cancellation preserves outcomes for requests already dispatched and never implies their remote effects were reversed. See `docs/agent-run-lifecycle-audit.md` for the original findings and regression coverage.
 - **Trust messaging consistency**: single source of truth across all surfaces (see §3)
 - **Hosted-provider flip UX**: the moment an admin switches from local to hosted is the most important UX moment in the app
 - **Documentation surface**: in-app help, web docs, GitHub issues, Discord: needs a coherent answer before launch

@@ -995,3 +995,47 @@ async function brokerWritePlan(params: unknown) {
     params: params as WritePlan,
   });
 }
+
+describe("template execution cancellation", () => {
+  it("stops the apply loop after cancellation instead of treating it as an individual failure", async () => {
+    const fixture = makeWriteAgentFixture({ devices: [
+      managedDevice("device-1", "Laptop 1", "S1"), managedDevice("device-2", "Laptop 2", "S2"),
+    ] });
+    try {
+      const input = { agent: fixture.agent, providerId: "ollama" as const, llm: fixture.llm,
+        createGraph: () => fixture.graph, onProgress() {} };
+      const planned = await executePlan({ ...input, run: createQueuedRun({ agent: fixture.agent, providerId: "ollama" }) });
+      assert.ok(planned.plan);
+      const controller = new AbortController();
+      let calls = 0;
+      fixture.graph.retireManagedDevice = async () => {
+        calls += 1; controller.abort(new Error("Cancelled during first action"));
+        throw new Error("Request interrupted");
+      };
+      const stopped = await executeApply({ ...input, run: planned, plan: planned.plan, realWrites: true, signal: controller.signal });
+      assert.equal(calls, 1);
+      assert.equal(stopped.status, "failed"); // The host retains the user-cancelled terminal state.
+      assert.match(stopped.error ?? "", /Cancelled during first action/);
+    } finally { fixture.cleanup(); }
+  });
+
+  it("passes cancellation into LLM streaming during planning", async () => {
+    const fixture = makeWriteAgentFixture({ devices: [] });
+    const controller = new AbortController();
+    let received: AbortSignal | undefined;
+    fixture.llm.stream = async function* (options) {
+      received = options.signal;
+      controller.abort(new Error("Cancelled LLM"));
+      options.signal?.throwIfAborted();
+      yield { delta: "", accumulated: "", done: true, model: "test" };
+    };
+    try {
+      const run = await executePlan({ agent: fixture.agent, providerId: "ollama", llm: fixture.llm,
+        createGraph: () => fixture.graph, signal: controller.signal,
+        run: createQueuedRun({ agent: fixture.agent, providerId: "ollama" }), onProgress() {} });
+      assert.equal(received, controller.signal);
+      assert.equal(run.status, "failed");
+      assert.match(run.error ?? "", /Cancelled LLM/);
+    } finally { fixture.cleanup(); }
+  });
+});

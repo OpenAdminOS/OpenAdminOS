@@ -1,3 +1,4 @@
+import { awaitWithSignal } from "./cancellation.js";
 import type {
   GraphRequestInput as SdkGraphRequestInput,
   ManagedDeviceRecord,
@@ -18,6 +19,7 @@ export type GraphAdapterLogger = (
 ) => void;
 
 export interface GraphAdapterOptions {
+  signal?: AbortSignal;
   tokenProvider: () => Promise<string>;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -106,6 +108,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
           method: "GET",
           url: nextLink,
           tokenProvider: options.tokenProvider,
+          signal: options.signal,
           fetchImpl,
           maxRetries,
           retryBackoffMs,
@@ -134,6 +137,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         method: "POST",
         url,
         tokenProvider: options.tokenProvider,
+        signal: options.signal,
         fetchImpl,
         maxRetries,
         retryBackoffMs,
@@ -178,6 +182,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         method,
         url,
         tokenProvider: options.tokenProvider,
+        signal: options.signal,
         fetchImpl,
         maxRetries,
         retryBackoffMs,
@@ -188,7 +193,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         idempotent: method === "GET" || method === "PUT" || method === "DELETE",
         baseUrl,
         log: options.log,
-        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.signal ? { signal: options.signal ? AbortSignal.any([options.signal, input.signal]) : input.signal } : {}),
       });
     },
   };
@@ -269,7 +274,8 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     if (input.signal?.aborted) {
       throw new Error(GRAPH_REQUEST_CANCELLED);
     }
-    const token = await input.tokenProvider();
+    const token = await awaitWithSignal(input.tokenProvider(), input.signal);
+    if (input.signal?.aborted) throw new Error(GRAPH_REQUEST_CANCELLED);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs);
     // Caller cancellation aborts the same controller the timeout uses;

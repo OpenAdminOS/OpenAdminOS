@@ -6249,6 +6249,7 @@ if (!gotLock) {
           }
         : {}),
     });
+    await store.recoverInterruptedRuns();
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
     void store.processPendingRunDeliveries();

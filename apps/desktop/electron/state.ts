@@ -1283,8 +1283,8 @@ export class AppStateStore {
       listProviders: () => host.listProviders(),
       providerCanRun: (provider) => host.providerCanRun(provider),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),
-      buildGraph: (pinnedTenantId, agentScopes) =>
-        host.buildGraph(pinnedTenantId, agentScopes),
+      buildGraph: (pinnedTenantId, agentScopes, execution) =>
+        host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),
       connectorSecretsFor: (connectorId) => host.connectorSecretsFor(connectorId),
       selfTrainingPromptOverlay: (tenantId, agentSlug) =>
@@ -4318,6 +4318,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return this.getAppState();
   }
 
+  async recoverInterruptedRuns(): Promise<void> {
+    await this.runService.recoverInterruptedRuns();
+  }
+
   async cancelRun(runId: string): Promise<RunRecord> {
     return this.runService.cancelRun(runId);
   }
@@ -5240,6 +5244,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   private async buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
+    execution?: { signal: AbortSignal; allowInteractive: boolean; onAuthRequired(): Promise<void> },
   ): Promise<{
     createGraph: (
       log: (
@@ -5269,12 +5274,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
       acquireInteractive: async (scopes) => {
+        execution?.signal.throwIfAborted();
+        if (execution && !execution.allowInteractive) {
+          throw new Error("Scheduled run needs Microsoft sign-in or additional permissions. Run the agent manually and complete sign-in, then retry the schedule.");
+        }
+        await execution?.onAuthRequired();
         // Per-capability incremental consent. Pops a browser sign-in when
         // a connector or agent requests scopes the cached refresh token
         // cannot satisfy. The user re-consents to the additional
         // scopes; subsequent silent acquisitions for the same scope set
         // succeed from cache.
-        return await runInteractiveFlow({ client, scopes, openBrowser });
+        return await runInteractiveFlow({ client, scopes, openBrowser, signal: execution?.signal });
       },
     });
     // When the agent declares Graph scopes, route the tokenProvider
@@ -5295,7 +5305,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             return result.accessToken;
           };
     return {
-      createGraph: (log) => createGraphAdapter({ tokenProvider, log }),
+      createGraph: (log) => createGraphAdapter({ tokenProvider, log, signal: execution?.signal }),
       tenantId: tenant.id,
       tenantSession,
     };
