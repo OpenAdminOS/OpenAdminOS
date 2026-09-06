@@ -1423,6 +1423,14 @@ Electron window.
 
 ### Code signing
 
+The macOS release job applies a fail-closed workaround for app-builder-lib
+26.15.3 before packaging. The dependency creates a random-password temporary
+keychain but supplies certificate passwords to `set-key-partition-list`;
+`scripts/patch-macos-signing.mjs` threads the keychain password separately while
+preserving certificate import passwords. The helper rejects unknown versions or
+source shapes. Remove it only after verifying an upstream correction. Signing,
+notarization, and packaged-signature verification remain mandatory.
+
 Release workflow dispatch must use the fully qualified `refs/tags/vX.Y.Z` ref.
 A branch may have the same version name; an unqualified dispatch can select
 that branch and skip tag-only signing/publication. Verify the workflow head
