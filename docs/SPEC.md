@@ -1854,6 +1854,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 
 ### Systemic concerns to track
 
+- **Agent execution lifecycle (audit 2026-09-06)**: incremental consent currently lacks the timeout/cancellation controls used by tenant setup, and run cancellation suppresses snapshots without stopping execution. Interrupted-run recovery and scheduled reauthentication also need correction. These are implementation gaps, not intended guarantees; see `docs/agent-run-lifecycle-audit.md` for evidence, affected agents, and acceptance checks.
 - **Trust messaging consistency**: single source of truth across all surfaces (see §3)
 - **Hosted-provider flip UX**: the moment an admin switches from local to hosted is the most important UX moment in the app
 - **Documentation surface**: in-app help, web docs, GitHub issues, Discord: needs a coherent answer before launch
