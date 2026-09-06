@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Replace the landing page's agent installation count with total GitHub release downloads, matching the README KPI.
+
 ### Removed
 
 ### Fixed

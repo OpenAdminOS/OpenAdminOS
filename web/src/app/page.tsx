@@ -11,6 +11,7 @@ import { getAgentStatsSummary } from "~/lib/stats/summary";
 
 import { AmbientVideo } from "./AmbientVideo";
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
+import { getGitHubDownloadCount } from "./github-downloads";
 import { getGitHubRepoStats } from "./github-repo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
 import { getLatestReleaseDownloads } from "./release-downloads";
@@ -112,10 +113,11 @@ const testimonials = [
 ] as const;
 
 export default async function HomePage() {
-  const [latestRelease, githubRepoStats, agentStatsSummary] = await Promise.all([
+  const [latestRelease, githubRepoStats, agentStatsSummary, downloadCount] = await Promise.all([
     getLatestReleaseDownloads(),
     getGitHubRepoStats(),
     getAgentStatsSummary(),
+    getGitHubDownloadCount(),
   ]);
   const tractionItems = [
     ...(githubRepoStats
@@ -132,11 +134,10 @@ export default async function HomePage() {
             value: formatStat(agentStatsSummary.agentCount),
             label: "Community agents",
           },
-          {
-            value: formatStat(agentStatsSummary.totalInstalls),
-            label: "Agent installs",
-          },
         ]
+      : []),
+    ...(downloadCount !== null
+      ? [{ value: formatStat(downloadCount), label: "Downloads" }]
       : []),
     {
       value: "MIT",

@@ -149,9 +149,11 @@ your Microsoft 365 tenant. Run locally, approved by you."), a pre-rendered
 product demo video, a traction strip, a three-step "How it works" section, the
 write-gate diff demo, the top most-installed registry agents, and open
 source + FAQ + final CTA. The traction strip and CTA star count only render
-real numbers: GitHub stars from the unauthenticated repo API (revalidated
-hourly) and agent/install counts from the synced `public/stats/agents.json`;
-when either source is unavailable the cell is omitted, never faked. Registry
+real numbers: GitHub stars from the unauthenticated repo API and total release
+asset downloads across all releases (both revalidated hourly), plus the community
+agent count from the synced `public/stats/agents.json`. Downloads replace the
+aggregate agent installation count and match the README's total-downloads badge.
+When a source is unavailable its cell is omitted, never faked. Registry
 agent display metadata (names, descriptions, mode, scopes) is curated in
 `web/src/lib/stats/summary.ts` because repo-root `agents/index.json` is not
 available inside the `web/` Vercel build. The demo video is rendered offline
