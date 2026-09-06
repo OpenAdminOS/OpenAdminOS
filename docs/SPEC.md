@@ -1981,3 +1981,14 @@ For context: these exist or are in flight, and may interact with OpenAdminOS ove
 - **IntuneTUI** (deprecated): terminal-based Intune tool. The lesson from this project drove OpenAdminOS' decision to use a desktop GUI instead of a terminal: admins are not developer-y enough for TUIs as a primary surface.
 
 OpenAdminOS is the flagship community project. The others are either narrow paid products (TenantPDF) or instructive prior art.
+
+### Approved v0.5.1 release recovery (2026-09-06)
+
+The maintainer explicitly approved restoring package versions to 0.5.1 while
+retaining the lifecycle and signing fixes, moving the previously unpublished
+v0.5.1 tag to the corrected CI-verified merge commit, and withdrawing the
+mistaken v0.5.2 GitHub Release into draft while preserving its tag and assets.
+The corrected v0.5.1 becomes the latest public release and apt package.
+This is a one-time approved exception, not permission to move other tags or
+reuse v0.5.2 for different source. Installed v0.5.2 copies do not automatically
+downgrade; users requiring 0.5.1 must install it explicitly.
