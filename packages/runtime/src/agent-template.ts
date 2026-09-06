@@ -677,6 +677,7 @@ export async function runAgentTemplateApply(
   }
 
   for (const action of plan.actions) {
+    ctx.signal?.throwIfAborted();
     const handler = ACTION_HANDLERS[action.kind];
     if (!handler) {
       failed.push({
@@ -701,6 +702,7 @@ export async function runAgentTemplateApply(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      ctx.signal?.throwIfAborted();
       failed.push({ id: action.id, name: action.label, error: message });
       ctx.log("error", `Failed action "${action.label}": ${message}`);
     }

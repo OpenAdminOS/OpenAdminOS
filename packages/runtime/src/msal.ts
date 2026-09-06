@@ -1,3 +1,4 @@
+import { awaitWithSignal } from "./cancellation.js";
 import {
   AuthError,
   type AuthorizeResponse,
@@ -307,7 +308,7 @@ export class TenantConnectCancelledError extends Error {
 
 export class TenantConnectTimeoutError extends Error {
   constructor() {
-    super("Tenant sign-in timed out while waiting for Microsoft.");
+    super("Microsoft sign-in timed out. Run the agent again and complete sign-in, or reconnect the tenant in Settings.");
     this.name = "TenantConnectTimeoutError";
   }
 }
@@ -413,7 +414,9 @@ class AbortableLoopbackClient implements ILoopbackClient {
   closeServer(): void {
     this.cleanupWaiters();
     if (!this.server) return;
-    if (this.server.listening) this.server.close();
+    const server = this.server;
+    if (server.listening) server.close();
+    else server.once("listening", () => server.close());
     this.server.closeAllConnections?.();
     this.server.unref();
     this.server = undefined;
@@ -439,24 +442,37 @@ class AbortableLoopbackClient implements ILoopbackClient {
 export async function runInteractiveFlow(
   input: InteractiveFlowInput,
 ): Promise<AuthenticationResult> {
-  const scopes = input.scopes ?? DEFAULT_SCOPES;
-
+  if (input.signal?.aborted) throw new TenantConnectCancelledError();
+  const deadline = new AbortController();
+  const timeoutMs = input.timeoutMs && input.timeoutMs > 0 ? input.timeoutMs : 300_000;
+  const timer = setTimeout(() => deadline.abort(new TenantConnectTimeoutError()), timeoutMs);
+  timer.unref?.();
+  const signal = input.signal ? AbortSignal.any([input.signal, deadline.signal]) : deadline.signal;
+  const loopbackClient = new AbortableLoopbackClient(signal);
   const request: InteractiveRequest = {
-    scopes,
-    openBrowser: input.openBrowser,
+    scopes: input.scopes ?? DEFAULT_SCOPES,
+    openBrowser: async (url) => {
+      signal.throwIfAborted();
+      await input.openBrowser(url);
+    },
     successTemplate: SUCCESS_TEMPLATE,
     errorTemplate: ERROR_TEMPLATE,
-    loopbackClient: new AbortableLoopbackClient(input.signal, input.timeoutMs),
+    loopbackClient,
   };
-  if (input.redirectUri) {
-    request.redirectUri = input.redirectUri;
+  if (input.redirectUri) request.redirectUri = input.redirectUri;
+  try {
+    const result = await awaitWithSignal(input.client.acquireTokenInteractive(request), signal);
+    signal.throwIfAborted();
+    if (!result) throw new Error("MSAL returned no authentication result.");
+    return result;
+  } catch (error) {
+    if (input.signal?.aborted) throw new TenantConnectCancelledError();
+    if (deadline.signal.aborted) throw new TenantConnectTimeoutError();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    loopbackClient.closeServer();
   }
-
-  const result = await input.client.acquireTokenInteractive(request);
-  if (!result) {
-    throw new Error("MSAL returned no authentication result.");
-  }
-  return result;
 }
 
 export async function acquireTokenSilent(input: {

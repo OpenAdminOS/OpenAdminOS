@@ -2,7 +2,8 @@
 
 Date: 2026-09-06. Scope: the 14 repository registry manifests, their shared
 read/plan/apply lifecycle, system apply, authentication, persistence, and scheduling.
-This is an analysis of the current source, not a shipped fix or a live-tenant test.
+The findings below describe the audited source at commit `a5fe348`. The v0.5.1
+corrections are recorded below. Verification uses isolated fixtures, not a live tenant.
 
 ## Findings
 
@@ -119,4 +120,39 @@ silent token acquisition succeeds for the declared scopes, not on the agent name
 
 Installed custom agents and version-pinned manifests in a user's app data were
 not inspected. The shared-runtime findings also apply to them when they use these
-execution paths. No production behavior was changed as part of this audit.
+execution paths. The fixes apply in the shared runtime; individual agent manifests do not need updates.
+
+## v0.5.1 corrections
+
+- Each run phase owns a cancellation signal. Cancellation reaches Microsoft
+  sign-in, token waits, Graph requests, provider calls, and step/action boundaries.
+  Template apply stops on cancellation instead of treating it as a per-item error.
+  Connector confirmations are cancelled and later capability invocations are blocked.
+- Microsoft interactive sign-in has a five-minute deadline covering the complete
+  MSAL wait, including callers that omit a timeout. Late authorization results
+  cannot resume cancelled Graph work. The active pipeline step and logs explain
+  the sign-in wait and the Cancel run recovery action.
+- Scheduled runs refuse interactive consent and return instructions to run the
+  agent manually to restore permissions. Startup marks abandoned queued/running
+  records failed, preserves evidence and pending approvals, and never replays writes.
+- Confirmation resolves provider information before persisting its running state.
+- Cancelled state is protected inside serialized persistence. Completed or failed
+  outcomes from already-dispatched actions remain visible without reviving the run.
+
+System-browser closure still cannot be observed through `shell.openExternal`.
+Closing the browser therefore leaves the explicit sign-in wait until the user
+selects Cancel run or the deadline expires. In-flight remote writes may already
+have taken effect when cancellation arrives; cancellation stops subsequent work
+and does not claim to roll those effects back. External connector operations
+already dispatched can finish; their audit outcome remains recorded.
+
+Regression coverage includes default auth timeout, late successful auth after
+cancellation, cancellation during token acquisition, cancellation between template
+and system writes, LLM signal propagation, a queued-snapshot cancellation race,
+startup recovery, scheduled consent refusal, and provider discovery failure.
+
+Local verification of the fixes: 379 backend tests and 93 renderer tests passed,
+along with typecheck, build, 168 registry QA checks, generated-document checks,
+and release compatibility checks. Renderer tests on the local Node 26 runtime
+used `NODE_OPTIONS=--no-experimental-webstorage` so jsdom supplies browser storage;
+CI uses Node 22. No live-tenant sign-in or write was performed.

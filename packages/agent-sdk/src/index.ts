@@ -3251,6 +3251,8 @@ export interface RunContextOptions {
 }
 
 export interface RunContext {
+  /** Host cancellation. Check before starting additional work. */
+  signal?: AbortSignal;
   agent: AgentDefinition;
   providerId: ProviderId;
   model?: string;

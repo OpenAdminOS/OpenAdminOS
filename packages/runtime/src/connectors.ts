@@ -276,6 +276,7 @@ export interface ConnectorInvocationInfo {
 }
 
 export interface WrapConnectorOptions {
+  signal?: AbortSignal;
   runId: string;
   /**
    * Current step id at the moment the capability fires. The wrapper
@@ -352,6 +353,7 @@ interface InvokeCapabilityInput {
 }
 
 async function invokeCapability(input: InvokeCapabilityInput): Promise<unknown> {
+  input.options.signal?.throwIfAborted();
   if (!input.capabilityDescriptor) {
     throw new ConnectorValidationError(
       `Connector '${input.connectorId}' exposed method '${input.methodName}' without a matching capability descriptor. Invocation was blocked.`,
@@ -414,6 +416,7 @@ async function invokeCapability(input: InvokeCapabilityInput): Promise<unknown> 
 
   const started = Date.now();
   try {
+    input.options.signal?.throwIfAborted();
     const result = await input.method(...args);
     const { externalId, externalUrl } = extractExternalRefs(result);
     emitAudit(input.options, {

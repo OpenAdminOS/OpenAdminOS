@@ -58,6 +58,7 @@ export interface RunServiceHost {
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
+    execution?: { signal: AbortSignal; allowInteractive: boolean; onAuthRequired(): Promise<void> },
   ): Promise<{
     createGraph: (
       log: (
@@ -88,7 +89,7 @@ export interface RunServiceHost {
 }
 
 export class RunService {
-  private readonly cancelledRunIds = new Set<string>();
+  private readonly controllers = new Map<string, AbortController>();
 
   constructor(private readonly host: RunServiceHost) {}
 
@@ -109,6 +110,7 @@ export class RunService {
         return run;
       }
 
+      this.controllers.get(runId)?.abort(new Error("Run cancelled by user."));
       const finishedAt = new Date().toISOString();
       const cancelled: RunRecord = {
         ...run,
@@ -117,7 +119,10 @@ export class RunService {
         // Overwrite any stale in-progress summary (e.g. "X is running.")
         // with an explicit cancellation message. The original summary
         // would otherwise leak into Activity rows long after the cancel.
-        summary: "Cancelled by user.",
+        summary: run.confirmedAt
+          ? "Cancelled by user. Requests already sent may have completed; review the action steps before retrying."
+          : "Cancelled by user.",
+        liveSummary: undefined,
         // Transition any in-flight step to "cancelled" and stop any
         // streaming reasoning indicator. Without this the UI keeps
         // spinning the active step and showing a "streaming" badge
@@ -146,7 +151,7 @@ export class RunService {
       await this.host.write({ ...persisted, runs: nextRuns });
       return cancelled;
     });
-    this.cancelledRunIds.add(runId);
+    this.host.emitStateChanged("run-cancelled", runId);
     return result;
   }
 
@@ -498,6 +503,18 @@ export class RunService {
         throw new Error(`Agent ${run.agentSlug} is not a write agent.`);
       }
 
+      const providers = await this.host.listProviders();
+      const activeProvider =
+        providers.find((provider) => provider.id === persisted.activeProviderId) ??
+        providers[0];
+      const providerId = run.providerId ?? activeProvider?.id ?? persisted.activeProviderId;
+      const model =
+        run.model ??
+        resolveProviderDefaultModel(
+          activeProvider,
+          persisted.activeModelByProviderId,
+        ).model;
+
       const confirmedAt = new Date().toISOString();
       const updated: RunRecord = {
         ...run,
@@ -512,18 +529,6 @@ export class RunService {
           existing.id === runId ? updated : existing,
         ),
       });
-
-      const providers = await this.host.listProviders();
-      const activeProvider =
-        providers.find((provider) => provider.id === persisted.activeProviderId) ??
-        providers[0];
-      const providerId = run.providerId ?? activeProvider?.id ?? persisted.activeProviderId;
-      const model =
-        run.model ??
-        resolveProviderDefaultModel(
-          activeProvider,
-          persisted.activeModelByProviderId,
-        ).model;
 
       return { kind: "agent" as const, agent, providerId, model, updated };
     });
@@ -612,6 +617,47 @@ export class RunService {
     return persisted.runs.find((run) => run.id === id);
   }
 
+  private executionOptions(run: RunRecord, signal: AbortSignal) {
+    return {
+      signal,
+      allowInteractive: run.trigger !== "schedule",
+      onAuthRequired: async () => {
+        const message = "Waiting for Microsoft sign-in. Complete sign-in in your browser, or select Cancel run. This request expires after five minutes.";
+        await this.host.serialize(async () => {
+          signal.throwIfAborted();
+          const state = await this.host.read();
+          await this.host.write({ ...state, runs: state.runs.map((current) =>
+            current.id === run.id && !isTerminalRunStatus(current.status)
+              ? { ...current, summary: message, steps: current.steps.map((step) =>
+                step.status === "running" ? { ...step, detail: message } : step) }
+              : current) });
+        });
+        await this.appendRunLog(run.id, "info", message);
+      },
+    };
+  }
+
+  async recoverInterruptedRuns(): Promise<void> {
+    await this.host.serialize(async () => {
+      const state = await this.host.read();
+      const finishedAt = new Date().toISOString();
+      const runs = state.runs.map((run): RunRecord => {
+        if (!["running", "queued"].includes(run.status) || this.controllers.has(run.id)) return run;
+        const message = run.confirmedAt
+          ? "OpenAdminOS closed during this run. Requests already sent may have completed. Review the tenant before running it again."
+          : "OpenAdminOS closed before this run finished. Run the agent again to retry.";
+        return { ...run, status: "failed", finishedAt, summary: message, error: message,
+          liveSummary: undefined,
+          steps: run.steps.map((step) => ({ ...step,
+            ...(step.status === "running" ? { status: "failed" as const, finishedAt, detail: message } : {}),
+            ...(step.thinking ? { thinking: { ...step.thinking, streaming: false } } : {}),
+          })),
+        };
+      });
+      if (runs.some((run, index) => run !== state.runs[index])) await this.host.write({ ...state, runs });
+    });
+  }
+
   private stampTenant(run: RunRecord, tenantId: string): RunRecord {
     return { ...run, tenantId };
   }
@@ -622,15 +668,20 @@ export class RunService {
     providerId: ProviderId;
     model?: string;
   }): Promise<void> {
+    const controller = new AbortController();
+    this.controllers.set(input.run.id, controller);
     try {
+      if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const baseLlm = await this.host.buildLlm(input.providerId, input.model);
-      const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes);
+      const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
       const overlay = this.host.selfTrainingPromptOverlay(selection.tenantId, input.agent.slug);
       const llm = overlay ? withSelfTrainingOverlay(baseLlm, overlay) : baseLlm;
       const stampedRun = this.stampTenant(input.run, selection.tenantId);
       await this.persistRunSnapshot(stampedRun);
+      controller.signal.throwIfAborted();
       await driver({
+        signal: controller.signal,
         run: stampedRun,
         agent: input.agent,
         providerId: input.providerId,
@@ -640,13 +691,15 @@ export class RunService {
         tenant: selection.tenantSession,
         connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        confirmCapability: requestConnectorConfirmation,
+        confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
         onProgress: (next) =>
           this.persistRunSnapshot(this.stampTenant(next, selection.tenantId)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
+    } finally {
+      if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
   }
 
@@ -657,12 +710,17 @@ export class RunService {
     model?: string;
     plan: NonNullable<RunRecord["plan"]>;
   }): Promise<void> {
+    const controller = new AbortController();
+    this.controllers.set(input.run.id, controller);
     try {
+      if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       const baseLlm = await this.host.buildLlm(input.providerId, input.model);
-      const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes);
+      const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
       const overlay = this.host.selfTrainingPromptOverlay(selection.tenantId, input.agent.slug);
       const llm = overlay ? withSelfTrainingOverlay(baseLlm, overlay) : baseLlm;
+      controller.signal.throwIfAborted();
       await executeApply({
+        signal: controller.signal,
         run: input.run,
         agent: input.agent,
         providerId: input.providerId,
@@ -673,13 +731,15 @@ export class RunService {
         tenant: selection.tenantSession,
         connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        confirmCapability: requestConnectorConfirmation,
+        confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
         onProgress: (next) =>
           this.persistRunSnapshot(this.stampTenant(next, selection.tenantId)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
+    } finally {
+      if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
   }
 
@@ -695,19 +755,23 @@ export class RunService {
     const plan = input.run.plan;
     const isRollback = input.run.origin === "baseline-rollback";
     const noun = isRollback ? "Rollback" : "Proposal";
+    const controller = new AbortController();
+    this.controllers.set(input.run.id, controller);
     try {
+      if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       if (!plan) throw new Error(`${noun} run has no plan.`);
       const scopes =
         input.run.rollback?.requiredScopes ??
         input.run.external?.requiredScopes ??
         [];
-      const selection = await this.host.buildGraph(input.run.tenantId, scopes);
+      const selection = await this.host.buildGraph(input.run.tenantId, scopes, this.executionOptions(input.run, controller.signal));
       const graph = selection.createGraph((level, message, metadata) => {
         void this.appendRunLog(input.run.id, level, message, metadata);
       });
       let run = this.stampTenant(input.run, selection.tenantId);
       let applied = 0;
       for (const [index, action] of plan.actions.entries()) {
+        controller.signal.throwIfAborted();
         const startedAt = new Date().toISOString();
         const step = {
           id: `step_rollback_${index}`,
@@ -723,7 +787,9 @@ export class RunService {
           if (!action.request) {
             throw new Error(`${noun} action carries no Graph request.`);
           }
+          controller.signal.throwIfAborted();
           await graph.request({
+            signal: controller.signal,
             method: action.request.method,
             path: action.request.path,
             ...(action.request.body !== undefined
@@ -787,6 +853,8 @@ export class RunService {
         summary: `${noun} failed before any action was applied: ${message}`,
         error: message,
       });
+    } finally {
+      if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
   }
 
@@ -807,16 +875,26 @@ export class RunService {
   }
 
   async persistRunSnapshot(run: RunRecord): Promise<void> {
-    if (this.cancelledRunIds.has(run.id)) {
-      // Run was soft-cancelled: discard further progress snapshots so
-      // the stored state stays in the "cancelled" terminal state even
-      // while background work finishes returning.
-      return Promise.resolve();
-    }
     let deliveryCandidate: RunRecord | undefined;
     await this.host.serialize(async () => {
       const persisted = await this.host.read();
       const previous = persisted.runs.find((existing) => existing.id === run.id);
+      if (previous?.status === "cancelled") {
+        const steps = previous.steps.map((step) => {
+          const incoming = run.steps.find((candidate) => candidate.id === step.id);
+          if (step.status !== "cancelled" || !incoming ||
+              !["completed", "failed"].includes(incoming.status)) return step;
+          if (incoming.status === "failed" && /cancelled/i.test(incoming.detail ?? "")) return { ...step, detail: incoming.detail };
+          return { ...incoming, thinking: incoming.thinking ? { ...incoming.thinking, streaming: false } : undefined };
+        });
+        const logs = [...previous.logs];
+        for (const log of run.logs) if (!logs.some((existing) => existing.id === log.id)) logs.push(log);
+        await this.host.write({ ...persisted, runs: persisted.runs.map((existing) =>
+          existing.id === run.id ? { ...previous, steps, logs } : existing) });
+        return;
+      }
+      if (previous && isTerminalRunStatus(previous.status) && !isTerminalRunStatus(run.status)) return;
+
       const wasTerminal = previous ? isTerminalRunStatus(previous.status) : false;
       const isNowTerminal = isTerminalRunStatus(run.status);
       const nextRun =

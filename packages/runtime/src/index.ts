@@ -338,6 +338,7 @@ export type CreateGraphAdapter = (
 ) => RunGraphApi;
 
 export interface ExecuteRunInput {
+  signal?: AbortSignal;
   run: RunRecord;
   agent: AgentSummary;
   providerId: ProviderId;
@@ -406,6 +407,7 @@ async function createPhaseHandle(
   initialOverrides: Partial<RunRecord>,
   startupLog: string,
 ): Promise<PhaseHandle> {
+  input.signal?.throwIfAborted();
   const startedAt = new Date().toISOString();
   let working: RunRecord = {
     ...input.run,
@@ -447,7 +449,7 @@ async function createPhaseHandle(
       working = { ...working, tokens: mergeTokenUsage(working.tokens, usage) };
       void input.onProgress(working);
     },
-  });
+  }, input.signal);
 
   const logFn = (
     level: RunLogLevel,
@@ -490,6 +492,7 @@ async function createPhaseHandle(
     for (const entry of preflight.built) {
       wrappedAccessor[entry.id] = wrapConnector(entry.id, entry.instance, {
         runId: input.run.id,
+        signal: input.signal,
         currentStepId: () => currentStepId,
         ...(input.confirmCapability
           ? { confirmInvocation: input.confirmCapability }
@@ -512,6 +515,7 @@ async function createPhaseHandle(
   const graph = input.createGraph(logFn);
 
   const ctx: RunContext = {
+    signal: input.signal,
     agent: toAgentDefinition(input.agent),
     providerId: input.providerId,
     model: input.model,
@@ -525,6 +529,7 @@ async function createPhaseHandle(
       void input.onProgress(working);
     },
     step: async (label, detail, fn) => {
+      input.signal?.throwIfAborted();
       const stepId = `step_${working.steps.length + 1}_${Math.random()
         .toString(36)
         .slice(2, 8)}`;
@@ -549,6 +554,7 @@ async function createPhaseHandle(
       await input.onProgress(working);
 
       try {
+        input.signal?.throwIfAborted();
         const value = await fn();
         const stepFinishedAt = new Date().toISOString();
         working = {
@@ -628,7 +634,7 @@ export function mergeTokenUsage(
   return merged;
 }
 
-function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
+function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: AbortSignal): RunLlmApi {
   const guardAvailable = () => {
     if (!base.available) {
       throw new Error(
@@ -657,6 +663,8 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
     },
     async *stream(options) {
       guardAvailable();
+      signal?.throwIfAborted();
+      options = { ...options, signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal };
       const stepId = hooks.getCurrentStepId();
       const reset = () => {
         if (stepId) {
@@ -666,6 +674,7 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks): RunLlmApi {
 
       try {
         for await (const chunk of base.stream(options)) {
+          signal?.throwIfAborted();
           if (stepId) {
             hooks.updateStepThinking(stepId, () => ({
               text: chunk.accumulated,

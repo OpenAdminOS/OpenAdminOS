@@ -61,11 +61,12 @@ describe("interactive tenant sign-in listener", () => {
       acquireTokenInteractive: async (request: InteractiveRequest) => {
         const authorization = request.loopbackClient!.listenForAuthCode();
         let redirectUri: string | undefined;
-        for (let attempt = 0; attempt < 20 && !redirectUri; attempt += 1) {
+        const readyDeadline = Date.now() + 2_000;
+        while (!redirectUri && Date.now() < readyDeadline) {
           try {
             redirectUri = request.loopbackClient!.getRedirectUri();
           } catch {
-            await new Promise((resolve) => setTimeout(resolve, 1));
+            await new Promise((resolve) => setTimeout(resolve, 5));
           }
         }
         assert.ok(redirectUri);
@@ -85,5 +86,26 @@ describe("interactive tenant sign-in listener", () => {
       openBrowser: async () => undefined,
     });
     assert.equal(result.accessToken, "test-token");
+  });
+});
+
+describe("incremental sign-in lifecycle", () => {
+  it("uses a five-minute default even when the agent does not supply a timeout", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const client = { acquireTokenInteractive: () => new Promise(() => {}) } as unknown as PublicClientApplication;
+    const result = runInteractiveFlow({ client, openBrowser: async () => undefined });
+    const rejected = assert.rejects(result, TenantConnectTimeoutError);
+    t.mock.timers.tick(300_001);
+    await rejected;
+  });
+
+  it("cancels the complete MSAL wait and ignores a late successful result", async () => {
+    const controller = new AbortController();
+    let finish!: (result: AuthenticationResult) => void;
+    const client = { acquireTokenInteractive: () => new Promise<AuthenticationResult>((resolve) => { finish = resolve; }) } as unknown as PublicClientApplication;
+    const result = runInteractiveFlow({ client, signal: controller.signal, openBrowser: async () => undefined });
+    controller.abort();
+    await assert.rejects(result, TenantConnectCancelledError);
+    finish({ accessToken: "late-token" } as AuthenticationResult);
   });
 });
