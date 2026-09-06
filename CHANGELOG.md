@@ -12,29 +12,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
-### Security
-
-## [0.5.2] - 2026-09-06
-
-### Added
-
-### Changed
-
-### Removed
-
-### Fixed
-
-- macOS release packaging now uses the generated temporary-keychain password when configuring signing-key access, while retaining each certificate's own import password. This corrects the electron-builder 26.15.3 signing failure without disabling signing, notarization, or artifact verification.
-- Includes the agent lifecycle fixes prepared for 0.5.1: five-minute Microsoft sign-in deadlines, explicit sign-in recovery instructions, execution cancellation that stops later approved actions, scheduled-run and notification authentication safeguards, and recovery of interrupted runs without replaying writes.
-
-### Upgrade notes
-
-- Version 0.5.1 was tagged but not published because macOS signing failed. Version 0.5.2 is the distributable update containing those fixes. The 0.5.1 tag is preserved unchanged.
-- Closing the system browser still requires Cancel run or the sign-in timeout. Requests already sent to Microsoft may have completed; cancellation does not undo those effects.
-
-### Fixed automation
-
-- Release automation explicitly dispatches the version tag, preventing a same-named development branch from being selected instead.
+- Restore the requested v0.5.1 release version and document the explicitly approved withdrawal of v0.5.2.
 
 ### Security
 
@@ -56,6 +34,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Cancel run now interrupts authentication and provider/Graph work and prevents subsequent approved actions. Results from requests already sent remain in the run history; cancellation does not reverse remote changes that already happened.
 - Scheduled agents and their Teams/Outlook notifications return actionable sign-in instructions when credentials or permissions need attention, instead of opening an unattended browser and blocking later runs indefinitely.
 - Restarting the app marks interrupted runs failed with recovery instructions, preserving pending write approvals and avoiding automatic write retries. Provider discovery failures during confirmation leave the plan awaiting approval rather than stranded as running.
+
+### Release reliability
+
+- Corrected macOS signing-key access to use the temporary keychain password, retaining certificate import passwords, signing, notarization, and artifact verification.
+- Release automation selects the explicit version tag even when a development branch has the same name.
+
+### Upgrade and recovery notes
+
+- This is the corrected v0.5.1 release. Version v0.5.2 was published in error and is being withdrawn from public distribution with maintainer approval. Its tag and artifacts are retained for traceability.
+- The previously unpublished v0.5.1 tag is being moved to the corrected, CI-verified release commit with explicit maintainer approval.
+- Existing v0.5.2 installations will not automatically downgrade. Users who need the v0.5.1 version must install it manually; apt also requires an explicit downgrade. Both versions contain the lifecycle fixes.
+- Closing the system browser requires Cancel run or the five-minute sign-in timeout. Cancellation does not undo Microsoft requests already sent.
 
 ### Security
 
