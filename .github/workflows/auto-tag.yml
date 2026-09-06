@@ -109,5 +109,5 @@ jobs:
           TAG: v${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
-          gh workflow run release.yml --ref "$TAG"
+          gh workflow run release.yml --ref "refs/tags/$TAG"
           echo "Dispatched release.yml for $TAG."

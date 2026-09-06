@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Release automation explicitly dispatches the version tag, preventing a same-named development branch from being selected instead.
+
 ### Security
 
 ## [0.5.1] - 2026-09-06

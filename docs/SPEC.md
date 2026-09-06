@@ -1423,6 +1423,11 @@ Electron window.
 
 ### Code signing
 
+Release workflow dispatch must use the fully qualified `refs/tags/vX.Y.Z` ref.
+A branch may have the same version name; an unqualified dispatch can select
+that branch and skip tag-only signing/publication. Verify the workflow head
+commit against the peeled release tag before treating it as a release build.
+
 Required before public v1 release:
 - **Windows:** Azure Artifact Signing (renamed from Trusted Signing in January 2026) under the validated identity `Ugurlabs UG (haftungsbeschränkt)`. The certificate is short-lived, issued and rotated by Microsoft, the private key never exists outside Microsoft's HSM, and CI holds only a revocable Entra service principal credential. Tagged releases build, sign, and publish an x64 NSIS `.exe` installer plus `latest.yml` for electron-updater. Maintainers may still request a manual AppX packaging-validation job for the deferred Microsoft Store path, but AppX files are not published as workflow artifacts or release assets. (The original v0.4.4-era pipeline used a DigiCert KeyLocker OV certificate, order #1504899298, valid to Aug 2027; it worked end to end and was replaced by Trusted Signing for faster SmartScreen reputation. It remains restorable from git history as a fallback.)
 - **macOS:** Apple Developer Program ($99/yr), a Developer ID Application certificate for the app/DMG/ZIP, a Developer ID Installer certificate for the PKG, and notarization. Without notarization, Gatekeeper blocks the app.
