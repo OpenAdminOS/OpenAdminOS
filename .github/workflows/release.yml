@@ -453,6 +453,9 @@ jobs:
           echo "::error::macOS PKG publishing requires CSC_INSTALLER_LINK and CSC_INSTALLER_KEY_PASSWORD for a Developer ID Installer certificate."
           exit 1
 
+      - name: Correct electron-builder macOS keychain password handling
+        run: node scripts/patch-macos-signing.mjs
+
       - name: Build .dmg + .pkg + .zip (signed + notarized when secrets present)
         # Arch is declared in package.json build.mac.target, so we only
         # pass --mac on the CLI; passing --arm64 here would be redundant

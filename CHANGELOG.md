@@ -12,6 +12,28 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+### Security
+
+## [0.5.2] - 2026-09-06
+
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+- macOS release packaging now uses the generated temporary-keychain password when configuring signing-key access, while retaining each certificate's own import password. This corrects the electron-builder 26.15.3 signing failure without disabling signing, notarization, or artifact verification.
+- Includes the agent lifecycle fixes prepared for 0.5.1: five-minute Microsoft sign-in deadlines, explicit sign-in recovery instructions, execution cancellation that stops later approved actions, scheduled-run and notification authentication safeguards, and recovery of interrupted runs without replaying writes.
+
+### Upgrade notes
+
+- Version 0.5.1 was tagged but not published because macOS signing failed. Version 0.5.2 is the distributable update containing those fixes. The 0.5.1 tag is preserved unchanged.
+- Closing the system browser still requires Cancel run or the sign-in timeout. Requests already sent to Microsoft may have completed; cancellation does not undo those effects.
+
+### Fixed automation
+
 - Release automation explicitly dispatches the version tag, preventing a same-named development branch from being selected instead.
 
 ### Security
