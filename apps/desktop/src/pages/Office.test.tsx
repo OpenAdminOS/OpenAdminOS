@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Office from "./Office";
@@ -113,6 +113,42 @@ describe("Office", () => {
     await userEvent.click(screen.getByRole("button", { name: "Stop & pause" }));
     expect(stop).toHaveBeenCalledWith(persona.id);
   });
+  it("preserves an unsaved persona edit during a background refresh", async () => {
+    const state = createMockAppState({
+      office: { personas: [persona], missions: [] },
+    });
+    let finishRefresh: (() => void) | undefined;
+    const getAppState = vi
+      .fn()
+      .mockResolvedValueOnce(state)
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishRefresh = () => resolve(state);
+          }),
+      );
+    renderRoute(<Office />, {
+      route: "/office",
+      path: "/office",
+      bridge: makeMockBridge({ getAppState }, state),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const name = within(screen.getByRole("dialog")).getByLabelText("Name");
+    await userEvent.clear(name);
+    await userEvent.type(name, "Security Watcher");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(name).toHaveValue("Security Watcher");
+    await act(async () => {
+      finishRefresh?.();
+    });
+    expect(
+      within(screen.getByRole("dialog")).getByLabelText("Name"),
+    ).toHaveValue("Security Watcher");
+  });
+
   it("preserves provider-default assignments when editing", async () => {
     const state = createMockAppState({
       activeModelByProviderId: { ollama: "llama3.1" },

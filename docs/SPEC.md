@@ -1613,20 +1613,20 @@ messages, and never suggest the same agent twice in one conversation.
 
 ### Navigation (locked for v0.4)
 
-Office adds a fourth workspace destination to the v0.4 navigation (approved 2026-09-10); Fleet remains conditional on multiple connected tenants. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
+Agent Team adds a fourth workspace destination to the v0.4 navigation (approved 2026-09-10); Fleet remains conditional on multiple connected tenants. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
 
 | Nav item | Route | Contains |
 |---|---|---|
 | Chat | `/chat` | Tenant Q&A (formerly "Intune Chat" in nav; covers Intune + Entra) |
+| Agent Team | `/office` | Persistent personas, ordered assignments, schedules, and evidence-linked briefings |
 | Agents | `/agents` | Tabs: Installed · Hub · Schedules |
-| Office | `/office` | Persistent personas, ordered assignments, schedules, and evidence-linked briefings |
 | Changes | `/changes` | Tenant drift timeline |
 | Settings | `/settings` | Providers, tenants, workspaces, connectors, general, privacy |
 | Workspaces | `/workspaces` | Saved multi-tenant working sets (More group) |
 | Connectors | `/connectors` | External integrations (More group) |
 
 Demoted from top-level nav (routes remain, reachable via Settings and the command palette):
-- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. Office is now an additional daily destination; Workspaces and Connectors remain subordinate. A renderer test asserts both facts.
+- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. Agent Team is now an additional daily destination; Workspaces and Connectors remain subordinate. A renderer test asserts both facts.
 - **Activity**: run history remains available through search, run links, and agent surfaces without adding another daily destination.
 - **Agent Hub**: a tab inside Agents, not a sibling of it.
 
@@ -1696,14 +1696,27 @@ North-star metric: time from install to first successful result, target under 5 
 
 ---
 
-### Office and persistent personas (approved 2026-09-10)
+### Agent Team and persistent personas (approved 2026-09-10)
 
-Office is a single-user desktop surface at `/office`, between Agents and Changes.
-Original SVG robot, cat, fox, and owl avatars represent named responsibilities.
-Room and list views expose the same real state; selection and view are addressable
-in the route query. Motion follows actual running tasks and stops in list view or
-when reduced motion is requested. Star Office UI inspired the metaphor; no upstream
-code or artwork is bundled and no new rendering dependency is introduced.
+Agent Team is a single-user desktop surface at `/office`, directly below Chat.
+The sidebar uses a dedicated team icon and lists all saved personas underneath with
+their original SVG robot, cat, fox, or owl avatars, direct selection links, and
+working/attention indicators. The team badge counts personas needing attention.
+The persona list scrolls independently for larger teams.
+
+Office and List views expose the same real state; selection and view remain
+addressable in the route query. The Office is an illustrated side-view studio with
+workstations, a furnished lounge, and a TV game corner. Working or queued personas
+move to desks; idle personas stroll between the lounge and game corner; approval
+and error states wait beside their desks for review. Decorative breathing, walking, coffee
+steam, and a Pong game make downtime visible without implying an agent run.
+Labels and a stable roster always expose actual run status. Six personas fit on a
+floor; floor controls accommodate all 24, and sidebar selection opens the right floor.
+The scene has an explicit Pause motion control, honors reduced-motion settings,
+and suspends ambient animation while the document is hidden. Background state
+refreshes preserve the mounted scene and unsaved persona edits. List view is static.
+Star Office UI inspired the metaphor; no upstream code or artwork is bundled and
+no new rendering dependency is introduced.
 
 A persona binds one connected tenant, one provider, an optional model, an ordered
 list of one to eight installed agents, a manual or recurring trigger, and a 5–120

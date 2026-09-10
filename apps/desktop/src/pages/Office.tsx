@@ -10,7 +10,7 @@ import type {
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
-import { OfficeDecor, PersonaAvatar } from "../components/office/OfficeScene";
+import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
 
 const isActive = (r?: RunRecord) =>
@@ -65,10 +65,14 @@ export default function Office() {
   );
   const mission = selectedMissions[0];
   const running = office.missions.filter((m) => m.status === "running").length;
-  const attention =
-    office.personas.filter((p) => p.lastError).length +
-    state.runs.filter((r) => r.office && r.status === "awaiting-confirmation")
-      .length;
+  const attention = office.personas.filter(
+    (p) =>
+      p.lastError ||
+      state.runs.some(
+        (r) =>
+          r.office?.personaId === p.id && r.status === "awaiting-confirmation",
+      ),
+  ).length;
   const api = window.openAdminOS;
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -84,10 +88,11 @@ export default function Office() {
       setBusy(false);
     }
   };
-  if (loading)
+  // Keep the scene and editor mounted during background run-state refreshes.
+  if (loading && !state.office)
     return (
       <div className="office-loading" role="status">
-        Opening your office…
+        Opening your team…
       </div>
     );
   return (
@@ -95,7 +100,7 @@ export default function Office() {
       <header className="office-header">
         <div>
           <div className="office-eyebrow">YOUR LOCAL TEAM</div>
-          <h1>Office</h1>
+          <h1>Agent Team</h1>
           <p>Give your agents a place, a purpose, and a schedule.</p>
         </div>
         <Button
@@ -110,7 +115,7 @@ export default function Office() {
         <div className="office-error" role="alert">
           {error || stateError?.message || office.error}
           <Button size="sm" onClick={() => void act(refresh)}>
-            Refresh Office
+            Refresh team
           </Button>
         </div>
       )}
@@ -120,12 +125,12 @@ export default function Office() {
           <strong>{running}</strong> assignments in progress <span>·</span>{" "}
           <strong>{attention}</strong> need attention
         </div>
-        <div className="office-view" aria-label="Office view">
+        <div className="office-view" aria-label="Team view">
           <button
             aria-pressed={view === "room"}
             onClick={() => setView("room")}
           >
-            Room
+            Office
           </button>
           <button
             aria-pressed={view === "list"}
@@ -140,7 +145,23 @@ export default function Office() {
           className={`office-room ${view === "list" ? "office-list" : ""}`}
           aria-label="Personas"
         >
-          {view === "room" && <OfficeDecor />}
+          {view === "room" && (
+            <OfficeScene
+              personas={office.personas}
+              selectedId={selected?.id}
+              onSelect={setSelectedId}
+              statuses={Object.fromEntries(
+                office.personas.map((p) => [
+                  p.id,
+                  status(
+                    p,
+                    office.missions.find((m) => m.personaId === p.id),
+                    state.runs,
+                  ),
+                ]),
+              )}
+            />
+          )}
           {office.personas.length === 0 ? (
             <div className="office-empty">
               <div className="office-empty-avatar">
@@ -164,7 +185,7 @@ export default function Office() {
                 </Button>
               )}
             </div>
-          ) : (
+          ) : view === "list" ? (
             <div className="office-stations">
               {office.personas.map((p) => {
                 const m = office.missions.find((m) => m.personaId === p.id);
@@ -214,9 +235,13 @@ export default function Office() {
                 );
               })}
             </div>
-          )}
+          ) : null}
           <footer className="office-room-footer">
-            <span>Activity reflects actual agent runs.</span>
+            <span>
+              {view === "list"
+                ? "Status reflects actual agent runs."
+                : "Desks: working · Lounge & games: idle"}
+            </span>
             <span>Stored on this device</span>
           </footer>
         </section>
@@ -383,11 +408,11 @@ export default function Office() {
           )}
         </aside>
       </div>
-      <section className="office-briefing" aria-label="Office briefing">
+      <section className="office-briefing" aria-label="Team briefing">
         <div className="office-briefing-title">
           <div>
             <div className="office-eyebrow">THE WORK, WITH EVIDENCE</div>
-            <h2>Office briefing</h2>
+            <h2>Team briefing</h2>
           </div>
           <span>Latest {Math.min(office.missions.length, 12)} assignments</span>
         </div>
@@ -487,7 +512,7 @@ export default function Office() {
         />
         <div className="office-modal-content">
           <p>
-            This removes its assignment and Office briefings. Agent run history
+            This removes its assignment and Team briefings. Agent run history
             remains available in Activity.
           </p>
           <div className="office-actions">

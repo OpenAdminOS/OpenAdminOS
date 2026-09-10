@@ -1,12 +1,12 @@
-# Office
+# Agent Team
 
-Office gives recurring work a recognizable owner. Create a persona, assign installed
+Agent Team gives recurring work a recognizable owner. Create a persona, assign installed
 agents, and inspect its work in a room or compact list. Personas and briefings are
 stored on your computer.
 
 ## Create a persona
 
-1. Open **Office** in the sidebar and choose **Add persona**.
+1. Open **Agent Team** in the sidebar and choose **Add persona**.
 2. Give it a name, a responsibility, and a robot, cat, fox, or owl avatar.
 3. Choose its connected tenant, provider, and optional model.
 4. Select up to eight installed agents and arrange their execution order.
@@ -24,7 +24,7 @@ model processing on your device. Saved connector delivery rules still apply.
 
 ## Run and review work
 
-Choose **Run assignment** to start. Office runs one task at a time, in the order
+Choose **Run assignment** to start. Agent Team runs one task at a time, in the order
 you chose. It waits for each task to finish successfully before starting the next.
 The assignment stays bound to its chosen tenant and provider when you switch the
 app's active tenant or provider.
@@ -34,7 +34,7 @@ provider, and time budget. **View evidence** opens the original run. If a write
 needs approval, **Review proposed changes** opens the existing confirmation screen.
 Every write still requires your approval, including destructive typed confirmation.
 
-The **Office briefing** collects the latest assignments and links to individual
+The **Team briefing** collects the latest assignments and links to individual
 results, changed findings, errors, and approval requests. It retains the latest
 100 assignments. Underlying agent results follow your run-history retention settings.
 
@@ -54,10 +54,25 @@ removing its persona.
 A failure or expired time budget pauses the persona. Review the error, repair the
 tenant connection or provider if needed, then edit and save to resume. Changes to
 provider configuration or assigned workflows also require reviewing and saving the
-persona again. Office will not silently continue with a changed assignment.
+persona again. Agent Team will not silently continue with a changed assignment.
 
-Removing a persona removes its Office briefings but preserves agent run history.
+Removing a persona removes its Agent Team briefings but preserves agent run history.
 Disconnecting its tenant removes the tenant's personas and briefings as well.
 
-Office currently runs on one user's computer. Inviting colleagues and floating
+Agent Team currently runs on one user's computer. Inviting colleagues and floating
 characters outside the app are not available.
+
+## Your team's office
+
+Each persona appears under **Agent Team** in the sidebar with its own character
+icon. Select one to open its assignment directly. Attention indicators point to
+personas that need review.
+
+In the **Office** view, working personas head to their desks. Between assignments,
+they relax in the lounge or visit the game corner. Walking and games are decorative;
+the status label tells you whether work is actually running. Personas needing
+approval or attention wait beside their desks for review.
+
+Use **Pause motion** for a still scene, or choose **List** for a compact overview.
+Your system's reduced-motion setting is respected. Larger teams occupy additional
+floors, with six personas per floor; sidebar links take you to the right floor.

@@ -1,8 +1,8 @@
-import { NavLink } from "react-router";
+import { Link, NavLink, useLocation } from "react-router";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import {
   IconAgents,
-  IconHome,
+  IconAgentTeam,
   IconChanges,
   IconConnectors,
   IconHardDrive,
@@ -12,6 +12,8 @@ import {
   IconLogo,
   IconCommand,
 } from "./icons";
+import { PersonaAvatar } from "./office/OfficeScene";
+import "../styles/office.css";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { useAppState } from "../state";
 import { shortcutLabel } from "../shared/shortcuts";
@@ -78,6 +80,17 @@ function NavRow({ item }: { item: NavItem }) {
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
+  const location = useLocation();
+  const personas = state.office?.personas ?? [];
+  const selectedPersona = new URLSearchParams(location.search).get("persona");
+  const attention = personas.filter(
+    (p) =>
+      p.lastError ||
+      state.runs.some(
+        (r) =>
+          r.office?.personaId === p.id && r.status === "awaiting-confirmation",
+      ),
+  ).length;
   const active = state.providers.find((p) => p.id === state.activeProviderId);
   const mainNav: NavItem[] = [
     {
@@ -86,12 +99,18 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       icon: <IconChat size={16} />,
     },
     {
+      to: "/office",
+      label: "Agent Team",
+      icon: <IconAgentTeam size={18} />,
+      badge: attention || undefined,
+      badgeTone: "warning",
+    },
+    {
       to: "/agents",
       label: "Agents",
       icon: <IconAgents size={16} />,
       badge: state.installedAgents.length,
     },
-    { to: "/office", label: "Office", icon: <IconHome size={16} /> },
     { to: "/changes", label: "Changes", icon: <IconChanges size={16} /> },
     ...(state.tenants.length >= 2
       ? [
@@ -113,14 +132,24 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   // them. They earn a place here as a visually subordinate group so they
   // are discoverable without competing with the daily destinations.
   const secondaryNav: NavItem[] = [
-    { to: "/workspaces", label: "Workspaces", icon: <IconHardDrive size={16} /> },
-    { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },
+    {
+      to: "/workspaces",
+      label: "Workspaces",
+      icon: <IconHardDrive size={16} />,
+    },
+    {
+      to: "/connectors",
+      label: "Connectors",
+      icon: <IconConnectors size={16} />,
+    },
   ];
 
   const focusAdjacentNav = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const links = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled])'),
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled])",
+      ),
     );
     const index = links.indexOf(document.activeElement as HTMLElement);
     if (index < 0 || links.length === 0) return;
@@ -139,7 +168,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   return (
     <aside
       aria-label="Application navigation"
-      className="flex h-full w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
+      className="flex h-full overflow-y-auto w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
       onKeyDown={focusAdjacentNav}
     >
       {/* Brand row — small */}
@@ -179,7 +208,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       >
         <IconCommand size={12} />
         <span className="flex-1 text-left">Quick search</span>
-        <kbd className="font-mono text-[10px]">{shortcutLabel("commandPalette")}</kbd>
+        <kbd className="font-mono text-[10px]">
+          {shortcutLabel("commandPalette")}
+        </kbd>
       </button>
 
       <div className="mx-3 mb-2 mt-3 h-px bg-[var(--color-border-soft)]" />
@@ -190,7 +221,59 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           Workspace
         </div>
         {mainNav.map((item) => (
-          <NavRow key={item.to} item={item} />
+          <div
+            key={item.to}
+            className={item.to === "/office" ? "team-nav-group" : undefined}
+          >
+            <NavRow item={item} />
+            {item.to === "/office" && personas.length > 0 && (
+              <ul className="team-nav-personas" aria-label="Team personas">
+                {personas.map((persona) => {
+                  const needsAttention =
+                    Boolean(persona.lastError) ||
+                    state.runs.some(
+                      (r) =>
+                        r.office?.personaId === persona.id &&
+                        r.status === "awaiting-confirmation",
+                    );
+                  const working = state.runs.some(
+                    (r) =>
+                      r.office?.personaId === persona.id &&
+                      r.status === "running",
+                  );
+                  const selected =
+                    location.pathname === "/office" &&
+                    (selectedPersona === persona.id ||
+                      (!selectedPersona && personas[0]?.id === persona.id));
+                  return (
+                    <li key={persona.id}>
+                      <Link
+                        to={`/office?persona=${encodeURIComponent(persona.id)}`}
+                        aria-current={selected ? "page" : undefined}
+                        className="team-nav-persona"
+                        title={`${persona.name}${needsAttention ? " · Needs attention" : working ? " · Working" : ""}`}
+                      >
+                        <PersonaAvatar
+                          avatar={persona.avatar}
+                          color={persona.color}
+                        />
+                        <span className="flex-1">{persona.name}</span>
+                        {(needsAttention || working) && (
+                          <span
+                            className={`team-nav-dot ${needsAttention ? "attention" : ""}`}
+                            role="img"
+                            aria-label={
+                              needsAttention ? "Needs attention" : "Working"
+                            }
+                          />
+                        )}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         ))}
       </nav>
 

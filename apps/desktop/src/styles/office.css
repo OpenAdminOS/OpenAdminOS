@@ -878,3 +878,384 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* Agent Team is a standing workspace, with direct access to every persona. */
+.team-nav-group {
+  margin: 3px 0 5px;
+  padding: 3px 0;
+  border-top: 1px solid var(--color-border-soft);
+  border-bottom: 1px solid var(--color-border-soft);
+}
+.team-nav-personas {
+  margin: 3px 0 5px 19px;
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border);
+  max-height: 38vh;
+  overflow: auto;
+}
+.team-nav-persona {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 37px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  color: var(--color-text-soft);
+  font-size: 12px;
+}
+.team-nav-persona .persona-avatar {
+  width: 28px;
+  height: 28px;
+}
+.team-nav-persona .flex-1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-nav-persona:hover,
+.team-nav-persona[aria-current="page"] {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+.team-nav-persona[aria-current="page"] {
+  box-shadow: inset 2px 0 var(--color-accent);
+}
+.team-nav-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+.team-nav-dot.attention {
+  background: var(--color-warning);
+}
+.team-nav-persona:focus-visible,
+.team-office button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* A cutaway studio: warm timber, green walls, and three distinct places to be. */
+.office-layout {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+.office-room:not(.office-list) {
+  min-height: 0;
+  background: #263d34;
+}
+.team-office {
+  color: #e9e2cc;
+}
+.scene-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 18px;
+  background: #23382f;
+  border-bottom: 1px solid #526356;
+  font: 10px var(--font-mono, monospace);
+  letter-spacing: 0.1em;
+}
+.scene-toolbar > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scene-toolbar i {
+  width: 6px;
+  height: 6px;
+  background: #a9c59a;
+  border-radius: 50%;
+}
+.scene-toolbar small {
+  color: #b0c2af;
+  font: 11px var(--font-sans, sans-serif);
+  letter-spacing: 0;
+  margin-left: 8px;
+}
+.scene-toolbar button,
+.scene-floors button {
+  cursor: pointer;
+  font: 10px var(--font-mono, monospace);
+  letter-spacing: 0;
+  padding: 6px 9px;
+  border: 1px solid #758573;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.scene-toolbar button:hover,
+.scene-floors button:hover,
+.scene-floors button[aria-pressed="true"] {
+  background: #425747;
+}
+.scene-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.office-stage {
+  position: relative;
+  aspect-ratio: 1000/560;
+  overflow: hidden;
+  isolation: isolate;
+}
+.office-interior {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.scene-persona-position {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  transition: transform 2.8s linear;
+}
+.scene-persona {
+  display: block;
+  position: relative;
+  width: 9%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+  border-radius: 16px;
+}
+.scene-persona .persona-avatar {
+  width: 100%;
+  height: auto;
+  display: block;
+  filter: drop-shadow(1px 4px 2px #16261f66);
+}
+.scene-persona-label {
+  display: block;
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  bottom: 99%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 125px;
+  border: 1px solid #829683;
+  border-radius: 5px;
+  background: #233a30f2;
+  padding: 4px 7px;
+  color: #f1e8ce;
+  text-align: center;
+  box-shadow: 0 3px 7px #20302733;
+}
+.scene-persona-label strong {
+  display: block;
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-persona-label small {
+  display: block;
+  font: 8px var(--font-mono, monospace);
+  color: #bccdb8;
+  margin-top: 2px;
+}
+.scene-persona-label.attention {
+  border-color: #edc47a;
+  background: #50442f;
+}
+.scene-persona[aria-pressed="true"] .scene-persona-label {
+  border-color: #edc294;
+  box-shadow: 0 0 0 2px #edc29444;
+}
+.scene-persona:hover .scene-persona-label {
+  background: #405b49;
+}
+.scene-persona-position:focus-within {
+  z-index: 4;
+  transition: none;
+}
+.scene-controller {
+  position: absolute;
+  width: 46%;
+  left: 27%;
+  top: 62%;
+  transform: rotate(-7deg);
+}
+.scene-roster {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 10px 12px;
+  background: #24372e;
+  border-top: 1px solid #596b55;
+}
+.scene-roster .scene-roster-persona {
+  flex-direction: row;
+  gap: 8px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 7px;
+}
+.scene-roster-persona .persona-avatar {
+  width: 36px;
+  height: 36px;
+}
+.scene-roster-persona > span {
+  min-width: 0;
+}
+.scene-roster-persona strong {
+  display: block;
+  margin: 0;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scene-roster-persona small {
+  display: block;
+  color: #bac7b5;
+  font: 9px var(--font-mono, monospace);
+  margin-top: 3px;
+}
+.scene-floors {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  background: #23382f;
+}
+.scene-paddle {
+  animation: scene-paddle 2.7s ease-in-out infinite alternate;
+}
+.scene-paddle-two {
+  animation-delay: -1.3s;
+  animation-duration: 3.1s;
+}
+.scene-ball {
+  animation: scene-pong 3.6s linear infinite;
+}
+.scene-steam {
+  animation: scene-steam 3s ease-out infinite;
+}
+.scene-desk-active .scene-code {
+  animation: office-code 1.6s steps(3) infinite;
+}
+.scene-persona .persona-avatar {
+  animation: scene-breathe 3.8s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+.is-walking .scene-persona .persona-avatar {
+  animation: scene-walk 0.35s ease-in-out infinite alternate;
+}
+.is-walking .persona-feet {
+  animation: scene-feet 0.35s steps(2) infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+.is-gaming .persona-hands {
+  animation: office-type 0.8s steps(2) infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+@keyframes scene-breathe {
+  50% {
+    transform: translateY(-2px) rotate(1deg);
+  }
+}
+@keyframes scene-walk {
+  from {
+    transform: translateY(0) rotate(-5deg);
+  }
+  to {
+    transform: translateY(-4px) rotate(5deg);
+  }
+}
+@keyframes scene-feet {
+  to {
+    transform: skewY(12deg);
+  }
+}
+@keyframes scene-paddle {
+  to {
+    transform: translateY(17px);
+  }
+}
+@keyframes scene-pong {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(49px, 32px);
+  }
+  50% {
+    transform: translate(99px, 10px);
+  }
+  75% {
+    transform: translate(49px, -14px);
+  }
+}
+@keyframes scene-steam {
+  0% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  40% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+.team-office[data-motion="off"] *,
+.team-office[data-motion="off"] *::before,
+.team-office[data-motion="off"] *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+@media (min-width: 1500px) {
+  .office-layout {
+    grid-template-columns: minmax(0, 1fr) 330px;
+  }
+}
+@media (max-width: 1340px) {
+  .office-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .office-panel {
+    max-width: none;
+  }
+}
+@media (max-width: 1000px) {
+  .scene-toolbar small {
+    display: none;
+  }
+  .scene-persona-label {
+    padding: 3px 5px;
+    max-width: 98px;
+  }
+  .scene-persona-label strong {
+    font-size: 9px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-office *,
+  .team-office *::before,
+  .team-office *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+@media (forced-colors: active) {
+  .scene-persona-label,
+  .scene-roster-persona,
+  .team-nav-persona[aria-current="page"] {
+    border: 1px solid ButtonText;
+  }
+}

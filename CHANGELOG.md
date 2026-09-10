@@ -6,9 +6,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Added Office with persistent robot and animal personas, tenant-pinned ordered agent assignments, recurring schedules, live execution states, and evidence-linked briefings; Chief of Staff coordinates existing workflows with normal write approval.
+- Added Agent Team with persistent robot and animal personas, tenant-pinned ordered agent assignments, recurring schedules, live execution states, and evidence-linked briefings; Chief of Staff coordinates existing workflows with normal write approval.
 
 ### Changed
+
+- Promote Agent Team below Chat with persona shortcuts and icons, and add a lively office with workstations, lounge, game corner, walking characters, and motion controls.
 
 - Replace the landing page's agent installation count with total GitHub release downloads, matching the README KPI.
 
