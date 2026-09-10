@@ -1,3 +1,4 @@
+import { OfficeService } from "./office.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -1355,9 +1356,31 @@ export class AppStateStore {
     void this.primeConnectorConfigCache().catch(() => undefined);
   }
 
+  private officeServiceInstance?: OfficeService;
+  private get officeService(): OfficeService {
+    return this.officeServiceInstance ??= new OfficeService(join(this.userDataPath ?? dirname(this.filePath), "office.db"), {
+      context: async () => {
+        const persisted = await this.read();
+        return { tenants: persisted.tenants, agents: persisted.installedAgents, runs: persisted.runs, providers: await this.listProviders(),
+          providerConfigKey: createHash("sha256").update(JSON.stringify({ configs: persisted.providerConfigs,
+            ollama: process.env.OPENAGENTS_OLLAMA_URL, lmStudio: process.env.OPENADMINOS_LM_STUDIO_URL })).digest("hex") };
+      },
+      startRun: (slug, options) => this.startRun(slug, options),
+      cancelRun: id => this.cancelRun(id),
+      changed: () => this.emitStateChanged("office-changed"),
+    });
+  }
+  saveOfficePersona(input: unknown) { return this.officeService.save(input); }
+  deleteOfficePersona(id: string) { return this.officeService.remove(id); }
+  startOfficePersona(id: string) { return this.officeService.start(id); }
+  stopOfficePersona(id: string) { return this.officeService.stop(id); }
+  tickOffice() { return this.officeService.tick(); }
+  reportOfficeError(error: unknown) { this.officeService.reportError(error); }
+
   close(): void {
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
+    this.officeServiceInstance?.close();
     this.intelligenceStore?.close();
   }
 
@@ -2099,13 +2122,14 @@ export class AppStateStore {
         (runId) => knownRunIds.has(runId),
       ),
     );
+    const officeMissionIds = new Set(this.officeService.state().missions.filter(m => m.status === "running").map(m => m.id));
     const active = new Set<string>();
     const awaitingConfirmation = new Set<string>();
 
     for (const run of runs) {
       // Exclusion: queued/running runs are live runtime state and may still
       // receive progress snapshots, logs, connector audit entries, or results.
-      if (run.status === "queued" || run.status === "running") {
+      if (run.status === "queued" || run.status === "running" || (run.office && officeMissionIds.has(run.office.missionId))) {
         active.add(run.id);
       }
       // Exclusion: awaiting-confirmation runs are the human-in-the-loop write
@@ -2166,6 +2190,7 @@ export class AppStateStore {
       registryInstallCountsEnabled: persisted.registryInstallCountsEnabled !== false,
       usageTelemetryEnabled: persisted.usageTelemetryEnabled === true,
       schedulerStatus: this.deriveSchedulerStatus(persisted),
+      office: this.officeService.state(),
     };
     if (persisted.activeModelByProviderId) {
       state.activeModelByProviderId = persisted.activeModelByProviderId;
@@ -4841,10 +4866,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   async hasEnabledSchedule(): Promise<boolean> {
     const persisted = await this.read();
-    return persisted.installedAgents.some((agent) => agent.schedule?.enabled === true);
+    return persisted.installedAgents.some((agent) => agent.schedule?.enabled === true) || this.officeService.state().personas.some(p => p.enabled && p.intervalMinutes !== null);
   }
 
   async hasEnabledBackgroundWork(): Promise<boolean> {
+    if (this.officeService.state().personas.some(p => p.enabled && p.intervalMinutes !== null)) return true;
     const persisted = await this.read();
     if (persisted.installedAgents.some((agent) => agent.schedule?.enabled === true)) {
       return true;
@@ -4870,7 +4896,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const scheduledAgents = persisted.installedAgents.filter(
       (agent) => agent.schedule?.enabled === true,
     );
-    const next = scheduledAgents
+    const next = [...scheduledAgents
       .map((agent) => {
         const schedule = agent.schedule;
         const last = schedule?.lastScheduledRunAt
@@ -4880,7 +4906,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           agent,
           dueAt: last + (schedule?.intervalSeconds ?? 3600) * 1000,
         };
-      })
+      }), ...this.officeService.state().personas.filter(p => p.enabled && p.nextRunAt).map(p => ({ agent: { name: p.name }, dueAt: Date.parse(p.nextRunAt!) }))]
       .sort((a, b) => a.dueAt - b.dueAt)[0];
     const scheduledRuns = persisted.runs.filter((run) => run.trigger === "schedule");
     const latestWake = scheduledRuns[0];
@@ -4892,7 +4918,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       supported: process.platform !== "linux",
       enabled: false,
       requiresTenant: persisted.tenants.length === 0,
-      activeScheduleCount: scheduledAgents.length,
+      activeScheduleCount: scheduledAgents.length + this.officeService.state().personas.filter(p => p.enabled && p.intervalMinutes !== null).length,
       ...(latestWake ? { lastWakeAt: latestWake.queuedAt } : {}),
       ...(latestSuccess?.finishedAt ? { lastSuccessAt: latestSuccess.finishedAt } : {}),
       ...(latestFailureMessage ? { lastError: latestFailureMessage } : {}),
@@ -5098,6 +5124,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async disconnectTenant(id: string): Promise<AppState> {
+    for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
     await this.serialize(async () => {
       const persisted = await this.read();
       const target = persisted.tenants.find((tenant) => tenant.id === id);
@@ -5135,6 +5162,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       this.intelligenceStore?.purgeTenant(id);
       await this.write(next);
     });
+    await this.officeService.purgeTenant(id);
 
     return this.getAppState();
   }
@@ -5305,7 +5333,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             return result.accessToken;
           };
     return {
-      createGraph: (log) => createGraphAdapter({ tokenProvider, log, signal: execution?.signal }),
+      createGraph: (log) => this.graphFactory
+        ? this.graphFactory({ tenantId: tenant.id, scopes, log })
+        : createGraphAdapter({ tokenProvider, log, signal: execution?.signal }),
       tenantId: tenant.id,
       tenantSession,
     };

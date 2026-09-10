@@ -1613,19 +1613,20 @@ messages, and never suggest the same agent twice in one conversation.
 
 ### Navigation (locked for v0.4)
 
-Three workspace destinations plus Settings. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
+Office adds a fourth workspace destination to the v0.4 navigation (approved 2026-09-10); Fleet remains conditional on multiple connected tenants. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
 
 | Nav item | Route | Contains |
 |---|---|---|
 | Chat | `/chat` | Tenant Q&A (formerly "Intune Chat" in nav; covers Intune + Entra) |
 | Agents | `/agents` | Tabs: Installed · Hub · Schedules |
+| Office | `/office` | Persistent personas, ordered assignments, schedules, and evidence-linked briefings |
 | Changes | `/changes` | Tenant drift timeline |
 | Settings | `/settings` | Providers, tenants, workspaces, connectors, general, privacy |
 | Workspaces | `/workspaces` | Saved multi-tenant working sets (More group) |
 | Connectors | `/connectors` | External integrations (More group) |
 
 Demoted from top-level nav (routes remain, reachable via Settings and the command palette):
-- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. The primary group stays the four daily destinations, so the v0.4 goal of a compact nav still holds. A renderer test asserts both facts.
+- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. Office is now an additional daily destination; Workspaces and Connectors remain subordinate. A renderer test asserts both facts.
 - **Activity**: run history remains available through search, run links, and agent surfaces without adding another daily destination.
 - **Agent Hub**: a tab inside Agents, not a sibling of it.
 
@@ -1694,6 +1695,54 @@ North-star metric: time from install to first successful result, target under 5 
 - Usability validation with 3–5 external Intune admins is still owed; these decisions are the best pre-validation guess and should be revisited against real hesitation points.
 
 ---
+
+### Office and persistent personas (approved 2026-09-10)
+
+Office is a single-user desktop surface at `/office`, between Agents and Changes.
+Original SVG robot, cat, fox, and owl avatars represent named responsibilities.
+Room and list views expose the same real state; selection and view are addressable
+in the route query. Motion follows actual running tasks and stops in list view or
+when reduced motion is requested. Star Office UI inspired the metaphor; no upstream
+code or artwork is bundled and no new rendering dependency is introduced.
+
+A persona binds one connected tenant, one provider, an optional model, an ordered
+list of one to eight installed agents, a manual or recurring trigger, and a 5–120
+minute assignment budget. The responsibility text describes the work to the admin;
+it does not inject instructions into agent prompts. Existing agent workflows,
+settings, and delivery rules define execution. Chief of Staff is a starting role
+for coordinating those workflows, not an unbounded model loop or an independent
+source of permissions. Each child uses the normal run engine and approval gates.
+Outputs are collected in the briefing; results are not automatically injected into
+subsequent agents. Human multiplayer and a floating desktop companion remain future
+work, with explicit shared-data design required before collaboration is implemented.
+
+The Electron host persists personas and the latest 100 assignment briefings in
+`office.db` using `node:sqlite`; no renderer storage is authoritative. Up to 24
+personas are supported. Office runs one child at a time across assignments,
+waits for success before advancing, and stops at write approval. Failed or timed-out
+assignments pause the persona's recurrence and show recovery details. Stop & pause
+cancels active work through the existing cancellation path; operations already sent
+may have completed. Queued child runs carry durable assignment/step correlation so
+restart recovery never silently replays a completed step. Missing evidence stops
+coordination. Active assignment evidence is protected from run-history pruning.
+Removing a persona removes its briefings while preserving agent run history;
+disconnecting a tenant stops its work and removes its Office data.
+
+New recurrence is anchored one full interval after saving. Existing app/OS scheduling
+launches the same host when the UI is closed on supported systems; the computer must
+be running with a signed-in user session. Linux OS registration remains unsupported.
+An Office assignment never follows a later active-tenant switch. Hosted-provider use
+requires explicit assignment-level consent, including scheduled runs. Provider
+configuration or assigned workflow changes invalidate the saved review and require
+reviewing/saving the persona again. Provider readiness and tenant connection are
+checked before each child starts. Approval for writes remains per operation.
+
+The Office smoke harness creates an assignment through the real renderer and IPC,
+executes two installed workflows with synthetic Graph/model dependencies, verifies
+scope and completed results, reloads persistence, checks room/list/edit/stop controls,
+and captures responsive evidence. It runs in CI alongside the existing Electron
+smokes. Live beta managed-device reads, next-link paging, and invalid-field error
+behavior were also checked through Lokka; no live tenant writes are part of verification.
 
 ## 5a. v0.1: Public preview foundation
 
@@ -1902,6 +1951,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `18-baseline-rollback.html` | v0.5 baseline drift, field-level evidence, and typed rollback confirmation | ✅ Done |
 | `19-fleet.html` | v0.5 multi-tenant fleet drift status and per-tenant write confirmation | ✅ Done |
 | `20-mcp-gateway.html` | v0.5 gateway settings, pairing, connected clients, and pending external proposals | ✅ Done |
+| `22-office.html` | Office room, original persona avatars, and assignment briefing | ✅ Done |
 | `21-telemetry.html` | v0.5 opt-in usage telemetry with the exact payload preview | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.

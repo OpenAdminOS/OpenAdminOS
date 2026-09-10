@@ -230,6 +230,55 @@ export interface AgentUpdateReview {
   changes: AgentUpdateTrustChange[];
 }
 
+/** A local, explicitly scoped assignment. The description is an admin-facing label;
+ * execution is defined by the ordered, installed agent workflows. */
+export interface OfficePersonaInput {
+  id?: string;
+  name: string;
+  responsibility: string;
+  avatar: "robot" | "cat" | "fox" | "owl";
+  color: "amber" | "sage" | "blue" | "lilac";
+  tenantId: string;
+  providerId: ProviderId;
+  model?: string;
+  agentSlugs: string[];
+  intervalMinutes: number | null;
+  maxMinutes: number;
+  enabled: boolean;
+  confirmHosted?: boolean;
+}
+
+export interface OfficePersona extends Omit<OfficePersonaInput, "id" | "confirmHosted"> {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  nextRunAt?: string;
+  lastError?: string;
+}
+
+export interface OfficeMission {
+  id: string;
+  personaId: string;
+  personaName: string;
+  tenantId: string;
+  providerId: ProviderId;
+  model?: string;
+  agentSlugs: string[];
+  runIds: string[];
+  status: "running" | "completed" | "failed" | "cancelled";
+  trigger: "manual" | "schedule";
+  startedAt: string;
+  finishedAt?: string;
+  deadlineAt: string;
+  error?: string;
+}
+
+export interface OfficeState {
+  error?: string;
+  personas: OfficePersona[];
+  missions: OfficeMission[];
+}
+
 export interface AgentSchedule {
   enabled: boolean;
   intervalSeconds: number;
@@ -381,6 +430,8 @@ export type RunStatus =
   | "cancelled";
 
 export interface StartRunOptions {
+  /** Host-owned Office correlation, never accepted by the generic renderer run IPC. */
+  office?: { missionId: string; personaId: string; step: number };
   /**
    * Pin the run to a specific tenant id at queue time. Omit to default to
    * whichever tenant is active when the run is queued. The run will fail
@@ -576,6 +627,7 @@ export interface RunLogRecord {
 }
 
 export interface RunRecord {
+  office?: { missionId: string; personaId: string; step: number };
   id: string;
   agentSlug: string;
   /**
@@ -791,6 +843,7 @@ export interface AppState {
   registryInstallCountsEnabled: boolean;
   usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
+  office?: OfficeState;
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -2490,6 +2543,10 @@ export interface OpenAdminOSApi {
    * the model belongs to the provider's installed list.
    */
   setActiveModel(providerId: ProviderId, model: string | null): Promise<AppState>;
+  saveOfficePersona?(input: OfficePersonaInput): Promise<OfficeState>;
+  deleteOfficePersona?(id: string): Promise<OfficeState>;
+  startOfficePersona?(id: string): Promise<OfficeState>;
+  stopOfficePersona?(id: string): Promise<OfficeState>;
   startRun(agentSlug: string, options?: StartRunOptions): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | undefined>;
   confirmRun(runId: string, phrase: string): Promise<RunRecord>;

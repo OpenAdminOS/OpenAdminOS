@@ -23,7 +23,7 @@ describe("Sidebar", () => {
       within(primary)
         .getAllByRole("link")
         .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
-    ).toEqual(["Chat", "Agents", "Changes", "Settings"]);
+    ).toEqual(["Chat", "Agents", "Office", "Changes", "Settings"]);
     expect(screen.queryByRole("link", { name: "Home" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Report issue/ })).not.toBeInTheDocument();
   });
@@ -77,6 +77,6 @@ describe("Sidebar", () => {
       within(primary)
         .getAllByRole("link")
         .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
-    ).toEqual(["Chat", "Agents", "Changes", "Fleet", "Settings"]);
+    ).toEqual(["Chat", "Agents", "Office", "Changes", "Fleet", "Settings"]);
   });
 });

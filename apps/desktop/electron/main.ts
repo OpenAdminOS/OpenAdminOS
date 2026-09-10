@@ -1,3 +1,4 @@
+import { runOfficeSmoke } from "./office-smoke.js";
 import {
   app,
   BrowserWindow,
@@ -941,6 +942,11 @@ async function runScreenshotCapture(): Promise<void> {
 
   window.show();
   window.focus();
+  if (process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
+    await runOfficeSmoke(window, screenshotCaptureOutDir);
+    app.exit(0);
+    return;
+  }
 
   const entries = loadScreenshotRegistryEntries();
   const appShots: Array<{
@@ -5886,6 +5892,24 @@ function registerIpcHandlers() {
       store.setActiveModel(validateProviderId(providerId), validateActiveModel(model)),
     ),
   );
+  ipcMain.handle("openadminos:office-save", handleTrusted(async (_event, input: unknown) => {
+    const office = await store.saveOfficePersona(input);
+    if (office.personas.some(p => p.enabled && p.intervalMinutes !== null)) void registerSchedulerIfReady("schedule");
+    else void unregisterSchedulerIfUnused();
+    return office;
+  }));
+  ipcMain.handle("openadminos:office-delete", handleTrusted(async (_event, id: unknown) => {
+    const office = await store.deleteOfficePersona(requireBoundedString(id, "personaId", 128));
+    void unregisterSchedulerIfUnused();
+    return office;
+  }));
+  ipcMain.handle("openadminos:office-start", handleTrusted((_event, id: unknown) =>
+    store.startOfficePersona(requireBoundedString(id, "personaId", 128))));
+  ipcMain.handle("openadminos:office-stop", handleTrusted(async (_event, id: unknown) => {
+    const office = await store.stopOfficePersona(requireBoundedString(id, "personaId", 128));
+    void unregisterSchedulerIfUnused();
+    return office;
+  }));
   ipcMain.handle(
     "openadminos:start-run",
     handleTrusted((_event, agentSlug: unknown, options?: unknown) =>
@@ -6320,6 +6344,23 @@ if (!gotLock) {
       void store.fireDueSchedules();
       void store.refreshDueGraphCaches();
     }
+    // One Office coordinator owns all persona work, independent of the renderer.
+    // Avoid accumulating ticks while a provider probe or queue operation is slow.
+    let officeTickPending = false;
+    const tickOffice = async () => {
+      if (officeTickPending) return;
+      officeTickPending = true;
+      try {
+        await store.tickOffice();
+      } catch (error) {
+        store.reportOfficeError(error);
+        console.error("[office] coordinator tick failed:", error);
+      } finally {
+        officeTickPending = false;
+      }
+    };
+    void tickOffice();
+    setInterval(() => { void tickOffice(); }, 2_000);
     const SCHEDULER_TICK_MS = 60_000;
     setInterval(() => {
       void store.fireDueSchedules();

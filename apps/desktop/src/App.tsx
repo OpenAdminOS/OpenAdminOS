@@ -5,6 +5,7 @@ import { Button } from "./components/Button";
 import { Card } from "./components/Card";
 import { useAppState } from "./state";
 
+const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
 const AgentsHome = lazy(() => import("./pages/AgentsHome"));
 const AgentDetail = lazy(() => import("./pages/AgentDetail"));
@@ -70,6 +71,7 @@ export default function App() {
           <Route path="/agents/:slug" element={<AgentDetail />} />
           <Route path="/hub" element={<Navigate to="/agents/hub" replace />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
+          <Route path="/office" element={<Office />} />
           <Route path="/changes" element={<Changes />} />
           <Route path="/fleet" element={<FleetRoute />} />
           <Route path="/workspaces" element={<Workspaces />} />

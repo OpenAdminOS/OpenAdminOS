@@ -276,6 +276,7 @@ export class RunService {
       const queuedRun = createQueuedRun({ agent, providerId, model });
       queuedRun.tenantId = pinnedTenantId;
       queuedRun.trigger = options.trigger ?? "manual";
+      if (options.office) queuedRun.office = options.office;
 
       await this.host.write({
         ...persisted,

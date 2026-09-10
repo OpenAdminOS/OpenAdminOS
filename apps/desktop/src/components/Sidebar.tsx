@@ -2,6 +2,7 @@ import { NavLink } from "react-router";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import {
   IconAgents,
+  IconHome,
   IconChanges,
   IconConnectors,
   IconHardDrive,
@@ -90,6 +91,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       icon: <IconAgents size={16} />,
       badge: state.installedAgents.length,
     },
+    { to: "/office", label: "Office", icon: <IconHome size={16} /> },
     { to: "/changes", label: "Changes", icon: <IconChanges size={16} /> },
     ...(state.tenants.length >= 2
       ? [

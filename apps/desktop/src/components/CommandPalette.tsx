@@ -110,6 +110,11 @@ export function CommandPalette({
         action: go("/agents/schedules"),
       },
       {
+        id: "nav-office", label: "Go to Office", group: "Navigate",
+        icon: <IconChanges size={13} className="text-[var(--color-accent)]" />,
+        action: go("/office"),
+      },
+      {
         id: "nav-changes",
         label: "Go to Changes",
         group: "Navigate",
