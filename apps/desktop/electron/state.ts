@@ -1,7 +1,8 @@
 import { OfficeService } from "./office.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { atomicRename } from "./atomic-rename.js";
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
@@ -4746,7 +4747,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       : `${manifestText}\n`;
     await writeFile(tmpPath, normalized, { encoding: "utf8", mode: 0o600 });
     try {
-      await rename(tmpPath, finalPath);
+      await atomicRename(tmpPath, finalPath);
       try {
         await commitState();
       } catch (stateError) {
@@ -4758,7 +4759,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             encoding: "utf8",
             mode: 0o600,
           });
-          await rename(rollbackPath, finalPath);
+          await atomicRename(rollbackPath, finalPath);
         }
         throw stateError;
       }
@@ -5804,7 +5805,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     try {
       await writeFile(tmpPath, serialized, { encoding: "utf8", mode: 0o600 });
-      await rename(tmpPath, this.filePath);
+      await atomicRename(tmpPath, this.filePath);
       this.lastReadSnapshot = state;
     } finally {
       await rm(tmpPath, { force: true });
