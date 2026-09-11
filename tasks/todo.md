@@ -1,6 +1,8 @@
 # Current active plan
 
-- [x] Prepare Agent Team as version **0.6.0**, with aligned workspace versions, release notes, and a 0.6.0 minimum for the new evidence workflows. Publication follows PR review and release validation.
+- [x] Prepare **0.6.1** after PR #83: guided teammate setup, native office fullscreen, correct workflow evidence, and Windows reliability/security fixes. Linux, macOS, and Windows native-flow and visual evidence is recorded in the 0.6.1 review reports. Full publication is authorized and follows release validation.
+
+- [x] Prepare Agent Team as version **0.6.0**, with aligned workspace versions, release notes, and a 0.6.0 minimum for the new evidence workflows. Published as v0.6.0 on 2026-09-11.
 
 - [x] Implement the approved [Agent Team significant improvement plan](./agent-team-improvement-plan.md): proactive evidence handoffs, bounded Chief planning, findings/conversations, operational schedules, and a conference rehearsal. Cross-platform hardware validation remains a release gate.
 
