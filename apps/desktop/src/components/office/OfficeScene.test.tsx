@@ -148,11 +148,65 @@ it("keeps 24 personas searchable and leaves no idle timers after prolonged use",
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("visits the shared table only for a recent recorded handoff, then returns to work",()=>{
- vi.useFakeTimers();vi.setSystemTime(new Date("2026-09-11T10:00:00Z"));
- const {container}=render(<OfficeScene personas={personas.slice(0,1)} statuses={{"persona-0":"Working"}} selectedId="persona-0" onSelect={vi.fn()} events={{"persona-0":{text:"Evidence received",at:new Date().toISOString(),handoffAt:new Date().toISOString(),handoff:true,runId:"source-run"}}}/>);
- expect(container.querySelector('.scene-persona-position')).toHaveAttribute('data-seat','meeting-0');
- expect(screen.getByRole('link',{name:/Evidence received/})).toHaveAttribute('href','#/runs/source-run');
- act(()=>vi.advanceTimersByTime(5001));
- expect(container.querySelector('.scene-persona-position')).toHaveAttribute('data-seat','desk-0');
+it("visits the shared table only for a recent recorded handoff, then returns to work", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-09-11T10:00:00Z"));
+  const { container } = render(
+    <OfficeScene
+      personas={personas.slice(0, 1)}
+      statuses={{ "persona-0": "Working" }}
+      selectedId="persona-0"
+      onSelect={vi.fn()}
+      events={{
+        "persona-0": {
+          text: "Evidence received",
+          at: new Date().toISOString(),
+          handoffAt: new Date().toISOString(),
+          handoff: true,
+          runId: "source-run",
+        },
+      }}
+    />,
+  );
+  expect(container.querySelector(".scene-persona-position")).toHaveAttribute(
+    "data-seat",
+    "meeting-0",
+  );
+  expect(screen.getByRole("link", { name: /Open evidence/ })).toHaveAttribute(
+    "href",
+    "#/runs/source-run",
+  );
+  act(() => vi.advanceTimersByTime(5001));
+  expect(container.querySelector(".scene-persona-position")).toHaveAttribute(
+    "data-seat",
+    "desk-0",
+  );
+});
+
+it("keeps complete teammate names available in the roster and evidence stationary", () => {
+  const name = "Long responsibility name for the conference demonstration";
+  const { container } = render(
+    <OfficeScene
+      personas={[{ ...personas[0], name }]}
+      statuses={{ "persona-0": "Needs attention" }}
+      selectedId="persona-0"
+      onSelect={vi.fn()}
+      events={{
+        "persona-0": {
+          text: "Evidence ready",
+          at: new Date().toISOString(),
+          runId: "source-run",
+        },
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Team roster" }));
+  expect(
+    screen.getByRole("button", { name: `Select ${name}` }),
+  ).toBeInTheDocument();
+  expect(container.querySelector(".office-stage .scene-event")).toBeNull();
+  expect(screen.getByRole("link", { name: "Open evidence →" })).toHaveAttribute(
+    "href",
+    "#/runs/source-run",
+  );
 });

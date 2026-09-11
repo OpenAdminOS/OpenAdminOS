@@ -79,6 +79,12 @@ The cost we accept: ~80–150MB installer size (vs ~5–10MB Tauri), ~150–250M
 
 OpenAdminOS is **one TypeScript monorepo that ships a polished Electron desktop app**, with a clean provider-adapter pattern and shared schema package. Preserve the directory boundaries, contracts package, and adapter abstraction when extending the runtime or renderer.
 
+Windows CLI providers launch native executables directly. Official Claude Code and
+Codex npm launchers resolve to their Node entry points, avoiding `cmd.exe` argument
+interpretation. Unrecognized batch launchers are rejected with installation guidance;
+persona instructions, model names, and prompt punctuation must remain literal arguments.
+No additional runtime dependency is introduced for this resolution.
+
 ### Public documentation model
 
 Public documentation is GitBook-synced from `docs/gitbook`, with the repository root `.gitbook.yaml` setting `root: ./docs/gitbook`. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the GitBook root.
@@ -799,6 +805,10 @@ owner-only file modes. SQLite enables foreign-key enforcement, WAL, and secure
 deletion. Tenant data in SQLite is not application-level encrypted; the product
 relies on operating-system account isolation and full-disk encryption for those
 local records and does not describe them as keychain-encrypted.
+
+Windows atomic profile and manifest replacement retries transient `EPERM`, `EACCES`,
+and `EBUSY` failures with bounded backoff (seven attempts, 1.26 seconds of waiting).
+The previous destination remains intact throughout; persistent errors still surface.
 
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
 error-reporting telemetry. Packaged production builds may send a minimal public
@@ -1696,10 +1706,10 @@ North-star metric: time from install to first successful result, target under 5 
 
 ---
 
-### Agent Team and persistent personas (approved 2026-09-10; expanded 2026-09-11)
+### Agent Team and persistent teammates (approved 2026-09-10; expanded 2026-09-11)
 
 Agent Team is a single-user desktop surface at `/office`, directly below Chat.
-Persona shortcuts use original robot, cat, fox, and owl icons, live attention badges,
+Teammate shortcuts use original robot, cat, fox, and owl icons, live attention badges,
 search, and a collapsible group. Selection and room/list view are addressable in the
 route query. Human invitations, shared credentials, cloud coordination, and floating
 desktop characters remain outside this scope.
@@ -1716,7 +1726,13 @@ compliance overview and proposes an hourly assessment with a noncompliant-count
 threshold. Chief of Staff selects compliance plus evidence review and skips dependent
 work when a scheduled assessment is unchanged. Research Bot selects an evidence-only
 review; Script Bot selects a PowerShell draft that never executes its output. Missing
-workflows are shown before activation. The two new registry templates have no Graph
+workflows are shown before activation. The 0.6.1 review fixes initial preset application,
+retains missing workflows in the work order, and keeps permission review/installation
+and tenant setup inside the open persona draft. Incomplete work orders cannot be saved;
+renaming a persona does not hide missing prerequisites. Existing assignments retain their
+assessment and planning settings when edited. Ollama model discovery verifies text-generation
+capabilities rather than offering embedding-only models for persona execution.
+The two new registry templates have no Graph
 or connector steps; QA permits scope-free read workflows only when their entire
 pipeline uses LLM/transforms and explicitly consumes host task evidence.
 
@@ -1734,7 +1750,9 @@ results are omitted with an explicit gap. A source cannot be removed while a dep
 assignment is active. Standing instructions are not rewritten by source or model text.
 A Chief using model selection gets one bounded request (600 output tokens, one-minute
 timeout) and may select only a unique subset of its explicitly assigned capabilities.
-The visible plan records its reason and skipped workflows. Invalid or unavailable
+The visible plan records its reason and skipped workflows. Work-order evidence is
+matched by workflow identity inside the assignment; a planned skip cannot borrow the
+next workflow's status or evidence link. Invalid or unavailable
 planning falls back visibly to the approved ordered list. No capability discovery or
 unbounded recursive model loop is available. Each child retains an accountable parent
 and uses the existing runtime, connector confirmation, and write approval boundaries.
@@ -1753,8 +1771,8 @@ unresolved sources protected from normal run pruning. Raw results are not copied
 the finding database. Handoff records keep at least the latest 1,000 per receiver plus
 all records still inside the event-freshness window.
 
-The action inbox precedes the room and filters approvals, findings, and operational
-issues. Its 24-hour briefing distinguishes completed checks from scheduled work and
+A compact attention summary precedes the room. Review inbox opens a dedicated modal
+with approvals, findings, and operational issues. Its 24-hour briefing distinguishes completed checks from scheduled work and
 personas without a completed assessment. Finding history and assignment search expose
 more than the former 12-item feed. Questions use the selected persona's own completed
 runs and handoff sources, at most six recent conversational messages, and its pinned
@@ -1800,14 +1818,33 @@ where supplied; monetary cost is not inferred.
 corner. Six personas occupy each of up to four floors. Reserved per-persona locations,
 aisle paths, interruptible directional walking, seated typing/controller poses, and
 foreground furniture give the room depth. Idle timing is independent. Actual run and
-handoff events produce timestamped, evidence-linked bubbles and a brief visit to the
-shared table; games remain decorative.
+handoff events populate a stationary timestamped evidence strip and trigger a brief
+visit to the shared table; games remain decorative.
 Search and floor attention indicators route to distant teammates. Zoom/fit, expanded
 office, an optional assignment panel, a static List view, persistent pause, reduced
 motion, and hidden-window suspension keep the surface usable. No rendering dependency
 or third-party artwork is added. Hide details anonymizes office names and conceals the
 sidebar, tenant strip, task text, and detail panel; it is a team-view presentation
 control, not a redaction guarantee for other apps or separately opened dialogs.
+
+The approved 0.6.1 [visual review](../tasks/agent-team-061-visual-review.md) refinements
+use **teammate** throughout the interface. Internal `OfficePersona` contracts, storage
+and route IDs remain unchanged. Creation has four steps: Choose a role, Prepare
+workspace, Choose schedule, Review and add. Required tenant/provider/workflow readiness
+is shown inline; contextual setup and signed installation preserve the draft. Back and
+Continue/Add remain in a persistent footer. Advanced policies stay available but
+secondary. Creation selects the new teammate and offers Run first assignment; no
+completed assessment is implied before evidence exists.
+
+Full screen is an explicit native Electron action, separate from Hide details.
+It retains the tenant/provider boundary and fits the room into both available dimensions.
+Exit full screen, Escape, native OS exit, and leaving the route restore the previous
+window mode and layout; nested dialogs consume Escape first. A window already fullscreen
+remains fullscreen when office focus ends. Reload also releases office focus. Full names
+and statuses remain in a toggleable roster; only the selected or focused room label is
+shown to prevent collisions at high zoom. Controls reflow and remain scrollable at 200%.
+Native fullscreen verification is opt-in in contributor tooling because bare Xvfb has
+no window manager; CI still covers the controller lifecycle and renderer behavior.
 
 The Electron rehearsal exercises real renderer/IPC/runtime paths with isolated local
 Graph/model fixtures: assessment change → research → bounded Chief delegation → script

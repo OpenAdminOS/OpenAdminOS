@@ -1,6 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -54,7 +61,10 @@ describe("probeClaudeCodeLlm", () => {
       assert.equal(probe.ready, true);
       assert.equal(probe.version, "2.1.201");
       assert.equal(probe.defaultModel, "claude-sonnet-5");
-      assert.deepEqual(await fixture.readCalls(), ["--version", "auth status --text"]);
+      assert.deepEqual(await fixture.readCalls(), [
+        "--version",
+        "auth status --text",
+      ]);
     } finally {
       await fixture.cleanup();
     }
@@ -62,6 +72,34 @@ describe("probeClaudeCodeLlm", () => {
 });
 
 describe("createClaudeCodeLlm", () => {
+  it("preserves punctuation and argument boundaries in completions and streams", async () => {
+    const fixture = await createFakeClaudeCodeBinary();
+    try {
+      const llm = createClaudeCodeLlm({
+        binaryPath: fixture.binaryPath,
+        homePath: fixture.homePath,
+      });
+      const prompt =
+        'Explain "A & B" | compare (C) < D > E %PATH% ! ^ and backslash\\';
+      const system = 'Use "quotes" & preserve boundaries.';
+      await llm.complete({ prompt, system });
+      for await (const _chunk of llm.stream({ prompt, system })) {
+        /* consume */
+      }
+      const calls = (await fixture.readArguments()).filter((args) =>
+        args.includes("-p"),
+      );
+      assert.equal(calls.length, 2);
+      for (const args of calls) {
+        assert.equal(args.at(-1), prompt);
+        assert.equal(args[args.indexOf("--append-system-prompt") + 1], system);
+        assert.equal(args[args.indexOf("--tools") + 1], "");
+      }
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it("runs print mode with tool use disabled and a scrubbed environment", async () => {
     const fixture = await createFakeClaudeCodeBinary();
     try {
@@ -128,34 +166,57 @@ async function createFakeClaudeCodeBinary(): Promise<{
   homePath: string;
   readCalls(): Promise<string[]>;
   readEnv(): Promise<string>;
+  readArguments(): Promise<string[][]>;
   cleanup(): Promise<void>;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "openadminos-claude-test-"));
-  const binaryPath = join(root, "claude");
+  const root = await mkdtemp(join(tmpdir(), "openadminos claude-test-"));
+  const binaryPath = join(
+    root,
+    process.platform === "win32" ? "claude.cmd" : "claude",
+  );
   const homePath = join(root, "claude-home");
   const callsPath = join(root, "calls.txt");
   const envPath = join(root, "env.txt");
-  const script = `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
-env | sort > ${JSON.stringify(envPath)}
-if [[ "$1" == "--version" ]]; then
-  printf '2.1.201 (Claude Code)\\n'
-  exit 0
-fi
-if [[ "$1" == "auth" && "$2" == "status" ]]; then
-  printf 'Login method: test\\n'
-  exit 0
-fi
-if [[ "$*" == *"stream-json"* ]]; then
-  printf '%s\\n' '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"Hel"}]}}'
-  printf '%s\\n' '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"Hello"}]}}'
-  printf '%s\\n' '{"type":"result","subtype":"success","result":"Hello","usage":{"input_tokens":3,"output_tokens":2}}'
-  exit 0
-fi
-printf '%s\\n' '{"type":"result","subtype":"success","result":"Hello","message":{"model":"claude-sonnet-5"},"usage":{"input_tokens":3,"output_tokens":2}}'
+  const argumentsPath = join(root, "arguments.jsonl");
+  const script = `#!/usr/bin/env node
+const { appendFileSync, writeFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(argumentsPath)}, JSON.stringify(args) + "\\n");
+appendFileSync(${JSON.stringify(callsPath)}, args.join(" ") + "\\n");
+writeFileSync(${JSON.stringify(envPath)}, Object.entries(process.env).map(([key, value]) => key + "=" + value).sort().join("\\n"));
+if (args[0] === "--version") {
+  console.log("2.1.201 (Claude Code)");
+} else if (args[0] === "auth" && args[1] === "status") {
+  console.log("Login method: test");
+} else {
+  if (args.includes("stream-json")) {
+    for (const text of ["Hel", "Hello"]) {
+      console.log(JSON.stringify({type: "assistant", message: {model: "claude-sonnet-5", content: [{type: "text", text}]}}));
+    }
+  }
+  console.log(JSON.stringify({type: "result", subtype: "success", result: "Hello", message: {model: "claude-sonnet-5"}, usage: {input_tokens: 3, output_tokens: 2}}));
+}
 `;
-  await writeFile(binaryPath, script, "utf8");
+  if (process.platform === "win32") {
+    const scriptPath = join(
+      root,
+      "node_modules",
+      "@anthropic-ai",
+      "claude-code",
+      "cli.js",
+    );
+    await mkdir(join(root, "node_modules", "@anthropic-ai", "claude-code"), {
+      recursive: true,
+    });
+    await writeFile(scriptPath, script, "utf8");
+    await writeFile(
+      binaryPath,
+      `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`,
+      "utf8",
+    );
+  } else {
+    await writeFile(binaryPath, script, "utf8");
+  }
   await chmod(binaryPath, 0o755);
   return {
     binaryPath,
@@ -163,6 +224,12 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Hello","message":
     async readCalls() {
       const text = await readFile(callsPath, "utf8");
       return text.trim().split(/\r?\n/).filter(Boolean);
+    },
+    async readArguments() {
+      return (await readFile(argumentsPath, "utf8"))
+        .trim()
+        .split(/\r?\n/)
+        .map((line) => JSON.parse(line));
     },
     async readEnv() {
       return await readFile(envPath, "utf8");

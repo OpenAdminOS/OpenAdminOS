@@ -37,6 +37,28 @@ app's capture flags. On a normal desktop, omit `xvfb-run -a` where appropriate.
 The native runtime and renderer builds must finish before starting the capture;
 building shared packages while Vite is capturing can trigger a development reload.
 
+## Native fullscreen and guided setup review
+
+The `review-061-after` folders contain the updated setup steps, normal office,
+native fullscreen, concealment and 200% captures from Linux, macOS and Windows.
+See [the visual review](../../../tasks/agent-team-061-visual-review.md) for platform
+provenance and limits. Older captures above are historical references.
+
+To include native window lifecycle checks on an interactive desktop:
+
+```sh
+npm run build
+OPENADMINOS_OFFICE_BUILT_RENDERER=1 OPENADMINOS_OFFICE_NATIVE_VISUALS=1 OPENADMINOS_OFFICE_SMOKE_OUT=/tmp/team-review node scripts/smoke-office.mjs
+```
+
+Use the equivalent environment-variable syntax in PowerShell on Windows.
+`OPENADMINOS_OFFICE_BUILT_RENDERER=1` serves the completed renderer build to avoid hot
+reload during capture. Native checks exercise entry, Escape, dialog precedence,
+OS exit, route restoration and room fit at 200%. They require a window manager;
+bare Xvfb runs the regular fixture rehearsal without those native transitions.
+Capture tooling temporarily disables background throttling to obtain current frames,
+then restores production visibility behavior for the hidden-window motion assertion.
+
 ## Validation limits
 
 The host tests cover tenant/configuration baselines, normalized evidence, queue and

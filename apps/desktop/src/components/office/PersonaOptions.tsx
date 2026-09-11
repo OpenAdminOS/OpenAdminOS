@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 import type { AppState, OfficePersonaInput } from "../../shared/openAdminOS";
 
 export const TEAM_ROLES = [
@@ -23,7 +22,7 @@ export const TEAM_ROLES = [
   {
     name: "Research Bot",
     slugs: ["team-evidence-review"],
-    description: "Investigate evidence handed over by another persona.",
+    description: "Investigate evidence handed over by another teammate.",
     avatar: "owl",
     color: "blue",
   },
@@ -78,11 +77,11 @@ export function PersonaOptions({
         />
       </label>
       <small>
-        These instructions accompany evidence-aware tasks and persona questions.
+        These instructions accompany evidence-aware tasks and teammate questions.
         They do not grant tools or bypass approvals.
       </small>
       <label>
-        Watch another persona
+        Watch another teammate
         <select
           value={form.watch?.personaId ?? ""}
           onChange={(e) =>
@@ -161,7 +160,7 @@ export function PersonaOptions({
           )}
           <small>
             The source finding and its evidence will be supplied to this
-            persona’s provider. Only fresh, open findings trigger work; repeated
+            teammate’s provider. Only fresh, open findings trigger work; repeated
             revisions are deduplicated.
           </small>
         </>
@@ -349,20 +348,7 @@ export function PersonaOptions({
           Expired approvals require a fresh proposal.
         </small>
       </details>
-      {TEAM_ROLES.find((r) => r.name === form.name)?.slugs.some(
-        (slug) => !state.installedAgents.some((a) => a.slug === slug),
-      ) && (
-        <p className="office-error">
-          This role has missing workflows:{" "}
-          {TEAM_ROLES.find((r) => r.name === form.name)!
-            .slugs.filter(
-              (slug) => !state.installedAgents.some((a) => a.slug === slug),
-            )
-            .join(", ")}
-          . <Link to="/agents/hub">Install from the Hub →</Link> You can also
-          choose a different installed work order.
-        </p>
-      )}
+
     </div>
   );
 }

@@ -137,11 +137,11 @@ export class OfficeService {
   }
   private persona(id: unknown): StoredPersona {
     if (typeof id !== "string" || id.length > 128)
-      throw new Error("Choose an existing Office persona.");
+      throw new Error("Choose an existing Office teammate.");
     const p = this.personas().find((p) => p.id === id);
     if (!p)
       throw new Error(
-        "This persona no longer exists. Refresh Office and choose another.",
+        "This teammate no longer exists. Refresh Office and choose another.",
       );
     return p;
   }
@@ -215,7 +215,7 @@ export class OfficeService {
       : p.reviewed.provider !== current.provider
         ? "the assigned provider destination or data boundary changed"
         : `changed workflows: ${p.agentSlugs.filter((slug) => p.reviewed!.agents[slug] !== current.agents[slug]).join(", ") || "assignment policy"}`;
-    return `The provider or assigned workflows changed: ${changed}. Review and save this persona before running it again.`;
+    return `The provider or assigned workflows changed: ${changed}. Review and save this teammate before running it again.`;
   }
   private validateReady(
     p: Pick<OfficePersona, "tenantId" | "providerId" | "agentSlugs" | "model">,
@@ -223,7 +223,7 @@ export class OfficeService {
   ) {
     if (!c.tenants.some((t) => t.id === p.tenantId))
       throw new Error(
-        "The assigned tenant is disconnected. Edit this persona and choose a connected tenant.",
+        "The assigned tenant is disconnected. Edit this teammate and choose a connected tenant.",
       );
     const provider = c.providers.find((x) => x.id === p.providerId);
     if (
@@ -234,11 +234,11 @@ export class OfficeService {
       )
     )
       throw new Error(
-        "The assigned provider is unavailable. Connect it in Settings, then run this persona again.",
+        "The assigned provider is unavailable. Connect it in Settings, then run this teammate again.",
       );
     if (p.model && provider.models.length && !provider.models.includes(p.model))
       throw new Error(
-        "The assigned model is unavailable. Edit this persona and choose an available model.",
+        "The assigned model is unavailable. Edit this teammate and choose an available model.",
       );
     for (const slug of p.agentSlugs)
       if (!c.agents.some((a) => a.slug === slug))
@@ -250,7 +250,7 @@ export class OfficeService {
   save(input: unknown): Promise<OfficeState> {
     return this.serial(async () => {
       if (!input || typeof input !== "object" || Array.isArray(input))
-        throw new Error("Office persona must be an object.");
+        throw new Error("Office teammate must be an object.");
       const v = input as OfficePersonaInput;
       const bounded = (x: unknown, max: number, label: string) => {
         if (typeof x !== "string" || !x.trim() || x.length > max)
@@ -263,16 +263,16 @@ export class OfficeService {
         this.missions().some((m) => m.personaId === old.id && missionActive(m))
       )
         throw new Error(
-          "Stop the current assignment before editing this persona.",
+          "Stop the current assignment before editing this teammate.",
         );
       if (!old && this.personas().length >= 24)
         throw new Error(
-          "Office supports up to 24 personas. Remove an unused persona first.",
+          "Office supports up to 24 teammates. Remove an unused teammate first.",
         );
       if (!["robot", "cat", "fox", "owl"].includes(v.avatar))
         throw new Error("Choose a robot, cat, fox, or owl avatar.");
       if (!["amber", "sage", "blue", "lilac"].includes(v.color))
-        throw new Error("Choose one of the available persona colors.");
+        throw new Error("Choose one of the available teammate colors.");
       if (
         !Array.isArray(v.agentSlugs) ||
         !v.agentSlugs.length ||
@@ -298,7 +298,7 @@ export class OfficeService {
       )
         throw new Error("The run budget must be between 5 and 120 minutes.");
       if (typeof v.enabled !== "boolean")
-        throw new Error("Choose whether the persona is enabled.");
+        throw new Error("Choose whether the teammate is enabled.");
       if (
         v.approvalMinutes !== undefined &&
         (!Number.isInteger(v.approvalMinutes) ||
@@ -332,7 +332,7 @@ export class OfficeService {
       if (v.watch) {
         const source = this.persona(v.watch.personaId);
         if (source.id === old?.id || source.tenantId !== v.tenantId)
-          throw new Error("Watch another persona in the same tenant.");
+          throw new Error("Watch another teammate in the same tenant.");
         if (
           !["new", "changed", "threshold"].includes(v.watch.event) ||
           !Number.isInteger(v.watch.cooldownMinutes) ||
@@ -348,7 +348,7 @@ export class OfficeService {
         for (let depth = 0; cursor; depth++) {
           if (visited.has(cursor.id) || depth >= 3)
             throw new Error(
-              "Watch chains must be acyclic and no deeper than four personas.",
+              "Watch chains must be acyclic and no deeper than four teammates.",
             );
           visited.add(cursor.id);
           cursor = cursor.watch
@@ -362,7 +362,7 @@ export class OfficeService {
         this.hasDependentMission(old.id)
       )
         throw new Error(
-          "Stop dependent assignments before changing this persona's tenant.",
+          "Stop dependent assignments before changing this teammate's tenant.",
         );
       const c = await this.host.context();
       const now = new Date(this.now()).toISOString();
@@ -426,7 +426,7 @@ export class OfficeService {
         while (cursor) {
           if (seen.has(cursor.id) || seen.size >= 4)
             throw new Error(
-              "Watch chains must be acyclic and no deeper than four personas.",
+              "Watch chains must be acyclic and no deeper than four teammates.",
             );
           seen.add(cursor.id);
           cursor = cursor.watch
@@ -489,7 +489,7 @@ export class OfficeService {
               enabled: false,
               nextRunAt: undefined,
               lastError:
-                "The watched persona changed tenant. Choose an evidence source in this tenant before enabling it.",
+                "The watched teammate changed tenant. Choose an evidence source in this tenant before enabling it.",
             });
         }
         this.putPersona(p);
@@ -516,9 +516,9 @@ export class OfficeService {
     handoff?: OfficeHandoff,
   ) {
     if (!p.enabled)
-      throw new Error("This persona is paused. Edit it to enable assignments.");
+      throw new Error("This teammate is paused. Edit it to enable assignments.");
     if (this.missions().some((m) => m.personaId === p.id && missionActive(m)))
-      throw new Error("This persona already has an assignment in progress.");
+      throw new Error("This teammate already has an assignment in progress.");
     const c = await this.host.context();
     this.validateReady(p, c);
     if (p.trustKey !== this.trustKey(p, c))
@@ -998,7 +998,7 @@ export class OfficeService {
       const p = this.persona(input.id);
       if (this.answering.has(p.id))
         throw new Error(
-          "This persona is answering a question. Wait for its response before asking another.",
+          "This teammate is answering a question. Wait for its response before asking another.",
         );
       if (
         typeof input.question !== "string" ||
@@ -1010,7 +1010,7 @@ export class OfficeService {
       this.validateReady(p, c);
       if (p.trustKey !== this.trustKey(p, c))
         throw new Error(
-          "The assigned provider or workflows changed. Review and save the persona before asking.",
+          "The assigned provider or workflows changed. Review and save the teammate before asking.",
         );
       const runs = c.runs
         .filter(
@@ -1042,7 +1042,7 @@ export class OfficeService {
       let answer: string;
       if (!ids.length)
         answer =
-          "There is no completed evidence for this persona yet. Run its assignment first. I cannot infer a clean result from an empty history.";
+          "There is no completed evidence for this teammate yet. Run its assignment first. I cannot infer a clean result from an empty history.";
       else if (!this.host.complete)
         throw new Error(
           "The assigned provider cannot answer questions. Check provider settings.",
@@ -1057,7 +1057,7 @@ export class OfficeService {
           !c.tenants.some((t) => t.id === p.tenantId)
         )
           throw new Error(
-            "This persona's scope changed while answering. Ask again with its current configuration.",
+            "This teammate's scope changed while answering. Ask again with its current configuration.",
           );
         this.memory.message(
           p,
@@ -1202,10 +1202,10 @@ export class OfficeService {
       this.persona(id);
       if (this.hasDependentMission(id))
         throw new Error(
-          "Stop dependent assignments before removing their evidence source persona.",
+          "Stop dependent assignments before removing their evidence source teammate.",
         );
       if (this.missions().some((m) => m.personaId === id && missionActive(m)))
-        throw new Error("Stop this persona before removing it.");
+        throw new Error("Stop this teammate before removing it.");
       for (const watcher of this.personas().filter(
         (p) => p.watch?.personaId === id,
       ))
@@ -1214,7 +1214,7 @@ export class OfficeService {
           enabled: false,
           nextRunAt: undefined,
           lastError:
-            "The watched persona was removed. Edit this assignment and choose another evidence source.",
+            "The watched teammate was removed. Edit this assignment and choose another evidence source.",
         });
       this.memory.purgePersona(id);
       this.db.prepare("DELETE FROM office_missions WHERE persona_id=?").run(id);

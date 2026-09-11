@@ -1,0 +1,58 @@
+{
+  "platform": "linux",
+  "fixture": true,
+  "nativeFullscreen": true,
+  "escape": true,
+  "nestedDialogEscape": true,
+  "nativeExit": true,
+  "routeExit": true,
+  "labels200": "no overlap",
+  "measurements": [
+    {
+      "mode": "window",
+      "width": 1366,
+      "height": 768,
+      "stage": {
+        "x": 283,
+        "y": 328.484375,
+        "width": 675,
+        "height": 378,
+        "top": 328.484375,
+        "right": 958,
+        "bottom": 706.484375,
+        "left": 283
+      }
+    },
+    {
+      "mode": "window",
+      "width": 1920,
+      "height": 1080,
+      "stage": {
+        "x": 283.015625,
+        "y": 328.484375,
+        "width": 1160.671875,
+        "height": 649.96875,
+        "top": 328.484375,
+        "right": 1443.6875,
+        "bottom": 978.453125,
+        "left": 283.015625
+      }
+    },
+    {
+      "mode": "fullscreen",
+      "width": 1920,
+      "height": 1080,
+      "stage": {
+        "x": 240.484375,
+        "y": 155,
+        "width": 1439.03125,
+        "height": 805.84375,
+        "top": 155,
+        "right": 1679.515625,
+        "bottom": 960.84375,
+        "left": 240.484375
+      },
+      "tenantBoundaryVisible": true
+    }
+  ]
+}

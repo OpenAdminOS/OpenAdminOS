@@ -109,11 +109,18 @@ export function PersonaAvatar({
 }
 
 type SceneProps = {
+  immersive?: boolean;
   personas: OfficePersona[];
   statuses: Record<string, string>;
   events?: Record<
     string,
-    { text: string; at: string; runId?: string; handoff?: boolean; handoffAt?:string }
+    {
+      text: string;
+      at: string;
+      runId?: string;
+      handoff?: boolean;
+      handoffAt?: string;
+    }
   >;
   selectedId?: string;
   onSelect: (id: string) => void;
@@ -477,7 +484,13 @@ function ScenePersona({
   motion: boolean;
   selected: boolean;
   onSelect: () => void;
-  event?: { text: string; at: string; runId?: string; handoff?: boolean; handoffAt?:string };
+  event?: {
+    text: string;
+    at: string;
+    runId?: string;
+    handoff?: boolean;
+    handoffAt?: string;
+  };
 }) {
   const seed = index * 3; // Stable seat timing makes rehearsal captures repeatable.
   const [idle, setIdle] = useState(seed % 2);
@@ -586,8 +599,6 @@ function ScenePersona({
     };
   }, [x, y, motion]);
   // Task messages are backed by a real record and remain inspectable on selection.
-  const showEvent =
-    event && (selected || Date.now() - Date.parse(event.at) < 12000);
   return (
     <div
       ref={element}
@@ -632,27 +643,6 @@ function ScenePersona({
           </svg>
         )}
       </button>
-      {showEvent && (
-        <a
-          className="scene-event"
-          href={
-            event.runId
-              ? `#/runs/${event.runId}`
-              : `#/office?persona=${encodeURIComponent(persona.id)}`
-          }
-          title={new Date(event.at).toLocaleString()}
-        >
-          {event.handoff ? "↗ " : ""}
-          {event.text}
-          <small>
-            {new Date(event.at).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}{" "}
-            · Open evidence
-          </small>
-        </a>
-      )}
     </div>
   );
 }
@@ -696,6 +686,7 @@ function FurnitureFront() {
 }
 
 export function OfficeScene({
+  immersive = false,
   personas,
   statuses,
   events,
@@ -705,6 +696,9 @@ export function OfficeScene({
   const [paused, setPaused] = useState(
     () => localStorage.getItem("team-motion") === "paused",
   );
+  const viewport = useRef<HTMLDivElement>(null);
+  const [fitWidth, setFitWidth] = useState<number>();
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [query, setQuery] = useState("");
   const [reduced, setReduced] = useState(false);
@@ -727,6 +721,22 @@ export function OfficeScene({
       document.removeEventListener("visibilitychange", visibility);
     };
   }, []);
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const resize = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setFitWidth(Math.max(1, Math.min(width, (height * 1000) / 560)));
+    });
+    resize.observe(element);
+    return () => resize.disconnect();
+  }, []);
+  const selectedEvent = selectedId ? events?.[selectedId] : undefined;
+  const latestEvent = selectedEvent
+    ? ([selectedId!, selectedEvent] as const)
+    : Object.entries(events ?? {}).sort(
+        (a, b) => Date.parse(b[1].at) - Date.parse(a[1].at),
+      )[0];
   const motion = !paused && !reduced && !hidden;
   const currentFloor = Math.min(
     floor,
@@ -734,7 +744,10 @@ export function OfficeScene({
   );
   const visible = personas.slice(currentFloor * 6, currentFloor * 6 + 6);
   return (
-    <div className="team-office" data-motion={motion ? "on" : "off"}>
+    <div
+      className={`team-office ${immersive ? "scene-immersive" : ""}`}
+      data-motion={motion ? "on" : "off"}
+    >
       <div className="scene-toolbar">
         <span>
           <i /> TEAM OFFICE <small>Live assignments, a little downtime</small>
@@ -783,6 +796,13 @@ export function OfficeScene({
             +
           </button>
           <button onClick={() => setZoom(1)}>Fit</button>
+          <button
+            aria-expanded={rosterOpen}
+            aria-controls="office-roster"
+            onClick={() => setRosterOpen((v) => !v)}
+          >
+            {rosterOpen ? "Hide roster" : "Team roster"}
+          </button>
         </div>
       </div>
       {query && (
@@ -803,8 +823,11 @@ export function OfficeScene({
             ))}
         </div>
       )}
-      <div className="scene-viewport">
-        <div className="office-stage" style={{ width: `${zoom * 100}%` }}>
+      <div className="scene-viewport" ref={viewport}>
+        <div
+          className="office-stage"
+          style={{ width: fitWidth ? fitWidth * zoom : "100%" }}
+        >
           <OfficeInterior
             working={visible.map((p) => statuses[p.id] === "Working")}
           />
@@ -823,6 +846,29 @@ export function OfficeScene({
           <FurnitureFront />
         </div>
       </div>
+      {latestEvent && (
+        <div className="scene-activity" aria-label="Latest team evidence">
+          <span>
+            {personas.find((p) => p.id === latestEvent[0])?.name}:{" "}
+            {latestEvent[1].text}
+          </span>
+          <a
+            href={
+              latestEvent[1].runId
+                ? `#/runs/${latestEvent[1].runId}`
+                : `#/office?persona=${encodeURIComponent(latestEvent[0])}`
+            }
+          >
+            Open evidence →
+          </a>
+          <time dateTime={latestEvent[1].at}>
+            {new Date(latestEvent[1].at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </time>
+        </div>
+      )}
       {personas.length > 6 && (
         <div className="scene-floors" aria-label="Office floors">
           {Array.from({ length: Math.ceil(personas.length / 6) }, (_, i) => (
@@ -841,8 +887,12 @@ export function OfficeScene({
           ))}
         </div>
       )}
-      {personas.length > 0 && (
-        <div className="scene-roster" aria-label="Office team">
+      {personas.length > 0 && rosterOpen && (
+        <div
+          className="scene-roster"
+          id="office-roster"
+          aria-label="Office team"
+        >
           {visible.map((p) => (
             <button
               key={p.id}

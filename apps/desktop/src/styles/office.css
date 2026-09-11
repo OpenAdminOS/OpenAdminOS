@@ -1722,3 +1722,557 @@ html[data-team-presentation]
 .scene-persona-label {
   max-width: 105px;
 }
+
+/* 0.6.1: the room is the workspace; setup and evidence have dedicated surfaces. */
+.office-header {
+  flex-wrap: wrap;
+}
+.office-header h1 {
+  font-size: 25px;
+}
+.office-header p {
+  margin: 4px 0 0;
+}
+.office-toolbar {
+  margin: 12px 0;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.office-view {
+  flex-wrap: wrap;
+}
+.office-view button {
+  min-height: 32px;
+}
+.office-view button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.team-attention-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  font-size: 12px;
+  color: var(--color-text-soft);
+}
+.team-attention-summary strong {
+  color: var(--color-text);
+}
+.team-attention-summary button {
+  color: var(--color-accent);
+  padding: 5px 8px;
+  cursor: pointer;
+  border-radius: 5px;
+}
+.team-attention-summary button:hover {
+  background: var(--color-surface-hover);
+}
+.team-inbox-dialog {
+  overflow: auto;
+  padding: 0 18px 18px;
+}
+.team-inbox-dialog .team-inbox {
+  display: block;
+  margin: 0;
+  border: 0;
+  padding: 14px 0;
+  max-height: none;
+}
+.team-inbox-dialog .team-inbox-grid {
+  max-height: none;
+  overflow: visible;
+}
+.office-panel[hidden] {
+  display: none;
+}
+.office-room {
+  min-width: 0;
+}
+.office-expanded .team-office {
+  max-width: none;
+}
+.scene-viewport {
+  height: clamp(220px, calc(100dvh - 390px), 650px);
+  background: #1e332b;
+}
+.office-stage {
+  margin-inline: auto;
+  container-type: inline-size;
+}
+.scene-toolbar,
+.scene-controls {
+  flex-wrap: wrap;
+}
+.scene-controls > div,
+.scene-controls label {
+  flex-wrap: wrap;
+}
+.scene-controls input {
+  min-width: 0;
+  width: 160px;
+  max-width: 100%;
+}
+.scene-toolbar small {
+  display: none;
+}
+.scene-persona-label {
+  opacity: 0;
+  pointer-events: none;
+  max-width: 16cqw;
+}
+.scene-persona[aria-pressed="true"] .scene-persona-label,
+.scene-persona:focus-visible .scene-persona-label {
+  opacity: 1;
+}
+.office-stage:has(.scene-persona:focus-visible)
+  .scene-persona:not(:focus-visible)
+  .scene-persona-label {
+  opacity: 0;
+}
+.scene-persona-label strong,
+.office-expanded .scene-persona-label strong {
+  font-size: 12px;
+}
+.scene-persona-label small,
+.office-expanded .scene-persona-label small {
+  font-size: 10px;
+}
+.scene-persona-position:focus-within {
+  z-index: 1000 !important;
+}
+.scene-persona[aria-pressed="true"] {
+  outline: 2px solid #edc294;
+  outline-offset: 2px;
+}
+.scene-activity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 9px 14px;
+  background: #f4e5c6;
+  color: #26382b;
+  font-size: 12px;
+}
+.scene-activity > span {
+  flex: 1;
+  min-width: min(160px, 100%);
+  overflow-wrap: anywhere;
+}
+.scene-activity a {
+  color: #26382b;
+  font-weight: 600;
+}
+.scene-activity time {
+  font-size: 11px;
+}
+.scene-roster {
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+.scene-roster-persona strong {
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.scene-roster-persona small {
+  font-size: 11px;
+}
+.scene-search-results {
+  max-height: 180px;
+  overflow: auto;
+}
+.scene-search-results button {
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.team-first-result {
+  border-left: 2px solid var(--color-accent);
+  padding: 8px 12px;
+  margin: 12px 0;
+  font-size: 12px;
+  background: var(--color-accent-soft);
+}
+.team-first-result p {
+  margin-top: 6px;
+  line-height: 1.6;
+}
+.team-empty-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+  list-style: decimal inside;
+  color: #d0c8bc;
+  margin: 24px 0 0;
+  font-size: 12px;
+}
+html[data-team-fullscreen] aside[aria-label="Application navigation"],
+html[data-team-fullscreen] .app-region-drag {
+  display: none;
+}
+.office-fullscreen {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+}
+.office-fullscreen > .office-header,
+.office-fullscreen > .team-attention-summary,
+.office-fullscreen > .office-briefing,
+.office-fullscreen > .office-availability {
+  display: none;
+}
+.office-fullscreen > .office-toolbar {
+  flex-shrink: 0;
+  margin: 0;
+}
+.office-fullscreen .office-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.office-fullscreen .office-layout:has(.office-panel:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) min(320px, 35%);
+}
+.office-fullscreen .office-panel {
+  min-height: 0;
+  overflow: auto;
+}
+.office-fullscreen .office-room {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.office-fullscreen .office-room-footer {
+  display: none;
+}
+.office-fullscreen .team-office {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.office-fullscreen .scene-viewport {
+  flex: 1;
+  min-height: 160px;
+  height: auto;
+}
+.office-fullscreen .scene-roster {
+  max-height: 160px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.office-fullscreen .scene-toolbar,
+.office-fullscreen .scene-controls,
+.office-fullscreen .scene-floors,
+.office-fullscreen .scene-activity {
+  flex-shrink: 0;
+}
+html[data-team-presentation] .office-fullscreen .office-layout {
+  display: flex;
+}
+html[data-team-presentation] .office-fullscreen .office-room {
+  width: 100%;
+}
+/* Fullscreen alone keeps the existing tenant/provider strip visible. */
+@media (max-height: 600px) {
+  .office-fullscreen .office-layout {
+    min-height: 300px;
+  }
+}
+@media (max-width: 800px) {
+  .office-page {
+    padding: 16px;
+  }
+  .office-toolbar {
+    align-items: stretch;
+  }
+  .office-fullscreen {
+    padding: 8px;
+  }
+  .office-fullscreen .office-layout:has(.office-panel:not([hidden])) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .office-fullscreen .office-panel:not([hidden]) {
+    max-height: 220px;
+  }
+}
+.team-setup-progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 16px 24px;
+  margin: 0;
+  list-style: none;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+.team-setup-progress li {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.team-setup-progress li > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  font: 11px var(--font-mono);
+}
+.team-setup-progress li[aria-current="step"] {
+  color: var(--color-accent);
+}
+.team-setup-progress li[aria-current="step"] > span {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.office-editor.team-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.team-editor-body {
+  padding: 16px 24px 24px;
+  overflow: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.team-step-heading {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  margin: 0 0 12px;
+}
+.team-step-heading:focus {
+  outline: none;
+}
+.team-step-intro {
+  color: var(--color-text-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 6px 0 14px;
+}
+.office-presets.team-role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 24px;
+}
+.team-role-grid button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  align-content: start;
+  gap: 6px 12px;
+  padding: 14px;
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+.team-role-grid button:hover {
+  background: var(--color-surface-hover);
+}
+.team-role-grid button[aria-pressed="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.team-role-grid .persona-avatar {
+  grid-row: span 3;
+  width: 42px;
+  height: 42px;
+}
+.team-role-grid strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+.team-role-grid span {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-soft);
+}
+.team-role-grid small {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font-size: 11px;
+}
+.team-readiness {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+}
+.team-readiness li {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+}
+.team-readiness strong {
+  color: var(--color-warning);
+}
+.team-readiness [data-ready="true"] strong {
+  color: var(--color-success);
+}
+.team-readiness span {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+  color: var(--color-text-soft);
+}
+.team-editor .office-agent-picker {
+  max-height: none;
+  overflow: visible;
+}
+.team-advanced {
+  margin: 16px 0;
+  border-block: 1px solid var(--color-border);
+  padding: 12px 0;
+}
+.team-advanced > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.team-data-boundary,
+.team-schedule-preview {
+  border-left: 2px solid var(--color-accent);
+  background: var(--color-accent-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 12px;
+  margin: 16px 0;
+}
+.team-editor-footer {
+  flex-shrink: 0;
+  padding: 14px 24px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+}
+.team-editor-footer .office-actions {
+  margin: 0;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.team-editor-footer .office-error {
+  margin: 0 0 10px;
+}
+.team-editor-footer .team-step-intro {
+  margin: 8px 0 0;
+}
+.team-step-count {
+  flex: 1;
+  font-size: 11px;
+  text-align: right;
+  color: var(--color-text-muted);
+}
+.team-review {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.team-review-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.team-review-heading .persona-avatar {
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
+}
+.team-review h4 {
+  font-weight: 600;
+  font-size: 15px;
+}
+.team-review dl {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.team-review dl > div {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+}
+.team-review dt {
+  color: var(--color-text-muted);
+}
+.team-review dd {
+  overflow-wrap: anywhere;
+}
+.team-review ol {
+  list-style: decimal;
+  padding-left: 20px;
+  margin: 12px 0 20px;
+}
+.team-review li {
+  margin-bottom: 8px;
+}
+.team-setup-recovery {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 12px;
+}
+.team-setup-recovery p {
+  margin-bottom: 10px;
+}
+@media (max-width: 700px) {
+  .team-setup-progress {
+    padding: 12px 16px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .team-editor-body,
+  .team-editor-footer {
+    padding: 14px 16px;
+  }
+  .office-presets.team-role-grid,
+  .team-readiness {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .team-editor .office-form-row {
+    flex-wrap: wrap;
+  }
+  .team-editor .office-form-row > label {
+    min-width: min(180px, 100%);
+  }
+  .team-step-count {
+    display: none;
+  }
+  .team-review dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+.office-layout {
+  align-items: start;
+}
+.scene-viewport {
+  aspect-ratio: 1000 / 560;
+  height: auto;
+  max-height: clamp(220px, calc(100dvh - 390px), 650px);
+}
+.office-fullscreen .office-layout {
+  align-items: stretch;
+}
+.office-fullscreen .scene-viewport {
+  aspect-ratio: auto;
+  max-height: none;
+}

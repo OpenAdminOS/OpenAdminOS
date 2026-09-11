@@ -1,3 +1,4 @@
+import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import {
@@ -4673,6 +4674,8 @@ function armMainWindowRevealFallback(window: BrowserWindow, show: boolean): void
   window.once("closed", () => clearTimeout(timeout));
 }
 
+let officeWindowMode: ReturnType<typeof officeFullscreen> | undefined;
+
 async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
   mainWindow = new BrowserWindow({
@@ -4729,6 +4732,8 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
       webviewTag: false,
     },
   });
+
+  officeWindowMode = officeFullscreen(mainWindow);
 
   if (!isScreenshotCaptureLaunch) {
     attachWindowStatePersistence(mainWindow);
@@ -5910,12 +5915,16 @@ function registerIpcHandlers() {
       store.setActiveModel(validateProviderId(providerId), validateActiveModel(model)),
     ),
   );
+  ipcMain.handle("openadminos:office-fullscreen", handleTrusted((event, active: unknown) => {
+    if (typeof active !== "boolean" || event.sender !== mainWindow?.webContents || !officeWindowMode) throw new Error("Full screen is available in the main desktop window.");
+    return officeWindowMode.set(active);
+  }));
   ipcMain.handle("openadminos:office-review", handleTrusted((_event, input: unknown) => {
     if (!input || typeof input !== "object") throw new Error("Choose a finding to review.");
     return store.reviewOfficeFinding(input as Parameters<typeof store.reviewOfficeFinding>[0]);
   }));
   ipcMain.handle("openadminos:office-ask", handleTrusted((_event, input: unknown) => {
-    if (!input || typeof input !== "object") throw new Error("Choose a persona and enter a question.");
+    if (!input || typeof input !== "object") throw new Error("Choose a teammate and enter a question.");
     return store.askOfficePersona(input as Parameters<typeof store.askOfficePersona>[0]);
   }));
   ipcMain.handle("openadminos:office-save", handleTrusted(async (_event, input: unknown) => {

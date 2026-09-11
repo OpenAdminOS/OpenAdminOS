@@ -7,9 +7,24 @@ export async function runOfficeSmoke(
   window: BrowserWindow,
   outputDir: string,
 ): Promise<void> {
+  window.webContents.setBackgroundThrottling(false);
   const evaluate = <T>(code: string): Promise<T> =>
     window.webContents.executeJavaScript(code, true);
+  const reload = async () => {
+    // Waiting only for a selector can match the old document during reload.
+    const loaded = new Promise<void>((resolve) =>
+      window.webContents.once("did-finish-load", () => resolve()),
+    );
+    window.webContents.reload();
+    await loaded;
+  };
   const capture = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    for (let i = 0; i < 4; i++) {
+      window.webContents.invalidate();
+      await window.webContents.capturePage();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
     // Discard Xvfb's previous compositor frame, as in captureScreenshotPng.
     window.webContents.invalidate();
     await window.webContents.capturePage();
@@ -31,25 +46,45 @@ export async function runOfficeSmoke(
   await evaluate(`location.hash = '/office'`);
   await wait(`Boolean(document.querySelector('.office-empty'))`);
   await evaluate(
-    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Add persona').click()`,
+    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Add teammate').click()`,
   );
   await wait(`Boolean(document.querySelector('.office-editor'))`);
   await evaluate(`(() => {
     const form = document.querySelector('.office-editor');
-    Array.from(form.querySelectorAll('button')).find(b => b.textContent === 'Chief of Staff').click();
+    Array.from(form.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Chief of Staff').click();
   })()`);
+  await writeFile(join(outputDir, "setup-role.png"), await capture());
+  await evaluate(
+    `document.querySelector('.office-editor button[type="submit"]').click()`,
+  );
+  await wait(`Boolean(document.querySelector('.office-agent-picker'))`);
   await evaluate(`(() => {
     const form = document.querySelector('.office-editor');
     for (const label of form.querySelectorAll('.office-agent-picker label')) {const input=label.querySelector('input');const wanted=/Compliance overview|Find inactive devices/.test(label.textContent);if (input.checked!==wanted) input.click();}
   })()`);
+  await writeFile(join(outputDir, "setup-workspace.png"), await capture());
   await evaluate(
     `document.querySelector('.office-editor button[type="submit"]').click()`,
   );
   await wait(
-    `Boolean(document.querySelector('.office-station')) && !document.querySelector('.office-editor')`,
+    `document.querySelector('.team-step-heading')?.textContent === 'Choose schedule'`,
+  );
+  await writeFile(join(outputDir, "setup-schedule.png"), await capture());
+  await evaluate(
+    `document.querySelector('.office-editor button[type="submit"]').click()`,
+  );
+  await wait(
+    `document.querySelector('.team-step-heading')?.textContent === 'Review and add'`,
+  );
+  await writeFile(join(outputDir, "setup-review.png"), await capture());
+  await evaluate(
+    `document.querySelector('.office-editor button[type="submit"]').click()`,
+  );
+  await wait(
+    `Boolean(document.querySelector('.scene-persona')) && !document.querySelector('.office-editor')`,
   );
   await evaluate(
-    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Run assignment').click()`,
+    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Run first assignment').click()`,
   );
   await wait(
     `(async () => { const s = await window.openAdminOS.getAppState(); const m = s.office.missions[0]; if (m?.status === 'failed') throw new Error(m.error); return m?.status === 'completed'; })()`,
@@ -71,8 +106,8 @@ export async function runOfficeSmoke(
     ]) await window.openAdminOS.saveOfficePersona({ ...original, id: undefined, name, avatar, color, agentSlugs, responsibility: name === "Policy Watcher" ? "Review compliance posture and flag changes." : "Investigate inactive devices and stale inventory.", intervalMinutes: 60, enabled: true });
     return { status: m.status, tasks: runs.length, tenantPinned: true };
   })()`);
-  await evaluate(`location.reload()`);
-  await wait(`document.querySelectorAll('.office-station').length === 3`);
+  await reload();
+  await wait(`document.querySelectorAll('.scene-persona').length === 3`);
   await evaluate(`(() => {
     const links = Array.from(document.querySelectorAll('.team-nav-persona'));
     if (links.length !== 3 || links.some(link => !link.querySelector('svg'))) throw new Error('Missing sidebar persona icons.');
