@@ -1,0 +1,58 @@
+{
+  "platform": "darwin",
+  "fixture": true,
+  "nativeFullscreen": true,
+  "escape": true,
+  "nestedDialogEscape": true,
+  "nativeExit": true,
+  "routeExit": true,
+  "labels200": "no overlap",
+  "measurements": [
+    {
+      "mode": "window",
+      "width": 1366,
+      "height": 768,
+      "stage": {
+        "x": 283,
+        "y": 362.9921875,
+        "width": 675,
+        "height": 378,
+        "top": 362.9921875,
+        "right": 958,
+        "bottom": 740.9921875,
+        "left": 283
+      }
+    },
+    {
+      "mode": "window",
+      "width": 1920,
+      "height": 1080,
+      "stage": {
+        "x": 283.015625,
+        "y": 362.9921875,
+        "width": 1160.6796875,
+        "height": 649.9765625,
+        "top": 362.9921875,
+        "right": 1443.6953125,
+        "bottom": 1012.96875,
+        "left": 283.015625
+      }
+    },
+    {
+      "mode": "fullscreen",
+      "width": 1920,
+      "height": 1205,
+      "stage": {
+        "x": 131.109375,
+        "y": 156.5,
+        "width": 1657.78125,
+        "height": 928.3515625,
+        "top": 156.5,
+        "right": 1788.890625,
+        "bottom": 1084.8515625,
+        "left": 131.109375
+      },
+      "tenantBoundaryVisible": true
+    }
+  ]
+}

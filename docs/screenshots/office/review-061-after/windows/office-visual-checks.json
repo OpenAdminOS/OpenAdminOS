@@ -1,0 +1,58 @@
+{
+  "platform": "win32",
+  "fixture": true,
+  "nativeFullscreen": true,
+  "escape": true,
+  "nestedDialogEscape": true,
+  "nativeExit": true,
+  "routeExit": true,
+  "labels200": "no overlap",
+  "measurements": [
+    {
+      "mode": "window",
+      "width": 1365,
+      "height": 768,
+      "stage": {
+        "x": 282.5714416503906,
+        "y": 358.20538330078125,
+        "width": 675,
+        "height": 378.0000305175781,
+        "top": 358.20538330078125,
+        "right": 957.5714416503906,
+        "bottom": 736.2054138183594,
+        "left": 282.5714416503906
+      }
+    },
+    {
+      "mode": "window",
+      "width": 1919,
+      "height": 1080,
+      "stage": {
+        "x": 282.58038330078125,
+        "y": 358.20538330078125,
+        "width": 1160.696533203125,
+        "height": 649.982177734375,
+        "top": 358.20538330078125,
+        "right": 1443.2769165039062,
+        "bottom": 1008.1875610351562,
+        "left": 282.58038330078125
+      }
+    },
+    {
+      "mode": "fullscreen",
+      "width": 1098,
+      "height": 618,
+      "stage": {
+        "x": 239.07144165039062,
+        "y": 153.1428680419922,
+        "width": 620.1428833007812,
+        "height": 347.27679443359375,
+        "top": 153.1428680419922,
+        "right": 859.2143249511719,
+        "bottom": 500.41966247558594,
+        "left": 239.07144165039062
+      },
+      "tenantBoundaryVisible": true
+    }
+  ]
+}

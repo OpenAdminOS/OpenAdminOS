@@ -150,6 +150,6 @@ the isolated profiles. Write boundaries were exercised only with fixtures.
 ## Visual follow-up
 
 The [three-platform visual review](agent-team-061-visual-review.md) records native
-captures, shared layout and 200% label-collision findings, and proposed teammate
-naming, guided setup, and native fullscreen acceptance criteria. These proposals
-are not implemented by the functional fixes above.
+captures, shared layout and 200% label-collision findings, and the implemented teammate naming, guided setup, and native fullscreen follow-up.
+Its after-captures and verification notes supersede the original visual findings;
+the release validation limits above still apply.

@@ -1,7 +1,12 @@
-# Agent Team visual review and proposed follow-up
+# Agent Team visual review and implemented follow-up
 
-Reviewed 2026-09-11 against `e98f20e` on `fix/0.6.1-agent-team`.
-This is a review and implementation proposal, not a claim that the proposed UI ships.
+Baseline reviewed 2026-09-11 against `e98f20e` on `fix/0.6.1-agent-team`.
+The user approved the follow-up below, which is now implemented on the review branch.
+No release has been published. Baseline findings are retained for comparison.
+Updated product code: `8452b55f1a11d769c9d8f1d5561773ab6acc7a35`.
+The page, editor, fullscreen controller and native-check source hashes matched across
+all three review machines. Final renderer suite: 23 files / 111 tests; desktop host:
+240 tests, including six native-controller lifecycle regressions.
 The functional review remains in [agent-team-061-review.md](agent-team-061-review.md).
 
 ## Evidence and scope
@@ -32,7 +37,7 @@ colors is Chromium emulation, not an OS accessibility certification. The saved
 editor images show editing; first-creation analysis additionally uses the existing
 fresh-profile interaction results and the new-role/empty-state code paths.
 
-## Findings, in priority order
+## Baseline findings, in priority order
 
 1. **P1: the office is largely below the fold.** The normal view places a large
    briefing, search, filters, and nested scrolling findings above the room on all
@@ -81,7 +86,7 @@ comes from composition, labels, and setup guidance, not adding another rendering
 Review criteria also included the current
 [Web Interface Guidelines](https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/main/command.md).
 
-## Proposed terminology
+## Implemented terminology
 
 | Concept | Recommended interface wording |
 | --- | --- |
@@ -94,11 +99,11 @@ Review criteria also included the current
 | Visual location | Office |
 
 Keep internal `OfficePersona`, IDs, routes and storage unchanged. This is a copy and
-information-hierarchy proposal, not a schema migration. Avoid “employee” or “hire,”
+information-hierarchy change, not a schema migration. Avoid “employee” or “hire,”
 which would imply broader human capabilities or employment. Future human invitations
-need explicit human/AI distinctions; multiplayer is not implemented by this proposal.
+need explicit human/AI distinctions; multiplayer remains outside this change.
 
-## Proposed first-teammate flow
+## Implemented first-teammate flow
 
 1. **Choose a role.** Show icon, plain-language responsibility, required workflows,
    and expected output. Explain that Research Bot reviews supplied evidence and
@@ -121,9 +126,8 @@ need explicit human/AI distinctions; multiplayer is not implemented by this prop
 
 The app already declares Electron's native `togglefullscreen` menu role in
 `apps/desktop/electron/main.ts:4581` and saves/restores window fullscreen state in
-`window-state.ts`. There is no office-specific fullscreen action. Existing window
-support makes this feasible without a new rendering dependency; native entry/exit
-behavior still needs implementation and testing rather than being inferred from CSS.
+`window-state.ts`. The follow-up adds an office-specific fullscreen controller and renderer action,
+using existing Electron window support without a new rendering dependency.
 
 - Provide a dedicated **Full screen** action that focuses the office and uses the
   native window fullscreen capability. Keep **Exit full screen** visible and support
@@ -143,15 +147,56 @@ behavior still needs implementation and testing rather than being inferred from 
   hidden-window suspension, window resize, and exiting while a dialog is open.
   Test macOS native Spaces transition and Windows display scaling explicitly.
 
-## Next implementation order and remaining limits
+## Implemented result and verification
 
-1. Consistent teammate copy and one first-run entry point.
-2. Guided setup with persistent actions and retained draft/install recovery.
-3. Compact attention summary and office-focused layout.
-4. Independent fullscreen and concealment controls with native lifecycle handling.
-5. Label collision/reflow fixes and renewed native visual verification.
+- All seven baseline findings are addressed: consistent teammate copy, a four-step
+  editor with persistent actions, contextual prerequisites, compact attention summary,
+  native fullscreen independent of concealment, selected/focused labels, and a fixed
+  evidence strip with a full-name roster. The original artwork and motion remain.
+- Creation selects the saved teammate and guides the first assignment. Back preserves
+  the draft. Missing workflows remain selected until installed or explicitly removed.
+  The review step exposes the actual ordered read/write workflows and data destination.
+- Provider setup buttons do not submit the editor. Connected providers that do not
+  enumerate models retain an explicitly configured model, matching host readiness.
+- Native fullscreen handles Escape, nested-dialog precedence, OS exit and route exit.
+  Prior fullscreen is preserved. Linux window-manager resize transitions can emit a
+  transient leave/enter pair; the controller confirms a settled native exit before
+  releasing the Office view. A host regression covers this sequence.
+- The detailed fullscreen capture exposed incorrect work-order evidence after a
+  planned skip. Rows now match their workflow slug within the assignment, rather
+  than the original step index; skipped rows are explicit and have no false evidence.
+  Renderer and native rehearsal assertions cover the correction.
+- Cross-platform verification uses source-built Electron and isolated fixture profiles.
+  Builds and full suites passed; final targeted regressions and native captures include
+  the fullscreen synchronization fix. macOS renderer tests were rerun with two workers
+  after a five-second test timeout under load. This was a test scheduling limit, not a
+  native app failure.
+- Native checks cover windowed 1366×768 and 1920×1080 requests, actual display fullscreen,
+  details/concealment, 200% zoom, full-name roster access, and lifecycle exits. Capture reloads wait for the new document before reading selectors, avoiding stale
+  frames and a macOS `UnknownVizError` when capturing a destroyed document. Native
+  display scale determines actual physical capture dimensions; Windows uses 175% OS
+  scaling and macOS uses Retina. At 200% on short displays, controls and roster remain
+  scrollable; the entire UI is not promised to fit on one screen.
+- Rehearsal still exercises creation, first ordered assignment, two evidence handoffs,
+  bounded Chief planning, source-linked questions, admin review, 24 teammates, reduced
+  motion, forced-colors emulation and hidden-window motion suspension. No live tenant
+  write or PowerShell draft execution occurs.
 
-These are proposed changes. No new UI behavior or release is claimed in this review.
-Signed installer upgrades, live app MSAL sign-in/deployment, native screen readers,
-Mac manual pointer behavior and native fullscreen transitions remain unverified.
-The earlier automated Mac click-stability limitation is not a proven end-user bug.
+| Updated capture | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| Choose a role | [Image](../docs/screenshots/office/review-061-after/linux/setup-role.png) | [Image](../docs/screenshots/office/review-061-after/macos/setup-role.png) | [Image](../docs/screenshots/office/review-061-after/windows/setup-role.png) |
+| Prepare workspace | [Image](../docs/screenshots/office/review-061-after/linux/setup-workspace.png) | [Image](../docs/screenshots/office/review-061-after/macos/setup-workspace.png) | [Image](../docs/screenshots/office/review-061-after/windows/setup-workspace.png) |
+| Review and add | [Image](../docs/screenshots/office/review-061-after/linux/setup-review.png) | [Image](../docs/screenshots/office/review-061-after/macos/setup-review.png) | [Image](../docs/screenshots/office/review-061-after/windows/setup-review.png) |
+| Normal office | [Image](../docs/screenshots/office/review-061-after/linux/office-window-1366.png) | [Image](../docs/screenshots/office/review-061-after/macos/office-window-1366.png) | [Image](../docs/screenshots/office/review-061-after/windows/office-window-1366.png) |
+| Native fullscreen | [Image](../docs/screenshots/office/review-061-after/linux/office-fullscreen.png) | [Image](../docs/screenshots/office/review-061-after/macos/office-fullscreen.png) | [Image](../docs/screenshots/office/review-061-after/windows/office-fullscreen.png) |
+| Fullscreen details | [Image](../docs/screenshots/office/review-061-after/linux/office-fullscreen-details.png) | [Image](../docs/screenshots/office/review-061-after/macos/office-fullscreen-details.png) | [Image](../docs/screenshots/office/review-061-after/windows/office-fullscreen-details.png) |
+| Fullscreen at 200% | [Image](../docs/screenshots/office/review-061-after/linux/office-fullscreen-zoom-200.png) | [Image](../docs/screenshots/office/review-061-after/macos/office-fullscreen-zoom-200.png) | [Image](../docs/screenshots/office/review-061-after/windows/office-fullscreen-zoom-200.png) |
+| Roster after scrolling at 200% | [Image](../docs/screenshots/office/review-061-after/linux/office-fullscreen-roster-200.png) | [Image](../docs/screenshots/office/review-061-after/macos/office-fullscreen-roster-200.png) | [Image](../docs/screenshots/office/review-061-after/windows/office-fullscreen-roster-200.png) |
+
+The earlier fresh-profile signed installation checks remain documented in the functional
+review. This follow-up reruns the new guided renderer flow and native fixture deployment;
+it does not claim another live app sign-in. Signed installer upgrades, live MSAL
+sign-in/deployment, notification authorization, native screen readers and manual Mac
+pointer validation remain release checks. The Mac development app still reports
+`UNErrorDomain` 1 for notifications. Existing installed applications and their profiles
+remain separate from these review builds.
