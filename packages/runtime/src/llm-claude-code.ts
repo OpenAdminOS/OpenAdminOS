@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { cliArgs } from "./cli-invocation.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -385,7 +386,7 @@ async function* runClaudeCodeStream(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): AsyncIterable<LlmStreamChunk> {
-  const child = spawn(
+  const child = spawn(...cliArgs(
     input.binaryPath,
     [
       "-p",
@@ -404,10 +405,9 @@ async function* runClaudeCodeStream(input: {
       env: createClaudeCodeProcessEnv({
         overrides: claudeCodeEnvOverrides(input.homePath),
       }),
-      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
     },
-  );
+  ));
 
   let stdout = "";
   let stderr = "";
@@ -551,12 +551,11 @@ async function runProcess(input: {
   signal?: AbortSignal;
 }): Promise<{ exitCode: number | "spawn-error"; stdout: string; stderr: string }> {
   return new Promise((resolveResult) => {
-    const child = spawn(input.binaryPath, input.args, {
+    const child = spawn(...cliArgs(input.binaryPath, input.args, {
       cwd: input.cwd,
       env: input.env ?? createClaudeCodeProcessEnv(),
-      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
-    });
+    }));
 
     let stdout = "";
     let stderr = "";

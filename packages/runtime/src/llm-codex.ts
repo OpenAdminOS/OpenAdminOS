@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { cliArgs } from "./cli-invocation.js";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -326,12 +327,11 @@ async function* runCodexExecStream(input: {
     input.outputPath,
     "-",
   ];
-  const child = spawn(input.binaryPath, args, {
+  const child = spawn(...cliArgs(input.binaryPath, args, {
     cwd: input.cwd,
     env: createCodexProcessEnv({ overrides: { CODEX_HOME: input.homePath } }),
-    shell: process.platform === "win32",
     stdio: ["pipe", "pipe", "pipe"],
-  });
+  }));
 
   let stdout = "";
   let stderr = "";
@@ -477,12 +477,11 @@ async function runProcess(input: {
   timeoutMs: number;
 }): Promise<{ exitCode: number | "spawn-error"; stdout: string; stderr: string }> {
   return new Promise((resolveResult) => {
-    const child = spawn(input.binaryPath, input.args, {
+    const child = spawn(...cliArgs(input.binaryPath, input.args, {
       cwd: input.cwd,
       env: createCodexProcessEnv({ overrides: input.env }),
-      shell: process.platform === "win32",
       stdio: ["pipe", "pipe", "pipe"],
-    });
+    }));
 
     let stdout = "";
     let stderr = "";
