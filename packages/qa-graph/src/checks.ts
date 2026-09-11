@@ -222,6 +222,16 @@ async function checkOperationsExist(
   client: MsgraphClient,
 ): Promise<OperationCheckResult> {
   if (agent.graphOperations.length === 0) {
+    // Evidence-only team workflows deliberately do not reread the tenant. This
+    // exception is structural: read mode, no connectors, only LLM/transforms,
+    // and an explicit reference to the host's bounded evidence input.
+    let evidenceOnly = false;
+    try {
+      const raw = readFileSync(agent.manifestPath,"utf8");
+      const manifest = parseYaml(raw) as {skills?:{format?:string}[];descriptor?:{mode?:string};connectors?:unknown;definition?:{connectors?:unknown}};
+      evidenceOnly = agent.mode === "read" && agent.scopes.length === 0 && manifest.descriptor?.mode === "read" && !manifest.connectors && !manifest.definition?.connectors && Boolean(manifest.skills?.length) && manifest.skills!.every(s=>s.format === "llm" || s.format === "transform") && raw.includes("task.evidenceJson");
+    } catch { /* Schema and manifest checks explain malformed inputs. */ }
+    if (evidenceOnly) return {results:[{name:"operations-declared",severity:"pass",message:"Read-only evidence workflow consumes host task evidence without Graph calls."}],endpointDocs:new Map()};
     return {
       results: [
         {

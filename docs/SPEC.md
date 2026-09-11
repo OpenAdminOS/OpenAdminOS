@@ -1613,11 +1613,12 @@ messages, and never suggest the same agent twice in one conversation.
 
 ### Navigation (locked for v0.4)
 
-Three workspace destinations plus Settings. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
+Agent Team adds a fourth workspace destination to the v0.4 navigation (approved 2026-09-10); Fleet remains conditional on multiple connected tenants. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
 
 | Nav item | Route | Contains |
 |---|---|---|
 | Chat | `/chat` | Tenant Q&A (formerly "Intune Chat" in nav; covers Intune + Entra) |
+| Agent Team | `/office` | Persistent personas, ordered assignments, schedules, and evidence-linked briefings |
 | Agents | `/agents` | Tabs: Installed · Hub · Schedules |
 | Changes | `/changes` | Tenant drift timeline |
 | Settings | `/settings` | Providers, tenants, workspaces, connectors, general, privacy |
@@ -1625,7 +1626,7 @@ Three workspace destinations plus Settings. The primary order stays fixed across
 | Connectors | `/connectors` | External integrations (More group) |
 
 Demoted from top-level nav (routes remain, reachable via Settings and the command palette):
-- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. The primary group stays the four daily destinations, so the v0.4 goal of a compact nav still holds. A renderer test asserts both facts.
+- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. Agent Team is now an additional daily destination; Workspaces and Connectors remain subordinate. A renderer test asserts both facts.
 - **Activity**: run history remains available through search, run links, and agent surfaces without adding another daily destination.
 - **Agent Hub**: a tab inside Agents, not a sibling of it.
 
@@ -1694,6 +1695,129 @@ North-star metric: time from install to first successful result, target under 5 
 - Usability validation with 3–5 external Intune admins is still owed; these decisions are the best pre-validation guess and should be revisited against real hesitation points.
 
 ---
+
+### Agent Team and persistent personas (approved 2026-09-10; expanded 2026-09-11)
+
+Agent Team is a single-user desktop surface at `/office`, directly below Chat.
+Persona shortcuts use original robot, cat, fox, and owl icons, live attention badges,
+search, and a collapsible group. Selection and room/list view are addressable in the
+route query. Human invitations, shared credentials, cloud coordination, and floating
+desktop characters remain outside this scope.
+
+The user approved the [15-item improvement plan](../tasks/agent-team-improvement-plan.md).
+A persona owns one connected tenant, one provider, an optional model, one to eight
+installed workflows, standing instructions, and bounded execution/scheduling policy.
+Name, avatar, color, and responsibility are presentation fields. Standing instructions
+are saved separately from evidence and are supplied only to evidence-aware workflows,
+the bounded planner, and persona questions. They never grant execution permissions.
+
+**Useful starting roles and coordination.** Policy Watcher selects the existing
+compliance overview and proposes an hourly assessment with a noncompliant-count
+threshold. Chief of Staff selects compliance plus evidence review and skips dependent
+work when a scheduled assessment is unchanged. Research Bot selects an evidence-only
+review; Script Bot selects a PowerShell draft that never executes its output. Missing
+workflows are shown before activation. The two new registry templates have no Graph
+or connector steps; QA permits scope-free read workflows only when their entire
+pipeline uses LLM/transforms and explicitly consumes host task evidence.
+
+Ordered work remains deterministic. A watched local finding can trigger another
+persona on a new finding, changed revision, or numeric threshold crossing. Watch
+chains must be acyclic and bounded, same-tenant, with 5-minute to 7-day cooldowns,
+revision deduplication, quiet hours, and a 24-hour evidence freshness limit. Incomplete
+metrics produce a coverage warning, never a clean assessment. Remote subscriptions,
+policy-cause diagnosis, and Defender-specific investigations are not introduced.
+
+Handoffs atomically persist the finding/revision, source and destination persona,
+question, source run references, reason, and parent mission. The host resolves at most
+eight completed same-tenant evidence records into a 36 KB task context; oversized
+results are omitted with an explicit gap. A source cannot be removed while a dependent
+assignment is active. Standing instructions are not rewritten by source or model text.
+A Chief using model selection gets one bounded request (600 output tokens, one-minute
+timeout) and may select only a unique subset of its explicitly assigned capabilities.
+The visible plan records its reason and skipped workflows. Invalid or unavailable
+planning falls back visibly to the approved ordered list. No capability discovery or
+unbounded recursive model loop is available. Each child retains an accountable parent
+and uses the existing runtime, connector confirmation, and write approval boundaries.
+
+**Evidence, review, and conversation.** SQLite finding records hold tenant, assessment
+identity, owner, entity references, severity, first/last seen, revision, fingerprint,
+coverage, and source run IDs. Fingerprints hash normalized structured evidence;
+object collections are order-independent and report-generation timestamps/LLM summary
+prose are excluded. Run baselines are isolated by tenant and assessment configuration,
+including workflow version/settings and persona assessment policy. Review supports
+acknowledge, snooze (5 minutes to 7 days), resolve, and reopen. Unchanged findings keep
+their review state; changed evidence reopens a resolved finding; snooze lasts until its
+expiry. Up to 100 assessment definitions per persona are retained; older resolved
+entries can be replaced. Findings retain 20 run references, with the latest two
+unresolved sources protected from normal run pruning. Raw results are not copied into
+the finding database. Handoff records keep at least the latest 1,000 per receiver plus
+all records still inside the event-freshness window.
+
+The action inbox precedes the room and filters approvals, findings, and operational
+issues. Its 24-hour briefing distinguishes completed checks from scheduled work and
+personas without a completed assessment. Finding history and assignment search expose
+more than the former 12-item feed. Questions use the selected persona's own completed
+runs and handoff sources, at most six recent conversational messages, and its pinned
+provider/tenant. Answers link to source runs. Questions cannot change configuration or
+perform actions; model work does not hold the scheduler lock. Conversation retention
+is 100 messages per persona. Editing or removing the scope during an answer prevents
+that answer from being saved into the changed scope.
+
+**Execution and recovery.** Missions distinguish queued, executing, awaiting review,
+completed, failed, and cancelled states (legacy `running` records are reconciled).
+One workflow compute slot is enforced inside the run-state lock. Human review releases
+that slot, so independent work can proceed. The 5–120 minute execution allowance
+excludes queue and human waiting; model planning counts toward it. Approval has a
+separate configurable lease (10 minutes to 7 days, default one day). Expired proposals
+require a new assignment. Immediately before applying an approved team write, the
+runtime reruns its plan with Graph reads only and connector mutations denied. Changed
+actions or confirmation text fail without applying; a fresh proposal needs fresh
+approval. Every destructive operation retains typed confirmation.
+
+Readiness checks cover the assigned tenant, model, provider, and installed workflows.
+Consent hashes cover only the assigned provider destination and relevant workflows;
+unrelated provider edits do not invalidate them. Review errors identify the changed
+destination or workflow. Cosmetic edits remain possible offline, while explicit
+review/save renews changed execution consent. Transient readiness failures before any
+child starts use three bounded retries; failures after a child starts pause visibly
+instead of replaying possible side effects. Stop & pause cancels active work; requests
+already dispatched may have completed. Durable mission/step correlation prevents
+replaying completed children after restart. Active handoff sources are protected from
+pruning. Removing a tenant stops its assignments and purges its team memory.
+
+**Local schedules.** Intervals start one full interval after saving. Calendar schedules
+use IANA zones, a local HH:mm, and selected weekdays; the UI states that calendar time
+overrides the interval. Quiet hours gate scheduled and event-triggered starts, while
+manual starts remain explicit. Wake-up coalesces missed checks into one run, records
+the missed slot, and schedules the next future slot. DST gaps skip to the next valid
+calendar day; repeated local slots run once. Background execution uses the existing
+Windows/macOS scheduler and needs a running computer and signed-in session. Linux
+requires the app open. Queue position, execution time, approval expiry, provider,
+next/last check, and missed-check information are visible. Source runs expose tokens
+where supplied; monetary cost is not inferred.
+
+**The office.** The original SVG studio includes desks, lounge seating, and a TV game
+corner. Six personas occupy each of up to four floors. Reserved per-persona locations,
+aisle paths, interruptible directional walking, seated typing/controller poses, and
+foreground furniture give the room depth. Idle timing is independent. Actual run and
+handoff events produce timestamped, evidence-linked bubbles and a brief visit to the
+shared table; games remain decorative.
+Search and floor attention indicators route to distant teammates. Zoom/fit, expanded
+office, an optional assignment panel, a static List view, persistent pause, reduced
+motion, and hidden-window suspension keep the surface usable. No rendering dependency
+or third-party artwork is added. Hide details anonymizes office names and conceals the
+sidebar, tenant strip, task text, and detail panel; it is a team-view presentation
+control, not a redaction guarantee for other apps or separately opened dialogs.
+
+The Electron rehearsal exercises real renderer/IPC/runtime paths with isolated local
+Graph/model fixtures: assessment change → research → bounded Chief delegation → script
+draft → evidence question → admin review. Captures identify rehearsal data. Quality
+evidence covers responsive layouts, 24 personas, floor navigation, motion, reduced
+motion, hidden-window behavior, high-contrast emulation, and 200% zoom. Linux
+Xvfb memory measurement, attempted frame sampling, and a recording accompany the design reference; they do not
+stand in for representative Windows/macOS hardware or native assistive-technology
+validation. Lokka beta reads verified the compliance selection, next-link paging, and
+invalid-field 400 behavior; the rehearsal performs no live tenant writes.
 
 ## 5a. v0.1: Public preview foundation
 
@@ -1902,6 +2026,7 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `18-baseline-rollback.html` | v0.5 baseline drift, field-level evidence, and typed rollback confirmation | ✅ Done |
 | `19-fleet.html` | v0.5 multi-tenant fleet drift status and per-tenant write confirmation | ✅ Done |
 | `20-mcp-gateway.html` | v0.5 gateway settings, pairing, connected clients, and pending external proposals | ✅ Done |
+| `22-office.html` | Office room, original persona avatars, and assignment briefing | ✅ Done |
 | `21-telemetry.html` | v0.5 opt-in usage telemetry with the exact payload preview | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
@@ -1983,6 +2108,14 @@ For context: these exist or are in flight, and may interact with OpenAdminOS ove
 - **IntuneTUI** (deprecated): terminal-based Intune tool. The lesson from this project drove OpenAdminOS' decision to use a desktop GUI instead of a terminal: admins are not developer-y enough for TUIs as a primary surface.
 
 OpenAdminOS is the flagship community project. The others are either narrow paid products (TenantPDF) or instructive prior art.
+
+### Agent Team release version (2026-09-11)
+
+The maintainer selected **0.6.0** for Agent Team. Product packages, internal
+dependency pins, and lockfile metadata use this version. The new evidence-review
+and script-draft workflows require app version 0.6.0 because they consume the new
+team task context. Release notes are prepared in CHANGELOG.md; this version
+selection does not itself publish a tag or installers.
 
 ### Approved v0.5.1 release recovery (2026-09-06)
 

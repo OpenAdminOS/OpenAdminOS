@@ -23,6 +23,13 @@ export const IconAgents = ({ size = 18, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconAgentTeam = ({ size = 18, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <rect x="7" y="4" width="10" height="9" rx="3" />
+    <path d="M12 4V2M10 8h.01M14 8h.01M5 21v-3a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v3M3 9v5M21 9v5M9 18h6" />
+  </svg>
+);
+
 export const IconHub = ({ size = 18, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />

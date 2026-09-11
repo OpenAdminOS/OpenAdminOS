@@ -8,7 +8,7 @@ description: "Catalog of OpenAdminOS agents and dashboards."
 
 This catalog lists the current OpenAdminOS agents and dashboards. Mode, scopes, tenant data access, and write behavior are taken from each agent's reviewed metadata.
 
-Last updated: 2026-08-07 · `b75ceec`.
+Last updated: 2026-09-11 · `153ee40`.
 
 | Agent | Mode | Tier | Category | Required Entra tier | Scopes |
 | --- | --- | --- | --- | --- | --- |
@@ -23,6 +23,8 @@ Last updated: 2026-08-07 · `b75ceec`.
 | [Secure Score prioritizer](agents/secure-score-prioritizer.md) | `read` | `agent` | `policies` | `free` | `SecurityEvents.Read.All` |
 | [Sign-in failure explainer](agents/sign-in-failure-explainer.md) | `read` | `agent` | `policies` | `p1` | `AuditLog.Read.All` |
 | [Stale guest cleanup](agents/stale-guest-cleanup.md) | `write` | `agent` | `policies` | `p1` | `User.Read.All`<br>`AuditLog.Read.All`<br>`User.ReadWrite.All` |
+| [Team evidence review](agents/team-evidence-review.md) | `read` | `agent` | `compliance` | `free` |  |
+| [Team PowerShell draft](agents/team-script-draft.md) | `read` | `agent` | `devices` | `free` |  |
 | [Tenant change audit](agents/tenant-change-audit.md) | `read` | `agent` | `policies` | `p1` | `AuditLog.Read.All`<br>`Directory.Read.All` |
 | [Tenant health report](agents/tenant-health-report.md) | `read` | `dashboard` | `compliance` | `free` | `DeviceManagementManagedDevices.Read.All` |
 | [User license overview](agents/user-license-overview.md) | `read` | `dashboard` | `apps` | `free` | `User.Read.All` |

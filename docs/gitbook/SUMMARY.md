@@ -13,6 +13,7 @@
 - [Multi-tenant Intune Chat](features/multi-tenant-intune-chat.md)
 - [Workspaces](features/workspaces.md)
 - [Changes and drift](features/changes.md)
+- [Agent Team](features/office.md)
 
 ## Trust Model
 
@@ -47,6 +48,8 @@
 - [Secure Score prioritizer](generated/agents/secure-score-prioritizer.md)
 - [Sign-in failure explainer](generated/agents/sign-in-failure-explainer.md)
 - [Stale guest cleanup](generated/agents/stale-guest-cleanup.md)
+- [Team evidence review](generated/agents/team-evidence-review.md)
+- [Team PowerShell draft](generated/agents/team-script-draft.md)
 - [Tenant change audit](generated/agents/tenant-change-audit.md)
 - [Tenant health report](generated/agents/tenant-health-report.md)
 - [User license overview](generated/agents/user-license-overview.md)

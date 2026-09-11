@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   createQueuedRun,
@@ -31,7 +31,7 @@ import {
 } from "./agent-draft-helpers.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
-import { fingerprintRunOutput } from "./run-delivery-format.js";
+import { fingerprintRunOutput, stableStringify } from "./run-delivery-format.js";
 import {
   isTerminalRunStatus,
   withSelfTrainingOverlay,
@@ -54,6 +54,7 @@ export interface RunServiceHost {
   providerCanRun(
     provider: ProviderSummary | undefined,
   ): provider is ProviderSummary & { status: "connected" | "available" };
+  validateOfficeApproval?(run: RunRecord): Promise<void>;
   buildLlm(providerId: ProviderId, model: string | undefined): Promise<RunLlmApi>;
   buildGraph(
     pinnedTenantId?: string,
@@ -273,9 +274,22 @@ export class RunService {
         }
       }
 
+      if (options.office && persisted.runs.some(r=>r.office && ["queued","running"].includes(r.status))) throw new Error("Team compute slot is occupied. This assignment remains queued.");
       const queuedRun = createQueuedRun({ agent, providerId, model });
+      queuedRun.assessmentKey = createHash("sha256").update(JSON.stringify({ schema: 1,
+        slug: agent.slug, version: agent.version, manifest: agent.provenance?.manifestSha256,
+        settings: agent.settings, personaId: options.office?.personaId, officeAssessment:options.officeContext?.assessmentKey })).digest("hex");
       queuedRun.tenantId = pinnedTenantId;
       queuedRun.trigger = options.trigger ?? "manual";
+      if (options.office) queuedRun.office = options.office;
+      if (options.officeContext) {
+        if (!options.office || options.officeContext.tenantId !== pinnedTenantId || Buffer.byteLength(JSON.stringify(options.officeContext), "utf8") > 40000) throw new Error("Invalid team task context.");
+        for (const source of options.officeContext.evidence) {
+          const evidence = persisted.runs.find(r=>r.id===source.runId);
+          if (!evidence || evidence.tenantId !== pinnedTenantId || evidence.status !== "completed") throw new Error("Team evidence is missing or belongs to another tenant.");
+        }
+        queuedRun.officeContext = options.officeContext;
+      }
 
       await this.host.write({
         ...persisted,
@@ -467,6 +481,8 @@ export class RunService {
       if (phrase !== run.plan.confirmationPhrase) {
         throw new Error("Confirmation phrase does not match.");
       }
+
+      if (run.office) await this.host.validateOfficeApproval?.(run);
 
       // System runs (baseline rollback, external gateway proposals) are
       // host-generated and have no installed agent behind them;
@@ -719,6 +735,27 @@ export class RunService {
       const overlay = this.host.selfTrainingPromptOverlay(selection.tenantId, input.agent.slug);
       const llm = overlay ? withSelfTrainingOverlay(baseLlm, overlay) : baseLlm;
       controller.signal.throwIfAborted();
+      if (input.run.office) {
+        // Re-read a team's proposal immediately before apply. Replanning has no
+        // mutation authority and changed actions require a fresh user decision.
+        const fresh = await executePlan({
+          signal: controller.signal, run: {...input.run,steps:[],logs:[]}, agent: input.agent,
+          providerId: input.providerId,model:input.model,llm,tenant:selection.tenantSession,
+          createGraph: log => {
+            const graph = selection.createGraph(log);
+            return {...graph,retireManagedDevice:async()=>{throw new Error("Proposal revalidation permits only Graph reads.");},request: async request => {
+              if (request.method !== "GET") throw new Error("Proposal revalidation permits only Graph reads.");
+              return graph.request(request);
+            }};
+          },
+          realWrites:false,connectorConfigs:await this.host.readConnectorConfigs(),
+          connectorSecretsFor: id => this.host.connectorSecretsFor(id),
+          confirmCapability: async()=>({approved:false,reason:"Revalidating a proposal cannot send notifications or change external state."}),onProgress:()=>{},
+        });
+        if (fresh.status === "failed" || !fresh.plan) throw new Error(`Proposal could not be revalidated. ${fresh.error ?? "Run the assignment again."}`);
+        if (stableStringify(fresh.plan.actions) !== stableStringify(input.plan.actions) || fresh.plan.confirmationPhrase !== input.plan.confirmationPhrase) throw new Error("The proposed actions changed since review. Nothing was applied. Run the assignment again to review a fresh proposal.");
+        controller.signal.throwIfAborted();
+      }
       await executeApply({
         signal: controller.signal,
         run: input.run,
@@ -924,6 +961,8 @@ export class RunService {
       (candidate) =>
         candidate.id !== run.id &&
         candidate.agentSlug === run.agentSlug &&
+        candidate.tenantId === run.tenantId &&
+        candidate.assessmentKey === run.assessmentKey &&
         candidate.trigger === "schedule" &&
         candidate.status === "completed",
     );

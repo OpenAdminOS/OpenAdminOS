@@ -89,5 +89,8 @@ jobs:
       - name: Intune Chat smoke test
         run: xvfb-run -a node scripts/smoke-intune-chat.mjs
 
+      - name: Office smoke test
+        run: xvfb-run -a node scripts/smoke-office.mjs
+
       - name: Support issue smoke test
         run: xvfb-run -a node scripts/smoke-report-issue.mjs

@@ -113,7 +113,7 @@ describe("agent manifests", () => {
       const skills = flattenSkills(m.raw.skills);
       const mode = m.raw.descriptor?.mode === "write" ? "write" : "read";
 
-      it("declares at least one Graph scope across its skills", () => {
+      it("declares Graph scopes or exclusively processes supplied evidence", () => {
         const scopes = new Set<string>();
         for (const s of skills) {
           const raw = s.settings?.scopes;
@@ -123,7 +123,11 @@ describe("agent manifests", () => {
             }
           }
         }
-        assert.ok(scopes.size > 0, `${m.slug} declares no Graph scopes`);
+        if (!scopes.size) {
+          assert.equal(m.raw.descriptor?.mode,"read", "Scope-free workflows must be read-only");
+          assert.ok(skills.length > 0 && skills.every(s=>s.format === "llm" || s.format === "transform"), "Scope-free workflows cannot declare Graph, code, write, or connector steps");
+          assert.match(readFileSync(m.path,"utf8"),/task\.evidenceJson/,"Scope-free workflows must consume host-supplied evidence");
+        }
       });
 
       it("every graph skill uses a valid HTTP method", () => {

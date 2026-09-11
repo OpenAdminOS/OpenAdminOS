@@ -1,0 +1,12 @@
+{
+  "fixture": true,
+  "liveWrites": 0,
+  "handoffs": 2,
+  "plannedTasks": [
+    "team-script-draft"
+  ],
+  "skippedTasks": [
+    "team-evidence-review"
+  ],
+  "sourceReferences": 1
+}

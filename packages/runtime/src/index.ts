@@ -523,6 +523,7 @@ async function createPhaseHandle(
     llm,
     realWrites: input.realWrites ?? false,
     settings: input.agent.settings,
+    officeTask: input.run.officeContext,
     ...(connectorAccessor !== undefined ? { connectors: connectorAccessor } : {}),
     log: (level, message, metadata) => {
       working = appendLog(working, level, message, currentStepId, metadata);

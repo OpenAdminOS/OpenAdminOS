@@ -5,6 +5,7 @@ import {
   IconAgents,
   IconBolt,
   IconChanges,
+  IconAgentTeam,
   IconChat,
   IconClock,
   IconConnectors,
@@ -108,6 +109,11 @@ export function CommandPalette({
         group: "Navigate",
         icon: <IconClock size={13} className="text-[var(--color-accent)]" />,
         action: go("/agents/schedules"),
+      },
+      {
+        id: "nav-office", label: "Go to Agent Team", group: "Navigate",
+        icon: <IconAgentTeam size={13} className="text-[var(--color-accent)]" />,
+        action: go("/office"),
       },
       {
         id: "nav-changes",

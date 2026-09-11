@@ -9,6 +9,9 @@ if (!window.HTMLElement.prototype.scrollIntoView) {
   });
 }
 
+if (!window.HTMLElement.prototype.animate) {
+ Object.defineProperty(window.HTMLElement.prototype,"animate",{configurable:true,value:()=>({cancel(){},onfinish:null})});
+}
 if (!window.matchMedia) {
   Object.defineProperty(window, "matchMedia", {
     configurable: true,

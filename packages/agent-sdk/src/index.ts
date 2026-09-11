@@ -230,6 +230,101 @@ export interface AgentUpdateReview {
   changes: AgentUpdateTrustChange[];
 }
 
+/** A local, explicitly scoped assignment. The description is an admin-facing label;
+ * execution is defined by the ordered, installed agent workflows. */
+export interface OfficePersonaInput {
+  id?: string;
+  name: string;
+  responsibility: string;
+  avatar: "robot" | "cat" | "fox" | "owl";
+  color: "amber" | "sage" | "blue" | "lilac";
+  tenantId: string;
+  providerId: ProviderId;
+  model?: string;
+  agentSlugs: string[];
+  intervalMinutes: number | null;
+  maxMinutes: number;
+  enabled: boolean;
+  confirmHosted?: boolean;
+  approvalMinutes?: number;
+  instructions?: string;
+  planning?: "ordered" | "on-change" | "model";
+  watch?: { personaId: string; event: "new" | "changed" | "threshold"; threshold?: number; cooldownMinutes: number };
+  assessment?: { metricPath: string; threshold: number };
+  calendar?: { time: string; timeZone: string; weekdays: number[] };
+  quietHours?: { start: number; end: number; timeZone: string };
+}
+
+export interface OfficePersona extends Omit<OfficePersonaInput, "id" | "confirmHosted"> {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  nextRunAt?: string;
+  lastError?: string;
+  lastMissedAt?: string;
+  retryAttempt?: number;
+}
+
+export interface OfficeMission {
+  id: string;
+  personaId: string;
+  personaName: string;
+  tenantId: string;
+  providerId: ProviderId;
+  model?: string;
+  agentSlugs: string[];
+  runIds: string[];
+  status: "queued" | "executing" | "awaiting-review" | "running" | "completed" | "failed" | "cancelled";
+  executionMs?: number;
+  executionBudgetMs?: number;
+  accountedAt?: string;
+  approvalSince?: string;
+  approvalExpiresAt?: string;
+  trigger: "manual" | "schedule";
+  startedAt: string;
+  finishedAt?: string;
+  deadlineAt: string;
+  error?: string;
+  assessedAt?: string;
+  handoffId?: string;
+  planningReason?: string;
+  skippedAgentSlugs?: string[];
+}
+
+export interface OfficeFinding {
+  id: string; tenantId: string; personaId: string; assessmentKey: string; agentSlug: string;
+  title: string; summary: string; severity: "info" | "warning";
+  state: "open" | "acknowledged" | "snoozed" | "resolved";
+  firstSeen: string; lastSeen: string; changedAt: string; revision: number;
+  runIds: string[]; entityIds: string[]; fingerprint: string;
+  previousMetric?: number; metric?: number;
+  snoozedUntil?: string; coverage: string;
+}
+export interface OfficeHandoff {
+  id: string; tenantId: string; sourcePersonaId: string; targetPersonaId: string;
+  findingId: string; revision: number; sourceRunIds: string[]; question: string;
+  createdAt: string; missionId?: string; reason: string;
+}
+export interface OfficeMessage {
+  id: string; personaId: string; tenantId: string; role: "user" | "assistant";
+  content: string; createdAt: string; runIds: string[]; providerId: ProviderId;
+}
+export interface OfficeTaskContext {
+  assessmentKey?: string;
+  conversation?: {role: "user" | "assistant"; content: string}[];
+  tenantId: string; question: string; instructions?: string;
+  evidence: { runId: string; agentSlug: string; finishedAt?: string; summary: string; result?: unknown }[];
+}
+
+export interface OfficeState {
+  error?: string;
+  personas: OfficePersona[];
+  missions: OfficeMission[];
+  findings?: OfficeFinding[];
+  handoffs?: OfficeHandoff[];
+  messages?: OfficeMessage[];
+}
+
 export interface AgentSchedule {
   enabled: boolean;
   intervalSeconds: number;
@@ -381,6 +476,9 @@ export type RunStatus =
   | "cancelled";
 
 export interface StartRunOptions {
+  /** Host-owned Office correlation, never accepted by the generic renderer run IPC. */
+  office?: { missionId: string; personaId: string; step: number };
+  officeContext?: OfficeTaskContext;
   /**
    * Pin the run to a specific tenant id at queue time. Omit to default to
    * whichever tenant is active when the run is queued. The run will fail
@@ -576,6 +674,9 @@ export interface RunLogRecord {
 }
 
 export interface RunRecord {
+  assessmentKey?: string;
+  office?: { missionId: string; personaId: string; step: number };
+  officeContext?: OfficeTaskContext;
   id: string;
   agentSlug: string;
   /**
@@ -791,6 +892,7 @@ export interface AppState {
   registryInstallCountsEnabled: boolean;
   usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
+  office?: OfficeState;
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -2490,6 +2592,12 @@ export interface OpenAdminOSApi {
    * the model belongs to the provider's installed list.
    */
   setActiveModel(providerId: ProviderId, model: string | null): Promise<AppState>;
+  saveOfficePersona?(input: OfficePersonaInput): Promise<OfficeState>;
+  deleteOfficePersona?(id: string): Promise<OfficeState>;
+  startOfficePersona?(id: string): Promise<OfficeState>;
+  stopOfficePersona?(id: string): Promise<OfficeState>;
+  reviewOfficeFinding?(input: { id: string; state: OfficeFinding["state"]; snoozeMinutes?: number }): Promise<OfficeState>;
+  askOfficePersona?(input: { id: string; question: string }): Promise<OfficeState>;
   startRun(agentSlug: string, options?: StartRunOptions): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | undefined>;
   confirmRun(runId: string, phrase: string): Promise<RunRecord>;
@@ -3251,6 +3359,7 @@ export interface RunContextOptions {
 }
 
 export interface RunContext {
+  officeTask?: OfficeTaskContext;
   /** Host cancellation. Check before starting additional work. */
   signal?: AbortSignal;
   agent: AgentDefinition;

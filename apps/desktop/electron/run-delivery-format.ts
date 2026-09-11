@@ -872,16 +872,21 @@ export function whatsappWebStatusToConnectorStatus(
 
 
 
+/** Compare structured evidence, with object collections independent of row order.
+ * Only report-envelope generation times are ignored; entity timestamps remain evidence. */
 export function fingerprintRunOutput(run: RunRecord): string {
-  const source =
-    run.result === undefined
-      ? run.summary ?? ""
-      : stableStringify(run.result);
-  return source
-    .replace(/\s+/g, " ")
-    .replace(/["'`*_#>-]/g, "")
-    .trim()
-    .toLowerCase();
+  const normalize = (value: unknown, root = false): unknown => {
+    if (Array.isArray(value)) {
+      const items = value.map(v => normalize(v));
+      return items.every(v => v !== null && typeof v === "object" && !Array.isArray(v))
+        ? items.sort((a, b) => stableStringify(a).localeCompare(stableStringify(b))) : items;
+    }
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !["llmSummary", "llmModel"].includes(key) && (!root || !["generatedAt", "collectedAt", "snapshotAt"].includes(key)))
+      .map(([key, v]) => [key, normalize(v)]));
+    return value;
+  };
+  return run.result === undefined ? (run.summary ?? "").replace(/\s+/g, " ").trim() : stableStringify(normalize(run.result, true));
 }
 
 

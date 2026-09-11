@@ -412,6 +412,7 @@ function summaryPage(agents) {
 - [Multi-tenant Intune Chat](features/multi-tenant-intune-chat.md)
 - [Workspaces](features/workspaces.md)
 - [Changes and drift](features/changes.md)
+- [Agent Team](features/office.md)
 
 ## Trust Model
 

@@ -418,6 +418,12 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:set-active-provider", id),
   setActiveModel: (providerId: ProviderId, model: string | null) =>
     ipcRenderer.invoke("openadminos:set-active-model", providerId, model),
+  reviewOfficeFinding: input => ipcRenderer.invoke("openadminos:office-review", input),
+  askOfficePersona: input => ipcRenderer.invoke("openadminos:office-ask", input),
+  saveOfficePersona: input => ipcRenderer.invoke("openadminos:office-save", input),
+  deleteOfficePersona: id => ipcRenderer.invoke("openadminos:office-delete", id),
+  startOfficePersona: id => ipcRenderer.invoke("openadminos:office-start", id),
+  stopOfficePersona: id => ipcRenderer.invoke("openadminos:office-stop", id),
   startRun: (agentSlug: string, options?: StartRunOptions) =>
     ipcRenderer.invoke("openadminos:start-run", agentSlug, options),
   getRun: (id: string) => ipcRenderer.invoke("openadminos:get-run", id),

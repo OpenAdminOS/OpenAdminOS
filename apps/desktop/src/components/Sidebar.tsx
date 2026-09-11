@@ -1,7 +1,12 @@
-import { NavLink } from "react-router";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { Link, NavLink, useLocation } from "react-router";
+import {
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   IconAgents,
+  IconAgentTeam,
   IconChanges,
   IconConnectors,
   IconHardDrive,
@@ -11,6 +16,8 @@ import {
   IconLogo,
   IconCommand,
 } from "./icons";
+import { PersonaAvatar } from "./office/OfficeScene";
+import "../styles/office.css";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { useAppState } from "../state";
 import { shortcutLabel } from "../shared/shortcuts";
@@ -77,12 +84,37 @@ function NavRow({ item }: { item: NavItem }) {
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
+  const location = useLocation();
+  const personas = state.office?.personas ?? [];
+  const [teamCollapsed, setTeamCollapsed] = useState(
+    () => localStorage.getItem("team-sidebar-collapsed") === "true",
+  );
+  const [teamQuery, setTeamQuery] = useState("");
+  const selectedPersona = new URLSearchParams(location.search).get("persona");
+  const attention = personas.filter(
+    (p) =>
+      p.lastError ||
+      state.office?.findings?.some(
+        (f) => f.personaId === p.id && f.state === "open",
+      ) ||
+      state.runs.some(
+        (r) =>
+          r.office?.personaId === p.id && r.status === "awaiting-confirmation",
+      ),
+  ).length;
   const active = state.providers.find((p) => p.id === state.activeProviderId);
   const mainNav: NavItem[] = [
     {
       to: "/chat",
       label: "Chat",
       icon: <IconChat size={16} />,
+    },
+    {
+      to: "/office",
+      label: "Agent Team",
+      icon: <IconAgentTeam size={18} />,
+      badge: attention || undefined,
+      badgeTone: "warning",
     },
     {
       to: "/agents",
@@ -111,14 +143,24 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   // them. They earn a place here as a visually subordinate group so they
   // are discoverable without competing with the daily destinations.
   const secondaryNav: NavItem[] = [
-    { to: "/workspaces", label: "Workspaces", icon: <IconHardDrive size={16} /> },
-    { to: "/connectors", label: "Connectors", icon: <IconConnectors size={16} /> },
+    {
+      to: "/workspaces",
+      label: "Workspaces",
+      icon: <IconHardDrive size={16} />,
+    },
+    {
+      to: "/connectors",
+      label: "Connectors",
+      icon: <IconConnectors size={16} />,
+    },
   ];
 
   const focusAdjacentNav = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     const links = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled])'),
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled])",
+      ),
     );
     const index = links.indexOf(document.activeElement as HTMLElement);
     if (index < 0 || links.length === 0) return;
@@ -137,7 +179,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   return (
     <aside
       aria-label="Application navigation"
-      className="flex h-full w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
+      className="flex h-full overflow-y-auto w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
       onKeyDown={focusAdjacentNav}
     >
       {/* Brand row — small */}
@@ -177,7 +219,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       >
         <IconCommand size={12} />
         <span className="flex-1 text-left">Quick search</span>
-        <kbd className="font-mono text-[10px]">{shortcutLabel("commandPalette")}</kbd>
+        <kbd className="font-mono text-[10px]">
+          {shortcutLabel("commandPalette")}
+        </kbd>
       </button>
 
       <div className="mx-3 mb-2 mt-3 h-px bg-[var(--color-border-soft)]" />
@@ -188,7 +232,105 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           Workspace
         </div>
         {mainNav.map((item) => (
-          <NavRow key={item.to} item={item} />
+          <div
+            key={item.to}
+            className={item.to === "/office" ? "team-nav-group" : undefined}
+          >
+            <NavRow item={item} />
+            {item.to === "/office" && personas.length > 0 && (
+              <div className="team-nav-children">
+                <button
+                  className="team-nav-toggle"
+                  aria-expanded={!teamCollapsed}
+                  onClick={() =>
+                    setTeamCollapsed((v) => {
+                      localStorage.setItem(
+                        "team-sidebar-collapsed",
+                        String(!v),
+                      );
+                      return !v;
+                    })
+                  }
+                >
+                  {teamCollapsed ? "▸" : "▾"} {personas.length} teammates
+                </button>
+                {!teamCollapsed && (
+                  <>
+                    <label className="team-nav-search">
+                      <span className="sr-only">Search sidebar teammates</span>
+                      <input
+                        placeholder="Find teammate…"
+                        value={teamQuery}
+                        onChange={(e) => setTeamQuery(e.target.value)}
+                      />
+                    </label>
+                    <ul
+                      className="team-nav-personas"
+                      aria-label="Team personas"
+                    >
+                      {personas
+                        .filter((p) =>
+                          p.name
+                            .toLowerCase()
+                            .includes(teamQuery.toLowerCase()),
+                        )
+                        .map((persona) => {
+                          const needsAttention =
+                            Boolean(persona.lastError) ||
+                            state.office?.findings?.some(
+                              (f) =>
+                                f.personaId === persona.id &&
+                                f.state === "open",
+                            ) ||
+                            state.runs.some(
+                              (r) =>
+                                r.office?.personaId === persona.id &&
+                                r.status === "awaiting-confirmation",
+                            );
+                          const working = state.runs.some(
+                            (r) =>
+                              r.office?.personaId === persona.id &&
+                              r.status === "running",
+                          );
+                          const selected =
+                            location.pathname === "/office" &&
+                            (selectedPersona === persona.id ||
+                              (!selectedPersona &&
+                                personas[0]?.id === persona.id));
+                          return (
+                            <li key={persona.id}>
+                              <Link
+                                to={`/office?persona=${encodeURIComponent(persona.id)}`}
+                                aria-current={selected ? "page" : undefined}
+                                className="team-nav-persona"
+                                title={`${persona.name}${needsAttention ? " · Needs attention" : working ? " · Working" : ""}`}
+                              >
+                                <PersonaAvatar
+                                  avatar={persona.avatar}
+                                  color={persona.color}
+                                />
+                                <span className="flex-1">{persona.name}</span>
+                                {(needsAttention || working) && (
+                                  <span
+                                    className={`team-nav-dot ${needsAttention ? "attention" : ""}`}
+                                    role="img"
+                                    aria-label={
+                                      needsAttention
+                                        ? "Needs attention"
+                                        : "Working"
+                                    }
+                                  />
+                                )}
+                              </Link>
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  </>
+                )}{" "}
+              </div>
+            )}
+          </div>
         ))}
       </nav>
 
