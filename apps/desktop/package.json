@@ -141,7 +141,12 @@
             "arm64"
           ]
         }
-      ]
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Nova uses the microphone when you start a voice conversation."
+      },
+      "entitlements": "build/entitlements.nova.plist",
+      "entitlementsInherit": "build/entitlements.nova.plist"
     },
     "dmg": {
       "title": "OpenAdminOS",
@@ -185,7 +190,7 @@
       ],
       "signtoolOptions": {
         "sign": "./scripts/sign-windows.cjs",
-        "publisherName": "Ugurlabs UG (haftungsbeschränkt)",
+        "publisherName": "Ugurlabs UG (haftungsbeschr\u00e4nkt)",
         "signingHashAlgorithms": [
           "sha256"
         ],

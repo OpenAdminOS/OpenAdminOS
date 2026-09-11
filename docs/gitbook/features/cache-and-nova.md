@@ -1,0 +1,74 @@
+# Cache and Nova
+
+## Prepare your tenant cache
+
+Open **Cache** in the sidebar. All supported resources are selected by default.
+Choose **Preload all** to collect every page of each selected resource, including
+available log history. You can deselect resource types or search the list. Search
+and **Needs attention** filter the list without changing your selections.
+
+The page shows resource counts, collected pages, snapshot timestamps, required
+read permissions and refresh errors. **Retry incomplete** retries selected resources
+that are missing, partial or failed. **Cancel refresh** stops new requests and keeps
+previous complete snapshots for unfinished collections. Resources that already
+finished remain updated.
+
+“All” means the app's supported resource catalogue. It does not include every
+Microsoft Graph endpoint, property, relationship or action. Microsoft retention,
+licensing and permissions determine what is available. Collection limits and
+failures are shown explicitly. A fresh cache does not imply a recent device check-in.
+
+Automatic refresh preloads all supported resources while the app is running, this
+device is awake and the tenant is signed in. Choose an hourly, six-hourly or daily
+schedule. The cache is shared with Chat and Agent Team.
+
+## Talk to Nova
+
+Choose **Talk to Nova** from any app page, or press **Alt+V**. Choose your voice
+provider, select a tenant, and click the orb to start the microphone. The orb
+responds to your voice volume; captions show the conversation. **Stop**, **Escape**,
+closing the panel or changing the tenant/provider ends the session. Backgrounding
+the app also stops microphone use.
+
+You can say “Hey Nova” during a running session. Set a greeting name in the panel.
+The app does not listen for a wake word in the background.
+
+Ask about your tenant or say “Open Cache”, “Open Agent Team” or “Open Settings”.
+Tenant questions use the existing Chat tools and the active agent model. Preload
+Cache before asking questions that need broad coverage. Open **evidence in Chat**
+to inspect the answer and its sources. Missing data is not proof of a healthy state.
+Voice does not approve or execute tenant writes; use the existing visual review.
+
+### OpenAI voice
+
+Choose **OpenAI · GPT-Live-1**, enter your API key and choose **Save key**. The key
+is kept in OS-secured storage. GPT-Live API access and billing are separate from
+ChatGPT or Codex CLI subscriptions.
+
+Before starting, acknowledge that audio and shared tenant answers are sent to
+OpenAI. The agent model may use a different provider; its normal hosted-context
+consent also applies. A local agent model does not make OpenAI voice local.
+Remove the saved key from the panel whenever you no longer need it.
+
+If the connection fails, check API access, billing, network access and microphone
+permissions. On macOS, allow OpenAdminOS under Privacy & Security → Microphone.
+
+### Local voice
+
+Choose **Local · whisper.cpp + Kokoro**, and select a local agent provider such as
+Ollama. Local voice uses two separately installed speech services:
+
+- [whisper.cpp server](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server),
+  listening on `127.0.0.1:8080`, with a downloaded transcription model.
+- [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI), listening on
+  `127.0.0.1:8880`, with the `kokoro` model and `af_heart` voice available.
+
+Follow those projects' installation instructions for your operating system.
+OpenAdminOS connects to these services; it does not bundle or install their
+runtimes or models. Keep them bound to loopback. Model downloads need internet
+access during setup; local voice itself has no automatic cloud fallback.
+
+Click the orb, speak, then choose **Finish speaking**. A recording is limited to
+one minute. Nova transcribes it locally, asks your local agent model, and speaks
+the result locally. If a service is unavailable, the panel reports the error so
+you can start that service and retry.

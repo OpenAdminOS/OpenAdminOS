@@ -2914,6 +2914,13 @@ export class AppStateStore {
     });
   }
 
+  async startGraphCachePreload(options?: import("@openadminos/agent-sdk").RefreshGraphCacheOptions): Promise<void> {
+    return this.chatService.startGraphCachePreload(options);
+  }
+  async cancelGraphCachePreload(tenantId: string): Promise<void> {
+    return this.chatService.cancelGraphCachePreload(tenantId);
+  }
+
   async refreshGraphCache(
     options: RefreshGraphCacheOptions = {},
   ): Promise<GraphCacheRefreshResult> {

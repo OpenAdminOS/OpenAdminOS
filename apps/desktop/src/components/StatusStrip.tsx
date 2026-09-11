@@ -7,7 +7,7 @@ import { TruncatedText } from "./TruncatedText";
 import { SETUP_COPY } from "../copy";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 
-export function StatusStrip() {
+export function StatusStrip({ voiceHosted = false }: { voiceHosted?: boolean }) {
   const { state } = useAppState();
   const { openSetup } = useSetupFlow();
   const activeProvider = state.providers.find(
@@ -117,8 +117,8 @@ export function StatusStrip() {
           </Link>
         )}
         <TruncatedText
-          value={trustCopy.strip}
-          className={trustCopy.isLocal ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}
+          value={voiceHosted ? "Nova · audio and shared context → OpenAI" : trustCopy.strip}
+          className={!voiceHosted && trustCopy.isLocal ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}
         />
       </div>
     </footer>

@@ -13,6 +13,7 @@ import {
   IconChat,
   IconFleet,
   IconSettings,
+  IconCache,
   IconLogo,
   IconCommand,
 } from "./icons";
@@ -135,6 +136,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           },
         ]
       : []),
+    { to: "/cache", label: "Cache", icon: <IconCache size={16} /> },
     { to: "/settings", label: "Settings", icon: <IconSettings size={16} /> },
   ];
 

@@ -1,3 +1,5 @@
+import { NovaService } from "./nova.js";
+import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
@@ -4430,13 +4432,13 @@ function validateResetSelfTrainingInput(value: unknown): ResetSelfTrainingInput 
 }
 
 function installSecurityGuards(): void {
-  // Deny every renderer-initiated permission request. The app has no
-  // legitimate need for camera, mic, geolocation, notifications-from-web,
-  // clipboard-read, etc. — anything we do need is wired through IPC.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-    callback(false);
+  // Only trusted app frames may request microphone audio. Camera and all
+  // unrelated browser permissions remain denied.
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+    callback(permission === "media" && isAllowedAppNavigation(wc.getURL()) && details.isMainFrame && "mediaTypes" in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === "audio");
   });
-  session.defaultSession.setPermissionCheckHandler(() => false);
+  session.defaultSession.setPermissionCheckHandler((wc, permission, _origin, details) =>
+    !!wc && permission === "media" && isAllowedAppNavigation(wc.getURL()) && details.mediaType === "audio");
 
   // Defense in depth: even though webviewTag is off and we deny new windows
   // on the main BrowserWindow, harden any webContents that does get created
@@ -5283,6 +5285,10 @@ function registerIpcHandlers() {
       store.getMultiTenantAgentBatch(requireBoundedString(id, "batchId", 128)),
     ),
   );
+  const nova = new NovaService(new SafeStorageProviderSecretStore(join(app.getPath("userData"), "providers", "secrets")).forProvider("nova"), () => store.getAppState(), input => store.sendIntuneChatMessage(input));
+  ipcMain.handle("openadminos:nova", handleTrusted((_event, input: import("@openadminos/agent-sdk").NovaRequest) => nova.handle(input)));
+  ipcMain.handle("openadminos:start-graph-cache-preload", handleTrusted((_event, options?: unknown) => store.startGraphCachePreload(validateRefreshGraphCacheOptions(options))));
+  ipcMain.handle("openadminos:cancel-graph-cache-preload", handleTrusted((_event, tenantId: unknown) => store.cancelGraphCachePreload(requireBoundedString(tenantId, "tenantId", 256))));
   ipcMain.handle(
     "openadminos:refresh-graph-cache",
     handleTrusted((_event, options?: unknown) =>

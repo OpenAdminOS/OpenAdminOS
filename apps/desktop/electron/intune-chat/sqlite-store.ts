@@ -971,6 +971,8 @@ export class IntelligenceSqliteStore {
     const columns: Array<{ field: string; expression: string }> = [
       { field: "operatingSystem", expression: "operating_system" },
       { field: "complianceState", expression: "compliance_state" },
+      { field: "osVersion", expression: "COALESCE(json_extract(raw_json, '$.osVersion'), 'unknown')" },
+      { field: "isEncrypted", expression: "COALESCE(json_extract(raw_json, '$.isEncrypted'), 'unknown')" },
       { field: "userType", expression: "json_extract(raw_json, '$.userType')" },
       { field: "accountEnabled", expression: "json_extract(raw_json, '$.accountEnabled')" },
       { field: "trustType", expression: "json_extract(raw_json, '$.trustType')" },

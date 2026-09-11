@@ -6,6 +6,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Add a shared Cache page with complete preloading, progress, cancellation and retry, plus app-wide Nova voice with GPT-Live-1 and optional local speech services.
+
+### Added
+
 ### Changed
 
 ### Removed

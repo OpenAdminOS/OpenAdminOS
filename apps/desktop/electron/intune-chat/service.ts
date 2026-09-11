@@ -184,6 +184,80 @@ export interface ChatServiceHost {
 }
 
 export class IntuneChatService {
+  private readonly preloadJobs = new Map<
+    string,
+    {
+      controller: AbortController;
+      job: import("@openadminos/agent-sdk").GraphCachePreloadJob;
+    }
+  >();
+  private refreshTail: Promise<unknown> = Promise.resolve();
+
+  async startGraphCachePreload(
+    options: RefreshGraphCacheOptions = {},
+  ): Promise<void> {
+    const persisted = await this.host.read();
+    const tenant = this.host.resolveTenant(persisted, options.tenantId);
+    if (this.preloadJobs.get(tenant.id)?.job.status === "running")
+      throw new Error("A cache preload is already running for this tenant.");
+    if (options.resources?.length === 0)
+      throw new Error("Select at least one resource to preload.");
+    const resources = sanitizeGraphResources(options.resources);
+    const controller = new AbortController();
+    const job: import("@openadminos/agent-sdk").GraphCachePreloadJob = {
+      tenantId: tenant.id,
+      status: "running",
+      total: resources.length,
+      completed: 0,
+      active: [],
+      results: [],
+    };
+    this.preloadJobs.set(tenant.id, { controller, job });
+    void this.refreshGraphCacheInternal(
+      { ...options, tenantId: tenant.id, resources },
+      (event) => {
+        job.completed = event.completed;
+        if (event.type === "resource-start") job.active.push(event.label);
+        else {
+          job.active = job.active.filter(
+            (label) => label !== event.result.label,
+          );
+          job.results.push(event.result);
+        }
+      },
+      controller.signal,
+      true,
+    )
+      .then((result) => {
+        job.results = result.resources;
+        job.status = controller.signal.aborted
+          ? "cancelled"
+          : result.resources.length === resources.length &&
+              result.resources.every((r) => r.ok && !r.pageLimitReached)
+            ? "complete"
+            : "incomplete";
+      })
+      .catch((error) => {
+        job.status = controller.signal.aborted ? "cancelled" : "incomplete";
+        job.error = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        job.active = [];
+      });
+  }
+
+  async cancelGraphCachePreload(tenantId: string): Promise<void> {
+    const persisted = await this.host.read();
+    this.host.resolveTenant(persisted, tenantId);
+    this.preloadJobs
+      .get(tenantId)
+      ?.controller.abort(
+        new Error(
+          "Cache refresh cancelled. Previous complete snapshots were kept.",
+        ),
+      );
+  }
+
   constructor(private readonly host: ChatServiceHost) {}
 
   private async maybeCreateSelfTrainingSuggestionFromChat(input: {
@@ -1102,6 +1176,7 @@ export class IntuneChatService {
         [...GRAPH_CACHE_RESOURCES],
       ),
       schedule: store.getGraphCacheRefreshSchedule(resolvedTenant.id),
+      preload: this.preloadJobs.get(resolvedTenant.id)?.job,
     };
   }
 
@@ -1159,13 +1234,28 @@ export class IntuneChatService {
   async refreshGraphCache(
     options: RefreshGraphCacheOptions = {},
   ): Promise<GraphCacheRefreshResult> {
-    return this.refreshGraphCacheInternal(options);
+    return this.refreshGraphCacheInternal(options, undefined, undefined, true);
   }
 
   private async refreshGraphCacheInternal(
     options: RefreshGraphCacheOptions = {},
     onProgress?: (event: GraphCacheRefreshProgressEvent) => void,
     signal?: AbortSignal,
+    complete = false,
+  ): Promise<GraphCacheRefreshResult> {
+    const operation = this.refreshTail.catch(() => {}).then(() => {
+      signal?.throwIfAborted();
+      return this.collectGraphCache(options, onProgress, signal, complete);
+    });
+    this.refreshTail = operation;
+    return operation;
+  }
+
+  private async collectGraphCache(
+    options: RefreshGraphCacheOptions = {},
+    onProgress?: (event: GraphCacheRefreshProgressEvent) => void,
+    signal?: AbortSignal,
+    complete = false,
   ): Promise<GraphCacheRefreshResult> {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
@@ -1219,7 +1309,13 @@ export class IntuneChatService {
             ...(Object.keys(headers).length > 0 ? { headers } : {}),
           },
           signal,
+          complete,
         );
+        signal?.throwIfAborted();
+        const existing = store.getGraphCacheStatus(tenant.id, [definition])[0];
+        if (pageResult.pageLimitReached && existing?.refreshedAt && !existing.pageLimitReached) {
+          throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
+        }
         store.replaceGraphResources({
           tenantId: tenant.id,
           resource,
@@ -1228,7 +1324,8 @@ export class IntuneChatService {
           rows: pageResult.rows,
           pageCount: pageResult.pages,
           pageLimitReached: pageResult.pageLimitReached,
-          ...(pageResult.totalCount !== undefined
+          ...(!pageResult.pageLimitReached
+            ? { tenantTotal: pageResult.rows.length } : pageResult.totalCount !== undefined
             ? { tenantTotal: pageResult.totalCount }
             : {}),
           refreshedAt,

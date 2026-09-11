@@ -1,3 +1,4 @@
+import { Nova } from "../voice/Nova";
 import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Sidebar } from "./Sidebar";
@@ -31,6 +32,7 @@ export function TitleBarInset() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const [voiceHosted, setVoiceHosted] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -78,7 +80,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             {children}
           </main>
         </div>
-        <StatusStrip />
+        <Nova onHostedChange={setVoiceHosted} />
+        <StatusStrip voiceHosted={voiceHosted} />
         <CommandPalette
           open={paletteOpen}
           onClose={() => setPaletteOpen(false)}

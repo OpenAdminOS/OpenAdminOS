@@ -564,6 +564,7 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "userPrincipalName",
           "operatingSystem",
           "osVersion",
+          "isEncrypted",
           "lastSyncDateTime",
           "enrolledDateTime",
           "complianceState",

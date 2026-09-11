@@ -211,6 +211,9 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:list-multi-tenant-agent-batches"),
   getMultiTenantAgentBatch: (id: string) =>
     ipcRenderer.invoke("openadminos:get-multi-tenant-agent-batch", id),
+  nova: (input) => ipcRenderer.invoke("openadminos:nova", input),
+  startGraphCachePreload: (options) => ipcRenderer.invoke("openadminos:start-graph-cache-preload", options),
+  cancelGraphCachePreload: (tenantId) => ipcRenderer.invoke("openadminos:cancel-graph-cache-preload", tenantId),
   refreshGraphCache: (options) =>
     ipcRenderer.invoke("openadminos:refresh-graph-cache", options),
   getGraphCacheStatus: (tenantId?: string) =>

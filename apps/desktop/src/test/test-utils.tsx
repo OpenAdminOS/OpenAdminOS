@@ -382,6 +382,9 @@ export function makeMockBridge(
     }),
     listMultiTenantAgentBatches: vi.fn(async () => []),
     getMultiTenantAgentBatch: vi.fn(async () => undefined),
+    nova: vi.fn(async () => ({})),
+    startGraphCachePreload: vi.fn(async () => {}),
+    cancelGraphCachePreload: vi.fn(async () => {}),
     refreshGraphCache: vi.fn(async () => ({
       tenantId: appState.activeTenantId ?? mockTenant.id,
       startedAt: now,

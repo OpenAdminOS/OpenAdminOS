@@ -409,6 +409,7 @@ function summaryPage(agents) {
 ## Features
 
 - [Intune Chat](features/intune-chat.md)
+- [Cache and Nova](features/cache-and-nova.md)
 - [Multi-tenant Intune Chat](features/multi-tenant-intune-chat.md)
 - [Workspaces](features/workspaces.md)
 - [Changes and drift](features/changes.md)

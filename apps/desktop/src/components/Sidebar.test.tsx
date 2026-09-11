@@ -23,7 +23,7 @@ describe("Sidebar", () => {
       within(primary)
         .getAllByRole("link")
         .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
-    ).toEqual(["Chat", "Agent Team", "Agents", "Changes", "Settings"]);
+    ).toEqual(["Chat", "Agent Team", "Agents", "Changes", "Cache", "Settings"]);
     expect(
       screen.queryByRole("link", { name: "Home" }),
     ).not.toBeInTheDocument();
@@ -123,6 +123,6 @@ describe("Sidebar", () => {
       within(primary)
         .getAllByRole("link")
         .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
-    ).toEqual(["Chat", "Agent Team", "Agents", "Changes", "Fleet", "Settings"]);
+    ).toEqual(["Chat", "Agent Team", "Agents", "Changes", "Fleet", "Cache", "Settings"]);
   });
 });

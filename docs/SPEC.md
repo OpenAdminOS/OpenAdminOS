@@ -317,6 +317,39 @@ generic model error.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
+### Tenant cache preparation and Nova
+
+Cache is a dedicated sidebar page with all 45 supported read-resource types
+selected by default. Search and attention filters do not change the selected
+refresh scope. Manual preloads expose progress, cancellation and incomplete-result
+retry. Scheduled refresh uses the same complete collection path. It follows all
+Graph `/beta` continuation links, deduplicates IDs and preserves previous complete
+snapshots when requests fail, are cancelled or hit the explicit 128 MiB per-resource
+refresh budget. Concurrent resource requests remain bounded; overlapping refreshes
+are serialized to prevent older partial refreshes overwriting newer complete data.
+“All” describes the supported collection catalogue, including available retained
+logs, not every Graph property, relationship or action. Device records include
+reported encryption; deterministic aggregates include OS versions and encryption
+with unknown values retained.
+
+Nova is available across app pages through Talk to Nova and Alt+V. The microphone
+starts only on click. The orb reflects input volume and honors reduced motion.
+Stop, Escape, panel close, tenant/provider change and app backgrounding release
+microphone access. “Hey Nova” is handled during an active conversation; background
+wake-word detection is not implemented. Simple navigation is restricted to known
+app routes. Tenant questions reuse the existing Chat tools and approval boundary;
+voice cannot approve writes. Results remain reviewable in Chat.
+
+Hosted voice uses GPT-Live-1 WebRTC with client delegation. Electron creates the
+session and holds the API key in OS-secured storage. Every session requires explicit
+hosted voice/context consent. Tenant and agent-provider identity are bound to the
+session and checked before returning results. Local reasoning with hosted voice
+still sends audio and shared context to OpenAI, visibly disclosed in the voice panel.
+Local voice connects only to separately installed whisper.cpp and Kokoro-FastAPI
+loopback services, with a local agent provider. It uses one-minute, explicitly
+submitted recordings with no cloud fallback. Runtime/model installation and a
+background wake-word engine are separate future work, not implied by the selector.
+
 ### Agent contract
 
 **Every agent invokes the LLM at least once.** The model is load-bearing, not optional polish. Agent Template manifests MUST declare at least one step with `format: llm`; the runtime hard-fails any LLM step that is reached without a connected provider (no silent skipping), and `startRun` preflights the active provider before queueing. This is what makes an agent an *agent* and not just a Graph query: the deterministic transforms shape the data, but the model is the part that reasons and produces the headline the admin reads.

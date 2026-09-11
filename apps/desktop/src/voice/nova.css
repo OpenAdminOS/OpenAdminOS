@@ -1,0 +1,154 @@
+.nova-root {
+  position: fixed;
+  right: 22px;
+  bottom: 40px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.nova-launch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-accent);
+  border-radius: 24px;
+  padding: 10px 14px;
+  color: var(--color-text);
+  font-size: 12px;
+  box-shadow: 0 5px 20px #0003;
+}
+.nova-launch kbd {
+  font-size: 9px;
+  color: var(--color-text-muted);
+}
+.nova-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+.nova-panel {
+  order: -1;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 140px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-bg);
+  box-shadow: 0 15px 65px #0006;
+}
+.nova-orb {
+  --voice-level: 0;
+  align-self: center;
+  width: 82px;
+  height: 82px;
+  min-height: 82px;
+  margin: 15px;
+  background: radial-gradient(circle at 30% 25%, #ffe4ca, #d99766 48%, #693e24);
+  border-radius: 45% 55% 47% 53%;
+  box-shadow:
+    inset -6px -8px 18px #42251466,
+    0 8px 24px #d1894830;
+  transform: scale(calc(1 + var(--voice-level) * 0.35));
+  transition: transform 90ms linear;
+  animation: nova-breathe 5s ease-in-out infinite;
+}
+.nova-orb[data-phase="thinking"] {
+  animation: nova-breathe 1s linear infinite;
+}
+.nova-orb:disabled {
+  opacity: 0.5;
+}
+.nova-orb:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 7px;
+}
+.nova-caption {
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 8px;
+}
+.nova-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+}
+.nova-field input,
+.nova-field select {
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px;
+  color: var(--color-text);
+}
+@keyframes nova-breathe {
+  50% {
+    border-radius: 55% 45% 55% 45%;
+    rotate: 8deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-orb {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+}
+@media (max-width: 600px) {
+  .nova-root {
+    right: 12px;
+    bottom: 36px;
+  }
+  .nova-panel {
+    width: calc(100vw - 24px);
+  }
+}
+/* Keep the click target fixed while the visual orb moves with speech. */
+.nova-orb {
+  position: relative;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  animation: none;
+  transition: none;
+}
+.nova-orb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 30% 25%, #ffe4ca, #d99766 48%, #693e24);
+  border-radius: 45% 55% 47% 53%;
+  box-shadow:
+    inset -6px -8px 18px #42251466,
+    0 8px 24px #d1894830;
+  transform: scale(calc(1 + var(--voice-level) * 0.35));
+  transition: transform 90ms linear;
+  animation: nova-breathe 5s ease-in-out infinite;
+}
+.nova-orb[data-phase="thinking"] {
+  animation: none;
+}
+.nova-orb[data-phase="thinking"]::before {
+  animation-duration: 1s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-orb::before {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+}
