@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-07T18:00:46.897Z",
+  "updatedAt": "2026-09-11T15:00:47.639Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 18,
@@ -10,12 +10,12 @@
       "installs7d": 0
     },
     "offboarding-agent": {
-      "installs": 14,
-      "installs7d": 1
+      "installs": 15,
+      "installs7d": 2
     },
     "compliance-overview": {
-      "installs": 23,
-      "installs7d": 1
+      "installs": 24,
+      "installs7d": 2
     },
     "os-update-posture": {
       "installs": 11,
@@ -56,6 +56,14 @@
     "tenant-change-audit": {
       "installs": 10,
       "installs7d": 0
+    },
+    "team-evidence-review": {
+      "installs": 1,
+      "installs7d": 1
+    },
+    "team-script-draft": {
+      "installs": 1,
+      "installs7d": 1
     }
   }
 }
