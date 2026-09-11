@@ -63,6 +63,7 @@ const CLAUDE_CODE_MODELS = [
 const CLAUDE_CODE_ENV_ALLOWLIST = new Set([
   "ALL_PROXY",
   "all_proxy",
+  "APPDATA",
   "COMSPEC",
   "HOME",
   "HOMEDRIVE",
@@ -97,7 +98,7 @@ const CLAUDE_CODE_ENV_ALLOWLIST = new Set([
 export function createClaudeCodeLlm(
   options: ClaudeCodeProviderOptions = {},
 ): RunLlmApi {
-  const homePath = resolveClaudeCodeHome(options.homePath);
+  const homePath = resolveClaudeCodeConfig(options.homePath);
   const defaultModel = options.defaultModel ?? DEFAULT_CLAUDE_CODE_MODEL;
   const configuredTimeout = Number.parseInt(
     process.env.OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS ?? "",
@@ -153,8 +154,8 @@ export function createClaudeCodeLlm(
 export async function probeClaudeCodeLlm(
   options: ClaudeCodeProviderOptions = {},
 ): Promise<ClaudeCodeProbeResult> {
-  const homePath = resolveClaudeCodeHome(options.homePath);
-  const authPath = join(homePath, ".credentials.json");
+  const homePath = resolveClaudeCodeConfig(options.homePath);
+  const authPath = join(expandHome(homePath ?? "~/.claude"), ".credentials.json");
   const binaryProbe = await probeClaudeCodeBinary(options.binaryPath);
   const { versionResult } = binaryProbe;
 
@@ -318,7 +319,7 @@ function claudeCodeBinaryCandidates(preferredBinaryPath?: string): string[] {
 
 async function runClaudeCodeJson(input: {
   binaryPath: string;
-  homePath: string;
+  homePath?: string;
   cwd: string;
   model?: string;
   system?: string;
@@ -378,7 +379,7 @@ async function runClaudeCodeJson(input: {
 
 async function* runClaudeCodeStream(input: {
   binaryPath: string;
-  homePath: string;
+  homePath?: string;
   cwd: string;
   model?: string;
   system?: string;
@@ -535,9 +536,9 @@ function claudeCodeSafetyArgs(): string[] {
   ];
 }
 
-function claudeCodeEnvOverrides(homePath: string): NodeJS.ProcessEnv {
+function claudeCodeEnvOverrides(homePath?: string): NodeJS.ProcessEnv {
   return {
-    CLAUDE_CONFIG_DIR: homePath,
+    ...(homePath ? { CLAUDE_CONFIG_DIR: homePath } : {}),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   };
 }
@@ -613,8 +614,12 @@ async function runProcess(input: {
   });
 }
 
-function resolveClaudeCodeHome(homePath?: string): string {
-  return expandHome(homePath ?? process.env.CLAUDE_CONFIG_DIR ?? "~/.claude");
+function resolveClaudeCodeConfig(homePath?: string): string | undefined {
+  // Setting even the default directory changes Claude's macOS Keychain namespace.
+  // Leave its default unset, and preserve an explicit environment value verbatim.
+  return homePath === undefined
+    ? process.env.CLAUDE_CONFIG_DIR || undefined
+    : expandHome(homePath);
 }
 
 function parseClaudeCodeJson(line: string): ClaudeCodeStreamEvent | undefined {

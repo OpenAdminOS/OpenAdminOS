@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { cliArgs } from "./cli-invocation.js";
-import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -41,6 +40,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const CODEX_ENV_ALLOWLIST = new Set([
   "ALL_PROXY",
   "all_proxy",
+  "APPDATA",
   "COMSPEC",
   "HOME",
   "HOMEDRIVE",
@@ -144,7 +144,13 @@ export async function probeCodexLlm(
   }
 
   const version = parseVersion(versionResult.stdout || versionResult.stderr);
-  if (!existsSync(authPath)) {
+  const authResult = await runProcess({
+    binaryPath: binaryProbe.binaryPath,
+    args: ["login", "status"],
+    timeoutMs: 5_000,
+    env: { CODEX_HOME: homePath },
+  });
+  if (authResult.exitCode !== 0) {
     return {
       installed: true,
       ready: false,

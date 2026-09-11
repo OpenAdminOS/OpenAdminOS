@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { it } from "node:test";
-import { cliArgs, cliInvocation } from "./cli-invocation.js";
+import { cliArgs, cliInvocation, cliProcessEnv } from "./cli-invocation.js";
 
 it("passes native executable arguments without a shell", () => {
   const payload = '"A & B" | (C) %PATH% ! ^ < >';
@@ -62,3 +62,21 @@ it(
     }
   },
 );
+
+it("adds macOS CLI and Node locations to a Finder PATH without loading shell configuration", () => {
+  const source = { PATH: "/usr/bin:/bin", HOME: "/Users/admin" };
+  const env = cliProcessEnv(source, "darwin", "/Users/admin");
+  assert.equal(env.PATH, "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/Users/admin/.local/bin");
+  assert.deepEqual(source, { PATH: "/usr/bin:/bin", HOME: "/Users/admin" });
+  assert.equal(cliProcessEnv(env, "darwin", "/Users/admin").PATH, env.PATH);
+  assert.equal(cliProcessEnv(source, "linux"), source);
+});
+
+it("finds Windows user installs with a stale PATH and preserves redirected AppData", () => {
+  const source = { Path: "C:\\Windows\\System32;C:\\Tools", APPDATA: "D:\\Profile\\Roaming" };
+  const env = cliProcessEnv(source, "win32", "C:\\Users\\admin");
+  assert.equal(env.PATH, "C:\\Windows\\System32;C:\\Tools;D:\\Profile\\Roaming\\npm;C:\\Users\\admin\\.local\\bin");
+  assert.equal(env.Path, undefined);
+  assert.equal(source.Path, "C:\\Windows\\System32;C:\\Tools");
+  assert.deepEqual(cliProcessEnv(env, "win32", "C:\\Users\\admin"), env);
+});
