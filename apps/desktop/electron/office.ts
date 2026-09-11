@@ -851,13 +851,15 @@ export class OfficeService {
       instructions: p.instructions,
       evidence,
     };
-    if (JSON.stringify(context).length > 36000) {
+    if (Buffer.byteLength(JSON.stringify(context), "utf8") > 36000) {
       context.evidence = evidence.map((e) => ({
         ...e,
         result: undefined,
-        summary: `${e.summary} [Result omitted because the handoff exceeds the context budget; use the source run for full evidence.]`,
+        summary: `${e.summary.slice(0, 1000)} [Result omitted because the handoff exceeds the context budget; use the source run for full evidence.]`,
       }));
     }
+    if (Buffer.byteLength(JSON.stringify(context), "utf8") > 36000)
+      throw new Error("Handoff metadata exceeds the context budget. Shorten the standing instructions and review the source assignment.");
     return context;
   }
   private async observe() {

@@ -283,7 +283,7 @@ export class RunService {
       queuedRun.trigger = options.trigger ?? "manual";
       if (options.office) queuedRun.office = options.office;
       if (options.officeContext) {
-        if (!options.office || options.officeContext.tenantId !== pinnedTenantId || JSON.stringify(options.officeContext).length > 40000) throw new Error("Invalid team task context.");
+        if (!options.office || options.officeContext.tenantId !== pinnedTenantId || Buffer.byteLength(JSON.stringify(options.officeContext), "utf8") > 40000) throw new Error("Invalid team task context.");
         for (const source of options.officeContext.evidence) {
           const evidence = persisted.runs.find(r=>r.id===source.runId);
           if (!evidence || evidence.tenantId !== pinnedTenantId || evidence.status !== "completed") throw new Error("Team evidence is missing or belongs to another tenant.");

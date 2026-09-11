@@ -139,6 +139,30 @@ test("Office runs ordered, tenant-pinned work and waits for human approval", asy
   }
 });
 
+test("handoff budgets count UTF-8 bytes and preserve source references when omitting oversized evidence", async () => {
+  const f = await fixture();
+  try {
+    const { personas: [p] } = await f.service.save(f.input);
+    await f.service.start(p.id);
+    const source = f.context.runs[0];
+    Object.assign(source, {
+      status: "completed",
+      result: { report: "証".repeat(15000) },
+      summary: "証".repeat(2000),
+    });
+    await f.service.tick();
+    assert.deepEqual(f.calls, ["one", "two"]);
+    const context = f.context.runs[0].officeContext!;
+    assert.ok(Buffer.byteLength(JSON.stringify(context), "utf8") <= 36000);
+    assert.equal(context.evidence[0].runId, source.id);
+    assert.equal(context.evidence[0].result, undefined);
+    assert.match(context.evidence[0].summary, /Result omitted/);
+    assert.equal((source.result as { report: string }).report.length, 15000);
+  } finally {
+    await f.close();
+  }
+});
+
 test("Office resumes persisted coordination without replaying a queued child", async () => {
   const f = await fixture();
   try {
