@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Document the three-platform Agent Team visual review, including setup guidance, terminology, fullscreen feasibility, and zoom readability findings.
+
 ### Changed
 
 ### Removed

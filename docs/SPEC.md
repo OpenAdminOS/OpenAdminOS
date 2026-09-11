@@ -1825,6 +1825,12 @@ or third-party artwork is added. Hide details anonymizes office names and concea
 sidebar, tenant strip, task text, and detail panel; it is a team-view presentation
 control, not a redaction guarantee for other apps or separately opened dialogs.
 
+The 0.6.1 [visual review](../tasks/agent-team-061-visual-review.md) confirms that
+expanded/presentation mode does not provide an office-specific native fullscreen
+action, and the no-horizontal-overflow assertion at 200% zoom does not establish
+label readability. Teammate terminology, guided creation and fullscreen refinements
+are proposals in that review, not changes to the implemented behavior described here.
+
 The Electron rehearsal exercises real renderer/IPC/runtime paths with isolated local
 Graph/model fixtures: assessment change → research → bounded Chief delegation → script
 draft → evidence question → admin review. Captures identify rehearsal data. Quality

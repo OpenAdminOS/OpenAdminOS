@@ -146,3 +146,10 @@ or approve release readiness until signed installer upgrades, live app sign-in/d
 OS notification authorization, and remaining manual accessibility checks have been
 completed. Live app sign-in/deployment and real tenant writes were not performed in
 the isolated profiles. Write boundaries were exercised only with fixtures.
+
+## Visual follow-up
+
+The [three-platform visual review](agent-team-061-visual-review.md) records native
+captures, shared layout and 200% label-collision findings, and proposed teammate
+naming, guided setup, and native fullscreen acceptance criteria. These proposals
+are not implemented by the functional fixes above.
