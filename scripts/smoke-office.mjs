@@ -3,8 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// Resolve the actual executable; .bin/electron is a shell shim on Windows.
+const electronBinary = createRequire(import.meta.url)("electron");
 const viteBin = resolve(
   dirname(fileURLToPath(import.meta.resolve("vite/package.json"))),
   "bin/vite.js",
@@ -35,7 +38,7 @@ try {
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic capture process, never the packaged app.
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
-  electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
+  electron = spawn(electronBinary, electronArgs, {
     cwd: root,
     env: {
       ...electronEnv,
