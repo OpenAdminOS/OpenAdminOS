@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Keep complete Agent Team role presets and persona drafts through workflow installation and tenant setup, show installation retry errors, and exclude embedding-only Ollama models from generation.
+
 ### Security
 
 ## [0.6.0] - 2026-09-11

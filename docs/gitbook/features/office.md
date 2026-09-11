@@ -8,8 +8,12 @@ Their office, assignments, findings, and conversations live on your computer.
 
 1. Open **Agent Team** and choose **Add persona**.
 2. Choose **Policy Watcher**, **Chief of Staff**, **Research Bot**, or **Script Bot**.
-3. Review the selected workflows. Install any missing ones from the Hub.
-4. Choose the tenant, provider, model, and schedule, then save.
+3. Review the selected workflows. Choose **Review and install** for missing workflows, confirm installation, then **Return to persona**. Your draft stays open.
+4. Choose the tenant, provider, model, and schedule, then save. If no tenant is connected, use **Connect tenant** in the editor to complete setup without losing the draft.
+
+Missing workflows stay in the selected work order until installed or explicitly removed.
+Installation errors appear in the review dialog so you can retry. **Refresh available workflows**
+reloads the catalog without closing your draft.
 
 Policy Watcher uses the compliance overview and proposes an hourly check of the
 noncompliant-device count. This assessment does not diagnose which policy caused

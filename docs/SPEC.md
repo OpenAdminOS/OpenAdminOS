@@ -1716,7 +1716,13 @@ compliance overview and proposes an hourly assessment with a noncompliant-count
 threshold. Chief of Staff selects compliance plus evidence review and skips dependent
 work when a scheduled assessment is unchanged. Research Bot selects an evidence-only
 review; Script Bot selects a PowerShell draft that never executes its output. Missing
-workflows are shown before activation. The two new registry templates have no Graph
+workflows are shown before activation. The 0.6.1 review fixes initial preset application,
+retains missing workflows in the work order, and keeps permission review/installation
+and tenant setup inside the open persona draft. Incomplete work orders cannot be saved;
+renaming a persona does not hide missing prerequisites. Existing assignments retain their
+assessment and planning settings when edited. Ollama model discovery verifies text-generation
+capabilities rather than offering embedding-only models for persona execution.
+The two new registry templates have no Graph
 or connector steps; QA permits scope-free read workflows only when their entire
 pipeline uses LLM/transforms and explicitly consumes host task evidence.
 

@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 import type { AppState, OfficePersonaInput } from "../../shared/openAdminOS";
 
 export const TEAM_ROLES = [
@@ -349,20 +348,7 @@ export function PersonaOptions({
           Expired approvals require a fresh proposal.
         </small>
       </details>
-      {TEAM_ROLES.find((r) => r.name === form.name)?.slugs.some(
-        (slug) => !state.installedAgents.some((a) => a.slug === slug),
-      ) && (
-        <p className="office-error">
-          This role has missing workflows:{" "}
-          {TEAM_ROLES.find((r) => r.name === form.name)!
-            .slugs.filter(
-              (slug) => !state.installedAgents.some((a) => a.slug === slug),
-            )
-            .join(", ")}
-          . <Link to="/agents/hub">Install from the Hub →</Link> You can also
-          choose a different installed work order.
-        </p>
-      )}
+
     </div>
   );
 }

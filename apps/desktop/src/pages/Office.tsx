@@ -7,12 +7,15 @@ import type {
   OfficePersona,
   OfficePersonaInput,
   RunRecord,
+  RegistryAgentSummary,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
+import { PersonaWorkflowInstall } from "../components/office/PersonaWorkflowInstall";
 import { TeamInbox, PersonaConversation } from "../components/office/TeamInbox";
 import {
   PersonaOptions,
@@ -781,12 +784,27 @@ function PersonaEditor({
   onClose(): void;
   onSave(input: OfficePersonaInput): Promise<void>;
 }) {
+  const { registryAgents, refreshRegistry } = useAppState();
+  const { openSetup } = useSetupFlow();
+  const [catalogError, setCatalogError] = useState("");
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [installingWorkflow, setInstallingWorkflow] = useState<RegistryAgentSummary>();
+  const [startingRole, setStartingRole] = useState<string>(TEAM_ROLES[0].name);
+  const roleDefaults = (role: (typeof TEAM_ROLES)[number]): Partial<OfficePersonaInput> => ({
+    name: role.name,
+    responsibility: role.description,
+    avatar: role.avatar,
+    color: role.color,
+    agentSlugs: [...role.slugs],
+    intervalMinutes: role.name === "Policy Watcher" ? 60 : null,
+    assessment: "metric" in role ? { metricPath: role.metric, threshold: 1 } : undefined,
+    planning: role.name === "Chief of Staff" ? "on-change" : "ordered",
+  });
   const [form, setForm] = useState<OfficePersonaInput>(() => ({
-    name: "Policy Watcher",
-    responsibility:
-      "Review policy findings and surface changes that need attention.",
-    avatar: "robot",
-    color: "amber",
+    name: TEAM_ROLES[0].name,
+    responsibility: TEAM_ROLES[0].description,
+    avatar: TEAM_ROLES[0].avatar,
+    color: TEAM_ROLES[0].color,
     tenantId: state.activeTenantId ?? state.tenants[0]?.id ?? "",
     providerId: state.activeProviderId,
     model: persona
@@ -802,10 +820,24 @@ function PersonaEditor({
     intervalMinutes: null,
     maxMinutes: 30,
     enabled: true,
+    ...(persona ? {} : roleDefaults(TEAM_ROLES[0])),
     ...persona,
     confirmHosted: false,
   }));
+  useEffect(() => {
+    if (!form.tenantId && state.activeTenantId) {
+      setForm((f) => ({ ...f, tenantId: state.activeTenantId! }));
+    }
+  }, [form.tenantId, state.activeTenantId]);
+  const refreshWorkflows = async () => {
+    setRefreshingCatalog(true);
+    setCatalogError("");
+    try { await refreshRegistry(); }
+    catch (e) { setCatalogError(e instanceof Error ? e.message : String(e)); }
+    finally { setRefreshingCatalog(false); }
+  };
   const provider = state.providers.find((p) => p.id === form.providerId);
+  const missingWorkflows = form.agentSlugs.filter((slug) => !state.installedAgents.some((a) => a.slug === slug));
   const executionKeys = [
     "tenantId",
     "providerId",
@@ -854,6 +886,7 @@ function PersonaEditor({
     void onSave(form);
   };
   return (
+    <>
     <Modal
       open
       onClose={onClose}
@@ -872,29 +905,11 @@ function PersonaEditor({
                 <button
                   key={role.name}
                   type="button"
-                  aria-pressed={form.name === role.name}
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      name: role.name,
-                      responsibility: role.description,
-                      avatar: role.avatar,
-                      color: role.color,
-                      agentSlugs: role.slugs.filter((slug) =>
-                        state.installedAgents.some((a) => a.slug === slug),
-                      ),
-                      intervalMinutes:
-                        role.name === "Policy Watcher" ? 60 : null,
-                      assessment:
-                        "metric" in role
-                          ? { metricPath: role.metric, threshold: 1 }
-                          : undefined,
-                      planning:
-                        role.name === "Chief of Staff"
-                          ? "on-change"
-                          : "ordered",
-                    }))
-                  }
+                  aria-pressed={startingRole === role.name}
+                  onClick={() => {
+                    setStartingRole(role.name);
+                    setForm((f) => ({ ...f, ...roleDefaults(role) }));
+                  }}
                 >
                   {role.name}
                 </button>
@@ -1018,11 +1033,31 @@ function PersonaEditor({
               Select workflows in execution order. Agent settings and delivery
               rules apply.
             </p>
-            {state.installedAgents.length === 0 && (
-              <Link to="/agents/hub" onClick={onClose}>
-                Install an agent from the Hub →
-              </Link>
+            {missingWorkflows.length > 0 && (
+              <div role="status">
+                <p className="office-error">Install the missing workflows below or remove them from this assignment before saving.</p>
+                {missingWorkflows.map((slug) => {
+                  const agent = registryAgents.find((a) => a.slug === slug);
+                  return <div key={slug}>
+                    <label className="office-check">
+                      <input type="checkbox" checked onChange={() => toggleAgent(slug)} />
+                      <span>{agent?.name ?? slug}<small>Not installed</small></span>
+                    </label>
+                    {agent ? <Button type="button" size="sm" onClick={() => setInstallingWorkflow(agent)}>Review and install {agent.name}</Button>
+                      : <p>Unavailable in the current catalog. Refresh available workflows below to retry.</p>}
+                  </div>;
+                })}
+              </div>
             )}
+            <details>
+              <summary>Browse available workflows</summary>
+              {registryAgents.filter((a) => !state.installedAgents.some((installed) => installed.slug === a.slug) && !missingWorkflows.includes(a.slug)).map((a) => (
+                <div key={a.slug}><Button type="button" size="sm" onClick={() => setInstallingWorkflow(a)}>Review and install {a.name}</Button></div>
+              ))}
+              {registryAgents.length === 0 && <p>No catalog available. Refresh available workflows to retry.</p>}
+            </details>
+            <Button type="button" size="sm" disabled={refreshingCatalog} onClick={() => void refreshWorkflows()}>{refreshingCatalog ? "Refreshing workflows…" : "Refresh available workflows"}</Button>
+            {(catalogError || state.registryRefreshError) && <p role="alert" className="office-error">{catalogError || state.registryRefreshError} Refresh available workflows to retry.</p>}
             {state.installedAgents.map((a) => (
               <label className="office-check" key={a.slug}>
                 <input
@@ -1148,6 +1183,8 @@ function PersonaEditor({
               {error}
             </p>
           )}
+          {!form.tenantId && <div><p role="status">Connect a tenant before deploying this persona. Your draft stays open during setup.</p><Button type="button" onClick={openSetup}>Connect tenant</Button></div>}
+          {provider && provider.status !== "connected" && !(provider.id === "azure-openai" && provider.status === "available") && <p role="status">{provider.detail} Choose an available provider or configure it in Settings before deploying.</p>}
           <div className="office-actions">
             <Button type="button" onClick={onClose}>
               Cancel
@@ -1157,6 +1194,7 @@ function PersonaEditor({
               variant="primary"
               disabled={
                 !form.agentSlugs.length ||
+                (!cosmeticOnly && missingWorkflows.length > 0) ||
                 !form.tenantId ||
                 !provider ||
                 (!persona &&
@@ -1173,5 +1211,7 @@ function PersonaEditor({
         </fieldset>
       </form>
     </Modal>
+    {installingWorkflow && <PersonaWorkflowInstall key={installingWorkflow.slug} agent={installingWorkflow} tenantId={form.tenantId} onClose={() => setInstallingWorkflow(undefined)} />}
+    </>
   );
 }

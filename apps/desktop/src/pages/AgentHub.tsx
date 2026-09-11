@@ -95,6 +95,7 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   const [showManifestRaw, setShowManifestRaw] = useState(false);
   const [confirmInstall, setConfirmInstall] = useState(false);
   const [installingAgentId, setInstallingAgentId] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
   // Live install counts fetched from the public stats endpoint on Hub
   // mount. Falls back silently to the bundled values on `agent.installs`
   // when the fetch fails (offline, network error, etc.).
@@ -111,6 +112,8 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   }, [detailSlug, manifestAgent?.slug, registryAgents]);
 
   const closeManifest = () => {
+    if (installingAgentId) return;
+    setInstallError(null);
     setManifestAgent(null);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -197,9 +200,12 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
       return;
     }
     setInstallingAgentId(agent.id);
+    setInstallError(null);
     try {
       await installAgent(agent.registryId);
       setConfirmInstall(false);
+    } catch (error) {
+      setInstallError(error instanceof Error ? error.message : String(error));
     } finally {
       setInstallingAgentId(null);
     }
@@ -347,6 +353,7 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
           onClose={closeManifest}
         />
         <div className="overflow-y-auto p-6">
+          {installError && <p role="alert" className="mb-4 text-[var(--color-danger)]">Installation failed: {installError} Review the error and retry installation.</p>}
           {manifestAgent && (
             <AgentInstallDetails
               agent={manifestAgent}
@@ -411,7 +418,7 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
   );
 }
 
-function AgentInstallDetails({
+export function AgentInstallDetails({
   agent,
   installed,
   tenantTier,
@@ -426,6 +433,7 @@ function AgentInstallDetails({
   onCancelInstall,
   onConfirmInstall,
   onOpen,
+  openLabel = "Open agent",
 }: {
   agent: RegistryAgentSummary;
   installed: boolean;
@@ -441,6 +449,7 @@ function AgentInstallDetails({
   onCancelInstall: () => void;
   onConfirmInstall: () => void;
   onOpen: () => void;
+  openLabel?: string;
 }) {
   return (
     <div className="space-y-5">
@@ -466,17 +475,17 @@ function AgentInstallDetails({
           <div className="mt-5 flex items-center gap-2">
             {installed ? (
               <Button variant="primary" leadingIcon={<IconCheck size={12} />} onClick={onOpen}>
-                Open agent
+                {openLabel}
               </Button>
             ) : agent.compatibility?.supported === false ? (
               <Button variant="secondary" onClick={onRequestInstall}>
                 Update OpenAdminOS
               </Button>
-            ) : (
+            ) : !confirmInstall ? (
               <Button variant="primary" onClick={onRequestInstall}>
                 Install
               </Button>
-            )}
+            ) : null}
             <Button variant="secondary" onClick={onToggleRaw}>
               {showRaw ? "Hide manifest" : "Review manifest"}
             </Button>
