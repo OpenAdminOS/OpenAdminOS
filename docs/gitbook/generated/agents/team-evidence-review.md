@@ -21,7 +21,7 @@ Investigates evidence handed to an Agent Team persona without collecting tenant 
 | Preferred model | `not pinned` |
 | Minimum app version | `0.6.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-09-11 · `153ee40` |
+| Last changed | 2026-09-11 · `13dad4d` |
 
 ## Execution
 
