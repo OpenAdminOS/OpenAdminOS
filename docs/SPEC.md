@@ -317,6 +317,16 @@ generic model error.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
+Desktop CLI provider discovery adds Homebrew and user-local executable directories
+to macOS child PATH so Finder/Dock launches can also resolve npm launchers' Node
+runtime. On Windows it adds the user npm and native CLI install folders, respects
+redirected AppData, and resolves official npm launchers without a command shell.
+It does not execute shell startup files or inherit additional secrets. Claude's
+configuration directory remains unset unless explicitly configured: forcing even
+its default directory selects a different macOS Keychain credential namespace.
+Codex readiness uses `codex login status`, not the presence of `auth.json`, so
+CLI-managed credential storage and signed-out states are handled consistently.
+
 ### Tenant cache preparation and Nova
 
 Nova can retrieve a new report and prepare its delivery in one request, such as
