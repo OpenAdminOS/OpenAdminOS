@@ -16,6 +16,17 @@ export async function runOfficeRehearsal(
       if (await evaluate<boolean>(code)) return;
       await sleep(100);
     }
+    // Preserve fixture execution state before the launcher removes its temporary
+    // profile. A timeout alone cannot distinguish a failed child from a slow UI.
+    const state = await evaluate(`(async()=>{
+      const s=await window.openAdminOS.getAppState();
+      return {
+        personas:s.office.personas.map(p=>({id:p.id,name:p.name,lastError:p.lastError,enabled:p.enabled})),
+        missions:s.office.missions,
+        runs:s.runs.map(r=>({id:r.id,agentSlug:r.agentSlug,status:r.status,error:r.error,summary:r.summary,logs:r.logs.slice(-8)}))
+      };
+    })()`);
+    await writeFile(join(outputDir, "rehearsal-failure.json"), JSON.stringify({ wait: code, state }, null, 2));
     throw new Error(`Rehearsal timed out: ${code}`);
   };
   const frame = async (path: string) => {
@@ -189,10 +200,9 @@ export async function runOfficeRehearsal(
         ...measurements,
         frameSampling: measurements.frameSamples
           ? "Renderer animation-frame samples"
-          : "Headless compositor throttled animation-frame callbacks; no FPS claim.",
+          : "Animation-frame samples unavailable; no FPS claim.",
         recordingFrames: frames,
-        environment:
-          "Linux Xvfb software rendering; not representative admin hardware",
+        environment: `Electron on ${process.platform}; record desktop/session context separately`,
         hiddenMotion,
         resumedMotion: "on",
         zoom200Overflow: overflow,

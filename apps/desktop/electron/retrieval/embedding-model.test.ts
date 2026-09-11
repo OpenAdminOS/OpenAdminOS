@@ -90,10 +90,11 @@ describe("index auto-install is gated on the local runtime", () => {
     // A loopback port nothing listens on.
     process.env.OPENADMINOS_EMBEDDING_ENDPOINT = "http://127.0.0.1:59999";
     const dir = await mkdtemp(join(tmpdir(), "openadminos-gate-"));
+    let store: InstanceType<typeof AppStateStore> | undefined;
     try {
       const statePath = join(dir, "state.json");
       await writeFile(statePath, JSON.stringify({ tenants: [], runs: [] }), "utf8");
-      const store = new AppStateStore({
+      store = new AppStateStore({
         filePath: statePath,
         tokenStore: { read: async () => "", write: async () => undefined },
         userDataPath: dir,
@@ -116,6 +117,7 @@ describe("index auto-install is gated on the local runtime", () => {
         "an unreachable runtime is not an attempt; the next launch must retry immediately",
       );
     } finally {
+      store?.close();
       if (previousEndpoint === undefined) {
         delete process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
       } else {

@@ -12,9 +12,12 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Retry transient Windows file locks when saving profile settings or installing agent manifests, preserving the previous file until replacement succeeds.
 - Keep complete Agent Team role presets and persona drafts through workflow installation and tenant setup, show installation retry errors, and exclude embedding-only Ollama models from generation.
 
 ### Security
+
+- Keep Windows Claude Code and Codex provider arguments out of the command shell, including persona instructions and script-drafting prompts.
 
 ## [0.6.0] - 2026-09-11
 

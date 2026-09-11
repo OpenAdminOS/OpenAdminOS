@@ -12,8 +12,8 @@ import { IntelligenceSqliteStore } from "./sqlite-store.js";
 describe("Intune Chat read-only tools", () => {
   it("lists cache inventory and query_cache enforces row caps", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 75);
     try {
-      const store = seededStore(dir, 75);
       const ctx = toolContext(store);
 
       const inventory = await executeIntuneChatTool(ctx, "list_cached_resources", {});
@@ -39,14 +39,15 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(result.rows.length, 50);
       assert.match(query.trace.resultSummary, /50 of 75 cached rows returned/);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("graph_get rejects writes and unknown paths", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
     try {
-      const store = seededStore(dir, 1);
       const ctx = toolContext(store);
 
       const write = await executeIntuneChatTool(ctx, "graph_get", {
@@ -60,14 +61,15 @@ describe("Intune Chat read-only tools", () => {
       });
       assert.match(unknown.trace.error ?? "", /Unknown Microsoft Graph GET path/);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("graph_get validates allowed read scopes, caps $top, and records trace", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
     try {
-      const store = seededStore(dir, 1);
       const graphRequests: Array<{ scopes: string[]; path: string; top?: string }> = [];
       const graph: RunGraphApi = {
         async listManagedDevices() {
@@ -117,14 +119,15 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(execution.trace.tool, "graph_get");
       assert.match(execution.trace.resultSummary, /live rows returned/i);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("graph_get accepts Entra and Defender read paths with their scopes", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
     try {
-      const store = seededStore(dir, 1);
       const graphRequests: Array<{ scopes: string[]; path: string }> = [];
       let currentScopes: string[] = [];
       const graph: RunGraphApi = {
@@ -165,14 +168,15 @@ describe("Intune Chat read-only tools", () => {
         );
       }
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("refresh_resource triggers the provided refresh callback", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
     try {
-      const store = seededStore(dir, 1);
       const refreshed: GraphCacheResourceKind[] = [];
       const ctx = toolContext(store, {
         refreshResource: async (resource) => {
@@ -194,14 +198,15 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(execution.trace.tool, "refresh_resource");
       assert.match(execution.trace.resultSummary, /3 rows refreshed/);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("query_drift reads local drift timeline rows, clamps top, and records trace", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
     try {
-      const store = seededStore(dir, 1);
       const timelineCalls: unknown[] = [];
       const ctx = toolContext(store, {
         getDriftTimeline: async (input) => {
@@ -265,6 +270,7 @@ describe("Intune Chat read-only tools", () => {
       });
       assert.match(invalid.trace.error ?? "", /drift-tracked resource/);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -337,8 +343,9 @@ function toolContext(
 describe("Graph endpoint discovery and reachability", () => {
   it("finds candidate endpoints from plain words so a path need not be recalled", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-"));
+    const store = seededStore(dir, 1);
     try {
-      const ctx = toolContext(seededStore(dir, 1));
+      const ctx = toolContext(store);
       const found = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
         query: "conditional access named locations",
       });
@@ -352,14 +359,16 @@ describe("Graph endpoint discovery and reachability", () => {
         `expected a namedLocations path, got ${result.candidates.map((c) => c.path).join(", ")}`,
       );
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("caps how many candidates are returned", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-cap-"));
+    const store = seededStore(dir, 1);
     try {
-      const ctx = toolContext(seededStore(dir, 1));
+      const ctx = toolContext(store);
       const found = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
         query: "user",
         limit: 500,
@@ -367,15 +376,17 @@ describe("Graph endpoint discovery and reachability", () => {
       const result = found.result as { candidates: unknown[] };
       assert.ok(result.candidates.length <= 15);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("attempts a read endpoint whose permissions the catalog does not document", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-unknown-"));
+    const store = seededStore(dir, 1);
     try {
       let requested: string | undefined;
-      const ctx = toolContext(seededStore(dir, 1), {
+      const ctx = toolContext(store, {
         graphForScopes: async () => ({
           async listManagedDevices() {
             return [];
@@ -400,15 +411,17 @@ describe("Graph endpoint discovery and reachability", () => {
       assert.equal(result.trace.error, undefined, `unexpected error: ${result.trace.error}`);
       assert.equal(requested, "/admin/edge/internetExplorerMode");
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("refuses an endpoint needing a permission this app never requests, without calling Graph", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-refuse-"));
+    const store = seededStore(dir, 1);
     try {
       let called = false;
-      const ctx = toolContext(seededStore(dir, 1), {
+      const ctx = toolContext(store, {
         graphForScopes: async () => ({
           async listManagedDevices() {
             return [];
@@ -431,19 +444,22 @@ describe("Graph endpoint discovery and reachability", () => {
       assert.match(result.trace.error ?? "", /does not request/);
       assert.equal(called, false, "no Graph call may be made for a refused endpoint");
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("still rejects a path that does not exist in the catalog", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-bogus-"));
+    const store = seededStore(dir, 1);
     try {
-      const ctx = toolContext(seededStore(dir, 1));
+      const ctx = toolContext(store);
       const result = await executeIntuneChatTool(ctx, "graph_get", {
         path: "/totallyMadeUpThing",
       });
       assert.match(result.trace.error ?? "", /Unknown Microsoft Graph GET path/);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -452,8 +468,9 @@ describe("Graph endpoint discovery and reachability", () => {
 describe("an empty query result is not evidence of an empty tenant", () => {
   it("reports the unfiltered row count when a filter matches nothing", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-empty-"));
+    const store = seededStore(dir, 9);
     try {
-      const ctx = toolContext(seededStore(dir, 9));
+      const ctx = toolContext(store);
       const result = await executeIntuneChatTool(ctx, "query_cache", {
         resource: "managedDevices",
         where: { operatingSystem: "SolarisNotAThing" },
@@ -478,14 +495,16 @@ describe("an empty query result is not evidence of an empty tenant", () => {
       );
       assert.ok(record.availableFields?.includes("operatingSystem"));
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("distinguishes an uncached resource from an empty one", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-uncached-"));
+    const store = seededStore(dir, 9);
     try {
-      const ctx = toolContext(seededStore(dir, 9));
+      const ctx = toolContext(store);
       const result = await executeIntuneChatTool(ctx, "query_cache", {
         resource: "users",
       });
@@ -493,6 +512,7 @@ describe("an empty query result is not evidence of an empty tenant", () => {
       assert.equal(record.cachedRowsForResource, 0);
       assert.match(record.note, /Nothing is cached/i);
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -501,8 +521,9 @@ describe("an empty query result is not evidence of an empty tenant", () => {
 describe("cached rows advertise the fields available to filter on", () => {
   it("lists field names on a successful query, not only after one fails", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-fields-"));
+    const store = seededStore(dir, 5);
     try {
-      const ctx = toolContext(seededStore(dir, 5));
+      const ctx = toolContext(store);
       const result = await executeIntuneChatTool(ctx, "query_cache", {
         resource: "managedDevices",
         limit: 3,
@@ -517,14 +538,16 @@ describe("cached rows advertise the fields available to filter on", () => {
         `fields must be advertised on a successful read; got ${JSON.stringify(record.availableFields)}`,
       );
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   it("keeps the cache inventory lean, since it covers every resource at once", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-fields-inv-"));
+    const store = seededStore(dir, 5);
     try {
-      const ctx = toolContext(seededStore(dir, 5));
+      const ctx = toolContext(store);
       const result = await executeIntuneChatTool(ctx, "list_cached_resources", {});
       const record = result.result as {
         resources: Array<{ resource: string; availableFields?: string[] }>;
@@ -535,6 +558,7 @@ describe("cached rows advertise the fields available to filter on", () => {
         "field lists across every resource make this observation too expensive",
       );
     } finally {
+      store.close();
       await rm(dir, { recursive: true, force: true });
     }
   });

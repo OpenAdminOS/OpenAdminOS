@@ -79,6 +79,12 @@ The cost we accept: ~80–150MB installer size (vs ~5–10MB Tauri), ~150–250M
 
 OpenAdminOS is **one TypeScript monorepo that ships a polished Electron desktop app**, with a clean provider-adapter pattern and shared schema package. Preserve the directory boundaries, contracts package, and adapter abstraction when extending the runtime or renderer.
 
+Windows CLI providers launch native executables directly. Official Claude Code and
+Codex npm launchers resolve to their Node entry points, avoiding `cmd.exe` argument
+interpretation. Unrecognized batch launchers are rejected with installation guidance;
+persona instructions, model names, and prompt punctuation must remain literal arguments.
+No additional runtime dependency is introduced for this resolution.
+
 ### Public documentation model
 
 Public documentation is GitBook-synced from `docs/gitbook`, with the repository root `.gitbook.yaml` setting `root: ./docs/gitbook`. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the GitBook root.
@@ -799,6 +805,10 @@ owner-only file modes. SQLite enables foreign-key enforcement, WAL, and secure
 deletion. Tenant data in SQLite is not application-level encrypted; the product
 relies on operating-system account isolation and full-disk encryption for those
 local records and does not describe them as keychain-encrypted.
+
+Windows atomic profile and manifest replacement retries transient `EPERM`, `EACCES`,
+and `EBUSY` failures with bounded backoff (seven attempts, 1.26 seconds of waiting).
+The previous destination remains intact throughout; persistent errors still surface.
 
 No cloud sync. No tenant-content, prompt, run-result, analytics-event, or
 error-reporting telemetry. Packaged production builds may send a minimal public

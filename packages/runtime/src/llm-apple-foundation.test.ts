@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { join } from "node:path";
 
 import {
   APPLE_FOUNDATION_MODEL_ID,
@@ -43,12 +44,18 @@ describe("listAppleFoundationHelperCandidates", () => {
     try {
       assert.ok(
         listAppleFoundationHelperCandidates().includes(
-          "/Applications/OpenAdminOS.app/Contents/Resources/native/apple-foundation-helper/openadminos-apple-foundation-helper",
+          join(
+            "/Applications/OpenAdminOS.app/Contents/Resources",
+            "native",
+            "apple-foundation-helper",
+            "openadminos-apple-foundation-helper",
+          ),
         ),
       );
     } finally {
       if (originalResourcesPath === undefined) {
-        delete (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+        delete (process as NodeJS.Process & { resourcesPath?: string })
+          .resourcesPath;
       } else {
         (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath =
           originalResourcesPath;
@@ -64,16 +71,13 @@ describe("createAppleFoundationLlm", () => {
       defaultModel: APPLE_FOUNDATION_MODEL_ID,
     });
 
-    await assert.rejects(
-      async () => {
-        for await (const _chunk of llm.stream({
-          model: "other-model",
-          prompt: "hello",
-        })) {
-          // unreachable
-        }
-      },
-      /only exposes the system language model/,
-    );
+    await assert.rejects(async () => {
+      for await (const _chunk of llm.stream({
+        model: "other-model",
+        prompt: "hello",
+      })) {
+        // unreachable
+      }
+    }, /only exposes the system language model/);
   });
 });
