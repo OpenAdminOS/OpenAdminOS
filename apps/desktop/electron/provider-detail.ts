@@ -69,19 +69,42 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
     }
 
     const payload = (await response.json()) as OllamaTagsResponse;
-    const models =
+    const installedModels =
       payload.models
         ?.map((model) => model.name)
         .filter((name): name is string => Boolean(name)) ?? [];
+    // /api/tags also includes embedding-only models. Ask Ollama instead of
+    // guessing capabilities from names, which can be arbitrary local aliases.
+    let unverified = false;
+    const supported = await Promise.all(installedModels.map(async (model) => {
+      try {
+        const details = await fetch(`${endpoint}/api/show`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model }),
+          signal: controller.signal,
+        });
+        if (!details.ok) throw new Error("Model details unavailable");
+        const data = await details.json() as { capabilities?: unknown };
+        if (!Array.isArray(data.capabilities)) throw new Error("Model capabilities unavailable");
+        return data.capabilities.includes("completion");
+      } catch {
+        unverified = true;
+        return false;
+      }
+    }));
+    const models = installedModels.filter((_, i) => supported[i]);
 
     return {
       ...trustedProvider,
-      status: "connected",
+      status: models.length ? "connected" : "error",
       detail: ollamaEndpointDetail(
         endpointTrust,
         models.length > 0
-          ? `Running on ${endpoint}`
-          : "Ollama is running but no models are installed",
+          ? `Running on ${endpoint}${unverified ? ". Some model capabilities could not be verified; refresh to retry" : ""}`
+          : unverified
+            ? "Ollama is running, but text-generation capabilities could not be verified. Check the server's /api/show support and refresh providers."
+            : "Ollama has no text-generation models available. Install a text-generation model, then refresh providers.",
       ),
       models,
       defaultModel: models[0],
