@@ -7,20 +7,20 @@ Review the released 0.6.0 behavior before applying fixes. Work on
 
 | Flow | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| Fresh profile and setup recovery | Native Electron + renderer regression passed | SSH key authorization pending | Native Electron, isolated profile passed |
-| Role presets and persona deployment | Presets passed; deployment passed with fixtures | Pending | Native presets and fixture deployment passed |
-| Signed team workflow installation | Evidence review through Hub; PowerShell through editor, both signed installs | Pending | Both signed workflows installed through persona editor |
-| Customization, editing, pause, removal | Renderer and host tests passed | Pending | Renderer and host tests passed |
-| Manual runs, schedules, restart recovery | Host tests + Electron fixture rehearsal passed | Pending | Host tests + native fixture rehearsal passed |
-| Evidence handoffs, questions, review inbox | Electron fixture rehearsal passed | Pending | Native fixture rehearsal passed |
-| Provider unavailable, missing workflows, permissions | Regression tests; live Ollama + read-only Lokka checks passed | Pending | Native missing-provider gate and regression tests passed |
-| Keyboard, scaling, motion, background behavior | Xvfb rehearsal passed; native assistive technology/hardware pending | Pending | Native pointer/keyboard, motion suspension, 200% zoom passed; assistive technology pending |
+| Fresh profile and setup recovery | Native Electron + renderer regression passed | Native Electron, isolated profile passed | Native Electron, isolated profile passed |
+| Role presets and persona deployment | Presets passed; deployment passed with fixtures | Native presets and fixture deployment passed | Native presets and fixture deployment passed |
+| Signed team workflow installation | Evidence review through Hub; PowerShell through editor, both signed installs | Both signed workflows installed through persona editor | Both signed workflows installed through persona editor |
+| Customization, editing, pause, removal | Renderer and host tests passed | Renderer and host tests passed | Renderer and host tests passed |
+| Manual runs, schedules, restart recovery | Host tests + Electron fixture rehearsal passed | Host tests + native fixture rehearsal passed | Host tests + native fixture rehearsal passed |
+| Evidence handoffs, questions, review inbox | Electron fixture rehearsal passed | Native fixture rehearsal passed | Native fixture rehearsal passed |
+| Provider unavailable, missing workflows, permissions | Regression tests; live Ollama + read-only Lokka checks passed | Native tenant gate, Ollama readiness, and regression tests passed | Native missing-provider gate and regression tests passed |
+| Keyboard, scaling, motion, background behavior | Xvfb rehearsal passed; native assistive technology/hardware pending | Native keyboard, motion suspension, 200% zoom passed; assistive technology/manual pointer checks pending | Native pointer/keyboard, motion suspension, 200% zoom passed; assistive technology pending |
 
 The Linux fresh-profile test uses the real Electron host, renderer, registry,
 and installed local providers. No tenant credentials are copied. Fixture-backed
-execution checks are recorded separately from live tenant checks. Tailscale SSH
-connectivity and native desktop interaction must be proven before either remote
-platform is marked tested. No private host addresses or account details belong
+execution checks are recorded separately from live tenant checks. Authenticated
+OpenSSH over Tailscale and native Electron execution were verified on both remote
+platforms. No private host addresses or account details belong
 in this report.
 
 ## Findings reproduced before fixes
@@ -66,10 +66,10 @@ in this report.
 
 ## Remaining prerequisites
 
-- Windows SSH over Tailscale is authenticated; native desktop checks used a separate
-  checkout and profile. The existing signed installation and its profile were preserved.
-- macOS SSH is reachable, but public-key authentication is rejected. The user must
-  authorize the review public key before native Mac testing can proceed.
+- Both remote platforms authenticated using the dedicated review key over Tailscale.
+  Native checks used separate checkouts and profiles. Existing signed installations
+  and their profiles were preserved. Temporary test tasks, apps, and debug tunnels
+  were removed or stopped after testing.
 - Signed 0.6.1 installer upgrade and live app MSAL sign-in/deployment remain unverified.
   No installer or release is produced by this review branch.
 
@@ -116,11 +116,33 @@ in this report.
 - Rehearsal artifacts now identify the actual platform and preserve synthetic execution
   diagnostics on timeout; older artifacts incorrectly hard-coded Linux in their metadata.
 
+## macOS verification details
+
+- macOS 26.6.2 on Apple Silicon. The existing 0.6.0 app passed signature verification
+  and remained separate from the source-built review app. The production source build
+  and full test suite passed, including 234 host tests and 106 renderer tests. Node 26
+  used the same jsdom web-storage flag as Windows.
+- Native keyboard interaction verified the initial Policy Watcher work order/schedule,
+  signed PowerShell and evidence-review installation, a renamed draft retained through
+  tenant setup cancellation, and the deployment gate without a connected tenant.
+  The fresh profile discovered the installed local Ollama provider.
+- Native rehearsal passed persona deployment, ordered work, two evidence handoffs,
+  bounded Chief planning, source-linked questions, admin review, reduced motion,
+  hidden-window suspension, and 200% zoom. With 24 personas and six visible seats,
+  90 frame samples measured 16.7 ms median and 17.7 ms p95. These are short samples,
+  not sustained performance guarantees.
+- The development Electron app could not deliver notifications (`UNErrorDomain` 1).
+  Signed-app notification delivery with OS authorization remains a validation gate.
+  This does not establish a notification defect in the signed release.
+- In the separate fresh-profile window, automated pointer stability waits stalled
+  before delivering the click; native keyboard activation completed the flow. Manual
+  pointer and assistive-technology validation remain outstanding.
+
 ## Release status
 
 This is a review/fix branch, not a published 0.6.1 release. Package versions stay at
 0.6.0 until patch-release preparation. Do not mark the three-platform audit complete
-or approve release readiness until Mac native validation and both platforms’ signed installer upgrade and live
-app sign-in/deployment checks have been completed. Live app
-sign-in/deployment and real tenant writes were not performed in the isolated Linux
-profile. Write boundaries were exercised only with fixtures.
+or approve release readiness until signed installer upgrades, live app sign-in/deployment,
+OS notification authorization, and remaining manual accessibility checks have been
+completed. Live app sign-in/deployment and real tenant writes were not performed in
+the isolated profiles. Write boundaries were exercised only with fixtures.
