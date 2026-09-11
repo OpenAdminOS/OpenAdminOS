@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.6.1] - 2026-09-11
+
+### Added
+
 - Add guided teammate setup with a persistent action footer, contextual prerequisites, review summary, and first-assignment guidance.
 - Add native office fullscreen with explicit exit controls and restored window state.
 
