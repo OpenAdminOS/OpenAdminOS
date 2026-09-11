@@ -2148,11 +2148,16 @@ OpenAdminOS is the flagship community project. The others are either narrow paid
 
 ### Agent Team release version (2026-09-11)
 
-The maintainer selected **0.6.0** for Agent Team. Product packages, internal
-dependency pins, and lockfile metadata use this version. The new evidence-review
-and script-draft workflows require app version 0.6.0 because they consume the new
-team task context. Release notes are prepared in CHANGELOG.md; this version
-selection does not itself publish a tag or installers.
+Agent Team shipped in **0.6.0**. The maintainer approved **0.6.1** as the
+follow-up release for guided teammate setup, native office fullscreen, workflow
+evidence fixes, and Windows reliability and provider-launch hardening. Product
+packages, internal dependency pins, and lockfile metadata use 0.6.1. The
+evidence-review and script-draft workflows retain their 0.6.0 minimum because
+that version introduced team task context. Publication requires green release
+gates, signed Windows and macOS installers, Linux packages, checksums, and apt
+deployment. Native Agent Team flows and visuals were verified on Linux, macOS,
+and Windows; live tenant sign-in and signed installer upgrade checks remain
+separate from that isolated-profile evidence.
 
 ### Approved v0.5.1 release recovery (2026-09-06)
 
@@ -2164,3 +2169,7 @@ The corrected v0.5.1 becomes the latest public release and apt package.
 This is a one-time approved exception, not permission to move other tags or
 reuse v0.5.2 for different source. Installed v0.5.2 copies do not automatically
 downgrade; users requiring 0.5.1 must install it explicitly.
+
+The maintainer approved deleting the remaining v0.5.2 draft release on
+2026-09-11 while retaining its tag. The draft and its attached assets were
+removed; published releases remain available.
