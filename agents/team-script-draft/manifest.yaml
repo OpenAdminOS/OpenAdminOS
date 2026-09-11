@@ -3,7 +3,7 @@ descriptor:
   name: Team PowerShell draft
   description: Prepares a PowerShell script for review from an Agent Team task and its supplied evidence.
   version: 1.0.0
-  minAppVersion: 0.5.1
+  minAppVersion: 0.6.0
   author:
     name: OpenAdminOS
     handle: openadminos

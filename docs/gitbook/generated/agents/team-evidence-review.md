@@ -19,7 +19,7 @@ Investigates evidence handed to an Agent Team persona without collecting tenant 
 | Category | `compliance` |
 | Required Entra tier | `free` |
 | Preferred model | `not pinned` |
-| Minimum app version | `0.5.1` |
+| Minimum app version | `0.6.0` |
 | Author | OpenAdminOS · verified |
 | Last changed | 2026-09-11 · `4ebc29d` |
 

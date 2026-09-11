@@ -1,5 +1,7 @@
 # Current active plan
 
+- [x] Prepare Agent Team as version **0.6.0**, with aligned workspace versions, release notes, and a 0.6.0 minimum for the new evidence workflows. Publication follows PR review and release validation.
+
 - [x] Implement the approved [Agent Team significant improvement plan](./agent-team-improvement-plan.md): proactive evidence handoffs, bounded Chief planning, findings/conversations, operational schedules, and a conference rehearsal. Cross-platform hardware validation remains a release gate.
 
 - [x] Agent Team: persistent personas, tenant/provider-pinned sequential assignments, recurrence, live room/list views, briefings, and host/renderer/Electron verification. Human collaboration and desktop avatars remain follow-ons.

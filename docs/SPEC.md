@@ -2109,6 +2109,14 @@ For context: these exist or are in flight, and may interact with OpenAdminOS ove
 
 OpenAdminOS is the flagship community project. The others are either narrow paid products (TenantPDF) or instructive prior art.
 
+### Agent Team release version (2026-09-11)
+
+The maintainer selected **0.6.0** for Agent Team. Product packages, internal
+dependency pins, and lockfile metadata use this version. The new evidence-review
+and script-draft workflows require app version 0.6.0 because they consume the new
+team task context. Release notes are prepared in CHANGELOG.md; this version
+selection does not itself publish a tag or installers.
+
 ### Approved v0.5.1 release recovery (2026-09-06)
 
 The maintainer explicitly approved restoring package versions to 0.5.1 while

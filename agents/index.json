@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 2,
+  "revision": 3,
   "agents": [
     {
       "id": "compliance-overview",
@@ -271,9 +271,9 @@
         "verified": true
       },
       "scopes": [],
-      "minAppVersion": "0.5.1",
+      "minAppVersion": "0.6.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-evidence-review/manifest.yaml",
-      "manifestSha256": "21c0018bd6b1b84344b42cf93ce55cc99c696def560b8a62b6f178ecf5c65ebe"
+      "manifestSha256": "c2dea87c71e5d26588fbc2473899e73a51b12cd75c4fa91c0a934f2e247f8874"
     },
     {
       "id": "team-script-draft",
@@ -291,9 +291,9 @@
         "verified": true
       },
       "scopes": [],
-      "minAppVersion": "0.5.1",
+      "minAppVersion": "0.6.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-script-draft/manifest.yaml",
-      "manifestSha256": "c39b6c83d39ba5c5e16db7891716d2bcc1ea051e9d4f75854705acc41f2d7273"
+      "manifestSha256": "db746cc242cdffc1b318acb0bceb0017a9ddaf7a1c1a42c8c423b56fa9eb1dca"
     },
     {
       "id": "tenant-change-audit",

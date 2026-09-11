@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.6.0] - 2026-09-11
+
+### Added
+
 - Added Agent Team with persistent robot and animal personas, tenant-pinned ordered agent assignments, recurring schedules, live execution states, and evidence-linked briefings; Chief of Staff coordinates existing workflows with normal write approval.
 
 ### Changed
@@ -16,11 +28,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Replace the landing page's agent installation count with total GitHub release downloads, matching the README KPI.
 
+- Require OpenAdminOS 0.6.0 for the new Agent Team evidence-review and PowerShell-draft workflows.
+
 ### Removed
 
 ### Fixed
-
-- Restore the requested v0.5.1 release version and document the explicitly approved withdrawal of v0.5.2.
 
 ### Security
 

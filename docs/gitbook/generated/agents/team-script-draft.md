@@ -19,7 +19,7 @@ Prepares a PowerShell script for review from an Agent Team task and its supplied
 | Category | `devices` |
 | Required Entra tier | `free` |
 | Preferred model | `not pinned` |
-| Minimum app version | `0.5.1` |
+| Minimum app version | `0.6.0` |
 | Author | OpenAdminOS · verified |
 | Last changed | 2026-09-11 · `4ebc29d` |
 

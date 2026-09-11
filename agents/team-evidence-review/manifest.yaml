@@ -3,7 +3,7 @@ descriptor:
   name: Team evidence review
   description: Investigates evidence handed to an Agent Team persona without collecting tenant data again.
   version: 1.0.0
-  minAppVersion: 0.5.1
+  minAppVersion: 0.6.0
   author:
     name: OpenAdminOS
     handle: openadminos
