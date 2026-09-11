@@ -6,14 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Document the three-platform Agent Team visual review, including setup guidance, terminology, fullscreen feasibility, and zoom readability findings.
+- Add guided teammate setup with a persistent action footer, contextual prerequisites, review summary, and first-assignment guidance.
+- Add native office fullscreen with explicit exit controls and restored window state.
 
 ### Changed
+
+- Use teammate naming consistently, move the detailed briefing into Review inbox, and keep room labels readable with a full-name roster and fixed evidence strip.
 
 ### Removed
 
 ### Fixed
 
+- Keep evidence links and completion states attached to the correct workflow when Chief of Staff skips earlier tasks.
 - Retry transient Windows file locks when saving profile settings or installing agent manifests, preserving the previous file until replacement succeeds.
 - Keep complete Agent Team role presets and persona drafts through workflow installation and tenant setup, show installation retry errors, and exclude embedding-only Ollama models from generation.
 

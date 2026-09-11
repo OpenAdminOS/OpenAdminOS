@@ -79,6 +79,7 @@ export function ProviderNotReadyCard({
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
+              type="button"
               size="sm"
               variant="primary"
               onClick={() => void handleRecheck()}
@@ -88,6 +89,7 @@ export function ProviderNotReadyCard({
             </Button>
             {providerGuideUrl(provider.id) && (
               <Button
+                type="button"
                 size="sm"
                 variant="secondary"
                 trailingIcon={<IconExternal size={11} />}
@@ -168,6 +170,7 @@ export function OllamaInstallGuide({
             OpenAdminOS detects Ollama without an app restart.
           </p>
           <Button
+            type="button"
             className="mt-3"
             size="sm"
             variant="primary"
@@ -228,6 +231,7 @@ function MacInstallStep({ openExternal }: { openExternal: (url: string) => void 
         Download the macOS app and move it to Applications, or install it with Homebrew.
       </p>
       <Button
+        type="button"
         size="sm"
         variant="secondary"
         trailingIcon={<IconExternal size={11} />}
@@ -247,6 +251,7 @@ function WindowsInstallStep({ openExternal }: { openExternal: (url: string) => v
         Download and run the Windows installer.
       </p>
       <Button
+        type="button"
         size="sm"
         variant="secondary"
         trailingIcon={<IconExternal size={11} />}
@@ -276,6 +281,7 @@ function UnknownPlatformInstallStep({ openExternal }: { openExternal: (url: stri
         Open the Ollama download page and choose the build for this device.
       </p>
       <Button
+        type="button"
         size="sm"
         variant="secondary"
         trailingIcon={<IconExternal size={11} />}

@@ -2592,6 +2592,8 @@ export interface OpenAdminOSApi {
    * the model belongs to the provider's installed list.
    */
   setActiveModel(providerId: ProviderId, model: string | null): Promise<AppState>;
+  setOfficeFullscreen?(active: boolean): Promise<boolean>;
+  onOfficeFullscreenChanged?(listener: (active: boolean) => void): () => void;
   saveOfficePersona?(input: OfficePersonaInput): Promise<OfficeState>;
   deleteOfficePersona?(id: string): Promise<OfficeState>;
   startOfficePersona?(id: string): Promise<OfficeState>;

@@ -1,15 +1,20 @@
 # Agent Team
 
-Agent Team gives recurring work an owner. Personas check their assigned tenant,
+Agent Team gives recurring work an owner. AI teammates check their assigned tenant,
 record findings, hand evidence to specialists, and bring decisions back to you.
 Their office, assignments, findings, and conversations live on your computer.
 
 ## Start with a role
 
-1. Open **Agent Team** and choose **Add persona**.
-2. Choose **Policy Watcher**, **Chief of Staff**, **Research Bot**, or **Script Bot**.
-3. Review the selected workflows. Choose **Review and install** for missing workflows, confirm installation, then **Return to persona**. Your draft stays open.
-4. Choose the tenant, provider, model, and schedule, then save. If no tenant is connected, use **Connect tenant** in the editor to complete setup without losing the draft.
+1. Open **Agent Team** and choose **Add teammate** (or **Add your first teammate**).
+2. **Choose a role.** Pick Policy Watcher, Chief of Staff, Research Bot, Script Bot, or Custom role. Each card explains its responsibility and workflows. Give your teammate a name and avatar.
+3. **Prepare workspace.** Choose its tenant and model provider. The checklist shows what is ready. Use **Connect tenant** or the provider setup guide when needed. For missing workflows, choose **Review and install**, confirm installation, then **Return to teammate**. Your draft stays open.
+4. **Choose schedule.** Keep the suggested interval or choose manual runs. Review when work starts and whether the app needs to stay open. Advanced instructions, handoffs, calendar schedules and quiet hours remain available below.
+5. **Review and add.** Check the tenant, model destination, ordered workflows, read/write modes and schedule. Hosted providers require your consent. **Back** lets you revise earlier choices without losing them.
+6. Your new teammate is selected in the office. Choose **Run first assignment** when ready, then follow its source runs and results. Adding a teammate does not mean a check has already completed.
+
+The action footer stays visible while the form scrolls. Workflows must be installed,
+and the selected tenant and provider must be ready, before setup can continue.
 
 Missing workflows stay in the selected work order until installed or explicitly removed.
 Installation errors appear in the review dialog so you can retry. **Refresh available workflows**
@@ -21,8 +26,8 @@ a device's status. Chief of Staff can collect compliance evidence and skip furth
 investigation when a scheduled result is unchanged. Research Bot reviews supplied
 evidence. Script Bot drafts PowerShell for your review and never executes its draft.
 
-Name, responsibility, color, and avatar describe the persona. **Standing instructions**
-control evidence review and persona answers. They cannot grant tools or bypass approval.
+Name, responsibility, color, and avatar describe the teammate. **Standing instructions**
+control evidence review and teammate answers. They cannot grant tools or bypass approval.
 You can arrange up to eight installed workflows in each work order.
 
 A local provider keeps model processing on your device. Saving a hosted assignment
@@ -31,9 +36,10 @@ and questions to the selected provider. Existing connector delivery rules still 
 
 ## Review the briefing
 
-The briefing at the top shows approvals, open findings, operational problems, and
-completed checks from the past 24 hours. Filter it by the kind of decision you need.
-A scheduled persona without a completed check is shown separately from completed work.
+The compact summary above the office shows attention and running assignments. Choose
+**Review inbox** to see approvals, open findings, operational problems, and completed
+checks from the past 24 hours. Filter it by the kind of decision you need.
+A scheduled teammate without a completed check is shown separately from completed work.
 
 Each finding has current and previous evidence links, freshness and coverage details,
 and a review state. **Acknowledge** records that you saw it. **Snooze 1 day** removes
@@ -48,7 +54,7 @@ normal pruning. Older source links may expire under your retention policy.
 
 ## Connect specialists
 
-Edit a persona and choose **Watch another persona**. The source must belong to the
+Edit a teammate and choose **Watch another teammate**. The source must belong to the
 same tenant. Select a new finding, changed finding, or threshold crossing, and set a
 cooldown. The team reacts to completed local assessments while OpenAdminOS is running.
 Quiet hours also apply to these triggers. Repeated revisions are deduplicated and
@@ -70,14 +76,14 @@ ordered work list. There is no unrestricted delegation loop.
 
 ## Ask about the evidence
 
-Select a persona and ask a question such as “What changed?” or “Why was this flagged?”
+Select a teammate and ask a question such as “What changed?” or “Why was this flagged?”
 Its answer uses completed evidence from its own assignments and handoffs, with links
-to source runs. It keeps the persona's assigned tenant and provider even when you
+to source runs. It keeps the teammate's assigned tenant and provider even when you
 switch the app's active selection. An empty history is disclosed as missing evidence.
 
 Questions cannot change schedules, standing instructions, or tenant settings. Use
 **Edit** to approve configuration changes. The conversation retains the latest 100
-messages for that persona.
+messages for that teammate.
 
 ## Schedules, limits, and approval
 
@@ -111,21 +117,33 @@ available when the assigned model is offline.
 
 ## Your team's office
 
-Personas appear beneath **Agent Team** in the sidebar with icons, search, and attention
+AI teammates appear beneath **Agent Team** in the sidebar with icons, search, and attention
 indicators. Select one to open its assignment. Six teammates fit on each floor, up to
 24 in total. Floor alerts and search keep distant teammates reachable.
 
 Characters walk along office aisles, sit at desks, relax in the lounge, and use the TV
-game corner. Timestamped work bubbles link to actual run evidence. Idle games are
-only animation. Use **Expand office**, **Assignment details**, **Zoom**, and **Fit**
-to present or inspect the room. **List** provides a compact operational view.
+game corner. Games are decorative. The fixed activity strip links to the run or finding
+that caused the activity. Only the selected or keyboard-focused teammate is labeled
+in the room; **Team roster** shows full names and statuses without crowding the scene.
+
+Use **Expand office** to give the room more space and **Restore layout** to return.
+**Assignment details** opens the selected work order. **Zoom / Fit** controls the
+room scale; Fit uses both the available width and height. **List** provides a compact
+operational view.
+
+**Full screen** opens a native fullscreen office. **Exit full screen**, Escape, or
+the operating system’s fullscreen control leaves it. Closing a dialog with Escape
+keeps the office fullscreen. Leaving Agent Team restores the prior window mode;
+if the window was already fullscreen, it stays fullscreen. The tenant and provider
+boundary remain visible until you explicitly choose **Hide details**.
 
 **Pause motion** is remembered. System reduced motion is respected, and ambient motion
-stops when the window is hidden. **Hide details** replaces persona names with generic
-labels and conceals tenant and assignment details in the team view. Other application
-windows and separately opened dialogs are outside this presentation control.
+stops when the window is hidden. **Hide details / Show details** is separate from
+fullscreen. Hiding details replaces teammate names with generic labels and conceals
+tenant and assignment details in the team view. Other application windows and
+separately opened dialogs are outside this presentation control.
 
-Removing a persona removes its team memory while preserving underlying run history.
+Removing a teammate removes its team memory while preserving underlying run history.
 Stop dependent assignments before removing their evidence source. Disconnecting a
-tenant stops its team and removes its persona, finding, handoff, and conversation data.
+tenant stops its team and removes its teammate, finding, handoff, and conversation data.
 Inviting colleagues and floating desktop companions are not available yet.

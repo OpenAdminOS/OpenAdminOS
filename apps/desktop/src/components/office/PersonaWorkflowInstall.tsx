@@ -66,7 +66,7 @@ export function PersonaWorkflowInstall({
     <Modal open onClose={close} size="lg" ariaLabel={`Install ${agent.name}`}>
       <ModalHeader
         title={agent.name}
-        subtitle="Install this workflow locally. Your persona draft stays open."
+        subtitle="Install this workflow locally. Your teammate draft stays open."
         onClose={close}
       />
       <div className="overflow-y-auto p-6">
@@ -78,7 +78,7 @@ export function PersonaWorkflowInstall({
         )}
         {installed && (
           <p role="status">
-            Workflow installed. Return to your persona to finish its assignment.
+            Workflow installed. Return to your teammate to finish its assignment.
           </p>
         )}
         <AgentInstallDetails
@@ -96,7 +96,7 @@ export function PersonaWorkflowInstall({
           onCancelInstall={close}
           onConfirmInstall={() => void install()}
           onOpen={close}
-          openLabel="Return to persona"
+          openLabel="Return to teammate"
         />
       </div>
     </Modal>

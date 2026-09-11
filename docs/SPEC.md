@@ -1706,10 +1706,10 @@ North-star metric: time from install to first successful result, target under 5 
 
 ---
 
-### Agent Team and persistent personas (approved 2026-09-10; expanded 2026-09-11)
+### Agent Team and persistent teammates (approved 2026-09-10; expanded 2026-09-11)
 
 Agent Team is a single-user desktop surface at `/office`, directly below Chat.
-Persona shortcuts use original robot, cat, fox, and owl icons, live attention badges,
+Teammate shortcuts use original robot, cat, fox, and owl icons, live attention badges,
 search, and a collapsible group. Selection and room/list view are addressable in the
 route query. Human invitations, shared credentials, cloud coordination, and floating
 desktop characters remain outside this scope.
@@ -1750,7 +1750,9 @@ results are omitted with an explicit gap. A source cannot be removed while a dep
 assignment is active. Standing instructions are not rewritten by source or model text.
 A Chief using model selection gets one bounded request (600 output tokens, one-minute
 timeout) and may select only a unique subset of its explicitly assigned capabilities.
-The visible plan records its reason and skipped workflows. Invalid or unavailable
+The visible plan records its reason and skipped workflows. Work-order evidence is
+matched by workflow identity inside the assignment; a planned skip cannot borrow the
+next workflow's status or evidence link. Invalid or unavailable
 planning falls back visibly to the approved ordered list. No capability discovery or
 unbounded recursive model loop is available. Each child retains an accountable parent
 and uses the existing runtime, connector confirmation, and write approval boundaries.
@@ -1769,8 +1771,8 @@ unresolved sources protected from normal run pruning. Raw results are not copied
 the finding database. Handoff records keep at least the latest 1,000 per receiver plus
 all records still inside the event-freshness window.
 
-The action inbox precedes the room and filters approvals, findings, and operational
-issues. Its 24-hour briefing distinguishes completed checks from scheduled work and
+A compact attention summary precedes the room. Review inbox opens a dedicated modal
+with approvals, findings, and operational issues. Its 24-hour briefing distinguishes completed checks from scheduled work and
 personas without a completed assessment. Finding history and assignment search expose
 more than the former 12-item feed. Questions use the selected persona's own completed
 runs and handoff sources, at most six recent conversational messages, and its pinned
@@ -1816,8 +1818,8 @@ where supplied; monetary cost is not inferred.
 corner. Six personas occupy each of up to four floors. Reserved per-persona locations,
 aisle paths, interruptible directional walking, seated typing/controller poses, and
 foreground furniture give the room depth. Idle timing is independent. Actual run and
-handoff events produce timestamped, evidence-linked bubbles and a brief visit to the
-shared table; games remain decorative.
+handoff events populate a stationary timestamped evidence strip and trigger a brief
+visit to the shared table; games remain decorative.
 Search and floor attention indicators route to distant teammates. Zoom/fit, expanded
 office, an optional assignment panel, a static List view, persistent pause, reduced
 motion, and hidden-window suspension keep the surface usable. No rendering dependency
@@ -1825,11 +1827,24 @@ or third-party artwork is added. Hide details anonymizes office names and concea
 sidebar, tenant strip, task text, and detail panel; it is a team-view presentation
 control, not a redaction guarantee for other apps or separately opened dialogs.
 
-The 0.6.1 [visual review](../tasks/agent-team-061-visual-review.md) confirms that
-expanded/presentation mode does not provide an office-specific native fullscreen
-action, and the no-horizontal-overflow assertion at 200% zoom does not establish
-label readability. Teammate terminology, guided creation and fullscreen refinements
-are proposals in that review, not changes to the implemented behavior described here.
+The approved 0.6.1 [visual review](../tasks/agent-team-061-visual-review.md) refinements
+use **teammate** throughout the interface. Internal `OfficePersona` contracts, storage
+and route IDs remain unchanged. Creation has four steps: Choose a role, Prepare
+workspace, Choose schedule, Review and add. Required tenant/provider/workflow readiness
+is shown inline; contextual setup and signed installation preserve the draft. Back and
+Continue/Add remain in a persistent footer. Advanced policies stay available but
+secondary. Creation selects the new teammate and offers Run first assignment; no
+completed assessment is implied before evidence exists.
+
+Full screen is an explicit native Electron action, separate from Hide details.
+It retains the tenant/provider boundary and fits the room into both available dimensions.
+Exit full screen, Escape, native OS exit, and leaving the route restore the previous
+window mode and layout; nested dialogs consume Escape first. A window already fullscreen
+remains fullscreen when office focus ends. Reload also releases office focus. Full names
+and statuses remain in a toggleable roster; only the selected or focused room label is
+shown to prevent collisions at high zoom. Controls reflow and remain scrollable at 200%.
+Native fullscreen verification is opt-in in contributor tooling because bare Xvfb has
+no window manager; CI still covers the controller lifecycle and renderer behavior.
 
 The Electron rehearsal exercises real renderer/IPC/runtime paths with isolated local
 Graph/model fixtures: assessment change → research → bounded Chief delegation → script

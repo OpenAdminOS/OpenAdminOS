@@ -78,7 +78,7 @@ export class OfficeMemory {
         .at(-1);
       if (!resolved)
         throw new Error(
-          "This persona has 100 retained assessments. Resolve an obsolete finding before collecting a new assessment definition.",
+          "This teammate has 100 retained assessments. Resolve an obsolete finding before collecting a new assessment definition.",
         );
       this.db
         .prepare("DELETE FROM office_memory WHERE kind='finding' AND id=?")

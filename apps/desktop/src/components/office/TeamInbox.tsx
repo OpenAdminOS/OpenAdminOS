@@ -105,7 +105,7 @@ export function TeamInbox({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Persona or finding…"
+            placeholder="Teammate or finding…"
           />
         </label>
       )}
@@ -198,7 +198,7 @@ export function TeamInbox({
           <p className="team-quiet">
             {findings.length
               ? "No findings need review. Scheduled checks and their evidence remain available below."
-              : "No completed assessments yet. Schedule a persona or run an assignment to establish evidence."}
+              : "No completed assessments yet. Schedule a teammate or run an assignment to establish evidence."}
           </p>
         )}
       {visible.length > 50 && (
@@ -230,10 +230,10 @@ export function PersonaConversation({
     )
     .slice(0, 5);
   return (
-    <section className="team-chat" aria-label="Persona conversation">
+    <section className="team-chat" aria-label="Teammate conversation">
       <h3>Ask {persona.name}</h3>
       <p>
-        Answers use this persona’s completed evidence and assigned provider.
+        Answers use this teammate’s completed evidence and assigned provider.
         Standing instructions and schedules change only through Edit.
       </p>
       <div className="team-messages" aria-live="polite">
@@ -273,7 +273,7 @@ export function PersonaConversation({
             busy || !question.trim() || !window.openAdminOS?.askOfficePersona
           }
         >
-          {busy ? "Working…" : "Ask persona"}
+          {busy ? "Working…" : "Ask teammate"}
         </Button>
       </form>
       {handoffs.length > 0 && (

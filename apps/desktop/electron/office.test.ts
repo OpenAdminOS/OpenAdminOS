@@ -265,7 +265,7 @@ test("host validates consent, tenant, workflow changes, and unsafe input", async
   }
 });
 
-test("Office serializes different personas and purges tenant assignments", async () => {
+test("Office serializes different teammates and purges tenant assignments", async () => {
   const f = await fixture();
   try {
     const {
@@ -306,7 +306,7 @@ test("missing retained evidence stops coordination instead of replaying a task",
   }
 });
 
-test("queue and review time do not consume execution budget or block an independent persona", async () => {
+test("queue and review time do not consume execution budget or block an independent teammate", async () => {
   const f = await fixture();
   try {
     const {
@@ -626,7 +626,7 @@ test("Chief planner accepts only assigned subsets and visibly falls back from in
   }
 });
 
-test("persona questions remain evidence-scoped without blocking schedules or editing instructions", async () => {
+test("teammate questions remain evidence-scoped without blocking schedules or editing instructions", async () => {
   const f = await fixture();
   try {
     const {

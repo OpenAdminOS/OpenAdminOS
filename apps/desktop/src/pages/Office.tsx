@@ -1,26 +1,19 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import type {
-  AppState,
   OfficeMission,
   OfficeFinding,
   OfficePersona,
-  OfficePersonaInput,
   RunRecord,
-  RegistryAgentSummary,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
-import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
-import { PersonaWorkflowInstall } from "../components/office/PersonaWorkflowInstall";
+import { PersonaEditor } from "../components/office/PersonaEditor";
+import { useOfficeFullscreen } from "../components/office/useOfficeFullscreen";
 import { TeamInbox, PersonaConversation } from "../components/office/TeamInbox";
-import {
-  PersonaOptions,
-  TEAM_ROLES,
-} from "../components/office/PersonaOptions";
 
 const isActive = (r?: RunRecord) =>
   r && ["queued", "running", "awaiting-confirmation"].includes(r.status);
@@ -59,8 +52,11 @@ function status(
 export default function Office() {
   const { state, refresh, loading, error: stateError } = useAppState();
   const [params, setParams] = useSearchParams();
+  const fullscreen = useOfficeFullscreen();
+  const [inboxOpen, setInboxOpen] = useState(false);
   const selectedId = params.get("persona");
-  const view = params.get("view") === "list" ? "list" : "room";
+  const view =
+    !fullscreen.active && params.get("view") === "list" ? "list" : "room";
   const setParam = (key: string, value: string) =>
     setParams(
       (previous) => {
@@ -77,6 +73,7 @@ export default function Office() {
   const [historyQuery, setHistoryQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const focusedOffice = expanded || fullscreen.active;
   const [presentation, setPresentation] = useState(false);
   useEffect(() => {
     document.documentElement.toggleAttribute(
@@ -132,7 +129,9 @@ export default function Office() {
       </div>
     );
   return (
-    <div className={`office-page ${expanded ? "office-expanded" : ""}`}>
+    <div
+      className={`office-page ${focusedOffice ? "office-expanded" : ""} ${fullscreen.active ? "office-fullscreen" : ""}`}
+    >
       <header className="office-header">
         <div>
           <div className="office-eyebrow">YOUR LOCAL TEAM</div>
@@ -144,51 +143,88 @@ export default function Office() {
           disabled={busy || !api?.saveOfficePersona}
           onClick={() => setEditing("new")}
         >
-          Add persona
+          Add teammate
         </Button>
       </header>
-      {(error || stateError || office.error) && (
+      {(error || stateError || office.error || fullscreen.error) && (
         <div className="office-error" role="alert">
-          {error || stateError?.message || office.error}
+          {error || stateError?.message || office.error || fullscreen.error}
           <Button size="sm" onClick={() => void act(refresh)}>
             Refresh team
           </Button>
         </div>
       )}
-      <TeamInbox state={state} act={act} busy={busy} />
+      {!fullscreen.active && (
+        <div className="team-attention-summary">
+          <span>
+            <strong>{attention}</strong>{" "}
+            {attention === 1 ? "teammate needs" : "teammates need"} attention ·{" "}
+            <strong>{running}</strong> assignments in progress
+          </span>
+          <button type="button" onClick={() => setInboxOpen(true)}>
+            Review inbox
+          </button>
+        </div>
+      )}
+      <Modal
+        open={inboxOpen && !presentation}
+        onClose={() => setInboxOpen(false)}
+        size="lg"
+        ariaLabel="Team briefing"
+      >
+        <ModalHeader
+          title="Team briefing"
+          subtitle="Approvals, findings and operational issues"
+          onClose={() => setInboxOpen(false)}
+        />
+        <div className="team-inbox-dialog">
+          <TeamInbox state={state} act={act} busy={busy} />
+        </div>
+      </Modal>
       <div className="office-toolbar">
         <div>
-          <strong>{office.personas.length}</strong> personas <span>·</span>{" "}
+          <strong>{office.personas.length}</strong> teammates <span>·</span>{" "}
           <strong>{running}</strong> assignments in progress <span>·</span>{" "}
           <strong>{attention}</strong> need attention
         </div>
         <div className="office-view" aria-label="Team view">
+          {fullscreen.active && !presentation && (
+            <button onClick={() => setInboxOpen(true)}>Review inbox</button>
+          )}
           <button
             aria-pressed={expanded}
+            disabled={fullscreen.active}
             onClick={() => setExpanded((v) => !v)}
           >
-            Expand office
+            {expanded ? "Restore layout" : "Expand office"}
           </button>
-          {expanded && !presentation && (
+          {focusedOffice && !presentation && (
             <button
               aria-pressed={showDetails}
               onClick={() => setShowDetails((v) => !v)}
             >
-              Assignment details
+              {showDetails ? "Close assignment" : "Assignment details"}
             </button>
           )}
-          {expanded && !presentation && (
-            <button onClick={() => setExpanded(false)}>Review inbox</button>
-          )}
+          <button
+            disabled={fullscreen.pending}
+            aria-pressed={fullscreen.active}
+            onClick={() => void fullscreen.change(!fullscreen.active)}
+          >
+            {fullscreen.pending
+              ? "Changing view…"
+              : fullscreen.active
+                ? "Exit full screen"
+                : "Full screen"}
+          </button>
           <button
             aria-pressed={presentation}
             onClick={() => {
               setPresentation((v) => !v);
-              setExpanded(true);
               setView("room");
             }}
           >
-            Hide details
+            {presentation ? "Show details" : "Hide details"}
           </button>
           <button
             aria-pressed={view === "room"}
@@ -198,7 +234,7 @@ export default function Office() {
           </button>
           <button
             aria-pressed={view === "list"}
-            disabled={presentation}
+            disabled={presentation || fullscreen.active}
             onClick={() => setView("list")}
           >
             List
@@ -208,10 +244,11 @@ export default function Office() {
       <div className="office-layout">
         <section
           className={`office-room ${view === "list" ? "office-list" : ""}`}
-          aria-label="Personas"
+          aria-label="Teammates"
         >
-          {view === "room" && (
+          {view === "room" && office.personas.length > 0 && (
             <OfficeScene
+              immersive={fullscreen.active}
               personas={
                 presentation
                   ? office.personas.map((p, i) => ({
@@ -316,17 +353,14 @@ export default function Office() {
                 Choose a responsibility, assign installed agents, and decide
                 when the work should run.
               </p>
-              {state.tenants.length === 0 ? (
-                <Link to="/settings/tenants">
-                  Connect a tenant to get started →
-                </Link>
-              ) : state.installedAgents.length === 0 ? (
-                <Link to="/agents/hub">Install an agent from the Hub →</Link>
-              ) : (
-                <Button onClick={() => setEditing("new")}>
-                  Create your first persona
-                </Button>
-              )}
+              <Button variant="primary" onClick={() => setEditing("new")}>
+                Add your first teammate
+              </Button>
+              <ol className="team-empty-steps">
+                <li>Choose a role</li>
+                <li>Prepare its workspace</li>
+                <li>Review its schedule</li>
+              </ol>
             </div>
           ) : view === "list" ? (
             <div className="office-stations">
@@ -388,7 +422,11 @@ export default function Office() {
             <span>Stored on this device</span>
           </footer>
         </section>
-        <aside className="office-panel" aria-label="Assignment details">
+        <aside
+          className="office-panel"
+          aria-label="Assignment details"
+          hidden={presentation || (focusedOffice && !showDetails)}
+        >
           {selected ? (
             <>
               <div className="office-persona-heading">
@@ -402,6 +440,16 @@ export default function Office() {
                 </div>
               </div>
               <p className="office-responsibility">{selected.responsibility}</p>
+              {!mission && (
+                <div className="team-first-result">
+                  <strong>Your first result starts with an assignment.</strong>
+                  <p>
+                    {selected.nextRunAt
+                      ? `Scheduled for ${date(selected.nextRunAt)}. You can also run it now.`
+                      : "Run when ready. Completed work will link to its evidence below."}
+                  </p>
+                </div>
+              )}
               <dl className="office-facts">
                 <div>
                   <dt>Tenant</dt>
@@ -505,7 +553,7 @@ export default function Office() {
                     void act(() => api!.startOfficePersona!(selected.id))
                   }
                 >
-                  Run assignment
+                  {mission ? "Run assignment" : "Run first assignment"}
                 </Button>
                 <Button
                   disabled={
@@ -544,7 +592,7 @@ export default function Office() {
                 {selected.agentSlugs.map((slug, i) => {
                   const run = state.runs.find(
                     (r) =>
-                      mission?.runIds.includes(r.id) && r.office?.step === i,
+                      mission?.runIds.includes(r.id) && r.agentSlug === slug,
                   );
                   const agent = state.installedAgents.find(
                     (a) => a.slug === slug,
@@ -555,7 +603,10 @@ export default function Office() {
                       <div>
                         <strong>{agent?.name ?? slug}</strong>
                         <small>
-                          {run?.status.replaceAll("-", " ") ?? "Not started"}
+                          {run?.status.replaceAll("-", " ") ??
+                            (mission?.skippedAgentSlugs?.includes(slug)
+                              ? "Skipped by assignment plan"
+                              : "Not started")}
                           {agent?.mode === "write"
                             ? " · Approval required"
                             : ""}
@@ -573,9 +624,9 @@ export default function Office() {
                 })}
               </ol>
               <p className="office-footnote">
-                Agents run in this order. The next step waits for success and
-                any required approval. Configure each workflow on its agent
-                page.
+                Selected workflows run in assignment-plan order. Each next step
+                waits for success and any required approval. Configure each
+                workflow on its agent page.
               </p>
               <Button
                 size="sm"
@@ -591,7 +642,7 @@ export default function Office() {
                 }
                 onClick={() => setRemoveId(selected.id)}
               >
-                Remove persona
+                Remove teammate
               </Button>
             </>
           ) : (
@@ -599,7 +650,7 @@ export default function Office() {
               <div className="office-eyebrow">HOW IT WORKS</div>
               <h2>A small team. Clear responsibilities.</h2>
               <ol>
-                <li>Give a persona a name and avatar.</li>
+                <li>Choose a role for your first teammate.</li>
                 <li>Choose its tenant and provider.</li>
                 <li>Assign up to eight installed agents.</li>
                 <li>Run once or set a recurring schedule.</li>
@@ -612,7 +663,7 @@ export default function Office() {
           )}
         </aside>
       </div>
-      {selected && (!expanded || showDetails) && (
+      {selected && !fullscreen.active && (!expanded || showDetails) && (
         <PersonaConversation
           key={selected.id}
           persona={selected}
@@ -632,7 +683,7 @@ export default function Office() {
             <input
               value={historyQuery}
               onChange={(e) => setHistoryQuery(e.target.value)}
-              placeholder="Persona, status, or task…"
+              placeholder="Teammate, status, or task…"
             />
           </label>
         </div>
@@ -723,8 +774,20 @@ export default function Office() {
             }
           }}
           onSave={async (input) => {
-            if (await act(() => api!.saveOfficePersona!(input)))
+            let savedId = input.id;
+            if (
+              await act(async () => {
+                const result = await api!.saveOfficePersona!(input);
+                savedId ??= result.personas.find(
+                  (p) =>
+                    !office.personas.some((previous) => previous.id === p.id),
+                )?.id;
+              })
+            ) {
+              if (savedId) setSelectedId(savedId);
+              setShowDetails(true);
               setEditing(undefined);
+            }
           }}
         />
       )}
@@ -733,10 +796,10 @@ export default function Office() {
         onClose={() => {
           if (!busy) setRemoveId(undefined);
         }}
-        ariaLabel="Remove persona"
+        ariaLabel="Remove teammate"
       >
         <ModalHeader
-          title="Remove this persona?"
+          title="Remove this teammate?"
           onClose={() => {
             if (!busy) setRemoveId(undefined);
           }}
@@ -748,7 +811,7 @@ export default function Office() {
           </p>
           <div className="office-actions">
             <Button disabled={busy} onClick={() => setRemoveId(undefined)}>
-              Keep persona
+              Keep teammate
             </Button>
             <Button
               variant="danger"
@@ -760,458 +823,11 @@ export default function Office() {
                 })()
               }
             >
-              Remove persona
+              Remove teammate
             </Button>
           </div>
         </div>
       </Modal>
     </div>
-  );
-}
-
-function PersonaEditor({
-  persona,
-  state,
-  busy,
-  error,
-  onClose,
-  onSave,
-}: {
-  persona?: OfficePersona;
-  state: AppState;
-  busy: boolean;
-  error: string;
-  onClose(): void;
-  onSave(input: OfficePersonaInput): Promise<void>;
-}) {
-  const { registryAgents, refreshRegistry } = useAppState();
-  const { openSetup } = useSetupFlow();
-  const [catalogError, setCatalogError] = useState("");
-  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
-  const [installingWorkflow, setInstallingWorkflow] = useState<RegistryAgentSummary>();
-  const [startingRole, setStartingRole] = useState<string>(TEAM_ROLES[0].name);
-  const roleDefaults = (role: (typeof TEAM_ROLES)[number]): Partial<OfficePersonaInput> => ({
-    name: role.name,
-    responsibility: role.description,
-    avatar: role.avatar,
-    color: role.color,
-    agentSlugs: [...role.slugs],
-    intervalMinutes: role.name === "Policy Watcher" ? 60 : null,
-    assessment: "metric" in role ? { metricPath: role.metric, threshold: 1 } : undefined,
-    planning: role.name === "Chief of Staff" ? "on-change" : "ordered",
-  });
-  const [form, setForm] = useState<OfficePersonaInput>(() => ({
-    name: TEAM_ROLES[0].name,
-    responsibility: TEAM_ROLES[0].description,
-    avatar: TEAM_ROLES[0].avatar,
-    color: TEAM_ROLES[0].color,
-    tenantId: state.activeTenantId ?? state.tenants[0]?.id ?? "",
-    providerId: state.activeProviderId,
-    model: persona
-      ? persona.model
-      : state.providers
-            .find((p) => p.id === state.activeProviderId)
-            ?.models.includes(
-              state.activeModelByProviderId?.[state.activeProviderId] ?? "",
-            )
-        ? state.activeModelByProviderId?.[state.activeProviderId]
-        : undefined,
-    agentSlugs: [],
-    intervalMinutes: null,
-    maxMinutes: 30,
-    enabled: true,
-    ...(persona ? {} : roleDefaults(TEAM_ROLES[0])),
-    ...persona,
-    confirmHosted: false,
-  }));
-  useEffect(() => {
-    if (!form.tenantId && state.activeTenantId) {
-      setForm((f) => ({ ...f, tenantId: state.activeTenantId! }));
-    }
-  }, [form.tenantId, state.activeTenantId]);
-  const refreshWorkflows = async () => {
-    setRefreshingCatalog(true);
-    setCatalogError("");
-    try { await refreshRegistry(); }
-    catch (e) { setCatalogError(e instanceof Error ? e.message : String(e)); }
-    finally { setRefreshingCatalog(false); }
-  };
-  const provider = state.providers.find((p) => p.id === form.providerId);
-  const missingWorkflows = form.agentSlugs.filter((slug) => !state.installedAgents.some((a) => a.slug === slug));
-  const executionKeys = [
-    "tenantId",
-    "providerId",
-    "model",
-    "agentSlugs",
-    "intervalMinutes",
-    "maxMinutes",
-    "approvalMinutes",
-    "enabled",
-    "instructions",
-    "planning",
-    "watch",
-    "assessment",
-    "calendar",
-    "quietHours",
-  ] as const;
-  const cosmeticOnly = Boolean(
-    persona &&
-    executionKeys.every(
-      (k) => JSON.stringify(form[k]) === JSON.stringify(persona[k]),
-    ) &&
-    ["name", "responsibility", "avatar", "color"].some(
-      (k) =>
-        form[k as keyof OfficePersonaInput] !==
-        persona[k as keyof OfficePersona],
-    ),
-  );
-  const change = <K extends keyof OfficePersonaInput>(
-    key: K,
-    value: OfficePersonaInput[K],
-  ) => setForm((f) => ({ ...f, [key]: value }));
-  const toggleAgent = (slug: string) =>
-    change(
-      "agentSlugs",
-      form.agentSlugs.includes(slug)
-        ? form.agentSlugs.filter((s) => s !== slug)
-        : [...form.agentSlugs, slug],
-    );
-  const move = (index: number, delta: number) => {
-    const order = [...form.agentSlugs];
-    [order[index], order[index + delta]] = [order[index + delta], order[index]];
-    change("agentSlugs", order);
-  };
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    void onSave(form);
-  };
-  return (
-    <>
-    <Modal
-      open
-      onClose={onClose}
-      ariaLabel={persona ? "Edit persona" : "Create persona"}
-    >
-      <ModalHeader
-        onClose={onClose}
-        title={persona ? "Edit persona" : "Create a persona"}
-        subtitle="A persistent responsibility, backed by installed agent workflows."
-      />
-      <form onSubmit={submit} className="office-editor" autoComplete="off">
-        <fieldset disabled={busy}>
-          {!persona && (
-            <div className="office-presets" aria-label="Starting roles">
-              {TEAM_ROLES.map((role) => (
-                <button
-                  key={role.name}
-                  type="button"
-                  aria-pressed={startingRole === role.name}
-                  onClick={() => {
-                    setStartingRole(role.name);
-                    setForm((f) => ({ ...f, ...roleDefaults(role) }));
-                  }}
-                >
-                  {role.name}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="office-form-row">
-            <label>
-              Name
-              <input
-                required
-                maxLength={60}
-                value={form.name}
-                onChange={(e) => change("name", e.target.value)}
-              />
-            </label>
-            <label>
-              Avatar
-              <select
-                value={form.avatar}
-                onChange={(e) =>
-                  change("avatar", e.target.value as OfficePersona["avatar"])
-                }
-              >
-                <option value="robot">Robot</option>
-                <option value="cat">Cat</option>
-                <option value="fox">Fox</option>
-                <option value="owl">Owl</option>
-              </select>
-            </label>
-            <label>
-              Color
-              <select
-                value={form.color}
-                onChange={(e) =>
-                  change("color", e.target.value as OfficePersona["color"])
-                }
-              >
-                <option value="amber">Amber</option>
-                <option value="sage">Sage</option>
-                <option value="blue">Blue</option>
-                <option value="lilac">Lilac</option>
-              </select>
-            </label>
-          </div>
-          <label>
-            Responsibility
-            <textarea
-              required
-              maxLength={400}
-              rows={2}
-              value={form.responsibility}
-              onChange={(e) => change("responsibility", e.target.value)}
-            />
-            <small>
-              A description for your team. The workflows below define what
-              actually runs.
-            </small>
-          </label>
-          <div className="office-form-row">
-            <label>
-              Tenant
-              <select
-                required
-                value={form.tenantId}
-                onChange={(e) => change("tenantId", e.target.value)}
-              >
-                <option value="" disabled>
-                  Choose tenant
-                </option>
-                {state.tenants.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Provider
-              <select
-                value={form.providerId}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    providerId: e.target.value as OfficePersona["providerId"],
-                    model: undefined,
-                    confirmHosted: false,
-                  }))
-                }
-              >
-                {state.providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} · {p.isLocal ? "Local" : "Hosted"}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label>
-            Model
-            <select
-              value={form.model ?? ""}
-              onChange={(e) => change("model", e.target.value || undefined)}
-            >
-              <option value="">Provider default</option>
-              {form.model && !provider?.models.includes(form.model) && (
-                <option value={form.model}>{form.model} · unavailable</option>
-              )}
-              {provider?.models.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="office-agent-picker">
-            <h3>
-              Assign installed agents <span>{form.agentSlugs.length}/8</span>
-            </h3>
-            <p>
-              Select workflows in execution order. Agent settings and delivery
-              rules apply.
-            </p>
-            {missingWorkflows.length > 0 && (
-              <div role="status">
-                <p className="office-error">Install the missing workflows below or remove them from this assignment before saving.</p>
-                {missingWorkflows.map((slug) => {
-                  const agent = registryAgents.find((a) => a.slug === slug);
-                  return <div key={slug}>
-                    <label className="office-check">
-                      <input type="checkbox" checked onChange={() => toggleAgent(slug)} />
-                      <span>{agent?.name ?? slug}<small>Not installed</small></span>
-                    </label>
-                    {agent ? <Button type="button" size="sm" onClick={() => setInstallingWorkflow(agent)}>Review and install {agent.name}</Button>
-                      : <p>Unavailable in the current catalog. Refresh available workflows below to retry.</p>}
-                  </div>;
-                })}
-              </div>
-            )}
-            <details>
-              <summary>Browse available workflows</summary>
-              {registryAgents.filter((a) => !state.installedAgents.some((installed) => installed.slug === a.slug) && !missingWorkflows.includes(a.slug)).map((a) => (
-                <div key={a.slug}><Button type="button" size="sm" onClick={() => setInstallingWorkflow(a)}>Review and install {a.name}</Button></div>
-              ))}
-              {registryAgents.length === 0 && <p>No catalog available. Refresh available workflows to retry.</p>}
-            </details>
-            <Button type="button" size="sm" disabled={refreshingCatalog} onClick={() => void refreshWorkflows()}>{refreshingCatalog ? "Refreshing workflows…" : "Refresh available workflows"}</Button>
-            {(catalogError || state.registryRefreshError) && <p role="alert" className="office-error">{catalogError || state.registryRefreshError} Refresh available workflows to retry.</p>}
-            {state.installedAgents.map((a) => (
-              <label className="office-check" key={a.slug}>
-                <input
-                  type="checkbox"
-                  checked={form.agentSlugs.includes(a.slug)}
-                  disabled={
-                    !form.agentSlugs.includes(a.slug) &&
-                    form.agentSlugs.length === 8
-                  }
-                  onChange={() => toggleAgent(a.slug)}
-                />
-                <span>
-                  {a.name}
-                  <small>
-                    {a.mode === "write"
-                      ? "Writes · Requires approval"
-                      : "Reads"}
-                  </small>
-                </span>
-              </label>
-            ))}
-          </div>
-          {form.agentSlugs.length > 1 && (
-            <ol className="office-reorder" aria-label="Execution order">
-              {form.agentSlugs.map((slug, i) => (
-                <li key={slug}>
-                  <span>
-                    {i + 1}.{" "}
-                    {state.installedAgents.find((a) => a.slug === slug)?.name ??
-                      slug}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={i === 0}
-                    aria-label={`Move ${slug} earlier`}
-                    onClick={() => move(i, -1)}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    disabled={i === form.agentSlugs.length - 1}
-                    aria-label={`Move ${slug} later`}
-                    onClick={() => move(i, 1)}
-                  >
-                    ↓
-                  </button>
-                </li>
-              ))}
-            </ol>
-          )}
-          <div className="office-form-row">
-            <label>
-              Schedule
-              <select
-                value={form.intervalMinutes ?? "manual"}
-                onChange={(e) =>
-                  change(
-                    "intervalMinutes",
-                    e.target.value === "manual" ? null : Number(e.target.value),
-                  )
-                }
-              >
-                <option value="manual">Manual only</option>
-                <option value="5">Every 5 minutes</option>
-                <option value="15">Every 15 minutes</option>
-                <option value="60">Every hour</option>
-                <option value="360">Every 6 hours</option>
-                <option value="1440">Every day</option>
-                <option value="10080">Every week</option>
-              </select>
-            </label>
-            <label>
-              Time budget (minutes)
-              <input
-                type="number"
-                min={5}
-                max={120}
-                required
-                value={form.maxMinutes}
-                onChange={(e) => change("maxMinutes", Number(e.target.value))}
-              />
-            </label>
-          </div>
-          <PersonaOptions form={form} change={change} state={state} />
-          <label className="office-check">
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => change("enabled", e.target.checked)}
-            />
-            <span>
-              Enable this persona
-              <small>
-                Schedules begin at the next interval or calendar slot. Event
-                triggers watch completed findings.
-              </small>
-            </span>
-          </label>
-          {!provider?.isLocal && (
-            <label className="office-check office-hosted">
-              <input
-                type="checkbox"
-                checked={form.confirmHosted === true}
-                required={!cosmeticOnly}
-                onChange={(e) => change("confirmHosted", e.target.checked)}
-              />
-              <span>
-                I approve sending context from{" "}
-                {state.tenants.find((t) => t.id === form.tenantId)
-                  ?.displayName ?? "the selected tenant"}{" "}
-                to {provider?.name ?? "this provider"}, including watched
-                evidence, planning, and persona questions.
-                <small>
-                  This applies to manual and scheduled assignments until the
-                  persona or provider configuration changes.
-                </small>
-              </span>
-            </label>
-          )}
-          {error && (
-            <p className="office-error" role="alert">
-              {error}
-            </p>
-          )}
-          {!form.tenantId && <div><p role="status">Connect a tenant before deploying this persona. Your draft stays open during setup.</p><Button type="button" onClick={openSetup}>Connect tenant</Button></div>}
-          {provider && provider.status !== "connected" && !(provider.id === "azure-openai" && provider.status === "available") && <p role="status">{provider.detail} Choose an available provider or configure it in Settings before deploying.</p>}
-          <div className="office-actions">
-            <Button type="button" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={
-                !form.agentSlugs.length ||
-                (!cosmeticOnly && missingWorkflows.length > 0) ||
-                !form.tenantId ||
-                !provider ||
-                (!persona &&
-                  !(
-                    provider.status === "connected" ||
-                    (provider.id === "azure-openai" &&
-                      provider.status === "available")
-                  ))
-              }
-            >
-              {busy ? "Saving…" : "Save persona"}
-            </Button>
-          </div>
-        </fieldset>
-      </form>
-    </Modal>
-    {installingWorkflow && <PersonaWorkflowInstall key={installingWorkflow.slug} agent={installingWorkflow} tenantId={form.tenantId} onClose={() => setInstallingWorkflow(undefined)} />}
-    </>
   );
 }

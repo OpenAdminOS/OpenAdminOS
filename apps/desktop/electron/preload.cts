@@ -420,6 +420,12 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:set-active-model", providerId, model),
   reviewOfficeFinding: input => ipcRenderer.invoke("openadminos:office-review", input),
   askOfficePersona: input => ipcRenderer.invoke("openadminos:office-ask", input),
+  setOfficeFullscreen: active => ipcRenderer.invoke("openadminos:office-fullscreen", active),
+  onOfficeFullscreenChanged: listener => {
+    const receive = (_event: Electron.IpcRendererEvent, active: boolean) => listener(active);
+    ipcRenderer.on("openadminos:office-fullscreen-changed", receive);
+    return () => ipcRenderer.removeListener("openadminos:office-fullscreen-changed", receive);
+  },
   saveOfficePersona: input => ipcRenderer.invoke("openadminos:office-save", input),
   deleteOfficePersona: id => ipcRenderer.invoke("openadminos:office-delete", id),
   startOfficePersona: id => ipcRenderer.invoke("openadminos:office-start", id),

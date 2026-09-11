@@ -1,3 +1,4 @@
+import { runOfficeVisualChecks } from "./office-visual-checks.js";
 /** Contributor-only, isolated Electron rehearsal. No production IPC or live tenant writes. */
 import type { BrowserWindow } from "electron";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -7,8 +8,17 @@ export async function runOfficeRehearsal(
   outputDir: string,
   advanceEvidence: () => Promise<void>,
 ) {
+  window.webContents.setBackgroundThrottling(false);
   const evaluate = <T>(code: string): Promise<T> =>
     window.webContents.executeJavaScript(code, true);
+  const reload = async () => {
+    // Waiting only for a selector can match the old document during reload.
+    const loaded = new Promise<void>((resolve) =>
+      window.webContents.once("did-finish-load", () => resolve()),
+    );
+    window.webContents.reload();
+    await loaded;
+  };
   const sleep = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
   const wait = async (code: string) => {
@@ -26,7 +36,10 @@ export async function runOfficeRehearsal(
         runs:s.runs.map(r=>({id:r.id,agentSlug:r.agentSlug,status:r.status,error:r.error,summary:r.summary,logs:r.logs.slice(-8)}))
       };
     })()`);
-    await writeFile(join(outputDir, "rehearsal-failure.json"), JSON.stringify({ wait: code, state }, null, 2));
+    await writeFile(
+      join(outputDir, "rehearsal-failure.json"),
+      JSON.stringify({ wait: code, state }, null, 2),
+    );
     throw new Error(`Rehearsal timed out: ${code}`);
   };
   const frame = async (path: string) => {
@@ -131,7 +144,7 @@ export async function runOfficeRehearsal(
   );
   await wait(`document.querySelectorAll('.team-nav-persona').length===24`);
   await evaluate(
-    `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('Floor 4')).click();})()`,
+    `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('Floor 4')).click();[...document.querySelectorAll('button')].find(b=>b.textContent==='Team roster').click();})()`,
   );
   await wait(
     `document.querySelector('.scene-roster')?.textContent.includes('24')`,
@@ -149,7 +162,7 @@ export async function runOfficeRehearsal(
   );
   await frame(join(outputDir, "office-presentation.png"));
   await evaluate(
-    `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='Hide details').click();})()`,
+    `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='Show details').click();})()`,
   );
   window.webContents.setZoomFactor(2);
   await sleep(200);
@@ -172,7 +185,7 @@ export async function runOfficeRehearsal(
       },
     );
     await frame(join(outputDir, "office-media-transition.png"));
-    await evaluate(`location.reload()`);
+    await reload();
     await wait(
       `document.querySelector('.team-office')?.dataset.motion==='off'`,
     );
@@ -182,17 +195,25 @@ export async function runOfficeRehearsal(
   }
   // Reset media emulation first so reduced motion cannot mask a broken
   // visibility listener. Prove running -> hidden -> running independently.
-  await evaluate(`location.reload()`);
+  await reload();
   await wait(`document.querySelector('.team-office')?.dataset.motion==='on'`);
+  // Electron intentionally keeps document.visibilityState visible when background
+  // throttling is disabled for screenshots. Restore production behavior here.
+  window.webContents.setBackgroundThrottling(true);
   window.hide();
-  await wait(`document.hidden && document.querySelector('.team-office')?.dataset.motion==='off'`);
+  await wait(
+    `document.hidden && document.querySelector('.team-office')?.dataset.motion==='off'`,
+  );
   const hiddenMotion = await evaluate<string>(
     `document.querySelector('.team-office').dataset.motion`,
   );
   if (hiddenMotion !== "off")
     throw new Error("Hidden window kept ambient motion running");
   window.show();
-  await wait(`!document.hidden && document.querySelector('.team-office')?.dataset.motion==='on'`);
+  await wait(
+    `!document.hidden && document.querySelector('.team-office')?.dataset.motion==='on'`,
+  );
+  window.webContents.setBackgroundThrottling(false);
   await writeFile(
     join(outputDir, "office-performance.json"),
     JSON.stringify(
@@ -211,4 +232,7 @@ export async function runOfficeRehearsal(
       2,
     ),
   );
+  // Native fullscreen requires a real window manager, unlike CI's bare Xvfb.
+  if (process.env.OPENADMINOS_OFFICE_NATIVE_VISUALS === "1")
+    await runOfficeVisualChecks(window, outputDir);
 }

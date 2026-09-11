@@ -24,7 +24,7 @@ delete electronEnv.ELECTRON_RUN_AS_NODE;
 try {
   renderer = spawn(
     process.execPath,
-    [viteBin, "--host", "127.0.0.1", "--port", port, "--strictPort"],
+    [viteBin, ...(process.env.OPENADMINOS_OFFICE_BUILT_RENDERER === "1" ? ["preview"] : []), "--host", "127.0.0.1", "--port", port, "--strictPort"],
     {
       cwd: join(root, "apps/desktop"),
       env: { ...process.env, BROWSER: "none" },

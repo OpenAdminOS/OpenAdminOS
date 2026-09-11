@@ -22,7 +22,7 @@ export const TEAM_ROLES = [
   {
     name: "Research Bot",
     slugs: ["team-evidence-review"],
-    description: "Investigate evidence handed over by another persona.",
+    description: "Investigate evidence handed over by another teammate.",
     avatar: "owl",
     color: "blue",
   },
@@ -77,11 +77,11 @@ export function PersonaOptions({
         />
       </label>
       <small>
-        These instructions accompany evidence-aware tasks and persona questions.
+        These instructions accompany evidence-aware tasks and teammate questions.
         They do not grant tools or bypass approvals.
       </small>
       <label>
-        Watch another persona
+        Watch another teammate
         <select
           value={form.watch?.personaId ?? ""}
           onChange={(e) =>
@@ -160,7 +160,7 @@ export function PersonaOptions({
           )}
           <small>
             The source finding and its evidence will be supplied to this
-            persona’s provider. Only fresh, open findings trigger work; repeated
+            teammate’s provider. Only fresh, open findings trigger work; repeated
             revisions are deduplicated.
           </small>
         </>
