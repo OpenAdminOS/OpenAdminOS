@@ -1696,66 +1696,128 @@ North-star metric: time from install to first successful result, target under 5 
 
 ---
 
-### Agent Team and persistent personas (approved 2026-09-10)
+### Agent Team and persistent personas (approved 2026-09-10; expanded 2026-09-11)
 
 Agent Team is a single-user desktop surface at `/office`, directly below Chat.
-The sidebar uses a dedicated team icon and lists all saved personas underneath with
-their original SVG robot, cat, fox, or owl avatars, direct selection links, and
-working/attention indicators. The team badge counts personas needing attention.
-The persona list scrolls independently for larger teams.
+Persona shortcuts use original robot, cat, fox, and owl icons, live attention badges,
+search, and a collapsible group. Selection and room/list view are addressable in the
+route query. Human invitations, shared credentials, cloud coordination, and floating
+desktop characters remain outside this scope.
 
-Office and List views expose the same real state; selection and view remain
-addressable in the route query. The Office is an illustrated side-view studio with
-workstations, a furnished lounge, and a TV game corner. Working or queued personas
-move to desks; idle personas stroll between the lounge and game corner; approval
-and error states wait beside their desks for review. Decorative breathing, walking, coffee
-steam, and a Pong game make downtime visible without implying an agent run.
-Labels and a stable roster always expose actual run status. Six personas fit on a
-floor; floor controls accommodate all 24, and sidebar selection opens the right floor.
-The scene has an explicit Pause motion control, honors reduced-motion settings,
-and suspends ambient animation while the document is hidden. Background state
-refreshes preserve the mounted scene and unsaved persona edits. List view is static.
-Star Office UI inspired the metaphor; no upstream code or artwork is bundled and
-no new rendering dependency is introduced.
+The user approved the [15-item improvement plan](../tasks/agent-team-improvement-plan.md).
+A persona owns one connected tenant, one provider, an optional model, one to eight
+installed workflows, standing instructions, and bounded execution/scheduling policy.
+Name, avatar, color, and responsibility are presentation fields. Standing instructions
+are saved separately from evidence and are supplied only to evidence-aware workflows,
+the bounded planner, and persona questions. They never grant execution permissions.
 
-A persona binds one connected tenant, one provider, an optional model, an ordered
-list of one to eight installed agents, a manual or recurring trigger, and a 5–120
-minute assignment budget. The responsibility text describes the work to the admin;
-it does not inject instructions into agent prompts. Existing agent workflows,
-settings, and delivery rules define execution. Chief of Staff is a starting role
-for coordinating those workflows, not an unbounded model loop or an independent
-source of permissions. Each child uses the normal run engine and approval gates.
-Outputs are collected in the briefing; results are not automatically injected into
-subsequent agents. Human multiplayer and a floating desktop companion remain future
-work, with explicit shared-data design required before collaboration is implemented.
+**Useful starting roles and coordination.** Policy Watcher selects the existing
+compliance overview and proposes an hourly assessment with a noncompliant-count
+threshold. Chief of Staff selects compliance plus evidence review and skips dependent
+work when a scheduled assessment is unchanged. Research Bot selects an evidence-only
+review; Script Bot selects a PowerShell draft that never executes its output. Missing
+workflows are shown before activation. The two new registry templates have no Graph
+or connector steps; QA permits scope-free read workflows only when their entire
+pipeline uses LLM/transforms and explicitly consumes host task evidence.
 
-The Electron host persists personas and the latest 100 assignment briefings in
-`office.db` using `node:sqlite`; no renderer storage is authoritative. Up to 24
-personas are supported. Office runs one child at a time across assignments,
-waits for success before advancing, and stops at write approval. Failed or timed-out
-assignments pause the persona's recurrence and show recovery details. Stop & pause
-cancels active work through the existing cancellation path; operations already sent
-may have completed. Queued child runs carry durable assignment/step correlation so
-restart recovery never silently replays a completed step. Missing evidence stops
-coordination. Active assignment evidence is protected from run-history pruning.
-Removing a persona removes its briefings while preserving agent run history;
-disconnecting a tenant stops its work and removes its Office data.
+Ordered work remains deterministic. A watched local finding can trigger another
+persona on a new finding, changed revision, or numeric threshold crossing. Watch
+chains must be acyclic and bounded, same-tenant, with 5-minute to 7-day cooldowns,
+revision deduplication, quiet hours, and a 24-hour evidence freshness limit. Incomplete
+metrics produce a coverage warning, never a clean assessment. Remote subscriptions,
+policy-cause diagnosis, and Defender-specific investigations are not introduced.
 
-New recurrence is anchored one full interval after saving. Existing app/OS scheduling
-launches the same host when the UI is closed on supported systems; the computer must
-be running with a signed-in user session. Linux OS registration remains unsupported.
-An Office assignment never follows a later active-tenant switch. Hosted-provider use
-requires explicit assignment-level consent, including scheduled runs. Provider
-configuration or assigned workflow changes invalidate the saved review and require
-reviewing/saving the persona again. Provider readiness and tenant connection are
-checked before each child starts. Approval for writes remains per operation.
+Handoffs atomically persist the finding/revision, source and destination persona,
+question, source run references, reason, and parent mission. The host resolves at most
+eight completed same-tenant evidence records into a 36 KB task context; oversized
+results are omitted with an explicit gap. A source cannot be removed while a dependent
+assignment is active. Standing instructions are not rewritten by source or model text.
+A Chief using model selection gets one bounded request (600 output tokens, one-minute
+timeout) and may select only a unique subset of its explicitly assigned capabilities.
+The visible plan records its reason and skipped workflows. Invalid or unavailable
+planning falls back visibly to the approved ordered list. No capability discovery or
+unbounded recursive model loop is available. Each child retains an accountable parent
+and uses the existing runtime, connector confirmation, and write approval boundaries.
 
-The Office smoke harness creates an assignment through the real renderer and IPC,
-executes two installed workflows with synthetic Graph/model dependencies, verifies
-scope and completed results, reloads persistence, checks room/list/edit/stop controls,
-and captures responsive evidence. It runs in CI alongside the existing Electron
-smokes. Live beta managed-device reads, next-link paging, and invalid-field error
-behavior were also checked through Lokka; no live tenant writes are part of verification.
+**Evidence, review, and conversation.** SQLite finding records hold tenant, assessment
+identity, owner, entity references, severity, first/last seen, revision, fingerprint,
+coverage, and source run IDs. Fingerprints hash normalized structured evidence;
+object collections are order-independent and report-generation timestamps/LLM summary
+prose are excluded. Run baselines are isolated by tenant and assessment configuration,
+including workflow version/settings and persona assessment policy. Review supports
+acknowledge, snooze (5 minutes to 7 days), resolve, and reopen. Unchanged findings keep
+their review state; changed evidence reopens a resolved finding; snooze lasts until its
+expiry. Up to 100 assessment definitions per persona are retained; older resolved
+entries can be replaced. Findings retain 20 run references, with the latest two
+unresolved sources protected from normal run pruning. Raw results are not copied into
+the finding database. Handoff records keep at least the latest 1,000 per receiver plus
+all records still inside the event-freshness window.
+
+The action inbox precedes the room and filters approvals, findings, and operational
+issues. Its 24-hour briefing distinguishes completed checks from scheduled work and
+personas without a completed assessment. Finding history and assignment search expose
+more than the former 12-item feed. Questions use the selected persona's own completed
+runs and handoff sources, at most six recent conversational messages, and its pinned
+provider/tenant. Answers link to source runs. Questions cannot change configuration or
+perform actions; model work does not hold the scheduler lock. Conversation retention
+is 100 messages per persona. Editing or removing the scope during an answer prevents
+that answer from being saved into the changed scope.
+
+**Execution and recovery.** Missions distinguish queued, executing, awaiting review,
+completed, failed, and cancelled states (legacy `running` records are reconciled).
+One workflow compute slot is enforced inside the run-state lock. Human review releases
+that slot, so independent work can proceed. The 5–120 minute execution allowance
+excludes queue and human waiting; model planning counts toward it. Approval has a
+separate configurable lease (10 minutes to 7 days, default one day). Expired proposals
+require a new assignment. Immediately before applying an approved team write, the
+runtime reruns its plan with Graph reads only and connector mutations denied. Changed
+actions or confirmation text fail without applying; a fresh proposal needs fresh
+approval. Every destructive operation retains typed confirmation.
+
+Readiness checks cover the assigned tenant, model, provider, and installed workflows.
+Consent hashes cover only the assigned provider destination and relevant workflows;
+unrelated provider edits do not invalidate them. Review errors identify the changed
+destination or workflow. Cosmetic edits remain possible offline, while explicit
+review/save renews changed execution consent. Transient readiness failures before any
+child starts use three bounded retries; failures after a child starts pause visibly
+instead of replaying possible side effects. Stop & pause cancels active work; requests
+already dispatched may have completed. Durable mission/step correlation prevents
+replaying completed children after restart. Active handoff sources are protected from
+pruning. Removing a tenant stops its assignments and purges its team memory.
+
+**Local schedules.** Intervals start one full interval after saving. Calendar schedules
+use IANA zones, a local HH:mm, and selected weekdays; the UI states that calendar time
+overrides the interval. Quiet hours gate scheduled and event-triggered starts, while
+manual starts remain explicit. Wake-up coalesces missed checks into one run, records
+the missed slot, and schedules the next future slot. DST gaps skip to the next valid
+calendar day; repeated local slots run once. Background execution uses the existing
+Windows/macOS scheduler and needs a running computer and signed-in session. Linux
+requires the app open. Queue position, execution time, approval expiry, provider,
+next/last check, and missed-check information are visible. Source runs expose tokens
+where supplied; monetary cost is not inferred.
+
+**The office.** The original SVG studio includes desks, lounge seating, and a TV game
+corner. Six personas occupy each of up to four floors. Reserved per-persona locations,
+aisle paths, interruptible directional walking, seated typing/controller poses, and
+foreground furniture give the room depth. Idle timing is independent. Actual run and
+handoff events produce timestamped, evidence-linked bubbles and a brief visit to the
+shared table; games remain decorative.
+Search and floor attention indicators route to distant teammates. Zoom/fit, expanded
+office, an optional assignment panel, a static List view, persistent pause, reduced
+motion, and hidden-window suspension keep the surface usable. No rendering dependency
+or third-party artwork is added. Hide details anonymizes office names and conceals the
+sidebar, tenant strip, task text, and detail panel; it is a team-view presentation
+control, not a redaction guarantee for other apps or separately opened dialogs.
+
+The Electron rehearsal exercises real renderer/IPC/runtime paths with isolated local
+Graph/model fixtures: assessment change → research → bounded Chief delegation → script
+draft → evidence question → admin review. Captures identify rehearsal data. Quality
+evidence covers responsive layouts, 24 personas, floor navigation, motion, reduced
+motion, hidden-window behavior, high-contrast emulation, and 200% zoom. Linux
+Xvfb memory measurement, attempted frame sampling, and a recording accompany the design reference; they do not
+stand in for representative Windows/macOS hardware or native assistive-technology
+validation. Lokka beta reads verified the compliance selection, next-link paging, and
+invalid-field 400 behavior; the rehearsal performs no live tenant writes.
 
 ## 5a. v0.1: Public preview foundation
 

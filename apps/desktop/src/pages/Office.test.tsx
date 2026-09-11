@@ -101,7 +101,7 @@ describe("Office", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Review proposed changes →" }),
+      within(screen.getByRole("region", { name:"Team action inbox" })).getByRole("link", { name: "Review proposed changes →" }),
     ).toHaveAttribute("href", "/runs/office-run");
     expect(
       screen.getByRole("button", { name: "Run assignment" }),

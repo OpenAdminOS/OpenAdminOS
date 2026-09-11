@@ -446,6 +446,7 @@ function makeTemplateCtx(
       agentId: ctx.agent.id,
     },
     descriptor: manifest.descriptor,
+    task: { ...ctx.officeTask, evidenceJson: JSON.stringify(ctx.officeTask?.evidence ?? []) },
     ...pipeline,
   };
 }

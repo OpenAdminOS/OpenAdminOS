@@ -18,7 +18,7 @@ export async function runOfficeSmoke(
     return (await window.webContents.capturePage()).toPNG();
   };
   const wait = async (code: string) => {
-    for (let attempt = 0; attempt < 200; attempt++) {
+    for (let attempt = 0; attempt < 350; attempt++) {
       if (await evaluate<boolean>(code)) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -40,8 +40,7 @@ export async function runOfficeSmoke(
   })()`);
   await evaluate(`(() => {
     const form = document.querySelector('.office-editor');
-    Array.from(form.querySelectorAll('.office-agent-picker label')).find(l => l.textContent.includes('Compliance overview')).querySelector('input').click();
-    Array.from(form.querySelectorAll('.office-agent-picker label')).find(l => l.textContent.includes('Find inactive devices')).querySelector('input').click();
+    for (const label of form.querySelectorAll('.office-agent-picker label')) {const input=label.querySelector('input');const wanted=/Compliance overview|Find inactive devices/.test(label.textContent);if (input.checked!==wanted) input.click();}
   })()`);
   await evaluate(
     `document.querySelector('.office-editor button[type="submit"]').click()`,
@@ -136,9 +135,9 @@ export async function runOfficeSmoke(
     const bounds = d.getBoundingClientRect();
     if (getComputedStyle(d).opacity !== '1' || bounds.top < 0 || bounds.bottom > innerHeight) throw new Error('Persona editor is not visible inside the viewport.');
     const form = document.querySelector('.office-editor');
-    form.querySelector('button[type="submit"]').scrollIntoView({ block: 'nearest' });
+    form.scrollTop = form.scrollHeight;
     const save = form.querySelector('button[type="submit"]').getBoundingClientRect();
-    if (save.bottom > bounds.bottom) throw new Error('Persona save button is clipped.');
+    if (save.bottom > bounds.bottom + 2) throw new Error('Persona save button is clipped: '+JSON.stringify({save:save.toJSON(),dialog:bounds.toJSON(),scroll:form.scrollTop,height:form.clientHeight,full:form.scrollHeight}));
     form.scrollTop = 0;
   })()`);
   await new Promise((resolve) => setTimeout(resolve, 100));

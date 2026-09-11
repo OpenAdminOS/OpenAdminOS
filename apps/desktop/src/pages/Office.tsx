@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
 import type {
   AppState,
   OfficeMission,
+  OfficeFinding,
   OfficePersona,
   OfficePersonaInput,
   RunRecord,
@@ -12,6 +13,11 @@ import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
+import { TeamInbox, PersonaConversation } from "../components/office/TeamInbox";
+import {
+  PersonaOptions,
+  TEAM_ROLES,
+} from "../components/office/PersonaOptions";
 
 const isActive = (r?: RunRecord) =>
   r && ["queued", "running", "awaiting-confirmation"].includes(r.status);
@@ -28,12 +34,22 @@ function status(
   p: OfficePersona,
   m: OfficeMission | undefined,
   runs: RunRecord[],
+  findings?: OfficeFinding[],
 ) {
   const current = runs.find((r) => m?.runIds.includes(r.id) && isActive(r));
   if (current?.status === "awaiting-confirmation") return "Needs approval";
   if (current?.status === "running") return "Working";
-  if (m?.status === "running") return "Queued";
-  if (p.lastError) return "Needs attention";
+  if (
+    ["queued", "running", "executing", "awaiting-review"].includes(
+      m?.status ?? "",
+    )
+  )
+    return "Queued";
+  if (
+    p.lastError ||
+    findings?.some((f) => f.personaId === p.id && f.state === "open")
+  )
+    return "Needs attention";
   if (!p.enabled) return "Paused";
   return p.nextRunAt ? "Scheduled" : "Ready";
 }
@@ -55,6 +71,18 @@ export default function Office() {
   const setView = (view: string) => setParam("view", view);
   const [editing, setEditing] = useState<OfficePersona | "new">();
   const [removeId, setRemoveId] = useState<string>();
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [presentation, setPresentation] = useState(false);
+  useEffect(() => {
+    document.documentElement.toggleAttribute(
+      "data-team-presentation",
+      presentation,
+    );
+    return () =>
+      document.documentElement.removeAttribute("data-team-presentation");
+  }, [presentation]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const office = state.office ?? { personas: [], missions: [] };
@@ -64,10 +92,15 @@ export default function Office() {
     (m) => m.personaId === selected?.id,
   );
   const mission = selectedMissions[0];
-  const running = office.missions.filter((m) => m.status === "running").length;
+  const running = office.missions.filter((m) =>
+    ["queued", "running", "executing", "awaiting-review"].includes(m.status),
+  ).length;
   const attention = office.personas.filter(
     (p) =>
       p.lastError ||
+      office.findings?.some(
+        (f) => f.personaId === p.id && f.state === "open",
+      ) ||
       state.runs.some(
         (r) =>
           r.office?.personaId === p.id && r.status === "awaiting-confirmation",
@@ -96,7 +129,7 @@ export default function Office() {
       </div>
     );
   return (
-    <div className="office-page">
+    <div className={`office-page ${expanded ? "office-expanded" : ""}`}>
       <header className="office-header">
         <div>
           <div className="office-eyebrow">YOUR LOCAL TEAM</div>
@@ -119,6 +152,7 @@ export default function Office() {
           </Button>
         </div>
       )}
+      <TeamInbox state={state} act={act} busy={busy} />
       <div className="office-toolbar">
         <div>
           <strong>{office.personas.length}</strong> personas <span>·</span>{" "}
@@ -127,6 +161,33 @@ export default function Office() {
         </div>
         <div className="office-view" aria-label="Team view">
           <button
+            aria-pressed={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            Expand office
+          </button>
+          {expanded && !presentation && (
+            <button
+              aria-pressed={showDetails}
+              onClick={() => setShowDetails((v) => !v)}
+            >
+              Assignment details
+            </button>
+          )}
+          {expanded && !presentation && (
+            <button onClick={() => setExpanded(false)}>Review inbox</button>
+          )}
+          <button
+            aria-pressed={presentation}
+            onClick={() => {
+              setPresentation((v) => !v);
+              setExpanded(true);
+              setView("room");
+            }}
+          >
+            Hide details
+          </button>
+          <button
             aria-pressed={view === "room"}
             onClick={() => setView("room")}
           >
@@ -134,6 +195,7 @@ export default function Office() {
           </button>
           <button
             aria-pressed={view === "list"}
+            disabled={presentation}
             onClick={() => setView("list")}
           >
             List
@@ -147,7 +209,84 @@ export default function Office() {
         >
           {view === "room" && (
             <OfficeScene
-              personas={office.personas}
+              personas={
+                presentation
+                  ? office.personas.map((p, i) => ({
+                      ...p,
+                      name: `Teammate ${i + 1}`,
+                    }))
+                  : office.personas
+              }
+              events={
+                presentation
+                  ? undefined
+                  : Object.fromEntries(
+                      office.personas
+                        .map((p) => {
+                          const m = office.missions.find(
+                            (m) => m.personaId === p.id,
+                          );
+                          const run = state.runs.find((r) =>
+                            m?.runIds.includes(r.id),
+                          );
+                          const handoff = office.handoffs?.find(
+                            (h) => h.id === m?.handoffId,
+                          );
+                          const outgoing = office.handoffs?.find(
+                            (h) =>
+                              h.sourcePersonaId === p.id &&
+                              Date.now() - Date.parse(h.createdAt) < 5000,
+                          );
+                          const event = outgoing
+                            ? {
+                                text: "Evidence handed over",
+                                at: outgoing.createdAt,
+                                runId: outgoing.sourceRunIds[0],
+                                handoff: true,
+                                handoffAt: outgoing.createdAt,
+                              }
+                            : run
+                              ? {
+                                  text:
+                                    run.status === "awaiting-confirmation"
+                                      ? "Waiting for your approval"
+                                      : run.status === "running"
+                                        ? handoff
+                                          ? "Investigating handed-over evidence"
+                                          : "Running assigned workflow"
+                                        : run.status === "completed"
+                                          ? "Assignment evidence ready"
+                                          : run.status === "failed"
+                                            ? "Assignment needs attention"
+                                            : "Task queued",
+                                  at:
+                                    run.finishedAt ??
+                                    run.startedAt ??
+                                    run.queuedAt,
+                                  runId: run.id,
+                                  handoff: Boolean(handoff),
+                                  handoffAt: handoff?.createdAt,
+                                }
+                              : handoff
+                                ? {
+                                    text: "Evidence received",
+                                    at: handoff.createdAt,
+                                    handoff: true,
+                                    handoffAt: handoff.createdAt,
+                                  }
+                                : undefined;
+                          return [p.id, event] as const;
+                        })
+                        .filter(
+                          (
+                            entry,
+                          ): entry is [
+                            string,
+                            NonNullable<(typeof entry)[1]>,
+                          ] => Boolean(entry[1]),
+                        ),
+                    )
+              }
               selectedId={selected?.id}
               onSelect={setSelectedId}
               statuses={Object.fromEntries(
@@ -157,6 +296,7 @@ export default function Office() {
                     p,
                     office.missions.find((m) => m.personaId === p.id),
                     state.runs,
+                    office.findings,
                   ),
                 ]),
               )}
@@ -189,7 +329,7 @@ export default function Office() {
             <div className="office-stations">
               {office.personas.map((p) => {
                 const m = office.missions.find((m) => m.personaId === p.id);
-                const label = status(p, m, state.runs);
+                const label = status(p, m, state.runs, office.findings);
                 const current = state.runs.find(
                   (r) => m?.runIds.includes(r.id) && isActive(r),
                 );
@@ -289,7 +429,9 @@ export default function Office() {
                     {selected.nextRunAt
                       ? date(selected.nextRunAt)
                       : selected.enabled
-                        ? "Manual only"
+                        ? selected.watch
+                          ? "Watching local findings"
+                          : "Manual only"
                         : "Paused"}
                   </dd>
                 </div>
@@ -307,11 +449,54 @@ export default function Office() {
                   <dd>{selected.maxMinutes} minutes</dd>
                 </div>
               </dl>
+              <p className="office-footnote">
+                {mission
+                  ? `${mission.status.replaceAll("-", " ")} · ${Math.round((mission.executionMs ?? 0) / 1000)}s execution used`
+                  : "No assignment has run yet."}
+                {mission?.approvalExpiresAt
+                  ? ` · Approval expires ${date(mission.approvalExpiresAt)}`
+                  : ""}
+                {selected.lastMissedAt
+                  ? ` · One overdue check was coalesced after ${date(selected.lastMissedAt)}`
+                  : ""}
+              </p>
+              <p className="office-footnote">
+                {mission?.planningReason}{" "}
+                {mission?.skippedAgentSlugs?.length
+                  ? `Skipped: ${mission.skippedAgentSlugs.join(", ")}.`
+                  : ""}
+              </p>
+              <p className="office-footnote">
+                One team workflow executes at a time.{" "}
+                {mission?.status === "queued"
+                  ? `Queue position ${
+                      office.missions
+                        .filter((m) => m.status === "queued")
+                        .reverse()
+                        .findIndex((m) => m.id === mission.id) + 1
+                    }.`
+                  : ""}
+                {selected.calendar
+                  ? ` ${selected.calendar.time} · ${selected.calendar.timeZone}.`
+                  : ""}
+                {selected.quietHours
+                  ? ` Quiet hours ${selected.quietHours.start}:00–${selected.quietHours.end}:00 (${selected.quietHours.timeZone}).`
+                  : ""}{" "}
+                Missed checks run once after wake, outside quiet hours. Token
+                usage is available in source runs; monetary cost is unavailable.
+              </p>
               <div className="office-actions">
                 <Button
                   variant="primary"
                   disabled={
-                    busy || !selected.enabled || mission?.status === "running"
+                    busy ||
+                    !selected.enabled ||
+                    [
+                      "queued",
+                      "running",
+                      "executing",
+                      "awaiting-review",
+                    ].includes(mission?.status ?? "")
                   }
                   onClick={() =>
                     void act(() => api!.startOfficePersona!(selected.id))
@@ -320,7 +505,15 @@ export default function Office() {
                   Run assignment
                 </Button>
                 <Button
-                  disabled={busy || mission?.status === "running"}
+                  disabled={
+                    busy ||
+                    [
+                      "queued",
+                      "running",
+                      "executing",
+                      "awaiting-review",
+                    ].includes(mission?.status ?? "")
+                  }
                   onClick={() => setEditing(selected)}
                 >
                   Edit
@@ -384,7 +577,15 @@ export default function Office() {
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={busy || mission?.status === "running"}
+                disabled={
+                  busy ||
+                  [
+                    "queued",
+                    "running",
+                    "executing",
+                    "awaiting-review",
+                  ].includes(mission?.status ?? "")
+                }
                 onClick={() => setRemoveId(selected.id)}
               >
                 Remove persona
@@ -408,13 +609,29 @@ export default function Office() {
           )}
         </aside>
       </div>
+      {selected && (!expanded || showDetails) && (
+        <PersonaConversation
+          key={selected.id}
+          persona={selected}
+          state={state}
+          act={act}
+          busy={busy}
+        />
+      )}
       <section className="office-briefing" aria-label="Team briefing">
         <div className="office-briefing-title">
           <div>
             <div className="office-eyebrow">THE WORK, WITH EVIDENCE</div>
-            <h2>Team briefing</h2>
+            <h2>Assignment history</h2>
           </div>
-          <span>Latest {Math.min(office.missions.length, 12)} assignments</span>
+          <label className="team-search">
+            Search assignments
+            <input
+              value={historyQuery}
+              onChange={(e) => setHistoryQuery(e.target.value)}
+              placeholder="Persona, status, or task…"
+            />
+          </label>
         </div>
         {office.missions.length === 0 ? (
           <p className="office-briefing-empty">
@@ -423,53 +640,64 @@ export default function Office() {
           </p>
         ) : (
           <div className="office-briefing-grid">
-            {office.missions.slice(0, 12).map((m) => (
-              <article key={m.id} className="office-briefing-entry">
-                <div>
-                  <strong>{m.personaName}</strong>
-                  <span>{m.status}</span>
-                </div>
-                <small>
-                  {state.tenants.find((t) => t.id === m.tenantId)
-                    ?.displayName ?? "Disconnected tenant"}{" "}
-                  · {date(m.startedAt)}
-                </small>
-                {m.error && <p className="office-error">{m.error}</p>}
-                {m.runIds.map((id) => {
-                  const r = state.runs.find((r) => r.id === id);
-                  return r ? (
-                    <div className="office-evidence" key={id}>
-                      <Link to={`/runs/${id}`}>
-                        {state.installedAgents.find(
-                          (a) => a.slug === r.agentSlug,
-                        )?.name ?? r.agentSlug}{" "}
-                        →
-                      </Link>
-                      <span>
-                        {r.status.replaceAll("-", " ")}
-                        {r.changeState ? ` · ${r.changeState} findings` : ""}
-                      </span>
-                      <p>
-                        {r.error ??
-                          r.summary ??
-                          (isActive(r)
-                            ? "Work is in progress. Open the run for live steps."
-                            : "Open the run to inspect its output.")}
-                      </p>
-                    </div>
-                  ) : (
-                    <p key={id}>Run removed by history retention.</p>
-                  );
-                })}
-                {m.runIds.length === 0 && (
-                  <p>
-                    {m.status === "running"
-                      ? "Waiting for an available execution slot."
-                      : "No agent runs were started."}
-                  </p>
-                )}
-              </article>
-            ))}
+            {office.missions
+              .filter((m) =>
+                `${m.personaName} ${m.status} ${m.agentSlugs.join(" ")}`
+                  .toLowerCase()
+                  .includes(historyQuery.toLowerCase()),
+              )
+              .map((m) => (
+                <article key={m.id} className="office-briefing-entry">
+                  <div>
+                    <strong>{m.personaName}</strong>
+                    <span>{m.status}</span>
+                  </div>
+                  <small>
+                    {state.tenants.find((t) => t.id === m.tenantId)
+                      ?.displayName ?? "Disconnected tenant"}{" "}
+                    · {date(m.startedAt)}
+                  </small>
+                  {m.error && <p className="office-error">{m.error}</p>}
+                  {m.runIds.map((id) => {
+                    const r = state.runs.find((r) => r.id === id);
+                    return r ? (
+                      <div className="office-evidence" key={id}>
+                        <Link to={`/runs/${id}`}>
+                          {state.installedAgents.find(
+                            (a) => a.slug === r.agentSlug,
+                          )?.name ?? r.agentSlug}{" "}
+                          →
+                        </Link>
+                        <span>
+                          {r.status.replaceAll("-", " ")}
+                          {r.changeState ? ` · ${r.changeState} findings` : ""}
+                        </span>
+                        <p>
+                          {r.error ??
+                            r.summary ??
+                            (isActive(r)
+                              ? "Work is in progress. Open the run for live steps."
+                              : "Open the run to inspect its output.")}
+                        </p>
+                      </div>
+                    ) : (
+                      <p key={id}>Run removed by history retention.</p>
+                    );
+                  })}
+                  {m.runIds.length === 0 && (
+                    <p>
+                      {[
+                        "queued",
+                        "running",
+                        "executing",
+                        "awaiting-review",
+                      ].includes(m.status)
+                        ? "Waiting for an available execution slot."
+                        : "No agent runs were started."}
+                    </p>
+                  )}
+                </article>
+              ))}
           </div>
         )}
       </section>
@@ -578,6 +806,33 @@ function PersonaEditor({
     confirmHosted: false,
   }));
   const provider = state.providers.find((p) => p.id === form.providerId);
+  const executionKeys = [
+    "tenantId",
+    "providerId",
+    "model",
+    "agentSlugs",
+    "intervalMinutes",
+    "maxMinutes",
+    "approvalMinutes",
+    "enabled",
+    "instructions",
+    "planning",
+    "watch",
+    "assessment",
+    "calendar",
+    "quietHours",
+  ] as const;
+  const cosmeticOnly = Boolean(
+    persona &&
+    executionKeys.every(
+      (k) => JSON.stringify(form[k]) === JSON.stringify(persona[k]),
+    ) &&
+    ["name", "responsibility", "avatar", "color"].some(
+      (k) =>
+        form[k as keyof OfficePersonaInput] !==
+        persona[k as keyof OfficePersona],
+    ),
+  );
   const change = <K extends keyof OfficePersonaInput>(
     key: K,
     value: OfficePersonaInput[K],
@@ -613,32 +868,35 @@ function PersonaEditor({
         <fieldset disabled={busy}>
           {!persona && (
             <div className="office-presets" aria-label="Starting roles">
-              {[
-                "Policy Watcher",
-                "Chief of Staff",
-                "Research Bot",
-                "Script Bot",
-              ].map((name) => (
+              {TEAM_ROLES.map((role) => (
                 <button
-                  key={name}
+                  key={role.name}
                   type="button"
-                  aria-pressed={form.name === name}
+                  aria-pressed={form.name === role.name}
                   onClick={() =>
                     setForm((f) => ({
                       ...f,
-                      name,
-                      responsibility:
-                        name === "Chief of Staff"
-                          ? "Coordinate the assigned checks and collect their results for review."
-                          : name === "Research Bot"
-                            ? "Investigate findings through the assigned research workflows."
-                            : name === "Script Bot"
-                              ? "Prepare reviewable scripts through the assigned authoring workflows."
-                              : "Review policy findings and surface changes that need attention.",
+                      name: role.name,
+                      responsibility: role.description,
+                      avatar: role.avatar,
+                      color: role.color,
+                      agentSlugs: role.slugs.filter((slug) =>
+                        state.installedAgents.some((a) => a.slug === slug),
+                      ),
+                      intervalMinutes:
+                        role.name === "Policy Watcher" ? 60 : null,
+                      assessment:
+                        "metric" in role
+                          ? { metricPath: role.metric, threshold: 1 }
+                          : undefined,
+                      planning:
+                        role.name === "Chief of Staff"
+                          ? "on-change"
+                          : "ordered",
                     }))
                   }
                 >
-                  {name}
+                  {role.name}
                 </button>
               ))}
             </div>
@@ -849,6 +1107,7 @@ function PersonaEditor({
               />
             </label>
           </div>
+          <PersonaOptions form={form} change={change} state={state} />
           <label className="office-check">
             <input
               type="checkbox"
@@ -858,7 +1117,8 @@ function PersonaEditor({
             <span>
               Enable this persona
               <small>
-                The first scheduled run starts after one full interval.
+                Schedules begin at the next interval or calendar slot. Event
+                triggers watch completed findings.
               </small>
             </span>
           </label>
@@ -867,14 +1127,15 @@ function PersonaEditor({
               <input
                 type="checkbox"
                 checked={form.confirmHosted === true}
-                required
+                required={!cosmeticOnly}
                 onChange={(e) => change("confirmHosted", e.target.checked)}
               />
               <span>
                 I approve sending context from{" "}
                 {state.tenants.find((t) => t.id === form.tenantId)
                   ?.displayName ?? "the selected tenant"}{" "}
-                to {provider?.name ?? "this provider"}.
+                to {provider?.name ?? "this provider"}, including watched
+                evidence, planning, and persona questions.
                 <small>
                   This applies to manual and scheduled assignments until the
                   persona or provider configuration changes.
@@ -898,11 +1159,12 @@ function PersonaEditor({
                 !form.agentSlugs.length ||
                 !form.tenantId ||
                 !provider ||
-                !(
-                  provider.status === "connected" ||
-                  (provider.id === "azure-openai" &&
-                    provider.status === "available")
-                )
+                (!persona &&
+                  !(
+                    provider.status === "connected" ||
+                    (provider.id === "azure-openai" &&
+                      provider.status === "available")
+                  ))
               }
             >
               {busy ? "Saving…" : "Save persona"}

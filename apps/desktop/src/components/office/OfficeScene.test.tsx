@@ -1,9 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OfficeScene } from "./OfficeScene";
 import type { OfficePersona } from "../../shared/openAdminOS";
 
-const personas: OfficePersona[] = Array.from({ length: 8 }, (_, i) => ({
+const personas: OfficePersona[] = Array.from({ length: 24 }, (_, i) => ({
   id: `persona-${i}`,
   name: `Teammate ${i}`,
   responsibility: "Review settings",
@@ -18,7 +18,20 @@ const personas: OfficePersona[] = Array.from({ length: 8 }, (_, i) => ({
   createdAt: "2026-09-10T10:00:00Z",
   updatedAt: "2026-09-10T10:00:00Z",
 }));
+beforeEach(() => {
+  vi.stubGlobal(
+    "DOMMatrixReadOnly",
+    class {
+      m41 = 0;
+      m42 = 0;
+    },
+  );
+  vi.spyOn(HTMLElement.prototype, "animate").mockImplementation(
+    () => ({ cancel: () => {}, onfinish: null }) as unknown as Animation,
+  );
+});
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -55,7 +68,7 @@ describe("Office scene", () => {
     rerender(
       <OfficeScene {...props} statuses={{ "persona-0": "Needs approval" }} />,
     );
-    expect(position()).not.toBe(desk);
+    expect(position()).toBe(desk); // Review retains the reserved desk, with work stopped.
     expect(container.querySelectorAll(".scene-desk-active")).toHaveLength(0);
     expect(
       screen.getByRole("button", { name: "Teammate 0, Needs approval" }),
@@ -106,4 +119,40 @@ describe("Office scene", () => {
       screen.getByRole("button", { name: "Teammate 0, Working" }),
     ).toBeInTheDocument();
   });
+});
+
+it("keeps 24 personas searchable and leaves no idle timers after prolonged use", () => {
+  vi.useFakeTimers();
+  const select = vi.fn();
+  const { unmount, container } = render(
+    <OfficeScene
+      personas={personas}
+      statuses={{ "persona-23": "Needs approval" }}
+      onSelect={select}
+    />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Floor 4 · Needs attention" }),
+  ).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Find a teammate"), {
+    target: { value: "Teammate 23" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Teammate 23 · Needs approval" }),
+  );
+  expect(select).toHaveBeenCalledWith("persona-23");
+  act(() => vi.advanceTimersByTime(3600000));
+  expect(container.querySelectorAll(".scene-persona")).toHaveLength(6);
+  expect(vi.getTimerCount()).toBeLessThan(50);
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("visits the shared table only for a recent recorded handoff, then returns to work",()=>{
+ vi.useFakeTimers();vi.setSystemTime(new Date("2026-09-11T10:00:00Z"));
+ const {container}=render(<OfficeScene personas={personas.slice(0,1)} statuses={{"persona-0":"Working"}} selectedId="persona-0" onSelect={vi.fn()} events={{"persona-0":{text:"Evidence received",at:new Date().toISOString(),handoffAt:new Date().toISOString(),handoff:true,runId:"source-run"}}}/>);
+ expect(container.querySelector('.scene-persona-position')).toHaveAttribute('data-seat','meeting-0');
+ expect(screen.getByRole('link',{name:/Evidence received/})).toHaveAttribute('href','#/runs/source-run');
+ act(()=>vi.advanceTimersByTime(5001));
+ expect(container.querySelector('.scene-persona-position')).toHaveAttribute('data-seat','desk-0');
 });

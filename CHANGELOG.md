@@ -10,6 +10,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Expand Agent Team with useful role presets, reviewable findings, proactive evidence handoffs, bounded Chief planning, persona questions, calendar schedules, and a furnished animated office with presentation controls; isolate tenant comparisons and separate execution from queue/approval waiting.
+
 - Promote Agent Team below Chat with persona shortcuts and icons, and add a lively office with workstations, lounge, game corner, walking characters, and motion controls.
 
 - Replace the landing page's agent installation count with total GitHub release downloads, matching the README KPI.

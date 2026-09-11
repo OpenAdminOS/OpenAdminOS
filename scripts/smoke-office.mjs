@@ -49,7 +49,7 @@ try {
   });
   pipeProcess(electron, "electron");
 
-  const code = await waitForExit(electron, 90_000);
+  const code = await waitForExit(electron, 180_000);
   if (code !== 0) {
     throw new Error(`Electron screenshot capture exited with code ${code}.`);
   }

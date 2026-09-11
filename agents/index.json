@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 1,
+  "revision": 2,
   "agents": [
     {
       "id": "compliance-overview",
@@ -254,6 +254,46 @@
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/stale-guest-cleanup/manifest.yaml",
       "manifestSha256": "4f9a0e5ceec07e83913215ef4aee5f242a88430ca4671329f2a9d7cffd9f2851"
+    },
+    {
+      "id": "team-evidence-review",
+      "slug": "team-evidence-review",
+      "name": "Team evidence review",
+      "description": "Investigates evidence handed to an Agent Team persona without collecting tenant data again.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "compliance",
+      "tier": "agent",
+      "requiresEntraTier": "free",
+      "author": {
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
+        "verified": true
+      },
+      "scopes": [],
+      "minAppVersion": "0.5.1",
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-evidence-review/manifest.yaml",
+      "manifestSha256": "21c0018bd6b1b84344b42cf93ce55cc99c696def560b8a62b6f178ecf5c65ebe"
+    },
+    {
+      "id": "team-script-draft",
+      "slug": "team-script-draft",
+      "name": "Team PowerShell draft",
+      "description": "Prepares a PowerShell script for review from an Agent Team task and its supplied evidence.",
+      "version": "1.0.0",
+      "mode": "read",
+      "category": "devices",
+      "tier": "agent",
+      "requiresEntraTier": "free",
+      "author": {
+        "name": "OpenAdminOS",
+        "handle": "openadminos",
+        "verified": true
+      },
+      "scopes": [],
+      "minAppVersion": "0.5.1",
+      "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-script-draft/manifest.yaml",
+      "manifestSha256": "c39b6c83d39ba5c5e16db7891716d2bcc1ea051e9d4f75854705acc41f2d7273"
     },
     {
       "id": "tenant-change-audit",

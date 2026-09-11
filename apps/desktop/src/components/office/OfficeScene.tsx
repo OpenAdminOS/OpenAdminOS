@@ -1,4 +1,10 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { OfficePersona } from "../../shared/openAdminOS";
 
 export function PersonaAvatar({
@@ -105,6 +111,10 @@ export function PersonaAvatar({
 type SceneProps = {
   personas: OfficePersona[];
   statuses: Record<string, string>;
+  events?: Record<
+    string,
+    { text: string; at: string; runId?: string; handoff?: boolean; handoffAt?:string }
+  >;
   selectedId?: string;
   onSelect: (id: string) => void;
 };
@@ -339,6 +349,21 @@ function OfficeInterior({ working }: { working: boolean[] }) {
       <path d="m774 281 26 4-10 11-26-4Z" fill="#56796d" />
       <ellipse cx="747" cy="285" rx="9" ry="5" fill="#f1dab5" />
       <rect x="738" y="274" width="18" height="11" rx="4" fill="#f1dab5" />
+      {/* Shared standing table for evidence handoffs in the central aisle. */}
+      <g transform="translate(580 367)">
+        <ellipse cy="18" rx="32" ry="8" fill="#22382e" opacity=".3" />
+        <path d="M0-12v29m-16 0h32" stroke="#454b38" strokeWidth="5" />
+        <ellipse cy="-12" rx="30" ry="10" fill="#cbb387" />
+        <path d="m-9-18 18 3-3 9-18-3Z" fill="#829b81" />
+      </g>
+      {/* Spare ottomans provide distinct lounge seats for the second desk row. */}
+      {[645, 755, 865].map((x) => (
+        <g key={x} transform={`translate(${x} 322)`}>
+          <ellipse cy="15" rx="36" ry="10" fill="#24352d" opacity=".3" />
+          <rect x="-31" y="-8" width="62" height="26" rx="10" fill="#a97658" />
+          <ellipse cy="-6" rx="31" ry="11" fill="#c29169" />
+        </g>
+      ))}
       {/* Game corner: a real decorative Pong loop, never task progress. */}
       <rect
         x="608"
@@ -423,52 +448,158 @@ function OfficeInterior({ working }: { working: boolean[] }) {
   );
 }
 
+type Point = { x: number; y: number };
+/** The central aisle and the aisle between desk rows keep travel off tabletops. */
+function route(from: Point, to: Point): Point[] {
+  const aisle = (p: Point) => (p.x < 53 ? (p.y < 55 ? 51 : 78) : 52);
+  if (Math.abs(from.x - to.x) + Math.abs(from.y - to.y) < 1) return [to];
+  return [
+    from,
+    { x: from.x, y: aisle(from) },
+    { x: 54, y: aisle(from) },
+    { x: 54, y: aisle(to) },
+    { x: to.x, y: aisle(to) },
+    to,
+  ].filter((p, i, a) => i === 0 || p.x !== a[i - 1].x || p.y !== a[i - 1].y);
+}
 function ScenePersona({
   persona,
   label,
   index,
-  phase,
   motion,
   selected,
   onSelect,
+  event,
 }: {
   persona: OfficePersona;
   label: string;
   index: number;
-  phase: number;
   motion: boolean;
   selected: boolean;
   onSelect: () => void;
+  event?: { text: string; at: string; runId?: string; handoff?: boolean; handoffAt?:string };
 }) {
-  const atDesk = label === "Working" || label === "Queued";
-  const attention = label === "Needs approval" || label === "Needs attention";
-  const gaming = !atDesk && !attention && (index + phase) % 2 === 1;
-  const x = atDesk
-    ? 8 + (index % 3) * 16.6
-    : attention
-      ? 14 + (index % 3) * 16.6
-      : 60 + (index % 3) * 11;
-  const y = atDesk
-    ? 39 + Math.floor(index / 3) * 23.8
-    : attention
-      ? 45 + Math.floor(index / 3) * 23.8
-      : gaming
-        ? 71 + Math.floor(index / 3) * 8
-        : 30 + Math.floor(index / 3) * 10;
+  const seed = index * 3; // Stable seat timing makes rehearsal captures repeatable.
+  const [idle, setIdle] = useState(seed % 2);
   const [walking, setWalking] = useState(false);
+  const [meeting, setMeeting] = useState(false);
   useEffect(() => {
-    if (!motion) {
+    const remaining = Date.parse(event?.handoffAt ?? "") + 5000 - Date.now();
+    setMeeting(remaining > 0);
+    if (remaining > 0) {
+      const timer = setTimeout(() => setMeeting(false), remaining);
+      return () => clearTimeout(timer);
+    }
+  }, [event?.handoffAt]);
+  const [facing, setFacing] = useState("right");
+  const element = useRef<HTMLDivElement>(null);
+  const last = useRef<Point | undefined>(undefined);
+  const atDesk = label === "Working";
+  const attention = label === "Needs approval" || label === "Needs attention";
+  const gaming = !meeting && !atDesk && !attention && idle % 2 === 1;
+  const x = meeting
+    ? 52 + (index % 3) * 10
+    : atDesk || attention
+      ? 7.8 + (index % 3) * 16.6
+      : 60 + (index % 3) * 11;
+  const y = meeting
+    ? 49 + Math.floor(index / 3) * 13
+    : atDesk || attention
+      ? 39.5 + Math.floor(index / 3) * 23.8
+      : gaming
+        ? 66 + Math.floor(index / 3) * 13
+        : 29 + Math.floor(index / 3) * 13;
+  useEffect(() => {
+    if (!motion || atDesk || attention) return;
+    const timer = setInterval(
+      () => setIdle((i) => i + 1),
+      12000 + (seed % 8) * 1700,
+    );
+    return () => clearInterval(timer);
+  }, [motion, atDesk, attention, seed]);
+  useLayoutEffect(() => {
+    const el = element.current;
+    if (!el) return;
+    const to = { x, y };
+    if (!motion || !last.current) {
+      last.current = to;
       setWalking(false);
       return;
     }
+    // Sample the current position so a new task can interrupt an ongoing walk.
+    const from = last.current;
+    const points = route(from, to);
+    last.current = to;
+    if (points.length < 2) {
+      setWalking(false);
+      return;
+    }
+    const distances = points.map((p, i) =>
+      i === 0
+        ? 0
+        : Math.hypot(p.x - points[i - 1].x, (p.y - points[i - 1].y) * 0.56),
+    );
+    const total = distances.reduce((a, b) => a + b, 0);
+    const duration = Math.min(6500, Math.max(700, total * 55));
+    let distance = 0;
+    const offsets = distances.map((d) => (distance += d) / total);
+    const animation = el.animate(
+      points.map((p, i) => ({
+        transform: `translate(${p.x}%, ${p.y}%)`,
+        offset: offsets[i],
+      })),
+      { duration, easing: "linear" },
+    );
     setWalking(true);
-    const timer = setTimeout(() => setWalking(false), 2800);
-    return () => clearTimeout(timer);
+    const timers = points
+      .slice(1)
+      .map((p, i) =>
+        setTimeout(
+          () =>
+            setFacing(
+              p.x < points[i].x
+                ? "left"
+                : p.x > points[i].x
+                  ? "right"
+                  : p.y < points[i].y
+                    ? "back"
+                    : "front",
+            ),
+          offsets[i] * duration,
+        ),
+      );
+    animation.onfinish = () => setWalking(false);
+    return () => {
+      if (
+        animation.playState === "running" &&
+        el.clientWidth &&
+        el.clientHeight
+      ) {
+        const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
+        last.current = {
+          x: (m.m41 / el.clientWidth) * 100,
+          y: (m.m42 / el.clientHeight) * 100,
+        };
+      }
+      animation.cancel();
+      timers.forEach(clearTimeout);
+    };
   }, [x, y, motion]);
+  // Task messages are backed by a real record and remain inspectable on selection.
+  const showEvent =
+    event && (selected || Date.now() - Date.parse(event.at) < 12000);
   return (
     <div
-      className={`scene-persona-position ${walking ? "is-walking" : ""} ${label === "Working" ? "is-working" : ""} ${gaming ? "is-gaming" : ""}`}
-      style={{ transform: `translate(${x}%, ${y}%)` } as CSSProperties}
+      ref={element}
+      className={`scene-persona-position ${walking ? "is-walking" : "is-sitting"} ${atDesk ? "is-working" : ""} ${gaming ? "is-gaming" : ""}`}
+      data-facing={facing}
+      data-seat={`${meeting ? "meeting" : atDesk || attention ? "desk" : gaming ? "game" : "lounge"}-${index}`}
+      style={
+        {
+          transform: `translate(${x}%, ${y}%)`,
+          zIndex: Math.round(y * 10),
+        } as CSSProperties
+      }
     >
       <button
         className="scene-persona"
@@ -481,8 +612,10 @@ function ScenePersona({
           <strong>{persona.name}</strong>
           <small>{label}</small>
         </span>
-        <PersonaAvatar avatar={persona.avatar} color={persona.color} />
-        {gaming && (
+        <span className="scene-facing">
+          <PersonaAvatar avatar={persona.avatar} color={persona.color} />
+        </span>
+        {gaming && !walking && (
           <svg
             className="scene-controller"
             viewBox="0 0 36 20"
@@ -499,20 +632,83 @@ function ScenePersona({
           </svg>
         )}
       </button>
+      {showEvent && (
+        <a
+          className="scene-event"
+          href={
+            event.runId
+              ? `#/runs/${event.runId}`
+              : `#/office?persona=${encodeURIComponent(persona.id)}`
+          }
+          title={new Date(event.at).toLocaleString()}
+        >
+          {event.handoff ? "↗ " : ""}
+          {event.text}
+          <small>
+            {new Date(event.at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}{" "}
+            · Open evidence
+          </small>
+        </a>
+      )}
     </div>
+  );
+}
+function FurnitureFront() {
+  return (
+    <>
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <svg
+          key={i}
+          className="scene-furniture-front"
+          style={{ zIndex: Math.floor(i / 3) === 0 ? 555 : 795 }}
+          viewBox="0 0 1000 560"
+          aria-hidden="true"
+        >
+          <g
+            transform={`translate(${123 + (i % 3) * 166} ${305 + Math.floor(i / 3) * 133})`}
+          >
+            <path d="M-63-12h122l10 19H-72Z" fill="#c8a27a" />
+            <path d="M-72 7H69v8H-72Z" fill="#98714f" />
+            <path d="M-26 0H8l5 6h-44Z" fill="#4b5850" />
+            <path d="M-52 15v19m102-19v19" stroke="#3d3931" strokeWidth="7" />
+          </g>
+        </svg>
+      ))}
+      <svg
+        className="scene-furniture-front"
+        style={{ zIndex: 400 }}
+        viewBox="0 0 1000 560"
+        aria-hidden="true"
+      >
+        <path
+          d="M629 239v21h298v-21"
+          fill="none"
+          stroke="#ab7251"
+          strokeWidth="16"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </>
   );
 }
 
 export function OfficeScene({
   personas,
   statuses,
+  events,
   selectedId,
   onSelect,
 }: SceneProps) {
-  const [paused, setPaused] = useState(false);
+  const [paused, setPaused] = useState(
+    () => localStorage.getItem("team-motion") === "paused",
+  );
+  const [zoom, setZoom] = useState(1);
+  const [query, setQuery] = useState("");
   const [reduced, setReduced] = useState(false);
   const [hidden, setHidden] = useState(false);
-  const [phase, setPhase] = useState(0);
   const [floor, setFloor] = useState(0);
   const selectedIndex = personas.findIndex((p) => p.id === selectedId);
   useEffect(() => {
@@ -532,11 +728,6 @@ export function OfficeScene({
     };
   }, []);
   const motion = !paused && !reduced && !hidden;
-  useEffect(() => {
-    if (!motion) return;
-    const timer = setInterval(() => setPhase((p) => p + 1), 18000);
-    return () => clearInterval(timer);
-  }, [motion]);
   const currentFloor = Math.min(
     floor,
     Math.max(0, Math.ceil(personas.length / 6) - 1),
@@ -551,7 +742,12 @@ export function OfficeScene({
         <button
           aria-pressed={paused}
           disabled={reduced}
-          onClick={() => setPaused((p) => !p)}
+          onClick={() =>
+            setPaused((p) => {
+              localStorage.setItem("team-motion", p ? "running" : "paused");
+              return !p;
+            })
+          }
         >
           {reduced
             ? "Reduced motion"
@@ -560,22 +756,72 @@ export function OfficeScene({
               : "Pause motion"}
         </button>
       </div>
-      <div className="office-stage">
-        <OfficeInterior
-          working={visible.map((p) => statuses[p.id] === "Working")}
-        />
-        {visible.map((p, i) => (
-          <ScenePersona
-            key={p.id}
-            persona={p}
-            label={statuses[p.id] ?? "Ready"}
-            index={i}
-            phase={phase}
-            motion={motion}
-            selected={p.id === selectedId}
-            onSelect={() => onSelect(p.id)}
+      <div className="scene-controls">
+        <label>
+          Find a teammate
+          <input
+            aria-label="Find a teammate"
+            placeholder="Search names…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
-        ))}
+        </label>
+        <div>
+          <button
+            aria-label="Zoom out office"
+            disabled={zoom <= 1}
+            onClick={() => setZoom((z) => Math.max(1, z - 0.25))}
+          >
+            −
+          </button>
+          <span>{Math.round(zoom * 100)}%</span>
+          <button
+            aria-label="Zoom in office"
+            disabled={zoom >= 1.75}
+            onClick={() => setZoom((z) => Math.min(1.75, z + 0.25))}
+          >
+            +
+          </button>
+          <button onClick={() => setZoom(1)}>Fit</button>
+        </div>
+      </div>
+      {query && (
+        <div className="scene-search-results">
+          {personas
+            .filter((p) => p.name.toLowerCase().includes(query.toLowerCase()))
+            .map((p) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  onSelect(p.id);
+                  setQuery("");
+                }}
+              >
+                <PersonaAvatar avatar={p.avatar} color={p.color} />
+                {p.name} · {statuses[p.id]}
+              </button>
+            ))}
+        </div>
+      )}
+      <div className="scene-viewport">
+        <div className="office-stage" style={{ width: `${zoom * 100}%` }}>
+          <OfficeInterior
+            working={visible.map((p) => statuses[p.id] === "Working")}
+          />
+          {visible.map((p, i) => (
+            <ScenePersona
+              key={p.id}
+              persona={p}
+              label={statuses[p.id] ?? "Ready"}
+              index={i}
+              event={events?.[p.id]}
+              motion={motion}
+              selected={p.id === selectedId}
+              onSelect={() => onSelect(p.id)}
+            />
+          ))}
+          <FurnitureFront />
+        </div>
       </div>
       {personas.length > 6 && (
         <div className="scene-floors" aria-label="Office floors">
@@ -586,6 +832,11 @@ export function OfficeScene({
               onClick={() => setFloor(i)}
             >
               Floor {i + 1}
+              {personas
+                .slice(i * 6, i * 6 + 6)
+                .some((p) => statuses[p.id]?.startsWith("Needs"))
+                ? " · Needs attention"
+                : ""}
             </button>
           ))}
         </div>

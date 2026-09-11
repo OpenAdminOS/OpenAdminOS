@@ -1,3 +1,4 @@
+import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import {
   app,
@@ -521,6 +522,8 @@ function seedScreenshotCaptureState(userDataDir: string): void {
     "compliance-overview",
     "find-inactive-devices",
     "offboarding-agent",
+    "team-evidence-review",
+    "team-script-draft",
   ]);
   const installedEntries = entries.filter((entry) => installedSlugs.has(entry.slug));
   const fallbackInstalledEntries =
@@ -735,6 +738,7 @@ function findScreenshotRegistryIndexPath(): string {
   throw new Error("Unable to find agents/index.json for screenshot capture.");
 }
 
+let officeRehearsalRevision = 0;
 function createIntuneChatSmokeGraph(): RunGraphApi {
   return {
     async listManagedDevices() {
@@ -757,6 +761,7 @@ function createIntuneChatSmokeGraph(): RunGraphApi {
               lastSyncDateTime: "2026-01-01T00:00:00.000Z",
               managementState: "managed",
             },
+            ...(officeRehearsalRevision ? [{id:"managed-device-2",deviceName:"WIN-02",operatingSystem:"Windows",complianceState:"noncompliant",lastSyncDateTime:"2026-01-01T00:00:00.000Z",managementState:"managed"}] : []),
           ],
         };
       }
@@ -779,17 +784,29 @@ function createIntuneChatSmokeGraph(): RunGraphApi {
   };
 }
 
+function officeRehearsalAnswer(prompt:string): string {
+  const sources=[...new Set(prompt.match(/run_[a-z0-9_]+/g)??[])].slice(0,4).join(", ");
+  if(prompt.includes("Select only relevant assigned workflows")) return JSON.stringify({agentSlugs:["team-script-draft"],reason:"Research already reviewed the finding. Draft the proposed next step for the admin."});
+  if(prompt.includes("PowerShell")) return `REHEARSAL: Review this read-only PowerShell draft before use.\n\nGet-Date | Select-Object DateTime\n\nThe supplied evidence describes a compliance-count change; it does not establish a policy cause. No script was executed. Sources: ${sources || "no supplied source"}.`;
+  return `REHEARSAL: Supplied compliance evidence changed between checks. Review collection freshness and the source run before deciding on remediation. The evidence does not establish policy causation. Sources: ${sources || "current collection"}.`;
+}
+
 function createIntuneChatSmokeLlm(): RunLlmApi {
   return {
     available: true,
     defaultModel: "test-smoke-local-model",
-    async complete() {
+    async complete(options) {
+      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:"test-smoke-local-model"};
       return {
         text: "WIN-01 is stale based on cached Intune and Entra device evidence.",
         model: "test-smoke-local-model",
       };
     },
     async *stream(options) {
+      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
+        const text=officeRehearsalAnswer(options.prompt);
+        yield {delta:text,accumulated:text,done:true,model:"test-smoke-local-model"};return;
+      }
       if (options.prompt.includes("Hold response for cancellation smoke")) {
         yield {
           delta: "Partial response",
@@ -944,6 +961,7 @@ async function runScreenshotCapture(): Promise<void> {
   window.focus();
   if (process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
     await runOfficeSmoke(window, screenshotCaptureOutDir);
+    await runOfficeRehearsal(window,screenshotCaptureOutDir,async()=>{officeRehearsalRevision=1;await store.tickOffice();});
     app.exit(0);
     return;
   }
@@ -5892,9 +5910,17 @@ function registerIpcHandlers() {
       store.setActiveModel(validateProviderId(providerId), validateActiveModel(model)),
     ),
   );
+  ipcMain.handle("openadminos:office-review", handleTrusted((_event, input: unknown) => {
+    if (!input || typeof input !== "object") throw new Error("Choose a finding to review.");
+    return store.reviewOfficeFinding(input as Parameters<typeof store.reviewOfficeFinding>[0]);
+  }));
+  ipcMain.handle("openadminos:office-ask", handleTrusted((_event, input: unknown) => {
+    if (!input || typeof input !== "object") throw new Error("Choose a persona and enter a question.");
+    return store.askOfficePersona(input as Parameters<typeof store.askOfficePersona>[0]);
+  }));
   ipcMain.handle("openadminos:office-save", handleTrusted(async (_event, input: unknown) => {
     const office = await store.saveOfficePersona(input);
-    if (office.personas.some(p => p.enabled && p.intervalMinutes !== null)) void registerSchedulerIfReady("schedule");
+    if (office.personas.some(p => p.enabled && (p.intervalMinutes !== null || Boolean(p.calendar) || Boolean(p.watch)))) void registerSchedulerIfReady("schedule");
     else void unregisterSchedulerIfUnused();
     return office;
   }));

@@ -1,5 +1,9 @@
 import { Link, NavLink, useLocation } from "react-router";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import {
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   IconAgents,
   IconAgentTeam,
@@ -82,10 +86,17 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
   const location = useLocation();
   const personas = state.office?.personas ?? [];
+  const [teamCollapsed, setTeamCollapsed] = useState(
+    () => localStorage.getItem("team-sidebar-collapsed") === "true",
+  );
+  const [teamQuery, setTeamQuery] = useState("");
   const selectedPersona = new URLSearchParams(location.search).get("persona");
   const attention = personas.filter(
     (p) =>
       p.lastError ||
+      state.office?.findings?.some(
+        (f) => f.personaId === p.id && f.state === "open",
+      ) ||
       state.runs.some(
         (r) =>
           r.office?.personaId === p.id && r.status === "awaiting-confirmation",
@@ -227,51 +238,97 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           >
             <NavRow item={item} />
             {item.to === "/office" && personas.length > 0 && (
-              <ul className="team-nav-personas" aria-label="Team personas">
-                {personas.map((persona) => {
-                  const needsAttention =
-                    Boolean(persona.lastError) ||
-                    state.runs.some(
-                      (r) =>
-                        r.office?.personaId === persona.id &&
-                        r.status === "awaiting-confirmation",
-                    );
-                  const working = state.runs.some(
-                    (r) =>
-                      r.office?.personaId === persona.id &&
-                      r.status === "running",
-                  );
-                  const selected =
-                    location.pathname === "/office" &&
-                    (selectedPersona === persona.id ||
-                      (!selectedPersona && personas[0]?.id === persona.id));
-                  return (
-                    <li key={persona.id}>
-                      <Link
-                        to={`/office?persona=${encodeURIComponent(persona.id)}`}
-                        aria-current={selected ? "page" : undefined}
-                        className="team-nav-persona"
-                        title={`${persona.name}${needsAttention ? " · Needs attention" : working ? " · Working" : ""}`}
-                      >
-                        <PersonaAvatar
-                          avatar={persona.avatar}
-                          color={persona.color}
-                        />
-                        <span className="flex-1">{persona.name}</span>
-                        {(needsAttention || working) && (
-                          <span
-                            className={`team-nav-dot ${needsAttention ? "attention" : ""}`}
-                            role="img"
-                            aria-label={
-                              needsAttention ? "Needs attention" : "Working"
-                            }
-                          />
-                        )}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="team-nav-children">
+                <button
+                  className="team-nav-toggle"
+                  aria-expanded={!teamCollapsed}
+                  onClick={() =>
+                    setTeamCollapsed((v) => {
+                      localStorage.setItem(
+                        "team-sidebar-collapsed",
+                        String(!v),
+                      );
+                      return !v;
+                    })
+                  }
+                >
+                  {teamCollapsed ? "▸" : "▾"} {personas.length} teammates
+                </button>
+                {!teamCollapsed && (
+                  <>
+                    <label className="team-nav-search">
+                      <span className="sr-only">Search sidebar teammates</span>
+                      <input
+                        placeholder="Find teammate…"
+                        value={teamQuery}
+                        onChange={(e) => setTeamQuery(e.target.value)}
+                      />
+                    </label>
+                    <ul
+                      className="team-nav-personas"
+                      aria-label="Team personas"
+                    >
+                      {personas
+                        .filter((p) =>
+                          p.name
+                            .toLowerCase()
+                            .includes(teamQuery.toLowerCase()),
+                        )
+                        .map((persona) => {
+                          const needsAttention =
+                            Boolean(persona.lastError) ||
+                            state.office?.findings?.some(
+                              (f) =>
+                                f.personaId === persona.id &&
+                                f.state === "open",
+                            ) ||
+                            state.runs.some(
+                              (r) =>
+                                r.office?.personaId === persona.id &&
+                                r.status === "awaiting-confirmation",
+                            );
+                          const working = state.runs.some(
+                            (r) =>
+                              r.office?.personaId === persona.id &&
+                              r.status === "running",
+                          );
+                          const selected =
+                            location.pathname === "/office" &&
+                            (selectedPersona === persona.id ||
+                              (!selectedPersona &&
+                                personas[0]?.id === persona.id));
+                          return (
+                            <li key={persona.id}>
+                              <Link
+                                to={`/office?persona=${encodeURIComponent(persona.id)}`}
+                                aria-current={selected ? "page" : undefined}
+                                className="team-nav-persona"
+                                title={`${persona.name}${needsAttention ? " · Needs attention" : working ? " · Working" : ""}`}
+                              >
+                                <PersonaAvatar
+                                  avatar={persona.avatar}
+                                  color={persona.color}
+                                />
+                                <span className="flex-1">{persona.name}</span>
+                                {(needsAttention || working) && (
+                                  <span
+                                    className={`team-nav-dot ${needsAttention ? "attention" : ""}`}
+                                    role="img"
+                                    aria-label={
+                                      needsAttention
+                                        ? "Needs attention"
+                                        : "Working"
+                                    }
+                                  />
+                                )}
+                              </Link>
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  </>
+                )}{" "}
+              </div>
             )}
           </div>
         ))}
