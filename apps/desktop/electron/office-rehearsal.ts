@@ -169,14 +169,19 @@ export async function runOfficeRehearsal(
   } finally {
     window.webContents.debugger.detach();
   }
+  // Reset media emulation first so reduced motion cannot mask a broken
+  // visibility listener. Prove running -> hidden -> running independently.
+  await evaluate(`location.reload()`);
+  await wait(`document.querySelector('.team-office')?.dataset.motion==='on'`);
   window.hide();
-  await sleep(300);
+  await wait(`document.hidden && document.querySelector('.team-office')?.dataset.motion==='off'`);
   const hiddenMotion = await evaluate<string>(
     `document.querySelector('.team-office').dataset.motion`,
   );
   if (hiddenMotion !== "off")
     throw new Error("Hidden window kept ambient motion running");
   window.show();
+  await wait(`!document.hidden && document.querySelector('.team-office')?.dataset.motion==='on'`);
   await writeFile(
     join(outputDir, "office-performance.json"),
     JSON.stringify(
@@ -189,6 +194,7 @@ export async function runOfficeRehearsal(
         environment:
           "Linux Xvfb software rendering; not representative admin hardware",
         hiddenMotion,
+        resumedMotion: "on",
         zoom200Overflow: overflow,
       },
       null,

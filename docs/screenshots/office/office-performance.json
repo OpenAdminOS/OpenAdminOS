@@ -2,12 +2,13 @@
   "frameSamples": 0,
   "medianFrameMs": null,
   "p95FrameMs": null,
-  "jsHeapBytes": 47628522,
+  "jsHeapBytes": 51216130,
   "personas": 24,
   "visibleSeats": 6,
   "frameSampling": "Headless compositor throttled animation-frame callbacks; no FPS claim.",
-  "recordingFrames": 50,
+  "recordingFrames": 53,
   "environment": "Linux Xvfb software rendering; not representative admin hardware",
   "hiddenMotion": "off",
+  "resumedMotion": "on",
   "zoom200Overflow": false
 }
