@@ -384,12 +384,23 @@ still sends audio and shared context to OpenAI, visibly disclosed in the voice p
 OpenAI Voice also grants its reasoning loop a general `web_search` tool after
 session consent. The selected reasoning model decides whether to use tenant tools,
 public research, or both. Public research uses the saved Nova key with OpenAI
-Responses, `gpt-4.1-mini` and hosted `web_search`; it sends the standalone public
+Responses, `gpt-5.4-mini` and hosted `web_search`; it sends the standalone public
 query rather than the tenant answer pack. The tool is scoped to the active hosted
 session, unavailable to local voice and ordinary Chat requests, limited to three
 searches per question, and cancelled with the session. Nova enables its tool loop
 for these hosted questions even when Chat's separate investigation setting is
 deterministic. Exact inventory shortcuts still avoid unnecessary searches.
+Voice research selects evidence through question-specific tools and does not load
+broad Microsoft documentation passages before tool selection. These passages can
+both exceed the voice budget and redirect public research to an unrelated product.
+Other voice investigations bound optional documentation and tool history in UTF-8
+bytes, retaining the newest observation and explicitly marking omitted evidence.
+Natural indirect counts such as “tell me how many devices I have in my tenant”
+use snapshot totals; filtered and compound requests still go through reasoning.
+Ordinary failed answers and question deadlines return a recoverable result after session/scope validation;
+hosted voice displays and speaks the recovery, stays connected and accepts the next
+question. Stop, transport errors and changed scope still invalidate the session.
+Context, malformed-tool, provider and iteration failures have distinct recovery copy.
 Search queries are limited to 1,000 characters, obvious emails/IDs/IPs/credentials
 are rejected, responses are bounded to 1 MiB, and retrieved evidence is bounded
 before returning to the reasoning model. Voice tool descriptions are compact to

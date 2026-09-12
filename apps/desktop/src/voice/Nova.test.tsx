@@ -143,14 +143,14 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
       close = vi.fn();
     },
   );
-  let finish!: (value: { text: string }) => void;
+  let finish!: (value: { text: string; answerError?: string }) => void;
   const bridge = makeMockBridge({
     nova: vi.fn(async (input) => {
       if (input.action === "status") return { hasKey: true };
       if (input.action === "start")
         return { sessionId: "voice-session", sdp: "v=0" };
       if (input.action === "answer")
-        return new Promise<{ text: string }>((resolve) => {
+        return new Promise<{ text: string; answerError?: string }>((resolve) => {
           finish = resolve;
         });
       return {};
@@ -242,7 +242,27 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   expect(screen.getByLabelText("Conversation captions")).toHaveTextContent(
     "Backend: The tenant has 9 Intune devices. Nova: Yes, nine Intune devices.",
   );
+  act(() => {
+    emit({ type: "session.input_transcript.delta", delta: "Research macOS" });
+    emit({ type: "session.delegation.created", delegation: { id: "task-3", target: "client" } });
+  });
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "Research macOS" })));
+  await act(async () => finish({ text: "Search failed. You can ask another question.", answerError: "Search failed. Retry later." }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Search failed. Retry later.");
+  expect(track.stop).not.toHaveBeenCalled();
+  expect(dc.close).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Stop Nova" })).toHaveAttribute("data-phase", "error");
+  expect(dc.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.commentary.append", delegation_id: "task-3", content: "Search failed. You can ask another question." }));
+  act(() => {
+    emit({ type: "session.input_transcript.delta", delta: "How many devices?" });
+    emit({ type: "session.delegation.created", delegation: { id: "task-4", target: "client" } });
+  });
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "How many devices?" })));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  await act(async () => finish({ text: "9 devices." }));
+  expect(dc.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.commentary.append", delegation_id: "task-4", content: "9 devices." }));
   await user.click(screen.getByRole("button", { name: "Stop" }));
+  expect(track.stop).toHaveBeenCalled();
 });
 
 it("explains microphone permission recovery without starting a hosted session", async () => {

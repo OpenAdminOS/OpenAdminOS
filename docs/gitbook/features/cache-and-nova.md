@@ -102,7 +102,7 @@ also skip the reasoning-model round trip. Speech recognition and voice generatio
 still add latency; cache access is only one part of response time.
 
 The selected reasoning model decides when to search. Public research uses OpenAI's
-Responses API and GPT-4.1 mini with the same saved Nova key. Your API project needs
+Responses API and GPT-5.4 mini with the same saved Nova key. Your API project needs
 access to that model and Responses; search and model usage incur API charges.
 Use a reasoning model capable of tool use. Nova uses its investigation loop for
 hosted research regardless of Chat's separate investigation preference.
@@ -111,7 +111,9 @@ Open **evidence in Chat** for clickable public sources and **What ran** for sear
 queries, timing and failures. Public sources describe external facts, not your
 tenant's state. Missing or failed search evidence is reported explicitly. Each
 question permits up to three searches; narrow the question if research exceeds
-that limit or the voice context budget. Stop cancels pending research.
+that limit or the voice context budget. A failed answer shows a recovery message;
+OpenAI Voice stays connected so you can retry or ask another question. Open Chat to
+inspect the failed investigation. Stop cancels pending research.
 
 Research queries should contain public product names and versions, not tenant
 names, user details, device identifiers or credentials. The app sends the research

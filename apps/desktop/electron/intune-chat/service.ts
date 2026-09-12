@@ -2134,7 +2134,9 @@ export class IntuneChatService {
             });
             const agentic = await runAgenticChat({
               question: modelQuestion,
-              documentation: await this.retrieveDocumentationSafely(modelQuestion),
+              documentation: options.voice && options.webSearch
+                ? []
+                : await this.retrieveDocumentationSafely(modelQuestion),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -2228,7 +2230,13 @@ export class IntuneChatService {
               if (options.webSearch) {
                 // A tenant-only fallback would discard web evidence and could invent current facts.
                 assistantStatus = "failed";
-                assistantError = "Nova could not finish the investigation within its tool or context limits. Narrow the question or choose a reasoning model that supports tool use, then retry.";
+                assistantError = agentic.reason === "context-limit"
+                  ? "This question exceeded Nova's voice context budget. Ask about fewer details or open Chat for a longer investigation."
+                  : agentic.reason === "malformed-output"
+                    ? "The selected reasoning model could not produce a valid tool request. Retry or select a model that supports tool use."
+                    : agentic.reason === "provider-unavailable"
+                      ? "The selected reasoning model is unavailable. Check the provider connection and retry."
+                      : "Nova reached its tool-call limit before finishing. Ask a more focused question or open Chat to inspect the evidence.";
                 assistantContent = assistantError;
                 emitDelta(assistantContent);
               } else await streamDeterministicAnswer(agentic.fallbackNotice);

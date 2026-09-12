@@ -235,11 +235,9 @@ export class NovaService {
       }
       const controller = new AbortController();
       this.pendingAnswer = controller;
-      const signal = AbortSignal.any([
-        session.controller.signal,
-        controller.signal,
-        AbortSignal.timeout(120000),
-      ]);
+      const deadline = AbortSignal.timeout(120000);
+      const scopeSignal = AbortSignal.any([session.controller.signal, controller.signal]);
+      const signal = AbortSignal.any([scopeSignal, deadline]);
       let searches = 0;
       const webSearch: WebSearch | undefined = session.mode === "openai" && session.consent
         ? async (query) => {
@@ -284,17 +282,18 @@ export class NovaService {
         },
       )
         .catch((error) => {
-          assertAnswerActive(signal);
+          scopeSignal.throwIfAborted();
+          if (deadline.aborted) return undefined;
           throw error;
         })
         .finally(() => {
           if (this.pendingAnswer === controller) this.pendingAnswer = undefined;
         });
-      assertAnswerActive(signal);
+      scopeSignal.throwIfAborted();
       if (revision !== this.answerRevision)
         throw new Error("This question was replaced.");
       const current = await this.state();
-      assertAnswerActive(signal);
+      scopeSignal.throwIfAborted();
       if (
         current.activeTenantId !== session.tenantId ||
         current.activeProviderId !== session.providerId ||
@@ -305,12 +304,20 @@ export class NovaService {
         throw new Error(
           "Tenant or provider changed. This voice result was discarded.",
         );
+      if (deadline.aborted || !result) {
+        const answerError = "Nova's investigation timed out. Retry or choose a faster reasoning model. For tenant questions, preloading Cache can also help.";
+        return { answerError, text: `${answerError} You can ask another question.`, conversationId: result?.conversation.id ?? session.conversationId };
+      }
       session.conversationId = result.conversation.id;
-      if (result.assistantMessage.status !== "completed")
-        throw new Error(
-          result.assistantMessage.error ||
-            "Nova could not answer. Open Chat to inspect the result.",
-        );
+      if (result.assistantMessage.status !== "completed") {
+        const answerError = result.assistantMessage.error ||
+          "Nova could not answer. Open Chat to inspect the result.";
+        return {
+          answerError,
+          text: boundedVoiceAnswer(`${answerError} You can retry or ask another question.`),
+          conversationId: result.conversation.id,
+        };
+      }
       return {
         text: boundedVoiceAnswer(result.assistantMessage.content),
         conversationId: result.conversation.id,

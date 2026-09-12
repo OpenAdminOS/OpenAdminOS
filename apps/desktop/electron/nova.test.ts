@@ -435,3 +435,42 @@ it("hosted voice delegates general public research as well as tenant comparisons
   assert.match(buildNovaInstructions(state, "", true), /search the public web for any topic/);
   assert.match(buildNovaInstructions(state, "", false), /unavailable in local voice/);
 });
+
+it("keeps a valid voice session usable after an investigation failure", async () => {
+  const f = fixture();
+  const inputs: SendIntuneChatMessageInput[] = [];
+  const nova = new NovaService(f.secrets, async () => f.state, async input => {
+    inputs.push(input);
+    return {
+      conversation: { id: "recoverable-conversation" },
+      assistantMessage: inputs.length === 1
+        ? { status: "failed", content: "", error: "Search is temporarily unavailable. Retry later." }
+        : { status: "completed", content: "42 devices" },
+    } as SendIntuneChatMessageResult;
+  }, async () => Response.json({ transport: { sdp: "answer" } }));
+  await nova.handle({ action: "configure", apiKey: "test-key" });
+  const { sessionId } = await nova.handle({ action: "start", mode: "openai", tenantId: "tenant-a", consent: true, sdp: "v=0" });
+  const first = await nova.handle({ action: "answer", sessionId: sessionId!, text: "Research macOS" });
+  assert.match(first.answerError!, /temporarily unavailable/);
+  assert.match(first.text!, /retry or ask another question/);
+  const next = await nova.handle({ action: "answer", sessionId: sessionId!, text: "How many devices?" });
+  assert.equal(next.text, "42 devices");
+  assert.equal(next.answerError, undefined);
+  assert.equal(inputs[1]?.conversationId, "recoverable-conversation");
+  await nova.handle({ action: "stop" });
+  await assert.rejects(nova.handle({ action: "answer", sessionId: sessionId!, text: "Continue" }), /changed|expired/);
+});
+
+it("recovers from a question deadline without renewing or invalidating the session", async t => {
+  const f = fixture();
+  const nova = new NovaService(f.secrets, async () => f.state, async (_input, options) => {
+    options.signal?.throwIfAborted();
+    return { conversation: { id: "after-timeout" }, assistantMessage: { status: "completed", content: "42 devices" } } as SendIntuneChatMessageResult;
+  });
+  const { sessionId } = await nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false });
+  const deadline = t.mock.method(AbortSignal, "timeout", () => AbortSignal.abort(new DOMException("Deadline", "TimeoutError")));
+  const result = await nova.handle({ action: "answer", sessionId: sessionId!, text: "Inspect my tenant" });
+  assert.match(result.answerError!, /timed out/);
+  deadline.mock.restore();
+  assert.equal((await nova.handle({ action: "answer", sessionId: sessionId!, text: "How many devices?" })).text, "42 devices");
+});

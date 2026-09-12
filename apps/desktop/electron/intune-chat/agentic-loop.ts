@@ -1,4 +1,4 @@
-import { assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS } from "./voice-context.js";
+import { assertVoicePromptBudget, clipVoiceText, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import type {
   GraphCacheResourceKind,
   IntuneChatAgentSuggestion,
@@ -139,7 +139,9 @@ export async function runAgenticChat(
     attempts += 1;
     assertNotCancelled(input.signal);
     const system = buildAgenticSystemPrompt(input);
-    const prompt = buildLoopPrompt(input, turns);
+    const prompt = input.voice
+      ? buildVoiceLoopPrompt(input, turns, system)
+      : buildLoopPrompt(input, turns);
     if (input.voice) {
       try { assertVoicePromptBudget(system, prompt, input.promptByteLimit); }
       catch {
@@ -225,7 +227,7 @@ export async function runAgenticChat(
             trace: execution.trace,
           },
           null,
-          2,
+          input.voice ? undefined : 2,
         ),
         input.observationCharBudget ?? DEFAULT_OBSERVATION_CHAR_BUDGET,
       ),
@@ -303,8 +305,53 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string 
       : "",
     `Admin question:\n${input.question}`,
     transcript ? `Conversation so far:\n${transcript}` : "",
+    input.voice && input.tools.webSearch
+      ? "For current public facts, use web_search before answering. Local documentation is not evidence of the latest public release. For tenant facts, use cache/Graph evidence. Choose the tools the question needs."
+      : "",
     "Next response:",
   ].filter(Boolean).join("\n\n");
+}
+
+/** Optional documentation must never crowd out the question or tool evidence. */
+function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], system: string): string {
+  const limit = input.promptByteLimit ?? VOICE_PROMPT_BYTE_LIMIT;
+  const compact = {
+    ...input,
+    // Broad Microsoft passages can redirect public research to an unrelated product.
+    // Hosted voice obtains evidence through the tools selected for this question.
+    documentation: (input.tools.webSearch ? [] : input.documentation ?? []).slice(0, 2).map(chunk => ({
+      file: clipVoiceText(chunk.file, 200),
+      title: chunk.title ? clipVoiceText(chunk.title, 160) : undefined,
+      text: clipVoiceText(chunk.text, 600),
+    })),
+  };
+  const recent = turns.map(turn => ({ ...turn }));
+  let omitted = false;
+  const build = () => buildLoopPrompt(compact, omitted
+    ? [{ role: "repair", content: "Earlier tool exchanges were omitted to fit voice context. Do not treat missing detail as absent evidence; retrieve it again if needed." }, ...recent]
+    : recent);
+  let prompt = build();
+  const size = () => Buffer.byteLength(system) + Buffer.byteLength(prompt);
+  if (size() <= limit) return prompt;
+  compact.documentation = [];
+  prompt = build();
+  // Preserve the newest tool exchange. Older observations remain in the Chat trace.
+  while (size() > limit && recent.length > 2) {
+    recent.shift();
+    omitted = true;
+    prompt = build();
+  }
+  if (size() > limit) {
+    const observation = recent.slice().reverse().find(turn => turn.role === "observation");
+    if (observation) {
+      const notice = "\n... evidence truncated by voice budget; omitted records are not absent. Do not infer totals from this excerpt. ...";
+      const available = Buffer.byteLength(observation.content) - (size() - limit) - Buffer.byteLength(notice);
+      observation.content = clipVoiceText(observation.content, Math.max(0, available)) + notice;
+      prompt = build();
+    }
+  }
+  // The caller still enforces the hard byte limit, including an oversized question.
+  return prompt;
 }
 
 function parseModelAction(text: string): ParsedModelAction {

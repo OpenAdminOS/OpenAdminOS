@@ -1499,6 +1499,8 @@ export type NovaRequest =
   | { action: "answer" | "speak"; sessionId: string; text: string }
   | { action: "transcribe"; sessionId: string; audio: number[] };
 export interface NovaResponse {
+  /** A failed answer, with the session still valid for the next question. */
+  answerError?: string;
   route?: string;
   hasKey?: boolean;
   sessionId?: string;

@@ -421,6 +421,7 @@ export function Nova({
               text: heard.text,
             });
             if (token !== generation.current) return;
+            setError(answer.answerError || "");
             setCaption(answer.text || "No answer returned.");
             setConversation(answer.conversationId);
             if (answer.route) {
@@ -506,7 +507,10 @@ export function Nova({
               (current + prefix + event.delta).slice(-3000),
             );
             lastSpeaker = role;
-            if (role === "User") setPhase("listening");
+            if (role === "User") {
+              setError("");
+              setPhase("listening");
+            }
           } else if (
             event.type === "session.delegation.created" &&
             typeof event.delegation?.id === "string"
@@ -549,6 +553,7 @@ export function Nova({
                 )
                   return;
                 pendingAnswers = 0;
+                setError(answer.answerError || "");
                 setConversation(answer.conversationId);
                 if (answer.route) {
                   setExpanded(false);
@@ -1114,7 +1119,8 @@ function voiceErrorMessage(error: unknown): string {
     return "No microphone is available. Connect an input device and start Nova again.";
   if (name === "NotReadableError")
     return "The microphone could not be opened. Check whether another app is using it and retry.";
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method ['"][^'"]+['"]: (?:Error: )?/, "");
 }
 
 /** Resolution-independent ribbons: audio scales the shell, CSS moves the interior. */

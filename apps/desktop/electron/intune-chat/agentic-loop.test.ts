@@ -294,3 +294,39 @@ describe("repair turns do not consume the investigation budget", () => {
     }
   });
 });
+
+it("bounds voice documentation and UTF-8 evidence over multiple tool turns", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nova-context-budget-"));
+  const store = seededStore(dir);
+  try {
+    let calls = 0;
+    const prompts: string[] = [];
+    const llm: RunLlmApi = {
+      available: true,
+      async complete(input) {
+        prompts.push(input.prompt);
+        assert.ok(Buffer.byteLength(input.system ?? "") + Buffer.byteLength(input.prompt) <= 12000);
+        calls++;
+        return { text: calls <= 3
+          ? JSON.stringify({ tool: "graph_get", params: { path: "/deviceManagement/managedDevices", scopes: ["DeviceManagementManagedDevices.Read.All"] } })
+          : "Evidence is partial; I cannot infer a tenant-wide count from it.", model: "test" };
+      },
+      async *stream() {},
+    };
+    const tools = toolContext(store);
+    tools.graphForScopes = async () => ({
+      listManagedDevices: async () => [],
+      retireManagedDevice: async () => { throw Error("Unexpected write"); },
+      request: async () => ({ value: Array.from({ length: 4 }, () => ({ operatingSystem: "Windows", description: "漢字".repeat(5000) })) }),
+    });
+    const result = await runAgenticChat({
+      ...baseInput(store, llm), voice: true, observationCharBudget: 6000,
+      documentation: Array.from({ length: 12 }, () => ({ file: "reference.md", text: "Public documentation ".repeat(1000) })),
+      tools,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.toolTrace.length, 3);
+    assert.match(prompts.at(-1)!, /evidence truncated by voice budget/);
+    assert.match(prompts.at(-1)!, /Earlier tool exchanges were omitted/);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});

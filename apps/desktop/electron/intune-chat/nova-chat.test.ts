@@ -281,3 +281,60 @@ it("natural cached inventory phrasing skips reasoning without swallowing compoun
     assert.ok(f.prompts.length > 0, "compound public research must still reach reasoning");
   } finally { await f.cleanup(); }
 });
+
+
+it("Nova can research macOS with a populated documentation index and large web evidence", async () => {
+  const f = await fixture();
+  try {
+    f.store.retrieveDocumentation = async () => Array.from({ length: 12 }, (_, i) => ({
+      file: `docs/macos-${i}.md`, title: "macOS reference", text: "Device documentation 漢字. ".repeat(400), score: 1,
+    }));
+    let completions = 0;
+    f.llm.complete = async opts => {
+      f.prompts.push(opts);
+      completions++;
+      assert.ok(Buffer.byteLength(opts.system ?? "") + Buffer.byteLength(opts.prompt) <= 12000);
+      return { text: completions === 1
+        ? JSON.stringify({ tool: "web_search", params: { query: "Latest macOS versions Apple" } })
+        : "Apple publishes the current macOS versions on its support page.", model: "test-model" };
+    };
+    let searches = 0;
+    const result = await f.store.streamIntuneChatMessage(
+      { content: "Hi Nova. How are you Um, can you tell me what the latest version versions for macOS are" }, () => {},
+      { ...options, webSearch: async () => {
+        searches++;
+        return { text: "Apple macOS guidance 漢字. ".repeat(180), sources: [{ title: "Apple releases", url: "https://support.apple.com/en-us/100100" }], searchedAt: new Date().toISOString() };
+      } },
+    );
+    assert.equal(result.assistantMessage.status, "completed", result.assistantMessage.content);
+    assert.equal(searches, 1);
+    assert.equal(completions, 2);
+    assert.match(f.prompts[1]!.prompt, /Apple macOS guidance/);
+    assert.match(result.assistantMessage.content, /Public web sources/);
+  } finally { await f.cleanup(); }
+});
+
+it("answers indirect spoken device counts without investigating or dropping filters", async () => {
+  const f = await fixture();
+  try {
+    for (const content of [
+      "Hi, can you tell me how many devices I have in my tenant",
+      "Tell me how many devices I have in my tenant",
+      "Hello Nova, I want you to tell me how many devices do I have in my tenant?",
+      "How many Intune devices are in our tenant?",
+    ]) {
+      const result = await f.store.streamIntuneChatMessage({ content }, () => {}, {
+        ...options, webSearch: async () => { assert.fail("Count must not search"); },
+      });
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.match(result.assistantMessage.content, /1 Intune managed devices/);
+    }
+    assert.equal(f.prompts.length, 0);
+    for (const content of [
+      "How many Windows devices I have in my tenant",
+      "How many devices I have in my tenant and what is the latest macOS version?",
+      "How many devices I have in my tenant that are not compliant",
+    ]) await f.store.streamIntuneChatMessage({ content }, () => {}, options);
+    assert.equal(f.prompts.length, 3, "filters and compound requests still need reasoning");
+  } finally { await f.cleanup(); }
+});

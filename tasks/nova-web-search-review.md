@@ -20,3 +20,13 @@ Validation:
 The API key used for verification was provided through non-echoed process input and
 held only in memory. Test processes ended without persisting it in app settings or
 repository files. The user should rotate the key shared in conversation.
+
+
+## Voice context failure follow-up
+
+- Reproduced the reported context-limit failure before the first model call with a populated documentation index. Broad passages were unbounded in voice investigations. Hosted voice now chooses evidence through task-specific tools, avoiding both the overflow and irrelevant Microsoft passages redirecting public research. Other voice investigations compact documentation and UTF-8 tool history; omissions are explicit and full traces stay in Chat.
+- Added regressions for the actual indirect device-count wording, filtered/compound exclusions, populated documentation, large multibyte evidence across multiple calls, recoverable answer failures, deadline recovery, and a subsequent successful question without reconnecting. Scope changes, cancellation and late-answer rejection remain enforced.
+- Live read-only Lokka beta checks verified managed-device fields, a continuation page, and HTTP 400 for an invalid field.
+- Retrieved twelve passages using the Mac's installed index and embedding model (about 24.6 kB before system/tool instructions, already over the 12 kB voice budget). Exercised the production reasoning loop and Ollama adapter against its Qwen3 8B model. With broad passages it answered from obsolete Defender documentation; after the fix it selected a general macOS web query and completed from Apple release evidence.
+- That Mac routing test supplied a controlled search result based on the Apple Support page checked during review. It did not invoke paid OpenAI search or the microphone. Earlier live OpenAI API validation remains documented above. The successful Mac run spent about 97 seconds in two local reasoning calls; some earlier attempts timed out. Local model speed and decision quality remain limitations, not a passed low-latency claim.
+- Final validation: desktop backend and renderer tests, typecheck, build, Graph QA, release compatibility and documentation generation. Updated source-based Chat grounding check to preserve ordinary Chat retrieval while allowing voice research to select its own evidence.
