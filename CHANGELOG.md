@@ -4,6 +4,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- Preserve Nova’s final spoken word at live delegation boundaries and keep overlapping speech fragments together in conversation bubbles.
+
 - Add Nova’s optional Conversation panel with chat bubbles and live task activity; isolate spoken questions so greetings, interruptions and old requests cannot replace tenant answers.
 
 - Fix Nova voice context failures with installed documentation, recognize indirect device-count questions, and keep voice connected after recoverable answer failures.

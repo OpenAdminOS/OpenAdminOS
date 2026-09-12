@@ -35,7 +35,7 @@ export class NovaTranscript {
 
   capture(offsetMs?: number): { text: string; history: NovaConversationTurn[] } | undefined {
     const cutoff = Number.isFinite(offsetMs) && offsetMs! >= 0 ? offsetMs : undefined;
-    const fragments = this.fragments.filter(fragment => cutoff === undefined || fragment.start === undefined || fragment.start < cutoff);
+    const fragments = this.fragments.filter(fragment => cutoff === undefined || fragment.start === undefined || fragment.start <= cutoff);
     fragments.sort((a, b) => a.start !== undefined && b.start !== undefined ? a.start - b.start || a.sequence - b.sequence : a.sequence - b.sequence);
     const turns: Turn[] = [];
     for (const fragment of fragments) {

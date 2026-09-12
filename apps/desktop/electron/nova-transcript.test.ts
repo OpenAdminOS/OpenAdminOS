@@ -64,3 +64,10 @@ it("does not reattach a consumed question when no spoken answer separates reques
   transcript.append({ type: "session.input_transcript.delta", delta: "How many devices?" });
   assert.equal(transcript.capture()?.text, "How many devices?");
 });
+
+it("includes the boundary word observed in a real Live device-count delegation", () => {
+  const transcript = new NovaTranscript();
+  for (const [delta, start_ms] of [[" How many", 8000], [" devices", 8400], [" do", 8600], [" I", 8800], [" have in", 9000], [" my", 9200], [" tenant", 9600]] as const)
+    transcript.append({ type: "session.input_transcript.delta", delta, start_ms, end_ms: start_ms + 200 });
+  assert.equal(transcript.capture(9600)?.text, "How many devices do I have in my tenant");
+});

@@ -167,6 +167,10 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     dc.onmessage!({ data: JSON.stringify(event) });
   act(() => {
     emit({ type: "session.started" });
+    emit({ type: "session.input_transcript.delta", delta: "Hello Nova.", start_ms: 0, end_ms: 200 });
+    emit({ type: "session.output_transcript.delta", delta: "Hi!", start_ms: 100, end_ms: 300 });
+    emit({ type: "session.input_transcript.delta", delta: " Who are you?", start_ms: 400, end_ms: 700 });
+    emit({ type: "session.output_transcript.delta", delta: " I'm Nova.", start_ms: 800, end_ms: 1000 });
     emit({ type: "session.input_transcript.delta", delta: "Do you see" });
     emit({ type: "session.input_transcript.delta", delta: " any devices?" });
     emit({
@@ -175,6 +179,8 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     });
     emit({ type: "session.output_transcript.delta", delta: "Let me check." });
   });
+  expect(screen.getByText("Hello Nova. Who are you?")).toBeVisible();
+  expect(screen.getByText("Hi! I'm Nova.")).toBeVisible();
   expect(screen.getByLabelText("Conversation")).toHaveTextContent(
     "YouDo you see any devices?NovaLet me check.",
   );

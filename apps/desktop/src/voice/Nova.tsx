@@ -34,13 +34,16 @@ export function Nova({
   const [conversationItems, setConversationItems] = useState<NovaConversationItem[]>([]);
   const itemSequence = useRef(0);
   const conversationToggle = useRef<HTMLButtonElement>(null);
-  const appendSpeech = useCallback((role: "user" | "assistant", text: string) => {
+  const appendSpeech = useCallback((role: "user" | "assistant", text: string, startMs?: number, endMs?: number) => {
     const id = `speech-${++itemSequence.current}`;
     setConversationItems(current => {
-      const last = current.at(-1);
-      if (last?.kind === "speech" && last.role === role)
-        return current.map(item => item.id === last.id ? { ...last, text: (last.text + text).slice(-8000) } : item);
-      return [...current, { id, kind: "speech", role, text } as NovaConversationItem].slice(-80);
+      const last = current.filter(item => item.kind === "speech" && item.role === role).at(-1);
+      // Live speech can overlap. Keep nearby fragments in their speaker's bubble.
+      const continues = last?.kind === "speech" && (last === current.at(-1) ||
+        (Number.isFinite(startMs) && last.endMs !== undefined && startMs! >= last.endMs && startMs! - last.endMs < 1200));
+      if (continues && last?.kind === "speech")
+        return current.map(item => item.id === last.id ? { ...last, endMs, text: (last.text + text).slice(-8000) } : item);
+      return [...current, { id, kind: "speech", role, text, endMs } as NovaConversationItem].slice(-80);
     });
   }, []);
   const recordActivity = useCallback((id: string, activity: NovaActivity, result?: string) => {
@@ -534,7 +537,7 @@ export function Nova({
             const role = event.type.includes("input_") ? "User" : "Nova";
             if (typeof event.delta !== "string") return;
             if (!transcript.append(event)) return;
-            appendSpeech(role === "User" ? "user" : "assistant", event.delta);
+            appendSpeech(role === "User" ? "user" : "assistant", event.delta, event.start_ms, event.end_ms);
             if (role === "User") {
               setError("");
               setPhase("listening");

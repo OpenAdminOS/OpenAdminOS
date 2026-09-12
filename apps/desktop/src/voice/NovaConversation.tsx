@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { NovaActivity } from "@openadminos/agent-sdk";
 
 export type NovaConversationItem =
-  | { id: string; kind: "speech"; role: "user" | "assistant"; text: string }
+  | { id: string; kind: "speech"; role: "user" | "assistant"; text: string; endMs?: number }
   | { id: string; kind: "activity"; status: NovaActivity["status"] | "stopped" | "replaced"; steps: NovaActivity[]; result?: string };
 
 export function ConversationIcon() {

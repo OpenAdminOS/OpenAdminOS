@@ -339,7 +339,7 @@ seconds without interaction; pointer or keyboard activity reveals the controls.
 An optional Conversation panel defaults hidden, with one saved visibility preference
 across compact and full-window views. On wide windows it sits on the right beside
 the orb; narrow windows stack it below the orb. User and Nova speech appear as
-separate chat bubbles. Request-scoped execution events show cache reads, Graph
+separate chat bubbles; nearby overlapping fragments stay with their speaker. Request-scoped execution events show cache reads, Graph
 queries, web research and answer preparation, with completed, failed, replaced
 and stopped states. It displays no private model reasoning. The panel remains
 visible when enabled; hiding it never stops audio. Setup, errors,
@@ -371,7 +371,7 @@ polite requests and "currently installed OS versions on my devices", use exact
 snapshot metadata/SQL aggregates without a reasoning-model round trip. Filtered or
 investigative questions continue through Chat. Original input/output transcript
 fragments retain their session timestamps and are grouped at each delegation
-boundary; previously consumed requests are not concatenated into new questions.
+boundary, including a word that starts exactly at that offset; previously consumed requests are not concatenated into new questions.
 Greetings, identity questions, jokes and waiting chatter do not replace pending
 investigations. Bounded spoken and completed Chat history is reference context
 only for follow-up questions. Voice answers retain Nova’s identity and omit
