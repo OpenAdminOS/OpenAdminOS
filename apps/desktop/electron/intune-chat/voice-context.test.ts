@@ -168,3 +168,11 @@ it("summarizes encryption and OS versions without treating unknown values as fal
     /^Detail coverage is partial/,
   );
 });
+
+it('retains the device question for why they follow-ups', () => {
+  const result = voiceConversationContext('Can you tell me why they are non-compliant?', [], false, [
+    { role: 'user', text: 'Which devices are non-compliant?' }, { role: 'assistant', text: 'Device A and Device B.' },
+  ]);
+  assert.match(result.history, /Device A and Device B/);
+  assert.match(result.planningQuestion, /Which devices are non-compliant/);
+});

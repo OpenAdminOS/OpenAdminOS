@@ -1,3 +1,4 @@
+import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
@@ -1532,7 +1533,7 @@ export class IntuneChatService {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
-        if (!status?.refreshedAt) return true;
+        if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
         return (
           Date.now() - new Date(status.refreshedAt).getTime() >
           resourceStalenessMs(resource)
@@ -1796,7 +1797,7 @@ export class IntuneChatService {
       : undefined;
     const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
-    const directResources = options.voice ? voiceResourcesForQuestion(content) : undefined;
+    const directResources = options.voice ? (voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content)) : undefined;
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
@@ -1922,7 +1923,7 @@ export class IntuneChatService {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
-        if (!status?.refreshedAt) return true;
+        if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
         return (
           Date.now() - new Date(status.refreshedAt).getTime() >
           resourceStalenessMs(resource)
@@ -2047,7 +2048,7 @@ export class IntuneChatService {
       });
     };
 
-    const directVoiceAnswer = options.voice ? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) : undefined;
+    const directVoiceAnswer = options.voice ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) : undefined;
     if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
       emitDelta(assistantContent);
