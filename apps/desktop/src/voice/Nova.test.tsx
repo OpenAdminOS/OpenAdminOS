@@ -52,14 +52,19 @@ it("expands the voice view and hides captions without requesting the microphone"
   renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
-  await user.click(screen.getByRole("button", { name: "Expand view" }));
+  await user.click(screen.getByRole("button", { name: "Full screen" }));
   expect(
-    screen.getByRole("region", { name: "Nova voice assistant" }),
+    screen.getByRole("dialog", { name: "Nova voice assistant" }),
   ).toHaveClass("nova-panel-expanded");
-  await user.click(screen.getByRole("button", { name: "Captions on" }));
   expect(
     screen.queryByLabelText("Conversation captions"),
   ).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+  await user.click(screen.getByRole("button", { name: "Captions off" }));
+  expect(screen.getByLabelText("Conversation captions")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Exit full screen" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Full screen" })).toHaveFocus();
   await user.click(screen.getByRole("button", { name: "Voice settings" }));
   expect(screen.getByLabelText("Voice provider")).toBeVisible();
   expect(getUserMedia).not.toHaveBeenCalled();
@@ -179,6 +184,17 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
       text: "Do you see any devices?",
     }),
   );
+  expect(screen.getByRole("button", { name: "Stop Nova" })).toHaveAttribute(
+    "data-phase",
+    "thinking",
+  );
+  await user.click(screen.getByRole("button", { name: "Full screen" }));
+  expect(screen.getByRole("dialog")).toHaveAttribute("data-active", "true");
+  expect(
+    screen.queryByLabelText("Conversation captions"),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Exit full screen" }));
+  expect(track.stop).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Stop Nova" })).toHaveAttribute(
     "data-phase",
     "thinking",

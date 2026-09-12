@@ -333,8 +333,14 @@ reported encryption; deterministic aggregates include OS versions and encryption
 with unknown values retained.
 
 Nova is available across app pages through Talk to Nova and Alt+V. Its compact
-panel can expand for presentations, with optional captions and separate microphone
-mute and session stop controls. Orb motion follows microphone and WebRTC playback
+panel can fill the app window for presentations, covering the sidebar and page.
+During an active session, the centered orb is the only visible element after three
+seconds without interaction; pointer or keyboard activity reveals the controls.
+Full-window captions default off independently of compact captions. Setup, errors,
+muted microphone and local recording submission remain discoverable. Full-window
+view traps keyboard focus and makes the background inert; exiting restores focus
+without restarting audio. Escape still stops the session. Optional captions and
+separate microphone mute and session stop controls remain available. Orb motion follows microphone and WebRTC playback
 levels; transcript arrival does not imply speech playback. Reduced-motion
 preferences suppress animated movement. Voice settings remain available from the
 idle panel. The microphone starts only on click.

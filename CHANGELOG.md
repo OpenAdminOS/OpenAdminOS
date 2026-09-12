@@ -4,6 +4,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- Add full-window Nova voice with a centered orb, fading controls, optional captions and accessible keyboard navigation.
+
 - Fix Nova cancellation, follow-up context, per-session consent and key-save races; answer common device summaries directly and bound reasoning context.
 
 - Give Nova the selected tenant context, restore on-demand tenant retrieval, and clarify voice/agent-provider setup with connection checks and bounded spoken answers.

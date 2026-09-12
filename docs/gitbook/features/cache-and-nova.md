@@ -49,7 +49,12 @@ needs too much context, narrow it or continue in Chat. Stop cancels pending tena
 work as well as audio; a new delegated question replaces the previous pending one.
 Changing the reasoning model or its local/hosted status ends the voice session.
 
-Use **Expand view** for a larger orb and captions during presentations. **Mute mic**
+Use **Full screen** to fill the app window with Nova. During a conversation, only
+the animated orb remains after three seconds without interaction. Move the pointer,
+tap the view or use the keyboard to reveal the controls. Captions start hidden in
+this view and can be enabled independently. **Exit full screen** returns to the
+compact panel without interrupting the conversation. Setup and errors stay visible;
+**Escape** still ends the session. **Mute mic**
 keeps the conversation connected while disabling microphone audio; **Stop** ends
 the session and releases the microphone. Captions can be hidden independently.
 The orb responds to microphone and hosted playback audio, with distinct waiting

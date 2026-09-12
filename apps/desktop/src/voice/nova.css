@@ -257,3 +257,135 @@
   color: var(--color-text);
   font-weight: 500;
 }
+
+/* Full-window voice keeps the same session, media elements and animated orb. */
+.nova-root-fullscreen {
+  inset: 0;
+  z-index: 1000;
+}
+.nova-root-fullscreen > .nova-launch {
+  display: none;
+}
+.nova-root-fullscreen .nova-panel-expanded {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: max(32px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
+  align-items: center;
+  overscroll-behavior: contain;
+}
+.nova-panel-expanded > * {
+  width: min(100%, 600px);
+}
+.nova-panel-expanded > .nova-header {
+  width: 100%;
+  max-width: none;
+  gap: 12px;
+}
+.nova-header > strong {
+  margin-right: auto;
+}
+.nova-panel-expanded[data-active="true"] > .nova-orb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(34vw, 38dvh, 340px);
+  height: min(34vw, 38dvh, 340px);
+  min-width: 130px;
+  min-height: 130px;
+  margin: 0;
+  translate: -50% -50%;
+}
+.nova-panel-expanded[data-active="true"] > .nova-session-controls {
+  position: absolute;
+  bottom: 80px;
+  flex-wrap: wrap;
+}
+.nova-panel-expanded[data-active="true"] > .nova-tools {
+  position: absolute;
+  bottom: 28px;
+}
+.nova-panel-expanded[data-active="true"] > .nova-caption {
+  position: absolute;
+  top: 130px;
+  max-height: min(15dvh, 110px);
+  min-height: 0;
+  font-size: 16px;
+}
+.nova-panel-expanded[data-active="true"] > .nova-status {
+  position: absolute;
+  bottom: 140px;
+}
+.nova-panel-expanded[data-active="true"] > .nova-footnote,
+.nova-panel-expanded[data-active="true"] > .nova-evidence {
+  display: none;
+}
+.nova-panel-expanded[data-active="true"] > .nova-tenant,
+.nova-panel-expanded[data-active="true"] > .nova-trust {
+  align-self: flex-start;
+}
+.nova-panel-expanded[data-active="true"] > [role="alert"] {
+  position: absolute;
+  top: 130px;
+  max-height: min(15dvh, 110px);
+  overflow: auto;
+}
+.nova-panel-expanded[data-active="true"] > .nova-header,
+.nova-panel-expanded[data-active="true"] > .nova-session-controls,
+.nova-panel-expanded[data-active="true"] > .nova-tools,
+.nova-panel-expanded[data-active="true"] > .nova-tenant,
+.nova-panel-expanded[data-active="true"] > .nova-trust,
+.nova-panel-expanded[data-active="true"] > .nova-status {
+  transition: opacity 200ms ease;
+}
+.nova-panel-expanded[data-quiet="true"] > .nova-header:not(:focus-within),
+.nova-panel-expanded[data-quiet="true"]
+  > .nova-session-controls:not(:focus-within),
+.nova-panel-expanded[data-quiet="true"] > .nova-tools:not(:focus-within),
+.nova-panel-expanded[data-quiet="true"] > .nova-tenant,
+.nova-panel-expanded[data-quiet="true"] > .nova-trust,
+.nova-panel-expanded[data-quiet="true"] > .nova-status {
+  opacity: 0;
+  pointer-events: none;
+}
+.nova-panel-expanded[data-quiet="true"] {
+  cursor: none;
+}
+.nova-panel-expanded button {
+  min-height: 44px;
+}
+@media (max-height: 540px) {
+  .nova-panel-expanded[data-active="true"] > .nova-orb {
+    width: 130px;
+    height: 130px;
+  }
+  .nova-panel-expanded[data-active="true"] > .nova-status {
+    top: auto;
+    bottom: 135px;
+  }
+  .nova-panel-expanded[data-active="true"] > .nova-caption {
+    top: 20%;
+    right: 24px;
+    width: 28%;
+    max-height: 42%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-panel-expanded > * {
+    transition: none !important;
+  }
+}
+
+.nova-panel-expanded[data-active="true"] > .nova-playback-recovery {
+  position: absolute;
+  top: 130px;
+  width: auto;
+}

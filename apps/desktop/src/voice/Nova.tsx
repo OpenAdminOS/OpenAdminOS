@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
@@ -48,6 +49,18 @@ export function Nova({
     reasoning?.status === "connected" &&
     (mode !== "local" || reasoning.isLocal);
   const [expanded, setExpanded] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const [focusCaptions, setFocusCaptions] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const controlsTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    clearTimeout(controlsTimer.current);
+    controlsTimer.current = setTimeout(() => setControlsVisible(false), 3000);
+  }, []);
   const [captions, setCaptions] = useState(true);
   const [muted, setMuted] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -410,7 +423,10 @@ export function Nova({
             if (token !== generation.current) return;
             setCaption(answer.text || "No answer returned.");
             setConversation(answer.conversationId);
-            if (answer.route) navigate(answer.route);
+            if (answer.route) {
+              setExpanded(false);
+              navigate(answer.route);
+            }
             const speech = await api.nova({
               action: "speak",
               sessionId: sessionId.current,
@@ -534,7 +550,10 @@ export function Nova({
                   return;
                 pendingAnswers = 0;
                 setConversation(answer.conversationId);
-                if (answer.route) navigate(answer.route);
+                if (answer.route) {
+                  setExpanded(false);
+                  navigate(answer.route);
+                }
                 const result =
                   answer.text || "No answer available. Open Chat for details.";
                 setCaption((current) =>
@@ -622,8 +641,47 @@ export function Nova({
     onHostedChange?.(active && mode === "openai");
     return () => onHostedChange?.(false);
   }, [active, mode, onHostedChange]);
-  return (
-    <div className="nova-root">
+  useEffect(() => {
+    if (!open || !expanded) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const siblings = Array.from(document.body.children).filter(
+      (element): element is HTMLElement =>
+        element instanceof HTMLElement && element !== root.current,
+    );
+    const previousInert = siblings.map((element) => element.inert);
+    siblings.forEach((element) => {
+      element.inert = true;
+    });
+    panel.current?.focus();
+    revealControls();
+    return () => {
+      clearTimeout(controlsTimer.current);
+      siblings.forEach((element, index) => {
+        element.inert = previousInert[index];
+      });
+      if (previousFocus?.isConnected) previousFocus.focus();
+      else
+        root.current?.querySelector<HTMLButtonElement>(".nova-launch")?.focus();
+    };
+  }, [open, expanded, revealControls]);
+  useEffect(() => {
+    if (expanded && active) revealControls();
+  }, [expanded, active, revealControls]);
+  const showCaptions = expanded ? focusCaptions : captions;
+  const quiet =
+    expanded &&
+    active &&
+    !controlsVisible &&
+    !error &&
+    !muted &&
+    !playBlocked &&
+    phase !== "connecting" &&
+    !(mode === "local" && phase === "listening");
+  return createPortal(
+    <div
+      ref={root}
+      className={`nova-root${open && expanded ? " nova-root-fullscreen" : ""}`}
+    >
       <button
         className="nova-launch"
         onClick={() => {
@@ -639,10 +697,49 @@ export function Nova({
       {open && (
         <section
           id="nova-panel"
+          ref={panel}
+          tabIndex={-1}
+          role={expanded ? "dialog" : "region"}
+          aria-modal={expanded || undefined}
+          data-active={active}
+          data-quiet={quiet}
+          onPointerMove={expanded ? revealControls : undefined}
+          onPointerDown={expanded ? revealControls : undefined}
+          onKeyDown={(event) => {
+            if (!expanded) return;
+            revealControls();
+            if (event.key !== "Tab") return;
+            const controls = Array.from(
+              panel.current?.querySelectorAll<HTMLElement>(
+                'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]',
+              ) || [],
+            ).filter((element) => element.getClientRects().length > 0);
+            const first = controls[0],
+              last = controls.at(-1);
+            if (!first) {
+              event.preventDefault();
+              return;
+            }
+            if (
+              event.shiftKey &&
+              (document.activeElement === first ||
+                document.activeElement === panel.current)
+            ) {
+              event.preventDefault();
+              last?.focus();
+            } else if (
+              !event.shiftKey &&
+              (document.activeElement === last ||
+                document.activeElement === panel.current)
+            ) {
+              event.preventDefault();
+              first.focus();
+            }
+          }}
           className={`nova-panel${expanded ? " nova-panel-expanded" : ""}`}
           aria-label="Nova voice assistant"
         >
-          <div className="flex items-center justify-between">
+          <div className="nova-header flex items-center justify-between">
             <strong>
               Nova <span className="nova-eyebrow">VOICE</span>
             </strong>
@@ -650,9 +747,12 @@ export function Nova({
               variant="ghost"
               size="sm"
               aria-pressed={expanded}
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => {
+                setExpanded(!expanded);
+                revealControls();
+              }}
             >
-              {expanded ? "Compact view" : "Expand view"}
+              {expanded ? "Exit full screen" : "Full screen"}
             </Button>
             <Button
               variant="ghost"
@@ -665,12 +765,12 @@ export function Nova({
               Close
             </Button>
           </div>
-          <p className="text-xs text-[var(--color-text-muted)]">
+          <p className="nova-tenant text-xs text-[var(--color-text-muted)]">
             {state.tenants.find((t) => t.id === state.activeTenantId)
               ?.displayName || "No tenant selected"}{" "}
             · {location.pathname.split("/")[1] || "Chat"}
           </p>
-          <p className="text-xs text-[var(--color-accent)]">
+          <p className="nova-trust text-xs text-[var(--color-accent)]">
             {mode === "openai"
               ? "Hosted voice · audio and shared context go to OpenAI"
               : "Local voice · audio stays on this device"}
@@ -712,7 +812,13 @@ export function Nova({
                     : "Whisper recognizes speech and Kokoro speaks the answer. Tenant answers use the local reasoning provider above."}
                 </p>
                 {!reasoningReady && (
-                  <Button size="sm" onClick={() => navigate("/settings")}>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setExpanded(false);
+                      navigate("/settings");
+                    }}
+                  >
                     Configure reasoning
                   </Button>
                 )}
@@ -739,7 +845,7 @@ export function Nova({
             <span className="nova-orb-core" aria-hidden="true" />
             <span className="nova-orb-ring" aria-hidden="true" />
           </button>
-          <div role="status" className="text-center text-sm">
+          <div role="status" className="nova-status text-center text-sm">
             {phase === "idle"
               ? "Start a conversation. Say “Hey Nova”."
               : phase === "connecting"
@@ -753,7 +859,7 @@ export function Nova({
                     : "Nova is speaking"}
           </div>
           {active && (
-            <div className="flex justify-center gap-2">
+            <div className="nova-session-controls flex justify-center gap-2">
               <Button
                 variant="secondary"
                 disabled={
@@ -790,10 +896,14 @@ export function Nova({
           <div className="nova-tools">
             <button
               type="button"
-              aria-pressed={captions}
-              onClick={() => setCaptions(!captions)}
+              aria-pressed={showCaptions}
+              onClick={() =>
+                expanded
+                  ? setFocusCaptions(!focusCaptions)
+                  : setCaptions(!captions)
+              }
             >
-              Captions {captions ? "on" : "off"}
+              Captions {showCaptions ? "on" : "off"}
             </button>
             {!active && (
               <button
@@ -806,7 +916,7 @@ export function Nova({
               </button>
             )}
           </div>
-          {captions && (
+          {showCaptions && (
             <div className="nova-caption" aria-label="Conversation captions">
               {caption || "Your conversation will appear here."}
             </div>
@@ -814,6 +924,7 @@ export function Nova({
           <audio ref={output} hidden />
           {playBlocked && (
             <Button
+              className="nova-playback-recovery"
               onClick={() =>
                 void output.current
                   ?.play()
@@ -830,8 +941,12 @@ export function Nova({
           )}
           {conversation && (
             <Button
+              className="nova-evidence"
               variant="secondary"
-              onClick={() => navigate(`/chat/${conversation}`)}
+              onClick={() => {
+                setExpanded(false);
+                navigate(`/chat/${conversation}`);
+              }}
             >
               Open evidence in Chat
             </Button>
@@ -860,7 +975,10 @@ export function Nova({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => navigate("/cache")}
+                  onClick={() => {
+                    setExpanded(false);
+                    navigate("/cache");
+                  }}
                 >
                   Review cache
                 </Button>
@@ -960,7 +1078,8 @@ export function Nova({
           </p>
         </section>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
