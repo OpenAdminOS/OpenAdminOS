@@ -18,3 +18,5 @@ Validation:
 - Full repository tests, typecheck, desktop build and Graph QA are run before push. Graph QA uses the installed msgraph reference directory.
 
 Limits: no external message was sent to a user's account in this pass. Connector acceptance is not delivery proof. Existing in-flight connector sends cannot necessarily be recalled by interruption. Hosted speech uses OpenAI's documented instructions.append plus application playback gating; exact speech wording and real-device microphone latency require live testing. The Mac was unavailable over SSH during the initial review. No new Mac/Windows hands-on result is claimed.
+
+CI follow-up: the release gate hit an intermittent second-answer timeout in the Chat smoke harness while the same head passed the local smoke and the independent CI Chat smoke. Its native textarea setter previously checked only the immediate DOM value, before React committed a sendable draft. The harness now waits for the enabled Send control before dispatching Enter; the response assertions remain unchanged.

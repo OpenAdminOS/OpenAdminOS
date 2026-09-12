@@ -1489,7 +1489,12 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     setter?.call(textarea, value);
     textarea.focus();
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    await waitFor(() => textarea.value === value, "chat input value");
+    // Native value changes happen before React commits the draft. Waiting only
+    // for the DOM value can dispatch Enter into the previous empty-input closure.
+    await waitFor(() => {
+      const send = findButton("Send");
+      return textarea.value === value && Boolean(send && !send.disabled);
+    }, "chat draft ready to send");
   };
   const findSelectByAccessibleName = (name: string): HTMLSelectElement | undefined => {
     const byAriaLabel = document.querySelector(`select[aria-label="${name}"]`);
