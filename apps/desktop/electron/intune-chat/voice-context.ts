@@ -177,8 +177,16 @@ function classifyVoiceQuestion(question: string): VoiceQuestion | undefined {
   const text = question
     .trim()
     .replace(/^(?:hey|hi)(?: nova)?[,!\s]+/i, "")
+    .replace(/^please /i, "")
+    .replace(/^(?:can|could|would) you (?:please )?(?:tell me |show me )/i, "")
     .replace(/[?.!]+$/, "")
     .trim();
+  const count = /^(?:what(?: is|'s) (?:the )?(?:total )?(?:number|count) of|(?:show|tell) me (?:the )?(?:total )?(?:number|count) of) (?:(intune|managed|entra) )?devices(?: (?:in|connected to|enrolled in) (?:my|our|the) tenant)?$/i.exec(text);
+  if (count) return { kind: "inventory", resources: count[1]?.toLowerCase() === "entra" ? ["entraDevices"] : count[1] ? ["managedDevices"] : ["managedDevices", "entraDevices"] };
+  if (/^(?:(?:what|which) (?:are )?(?:the )?(?:currently )?(?:installed )?(?:os|operating system) versions (?:are (?:currently )?installed on|are running on|on|across|of) (?:my|our|the) devices|(?:show|list)(?: me)? (?:the )?(?:os|operating system) versions (?:on|across|of) (?:my|our|the) devices)$/i.test(text))
+    return { kind: "versions", resources: ["managedDevices"] };
+  if (/^(?:what(?: is|'s) (?:the )?encryption (?:status|state) (?:of|for) (?:my|our|the) devices|(?:show|tell) me (?:the )?encryption (?:status|state) (?:of|for) (?:my|our|the) devices)$/i.test(text))
+    return { kind: "encryption", resources: ["managedDevices"] };
   const match =
     /^(?:(?:do|can) you (?:see|access)(?: any)?(?: of)?(?: my| our| the)? |how many )(?:(intune|managed|entra) )?devices(?: (?:do (?:i|we|you) have|are there|are in (?:my|our|the) tenant))?$/i.exec(
       text,

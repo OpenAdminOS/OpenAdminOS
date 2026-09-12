@@ -29,7 +29,7 @@ tenant questions it asks the app to retrieve missing or stale relevant data.
 An empty cache does not mean there are no devices. Permission failures and partial
 coverage still need to be resolved through the tenant connection and Cache page.
 
-Voice and reasoning have separate setup. The OpenAI key enables hosted speech;
+Voice and reasoning have separate setup. The OpenAI key enables hosted speech and public web research;
 tenant answers use the reasoning provider and model shown in Nova. Connect that
 provider in Settings. Local voice needs a local reasoning model plus Whisper for
 recognition and Kokoro for speech output. Use **Check voice setup** to check key/model
@@ -82,13 +82,41 @@ Choose **OpenAI · GPT-Live-1**, enter your API key and choose **Save key**. The
 is kept in OS-secured storage. GPT-Live API access and billing are separate from
 ChatGPT or Codex CLI subscriptions.
 
-Before starting, acknowledge that audio and shared tenant answers are sent to
-OpenAI. The agent model may use a different provider; its normal hosted-context
+Before starting, acknowledge that audio, shared tenant answers and public research
+queries are sent to OpenAI. The agent model may use a different provider; its normal hosted-context
 consent also applies. A local agent model does not make OpenAI voice local.
 Remove the saved key from the panel whenever you no longer need it.
 
 If the connection fails, check API access, billing, network access and microphone
 permissions. On macOS, allow OpenAdminOS under Privacy & Security → Microphone.
+
+### Public web research
+
+In OpenAI Voice, Nova can choose tenant data, public web research, or both for a
+question. For example, ask about your device versions and compare them with current
+vendor guidance, or ask about a recent product announcement. This is general web
+research, not a predefined OS lookup. Simple tenant counts still use your cache
+without a paid search. Natural requests such as “What are the currently installed
+OS versions on my devices?” and “What is the encryption status of my devices?”
+also skip the reasoning-model round trip. Speech recognition and voice generation
+still add latency; cache access is only one part of response time.
+
+The selected reasoning model decides when to search. Public research uses OpenAI's
+Responses API and GPT-4.1 mini with the same saved Nova key. Your API project needs
+access to that model and Responses; search and model usage incur API charges.
+Use a reasoning model capable of tool use. Nova uses its investigation loop for
+hosted research regardless of Chat's separate investigation preference.
+
+Open **evidence in Chat** for clickable public sources and **What ran** for search
+queries, timing and failures. Public sources describe external facts, not your
+tenant's state. Missing or failed search evidence is reported explicitly. Each
+question permits up to three searches; narrow the question if research exceeds
+that limit or the voice context budget. Stop cancels pending research.
+
+Research queries should contain public product names and versions, not tenant
+names, user details, device identifiers or credentials. The app sends the research
+query, rather than the full cache, to OpenAI. Local voice and ordinary typed Chat
+do not use this hosted search capability.
 
 ### Local voice
 

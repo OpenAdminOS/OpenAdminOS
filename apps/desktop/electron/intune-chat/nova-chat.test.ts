@@ -93,6 +93,7 @@ async function fixture(empty = false) {
   await store.setChatInvestigationMode("always-deterministic");
   return {
     store,
+    llm,
     calls,
     prompts,
     cleanup: () => rm(dir, { recursive: true, force: true }),
@@ -208,4 +209,75 @@ it("answers reported encryption and OS summaries without fetching unrelated poli
   } finally {
     await f.cleanup();
   }
+});
+
+
+it("Nova combines tenant and public evidence, preserving citations in Chat within the voice budget", async () => {
+  const f = await fixture();
+  try {
+    const replies = [
+      JSON.stringify({ tool: "query_cache", params: { resource: "managedDevices", limit: 1 } }),
+      JSON.stringify({ tool: "web_search", params: { query: "Current Windows support guidance" } }),
+      JSON.stringify({ final: true, answer: "The tenant has a Windows device. Public guidance describes supported Windows releases." }),
+    ];
+    let searches = 0;
+    f.llm.complete = async opts => {
+      assert.ok(Buffer.byteLength(opts.system ?? "") + Buffer.byteLength(opts.prompt) <= 12000);
+      return { text: replies.shift() ?? "Unexpected extra request", model: "test-model" };
+    };
+    const result = await f.store.streamIntuneChatMessage(
+      { content: "Compare my devices with current Windows support guidance" }, () => {},
+      { ...options, webSearch: async query => {
+        assert.equal(query, "Current Windows support guidance");
+        searches++;
+        return { text: "Public guidance", sources: [{ title: "Vendor guidance", url: "https://learn.microsoft.com/windows" }], searchedAt: new Date().toISOString() };
+      } },
+    );
+    assert.equal(searches, 1);
+    assert.equal(result.assistantMessage.status, "completed", result.assistantMessage.content);
+    assert.deepEqual(result.assistantMessage.toolTrace?.map(t => t.tool), ["query_cache", "web_search"]);
+    const saved = (await f.store.getIntuneChatMessages(result.conversation.id)).find(m => m.role === "assistant")!;
+    assert.equal(saved.toolTrace?.[1]?.tool, "web_search");
+    assert.equal(saved.toolTrace?.[1]?.webSources?.length, 1);
+    assert.match(result.assistantMessage.content, /Public web sources/);
+    assert.match(result.assistantMessage.content, /https:\/\/learn.microsoft.com\/windows/);
+  } finally { await f.cleanup(); }
+});
+it("a simple tenant count does not trigger paid web research", async () => {
+  const f = await fixture();
+  try {
+    const result = await f.store.streamIntuneChatMessage({ content: "How many devices?" }, () => {}, {
+      ...options, webSearch: async () => { assert.fail("Search was unnecessary"); },
+    });
+    assert.match(result.assistantMessage.content, /1 Intune managed devices/);
+    assert.equal(f.prompts.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+it("failed web research cannot silently become an uncited current-facts answer", async () => {
+  const f = await fixture();
+  try {
+    const replies = [JSON.stringify({ tool: "web_search", params: { query: "Recent public guidance" } }), "An unsupported current claim"];
+    f.llm.complete = async () => ({ text: replies.shift()!, model: "test-model" });
+    const result = await f.store.streamIntuneChatMessage({ content: "Research recent vendor guidance" }, () => {}, {
+      ...options, webSearch: async () => { throw new Error("OpenAI web search failed (HTTP 429). Retry later."); },
+    });
+    assert.equal(result.assistantMessage.status, "failed");
+    assert.match(result.assistantMessage.content, /HTTP 429/);
+    assert.doesNotMatch(result.assistantMessage.content, /unsupported current claim/);
+  } finally { await f.cleanup(); }
+});
+
+it("natural cached inventory phrasing skips reasoning without swallowing compound research", async () => {
+  const f = await fixture();
+  try {
+    const samples = ["What are the currently installed OS versions on my devices?", "Hey Nova, can you tell me what is the number of Intune devices in my tenant?", "What is the encryption status of my devices?"];
+    for (const content of samples) {
+      const result = await f.store.streamIntuneChatMessage({ content }, () => {}, options);
+      assert.equal(result.assistantMessage.status, "completed");
+    }
+    assert.equal(f.prompts.length, 0);
+    await f.store.streamIntuneChatMessage({ content: "What are the currently installed OS versions on my devices, and what are the latest available versions?" }, () => {}, options);
+    assert.ok(f.prompts.length > 0, "compound public research must still reach reasoning");
+  } finally { await f.cleanup(); }
 });

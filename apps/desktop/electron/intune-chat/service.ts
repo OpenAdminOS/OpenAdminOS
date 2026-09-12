@@ -1,3 +1,4 @@
+import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -185,6 +186,8 @@ export interface ChatServiceHost {
 }
 
 export interface IntuneChatStreamOptions {
+  /** Main-process capability, passed only by a consented hosted Nova session. */
+  webSearch?: WebSearch;
   voice?: boolean;
   signal?: AbortSignal;
   /** Pin delegated voice work before fetching data or invoking a provider. */
@@ -2117,7 +2120,7 @@ export class IntuneChatService {
             providerId,
             model: selectedModel ?? llm.defaultModel,
           });
-          if (capability.enabled) {
+          if (capability.enabled || options.webSearch) {
             sendProgress({
               message: "Investigative mode started.",
               stage: "running-tools",
@@ -2137,7 +2140,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: this.buildChatToolContext(tenant.id, options.signal),
+              tools: { ...this.buildChatToolContext(tenant.id, options.signal), webSearch: options.webSearch },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
               agentSuggestions,
@@ -2217,12 +2220,18 @@ export class IntuneChatService {
               emitDelta(assistantContent);
             } else {
               sendProgress({
-                message: agentic.fallbackNotice,
+                message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice,
                 stage: "building-context",
                 contextStatus: "active",
                 modelStatus: "pending",
               });
-              await streamDeterministicAnswer(agentic.fallbackNotice);
+              if (options.webSearch) {
+                // A tenant-only fallback would discard web evidence and could invent current facts.
+                assistantStatus = "failed";
+                assistantError = "Nova could not finish the investigation within its tool or context limits. Narrow the question or choose a reasoning model that supports tool use, then retry.";
+                assistantContent = assistantError;
+                emitDelta(assistantContent);
+              } else await streamDeterministicAnswer(agentic.fallbackNotice);
             }
           } else {
             if (capability.reason === "capability-fallback" && capability.notice) {
@@ -2269,6 +2278,23 @@ export class IntuneChatService {
       return result;
     }
 
+    const webFailures = (toolTrace ?? []).filter(t => t.tool === "web_search" && t.error);
+    const searched = (toolTrace ?? []).some(t => t.tool === "web_search" && !t.error);
+    if (webFailures.length && !searched) {
+      assistantStatus = "failed";
+      assistantError = `Public web research could not be verified. ${webFailures[0]!.error}`;
+      assistantContent = assistantError;
+      emitDelta(assistantContent, "");
+    } else if (webFailures.length) {
+      assistantContent += "\n\nSome public searches failed; the web evidence is incomplete. See What ran for details.";
+    }
+    const webSources = [...new Map((toolTrace ?? []).flatMap(t => t.webSources ?? []).map(source => [source.url, source])).values()];
+    if (webSources.length) {
+      assistantContent += "\n\nPublic web sources:\n" + webSources.map(source =>
+        `- [${source.title.replace(/[\[\]\\\n\r]/g, " ") || "Source"}](<${source.url.replace(/>/g, "%3E")}>)`
+      ).join("\n");
+      emitDelta(assistantContent, "");
+    }
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,
       conversationId: conversation.id,

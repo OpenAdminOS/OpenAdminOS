@@ -4,6 +4,7 @@ import {
   NovaService,
   buildNovaInstructions,
   boundedVoiceAnswer,
+  type NovaChatOptions,
 } from "./nova.js";
 import type {
   AppState,
@@ -32,10 +33,12 @@ function fixture(reply?: (url: string) => Response) {
   } as AppState;
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const chats: SendIntuneChatMessageInput[] = [];
+  const chatOptions: NovaChatOptions[] = [];
   const nova = new NovaService(
     secrets,
     async () => state,
-    async (input) => {
+    async (input, options) => {
+      chatOptions.push(options);
       chats.push(input);
       return {
         conversation: { id: "conversation-a" },
@@ -50,7 +53,7 @@ function fixture(reply?: (url: string) => Response) {
       );
     },
   );
-  return { nova, state, requests, chats, secrets };
+  return { nova, state, requests, chats, secrets, chatOptions };
 }
 it("hosted voice requires consent, uses client delegation, and does not return the key", async () => {
   const { nova, requests } = fixture();
@@ -410,4 +413,25 @@ it("requires a new session after changing the model or local-provider trust", as
     /changed/,
   );
   assert.equal(chats.length, 0);
+});
+
+
+it("web research capability is scoped to a consented hosted session and stops with it", async () => {
+  const f = fixture();
+  let session = await f.nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false });
+  await f.nova.handle({ action: "answer", sessionId: session.sessionId!, text: "Research current vendor guidance" });
+  assert.equal(f.chatOptions[0].webSearch, undefined);
+  await f.nova.handle({ action: "configure", apiKey: "test-key" });
+  session = await f.nova.handle({ action: "start", mode: "openai", tenantId: "tenant-a", consent: true, sdp: "v=0" });
+  await f.nova.handle({ action: "answer", sessionId: session.sessionId!, text: "Research current vendor guidance" });
+  assert.equal(typeof f.chatOptions[1].webSearch, "function");
+  await f.nova.handle({ action: "stop" });
+  const requests = f.requests.length;
+  await assert.rejects(f.chatOptions[1].webSearch!("public query"));
+  assert.equal(f.requests.length, requests);
+});
+it("hosted voice delegates general public research as well as tenant comparisons", () => {
+  const { state } = fixture();
+  assert.match(buildNovaInstructions(state, "", true), /search the public web for any topic/);
+  assert.match(buildNovaInstructions(state, "", false), /unavailable in local voice/);
 });

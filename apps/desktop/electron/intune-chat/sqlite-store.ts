@@ -3992,6 +3992,7 @@ function readToolTrace(row: ToolCallRow): IntuneChatToolTraceEntry {
       typeof output.resultSummary === "string"
         ? output.resultSummary
         : row.error ?? "Tool call completed.",
+    ...(Array.isArray(output.webSources) ? { webSources: output.webSources } : {}),
     durationMs:
       typeof output.durationMs === "number" && Number.isFinite(output.durationMs)
         ? output.durationMs
@@ -4021,6 +4022,7 @@ function isInvestigationToolName(value: unknown): value is IntuneChatInvestigati
     value === "query_cache" ||
     value === "graph_get" ||
     value === "refresh_resource" ||
+    value === "web_search" ||
     value === "query_drift"
   );
 }

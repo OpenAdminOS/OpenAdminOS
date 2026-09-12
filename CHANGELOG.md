@@ -4,6 +4,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- Speed up common Nova cache questions by answering more natural device-count, OS-version and encryption requests directly from snapshot aggregates.
+
+- Add general OpenAI web research to Nova, with automatic tenant/web tool selection, explicit sharing, cancellation, and public sources retained in Chat.
+
 - Sharpen Nova’s orb with scalable layered artwork, richer highlights and fluid motion that transitions smoothly between voice states.
 
 - Add full-window Nova voice with a centered orb, fading controls, optional captions and accessible keyboard navigation.

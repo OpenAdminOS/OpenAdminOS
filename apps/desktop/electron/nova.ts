@@ -1,3 +1,4 @@
+import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
 import { randomUUID } from "node:crypto";
 import { resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import type {
@@ -10,6 +11,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 export interface NovaChatOptions {
+  webSearch?: WebSearch;
   signal: AbortSignal;
   scope: {
     tenantId: string;
@@ -161,7 +163,7 @@ export class NovaService {
               session: {
                 model: "gpt-live-1",
                 delegation: { type: "client" },
-                instructions: buildNovaInstructions(state, name),
+                instructions: buildNovaInstructions(state, name, true),
               },
               transport: { type: "webrtc", sdp: input.sdp },
             }),
@@ -238,6 +240,23 @@ export class NovaService {
         controller.signal,
         AbortSignal.timeout(120000),
       ]);
+      let searches = 0;
+      const webSearch: WebSearch | undefined = session.mode === "openai" && session.consent
+        ? async (query) => {
+            assertAnswerActive(signal);
+            if (++searches > 3) throw new Error("Nova reached the limit of three web searches for this question. Narrow the question and retry.");
+            const current = await this.state();
+            assertAnswerActive(signal);
+            if (this.session !== session || current.activeTenantId !== session.tenantId ||
+                current.activeProviderId !== session.providerId || selectedNovaModel(current) !== session.model ||
+                current.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+              throw new Error("Nova’s tenant or provider changed. Start a new conversation before searching.");
+            const key = await this.secrets.get("api-key");
+            assertAnswerActive(signal);
+            if (!key) throw new Error("Add an OpenAI API key in Nova settings before searching.");
+            return searchPublicWeb(query, key, signal, this.request);
+          }
+        : undefined;
       const result = await this.chat(
         {
           content: input.text,
@@ -255,6 +274,7 @@ export class NovaService {
         },
         {
           signal,
+          webSearch,
           scope: {
             tenantId: session.tenantId,
             providerId: session.providerId,
@@ -474,11 +494,13 @@ export class NovaService {
 }
 
 export function boundedVoiceAnswer(text: string): string {
+  const sourceIndex = text.indexOf("\n\nPublic web sources:");
+  if (sourceIndex >= 0) text = `${text.slice(0, sourceIndex)} Public source links are available in Chat.`;
   if (text.length <= 2000) return text;
   return `${text.slice(0, 1900)}… The full answer and evidence are available in Chat.`;
 }
 
-export function buildNovaInstructions(state: AppState, name: string): string {
+export function buildNovaInstructions(state: AppState, name: string, webSearch = false): string {
   const tenant = state.tenants.find((t) => t.id === state.activeTenantId);
   const provider = state.providers.find((p) => p.id === state.activeProviderId);
   return [
@@ -489,6 +511,9 @@ export function buildNovaInstructions(state: AppState, name: string): string {
     "If asked whether a tenant is connected, say yes and name the selected tenant. Do not claim that you have no tenant access just because records are not in this prompt.",
     "You access permitted tenant data THROUGH the OpenAdminOS backend. You do not need a separate Microsoft sign-in inside the voice model.",
     "Delegation policy:",
+    webSearch
+      ? "The backend can also search the public web for any topic. Delegate questions needing current information, web research, external documentation, recommendations or comparisons with public facts. The backend chooses tenant tools, web search, or both. Do not answer current public facts from memory. Tell the user when research failed; sources remain in Chat."
+      : "Public web search is unavailable in local voice. Do not claim to browse or verify current public information.",
     "Backend tools: read permitted devices, OS versions, encryption, compliance, users, groups, policies, apps and available security logs; query or refresh relevant tenant cache resources; navigate app pages. Detailed results stay in Chat.",
     "Delegate to the backend when: the user asks about any devices or other tenant records, asks whether you can see devices, requests counts or comparisons, asks a follow-up about tenant evidence, or requests app navigation. Delegate BEFORE answering. Wait for the result; never guess absence, counts or completion.",
     "Do not delegate to the backend when: greeting the user, naming the already selected tenant, or repeating a verified result. Ask a brief clarification when a request is unclear.",

@@ -992,10 +992,12 @@ export function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProv
 
 
 
-export function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
+export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicResearch = false): string {
   return [
     "You are OpenAdminOS Chat.",
-    "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
+    publicResearch
+      ? "Answer tenant questions from retrieved tenant evidence and public questions from retrieved web evidence. Clearly distinguish those sources."
+      : "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
     "If the context is missing, stale, partial, or has Graph errors, say that plainly.",
     "Do not invent tenant state, counts, users, devices, policies, or remediation results.",
     "A tool returning zero rows means zero matched that query, not that the tenant has none. Never state that a tenant has none of something on the strength of an empty result; check the unfiltered count first.",
@@ -1003,7 +1005,9 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
     "When cachedRows is below tenantTotal, or pageLimitReached is true, say that the detail rows cover only part of the tenant.",
     "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",
     isLocalProvider
-      ? "The selected provider is local; keep wording consistent with local-only trust."
+      ? publicResearch
+        ? "Reasoning is local, but this hosted Nova session shares audio, answers and public research queries with OpenAI under explicit session consent."
+        : "The selected provider is local; keep wording consistent with local-only trust."
       : "The selected provider is hosted; be explicit when tenant context is being used to produce the answer.",
     "Use concise admin-facing prose. No hype, no exclamation marks.",
   ].join("\n");

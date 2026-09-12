@@ -789,7 +789,7 @@ export function Nova({
           </p>
           <p className="nova-trust text-xs text-[var(--color-accent)]">
             {mode === "openai"
-              ? "Hosted voice · audio and shared context go to OpenAI"
+              ? "Hosted voice + web search · audio, shared context and searches go to OpenAI"
               : "Local voice · audio stays on this device"}
           </p>
           {!active && (
@@ -1012,8 +1012,8 @@ export function Nova({
                 checked={consent}
                 onChange={(e) => setConsent(e.target.checked)}
               />{" "}
-              Allow audio and relevant tenant context to the selected hosted
-              providers for this session.
+              Allow audio, relevant tenant context and public web research queries
+              to the selected hosted providers for this session.
             </label>
           )}
           {!active && (settings || (mode === "openai" && !hasKey)) && (
@@ -1032,14 +1032,15 @@ export function Nova({
               {mode === "openai" ? (
                 <>
                   <p className="text-xs text-[var(--color-text-muted)]">
-                    Audio and shared tenant answers go to OpenAI. Agent
+                    Audio, shared tenant answers and public research queries go to OpenAI.
+                    Nova can choose web search when it needs current information. Agent
                     reasoning uses{" "}
                     {
                       state.providers.find(
                         (p) => p.id === state.activeProviderId,
                       )?.name
                     }
-                    . API billing is separate from CLI subscriptions.
+                    . Voice and web search incur API charges separately from CLI subscriptions.
                   </p>
                   <label className="nova-field">
                     OpenAI API key {hasKey ? "· saved securely" : ""}

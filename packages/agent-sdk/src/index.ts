@@ -964,13 +964,15 @@ export type IntuneChatInvestigationToolName =
   | "find_graph_endpoint"
   | "graph_get"
   | "refresh_resource"
-  | "query_drift";
+  | "query_drift"
+  | "web_search";
 
 export interface IntuneChatToolTraceEntry {
   id: string;
   tool: IntuneChatInvestigationToolName;
   params: unknown;
   resultSummary: string;
+  webSources?: Array<{ title: string; url: string }>;
   durationMs: number;
   createdAt: string;
   completedAt: string;

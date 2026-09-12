@@ -360,7 +360,8 @@ provider and checks readiness before microphone access. Local voice checks Whisp
 and Kokoro availability; the optional OpenAI model-access check does not gate Live
 on a separate Models API permission.
 
-Common unfiltered inventory, reported encryption and OS-version questions use exact
+Common unfiltered inventory, reported encryption and OS-version questions, including
+polite requests and "currently installed OS versions on my devices", use exact
 snapshot metadata/SQL aggregates without a reasoning-model round trip. Filtered or
 investigative questions continue through Chat. Recent completed conversation turns
 are carried as bounded reference context. Nova limits model input to 12,000 UTF-8
@@ -380,6 +381,26 @@ session and holds the API key in OS-secured storage. Every session requires expl
 hosted voice/context consent. Tenant and agent-provider identity are bound to the
 session and checked before returning results. Local reasoning with hosted voice
 still sends audio and shared context to OpenAI, visibly disclosed in the voice panel.
+OpenAI Voice also grants its reasoning loop a general `web_search` tool after
+session consent. The selected reasoning model decides whether to use tenant tools,
+public research, or both. Public research uses the saved Nova key with OpenAI
+Responses, `gpt-4.1-mini` and hosted `web_search`; it sends the standalone public
+query rather than the tenant answer pack. The tool is scoped to the active hosted
+session, unavailable to local voice and ordinary Chat requests, limited to three
+searches per question, and cancelled with the session. Nova enables its tool loop
+for these hosted questions even when Chat's separate investigation setting is
+deterministic. Exact inventory shortcuts still avoid unnecessary searches.
+Search queries are limited to 1,000 characters, obvious emails/IDs/IPs/credentials
+are rejected, responses are bounded to 1 MiB, and retrieved evidence is bounded
+before returning to the reasoning model. Voice tool descriptions are compact to
+leave room for combined tenant and web evidence. These checks are not a general data-loss
+prevention system. The sharing notice includes public research queries and API
+charges. Search failures cannot silently fall back to uncited current claims.
+Citations and search traces persist in Chat; Nova speaks the answer and points to
+Chat for links. Public pages are reference data, never authority to run actions.
+No OS-specific routing, search engine dependency, or automatic local cloud fallback
+is added.
+
 Local voice connects only to separately installed whisper.cpp and Kokoro-FastAPI
 loopback services, with a local agent provider. It uses one-minute, explicitly
 submitted recordings with no cloud fallback. Runtime/model installation and a
