@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
-import type { GraphCacheStatus } from "@openadminos/agent-sdk";
+import {
+  resolveProviderDefaultModel,
+  type GraphCacheStatus,
+} from "@openadminos/agent-sdk";
 import "./nova.css";
 
 export function Nova({
@@ -27,11 +30,20 @@ export function Nova({
     [error, setError] = useState(""),
     [caption, setCaption] = useState("");
   const [connectionCheck, setConnectionCheck] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const keyRevision = useRef(0);
+  const liveReady = useRef(false);
+  const currentPage = useRef(location.pathname);
+  currentPage.current = location.pathname;
   const [checking, setChecking] = useState(false);
   const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus>();
   const reasoning = state.providers.find(
     (p) => p.id === state.activeProviderId,
   );
+  const reasoningModel = resolveProviderDefaultModel(
+    reasoning,
+    state.activeModelByProviderId,
+  ).model;
   const reasoningReady =
     reasoning?.status === "connected" &&
     (mode !== "local" || reasoning.isLocal);
@@ -55,12 +67,19 @@ export function Nova({
     orb = useRef<HTMLButtonElement>(null),
     recorder = useRef<MediaRecorder | null>(null),
     sessionId = useRef("");
+  const delegationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     blobUrl = useRef("");
   const api = window.openAdminOS;
   const stop = useCallback(() => {
     generation.current++;
+    liveReady.current = false;
+    setConsent(false);
+    setKey("");
     clearTimeout(timeout.current);
+    clearTimeout(delegationTimer.current);
     cancelAnimationFrame(frame.current);
     if (recorder.current?.state === "recording") recorder.current.stop();
     recorder.current = null;
@@ -115,13 +134,30 @@ export function Nova({
     setCacheStatus(undefined);
     setConversation(undefined);
     setCaption("");
-  }, [state.activeTenantId, state.activeProviderId, stop]);
+  }, [
+    state.activeTenantId,
+    state.activeProviderId,
+    reasoningModel,
+    reasoning?.isLocal,
+    stop,
+  ]);
   useEffect(() => {
+    let cancelled = false;
+    const revision = keyRevision.current;
     if (open)
       void api
         ?.nova({ action: "status" })
-        .then((r) => setHasKey(!!r.hasKey))
-        .catch((e) => setError(String(e)));
+        .then((result) => {
+          if (!cancelled && revision === keyRevision.current)
+            setHasKey(!!result.hasKey);
+        })
+        .catch((error) => {
+          if (!cancelled && revision === keyRevision.current)
+            setError(voiceErrorMessage(error));
+        });
+    return () => {
+      cancelled = true;
+    };
   }, [open, api]);
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +174,23 @@ export function Nova({
       cancelled = true;
     };
   }, [open, state.activeTenantId, api]);
+  async function configureKey(apiKey: string | null) {
+    if (!api || savingKey) return;
+    keyRevision.current++;
+    setSavingKey(true);
+    setConnectionCheck("");
+    setConsent(false);
+    try {
+      const result = await api.nova({ action: "configure", apiKey });
+      setKey("");
+      setHasKey(!!result.hasKey);
+      setError("");
+    } catch (error) {
+      setError(voiceErrorMessage(error));
+    } finally {
+      setSavingKey(false);
+    }
+  }
   async function checkSetup() {
     if (!api) return;
     const token = generation.current;
@@ -181,7 +234,7 @@ export function Nova({
     };
   }, [stop]);
   useEffect(() => {
-    if (channel.current?.readyState === "open")
+    if (liveReady.current && channel.current?.readyState === "open")
       channel.current.send(
         JSON.stringify({
           type: "session.thinking.append",
@@ -200,7 +253,7 @@ export function Nova({
     const fail = (e: unknown) => {
       if (generation.current === token) {
         stop();
-        setError(e instanceof Error ? e.message : String(e));
+        setError(voiceErrorMessage(e));
       }
     };
     try {
@@ -371,6 +424,12 @@ export function Nova({
             );
             output.current!.src = blobUrl.current;
             setPhase("speaking");
+            output.current!.onerror = () =>
+              fail(
+                new Error(
+                  "Local speech could not be played. Check Kokoro's WAV output and your audio device, then retry.",
+                ),
+              );
             output.current!.onended = () => {
               if (token === generation.current) stop();
             };
@@ -399,8 +458,8 @@ export function Nova({
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
       const dc = pc.createDataChannel("oai-events");
       channel.current = dc;
-      let history = "",
-        queued = Promise.resolve(),
+      let pendingUserText = "",
+        answerRevision = 0,
         lastSpeaker = "";
       const delegated = new Set<string>();
       dc.onmessage = (e) => {
@@ -408,13 +467,14 @@ export function Nova({
         try {
           const event = JSON.parse(e.data);
           if (event.type === "session.started") {
+            liveReady.current = true;
             clearTimeout(timeout.current);
             setPhase("listening");
             dc.send(
               JSON.stringify({
                 type: "session.thinking.append",
                 delegation_id: null,
-                content: `Current app page: ${location.pathname}. No action is approved.`,
+                content: `Current app page: ${currentPage.current}. No action is approved.`,
               }),
             );
           } else if (
@@ -424,7 +484,8 @@ export function Nova({
             const role = event.type.includes("input_") ? "User" : "Nova";
             if (typeof event.delta !== "string") return;
             const prefix = lastSpeaker !== role ? `\n${role}: ` : "";
-            history = (history + prefix + event.delta).slice(-12000);
+            if (role === "User")
+              pendingUserText = (pendingUserText + event.delta).slice(-12000);
             setCaption((current) =>
               (current + prefix + event.delta).slice(-3000),
             );
@@ -437,22 +498,41 @@ export function Nova({
             const id = event.delegation.id;
             if (delegated.has(id)) return;
             delegated.add(id);
-            const text =
-              history.split("\nUser: ").at(-1)?.split("\nNova: ")[0]?.trim() ||
-              history;
-            queued = queued
-              .then(async () => {
-                if (token !== generation.current) return;
-                pendingAnswers++;
-                setPhase("thinking");
+            clearTimeout(delegationTimer.current);
+            // Delegation and transcript events can arrive in the same network burst.
+            delegationTimer.current = setTimeout(() => {
+              if (token !== generation.current || dc.readyState !== "open")
+                return;
+              const text = pendingUserText.trim();
+              if (!text) {
+                dc.send(
+                  JSON.stringify({
+                    type: "session.commentary.append",
+                    delegation_id: id,
+                    content: pendingAnswers
+                      ? "The earlier question is still being checked."
+                      : "Please repeat the question; I did not receive its transcript.",
+                  }),
+                );
+                return;
+              }
+              pendingUserText = "";
+              const revision = ++answerRevision;
+              pendingAnswers = 1;
+              setPhase("thinking");
+              void (async () => {
                 const answer = await api.nova({
                   action: "answer",
                   sessionId: sessionId.current,
                   text,
                 });
-                if (token !== generation.current || dc.readyState !== "open")
+                if (
+                  token !== generation.current ||
+                  revision !== answerRevision ||
+                  dc.readyState !== "open"
+                )
                   return;
-                pendingAnswers--;
+                pendingAnswers = 0;
                 setConversation(answer.conversationId);
                 if (answer.route) navigate(answer.route);
                 const result =
@@ -462,18 +542,19 @@ export function Nova({
                 );
                 lastSpeaker = "";
                 setPhase("listening");
-                for (let i = 0; i < Array.from(result).length; i += 100)
+                const characters = Array.from(result);
+                for (let i = 0; i < characters.length; i += 100)
                   dc.send(
                     JSON.stringify({
                       type: "session.commentary.append",
                       delegation_id: id,
-                      content: Array.from(result)
-                        .slice(i, i + 100)
-                        .join(""),
+                      content: characters.slice(i, i + 100).join(""),
                     }),
                   );
-              })
-              .catch(fail);
+              })().catch((error) => {
+                if (revision === answerRevision) fail(error);
+              });
+            }, 250);
           } else if (event.type === "session.closed") stop();
           else if (event.type === "error")
             fail(
@@ -600,6 +681,7 @@ export function Nova({
                 Voice provider
                 <select
                   value={mode}
+                  disabled={savingKey}
                   onChange={(e) => {
                     stop();
                     setMode(e.target.value as "local" | "openai");
@@ -617,9 +699,7 @@ export function Nova({
                 <p>
                   <strong>Tenant reasoning</strong> ·{" "}
                   {reasoning?.name || "Not selected"}
-                  {reasoning?.defaultModel
-                    ? ` · ${reasoning.defaultModel}`
-                    : ""}
+                  {reasoningModel ? ` · ${reasoningModel}` : ""}
                 </p>
                 <p>
                   {reasoningReady
@@ -647,10 +727,12 @@ export function Nova({
             }
             onClick={() => (active ? stop() : void start())}
             disabled={
-              !reasoningReady ||
-              checking ||
-              !state.activeTenantId ||
-              (mode === "openai" && (!hasKey || !consent))
+              !active &&
+              (!reasoningReady ||
+                checking ||
+                savingKey ||
+                !state.activeTenantId ||
+                (mode === "openai" && (!hasKey || !consent)))
             }
             aria-label={active ? "Stop Nova" : "Start Nova"}
           >
@@ -770,7 +852,7 @@ export function Nova({
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={checking}
+                  disabled={checking || savingKey}
                   onClick={() => void checkSetup()}
                 >
                   {checking ? "Checking…" : "Check voice setup"}
@@ -837,17 +919,8 @@ export function Nova({
                   <div className="flex gap-2">
                     <Button
                       size="sm"
-                      disabled={!key.trim()}
-                      onClick={() =>
-                        void api
-                          ?.nova({ action: "configure", apiKey: key })
-                          .then(() => {
-                            setKey("");
-                            setHasKey(true);
-                            setError("");
-                          })
-                          .catch((e) => setError(String(e)))
-                      }
+                      disabled={!key.trim() || savingKey || checking}
+                      onClick={() => void configureKey(key)}
                     >
                       Save key
                     </Button>
@@ -855,12 +928,8 @@ export function Nova({
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() =>
-                          void api
-                            ?.nova({ action: "configure", apiKey: null })
-                            .then(() => setHasKey(false))
-                            .catch((e) => setError(String(e)))
-                        }
+                        disabled={savingKey || checking}
+                        onClick={() => void configureKey(null)}
                       >
                         Remove key
                       </Button>
@@ -893,4 +962,18 @@ export function Nova({
       )}
     </div>
   );
+}
+
+function voiceErrorMessage(error: unknown): string {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? error.name
+      : undefined;
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return "Microphone access was denied. Allow OpenAdminOS in your system microphone privacy settings, then start Nova again.";
+  if (name === "NotFoundError")
+    return "No microphone is available. Connect an input device and start Nova again.";
+  if (name === "NotReadableError")
+    return "The microphone could not be opened. Check whether another app is using it and retry.";
+  return error instanceof Error ? error.message : String(error);
 }

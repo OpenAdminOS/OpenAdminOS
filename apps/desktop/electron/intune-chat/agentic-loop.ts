@@ -1,3 +1,4 @@
+import { assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS } from "./voice-context.js";
 import type {
   GraphCacheResourceKind,
   IntuneChatAgentSuggestion,
@@ -48,6 +49,8 @@ export const AGENTIC_TOOL_PROTOCOL = [
 ].join("\n");
 
 export interface RunAgenticChatInput {
+  voice?: boolean;
+  promptByteLimit?: number;
   question: string;
   /**
    * Documentation passages retrieved for this question. Empty when no
@@ -89,7 +92,7 @@ export type RunAgenticChatResult =
     }
   | {
       ok: false;
-      reason: "malformed-output" | "iteration-cap" | "provider-unavailable";
+      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit";
       fallbackNotice: string;
       toolTrace: IntuneChatToolTraceEntry[];
       iterations: number;
@@ -135,9 +138,17 @@ export async function runAgenticChat(
   while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
+    const system = buildAgenticSystemPrompt(input);
+    const prompt = buildLoopPrompt(input, turns);
+    if (input.voice) {
+      try { assertVoicePromptBudget(system, prompt, input.promptByteLimit); }
+      catch {
+        return { ok: false, reason: "context-limit", fallbackNotice: "Nova used bounded retrieved evidence because this investigation exceeded its voice context budget.", toolTrace, iterations: iteration, model: responseModel };
+      }
+    }
     const completion = await input.llm.complete({
-      system: buildAgenticSystemPrompt(input),
-      prompt: buildLoopPrompt(input, turns),
+      system,
+      prompt,
       ...(input.model ? { model: input.model } : {}),
       temperature: 0.1,
       maxTokens: Math.max(500, input.maxTokens),
@@ -237,6 +248,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput): string {
   const tenantName = input.tenant.displayName || "Active tenant";
   return [
     buildIntuneChatSystemPrompt(input.providerIsLocal),
+    input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
     "You can investigate read-only tenant data by asking the host to run tools.",
     "Every tool call is visible to the admin and recorded with the final answer.",

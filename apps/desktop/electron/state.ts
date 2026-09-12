@@ -177,7 +177,7 @@ import {
   validateRegistrySource,
 } from "./registry-client.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
-import { IntuneChatService } from "./intune-chat/service.js";
+import { IntuneChatService, type IntuneChatStreamOptions } from "./intune-chat/service.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
 import { GatewayService } from "./gateway/service.js";
@@ -2936,7 +2936,7 @@ export class AppStateStore {
   async streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
-    options: { signal?: AbortSignal } = {},
+    options: IntuneChatStreamOptions = {},
   ): Promise<SendIntuneChatMessageResult> {
     return this.chatService.streamIntuneChatMessage(input, onEvent, options);
   }

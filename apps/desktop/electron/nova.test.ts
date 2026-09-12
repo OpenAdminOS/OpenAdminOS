@@ -50,7 +50,7 @@ function fixture(reply?: (url: string) => Response) {
       );
     },
   );
-  return { nova, state, requests, chats };
+  return { nova, state, requests, chats, secrets };
 }
 it("hosted voice requires consent, uses client delegation, and does not return the key", async () => {
   const { nova, requests } = fixture();
@@ -243,4 +243,171 @@ it("reports API credential failures without returning credential contents", asyn
       return true;
     },
   );
+});
+
+it("does not resurrect a session when Stop overtakes a slow state lookup", async () => {
+  const { state, secrets } = fixture();
+  let release!: (state: AppState) => void;
+  let requests = 0;
+  const nova = new NovaService(
+    secrets,
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    async () => {
+      throw Error("Unexpected chat");
+    },
+    async () => {
+      requests++;
+      return Response.json({});
+    },
+  );
+  const starting = nova.handle({
+    action: "start",
+    mode: "local",
+    tenantId: "tenant-a",
+    consent: false,
+  });
+  await nova.handle({ action: "stop" });
+  release(state);
+  await assert.rejects(starting, /stopped/);
+  assert.equal(requests, 0);
+});
+
+it("aborts delegated reasoning on Stop and discards a late result", async () => {
+  const { state, secrets } = fixture();
+  let finish!: (value: SendIntuneChatMessageResult) => void;
+  let signal!: AbortSignal;
+  const nova = new NovaService(
+    secrets,
+    async () => state,
+    async (_input, options) => {
+      signal = options.signal;
+      assert.deepEqual(options.scope, {
+        tenantId: "tenant-a",
+        providerId: "ollama",
+        model: undefined,
+        isLocal: true,
+      });
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    },
+  );
+  const { sessionId } = await nova.handle({
+    action: "start",
+    mode: "local",
+    tenantId: "tenant-a",
+    consent: false,
+  });
+  const answer = nova.handle({
+    action: "answer",
+    sessionId: sessionId!,
+    text: "Devices?",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await nova.handle({ action: "stop" });
+  assert.equal(signal.aborted, true);
+  finish({
+    conversation: { id: "old" },
+    assistantMessage: { status: "completed", content: "Old result" },
+  } as SendIntuneChatMessageResult);
+  await assert.rejects(answer, /abort/i);
+});
+
+it("replaces an older question without speaking its late result", async () => {
+  const { state, secrets } = fixture();
+  let finish!: (value: SendIntuneChatMessageResult) => void;
+  let firstSignal!: AbortSignal;
+  const result = {
+    conversation: { id: "current" },
+    assistantMessage: { status: "completed", content: "Current answer" },
+  } as SendIntuneChatMessageResult;
+  const nova = new NovaService(
+    secrets,
+    async () => state,
+    async (input, options) => {
+      if (input.content === "Old question") {
+        firstSignal = options.signal;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      }
+      return result;
+    },
+  );
+  const { sessionId } = await nova.handle({
+    action: "start",
+    mode: "local",
+    tenantId: "tenant-a",
+    consent: false,
+  });
+  const first = nova.handle({
+    action: "answer",
+    sessionId: sessionId!,
+    text: "Old question",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const second = await nova.handle({
+    action: "answer",
+    sessionId: sessionId!,
+    text: "New question",
+  });
+  assert.equal(firstSignal.aborted, true);
+  assert.equal(second.text, "Current answer");
+  finish(result);
+  await assert.rejects(first, /abort/i);
+});
+
+it("stops reading oversized local speech responses", async () => {
+  let cancelled = false;
+  const { nova } = fixture(
+    () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.enqueue(new Uint8Array(1024 * 1024));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+      ),
+  );
+  const { sessionId } = await nova.handle({
+    action: "start",
+    mode: "local",
+    tenantId: "tenant-a",
+    consent: false,
+  });
+  await assert.rejects(
+    nova.handle({ action: "speak", sessionId: sessionId!, text: "Hello" }),
+    /too large/,
+  );
+  assert.equal(cancelled, true);
+});
+
+it("requires a new session after changing the model or local-provider trust", async () => {
+  const { nova, state, chats } = fixture();
+  state.providers[0].models = ["model-a", "model-b"];
+  state.activeModelByProviderId = { ollama: "model-a" };
+  const { sessionId } = await nova.handle({
+    action: "start",
+    mode: "local",
+    tenantId: "tenant-a",
+    consent: false,
+  });
+  state.activeModelByProviderId = { ollama: "model-b" };
+  await assert.rejects(
+    nova.handle({ action: "answer", sessionId: sessionId!, text: "Devices?" }),
+    /changed/,
+  );
+  state.activeModelByProviderId = { ollama: "model-a" };
+  state.providers[0].isLocal = false;
+  await assert.rejects(
+    nova.handle({ action: "answer", sessionId: sessionId!, text: "Devices?" }),
+    /changed/,
+  );
+  assert.equal(chats.length, 0);
 });

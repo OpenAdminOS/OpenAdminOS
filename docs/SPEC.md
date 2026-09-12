@@ -351,6 +351,21 @@ provider and checks readiness before microphone access. Local voice checks Whisp
 and Kokoro availability; the optional OpenAI model-access check does not gate Live
 on a separate Models API permission.
 
+Common unfiltered inventory, reported encryption and OS-version questions use exact
+snapshot metadata/SQL aggregates without a reasoning-model round trip. Filtered or
+investigative questions continue through Chat. Recent completed conversation turns
+are carried as bounded reference context. Nova limits model input to 12,000 UTF-8
+bytes (3,000 for Apple Foundation Models), preserves totals and coverage when
+compacting detail, and falls back from an oversized investigation to bounded
+retrieved evidence. These input budgets do not discover arbitrary custom models'
+context capacities. Questions that still exceed the budget get a recovery message.
+
+Stop aborts delegated model/Graph requests as well as audio. New delegated questions
+replace older pending work; late results are discarded. Queries have a two-minute
+deadline. Session startup cannot resume after Stop; tenant, reasoning model and
+local/hosted trust changes invalidate the session. Each new hosted voice session
+requires fresh consent. Local speech response bodies are bounded during reading.
+
 Hosted voice uses GPT-Live-1 WebRTC with client delegation. Electron creates the
 session and holds the API key in OS-secured storage. Every session requires explicit
 hosted voice/context consent. Tenant and agent-provider identity are bound to the

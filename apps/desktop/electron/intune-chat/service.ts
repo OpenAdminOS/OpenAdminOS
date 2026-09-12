@@ -1,3 +1,4 @@
+import { voiceConversationContext, voiceInventoryAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -181,6 +182,13 @@ export interface ChatServiceHost {
         ) => void;
       }) => RunGraphApi)
     | undefined;
+}
+
+export interface IntuneChatStreamOptions {
+  voice?: boolean;
+  signal?: AbortSignal;
+  /** Pin delegated voice work before fetching data or invoking a provider. */
+  scope?: { tenantId: string; providerId: ProviderId; model?: string; isLocal?: boolean };
 }
 
 export class IntuneChatService {
@@ -1520,7 +1528,7 @@ export class IntuneChatService {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
-        if (!status || status.rows === 0 || !status.refreshedAt) return true;
+        if (!status?.refreshedAt) return true;
         return (
           Date.now() - new Date(status.refreshedAt).getTime() >
           resourceStalenessMs(resource)
@@ -1645,7 +1653,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               if (agentSuggestions.length > 0) {
@@ -1714,7 +1722,7 @@ export class IntuneChatService {
   async streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
-    options: { signal?: AbortSignal } = {},
+    options: IntuneChatStreamOptions = {},
   ): Promise<SendIntuneChatMessageResult> {
     const content = input.content.trim();
     if (!content) {
@@ -1728,10 +1736,15 @@ export class IntuneChatService {
     const provider =
       providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
     const providerId = provider?.id ?? persisted.activeProviderId;
+    options.signal?.throwIfAborted();
+    if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
+      throw new Error("Nova's tenant or provider changed. Start a new conversation.");
     const selectedModel = resolveProviderDefaultModel(
       provider,
       persisted.activeModelByProviderId,
     ).model;
+    if (options.scope && (("model" in options.scope && options.scope.model !== selectedModel) || (options.scope.isLocal !== undefined && options.scope.isLocal !== provider?.isLocal)))
+      throw new Error("Nova's reasoning model or provider trust changed. Start a new conversation.");
     const chatBudget = intuneChatProviderBudget(providerId);
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
@@ -1757,7 +1770,6 @@ export class IntuneChatService {
           : {}),
       });
     }
-    const planned = planChatContext(content);
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1775,6 +1787,13 @@ export class IntuneChatService {
       });
     }
 
+    const voiceContext = options.voice
+      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation")
+      : undefined;
+    const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
+    const planned = planChatContext(voiceContext?.planningQuestion ?? content);
+    const directResources = options.voice ? voiceResourcesForQuestion(content) : undefined;
+    if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -1899,7 +1918,7 @@ export class IntuneChatService {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
-        if (!status || status.rows === 0 || !status.refreshedAt) return true;
+        if (!status?.refreshedAt) return true;
         return (
           Date.now() - new Date(status.refreshedAt).getTime() >
           resourceStalenessMs(resource)
@@ -1988,7 +2007,7 @@ export class IntuneChatService {
     const answerGeneratedAt = new Date().toISOString();
     const rows = readPlannedChatRows(store, {
       tenantId: tenant.id,
-      question: content,
+      question: voiceContext?.planningQuestion ?? content,
       generatedAt: answerGeneratedAt,
       resources: planned.resources,
       searchTerms: planned.searchTerms,
@@ -2024,16 +2043,22 @@ export class IntuneChatService {
       });
     };
 
+    const directVoiceAnswer = options.voice ? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) : undefined;
     if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
       emitDelta(assistantContent);
+    } else if (directVoiceAnswer !== undefined) {
+      assistantContent = directVoiceAnswer;
+      responseModel = undefined;
+      emitDelta(assistantContent);
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
+      const contextualQuestion = voiceContext?.history ?? content;
       const modelQuestion = workspaceContext
-        ? `${content}\n\n${workspaceContext.promptBlock}`
-        : content;
+        ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
+        : contextualQuestion;
       const streamDeterministicAnswer = async (notice?: string) => {
-        const answerPack = buildAnswerPack({
+        let answerPack = buildAnswerPack({
           question: modelQuestion,
           tenant,
           cacheStatus,
@@ -2049,11 +2074,16 @@ export class IntuneChatService {
           assistantContent = prefix;
           emitDelta(assistantContent, prefix);
         }
-        const streamDocumentation =
-          await this.retrieveDocumentationSafely(modelQuestion);
+        const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true), options.voice ? VOICE_ANSWER_INSTRUCTIONS : ""].filter(Boolean).join("\n");
+        const streamDocumentation = await this.retrieveDocumentationSafely(options.voice ? content : modelQuestion);
+        const documentation = options.voice ? streamDocumentation.slice(0, 2).map(d => ({ ...d, text: d.text.slice(0, 600) })) : streamDocumentation;
+        const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation)) + Buffer.byteLength(system);
+        if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
+        const prompt = buildAnswerPrompt(answerPack, documentation);
+        if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
         for await (const chunk of llm.stream({
-          system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: buildAnswerPrompt(answerPack, streamDocumentation),
+          system,
+          prompt,
           ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
@@ -2107,7 +2137,8 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: this.buildChatToolContext(tenant.id),
+              tools: this.buildChatToolContext(tenant.id, options.signal),
+              ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
               agentSuggestions,
               generatedAt: answerGeneratedAt,
@@ -2166,7 +2197,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               sendProgress({
                 message: "Model response started.",
@@ -2351,7 +2382,7 @@ export class IntuneChatService {
     }
   }
 
-  private buildChatToolContext(tenantId: string): IntuneChatToolContext {
+  private buildChatToolContext(tenantId: string, signal?: AbortSignal): IntuneChatToolContext {
     const store = this.host.requireIntelligenceStore();
     const log = (
       level: RunLogLevel,
@@ -2363,6 +2394,7 @@ export class IntuneChatService {
     return {
       tenantId,
       store,
+      signal,
       graphForScopes: async (scopes) => {
         const uniqueScopes = [...new Set(scopes)].sort();
         return this.host.graphFactory
@@ -2373,7 +2405,7 @@ export class IntuneChatService {
         const result = await this.refreshGraphCacheInternal({
           tenantId,
           resources: [resource],
-        });
+        }, undefined, signal);
         const resourceResult = result.resources[0];
         if (resourceResult) return resourceResult;
         const definition = definitionForResource(resource);

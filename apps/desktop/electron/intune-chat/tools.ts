@@ -44,6 +44,7 @@ export interface IntuneChatToolExecution {
 }
 
 export interface IntuneChatToolContext {
+  signal?: AbortSignal;
   tenantId: string;
   store: IntelligenceSqliteStore;
   graphForScopes(scopes: string[]): Promise<RunGraphApi>;
@@ -454,7 +455,8 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     ...(Object.keys(query).length > 0 ? { query } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
-  const response = await graph.request(request);
+  ctx.signal?.throwIfAborted();
+  const response = await graph.request({ ...request, ...(ctx.signal ? { signal: ctx.signal } : {}) });
   return capGraphResponse({
     path,
     query,

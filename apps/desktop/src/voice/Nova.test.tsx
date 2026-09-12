@@ -37,6 +37,7 @@ it("does not activate the microphone until consent and releases a late permissio
   expect(bridge.nova).not.toHaveBeenCalledWith(
     expect.objectContaining({ action: "start" }),
   );
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
 });
 
 it("expands the voice view and hides captions without requesting the microphone", async () => {
@@ -182,13 +183,37 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     "data-phase",
     "thinking",
   );
+  const oldFinish = finish;
+  act(() => {
+    emit({
+      type: "session.input_transcript.delta",
+      delta: "How many Intune devices?",
+    });
+    emit({
+      type: "session.delegation.created",
+      delegation: { id: "task-2", target: "client" },
+    });
+  });
+  await waitFor(() =>
+    expect(bridge.nova).toHaveBeenCalledWith({
+      action: "answer",
+      sessionId: "voice-session",
+      text: "How many Intune devices?",
+    }),
+  );
   await act(async () => {
+    oldFinish({ text: "Outdated result" });
     finish({ text: "The tenant has 9 Intune devices." });
   });
+  expect(
+    dc.send.mock.calls.some(([event]) =>
+      String(event).includes("Outdated result"),
+    ),
+  ).toBe(false);
   expect(dc.send).toHaveBeenCalledWith(
     JSON.stringify({
       type: "session.commentary.append",
-      delegation_id: "task-1",
+      delegation_id: "task-2",
       content: "The tenant has 9 Intune devices.",
     }),
   );
@@ -202,4 +227,57 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     "Backend: The tenant has 9 Intune devices. Nova: Yes, nine Intune devices.",
   );
   await user.click(screen.getByRole("button", { name: "Stop" }));
+});
+
+it("explains microphone permission recovery without starting a hosted session", async () => {
+  Object.defineProperty(navigator, "mediaDevices", {
+    value: {
+      getUserMedia: vi.fn(async () => {
+        throw new DOMException("Denied", "NotAllowedError");
+      }),
+    },
+    configurable: true,
+  });
+  const bridge = makeMockBridge({
+    nova: vi.fn(async () => ({ hasKey: true })),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await user.click(screen.getByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: "Start Nova" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "system microphone privacy settings",
+  );
+  expect(bridge.nova).not.toHaveBeenCalledWith(
+    expect.objectContaining({ action: "start" }),
+  );
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+});
+
+it("does not let a delayed key-status result undo a successful key save", async () => {
+  let status!: (value: { hasKey: boolean }) => void;
+  const bridge = makeMockBridge({
+    nova: vi.fn(async (input) => {
+      if (input.action === "status")
+        return new Promise<{ hasKey: boolean }>((resolve) => {
+          status = resolve;
+        });
+      if (input.action === "configure") return { hasKey: true };
+      return {};
+    }),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await user.type(screen.getByLabelText("OpenAI API key"), "test-only-key");
+  await user.click(screen.getByRole("button", { name: "Save key" }));
+  await act(async () => {
+    status({ hasKey: false });
+  });
+  await user.click(screen.getByRole("button", { name: "Voice settings" }));
+  expect(screen.getByLabelText(/OpenAI API key.*saved securely/)).toHaveValue(
+    "",
+  );
+  expect(screen.getByRole("button", { name: "Remove key" })).toBeVisible();
 });

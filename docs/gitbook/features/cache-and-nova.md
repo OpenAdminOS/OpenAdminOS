@@ -39,7 +39,15 @@ actual Live connection and billing, so a restricted key need not allow model lis
 Large cache collections stay in the local database. Nova gets selected evidence and
 short answers, with full results available through **Open evidence in Chat**.
 Preload before a presentation to reduce retrieval time; it is not required for Nova
-to recognize your tenant.
+to recognize your tenant. Basic device counts, reported encryption and OS-version
+summaries come directly from the snapshot, avoiding a model round trip. More complex
+questions use the selected reasoning model. Freshness and partial coverage remain
+visible in the answer.
+
+Nova carries recent conversation context into follow-up questions. If a question
+needs too much context, narrow it or continue in Chat. Stop cancels pending tenant
+work as well as audio; a new delegated question replaces the previous pending one.
+Changing the reasoning model or its local/hosted status ends the voice session.
 
 Use **Expand view** for a larger orb and captions during presentations. **Mute mic**
 keeps the conversation connected while disabling microphone audio; **Stop** ends
