@@ -75,58 +75,64 @@
 }
 .nova-orb-core {
   position: absolute;
-  inset: 8%;
+  inset: 5%;
   pointer-events: none;
-  border-radius: 46% 54% 52% 48%;
-  background: radial-gradient(
-    circle at 30% 24%,
-    #fff0dd,
-    #d99766 46%,
-    #754529 85%
-  );
+  border-radius: 50%;
   box-shadow:
-    inset -8px -14px 22px #42251466,
-    inset 4px 6px 15px #fff3,
-    0 12px 40px #d1894825;
-  transform: scale(calc(1 + var(--voice-level) * 0.24));
-  transition: transform 100ms linear;
-  animation: nova-float 7s ease-in-out infinite;
+    0 18px 45px -20px #000a,
+    0 0 34px -14px #e5a26750;
+  transform: scale(calc(1 + var(--voice-level) * 0.16));
+  transition: transform 90ms linear;
+}
+.nova-orb-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.nova-orb-current,
+.nova-orb-undercurrent {
+  transform-origin: 100px 100px;
+  animation: nova-current 18s linear infinite;
+}
+.nova-orb-undercurrent {
+  animation: nova-undercurrent 23s linear infinite;
+}
+.nova-orb-glint {
+  animation: nova-glint 7s ease-in-out infinite;
 }
 .nova-orb-ring {
   position: absolute;
-  inset: -3%;
+  inset: 0;
   pointer-events: none;
-  border: 1px solid #d9976633;
+  border: 1px solid #d9976618;
   border-radius: 50%;
-  transform: scale(calc(1 + var(--voice-level) * 0.28));
+  transform: scale(calc(1 + var(--voice-level) * 0.2));
   transition: transform 120ms linear;
 }
-.nova-orb[data-phase="listening"] .nova-orb-core {
-  animation-duration: 4s;
-}
-.nova-orb[data-phase="speaking"] .nova-orb-core {
-  animation: nova-speak 2.4s ease-in-out infinite;
+.nova-orb[data-phase="speaking"] .nova-orb-glint {
+  animation-duration: 2.8s;
 }
 .nova-orb[data-phase="speaking"] .nova-orb-ring {
-  border-color: #e8ba8666;
+  border-color: #e8ba8655;
 }
 .nova-orb[data-phase="connecting"] .nova-orb-ring,
 .nova-orb[data-phase="thinking"] .nova-orb-ring {
-  border-top: 2px solid var(--color-accent);
+  border-top: 1px solid var(--color-accent);
   border-right-color: transparent;
-  animation: nova-orbit 2s linear infinite;
-}
-.nova-orb[data-phase="thinking"] .nova-orb-core {
-  animation-duration: 3s;
+  animation: nova-orbit 3s linear infinite;
 }
 .nova-orb[data-phase="muted"] .nova-orb-core {
   filter: saturate(0.2);
-  animation: none;
   transform: none;
 }
 .nova-orb[data-phase="error"] .nova-orb-core {
   filter: saturate(0.4);
-  animation: none;
+}
+.nova-orb[data-phase="muted"] .nova-orb-art *,
+.nova-orb[data-phase="error"] .nova-orb-art *,
+.nova-orb:disabled .nova-orb-art * {
+  animation-play-state: paused;
 }
 .nova-orb:disabled {
   opacity: 0.5;
@@ -196,16 +202,29 @@
   font-size: 10px;
   color: var(--color-text-muted);
 }
-@keyframes nova-float {
-  50% {
-    border-radius: 54% 46% 43% 57%;
-    rotate: 9deg;
+@keyframes nova-current {
+  from {
+    transform: rotate(0deg) scale(1.04);
+  }
+  to {
+    transform: rotate(360deg) scale(1.04);
   }
 }
-@keyframes nova-speak {
+@keyframes nova-undercurrent {
+  from {
+    transform: rotate(360deg) scale(1.08);
+  }
+  to {
+    transform: rotate(0deg) scale(1.08);
+  }
+}
+@keyframes nova-glint {
+  0%,
+  100% {
+    opacity: 0.08;
+  }
   50% {
-    border-radius: 40% 60% 55% 45%;
-    rotate: -12deg;
+    opacity: 0.24;
   }
 }
 @keyframes nova-orbit {
@@ -215,6 +234,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .nova-orb-core,
+  .nova-orb-art *,
   .nova-orb-ring {
     animation: none !important;
     transition: none;

@@ -341,7 +341,10 @@ muted microphone and local recording submission remain discoverable. Full-window
 view traps keyboard focus and makes the background inert; exiting restores focus
 without restarting audio. Escape still stops the session. Optional captions and
 separate microphone mute and session stop controls remain available. Orb motion follows microphone and WebRTC playback
-levels; transcript arrival does not imply speech playback. Reduced-motion
+levels; transcript arrival does not imply speech playback. Orb artwork uses scalable
+vector ribbons, a crisp spherical rim and layered highlights. Interior animation
+changes playback rate without resetting its position across speech states; muted
+and error states pause the interior. Reduced-motion
 preferences suppress animated movement. Voice settings remain available from the
 idle panel. The microphone starts only on click.
 Stop, Escape, panel close, tenant/provider change and app backgrounding release

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import { useAppState } from "../state";
@@ -667,6 +667,23 @@ export function Nova({
   useEffect(() => {
     if (expanded && active) revealControls();
   }, [expanded, active, revealControls]);
+  useEffect(() => {
+    const speed =
+      phase === "speaking"
+        ? 2.2
+        : phase === "listening"
+          ? 1.4
+          : phase === "thinking"
+            ? 0.75
+            : 1;
+    // Changing playback rate preserves the current angle; changing CSS duration jumps.
+    for (const layer of orb.current?.querySelectorAll(
+      ".nova-orb-current, .nova-orb-undercurrent",
+    ) || []) {
+      for (const animation of layer.getAnimations?.() || [])
+        animation.updatePlaybackRate(speed);
+    }
+  }, [open, phase]);
   const showCaptions = expanded ? focusCaptions : captions;
   const quiet =
     expanded &&
@@ -842,7 +859,9 @@ export function Nova({
             }
             aria-label={active ? "Stop Nova" : "Start Nova"}
           >
-            <span className="nova-orb-core" aria-hidden="true" />
+            <span className="nova-orb-core" aria-hidden="true">
+              <NovaOrbArtwork />
+            </span>
             <span className="nova-orb-ring" aria-hidden="true" />
           </button>
           <div role="status" className="nova-status text-center text-sm">
@@ -1095,4 +1114,100 @@ function voiceErrorMessage(error: unknown): string {
   if (name === "NotReadableError")
     return "The microphone could not be opened. Check whether another app is using it and retry.";
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Resolution-independent ribbons: audio scales the shell, CSS moves the interior. */
+function NovaOrbArtwork() {
+  const id = useId().replace(/:/g, "");
+  return (
+    <svg
+      className="nova-orb-art"
+      viewBox="0 0 200 200"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <radialGradient id={`${id}-body`} cx="32%" cy="18%" r="85%">
+          <stop offset="0" stopColor="#fff9ee" />
+          <stop offset="0.33" stopColor="#f2d1aa" />
+          <stop offset="0.62" stopColor="#ba693e" />
+          <stop offset="0.86" stopColor="#522718" />
+          <stop offset="1" stopColor="#160f0d" />
+        </radialGradient>
+        <linearGradient id={`${id}-silk`} x1="0" y1="0" x2="0.7" y2="1">
+          <stop offset="0" stopColor="#fffef8" />
+          <stop offset="0.36" stopColor="#ffe7ca" />
+          <stop offset="0.57" stopColor="#d88955" />
+          <stop offset="0.78" stopColor="#814226" />
+          <stop offset="1" stopColor="#341b16" />
+        </linearGradient>
+        <linearGradient id={`${id}-edge`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#fffdf3" stopOpacity="0.95" />
+          <stop offset="0.5" stopColor="#ffcc90" stopOpacity="0.5" />
+          <stop offset="1" stopColor="#ffa26a" stopOpacity="0" />
+        </linearGradient>
+        <radialGradient id={`${id}-glass`} cx="35%" cy="12%" r="88%">
+          <stop offset="0" stopColor="#fffef7" stopOpacity="0.6" />
+          <stop offset="0.28" stopColor="#fffef7" stopOpacity="0" />
+          <stop offset="0.78" stopColor="#150b07" stopOpacity="0" />
+          <stop offset="1" stopColor="#150b07" stopOpacity="0.55" />
+        </radialGradient>
+        <radialGradient id={`${id}-specular`}>
+          <stop offset="0" stopColor="#fffef6" stopOpacity="0.95" />
+          <stop offset="0.55" stopColor="#fffef6" stopOpacity="0.35" />
+          <stop offset="1" stopColor="#fffef6" stopOpacity="0" />
+        </radialGradient>
+        <clipPath id={`${id}-clip`}>
+          <circle cx="100" cy="100" r="98" />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${id}-clip)`}>
+        <circle cx="100" cy="100" r="100" fill={`url(#${id}-body)`} />
+        <g className="nova-orb-current">
+          <path
+            d="M-35 57 C30 -38 164 -4 172 48 C181 102 64 77 46 124 C25 181 161 160 227 116 L233 225 L-35 225Z"
+            fill={`url(#${id}-silk)`}
+          />
+          <path
+            d="M-35 57 C30 -38 164 -4 172 48 C181 102 64 77 46 124 C25 181 161 160 227 116"
+            fill="none"
+            stroke={`url(#${id}-edge)`}
+            strokeWidth="1.4"
+          />
+        </g>
+        <g className="nova-orb-undercurrent">
+          <path
+            d="M-25 96 C15 163 89 201 142 158 C192 117 90 113 116 66 C137 29 191 43 227 62 L220 -30 L-25 -30Z"
+            fill={`url(#${id}-silk)`}
+            opacity="0.8"
+          />
+          <path
+            d="M-25 96 C15 163 89 201 142 158 C192 117 90 113 116 66 C137 29 191 43 227 62"
+            fill="none"
+            stroke={`url(#${id}-edge)`}
+            strokeWidth="1"
+          />
+        </g>
+        <circle cx="100" cy="100" r="98" fill={`url(#${id}-glass)`} />
+        <ellipse
+          className="nova-orb-glint"
+          cx="78"
+          cy="30"
+          rx="43"
+          ry="12"
+          fill={`url(#${id}-specular)`}
+          opacity="0.12"
+          transform="rotate(-28 78 30)"
+        />
+      </g>
+      <circle
+        cx="100"
+        cy="100"
+        r="98"
+        fill="none"
+        stroke={`url(#${id}-edge)`}
+        strokeWidth="0.7"
+      />
+    </svg>
+  );
 }
