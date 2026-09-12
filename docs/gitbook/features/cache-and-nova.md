@@ -24,6 +24,23 @@ schedule. The cache is shared with Chat and Agent Team.
 
 ## Talk to Nova
 
+Nova knows the selected tenant before you preload anything. For device and other
+tenant questions it asks the app to retrieve missing or stale relevant data.
+An empty cache does not mean there are no devices. Permission failures and partial
+coverage still need to be resolved through the tenant connection and Cache page.
+
+Voice and reasoning have separate setup. The OpenAI key enables hosted speech;
+tenant answers use the reasoning provider and model shown in Nova. Connect that
+provider in Settings. Local voice needs a local reasoning model plus Whisper for
+recognition and Kokoro for speech output. Use **Check voice setup** to check key/model
+access or local service availability. Starting hosted voice separately checks the
+actual Live connection and billing, so a restricted key need not allow model listing.
+
+Large cache collections stay in the local database. Nova gets selected evidence and
+short answers, with full results available through **Open evidence in Chat**.
+Preload before a presentation to reduce retrieval time; it is not required for Nova
+to recognize your tenant.
+
 Use **Expand view** for a larger orb and captions during presentations. **Mute mic**
 keeps the conversation connected while disabling microphone audio; **Stop** ends
 the session and releases the microphone. Captions can be hidden independently.

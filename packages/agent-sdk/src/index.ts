@@ -1482,6 +1482,7 @@ export interface RefreshGraphCacheOptions {
 }
 
 export type NovaRequest =
+  | { action: "check"; mode: "openai" | "local"; connectivity?: boolean }
   | { action: "status" }
   | { action: "stop" }
   | { action: "configure"; apiKey: string | null }

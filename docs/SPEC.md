@@ -342,7 +342,14 @@ Stop, Escape, panel close, tenant/provider change and app backgrounding release
 microphone access. “Hey Nova” is handled during an active conversation; background
 wake-word detection is not implemented. Simple navigation is restricted to known
 app routes. Tenant questions reuse the existing Chat tools and approval boundary;
-voice cannot approve writes. Results remain reviewable in Chat.
+voice cannot approve writes. Results remain reviewable in Chat. The voice model
+receives the selected tenant identity and explicit delegation rules at session
+creation. Tenant questions refresh missing/stale relevant cache resources on demand;
+preloading is optional. Voice responses are capped at 2,000 characters with full
+answers retained in Chat. Setup distinguishes speech from the selected reasoning
+provider and checks readiness before microphone access. Local voice checks Whisper
+and Kokoro availability; the optional OpenAI model-access check does not gate Live
+on a separate Models API permission.
 
 Hosted voice uses GPT-Live-1 WebRTC with client delegation. Electron creates the
 session and holds the API key in OS-secured storage. Every session requires explicit

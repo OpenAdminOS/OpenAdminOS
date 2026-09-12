@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
+import type { GraphCacheStatus } from "@openadminos/agent-sdk";
 import "./nova.css";
 
 export function Nova({
@@ -13,7 +14,9 @@ export function Nova({
   const location = useLocation(),
     navigate = useNavigate();
   const [open, setOpen] = useState(false),
-    [mode, setMode] = useState<"openai" | "local">("openai");
+    [mode, setMode] = useState<"openai" | "local">(() =>
+      localStorage.getItem("nova.voice-mode") === "local" ? "local" : "openai",
+    );
   const [name, setName] = useState(
     () => localStorage.getItem("nova.greeting-name") || "",
   );
@@ -23,6 +26,15 @@ export function Nova({
   const [phase, setPhase] = useState("idle"),
     [error, setError] = useState(""),
     [caption, setCaption] = useState("");
+  const [connectionCheck, setConnectionCheck] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus>();
+  const reasoning = state.providers.find(
+    (p) => p.id === state.activeProviderId,
+  );
+  const reasoningReady =
+    reasoning?.status === "connected" &&
+    (mode !== "local" || reasoning.isLocal);
   const [expanded, setExpanded] = useState(false);
   const [captions, setCaptions] = useState(true);
   const [muted, setMuted] = useState(false);
@@ -82,6 +94,7 @@ export function Nova({
     playbackAnalyser.current = null;
     mutedRef.current = false;
     setMuted(false);
+    setChecking(false);
     setPlayBlocked(false);
     if (output.current) {
       output.current.pause();
@@ -98,6 +111,8 @@ export function Nova({
   useEffect(() => {
     stop();
     setConsent(false);
+    setConnectionCheck("");
+    setCacheStatus(undefined);
     setConversation(undefined);
     setCaption("");
   }, [state.activeTenantId, state.activeProviderId, stop]);
@@ -108,6 +123,42 @@ export function Nova({
         .then((r) => setHasKey(!!r.hasKey))
         .catch((e) => setError(String(e)));
   }, [open, api]);
+  useEffect(() => {
+    let cancelled = false;
+    if (open && state.activeTenantId)
+      void api
+        ?.getGraphCacheStatus(state.activeTenantId)
+        .then((result) => {
+          if (!cancelled) setCacheStatus(result);
+        })
+        .catch(() => {
+          if (!cancelled) setCacheStatus(undefined);
+        });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, state.activeTenantId, api]);
+  async function checkSetup() {
+    if (!api) return;
+    const token = generation.current;
+    setChecking(true);
+    setConnectionCheck("");
+    setError("");
+    try {
+      const result = await api.nova({ action: "check", mode });
+      if (token !== generation.current) return;
+      setConnectionCheck(result.text || "Connection checked.");
+      if (state.activeTenantId) {
+        const snapshot = await api.getGraphCacheStatus(state.activeTenantId);
+        if (token === generation.current) setCacheStatus(snapshot);
+      }
+    } catch (error) {
+      if (token === generation.current)
+        setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (token === generation.current) setChecking(false);
+    }
+  }
   useEffect(() => {
     const keydown = (e: KeyboardEvent) => {
       if (e.altKey && e.code === "KeyV") {
@@ -153,6 +204,8 @@ export function Nova({
       }
     };
     try {
+      await api.nova({ action: "check", mode, connectivity: false });
+      if (token !== generation.current) return;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
         video: false,
@@ -172,7 +225,8 @@ export function Nova({
       const samples = new Uint8Array(analyser.fftSize);
       const playbackSamples = new Uint8Array(512);
       let level = 0,
-        lastPlayback = 0;
+        lastPlayback = 0,
+        pendingAnswers = 0;
       const rms = (values: Uint8Array) => {
         let sum = 0;
         for (const sample of values) sum += ((sample - 128) / 128) ** 2;
@@ -195,8 +249,8 @@ export function Nova({
             phaseRef.current === "speaking" &&
             performance.now() - lastPlayback > 650
           ) {
-            phaseRef.current = "listening";
-            setPhase("listening");
+            phaseRef.current = pendingAnswers > 0 ? "thinking" : "listening";
+            setPhase(phaseRef.current);
           }
         }
         const target = Math.max(
@@ -369,17 +423,10 @@ export function Nova({
           ) {
             const role = event.type.includes("input_") ? "User" : "Nova";
             if (typeof event.delta !== "string") return;
-            history = (
-              history +
-              (lastSpeaker !== role ? `\n${role}: ` : "") +
-              event.delta
-            ).slice(-12000);
+            const prefix = lastSpeaker !== role ? `\n${role}: ` : "";
+            history = (history + prefix + event.delta).slice(-12000);
             setCaption((current) =>
-              (
-                current +
-                (lastSpeaker !== role ? `\n${role}: ` : "") +
-                event.delta
-              ).slice(-3000),
+              (current + prefix + event.delta).slice(-3000),
             );
             lastSpeaker = role;
             if (role === "User") setPhase("listening");
@@ -396,6 +443,7 @@ export function Nova({
             queued = queued
               .then(async () => {
                 if (token !== generation.current) return;
+                pendingAnswers++;
                 setPhase("thinking");
                 const answer = await api.nova({
                   action: "answer",
@@ -404,11 +452,15 @@ export function Nova({
                 });
                 if (token !== generation.current || dc.readyState !== "open")
                   return;
+                pendingAnswers--;
                 setConversation(answer.conversationId);
                 if (answer.route) navigate(answer.route);
-                setCaption(answer.text || "");
                 const result =
                   answer.text || "No answer available. Open Chat for details.";
+                setCaption((current) =>
+                  `${current}\nBackend: ${result}`.slice(-3000),
+                );
+                lastSpeaker = "";
                 setPhase("listening");
                 for (let i = 0; i < Array.from(result).length; i += 100)
                   dc.send(
@@ -542,6 +594,51 @@ export function Nova({
               ? "Hosted voice · audio and shared context go to OpenAI"
               : "Local voice · audio stays on this device"}
           </p>
+          {!active && (
+            <>
+              <label className="nova-field">
+                Voice provider
+                <select
+                  value={mode}
+                  onChange={(e) => {
+                    stop();
+                    setMode(e.target.value as "local" | "openai");
+                    localStorage.setItem("nova.voice-mode", e.target.value);
+                    setConnectionCheck("");
+                    setConsent(false);
+                    setError("");
+                  }}
+                >
+                  <option value="openai">OpenAI · GPT-Live-1</option>
+                  <option value="local">Local · whisper.cpp + Kokoro</option>
+                </select>
+              </label>
+              <div className="nova-readiness">
+                <p>
+                  <strong>Tenant reasoning</strong> ·{" "}
+                  {reasoning?.name || "Not selected"}
+                  {reasoning?.defaultModel
+                    ? ` · ${reasoning.defaultModel}`
+                    : ""}
+                </p>
+                <p>
+                  {reasoningReady
+                    ? "Ready to retrieve permitted tenant data."
+                    : "Connect a reasoning provider in Settings before starting voice."}
+                </p>
+                <p>
+                  {mode === "openai"
+                    ? "The voice key powers speech. Tenant answers use the reasoning provider above."
+                    : "Whisper recognizes speech and Kokoro speaks the answer. Tenant answers use the local reasoning provider above."}
+                </p>
+                {!reasoningReady && (
+                  <Button size="sm" onClick={() => navigate("/settings")}>
+                    Configure reasoning
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
           <button
             ref={orb}
             className="nova-orb"
@@ -550,6 +647,8 @@ export function Nova({
             }
             onClick={() => (active ? stop() : void start())}
             disabled={
+              !reasoningReady ||
+              checking ||
               !state.activeTenantId ||
               (mode === "openai" && (!hasKey || !consent))
             }
@@ -562,7 +661,7 @@ export function Nova({
             {phase === "idle"
               ? "Start a conversation. Say “Hey Nova”."
               : phase === "connecting"
-                ? "Connecting microphone and voice…"
+                ? "Checking setup and connecting microphone…"
                 : phase === "listening"
                   ? muted
                     ? "Microphone muted"
@@ -655,6 +754,38 @@ export function Nova({
               Open evidence in Chat
             </Button>
           )}
+          {!active && (
+            <div className="nova-readiness">
+              <p>
+                <strong>Tenant data</strong> ·{" "}
+                {cacheStatus?.resources?.some((r) => r.refreshedAt)
+                  ? "Saved snapshots available"
+                  : "Retrieved when you ask"}
+              </p>
+              <p>
+                Nova fetches missing or stale data for your question. Preloading
+                is optional and keeps large collections on this device.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={checking}
+                  onClick={() => void checkSetup()}
+                >
+                  {checking ? "Checking…" : "Check voice setup"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => navigate("/cache")}
+                >
+                  Review cache
+                </Button>
+              </div>
+              {connectionCheck && <p role="status">{connectionCheck}</p>}
+            </div>
+          )}
           {!active && mode === "openai" && hasKey && (
             <label className="text-xs">
               <input
@@ -668,21 +799,6 @@ export function Nova({
           )}
           {!active && (settings || (mode === "openai" && !hasKey)) && (
             <div id="nova-settings" className="nova-settings">
-              <label className="nova-field">
-                Voice provider
-                <select
-                  value={mode}
-                  onChange={(e) => {
-                    stop();
-                    setMode(e.target.value as "local" | "openai");
-                    setConsent(false);
-                    setError("");
-                  }}
-                >
-                  <option value="openai">OpenAI · GPT-Live-1</option>
-                  <option value="local">Local · whisper.cpp + Kokoro</option>
-                </select>
-              </label>
               <label className="nova-field">
                 Greeting name
                 <input
@@ -753,10 +869,12 @@ export function Nova({
                 </>
               ) : (
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  Run whisper-server at 127.0.0.1:8080 and Kokoro-FastAPI at
-                  127.0.0.1:8880, with models downloaded. Select a local agent
-                  provider such as Ollama. Click Finish speaking to submit. No
-                  cloud fallback. Maximum recording: one minute.
+                  Local voice needs three components: a reasoning model, speech
+                  recognition and speech output. Run whisper-server at
+                  127.0.0.1:8080 and Kokoro-FastAPI at 127.0.0.1:8880, with
+                  models downloaded. Select a local agent provider such as
+                  Ollama. Click Finish speaking to submit. No cloud fallback.
+                  Maximum recording: one minute.
                 </p>
               )}
               <p className="text-[10px] text-[var(--color-text-muted)]">
