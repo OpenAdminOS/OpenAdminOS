@@ -38,3 +38,28 @@ it("does not activate the microphone until consent and releases a late permissio
     expect.objectContaining({ action: "start" }),
   );
 });
+
+it("expands the voice view and hides captions without requesting the microphone", async () => {
+  const getUserMedia = vi.fn();
+  Object.defineProperty(navigator, "mediaDevices", {
+    value: { getUserMedia },
+    configurable: true,
+  });
+  const bridge = makeMockBridge({
+    nova: vi.fn(async () => ({ hasKey: true })),
+  });
+  renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await user.click(screen.getByRole("button", { name: "Expand view" }));
+  expect(
+    screen.getByRole("region", { name: "Nova voice assistant" }),
+  ).toHaveClass("nova-panel-expanded");
+  await user.click(screen.getByRole("button", { name: "Captions on" }));
+  expect(
+    screen.queryByLabelText("Conversation captions"),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Voice settings" }));
+  expect(screen.getByLabelText("Voice provider")).toBeVisible();
+  expect(getUserMedia).not.toHaveBeenCalled();
+});

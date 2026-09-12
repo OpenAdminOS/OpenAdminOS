@@ -24,6 +24,13 @@ schedule. The cache is shared with Chat and Agent Team.
 
 ## Talk to Nova
 
+Use **Expand view** for a larger orb and captions during presentations. **Mute mic**
+keeps the conversation connected while disabling microphone audio; **Stop** ends
+the session and releases the microphone. Captions can be hidden independently.
+The orb responds to microphone and hosted playback audio, with distinct waiting
+and speaking states. Reduced-motion settings disable animated movement.
+Open **Voice settings** while idle to change providers or the greeting name.
+
 Choose **Talk to Nova** from any app page, or press **Alt+V**. Choose your voice
 provider, select a tenant, and click the orb to start the microphone. The orb
 responds to your voice volume; captions show the conversation. **Stop**, **Escape**,

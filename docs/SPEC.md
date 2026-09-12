@@ -332,8 +332,12 @@ logs, not every Graph property, relationship or action. Device records include
 reported encryption; deterministic aggregates include OS versions and encryption
 with unknown values retained.
 
-Nova is available across app pages through Talk to Nova and Alt+V. The microphone
-starts only on click. The orb reflects input volume and honors reduced motion.
+Nova is available across app pages through Talk to Nova and Alt+V. Its compact
+panel can expand for presentations, with optional captions and separate microphone
+mute and session stop controls. Orb motion follows microphone and WebRTC playback
+levels; transcript arrival does not imply speech playback. Reduced-motion
+preferences suppress animated movement. Voice settings remain available from the
+idle panel. The microphone starts only on click.
 Stop, Escape, panel close, tenant/provider change and app backgrounding release
 microphone access. “Hey Nova” is handled during an active conversation; background
 wake-word detection is not implemented. Simple navigation is restricted to known

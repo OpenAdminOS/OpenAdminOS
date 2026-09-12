@@ -23,6 +23,15 @@ export function Nova({
   const [phase, setPhase] = useState("idle"),
     [error, setError] = useState(""),
     [caption, setCaption] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const [captions, setCaptions] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [settings, setSettings] = useState(false);
+  const [playBlocked, setPlayBlocked] = useState(false);
+  const mutedRef = useRef(false);
+  const playbackAnalyser = useRef<AnalyserNode | null>(null);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
   const [conversation, setConversation] = useState<string>();
   const generation = useRef(0),
     peer = useRef<RTCPeerConnection | null>(null),
@@ -70,6 +79,10 @@ export function Nova({
     }
     void context.current?.close().catch(() => {});
     context.current = null;
+    playbackAnalyser.current = null;
+    mutedRef.current = false;
+    setMuted(false);
+    setPlayBlocked(false);
     if (output.current) {
       output.current.pause();
       output.current.srcObject = null;
@@ -157,15 +170,41 @@ export function Nova({
       analyser.fftSize = 512;
       audioContext.createMediaStreamSource(stream).connect(analyser);
       const samples = new Uint8Array(analyser.fftSize);
+      const playbackSamples = new Uint8Array(512);
+      let level = 0,
+        lastPlayback = 0;
+      const rms = (values: Uint8Array) => {
+        let sum = 0;
+        for (const sample of values) sum += ((sample - 128) / 128) ** 2;
+        return Math.min(1, Math.sqrt(sum / values.length) * 7);
+      };
       const animate = () => {
         if (token !== generation.current) return;
         analyser.getByteTimeDomainData(samples);
-        let sum = 0;
-        for (const sample of samples) sum += ((sample - 128) / 128) ** 2;
-        orb.current?.style.setProperty(
-          "--voice-level",
-          String(Math.min(1, Math.sqrt(sum / samples.length) * 7)),
+        let outputLevel = 0;
+        if (playbackAnalyser.current) {
+          playbackAnalyser.current.getByteTimeDomainData(playbackSamples);
+          outputLevel = rms(playbackSamples);
+          if (outputLevel > 0.025 && !output.current?.paused) {
+            lastPlayback = performance.now();
+            if (phaseRef.current !== "speaking") {
+              phaseRef.current = "speaking";
+              setPhase("speaking");
+            }
+          } else if (
+            phaseRef.current === "speaking" &&
+            performance.now() - lastPlayback > 650
+          ) {
+            phaseRef.current = "listening";
+            setPhase("listening");
+          }
+        }
+        const target = Math.max(
+          mutedRef.current ? 0 : rms(samples),
+          outputLevel,
         );
+        level += (target - level) * (target > level ? 0.45 : 0.12);
+        orb.current?.style.setProperty("--voice-level", String(level));
         frame.current = requestAnimationFrame(animate);
       };
       animate();
@@ -295,12 +334,13 @@ export function Nova({
       peer.current = pc;
       pc.ontrack = (e) => {
         if (token !== generation.current) return;
-        output.current!.srcObject = new MediaStream([e.track]);
-        void output
-          .current!.play()
-          .catch(() =>
-            setError("Select Play in the audio controls to hear Nova."),
-          );
+        const playback = new MediaStream([e.track]);
+        output.current!.srcObject = playback;
+        const meter = audioContext.createAnalyser();
+        meter.fftSize = 512;
+        audioContext.createMediaStreamSource(playback).connect(meter);
+        playbackAnalyser.current = meter;
+        void output.current!.play().catch(() => setPlayBlocked(true));
       };
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
       const dc = pc.createDataChannel("oai-events");
@@ -342,7 +382,7 @@ export function Nova({
               ).slice(-3000),
             );
             lastSpeaker = role;
-            setPhase(role === "User" ? "listening" : "speaking");
+            if (role === "User") setPhase("listening");
           } else if (
             event.type === "session.delegation.created" &&
             typeof event.delegation?.id === "string"
@@ -369,6 +409,7 @@ export function Nova({
                 setCaption(answer.text || "");
                 const result =
                   answer.text || "No answer available. Open Chat for details.";
+                setPhase("listening");
                 for (let i = 0; i < Array.from(result).length; i += 100)
                   dc.send(
                     JSON.stringify({
@@ -465,11 +506,21 @@ export function Nova({
       {open && (
         <section
           id="nova-panel"
-          className="nova-panel"
+          className={`nova-panel${expanded ? " nova-panel-expanded" : ""}`}
           aria-label="Nova voice assistant"
         >
           <div className="flex items-center justify-between">
-            <strong>Nova</strong>
+            <strong>
+              Nova <span className="nova-eyebrow">VOICE</span>
+            </strong>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={expanded}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? "Compact view" : "Expand view"}
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -494,27 +545,52 @@ export function Nova({
           <button
             ref={orb}
             className="nova-orb"
-            data-phase={phase}
+            data-phase={
+              error ? "error" : muted && phase === "listening" ? "muted" : phase
+            }
             onClick={() => (active ? stop() : void start())}
             disabled={
               !state.activeTenantId ||
               (mode === "openai" && (!hasKey || !consent))
             }
             aria-label={active ? "Stop Nova" : "Start Nova"}
-          />
+          >
+            <span className="nova-orb-core" aria-hidden="true" />
+            <span className="nova-orb-ring" aria-hidden="true" />
+          </button>
           <div role="status" className="text-center text-sm">
             {phase === "idle"
               ? "Start a conversation. Say “Hey Nova”."
               : phase === "connecting"
                 ? "Connecting microphone and voice…"
                 : phase === "listening"
-                  ? "Listening"
+                  ? muted
+                    ? "Microphone muted"
+                    : "Listening"
                   : phase === "thinking"
                     ? "Checking tenant evidence…"
                     : "Nova is speaking"}
           </div>
           {active && (
             <div className="flex justify-center gap-2">
+              <Button
+                variant="secondary"
+                disabled={
+                  phase === "connecting" ||
+                  (mode === "local" && phase !== "listening")
+                }
+                aria-pressed={muted}
+                onClick={() => {
+                  const next = !mutedRef.current;
+                  mic.current?.getAudioTracks().forEach((track) => {
+                    track.enabled = !next;
+                  });
+                  mutedRef.current = next;
+                  setMuted(next);
+                }}
+              >
+                {muted ? "Unmute mic" : "Mute mic"}
+              </Button>
               <Button variant="secondary" onClick={stop}>
                 Stop
               </Button>
@@ -530,8 +606,47 @@ export function Nova({
               {error}
             </p>
           )}
-          {caption && <p className="nova-caption">{caption}</p>}
-          <audio ref={output} controls className="w-full h-8" />
+          <div className="nova-tools">
+            <button
+              type="button"
+              aria-pressed={captions}
+              onClick={() => setCaptions(!captions)}
+            >
+              Captions {captions ? "on" : "off"}
+            </button>
+            {!active && (
+              <button
+                type="button"
+                aria-expanded={settings || (mode === "openai" && !hasKey)}
+                aria-controls="nova-settings"
+                onClick={() => setSettings(!settings)}
+              >
+                Voice settings
+              </button>
+            )}
+          </div>
+          {captions && (
+            <div className="nova-caption" aria-label="Conversation captions">
+              {caption || "Your conversation will appear here."}
+            </div>
+          )}
+          <audio ref={output} hidden />
+          {playBlocked && (
+            <Button
+              onClick={() =>
+                void output.current
+                  ?.play()
+                  .then(() => setPlayBlocked(false))
+                  .catch(() =>
+                    setError(
+                      "Audio playback is blocked. Check the app’s audio permissions and try again.",
+                    ),
+                  )
+              }
+            >
+              Play Nova audio
+            </Button>
+          )}
           {conversation && (
             <Button
               variant="secondary"
@@ -540,8 +655,19 @@ export function Nova({
               Open evidence in Chat
             </Button>
           )}
-          {!active && (
-            <>
+          {!active && mode === "openai" && hasKey && (
+            <label className="text-xs">
+              <input
+                type="checkbox"
+                checked={consent}
+                onChange={(e) => setConsent(e.target.checked)}
+              />{" "}
+              Allow audio and relevant tenant context to the selected hosted
+              providers for this session.
+            </label>
+          )}
+          {!active && (settings || (mode === "openai" && !hasKey)) && (
+            <div id="nova-settings" className="nova-settings">
               <label className="nova-field">
                 Voice provider
                 <select
@@ -624,15 +750,6 @@ export function Nova({
                       </Button>
                     )}
                   </div>
-                  <label className="text-xs">
-                    <input
-                      type="checkbox"
-                      checked={consent}
-                      onChange={(e) => setConsent(e.target.checked)}
-                    />{" "}
-                    Allow audio and relevant tenant context to the selected
-                    hosted providers for this session.
-                  </label>
                 </>
               ) : (
                 <p className="text-xs text-[var(--color-text-muted)]">
@@ -647,8 +764,13 @@ export function Nova({
                 active conversation; background wake-word detection is not
                 enabled. Writes require visual review.
               </p>
-            </>
+            </div>
           )}
+          <p className="nova-footnote">
+            {active
+              ? "Esc ends the session and releases your microphone."
+              : "Click the orb to begin. Your microphone stays off until then."}
+          </p>
         </section>
       )}
     </div>
