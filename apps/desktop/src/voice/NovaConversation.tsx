@@ -1,3 +1,4 @@
+import { MarkdownPreview } from "../components/MarkdownPreview";
 import { useEffect, useRef } from "react";
 import type { NovaActivity } from "@openadminos/agent-sdk";
 
@@ -34,11 +35,11 @@ export function NovaConversation({ items, onClose, onEvidence }: {
       onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48; }}>
       {!items.length && <div className="nova-conversation-empty"><ConversationIcon /><p>A place to follow along.</p><span>Your words, Nova’s replies and live task activity will appear here.</span></div>}
       {items.map(item => item.kind === "speech"
-        ? <div key={item.id} className={`nova-message nova-message-${item.role}`}><span className="nova-message-author">{item.role === "user" ? "You" : "Nova"}</span><p>{item.text}</p></div>
+        ? <div key={item.id} className={`nova-message nova-message-${item.role}`}><span className="nova-message-author">{item.role === "user" ? "You" : "Nova"}</span><MarkdownPreview source={item.text} numberedSections={false} className="nova-message-body nova-markdown" /></div>
         : <div key={item.id} className="nova-activity-card" data-status={item.status}>
             <div className="nova-activity-heading"><span className="nova-activity-mark" aria-hidden="true">{item.status === "completed" ? "✓" : item.status === "failed" ? "!" : ""}</span><strong>{item.status === "completed" ? "Result retrieved" : item.status === "failed" ? "Needs attention" : item.status === "stopped" ? "Request stopped" : item.status === "replaced" ? "Question replaced" : "Working on your request"}</strong><span className="nova-activity-label">ACTIVITY</span></div>
             <ol>{item.steps.slice(-4).map((step, index) => <li key={`${index}-${step.message}`} data-status={step.status}>{step.message}</li>)}</ol>
-            {item.result && <details><summary>View result</summary><p className="nova-activity-result">{item.result}</p></details>}
+            {item.result && <details><summary>View result</summary><MarkdownPreview source={item.result} numberedSections={false} className="nova-activity-result nova-markdown" /></details>}
           </div>)}
     </div>
     <div className="nova-conversation-footer"><span>Live updates from your app</span>{onEvidence && <button type="button" onClick={onEvidence}>Open evidence <span aria-hidden="true">↗</span></button>}</div>

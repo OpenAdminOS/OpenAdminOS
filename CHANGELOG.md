@@ -4,6 +4,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- Fix Nova connector request routing, add one-request report delivery with setup checks and reviewed multipart sends, and render formatted conversation results.
+
 - Ground Nova device lists and compliance explanations in reported evidence, support spoken interruption and follow-ups, and add reviewed agent launches and result delivery through existing messaging connectors.
 
 - Preserve Nova’s final spoken word at live delegation boundaries and keep overlapping speech fragments together in conversation bubbles.

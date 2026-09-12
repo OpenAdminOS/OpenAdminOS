@@ -1496,6 +1496,7 @@ export interface NovaConversationTurn {
 
 export interface NovaActionPreview {
   id: string; kind: "send" | "run"; title: string; target: string; body: string;
+  deliveryNote?: string;
 }
 
 export type NovaRequest =
@@ -1517,6 +1518,8 @@ export type NovaRequest =
   | { action: "speak"; sessionId: string; text: string }
   | { action: "transcribe"; sessionId: string; audio: number[] };
 export interface NovaResponse {
+  /** Full local result for visual review; never sent to the speech model automatically. */
+  displayText?: string;
   pendingAction?: NovaActionPreview;
   /** A failed answer, with the session still valid for the next question. */
   answerError?: string;

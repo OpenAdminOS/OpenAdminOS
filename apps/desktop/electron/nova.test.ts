@@ -553,3 +553,49 @@ it('opens connector setup directly from voice without invoking reasoning', async
   const result = await f.nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Open connectors' });
   assert.equal(result.route, '/connectors'); assert.equal(f.chats.length, 0);
 });
+
+it('retrieves a fresh report and requires a single visual decision for every connector', async () => {
+  const f = fixture();
+  const deliveries: string[] = [], questions: string[] = [];
+  const ids = ['whatsapp-web', 'outlook', 'teams', 'slack', 'discord', 'signal'];
+  const nova = new NovaService(f.secrets, async () => f.state, async input => {
+    questions.push(input.content);
+    return { conversation: { id: 'report' }, assistantMessage: { status: 'completed', content: `Fresh report ${questions.length}` } } as SendIntuneChatMessageResult;
+  }, fetch, {
+    connectors: async () => ids.map(id => ({ descriptor: { id, name: id }, status: 'connected', config: { defaultRecipients: 'admin@example.test', defaultTeamId: 'team', defaultChannelId: 'channel', defaultChannel: 'slack-channel', defaultRecipient: 'signal-recipient' } } as never)),
+    send: async input => { deliveries.push(input.connectorId); }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  for (const [index, id] of ids.entries()) {
+    const channel = id === 'whatsapp-web' ? 'WhatsApp' : id;
+    const answer = await nova.handle({ action: 'answer', sessionId: sessionId!, text: `Send the list of non-compliant devices via ${channel}` });
+    assert.equal(questions[index], 'List devices that are non-compliant');
+    assert.equal(answer.pendingAction?.body, `Fresh report ${index + 1}`);
+    assert.equal(deliveries.length, index);
+    const decision = { action: 'decide-action' as const, sessionId: sessionId!, actionId: answer.pendingAction!.id, approved: true };
+    await nova.handle(decision);
+    await assert.rejects(nova.handle(decision), /expired/);
+  }
+  assert.deepEqual(deliveries, ids);
+});
+
+it('reports connector capabilities from configuration and never attaches an older report after failure', async () => {
+  const f = fixture();
+  let failed = false, questions = 0;
+  const nova = new NovaService(f.secrets, async () => f.state, async () => {
+    questions++;
+    return { conversation: { id: 'report' }, assistantMessage: failed ? { status: 'failed', error: 'No permission', content: '' } : { status: 'completed', content: 'Previous report' } } as SendIntuneChatMessageResult;
+  }, fetch, {
+    connectors: async () => [{ descriptor: { id: 'outlook', name: 'Outlook' }, status: 'connected', config: { defaultRecipients: 'admin@example.test' } } as never],
+    send: async () => { throw new Error('Must not send'); }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
+  const capability = await ask('Can you send email?');
+  assert.match(capability.text!, /Outlook.*connected/); assert.equal(questions, 0);
+  await ask('List devices'); failed = true;
+  const report = await ask('Send an email with the list of non-compliant devices');
+  assert.match(report.answerError!, /No permission/); assert.equal(report.pendingAction, undefined);
+  const old = await ask('Send this via email');
+  assert.match(old.text!, /no completed result/); assert.equal(old.pendingAction, undefined);
+});

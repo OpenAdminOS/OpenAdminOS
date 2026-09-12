@@ -398,10 +398,10 @@
 .nova-conversation-log:focus-visible, .nova-conversation button:focus-visible, .nova-conversation summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -3px; }
 .nova-message { max-width: 92%; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
 .nova-message-author { display: block; font-size: 10px; margin: 0 10px 6px; color: var(--color-text-muted); }
-.nova-message p { margin: 0; padding: 12px 15px; white-space: pre-wrap; border-radius: 14px 14px 14px 4px; background: var(--color-bg); border: 1px solid var(--color-border-soft); }
+.nova-message-body { margin: 0; padding: 12px 15px; white-space: pre-wrap; border-radius: 14px 14px 14px 4px; background: var(--color-bg); border: 1px solid var(--color-border-soft); }
 .nova-message-user { align-self: flex-end; }
 .nova-message-user .nova-message-author { text-align: right; }
-.nova-message-user p { border-radius: 14px 14px 4px 14px; background: color-mix(in srgb, var(--color-accent) 9%, var(--color-bg)); border-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-border-soft)); }
+.nova-message-user .nova-message-body { border-radius: 14px 14px 4px 14px; background: color-mix(in srgb, var(--color-accent) 9%, var(--color-bg)); border-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-border-soft)); }
 .nova-activity-card { margin: 0 3px; padding: 13px 0 13px 13px; border-left: 1px solid var(--color-border); font-size: 11px; line-height: 1.6; color: var(--color-text-muted); overflow-wrap: anywhere; }
 .nova-activity-heading { display: flex; align-items: center; gap: 7px; }
 .nova-activity-heading strong { font-size: 11px; font-weight: 500; color: var(--color-text); }
@@ -409,12 +409,12 @@
 .nova-activity-mark { width: 13px; height: 13px; display: inline-grid; place-items: center; color: var(--color-accent); font-size: 11px; flex-shrink: 0; }
 .nova-activity-card[data-status="running"] .nova-activity-mark { border: 1.5px solid var(--color-border); border-top-color: var(--color-accent); border-radius: 50%; animation: nova-activity-spin 1s linear infinite; }
 .nova-activity-card[data-status="failed"] .nova-activity-mark { color: #edab9e; }
-.nova-activity-card ol { list-style: none; display: grid; gap: 4px; padding: 8px 0 0 20px; margin: 0; }
-.nova-activity-card li::before { content: "·"; margin-right: 6px; }
+.nova-activity-card > ol { list-style: none; display: grid; gap: 4px; padding: 8px 0 0 20px; margin: 0; }
+.nova-activity-card > ol > li::before { content: "·"; margin-right: 6px; }
 .nova-activity-card li[data-status="failed"] { color: #edab9e; }
 .nova-activity-card details { margin: 9px 0 0 20px; }
 .nova-activity-card summary { cursor: pointer; color: var(--color-text-muted); font-size: 11px; }
-.nova-activity-result { margin-top: 10px; white-space: pre-wrap; color: var(--color-text); }
+.nova-activity-result { margin-top: 10px; color: var(--color-text); }
 .nova-conversation-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--color-border-soft); padding: 13px 18px; font-size: 9px; color: var(--color-text-muted); }
 .nova-conversation-footer button { color: var(--color-accent); min-height: 28px; font-size: 11px; }
 .nova-conversation-empty { margin: auto 12px; text-align: center; padding: 28px 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
@@ -452,15 +452,15 @@
 .nova-action-review { position: absolute; z-index: 12; inset: auto 24px 24px; max-height: min(70vh, 600px); overflow: auto; padding: 24px; background: var(--color-bg-elevated); border: 1px solid var(--color-border-strong); border-radius: 16px; box-shadow: 0 16px 64px #0008; }
 .nova-action-review h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
 .nova-action-review p { font-size: 13px; margin-bottom: 12px; }
-.nova-action-review pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; padding: 16px; background: var(--color-bg); border-radius: 8px; font: 13px/1.6 var(--font-sans); }
-.nova-action-review > div { display: flex; gap: 8px; margin-top: 16px; }
+.nova-action-body { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; padding: 16px; background: var(--color-bg); border-radius: 8px; font: 13px/1.6 var(--font-sans); }
+.nova-action-review > div:not(.nova-action-body) { display: flex; gap: 8px; margin-top: 16px; }
 
 .nova-panel-expanded > .nova-action-review { left: auto; right: 24px; width: min(48vw, 540px); }
 .nova-panel-expanded[data-action-review="true"] > .nova-orb { left: 25%; }
 @media (max-width: 760px) {
   .nova-panel-expanded > .nova-action-review { left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 65dvh; padding: 18px; }
   .nova-panel-expanded[data-action-review="true"][data-active="true"] > .nova-orb { left: 50%; top: 18%; width: 120px; height: 120px; min-width: 120px; min-height: 120px; }
-  .nova-action-review pre { max-height: 24dvh; }
+  .nova-action-body { max-height: 24dvh; }
 }
 .nova-panel-expanded[data-action-review="true"] > .nova-session-controls,
 .nova-panel-expanded[data-action-review="true"] > .nova-tools,
@@ -470,3 +470,11 @@
   .nova-panel-expanded[data-action-review="true"] > .nova-session-controls { left: 12px; top: calc(30% + 55px); bottom: auto; width: calc(100% - 24px); }
   .nova-panel-expanded[data-action-review="true"] > .nova-status { visibility: hidden; }
 }
+
+.nova-markdown { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.nova-markdown p { margin: 8px 0 0; padding: 0; font-size: inherit; }
+.nova-markdown > :first-child { margin-top: 0; }
+.nova-markdown pre { max-width: 100%; white-space: pre; overflow-x: auto; }
+.nova-markdown ul { list-style: disc; padding-left: 20px; }
+.nova-markdown ol { list-style: decimal; padding-left: 20px; }
+.nova-markdown a:focus-visible, .nova-markdown [tabindex]:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }

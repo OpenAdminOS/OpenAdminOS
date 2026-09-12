@@ -306,7 +306,23 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   await act(async () => finishAction({ text: "Late delivery message" }));
   expect(dc.send.mock.calls.some(([event]) => String(event).includes("Late delivery message"))).toBe(false);
   expect(screen.queryByText("Late delivery message")).not.toBeInTheDocument();
+  const beforeFallback = vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer").length;
+  act(() => {
+    emit({ type: "session.input_transcript.delta", delta: "Can you send me an email with the list of non-compliant devices" });
+    emit({ type: "session.output_transcript.delta", delta: "I cannot send emails." });
+  });
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "Can you send me an email with the list of non-compliant devices" }), expect.any(Function)), { timeout: 2000 });
+  await act(async () => finish({ text: "Review the email.", pendingAction: { id: "email-1", kind: "send", title: "Send via Outlook", target: "admin@example.test", body: "Verified device list.", deliveryNote: "This report will be sent as 2 numbered messages." } }));
+  expect(screen.getByRole("region", { name: "Review Nova action" })).toHaveTextContent("admin@example.test");
+  expect(screen.getByRole("region", { name: "Review Nova action" })).toHaveTextContent("2 numbered messages");
+  expect(dc.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.commentary.append", delegation_id: null, content: "Review the email." }));
+  act(() => emit({ type: "session.delegation.created", delegation: { id: "late-email", target: "client" } }));
+  await new Promise(resolve => setTimeout(resolve, 350));
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  act(() => emit({ type: "session.input_transcript.delta", delta: "Send this via Slack" }));
   await user.click(screen.getByRole("button", { name: "Stop" }));
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
   expect(track.stop).toHaveBeenCalled();
 });
 

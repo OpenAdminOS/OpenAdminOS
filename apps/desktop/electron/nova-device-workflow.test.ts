@@ -31,9 +31,21 @@ it('answers the reported fleet conversation through real SQLite and prepares the
   try {
     const nova = new NovaService({ get: async () => undefined, set: async () => {}, remove: async () => {} }, () => store.getAppState(),
       (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }), fetch,
-      { connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {} } as never], send: async () => { sends++; }, startRun: (...args) => store.startRun(...args) });
+      { connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {} } as never, { descriptor: { id: 'outlook', name: 'Outlook' }, status: 'connected', config: { defaultRecipients: 'admin@example.test' } } as never, { descriptor: { id: 'teams', name: 'Teams' }, status: 'connected', config: { defaultTeamId: 'team', defaultTeamName: 'Test team', defaultChannelId: 'channel', defaultChannelName: 'General' } } as never], send: async () => { sends++; }, startRun: (...args) => store.startRun(...args) });
     const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'test', consent: false });
     const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
+    const combined = await ask('Can you send me an email with the list of non-compliant devices');
+    assert.equal(combined.pendingAction?.target, 'admin@example.test');
+    assert.match(combined.pendingAction!.body, /2 are marked non-compliant/);
+    assert.match(combined.pendingAction!.body, /Device A/);
+    assert.match(combined.pendingAction!.body, /Device C/);
+    assert.equal(sends, 0);
+    const personalTeams = await ask('Can you send me a Teams message');
+    assert.match(personalTeams.text!, /shared destinations/);
+    assert.match(personalTeams.text!, /Test team \/ General/);
+    const teams = await ask('Send this via Teams');
+    assert.equal(teams.pendingAction?.target, 'Test team / General');
+    assert.equal(teams.pendingAction?.body, combined.pendingAction?.body);
     const noncompliant = await ask('Can you tell me which devices are non-compliant');
     assert.match(noncompliant.text!, /2 are marked non-compliant/); assert.match(noncompliant.text!, /Device A/); assert.match(noncompliant.text!, /Device C/);
     const why = await ask('Can you tell me why they are non-compliant');

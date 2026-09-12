@@ -1,3 +1,5 @@
+import { MarkdownPreview } from "../components/MarkdownPreview";
+import { novaActionIntent, novaConnectorQuestion } from "../shared/nova-action-intent";
 import { NovaConversation, ConversationIcon, type NovaConversationItem } from "./NovaConversation";
 import { NovaTranscript, isNovaConversationOnly, novaCommentaryChunks } from "../shared/nova-transcript";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -492,7 +494,7 @@ export function Nova({
             setPendingAction(answer.pendingAction);
             setError(answer.answerError || "");
             appendSpeech("assistant", answer.text || "No answer returned.");
-            recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.text);
+            recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || answer.text);
             setConversation(answer.conversationId);
             if (answer.route) {
               setExpanded(false);
@@ -565,6 +567,91 @@ export function Nova({
         void api.nova({ action: "interrupt", sessionId: sessionId.current }).catch(error => setError(String(error)));
         setPhase("listening");
       };
+      let actionFallback: ReturnType<typeof setTimeout> | undefined;
+      const runRequest = (id: string | null, offsetMs?: number, actionsOnly = false) => {
+        if (token !== generation.current || dc.readyState !== "open") return;
+        const preview = transcript.capture(offsetMs, false);
+        const actionRequest = preview && (novaActionIntent(preview.text) || novaConnectorQuestion(preview.text));
+        if (actionsOnly && !actionRequest) return;
+        const request = transcript.capture(offsetMs);
+        const activityId = id || `action-${++itemSequence.current}`;
+        if (!request?.text || isNovaConversationOnly(request.text)) {
+          if (request?.text && /^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(request.text) && !pendingAnswers && lastCompletedResult) {
+            dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
+              content: "The investigation is complete. Answer the waiting question using the completed result that follows. Do not say you are still checking." }));
+            for (const content of novaCommentaryChunks(lastCompletedResult)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
+            return;
+          }
+          dc.send(
+            JSON.stringify({
+              type: "session.thinking.append",
+              delegation_id: id,
+              content: pendingAnswers
+                ? "The existing backend question is still running. This conversational turn did not replace it."
+                : "No new backend question was identified. The current turn can be handled conversationally or clarified.",
+            }),
+          );
+          return;
+        }
+        const { text, history } = request;
+        if (actionRequest) dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
+          content: "The app is handling this connector or agent request. Wait for its configuration check and review result. Do not claim that Nova cannot send messages or run agents. No action is approved or executed by this request." }));
+        if (output.current) output.current.muted = false;
+        ++actionRevision.current;
+        setActionBusy(false);
+        setPendingAction(undefined);
+        endActivities("replaced");
+        lastCompletedResult = undefined;
+        const revision = ++answerRevision;
+        pendingAnswers = 1;
+        setPhase("thinking");
+        dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
+          content: JSON.stringify({ status: "running", question: text.slice(0, 300) }) }));
+        void (async () => {
+          const answer = await api.nova({
+            action: "answer",
+            sessionId: sessionId.current,
+            text,
+            ...(history.length ? { history } : {}),
+          }, event => {
+            if (token !== generation.current || revision !== answerRevision || dc.readyState !== "open") return;
+            recordActivity(activityId, event);
+            dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
+              content: JSON.stringify({ status: event.status, activity: event.message.slice(0, 250) }) }));
+          });
+          if (
+            token !== generation.current ||
+            revision !== answerRevision ||
+            dc.readyState !== "open"
+          )
+            return;
+          pendingAnswers = 0;
+          setPendingAction(answer.pendingAction);
+          setError(answer.answerError || "");
+          setConversation(answer.conversationId);
+          if (answer.route) {
+            setExpanded(false);
+            navigate(answer.route);
+          }
+          const result =
+            answer.text || "No answer available. Open Chat for details.";
+          lastCompletedResult = result;
+          recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || result);
+          setPhase("listening");
+          dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
+            content: JSON.stringify({ status: answer.pendingAction ? "awaiting_approval" : "completed", question: text.slice(0, 300), note: "The backend has finished. Do not say you are still checking. The result follows." }) }));
+          for (const chunk of novaCommentaryChunks(result))
+            dc.send(
+              JSON.stringify({
+                type: "session.commentary.append",
+                delegation_id: id,
+                content: chunk,
+              }),
+            );
+        })().catch((error) => {
+          if (revision === answerRevision) fail(error);
+        });
+      };
       dc.onmessage = (e) => {
         if (token !== generation.current) return;
         try {
@@ -590,6 +677,14 @@ export function Nova({
             appendSpeech(role === "User" ? "user" : "assistant", event.delta, event.start_ms, event.end_ms);
             if (role === "User") {
               if (transcript.takeStopCommand()) { interruptCurrent.current(); return; }
+              if (actionFallback) { clearTimeout(actionFallback); delegationTimers.current.delete(actionFallback); }
+              // A settled explicit action reaches the app even if Live never delegates it.
+              // capture() consumes it once, so a later model delegation cannot duplicate it.
+              actionFallback = setTimeout(() => {
+                delegationTimers.current.delete(actionFallback!);
+                runRequest(null, undefined, true);
+              }, 1000);
+              delegationTimers.current.add(actionFallback);
               if (output.current) output.current.muted = false;
               setError("");
               setPhase("listening");
@@ -606,81 +701,7 @@ export function Nova({
               delegationTimers.current.delete(timer);
               if (token !== generation.current || dc.readyState !== "open")
                 return;
-              const request = transcript.capture(event.offset_ms);
-              if (!request?.text || isNovaConversationOnly(request.text)) {
-                if (request?.text && /^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(request.text) && !pendingAnswers && lastCompletedResult) {
-                  dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
-                    content: "The investigation is complete. Answer the waiting question using the completed result that follows. Do not say you are still checking." }));
-                  for (const content of novaCommentaryChunks(lastCompletedResult)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
-                  return;
-                }
-                dc.send(
-                  JSON.stringify({
-                    type: "session.thinking.append",
-                    delegation_id: id,
-                    content: pendingAnswers
-                      ? "The existing backend question is still running. This conversational turn did not replace it."
-                      : "No new backend question was identified. The current turn can be handled conversationally or clarified.",
-                  }),
-                );
-                return;
-              }
-              const { text, history } = request;
-              if (output.current) output.current.muted = false;
-              ++actionRevision.current;
-              setActionBusy(false);
-              setPendingAction(undefined);
-              endActivities("replaced");
-              lastCompletedResult = undefined;
-              const revision = ++answerRevision;
-              pendingAnswers = 1;
-              setPhase("thinking");
-              dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
-                content: JSON.stringify({ status: "running", question: text.slice(0, 300) }) }));
-              void (async () => {
-                const answer = await api.nova({
-                  action: "answer",
-                  sessionId: sessionId.current,
-                  text,
-                  ...(history.length ? { history } : {}),
-                }, event => {
-                  if (token !== generation.current || revision !== answerRevision || dc.readyState !== "open") return;
-                  recordActivity(id, event);
-                  dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
-                    content: JSON.stringify({ status: event.status, activity: event.message.slice(0, 250) }) }));
-                });
-                if (
-                  token !== generation.current ||
-                  revision !== answerRevision ||
-                  dc.readyState !== "open"
-                )
-                  return;
-                pendingAnswers = 0;
-                setPendingAction(answer.pendingAction);
-                setError(answer.answerError || "");
-                setConversation(answer.conversationId);
-                if (answer.route) {
-                  setExpanded(false);
-                  navigate(answer.route);
-                }
-                const result =
-                  answer.text || "No answer available. Open Chat for details.";
-                lastCompletedResult = result;
-                recordActivity(id, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, result);
-                setPhase("listening");
-                dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
-                  content: JSON.stringify({ status: answer.pendingAction ? "awaiting_approval" : "completed", question: text.slice(0, 300), note: "The backend has finished. Do not say you are still checking. The result follows." }) }));
-                for (const chunk of novaCommentaryChunks(result))
-                  dc.send(
-                    JSON.stringify({
-                      type: "session.commentary.append",
-                      delegation_id: id,
-                      content: chunk,
-                    }),
-                  );
-              })().catch((error) => {
-                if (revision === answerRevision) fail(error);
-              });
+              runRequest(id, event.offset_ms);
             }, 250);
             delegationTimers.current.add(timer);
           } else if (event.type === "session.closed") stop();
@@ -1052,7 +1073,8 @@ export function Nova({
           {pendingAction && <section className="nova-action-review" aria-label="Review Nova action">
             <h2>{pendingAction.title}</h2><p><strong>Destination:</strong> {pendingAction.target}</p>
             <p>{pendingAction.kind === "send" ? "This sends the content below outside this app through your configured connector." : "The agent uses the selected tenant. Write plans still require their normal approval."}</p>
-            <pre>{pendingAction.body}</pre>
+            {pendingAction.deliveryNote && <p>{pendingAction.deliveryNote}</p>}
+            <MarkdownPreview source={pendingAction.body} numberedSections={false} className="nova-action-body nova-markdown" />
             <div><Button disabled={actionBusy} onClick={() => void decideAction(true)}>{actionBusy ? "Submitting…" : pendingAction.kind === "send" ? "Confirm send" : "Confirm run"}</Button>
             <Button variant="secondary" disabled={actionBusy} onClick={() => void decideAction(false)}>Cancel</Button></div>
           </section>}

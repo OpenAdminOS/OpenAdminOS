@@ -184,3 +184,41 @@ and cancel pending investigation while leaving the microphone available. Click
 **Stop** to end the session. **Result retrieved** means the backend lookup is complete;
 it does not mean every word has been spoken. Local voice remains a recording-based
 flow and does not listen continuously while playing its answer.
+
+
+### Ask for a report and send it in one request
+
+You can say “Send me an email with the list of non-compliant devices.” Nova retrieves
+the relevant report, then displays its content and destination for review. It does
+not send anything until you click **Confirm send**. You do not need to ask for the
+list separately first.
+
+| Connector | Setup in Connectors | Example after retrieving a result |
+| --- | --- | --- |
+| WhatsApp | Link the account with QR and choose a target | “Send this to my WhatsApp” |
+| Outlook / Exchange email | Connect the tenant, set recipients and test consent | “Email this to me” |
+| Teams | Choose the team and channel, then test consent | “Send this via Teams” |
+| Slack | Add the bot token, choose a destination and test | “Send this via Slack” |
+| Discord | Add the channel webhook and test | “Send this via Discord” |
+| Signal | Configure the account, recipient and local bridge or signal-cli, then test | “Send this via Signal” |
+
+“My WhatsApp” uses your linked account; “my email” uses your active tenant account.
+A configured Teams channel is shared with its members. It is not a private chat with
+you. Nova explains this when you ask for a personal Teams message; say “Send this via
+Teams” to review the configured channel. Slack, Discord and Signal defaults likewise
+do not establish which destination is personally yours. Always check the destination
+shown in the preview.
+
+Nova checks connector setup and gives the relevant recovery steps. Long reports may
+need several numbered messages; the preview states how many before you confirm.
+If delivery stops partway through, Nova reports how many messages were confirmed
+accepted and stops the rest. It does not retry automatically. Check the destination
+before repeating an uncertain send.
+
+### Read formatted answers
+
+The **Conversation** panel displays lists, bold and italic text, headings, tables,
+quotes, links and code blocks. Expand **View result** to read the full retrieved
+answer while Nova speaks a shorter summary. Message previews use the same formatting.
+The full visual answer stays in the app rather than being added to the speech
+model's context automatically. Raw HTML and executable links are not rendered.

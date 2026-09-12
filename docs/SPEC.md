@@ -319,6 +319,14 @@ Per-agent model overrides are required: an agent's manifest can specify a prefer
 
 ### Tenant cache preparation and Nova
 
+Nova can retrieve a new report and prepare its delivery in one request, such as
+“send me an email with the list of non-compliant devices”. Delivery wording is
+separated from the read-only research question; the research model cannot decide
+Nova connector capabilities. Explicit connector requests also have a transcript
+fallback when hosted speech omits delegation, using the same consumed request
+and approval path. Voice startup receives connector status, and missing setup
+returns specific instructions before a report lookup.
+
 Nova can prepare the last completed backend result for WhatsApp, Outlook/Exchange
 email, Teams, Slack, Discord and Signal using existing connectors. A visible preview
 shows the exact body and resolved destination, even when Conversation is hidden.
@@ -331,7 +339,20 @@ are consumed once, and are invalidated by interruption, replacement or scope cha
 Connector configuration is checked again before sending. Sends use the runtime
 connector wrapper, with the latest 200 connector audit entries retained locally and
 included in audit exports. Acceptance is distinct from recipient delivery; cancellation
-cannot recall a message already accepted by a connector.
+cannot recall a message already accepted by a connector. Shared Teams, Slack and
+Discord targets, and Signal recipient defaults, are not treated as verified personal
+self destinations. Nova explains the distinction and asks the admin to choose the
+configured destination explicitly. Long Discord, Slack and Teams reports are split
+into numbered, paced messages; the preview discloses the count and retains the full
+report. Failure or cancellation stops unsent parts, reports confirmed acceptance,
+and never automatically retries an uncertain send. Each part has a distinct audit ID.
+
+Nova conversation bubbles, retrieved results and action previews render safe Markdown,
+including nested lists, bold/italic text, headings, tables, quotes, links and code.
+HTML remains literal text and links permit only HTTP(S). The full retrieved result
+is returned separately for local visual review; only the bounded spoken summary is
+sent to hosted speech. Numbered Nova lists retain their numbering, including a
+single-item list; other report previews retain the existing numbered-section default.
 
 Fleet non-compliance and unencrypted-device lists use filtered SQLite fields directly,
 include snapshot freshness and coverage, and report the 50-row detail cap. Missing

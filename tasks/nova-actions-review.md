@@ -20,3 +20,15 @@ Validation:
 Limits: no external message was sent to a user's account in this pass. Connector acceptance is not delivery proof. Existing in-flight connector sends cannot necessarily be recalled by interruption. Hosted speech uses OpenAI's documented instructions.append plus application playback gating; exact speech wording and real-device microphone latency require live testing. The Mac was unavailable over SSH during the initial review. No new Mac/Windows hands-on result is claimed.
 
 CI follow-up: the release gate hit an intermittent second-answer timeout in the Chat smoke harness while the same head passed the local smoke and the independent CI Chat smoke. Its native textarea setter previously checked only the immediate DOM value, before React committed a sendable draft. The harness now waits for the enabled Send control before dispatching Enter; the response assertions remain unchanged.
+
+
+September 13 follow-up: fixes the reported natural email and Teams request forms,
+separates report retrieval from delivery, adds a consumed-transcript fallback when
+Live omits delegation, and checks all six implemented connector configurations.
+Personal requests never silently become shared channel posts. Long Discord, Slack
+and Teams messages are split with explicit preview counts and partial-send outcomes.
+Markdown conversation/result rendering includes lists, tables, emphasis, quotes and
+code; visual full results are separate from spoken summaries. Regression coverage
+includes all six reviewed sends, missing setup, fresh evidence, stale/failure guards,
+missing/late delegation, message limits and safe formatting. No external messages are
+sent by these tests; real delivery still requires configured accounts and approval.
