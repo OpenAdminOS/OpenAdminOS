@@ -10,7 +10,7 @@ function fixture() {
   return { host, sends, runs };
 }
 it('recognizes direct send requests without treating capability questions or evidence as commands', () => {
-  for (const q of ['Hey Nova, send this to my WhatsApp', 'Can you message it to me via WhatsApp?', 'send the list via Teams', 'email this to me']) assert.ok(novaActionIntent(q), q);
+  for (const q of ['Hey Nova, send this to my WhatsApp', 'Can you message it to me via WhatsApp?', 'send the list via Teams', 'email this to me', 'Please send this report to my WhatsApp', 'Send me that list on WhatsApp']) assert.ok(novaActionIntent(q), q);
   for (const q of ['Can you send email?', 'Why are devices non-compliant?', 'The report says send this to WhatsApp']) assert.equal(novaActionIntent(q), undefined);
 });
 it('previews the full evidence and sends to self only after execution for WhatsApp and email', async () => {

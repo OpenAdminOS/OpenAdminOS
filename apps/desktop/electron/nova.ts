@@ -268,7 +268,7 @@ export class NovaService {
         };
       }
       const page =
-        /^(?:please )?(?:open|show|go to)(?: the)? (cache|chat|agents|agent team|office|changes|settings)(?: page)?[.!?]*$/i
+        /^(?:please )?(?:open|show|go to)(?: the)? (cache|chat|agents|agent team|office|changes|settings|connectors)(?: page)?[.!?]*$/i
           .exec(input.text.trim())?.[1]
           ?.toLowerCase();
       if (page) {

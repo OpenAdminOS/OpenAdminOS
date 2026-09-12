@@ -16,8 +16,8 @@ export function novaActionIntent(text: string): { kind: 'send'; connectorId: str
   if (/^(?:can|could) you (?:send (?:email|messages)|run agents)[?.!\s]*$/i.test(text.trim())) return undefined;
   const q = text.trim().replace(/^(?:hey|hi)[,\s]+nova[,\s]*/i, '').replace(/^(?:please\s+|(?:can|could|would) you\s+)/i, '').replace(/[?.!]+$/, '').trim();
   if (/^send (?:an? )?email with (?:this|that|the) (?:list|result|answer|report)(?: to me)?$/i.test(q)) return { kind: "send", connectorId: "outlook", self: /to me$/i.test(q) };
-  if (/^email (?:this|that|it|the (?:list|result|answer|report)) to me$/i.test(q)) return { kind: 'send', connectorId: 'outlook', self: true };
-  const send = /^(?:send|share|message|post|email)\s+(?:(?:this|that|it|the (?:list|result|answer|report))\s+)?(?:(?:to|via|on|through|using|by)\s+)?(?:(?:me|my)\s+)?(?:on |via |to )?(whatsapp|email|exchange|outlook|teams|slack|discord|signal)$/i.exec(q);
+  if (/^email (?:it|(?:this|that|the)(?: (?:list|result|answer|report|summary))?) to me$/i.test(q)) return { kind: 'send', connectorId: 'outlook', self: true };
+  const send = /^(?:send|share|message|post|email)\s+(?:me\s+)?(?:(?:it|(?:this|that|the)(?: (?:list|result|answer|report|summary))?)\s+)?(?:(?:to|via|on|through|using|by)\s+)?(?:(?:me|my)\s+)?(?:on |via |to )?(whatsapp|email|exchange|outlook|teams|slack|discord|signal)$/i.exec(q);
   if (send) return { kind: 'send', connectorId: aliases[send[1].toLowerCase()]!, self: /\b(me|my)\b/i.test(q) };
   const run = /^(?:run|start|launch)\s+(?:the\s+)?(.+?)(?:\s+agent)?$/i.exec(q);
   if (run) return { kind: 'run', name: run[1].trim() };

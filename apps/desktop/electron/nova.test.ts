@@ -546,3 +546,10 @@ it('does not execute a prepared connector action after tenant changes', async ()
   await assert.rejects(nova.handle({ action: 'decide-action', sessionId: sessionId!, actionId: draft.pendingAction!.id, approved: true }), /changed/);
   assert.equal(sends, 0);
 });
+
+it('opens connector setup directly from voice without invoking reasoning', async () => {
+  const f = fixture();
+  const { sessionId } = await f.nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  const result = await f.nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Open connectors' });
+  assert.equal(result.route, '/connectors'); assert.equal(f.chats.length, 0);
+});
