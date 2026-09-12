@@ -211,7 +211,16 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:list-multi-tenant-agent-batches"),
   getMultiTenantAgentBatch: (id: string) =>
     ipcRenderer.invoke("openadminos:get-multi-tenant-agent-batch", id),
-  nova: (input) => ipcRenderer.invoke("openadminos:nova", input),
+  nova: (input, onActivity) => {
+    if (!onActivity || input.action !== "answer") return ipcRenderer.invoke("openadminos:nova", input);
+    const streamId = crypto.randomUUID();
+    const handler = (_event: unknown, payload: { streamId: string; activity: import("@openadminos/agent-sdk").NovaActivity }) => {
+      if (payload.streamId === streamId) onActivity(payload.activity);
+    };
+    ipcRenderer.on("openadminos:nova-activity", handler);
+    return ipcRenderer.invoke("openadminos:nova", input, streamId)
+      .finally(() => ipcRenderer.removeListener("openadminos:nova-activity", handler));
+  },
   startGraphCachePreload: (options) => ipcRenderer.invoke("openadminos:start-graph-cache-preload", options),
   cancelGraphCachePreload: (tenantId) => ipcRenderer.invoke("openadminos:cancel-graph-cache-preload", tenantId),
   refreshGraphCache: (options) =>

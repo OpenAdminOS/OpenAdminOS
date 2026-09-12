@@ -1,3 +1,5 @@
+import { NovaConversation, ConversationIcon, type NovaConversationItem } from "./NovaConversation";
+import { NovaTranscript, isNovaConversationOnly, novaCommentaryChunks } from "../shared/nova-transcript";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
@@ -6,6 +8,7 @@ import { Button } from "../components/Button";
 import {
   resolveProviderDefaultModel,
   type GraphCacheStatus,
+  type NovaActivity,
 } from "@openadminos/agent-sdk";
 import "./nova.css";
 
@@ -27,9 +30,33 @@ export function Nova({
   const [key, setKey] = useState(""),
     [hasKey, setHasKey] = useState(false),
     [consent, setConsent] = useState(false);
-  const [phase, setPhase] = useState("idle"),
-    [error, setError] = useState(""),
-    [caption, setCaption] = useState("");
+  const [phase, setPhase] = useState("idle"), [error, setError] = useState("");
+  const [conversationItems, setConversationItems] = useState<NovaConversationItem[]>([]);
+  const itemSequence = useRef(0);
+  const conversationToggle = useRef<HTMLButtonElement>(null);
+  const appendSpeech = useCallback((role: "user" | "assistant", text: string) => {
+    const id = `speech-${++itemSequence.current}`;
+    setConversationItems(current => {
+      const last = current.at(-1);
+      if (last?.kind === "speech" && last.role === role)
+        return current.map(item => item.id === last.id ? { ...last, text: (last.text + text).slice(-8000) } : item);
+      return [...current, { id, kind: "speech", role, text } as NovaConversationItem].slice(-80);
+    });
+  }, []);
+  const recordActivity = useCallback((id: string, activity: NovaActivity, result?: string) => {
+    setConversationItems(current => {
+      const previous = current.find(item => item.id === id && item.kind === "activity");
+      const steps = previous?.kind === "activity" ? previous.steps : [];
+      const item: NovaConversationItem = { id, kind: "activity",
+        status: activity.kind === "answer" ? activity.status : "running",
+        steps: (steps.at(-1)?.message === activity.message ? steps : [...steps, activity]).slice(-8), result };
+      return previous ? current.map(row => row.id === id ? item : row) : [...current, item].slice(-80);
+    });
+  }, []);
+  const endActivities = useCallback((status: "stopped" | "replaced" | "failed") => {
+    setConversationItems(current => current.map(item =>
+      item.kind === "activity" && item.status === "running" ? { ...item, status } : item));
+  }, []);
   const [connectionCheck, setConnectionCheck] = useState("");
   const [savingKey, setSavingKey] = useState(false);
   const keyRevision = useRef(0);
@@ -51,7 +78,6 @@ export function Nova({
   const [expanded, setExpanded] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const root = useRef<HTMLDivElement>(null);
-  const [focusCaptions, setFocusCaptions] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -61,7 +87,12 @@ export function Nova({
     clearTimeout(controlsTimer.current);
     controlsTimer.current = setTimeout(() => setControlsVisible(false), 3000);
   }, []);
-  const [captions, setCaptions] = useState(true);
+  const [captions, setCaptions] = useState(() => localStorage.getItem("nova.conversation-visible") === "true");
+  const toggleConversation = useCallback((visible: boolean) => {
+    setCaptions(visible);
+    localStorage.setItem("nova.conversation-visible", String(visible));
+    if (!visible) conversationToggle.current?.focus();
+  }, []);
   const [muted, setMuted] = useState(false);
   const [settings, setSettings] = useState(false);
   const [playBlocked, setPlayBlocked] = useState(false);
@@ -80,19 +111,19 @@ export function Nova({
     orb = useRef<HTMLButtonElement>(null),
     recorder = useRef<MediaRecorder | null>(null),
     sessionId = useRef("");
-  const delegationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
+  const delegationTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     blobUrl = useRef("");
   const api = window.openAdminOS;
   const stop = useCallback(() => {
     generation.current++;
+    endActivities("stopped");
     liveReady.current = false;
     setConsent(false);
     setKey("");
     clearTimeout(timeout.current);
-    clearTimeout(delegationTimer.current);
+    delegationTimers.current.forEach(clearTimeout);
+    delegationTimers.current.clear();
     cancelAnimationFrame(frame.current);
     if (recorder.current?.state === "recording") recorder.current.stop();
     recorder.current = null;
@@ -139,14 +170,14 @@ export function Nova({
     orb.current?.style.setProperty("--voice-level", "0");
     void api?.nova({ action: "stop" }).catch(() => {});
     setPhase("idle");
-  }, [api]);
+  }, [api, endActivities]);
   useEffect(() => {
     stop();
     setConsent(false);
     setConnectionCheck("");
     setCacheStatus(undefined);
     setConversation(undefined);
-    setCaption("");
+    setConversationItems([]);
   }, [
     state.activeTenantId,
     state.activeProviderId,
@@ -261,10 +292,11 @@ export function Nova({
     stop();
     const token = generation.current;
     setError("");
-    setCaption("");
+    setConversationItems([]);
     setPhase("connecting");
     const fail = (e: unknown) => {
       if (generation.current === token) {
+        endActivities("failed");
         stop();
         setError(voiceErrorMessage(e));
       }
@@ -414,15 +446,17 @@ export function Nova({
               throw new Error(
                 "No speech recognized. Try again closer to the microphone.",
               );
-            setCaption(heard.text);
+            appendSpeech("user", heard.text);
+            const activityId = `local-${++itemSequence.current}`;
             const answer = await api.nova({
               action: "answer",
               sessionId: sessionId.current,
               text: heard.text,
-            });
+            }, event => { if (token === generation.current) recordActivity(activityId, event); });
             if (token !== generation.current) return;
             setError(answer.answerError || "");
-            setCaption(answer.text || "No answer returned.");
+            appendSpeech("assistant", answer.text || "No answer returned.");
+            recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || "Answer ready" }, answer.text);
             setConversation(answer.conversationId);
             if (answer.route) {
               setExpanded(false);
@@ -475,9 +509,8 @@ export function Nova({
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
       const dc = pc.createDataChannel("oai-events");
       channel.current = dc;
-      let pendingUserText = "",
-        answerRevision = 0,
-        lastSpeaker = "";
+      const transcript = new NovaTranscript();
+      let answerRevision = 0;
       const delegated = new Set<string>();
       dc.onmessage = (e) => {
         if (token !== generation.current) return;
@@ -500,13 +533,8 @@ export function Nova({
           ) {
             const role = event.type.includes("input_") ? "User" : "Nova";
             if (typeof event.delta !== "string") return;
-            const prefix = lastSpeaker !== role ? `\n${role}: ` : "";
-            if (role === "User")
-              pendingUserText = (pendingUserText + event.delta).slice(-12000);
-            setCaption((current) =>
-              (current + prefix + event.delta).slice(-3000),
-            );
-            lastSpeaker = role;
+            if (!transcript.append(event)) return;
+            appendSpeech(role === "User" ? "user" : "assistant", event.delta);
             if (role === "User") {
               setError("");
               setPhase("listening");
@@ -518,33 +546,42 @@ export function Nova({
             const id = event.delegation.id;
             if (delegated.has(id)) return;
             delegated.add(id);
-            clearTimeout(delegationTimer.current);
-            // Delegation and transcript events can arrive in the same network burst.
-            delegationTimer.current = setTimeout(() => {
+            // Use the delegation's timeline boundary even if later speech arrives first.
+            const timer = setTimeout(() => {
+              delegationTimers.current.delete(timer);
               if (token !== generation.current || dc.readyState !== "open")
                 return;
-              const text = pendingUserText.trim();
-              if (!text) {
+              const request = transcript.capture(event.offset_ms);
+              if (!request?.text || isNovaConversationOnly(request.text)) {
                 dc.send(
                   JSON.stringify({
-                    type: "session.commentary.append",
+                    type: "session.thinking.append",
                     delegation_id: id,
                     content: pendingAnswers
-                      ? "The earlier question is still being checked."
-                      : "Please repeat the question; I did not receive its transcript.",
+                      ? "The existing backend question is still running. This conversational turn did not replace it."
+                      : "No new backend question was identified. The current turn can be handled conversationally or clarified.",
                   }),
                 );
                 return;
               }
-              pendingUserText = "";
+              const { text, history } = request;
+              endActivities("replaced");
               const revision = ++answerRevision;
               pendingAnswers = 1;
               setPhase("thinking");
+              dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
+                content: JSON.stringify({ status: "running", question: text.slice(0, 300) }) }));
               void (async () => {
                 const answer = await api.nova({
                   action: "answer",
                   sessionId: sessionId.current,
                   text,
+                  ...(history.length ? { history } : {}),
+                }, event => {
+                  if (token !== generation.current || revision !== answerRevision || dc.readyState !== "open") return;
+                  recordActivity(id, event);
+                  dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
+                    content: JSON.stringify({ status: event.status, activity: event.message.slice(0, 250) }) }));
                 });
                 if (
                   token !== generation.current ||
@@ -561,24 +598,21 @@ export function Nova({
                 }
                 const result =
                   answer.text || "No answer available. Open Chat for details.";
-                setCaption((current) =>
-                  `${current}\nBackend: ${result}`.slice(-3000),
-                );
-                lastSpeaker = "";
+                recordActivity(id, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || "Answer ready" }, result);
                 setPhase("listening");
-                const characters = Array.from(result);
-                for (let i = 0; i < characters.length; i += 100)
+                for (const chunk of novaCommentaryChunks(result))
                   dc.send(
                     JSON.stringify({
                       type: "session.commentary.append",
                       delegation_id: id,
-                      content: characters.slice(i, i + 100).join(""),
+                      content: chunk,
                     }),
                   );
               })().catch((error) => {
                 if (revision === answerRevision) fail(error);
               });
             }, 250);
+            delegationTimers.current.add(timer);
           } else if (event.type === "session.closed") stop();
           else if (event.type === "error")
             fail(
@@ -689,7 +723,7 @@ export function Nova({
         animation.updatePlaybackRate(speed);
     }
   }, [open, phase]);
-  const showCaptions = expanded ? focusCaptions : captions;
+  const showCaptions = captions;
   const quiet =
     expanded &&
     active &&
@@ -725,6 +759,7 @@ export function Nova({
           aria-modal={expanded || undefined}
           data-active={active}
           data-quiet={quiet}
+          data-conversation={showCaptions}
           onPointerMove={expanded ? revealControls : undefined}
           onPointerDown={expanded ? revealControls : undefined}
           onKeyDown={(event) => {
@@ -879,7 +914,7 @@ export function Nova({
                     ? "Microphone muted"
                     : "Listening"
                   : phase === "thinking"
-                    ? "Checking tenant evidence…"
+                    ? "Working on your question…"
                     : "Nova is speaking"}
           </div>
           {active && (
@@ -919,15 +954,15 @@ export function Nova({
           )}
           <div className="nova-tools">
             <button
+              ref={conversationToggle}
               type="button"
+              className="nova-conversation-toggle"
+              aria-label={showCaptions ? "Hide conversation panel" : "Show conversation panel"}
               aria-pressed={showCaptions}
-              onClick={() =>
-                expanded
-                  ? setFocusCaptions(!focusCaptions)
-                  : setCaptions(!captions)
-              }
+              aria-controls="nova-conversation"
+              onClick={() => toggleConversation(!showCaptions)}
             >
-              Captions {showCaptions ? "on" : "off"}
+              <ConversationIcon /> Conversation
             </button>
             {!active && (
               <button
@@ -940,11 +975,8 @@ export function Nova({
               </button>
             )}
           </div>
-          {showCaptions && (
-            <div className="nova-caption" aria-label="Conversation captions">
-              {caption || "Your conversation will appear here."}
-            </div>
-          )}
+          {showCaptions && <NovaConversation items={conversationItems} onClose={() => toggleConversation(false)}
+            onEvidence={conversation ? () => { setExpanded(false); navigate(`/chat/${conversation}`); } : undefined} />}
           <audio ref={output} hidden />
           {playBlocked && (
             <Button

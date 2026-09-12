@@ -57,11 +57,11 @@ it("expands the voice view and hides captions without requesting the microphone"
     screen.getByRole("dialog", { name: "Nova voice assistant" }),
   ).toHaveClass("nova-panel-expanded");
   expect(
-    screen.queryByLabelText("Conversation captions"),
+    screen.queryByLabelText("Conversation"),
   ).not.toBeInTheDocument();
   expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
-  await user.click(screen.getByRole("button", { name: "Captions off" }));
-  expect(screen.getByLabelText("Conversation captions")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Show conversation panel" }));
+  expect(screen.getByLabelText("Conversation")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Exit full screen" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Full screen" })).toHaveFocus();
@@ -162,6 +162,7 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   await user.click(screen.getByRole("checkbox"));
   await user.click(screen.getByRole("button", { name: "Start Nova" }));
   await waitFor(() => expect(dc.onmessage).toBeTypeOf("function"));
+  await user.click(screen.getByRole("button", { name: "Show conversation panel" }));
   const emit = (event: object) =>
     dc.onmessage!({ data: JSON.stringify(event) });
   act(() => {
@@ -174,25 +175,29 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     });
     emit({ type: "session.output_transcript.delta", delta: "Let me check." });
   });
-  expect(screen.getByLabelText("Conversation captions")).toHaveTextContent(
-    "User: Do you see any devices? Nova: Let me check.",
+  expect(screen.getByLabelText("Conversation")).toHaveTextContent(
+    "YouDo you see any devices?NovaLet me check.",
   );
   await waitFor(() =>
-    expect(bridge.nova).toHaveBeenCalledWith({
+    expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({
       action: "answer",
       sessionId: "voice-session",
       text: "Do you see any devices?",
-    }),
+    }), expect.any(Function)),
   );
+  const firstActivity = vi.mocked(bridge.nova).mock.calls.find(([request]) => request.action === "answer")![1]!;
+  act(() => firstActivity({ kind: "cache", status: "running", message: "Reading cached device inventory" }));
+  expect(screen.getByLabelText("Conversation")).toHaveTextContent("Reading cached device inventory");
   expect(screen.getByRole("button", { name: "Stop Nova" })).toHaveAttribute(
     "data-phase",
     "thinking",
   );
   await user.click(screen.getByRole("button", { name: "Full screen" }));
   expect(screen.getByRole("dialog")).toHaveAttribute("data-active", "true");
-  expect(
-    screen.queryByLabelText("Conversation captions"),
-  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Conversation")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Hide conversation panel" }));
+  expect(screen.queryByLabelText("Conversation")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Show conversation panel" }));
   await user.click(screen.getByRole("button", { name: "Exit full screen" }));
   expect(track.stop).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Stop Nova" })).toHaveAttribute(
@@ -200,6 +205,14 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     "thinking",
   );
   const oldFinish = finish;
+  act(() => {
+    emit({ type: "session.input_transcript.delta", delta: "Can you tell me a joke while we wait" });
+    emit({ type: "session.delegation.created", delegation: { id: "small-talk", target: "client" } });
+    emit({ type: "session.output_transcript.delta", delta: "Sure. Here is a joke." });
+  });
+  await waitFor(() => expect(dc.send.mock.calls.some(([event]) => String(event).includes("did not replace it"))).toBe(true));
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(1);
+
   act(() => {
     emit({
       type: "session.input_transcript.delta",
@@ -211,12 +224,15 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     });
   });
   await waitFor(() =>
-    expect(bridge.nova).toHaveBeenCalledWith({
+    expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({
       action: "answer",
       sessionId: "voice-session",
       text: "How many Intune devices?",
-    }),
+    }), expect.any(Function)),
   );
+  expect(screen.getByLabelText("Conversation")).toHaveTextContent("Question replaced");
+  act(() => firstActivity({ kind: "cache", status: "completed", message: "Old activity must stay hidden" }));
+  expect(screen.getByLabelText("Conversation")).not.toHaveTextContent("Old activity must stay hidden");
   await act(async () => {
     oldFinish({ text: "Outdated result" });
     finish({ text: "The tenant has 9 Intune devices." });
@@ -239,14 +255,14 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
       delta: "Yes, nine Intune devices.",
     }),
   );
-  expect(screen.getByLabelText("Conversation captions")).toHaveTextContent(
-    "Backend: The tenant has 9 Intune devices. Nova: Yes, nine Intune devices.",
+  expect(screen.getByLabelText("Conversation")).toHaveTextContent(
+    "NovaYes, nine Intune devices.",
   );
   act(() => {
     emit({ type: "session.input_transcript.delta", delta: "Research macOS" });
     emit({ type: "session.delegation.created", delegation: { id: "task-3", target: "client" } });
   });
-  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "Research macOS" })));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "Research macOS" }), expect.any(Function)));
   await act(async () => finish({ text: "Search failed. You can ask another question.", answerError: "Search failed. Retry later." }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Search failed. Retry later.");
   expect(track.stop).not.toHaveBeenCalled();
@@ -257,7 +273,7 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     emit({ type: "session.input_transcript.delta", delta: "How many devices?" });
     emit({ type: "session.delegation.created", delegation: { id: "task-4", target: "client" } });
   });
-  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "How many devices?" })));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "How many devices?" }), expect.any(Function)));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   await act(async () => finish({ text: "9 devices." }));
   expect(dc.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.commentary.append", delegation_id: "task-4", content: "9 devices." }));

@@ -56,6 +56,26 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
+  it("requires a voice lookup to finish instead of accepting a progress promise", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nova-unfinished-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat({ ...baseInput(store, scriptedLlm([
+        'Let me check the tenant device data.',
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":1}}\n```',
+        '```json\n{"final":true,"answer":"WIN-01 is in the cached inventory."}\n```',
+      ])), voice: true });
+      assert.equal(result.ok, true);
+      assert.equal(result.answer, "WIN-01 is in the cached inventory.");
+      assert.equal(result.toolTrace[0]?.tool, "query_cache");
+      const unfinished = await runAgenticChat({ ...baseInput(store, scriptedLlm([
+        'Let me check that.', 'I am checking the device inventory.', 'I will query that now.',
+      ])), voice: true });
+      assert.equal(unfinished.ok, false);
+      assert.equal(unfinished.reason, "unfinished-answer");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("repairs one malformed tool JSON response", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);

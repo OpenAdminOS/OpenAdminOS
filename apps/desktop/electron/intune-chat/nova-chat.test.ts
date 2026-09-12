@@ -1,3 +1,4 @@
+import { NovaTranscript } from "../../src/shared/nova-transcript.js";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -336,5 +337,39 @@ it("answers indirect spoken device counts without investigating or dropping filt
       "How many devices I have in my tenant that are not compliant",
     ]) await f.store.streamIntuneChatMessage({ content }, () => {}, options);
     assert.equal(f.prompts.length, 3, "filters and compound requests still need reasoning");
+  } finally { await f.cleanup(); }
+});
+
+
+it("answers the real multi-turn Nova sequence from cache with no reasoning or research calls", async () => {
+  const f = await fixture();
+  try {
+    const transcript = new NovaTranscript();
+    let time = 0;
+    const say = (role: "input" | "output", delta: string) => {
+      transcript.append({ type: `session.${role}_transcript.delta`, delta, start_ms: time, end_ms: time + 900 });
+      time += 1000;
+    };
+    say("input", "Hello girl"); say("output", "Hi! What would you like to know?");
+    say("input", "Who are you and what can you do"); say("output", "I'm Nova, the voice of OpenAdminOS.");
+    say("input", "How many devices do I have in my tenant");
+    let conversationId: string | undefined;
+    for (let round = 0; round < 2; round++) {
+      const request = transcript.capture(time)!;
+      const result = await f.store.streamIntuneChatMessage({ content: request.text, conversationId }, () => {}, {
+        ...options, voiceHistory: request.history,
+        webSearch: async () => { assert.fail("Device count must not search the web"); },
+      });
+      conversationId = result.conversation.id;
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.match(result.assistantMessage.content, /1 Intune managed devices/);
+      assert.doesNotMatch(result.assistantMessage.content, /joke|let me check|Detected matching agent|Public web sources/i);
+      say("output", "There is one Intune managed device.");
+      say("input", "Still there"); say("output", "Yes.");
+      say("input", "Can you tell me a joke while we wait"); say("output", "A joke.");
+      say("input", "All right, how many devices do I have");
+    }
+    assert.equal(f.prompts.length, 0);
+    assert.equal(f.calls.length, 2, "fresh cache reused across both questions");
   } finally { await f.cleanup(); }
 });

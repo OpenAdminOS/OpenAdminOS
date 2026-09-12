@@ -1483,6 +1483,17 @@ export interface RefreshGraphCacheOptions {
   tenantId?: string;
 }
 
+export interface NovaActivity {
+  kind: "cache" | "graph" | "web" | "reasoning" | "answer";
+  status: "running" | "completed" | "failed";
+  message: string;
+}
+
+export interface NovaConversationTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 export type NovaRequest =
   | { action: "check"; mode: "openai" | "local"; connectivity?: boolean }
   | { action: "status" }
@@ -1496,7 +1507,8 @@ export type NovaRequest =
       name?: string;
       sdp?: string;
     }
-  | { action: "answer" | "speak"; sessionId: string; text: string }
+  | { action: "answer"; sessionId: string; text: string; history?: NovaConversationTurn[] }
+  | { action: "speak"; sessionId: string; text: string }
   | { action: "transcribe"; sessionId: string; audio: number[] };
 export interface NovaResponse {
   /** A failed answer, with the session still valid for the next question. */
@@ -2393,7 +2405,7 @@ export interface OpenAdminOSApi {
   ): Promise<QueueMultiTenantAgentBatchResult>;
   listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
-  nova(input: NovaRequest): Promise<NovaResponse>;
+  nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
   startGraphCachePreload(options?: RefreshGraphCacheOptions): Promise<void>;
   cancelGraphCachePreload(tenantId: string): Promise<void>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;

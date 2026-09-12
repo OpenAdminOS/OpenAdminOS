@@ -189,6 +189,7 @@ export interface IntuneChatStreamOptions {
   /** Main-process capability, passed only by a consented hosted Nova session. */
   webSearch?: WebSearch;
   voice?: boolean;
+  voiceHistory?: import("@openadminos/agent-sdk").NovaConversationTurn[];
   signal?: AbortSignal;
   /** Pin delegated voice work before fetching data or invoking a provider. */
   scope?: { tenantId: string; providerId: ProviderId; model?: string; isLocal?: boolean };
@@ -1791,7 +1792,7 @@ export class IntuneChatService {
     }
 
     const voiceContext = options.voice
-      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation")
+      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
       : undefined;
     const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
@@ -2100,7 +2101,7 @@ export class IntuneChatService {
           emitDelta(assistantContent, chunk.delta);
         }
         assistantContent = assistantContent.trim();
-        if (agentSuggestions.length > 0) {
+        if (!options.voice && agentSuggestions.length > 0) {
           assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
         }
         emitDelta(assistantContent, "");
@@ -2145,7 +2146,7 @@ export class IntuneChatService {
               tools: { ...this.buildChatToolContext(tenant.id, options.signal), webSearch: options.webSearch },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
-              agentSuggestions,
+              agentSuggestions: options.voice ? [] : agentSuggestions,
               generatedAt: answerGeneratedAt,
               maxTokens: chatBudget.maxTokens,
               signal: options.signal,
@@ -2216,7 +2217,7 @@ export class IntuneChatService {
                 },
               });
               assistantContent = agentic.answer.trim();
-              if (agentSuggestions.length > 0) {
+              if (!options.voice && agentSuggestions.length > 0) {
                 assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
               }
               emitDelta(assistantContent);
@@ -2232,6 +2233,8 @@ export class IntuneChatService {
                 assistantStatus = "failed";
                 assistantError = agentic.reason === "context-limit"
                   ? "This question exceeded Nova's voice context budget. Ask about fewer details or open Chat for a longer investigation."
+                  : agentic.reason === "unfinished-answer"
+                    ? "The reasoning model described a lookup without finishing it. No completed answer is available. Retry or open Chat to inspect the evidence."
                   : agentic.reason === "malformed-output"
                     ? "The selected reasoning model could not produce a valid tool request. Retry or select a model that supports tool use."
                     : agentic.reason === "provider-unavailable"

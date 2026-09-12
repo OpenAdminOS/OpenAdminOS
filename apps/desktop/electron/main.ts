@@ -5288,9 +5288,14 @@ function registerIpcHandlers() {
   const nova = new NovaService(
     new SafeStorageProviderSecretStore(join(app.getPath("userData"), "providers", "secrets")).forProvider("nova"),
     () => store.getAppState(),
-    (input, options) => store.streamIntuneChatMessage(input, () => {}, { ...options, voice: true }),
+    (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
   );
-  ipcMain.handle("openadminos:nova", handleTrusted((_event, input: import("@openadminos/agent-sdk").NovaRequest) => nova.handle(input)));
+  ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
+    const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
+    return nova.handle(input, activity => {
+      if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });
+    });
+  }));
   ipcMain.handle("openadminos:start-graph-cache-preload", handleTrusted((_event, options?: unknown) => store.startGraphCachePreload(validateRefreshGraphCacheOptions(options))));
   ipcMain.handle("openadminos:cancel-graph-cache-preload", handleTrusted((_event, tenantId: unknown) => store.cancelGraphCachePreload(requireBoundedString(tenantId, "tenantId", 256))));
   ipcMain.handle(

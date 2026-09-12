@@ -474,3 +474,35 @@ it("recovers from a question deadline without renewing or invalidating the sessi
   deadline.mock.restore();
   assert.equal((await nova.handle({ action: "answer", sessionId: sessionId!, text: "How many devices?" })).text, "42 devices");
 });
+
+it("keeps spoken references separate and exposes only execution activity", async () => {
+  const { nova, chatOptions } = fixture();
+  const { sessionId } = await nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false });
+  const activity: unknown[] = [];
+  await nova.handle({ action: "answer", sessionId: sessionId!, text: "How many of those?", history: [{ role: "user", text: "Show Windows devices" }] }, value => activity.push(value));
+  assert.deepEqual(chatOptions[0].voiceHistory, [{ role: "user", text: "Show Windows devices" }]);
+  assert.deepEqual(activity, [{ kind: "answer", status: "completed", message: "Answer ready" }]);
+  await nova.handle({ action: "stop" });
+  chatOptions[0].onEvent?.({ type: "status", conversationId: "conversation-a", stage: "generating-answer", message: "Late activity" });
+  assert.equal(activity.length, 1, "stopped sessions cannot emit stale activity");
+  assert.equal(boundedVoiceAnswer("42 devices\n\nDetected matching agent: Draft script.\n\nPublic web sources:\nInvented link"), "42 devices");
+  assert.equal(boundedVoiceAnswer("Current release", true), "Current release Public source links are available in Chat.");
+});
+
+it("streams real tool lifecycle labels without exposing model text or tool arguments", async () => {
+  const f = fixture();
+  const nova = new NovaService(f.secrets, async () => f.state, async (_input, options) => {
+    options.onEvent?.({ type: "status", conversationId: "c", stage: "generating-answer", message: "Preparing answer" });
+    options.onEvent?.({ type: "tool-step-start", conversationId: "c", assistantMessageId: "a", tool: "web_search", params: { query: "not forwarded" }, message: "Searching public sources", startedAt: new Date().toISOString() });
+    options.onEvent?.({ type: "delta", conversationId: "c", assistantMessageId: "a", delta: "not execution status", content: "not execution status" });
+    return { conversation: { id: "c" }, assistantMessage: { content: "Finished", status: "completed" } } as SendIntuneChatMessageResult;
+  });
+  const { sessionId } = await nova.handle({ action: "start", mode: "local", tenantId: "tenant-a", consent: false });
+  const activity: unknown[] = [];
+  await nova.handle({ action: "answer", sessionId: sessionId!, text: "Inspect the data" }, value => activity.push(value));
+  assert.deepEqual(activity, [
+    { kind: "reasoning", status: "running", message: "Preparing answer" },
+    { kind: "web", status: "running", message: "Searching public sources" },
+    { kind: "answer", status: "completed", message: "Answer ready" },
+  ]);
+});

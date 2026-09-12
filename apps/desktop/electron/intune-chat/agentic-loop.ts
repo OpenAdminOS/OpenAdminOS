@@ -35,6 +35,7 @@ export const MAX_AGENTIC_ITERATIONS = 8;
  * mode and dropped the question back to keyword-planned context.
  */
 const MAX_MALFORMED_RETRIES = 3;
+const MAX_UNFINISHED_RETRIES = 2;
 const DEFAULT_OBSERVATION_CHAR_BUDGET = 36_000;
 
 export const AGENTIC_TOOL_PROTOCOL = [
@@ -92,7 +93,7 @@ export type RunAgenticChatResult =
     }
   | {
       ok: false;
-      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit";
+      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer";
       fallbackNotice: string;
       toolTrace: IntuneChatToolTraceEntry[];
       iterations: number;
@@ -126,6 +127,7 @@ export async function runAgenticChat(
   const turns: LoopTurn[] = [];
   const toolTrace: IntuneChatToolTraceEntry[] = [];
   let malformedCount = 0;
+  let unfinishedCount = 0;
   let responseModel = input.model;
 
   // Turns spent coaching the model back into valid JSON must not eat
@@ -134,7 +136,7 @@ export async function runAgenticChat(
   // actual tool calls made, and losing the investigation to a fallback.
   let iteration = 0;
   let attempts = 0;
-  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + 1;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + 1;
   while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
@@ -189,6 +191,14 @@ export async function runAgenticChat(
       continue;
     }
 
+    if (input.voice && action.kind === "final" && (!action.answer.trim() || /\b(?:let me (?:check|look|query|search|investigate|find|retrieve)|i(?:'ll| will) (?:check|look|query|search|investigate|find|retrieve)|i(?:'m| am) (?:currently )?(?:checking|querying|searching|investigating|retrieving))\b/i.test(action.answer))) {
+      if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
+        ok: false, reason: "unfinished-answer", fallbackNotice: "The model returned progress instead of a completed answer.",
+        toolTrace, iterations: iteration, model: responseModel,
+      };
+      turns.push({ role: "repair", content: "That was a progress message, not a finished answer. Perform the required read-only tool call now, then answer the current question using its result. If blocked, explain the concrete blocker. No work continues after a final response; do not promise a future lookup." });
+      continue;
+    }
     malformedCount = 0;
     iteration += 1;
     if (action.kind === "final") {

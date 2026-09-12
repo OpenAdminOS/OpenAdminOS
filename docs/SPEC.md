@@ -336,10 +336,16 @@ Nova is available across app pages through Talk to Nova and Alt+V. Its compact
 panel can fill the app window for presentations, covering the sidebar and page.
 During an active session, the centered orb is the only visible element after three
 seconds without interaction; pointer or keyboard activity reveals the controls.
-Full-window captions default off independently of compact captions. Setup, errors,
+An optional Conversation panel defaults hidden, with one saved visibility preference
+across compact and full-window views. On wide windows it sits on the right beside
+the orb; narrow windows stack it below the orb. User and Nova speech appear as
+separate chat bubbles. Request-scoped execution events show cache reads, Graph
+queries, web research and answer preparation, with completed, failed, replaced
+and stopped states. It displays no private model reasoning. The panel remains
+visible when enabled; hiding it never stops audio. Setup, errors,
 muted microphone and local recording submission remain discoverable. Full-window
 view traps keyboard focus and makes the background inert; exiting restores focus
-without restarting audio. Escape still stops the session. Optional captions and
+without restarting audio. Escape still stops the session. The Conversation toggle and
 separate microphone mute and session stop controls remain available. Orb motion follows microphone and WebRTC playback
 levels; transcript arrival does not imply speech playback. Orb artwork uses scalable
 vector ribbons, a crisp spherical rim and layered highlights. Interior animation
@@ -363,8 +369,15 @@ on a separate Models API permission.
 Common unfiltered inventory, reported encryption and OS-version questions, including
 polite requests and "currently installed OS versions on my devices", use exact
 snapshot metadata/SQL aggregates without a reasoning-model round trip. Filtered or
-investigative questions continue through Chat. Recent completed conversation turns
-are carried as bounded reference context. Nova limits model input to 12,000 UTF-8
+investigative questions continue through Chat. Original input/output transcript
+fragments retain their session timestamps and are grouped at each delegation
+boundary; previously consumed requests are not concatenated into new questions.
+Greetings, identity questions, jokes and waiting chatter do not replace pending
+investigations. Bounded spoken and completed Chat history is reference context
+only for follow-up questions. Voice answers retain Nova’s identity and omit
+unrequested agent suggestions; source-link notices require actual search sources.
+The tool loop retries progress-only final answers up to twice, then reports an
+unfinished investigation instead of claiming the promised lookup continues. Nova limits model input to 12,000 UTF-8
 bytes (3,000 for Apple Foundation Models), preserves totals and coverage when
 compacting detail, and falls back from an oversized investigation to bounded
 retrieved evidence. These input budgets do not discover arbitrary custom models'

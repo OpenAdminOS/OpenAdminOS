@@ -47,23 +47,31 @@ visible in the answer.
 Nova carries recent conversation context into follow-up questions. If a question
 needs too much context, narrow it or continue in Chat. Stop cancels pending tenant
 work as well as audio; a new delegated question replaces the previous pending one.
+Greetings, jokes and “still there?” do not replace a pending tenant investigation.
+Nova keeps the current question separate from earlier spoken turns.
 Changing the reasoning model or its local/hosted status ends the voice session.
 
 Use **Full screen** to fill the app window with Nova. During a conversation, only
 the animated orb remains after three seconds without interaction. Move the pointer,
-tap the view or use the keyboard to reveal the controls. Captions start hidden in
-this view and can be enabled independently. **Exit full screen** returns to the
+tap the view or use the keyboard to reveal the controls. Enable **Conversation**
+to see your words and Nova’s replies in chat bubbles, with live updates for cache
+reads, tenant queries, web research and answer preparation. The panel appears on
+the right in wide windows and below the orb in narrow windows. It starts hidden
+and remembers your preference between compact and full-window views. **Exit full screen** returns to the
 compact panel without interrupting the conversation. Setup and errors stay visible;
 **Escape** still ends the session. **Mute mic**
 keeps the conversation connected while disabling microphone audio; **Stop** ends
-the session and releases the microphone. Captions can be hidden independently.
+the session and releases the microphone. Hiding **Conversation** leaves audio
+running. Activity cards distinguish finished answers, failures, stopped sessions
+and questions replaced by a new request. Expand **View result** for the backend
+answer, or use **Open evidence** for the full Chat record.
 The orb responds to microphone and hosted playback audio, with distinct waiting
 and speaking states. Reduced-motion settings disable animated movement.
 Open **Voice settings** while idle to change providers or the greeting name.
 
 Choose **Talk to Nova** from any app page, or press **Alt+V**. Choose your voice
 provider, select a tenant, and click the orb to start the microphone. The orb
-responds to your voice volume; captions show the conversation. **Stop**, **Escape**,
+responds to your voice volume; the optional panel lets you follow the conversation. **Stop**, **Escape**,
 closing the panel or changing the tenant/provider ends the session. Backgrounding
 the app also stops microphone use.
 
