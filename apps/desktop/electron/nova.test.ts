@@ -481,7 +481,7 @@ it("keeps spoken references separate and exposes only execution activity", async
   const activity: unknown[] = [];
   await nova.handle({ action: "answer", sessionId: sessionId!, text: "How many of those?", history: [{ role: "user", text: "Show Windows devices" }] }, value => activity.push(value));
   assert.deepEqual(chatOptions[0].voiceHistory, [{ role: "user", text: "Show Windows devices" }]);
-  assert.deepEqual(activity, [{ kind: "answer", status: "completed", message: "Answer ready" }]);
+  assert.deepEqual(activity, [{ kind: "answer", status: "completed", message: "Result retrieved" }]);
   await nova.handle({ action: "stop" });
   chatOptions[0].onEvent?.({ type: "status", conversationId: "conversation-a", stage: "generating-answer", message: "Late activity" });
   assert.equal(activity.length, 1, "stopped sessions cannot emit stale activity");
@@ -503,6 +503,46 @@ it("streams real tool lifecycle labels without exposing model text or tool argum
   assert.deepEqual(activity, [
     { kind: "reasoning", status: "running", message: "Preparing answer" },
     { kind: "web", status: "running", message: "Searching public sources" },
-    { kind: "answer", status: "completed", message: "Answer ready" },
+    { kind: "answer", status: "completed", message: "Result retrieved" },
   ]);
+});
+
+it('requires one-use visual approval, retains the full evidence, and invalidates drafts on interruption', async () => {
+  const f = fixture();
+  f.state.installedAgents = [];
+  const sends: unknown[] = [];
+  const nova = new NovaService(f.secrets, async () => f.state, async () => ({
+    conversation: { id: 'test-chat' }, assistantMessage: { status: 'completed', content: 'Verified device report. '.repeat(150) },
+  } as SendIntuneChatMessageResult), fetch, {
+    connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {}, status: 'connected' } as never],
+    send: async input => { sends.push(input); return { messageId: 'accepted' }; }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  await nova.handle({ action: 'answer', sessionId: sessionId!, text: 'List devices' });
+  const draft = await nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Send this to my WhatsApp' });
+  assert.ok(draft.pendingAction!.body.length > 2000);
+  assert.equal(sends.length, 0);
+  const decision = { action: 'decide-action' as const, sessionId: sessionId!, actionId: draft.pendingAction!.id, approved: true };
+  const results = await Promise.allSettled([nova.handle(decision), nova.handle(decision)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(sends.length, 1);
+  const next = await nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Send this to my WhatsApp' });
+  await nova.handle({ action: 'interrupt', sessionId: sessionId! });
+  await assert.rejects(nova.handle({ ...decision, actionId: next.pendingAction!.id }), /expired/);
+  assert.equal((await nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Which tenant are we using?' })).text?.includes('Northwind'), true);
+});
+
+it('does not execute a prepared connector action after tenant changes', async () => {
+  const f = fixture();
+  let sends = 0;
+  const nova = new NovaService(f.secrets, async () => f.state, async () => ({ conversation: { id: 'chat' }, assistantMessage: { status: 'completed', content: 'Report' } } as SendIntuneChatMessageResult), fetch, {
+    connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {} } as never],
+    send: async () => { sends++; }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  await nova.handle({ action: 'answer', sessionId: sessionId!, text: 'List devices' });
+  const draft = await nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Send this to my WhatsApp' });
+  f.state.activeTenantId = 'tenant-b';
+  await assert.rejects(nova.handle({ action: 'decide-action', sessionId: sessionId!, actionId: draft.pendingAction!.id, approved: true }), /changed/);
+  assert.equal(sends, 0);
 });

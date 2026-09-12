@@ -71,3 +71,12 @@ it("includes the boundary word observed in a real Live device-count delegation",
     transcript.append({ type: "session.input_transcript.delta", delta, start_ms, end_ms: start_ms + 200 });
   assert.equal(transcript.capture(9600)?.text, "How many devices do I have in my tenant");
 });
+
+it('consumes a spoken stop without losing the next question or matching quoted stop', () => {
+  const transcript = new NovaTranscript();
+  transcript.append({ type: 'session.input_transcript.delta', delta: 'Stop. Can you tell me why they are non-compliant?' });
+  assert.equal(transcript.takeStopCommand(), true);
+  assert.equal(transcript.capture()?.text, 'Can you tell me why they are non-compliant?');
+  transcript.append({ type: 'session.input_transcript.delta', delta: "Do not stop" });
+  assert.equal(transcript.takeStopCommand(), false);
+});

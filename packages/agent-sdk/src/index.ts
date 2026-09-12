@@ -1484,7 +1484,7 @@ export interface RefreshGraphCacheOptions {
 }
 
 export interface NovaActivity {
-  kind: "cache" | "graph" | "web" | "reasoning" | "answer";
+  kind: "cache" | "graph" | "web" | "reasoning" | "answer" | "action";
   status: "running" | "completed" | "failed";
   message: string;
 }
@@ -1494,10 +1494,16 @@ export interface NovaConversationTurn {
   text: string;
 }
 
+export interface NovaActionPreview {
+  id: string; kind: "send" | "run"; title: string; target: string; body: string;
+}
+
 export type NovaRequest =
   | { action: "check"; mode: "openai" | "local"; connectivity?: boolean }
   | { action: "status" }
   | { action: "stop" }
+  | { action: "interrupt"; sessionId: string }
+  | { action: "decide-action"; sessionId: string; actionId: string; approved: boolean }
   | { action: "configure"; apiKey: string | null }
   | {
       action: "start";
@@ -1511,6 +1517,7 @@ export type NovaRequest =
   | { action: "speak"; sessionId: string; text: string }
   | { action: "transcribe"; sessionId: string; audio: number[] };
 export interface NovaResponse {
+  pendingAction?: NovaActionPreview;
   /** A failed answer, with the session still valid for the next question. */
   answerError?: string;
   route?: string;

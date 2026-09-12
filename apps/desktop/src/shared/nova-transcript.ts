@@ -33,7 +33,17 @@ export class NovaTranscript {
     return true;
   }
 
-  capture(offsetMs?: number): { text: string; history: NovaConversationTurn[] } | undefined {
+  takeStopCommand(): boolean {
+    const pending = this.capture(undefined, false);
+    if (!pending) return false;
+    const rest = novaStopCommand(pending.text);
+    if (rest === undefined) return false;
+    this.capture();
+    if (rest) this.append({ type: "session.input_transcript.delta", delta: rest });
+    return true;
+  }
+
+  capture(offsetMs?: number, consume = true): { text: string; history: NovaConversationTurn[] } | undefined {
     const cutoff = Number.isFinite(offsetMs) && offsetMs! >= 0 ? offsetMs : undefined;
     const fragments = this.fragments.filter(fragment => cutoff === undefined || fragment.start === undefined || fragment.start <= cutoff);
     fragments.sort((a, b) => a.start !== undefined && b.start !== undefined ? a.start - b.start || a.sequence - b.sequence : a.sequence - b.sequence);
@@ -53,7 +63,7 @@ export class NovaTranscript {
     if (!current || current.fragments.every(fragment => this.consumed.has(fragment.key))) return undefined;
     const text = current.fragments.filter(fragment => !this.consumed.has(fragment.key)).map(fragment => fragment.text).join("").trim();
     // Earlier greetings and waiting chatter remain reference history, never the new request.
-    for (const fragment of fragments) if (fragment.role === "user") this.consumed.add(fragment.key);
+    if (consume) for (const fragment of fragments) if (fragment.role === "user") this.consumed.add(fragment.key);
     const history = turns.slice(0, turns.indexOf(current)).slice(-6).map(({ role, text }) => ({ role, text: text.slice(-600) }));
     return { text, history };
   }
@@ -87,4 +97,10 @@ export function novaCommentaryChunks(text: string): string[] {
     remaining = remaining.slice(end).trimStart();
   }
   return chunks;
+}
+
+/** Recognize an explicit command at the start of the unconsumed utterance. */
+export function novaStopCommand(text: string): string | undefined {
+  const match = /^(?:(?:hey\s+)?nova[,\s]+)?(?:please\s+)?(?:stop|cancel)(?:\s+(?:speaking|talking|the (?:answer|investigation)|that|this))?(?:[.!?,]+\s*|\s+(?=(?:can|could|now|tell|show|why|what|which|list)\b)|$)/i.exec(text.trim());
+  return match ? text.trim().slice(match[0].length).trim() : undefined;
 }

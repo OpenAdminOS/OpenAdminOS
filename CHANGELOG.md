@@ -4,6 +4,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- Ground Nova device lists and compliance explanations in reported evidence, support spoken interruption and follow-ups, and add reviewed agent launches and result delivery through existing messaging connectors.
+
 - Preserve Nova’s final spoken word at live delegation boundaries and keep overlapping speech fragments together in conversation bubbles.
 
 - Add Nova’s optional Conversation panel with chat bubbles and live task activity; isolate spoken questions so greetings, interruptions and old requests cannot replace tenant answers.

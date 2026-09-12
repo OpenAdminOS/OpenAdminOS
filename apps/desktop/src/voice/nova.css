@@ -448,3 +448,25 @@
   .nova-conversation-footer { padding: 9px 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .nova-activity-card[data-status="running"] .nova-activity-mark { animation: none; } }
+
+.nova-action-review { position: absolute; z-index: 12; inset: auto 24px 24px; max-height: min(70vh, 600px); overflow: auto; padding: 24px; background: var(--color-bg-elevated); border: 1px solid var(--color-border-strong); border-radius: 16px; box-shadow: 0 16px 64px #0008; }
+.nova-action-review h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+.nova-action-review p { font-size: 13px; margin-bottom: 12px; }
+.nova-action-review pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; padding: 16px; background: var(--color-bg); border-radius: 8px; font: 13px/1.6 var(--font-sans); }
+.nova-action-review > div { display: flex; gap: 8px; margin-top: 16px; }
+
+.nova-panel-expanded > .nova-action-review { left: auto; right: 24px; width: min(48vw, 540px); }
+.nova-panel-expanded[data-action-review="true"] > .nova-orb { left: 25%; }
+@media (max-width: 760px) {
+  .nova-panel-expanded > .nova-action-review { left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 65dvh; padding: 18px; }
+  .nova-panel-expanded[data-action-review="true"][data-active="true"] > .nova-orb { left: 50%; top: 18%; width: 120px; height: 120px; min-width: 120px; min-height: 120px; }
+  .nova-action-review pre { max-height: 24dvh; }
+}
+.nova-panel-expanded[data-action-review="true"] > .nova-session-controls,
+.nova-panel-expanded[data-action-review="true"] > .nova-tools,
+.nova-panel-expanded[data-action-review="true"] > .nova-status { left: 24px; width: calc(50% - 48px); }
+@media (max-width: 760px) {
+  .nova-panel-expanded[data-action-review="true"][data-active="true"] > .nova-orb { top: 30%; width: 100px; height: 100px; min-width: 100px; min-height: 100px; }
+  .nova-panel-expanded[data-action-review="true"] > .nova-session-controls { left: 12px; top: calc(30% + 55px); bottom: auto; width: calc(100% - 24px); }
+  .nova-panel-expanded[data-action-review="true"] > .nova-status { visibility: hidden; }
+}

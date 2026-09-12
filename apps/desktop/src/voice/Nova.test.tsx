@@ -143,7 +143,7 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
       close = vi.fn();
     },
   );
-  let finish!: (value: { text: string; answerError?: string }) => void;
+  let finish!: (value: { text: string; answerError?: string; pendingAction?: import("@openadminos/agent-sdk").NovaActionPreview }) => void;
   const bridge = makeMockBridge({
     nova: vi.fn(async (input) => {
       if (input.action === "status") return { hasKey: true };
@@ -283,6 +283,23 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   await act(async () => finish({ text: "9 devices." }));
   expect(dc.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.commentary.append", delegation_id: "task-4", content: "9 devices." }));
+  act(() => {
+    emit({ type: "session.input_transcript.delta", delta: "Stop" });
+  });
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith({ action: "interrupt", sessionId: "voice-session" }));
+  expect(track.stop).not.toHaveBeenCalled();
+  expect(dc.close).not.toHaveBeenCalled();
+  expect(dc.send.mock.calls.some(([event]) => String(event).includes("session.instructions.append"))).toBe(true);
+  act(() => {
+    emit({ type: "session.input_transcript.delta", delta: "Send this to my WhatsApp" });
+    emit({ type: "session.delegation.created", delegation: { id: "send-1", target: "client" } });
+  });
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ text: "Send this to my WhatsApp" }), expect.any(Function)));
+  await act(async () => finish({ text: "Review the message.", pendingAction: { id: "action-1", kind: "send", title: "Send via WhatsApp", target: "My WhatsApp", body: "Verified nine-device report." } }));
+  expect(screen.getByRole("region", { name: "Review Nova action" })).toHaveTextContent("Verified nine-device report.");
+  expect(bridge.nova).not.toHaveBeenCalledWith(expect.objectContaining({ action: "decide-action" }), expect.any(Function));
+  await user.click(screen.getByRole("button", { name: "Confirm send" }));
+  await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith({ action: "decide-action", sessionId: "voice-session", actionId: "action-1", approved: true }, expect.any(Function)));
   await user.click(screen.getByRole("button", { name: "Stop" }));
   expect(track.stop).toHaveBeenCalled();
 });

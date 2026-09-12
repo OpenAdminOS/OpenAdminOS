@@ -9,6 +9,7 @@ import {
   resolveProviderDefaultModel,
   type GraphCacheStatus,
   type NovaActivity,
+  type NovaActionPreview,
 } from "@openadminos/agent-sdk";
 import "./nova.css";
 
@@ -30,6 +31,9 @@ export function Nova({
   const [key, setKey] = useState(""),
     [hasKey, setHasKey] = useState(false),
     [consent, setConsent] = useState(false);
+  const [pendingAction, setPendingAction] = useState<NovaActionPreview>();
+  const [actionBusy, setActionBusy] = useState(false);
+  const interruptCurrent = useRef<() => void>(() => {});
   const [phase, setPhase] = useState("idle"), [error, setError] = useState("");
   const [conversationItems, setConversationItems] = useState<NovaConversationItem[]>([]);
   const itemSequence = useRef(0);
@@ -118,8 +122,31 @@ export function Nova({
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     blobUrl = useRef("");
   const api = window.openAdminOS;
+  const decideAction = async (approved: boolean) => {
+    if (!pendingAction || actionBusy || !api) return;
+    const token = generation.current;
+    setActionBusy(true);
+    try {
+      const answer = await api.nova({ action: "decide-action", sessionId: sessionId.current, actionId: pendingAction.id, approved },
+        event => { if (token === generation.current) recordActivity(pendingAction.id, event); });
+      if (token !== generation.current) return;
+      setPendingAction(undefined);
+      setError(answer.answerError || "");
+      appendSpeech("assistant", answer.text || "No action result returned.");
+      const dc = channel.current;
+      if (dc?.readyState === "open") {
+        if (output.current) output.current.muted = false;
+        for (const content of novaCommentaryChunks(answer.text || "No action result returned."))
+          dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: null, content }));
+      }
+      if (answer.route) { setExpanded(false); navigate(answer.route); }
+    } catch (error) { if (token === generation.current) { setPendingAction(undefined); setError(String(error)); } }
+    finally { setActionBusy(false); }
+  };
   const stop = useCallback(() => {
     generation.current++;
+    setPendingAction(undefined);
+    interruptCurrent.current = () => {};
     endActivities("stopped");
     liveReady.current = false;
     setConsent(false);
@@ -164,6 +191,7 @@ export function Nova({
     setPlayBlocked(false);
     if (output.current) {
       output.current.pause();
+      output.current.muted = false;
       output.current.srcObject = null;
       output.current.removeAttribute("src");
     }
@@ -340,7 +368,7 @@ export function Nova({
         if (playbackAnalyser.current) {
           playbackAnalyser.current.getByteTimeDomainData(playbackSamples);
           outputLevel = rms(playbackSamples);
-          if (outputLevel > 0.025 && !output.current?.paused) {
+          if (outputLevel > 0.025 && !output.current?.paused && !output.current?.muted) {
             lastPlayback = performance.now();
             if (phaseRef.current !== "speaking") {
               phaseRef.current = "speaking";
@@ -457,9 +485,10 @@ export function Nova({
               text: heard.text,
             }, event => { if (token === generation.current) recordActivity(activityId, event); });
             if (token !== generation.current) return;
+            setPendingAction(answer.pendingAction);
             setError(answer.answerError || "");
             appendSpeech("assistant", answer.text || "No answer returned.");
-            recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || "Answer ready" }, answer.text);
+            recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.text);
             setConversation(answer.conversationId);
             if (answer.route) {
               setExpanded(false);
@@ -485,7 +514,7 @@ export function Nova({
                 ),
               );
             output.current!.onended = () => {
-              if (token === generation.current) stop();
+              if (token === generation.current) { if (answer.pendingAction) setPhase("listening"); else stop(); }
             };
             await output.current!.play();
           })().catch(fail);
@@ -514,7 +543,22 @@ export function Nova({
       channel.current = dc;
       const transcript = new NovaTranscript();
       let answerRevision = 0;
+      let lastCompletedResult: string | undefined;
       const delegated = new Set<string>();
+      interruptCurrent.current = () => {
+        ++answerRevision;
+        lastCompletedResult = undefined;
+        pendingAnswers = 0;
+        delegationTimers.current.forEach(clearTimeout);
+        delegationTimers.current.clear();
+        setPendingAction(undefined);
+        endActivities("stopped");
+        if (output.current) output.current.muted = true;
+        if (dc.readyState === "open") dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: null,
+          content: "Stop speaking immediately. The current investigation and any unapproved action were cancelled. Do not resume the old answer. Wait for a new user request." }));
+        void api.nova({ action: "interrupt", sessionId: sessionId.current }).catch(error => setError(String(error)));
+        setPhase("listening");
+      };
       dc.onmessage = (e) => {
         if (token !== generation.current) return;
         try {
@@ -539,6 +583,8 @@ export function Nova({
             if (!transcript.append(event)) return;
             appendSpeech(role === "User" ? "user" : "assistant", event.delta, event.start_ms, event.end_ms);
             if (role === "User") {
+              if (transcript.takeStopCommand()) { interruptCurrent.current(); return; }
+              if (output.current) output.current.muted = false;
               setError("");
               setPhase("listening");
             }
@@ -556,6 +602,12 @@ export function Nova({
                 return;
               const request = transcript.capture(event.offset_ms);
               if (!request?.text || isNovaConversationOnly(request.text)) {
+                if (request?.text && /^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(request.text) && !pendingAnswers && lastCompletedResult) {
+                  dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
+                    content: "The investigation is complete. Answer the waiting question using the completed result that follows. Do not say you are still checking." }));
+                  for (const content of novaCommentaryChunks(lastCompletedResult)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
+                  return;
+                }
                 dc.send(
                   JSON.stringify({
                     type: "session.thinking.append",
@@ -568,7 +620,10 @@ export function Nova({
                 return;
               }
               const { text, history } = request;
+              if (output.current) output.current.muted = false;
+              setPendingAction(undefined);
               endActivities("replaced");
+              lastCompletedResult = undefined;
               const revision = ++answerRevision;
               pendingAnswers = 1;
               setPhase("thinking");
@@ -593,6 +648,7 @@ export function Nova({
                 )
                   return;
                 pendingAnswers = 0;
+                setPendingAction(answer.pendingAction);
                 setError(answer.answerError || "");
                 setConversation(answer.conversationId);
                 if (answer.route) {
@@ -601,8 +657,11 @@ export function Nova({
                 }
                 const result =
                   answer.text || "No answer available. Open Chat for details.";
-                recordActivity(id, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || "Answer ready" }, result);
+                lastCompletedResult = result;
+                recordActivity(id, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, result);
                 setPhase("listening");
+                dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
+                  content: JSON.stringify({ status: answer.pendingAction ? "awaiting_approval" : "completed", question: text.slice(0, 300), note: "The backend has finished. Do not say you are still checking. The result follows." }) }));
                 for (const chunk of novaCommentaryChunks(result))
                   dc.send(
                     JSON.stringify({
@@ -763,6 +822,7 @@ export function Nova({
           data-active={active}
           data-quiet={quiet}
           data-conversation={showCaptions}
+          data-action-review={Boolean(pendingAction)}
           onPointerMove={expanded ? revealControls : undefined}
           onPointerDown={expanded ? revealControls : undefined}
           onKeyDown={(event) => {
@@ -940,6 +1000,7 @@ export function Nova({
               >
                 {muted ? "Unmute mic" : "Mute mic"}
               </Button>
+              {mode === "openai" && <Button variant="secondary" onClick={() => interruptCurrent.current()}>Stop answer</Button>}
               <Button variant="secondary" onClick={stop}>
                 Stop
               </Button>
@@ -980,6 +1041,13 @@ export function Nova({
           </div>
           {showCaptions && <NovaConversation items={conversationItems} onClose={() => toggleConversation(false)}
             onEvidence={conversation ? () => { setExpanded(false); navigate(`/chat/${conversation}`); } : undefined} />}
+          {pendingAction && <section className="nova-action-review" aria-label="Review Nova action">
+            <h2>{pendingAction.title}</h2><p><strong>Destination:</strong> {pendingAction.target}</p>
+            <p>{pendingAction.kind === "send" ? "This sends the content below outside this app through your configured connector." : "The agent uses the selected tenant. Write plans still require their normal approval."}</p>
+            <pre>{pendingAction.body}</pre>
+            <div><Button disabled={actionBusy} onClick={() => void decideAction(true)}>{actionBusy ? "Submitting…" : pendingAction.kind === "send" ? "Confirm send" : "Confirm run"}</Button>
+            <Button variant="secondary" disabled={actionBusy} onClick={() => void decideAction(false)}>Cancel</Button></div>
+          </section>}
           <audio ref={output} hidden />
           {playBlocked && (
             <Button

@@ -24,6 +24,7 @@ import {
   DEFAULT_SCOPE_METADATA,
   probeSubscribedSkus,
   findConnectorFactory,
+  wrapConnector,
   findRegistryAgentById,
   listAllRegistryAgents,
   listRegisteredConnectors,
@@ -319,6 +320,7 @@ interface PersistedState {
    * `configSchema`) plus the last health-check outcome so the
    * Connectors page can render status without re-testing on every load.
    */
+  novaConnectorAudit?: Array<{ tenantId: string; timestamp: string; entry: ConnectorAuditEntry }>;
   connectors?: Record<
     string,
     {
@@ -518,6 +520,7 @@ interface AuditLogEventSeed {
 type AuditLogEvent = AuditLogEventSeed & { sha256: string };
 
 interface AuditLogBuildInput {
+  novaConnectorAudit?: PersistedState["novaConnectorAudit"];
   runs: RunRecord[];
   tenants: TenantRecord[];
   installedAgents: AgentSummary[];
@@ -642,6 +645,12 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
         },
       });
     }
+  }
+
+  for (const delivery of input.novaConnectorAudit ?? []) {
+    events.push({ id: `nova-connector:${delivery.entry.idempotencyKey}`, timestamp: delivery.timestamp,
+      type: "connector.delivery", source: "connector-audit", tenantId: delivery.tenantId,
+      actor: actorForTenant(tenantById.get(delivery.tenantId)), details: { source: "nova", ...delivery.entry } });
   }
 
   for (const consent of input.hostedProviderConsentEvents) {
@@ -2731,6 +2740,7 @@ export class AppStateStore {
     const generatedAt = new Date().toISOString();
     const allEvents = buildAuditLogEvents({
       runs: persisted.runs,
+      novaConnectorAudit: persisted.novaConnectorAudit,
       tenants: persisted.tenants,
       installedAgents: persisted.installedAgents,
       hostedProviderConsentEvents:
@@ -3453,6 +3463,42 @@ export class AppStateStore {
       return await invoke(instance.capabilities);
     } finally {
       await instance.dispose().catch(() => undefined);
+    }
+  }
+
+  /** Called only after Nova consumes a one-use, session-scoped visual approval. */
+  async sendNovaConnector(input: Parameters<import("./nova-actions.js").NovaActionHost["send"]>[0]): Promise<unknown> {
+    const persisted = await this.read();
+    input.signal.throwIfAborted();
+    if (persisted.activeTenantId !== input.tenantId) throw new Error("Tenant changed. Prepare the message again.");
+    const tenant = persisted.tenants.find(t => t.id === input.tenantId);
+    const factory = findConnectorFactory(input.connectorId);
+    if (!tenant || !factory) throw new Error("Tenant or connector is unavailable.");
+    const config = persisted.connectors?.[input.connectorId]?.config ?? {};
+    if (JSON.stringify(config) !== JSON.stringify(input.config)) throw new Error("Connector settings changed. Review a new preview before sending.");
+    const instance = await factory.build({ tenant: this.createTenantSessionForRecord(tenant),
+      config: this.connectorRuntimeConfig(input.connectorId, config), secrets: this.connectorSecretsFor(input.connectorId),
+      log: () => undefined, idempotencyKeyFor: () => input.actionId });
+    const entries: ConnectorAuditEntry[] = [];
+    try {
+      const wrapped = wrapConnector(input.connectorId, instance, { signal: input.signal, runId: input.actionId,
+        currentStepId: () => "nova-send", nextIteration: () => 0,
+        confirmInvocation: async () => {
+          input.signal.throwIfAborted();
+          const current = await this.read();
+          return current.activeTenantId === input.tenantId && JSON.stringify(current.connectors?.[input.connectorId]?.config ?? {}) === JSON.stringify(input.config)
+            ? { approved: true } : { approved: false, reason: "Tenant or connector settings changed." };
+        }, onAuditEntry: entry => entries.push(entry) });
+      const capabilities = wrapped.capabilities as Record<string, (args: unknown) => Promise<unknown>>;
+      const allowed = ["sendMessage", "sendMail", "postChannelMessage", "postChatMessage"];
+      if (!allowed.includes(input.method) || typeof capabilities[input.method] !== "function") throw new Error("Unsupported message capability.");
+      return await capabilities[input.method]!(input.args);
+    } finally {
+      await instance.dispose().catch(() => undefined);
+      if (entries.length) await this.serialize(async () => {
+        const current = await this.read();
+        await this.write({ ...current, novaConnectorAudit: [...(current.novaConnectorAudit ?? []), ...entries.map(entry => ({ tenantId: input.tenantId, timestamp: new Date().toISOString(), entry }))].slice(-200) });
+      });
     }
   }
 
@@ -5558,6 +5604,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         if (Object.keys(sanitized).length > 0) {
           state.activeModelByProviderId = sanitized;
         }
+      }
+      if (Array.isArray(parsed.novaConnectorAudit)) {
+        state.novaConnectorAudit = parsed.novaConnectorAudit.filter(item => typeof item?.tenantId === "string" && typeof item.timestamp === "string" && readConnectorAuditEntry(item.entry)).slice(-200);
       }
       const rawConnectors = (parsed as { connectors?: unknown }).connectors;
       if (

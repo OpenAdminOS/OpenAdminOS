@@ -147,3 +147,40 @@ Click the orb, speak, then choose **Finish speaking**. A recording is limited to
 one minute. Nova transcribes it locally, asks your local agent model, and speaks
 the result locally. If a service is unavailable, the panel reports the error so
 you can start that service and retry.
+
+## Send a result or start an agent
+
+After Nova completes an answer, try “Send this to my WhatsApp,” “Email this to me,”
+or “Send the report via Teams.” WhatsApp, Outlook/Exchange email, Teams, Slack,
+Discord and Signal use the connectors configured in **Connectors**. WhatsApp self
+messages go to the linked account; email to yourself uses the connected tenant
+account. Other requests use the connector's saved destination. Personal Teams
+messages require an explicit configured chat destination.
+
+Nova displays the full message and destination before sending. Check both and click
+**Confirm send**, or cancel. Speaking “yes” does not approve a send. The preview
+expires after five minutes, and changing tenant or interrupting invalidates it.
+Nova reports whether the connector accepted the message; acceptance does not prove
+that the recipient received it. Do not retry an uncertain send until you check the
+destination. Sending through a connector shares the reviewed content even when
+local voice is selected.
+
+Say “Run” followed by an installed agent's name to prepare an agent launch. Review
+the tenant and click **Confirm run**. Follow the run in Activity. Write plans still
+require their normal approval; existing saved delivery routes remain in effect.
+
+## Understand device answers
+
+Fleet lists use reported Intune device fields, with snapshot time and incomplete
+coverage disclosed. Missing encryption data is unknown, not unencrypted. Lists show
+up to 50 matching devices. For fleet questions about why devices are non-compliant,
+Nova reads actual failed compliance policy settings for up to ten matching devices.
+It reports remaining or unavailable details explicitly. A non-compliant status alone
+does not explain its cause. Policy details require the connected account to have
+permission to read device configuration.
+
+In hosted voice, say **Stop** or click **Stop answer** to silence the current response
+and cancel pending investigation while leaving the microphone available. Click
+**Stop** to end the session. **Result retrieved** means the backend lookup is complete;
+it does not mean every word has been spoken. Local voice remains a recording-based
+flow and does not listen continuously while playing its answer.

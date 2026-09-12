@@ -319,6 +319,39 @@ Per-agent model overrides are required: an agent's manifest can specify a prefer
 
 ### Tenant cache preparation and Nova
 
+Nova can prepare the last completed backend result for WhatsApp, Outlook/Exchange
+email, Teams, Slack, Discord and Signal using existing connectors. A visible preview
+shows the exact body and resolved destination, even when Conversation is hidden.
+“My WhatsApp” means the linked account itself; “my email” means the active tenant
+account username. Other sends use configured connector destinations. Nova can also
+prepare an installed agent by name. A click confirms each action; spoken approval
+cannot authorize it. Agent launches retain ordinary runtime preflight, write-plan
+review and previously configured result delivery. Drafts expire after five minutes,
+are consumed once, and are invalidated by interruption, replacement or scope changes.
+Connector configuration is checked again before sending. Sends use the runtime
+connector wrapper, with the latest 200 connector audit entries retained locally and
+included in audit exports. Acceptance is distinct from recipient delivery; cancellation
+cannot recall a message already accepted by a connector.
+
+Fleet non-compliance and unencrypted-device lists use filtered SQLite fields directly,
+include snapshot freshness and coverage, and report the 50-row detail cap. Missing
+encryption is unknown. Fleet “why non-compliant” questions read live per-device
+compliance policy setting states with DeviceManagementConfiguration.Read.All consent; they investigate
+at most ten matching devices and explicitly disclose the remaining coverage. Each
+collection follows validated beta continuation links with a ten-page/1,000-row bound.
+Unavailable or missing failed settings are reported as unverified causes, never
+replaced by an OS, encryption or retirement inference. These direct answers bypass
+the reasoning model; scoped questions outside this route retain ordinary investigation.
+
+During hosted voice, spoken Stop and Stop answer silence playback and cancel pending
+investigation/drafts while retaining microphone access. End-session Stop and Escape
+still release the microphone. A combined Stop followed by a question retains the new
+question. Completion labels describe backend retrieval, not speech delivery; completed
+results are re-supplied when the user asks whether an already-finished task is running.
+OpenAI instructions request speech interruption while the application separately gates
+playback and backend work. Local voice remains recording-based, rather than an always
+listening barge-in session.
+
 Cache is a dedicated sidebar page with all 45 supported read-resource types
 selected by default. Search and attention filters do not change the selected
 refresh scope. Manual preloads expose progress, cancellation and incomplete-result
