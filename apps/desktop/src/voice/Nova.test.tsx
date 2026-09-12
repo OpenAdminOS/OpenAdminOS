@@ -143,12 +143,14 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
       close = vi.fn();
     },
   );
+  let finishAction!: (value: { text: string }) => void;
   let finish!: (value: { text: string; answerError?: string; pendingAction?: import("@openadminos/agent-sdk").NovaActionPreview }) => void;
   const bridge = makeMockBridge({
     nova: vi.fn(async (input) => {
       if (input.action === "status") return { hasKey: true };
       if (input.action === "start")
         return { sessionId: "voice-session", sdp: "v=0" };
+      if (input.action === "decide-action") return new Promise<{ text: string }>(resolve => { finishAction = resolve; });
       if (input.action === "answer")
         return new Promise<{ text: string; answerError?: string }>((resolve) => {
           finish = resolve;
@@ -300,6 +302,10 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   expect(bridge.nova).not.toHaveBeenCalledWith(expect.objectContaining({ action: "decide-action" }), expect.any(Function));
   await user.click(screen.getByRole("button", { name: "Confirm send" }));
   await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith({ action: "decide-action", sessionId: "voice-session", actionId: "action-1", approved: true }, expect.any(Function)));
+  await user.click(screen.getByRole("button", { name: "Stop answer" }));
+  await act(async () => finishAction({ text: "Late delivery message" }));
+  expect(dc.send.mock.calls.some(([event]) => String(event).includes("Late delivery message"))).toBe(false);
+  expect(screen.queryByText("Late delivery message")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Stop" }));
   expect(track.stop).toHaveBeenCalled();
 });

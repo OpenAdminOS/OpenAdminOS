@@ -33,6 +33,7 @@ export function Nova({
     [consent, setConsent] = useState(false);
   const [pendingAction, setPendingAction] = useState<NovaActionPreview>();
   const [actionBusy, setActionBusy] = useState(false);
+  const actionRevision = useRef(0);
   const interruptCurrent = useRef<() => void>(() => {});
   const [phase, setPhase] = useState("idle"), [error, setError] = useState("");
   const [conversationItems, setConversationItems] = useState<NovaConversationItem[]>([]);
@@ -125,11 +126,12 @@ export function Nova({
   const decideAction = async (approved: boolean) => {
     if (!pendingAction || actionBusy || !api) return;
     const token = generation.current;
+    const revision = ++actionRevision.current;
     setActionBusy(true);
     try {
       const answer = await api.nova({ action: "decide-action", sessionId: sessionId.current, actionId: pendingAction.id, approved },
-        event => { if (token === generation.current) recordActivity(pendingAction.id, event); });
-      if (token !== generation.current) return;
+        event => { if (token === generation.current && revision === actionRevision.current) recordActivity(pendingAction.id, event); });
+      if (token !== generation.current || revision !== actionRevision.current) return;
       setPendingAction(undefined);
       setError(answer.answerError || "");
       appendSpeech("assistant", answer.text || "No action result returned.");
@@ -140,11 +142,13 @@ export function Nova({
           dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: null, content }));
       }
       if (answer.route) { setExpanded(false); navigate(answer.route); }
-    } catch (error) { if (token === generation.current) { setPendingAction(undefined); setError(String(error)); } }
-    finally { setActionBusy(false); }
+    } catch (error) { if (token === generation.current && revision === actionRevision.current) { setPendingAction(undefined); setError(String(error)); } }
+    finally { if (revision === actionRevision.current) setActionBusy(false); }
   };
   const stop = useCallback(() => {
     generation.current++;
+    ++actionRevision.current;
+    setActionBusy(false);
     setPendingAction(undefined);
     interruptCurrent.current = () => {};
     endActivities("stopped");
@@ -547,6 +551,8 @@ export function Nova({
       const delegated = new Set<string>();
       interruptCurrent.current = () => {
         ++answerRevision;
+        ++actionRevision.current;
+        setActionBusy(false);
         lastCompletedResult = undefined;
         pendingAnswers = 0;
         delegationTimers.current.forEach(clearTimeout);
@@ -621,6 +627,8 @@ export function Nova({
               }
               const { text, history } = request;
               if (output.current) output.current.muted = false;
+              ++actionRevision.current;
+              setActionBusy(false);
               setPendingAction(undefined);
               endActivities("replaced");
               lastCompletedResult = undefined;

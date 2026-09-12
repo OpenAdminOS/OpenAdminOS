@@ -13,7 +13,7 @@ Validation:
 
 - Real Chat service + SQLite integration replays list, why, encryption, and WhatsApp preview with fixture Graph responses and zero reasoning calls. Unknown encryption stays unknown; only completed evidence is shared.
 - Unit/regression checks cover all connector mappings, exact agent lookup, absent evidence, full-body previews, duplicate decisions, interrupted previews, tenant changes, combined Stop/follow-up, policy paging and unavailable causes.
-- Renderer tests exercise hosted interruption without closing microphone/peer and approval before execution. Browser screenshots inspect production Nova with synthetic transport/bridge data at wide and narrow window sizes, including the visible destination/body review.
+- Renderer tests exercise hosted interruption without closing microphone/peer, approval before execution, and suppression of late connector replies after Stop answer. Browser screenshots inspect production Nova with synthetic transport/bridge data at wide and narrow window sizes, including the visible destination/body review.
 - Read-only live Lokka beta checks verify inventory compliance/encryption fields, continuation links, policy-state fields and setting-state failure values. These are endpoint checks, not desktop MSAL verification.
 - Full repository tests, typecheck, desktop build and Graph QA are run before push. Graph QA uses the installed msgraph reference directory.
 
