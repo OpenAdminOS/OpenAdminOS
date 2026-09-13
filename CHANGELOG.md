@@ -4,34 +4,6 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
-- Fix Nova connector request routing, add one-request report delivery with setup checks and reviewed multipart sends, and render formatted conversation results.
-
-- Ground Nova device lists and compliance explanations in reported evidence, support spoken interruption and follow-ups, and add reviewed agent launches and result delivery through existing messaging connectors.
-
-- Preserve Nova’s final spoken word at live delegation boundaries and keep overlapping speech fragments together in conversation bubbles.
-
-- Add Nova’s optional Conversation panel with chat bubbles and live task activity; isolate spoken questions so greetings, interruptions and old requests cannot replace tenant answers.
-
-- Fix Nova voice context failures with installed documentation, recognize indirect device-count questions, and keep voice connected after recoverable answer failures.
-
-- Speed up common Nova cache questions by answering more natural device-count, OS-version and encryption requests directly from snapshot aggregates.
-
-- Add general OpenAI web research to Nova, with automatic tenant/web tool selection, explicit sharing, cancellation, and public sources retained in Chat.
-
-- Sharpen Nova’s orb with scalable layered artwork, richer highlights and fluid motion that transitions smoothly between voice states.
-
-- Add full-window Nova voice with a centered orb, fading controls, optional captions and accessible keyboard navigation.
-
-- Fix Nova cancellation, follow-up context, per-session consent and key-save races; answer common device summaries directly and bound reasoning context.
-
-- Give Nova the selected tenant context, restore on-demand tenant retrieval, and clarify voice/agent-provider setup with connection checks and bounded spoken answers.
-
-- Refine Nova with an expanded voice view, captions toggle, microphone mute, and audio-responsive animations that respect reduced motion.
-
-### Added
-
-- Add a shared Cache page with complete preloading, progress, cancellation and retry, plus app-wide Nova voice with GPT-Live-1 and optional local speech services.
-
 ### Added
 
 ### Changed
@@ -41,6 +13,28 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 ### Security
+
+## [0.6.2] - 2026-09-13
+
+### Added
+
+- Add a shared Cache page to preload supported tenant resources, filter the preload, track progress, cancel work, and retry failed resources.
+- Add Nova voice throughout the app with hosted OpenAI voice or optional local speech services, guided setup, and a full-window view with an animated orb.
+- Add optional web research for Nova with explicit sharing controls and public source links retained in Chat.
+- Let Nova prepare agent launches and report delivery through Outlook/email, Teams, WhatsApp, Slack, Discord, and Signal, with destination review and confirmation before sending.
+
+### Changed
+
+- Show Nova conversations as formatted chat bubbles with lists, bold text, tables, code, and an optional live activity panel.
+- Keep complete retrieved reports available for review while bounding the context and summaries sent to voice services.
+
+### Fixed
+
+- Give Nova the selected tenant context and retrieve tenant data on demand when a requested resource is not cached.
+- Answer common cached device counts, OS summaries, and encryption questions directly; ground device lists and compliance explanations in reported evidence.
+- Keep interruptions, follow-up questions, overlapping speech, and delayed task responses associated with the correct request.
+- Route connector requests to the app's configured capabilities, retrieve new reports before preparing delivery, and provide setup guidance instead of incorrectly refusing supported actions.
+- Preserve long reports through reviewed multipart delivery and report partial-send failures without automatically retrying accepted messages.
 
 ## [0.6.1] - 2026-09-11
 

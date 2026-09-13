@@ -2340,3 +2340,15 @@ downgrade; users requiring 0.5.1 must install it explicitly.
 The maintainer approved deleting the remaining v0.5.2 draft release on
 2026-09-11 while retaining its tag. The draft and its attached assets were
 removed; published releases remain available.
+
+### Cache and Nova release version (2026-09-13)
+
+Cache and Nova ship in **0.6.2**, following the published 0.6.1 release.
+Workspace versions, internal dependency pins, installer filenames, and updater
+metadata advance together so existing 0.6.1 installations can detect the update.
+The published v0.6.1 tag and its assets remain unchanged. This release includes
+the shared Cache page, Nova voice and web research, reviewed connector delivery,
+and formatted conversation results. Windows and macOS artifacts must be signed,
+macOS must be notarized, and Linux packages must include checksums and signed apt
+metadata. Live connector delivery and microphone checks on user devices remain
+separate from automated regression and packaging verification.
