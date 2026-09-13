@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Verify the CLI adapters on macOS, including Codex and Claude live responses and Claude login-keychain access from the desktop session.
+
 ### Security
 
 ## [0.6.3] - 2026-09-13

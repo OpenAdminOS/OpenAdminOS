@@ -1,6 +1,6 @@
 # Current active plan
 
-- [ ] Finish **0.6.3 CLI providers**: Copilot and Gemini adapters plus PR #85 discovery/auth fixes are implemented; Linux/Windows checks passed, authenticated new-provider and MacBook verification remain pending. Evidence: [CLI provider review](./v0.6.3-cli-provider-review.md).
+- [x] Prepare **0.6.3 CLI providers** in PR #88: Copilot/Gemini adapters and PR #85 discovery/auth fixes are implemented. Native protocol tests passed on Linux, Windows, and macOS; live Mac Codex/Claude completions passed. Authenticated Copilot/Gemini tests remain unverified because no accounts are available. Evidence: [CLI provider review](./v0.6.3-cli-provider-review.md).
 
 - [x] Prepare **0.6.2** after PR #86 with Cache, Nova voice and web research, reviewed connector delivery, formatted conversations, and aligned installer/update metadata. Publish through the signed release workflow after all gates pass.
 
