@@ -4,6 +4,34 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- Fix Nova connector request routing, add one-request report delivery with setup checks and reviewed multipart sends, and render formatted conversation results.
+
+- Ground Nova device lists and compliance explanations in reported evidence, support spoken interruption and follow-ups, and add reviewed agent launches and result delivery through existing messaging connectors.
+
+- Preserve Nova’s final spoken word at live delegation boundaries and keep overlapping speech fragments together in conversation bubbles.
+
+- Add Nova’s optional Conversation panel with chat bubbles and live task activity; isolate spoken questions so greetings, interruptions and old requests cannot replace tenant answers.
+
+- Fix Nova voice context failures with installed documentation, recognize indirect device-count questions, and keep voice connected after recoverable answer failures.
+
+- Speed up common Nova cache questions by answering more natural device-count, OS-version and encryption requests directly from snapshot aggregates.
+
+- Add general OpenAI web research to Nova, with automatic tenant/web tool selection, explicit sharing, cancellation, and public sources retained in Chat.
+
+- Sharpen Nova’s orb with scalable layered artwork, richer highlights and fluid motion that transitions smoothly between voice states.
+
+- Add full-window Nova voice with a centered orb, fading controls, optional captions and accessible keyboard navigation.
+
+- Fix Nova cancellation, follow-up context, per-session consent and key-save races; answer common device summaries directly and bound reasoning context.
+
+- Give Nova the selected tenant context, restore on-demand tenant retrieval, and clarify voice/agent-provider setup with connection checks and bounded spoken answers.
+
+- Refine Nova with an expanded voice view, captions toggle, microphone mute, and audio-responsive animations that respect reduced motion.
+
+### Added
+
+- Add a shared Cache page with complete preloading, progress, cancellation and retry, plus app-wide Nova voice with GPT-Live-1 and optional local speech services.
+
 ### Added
 
 ### Changed

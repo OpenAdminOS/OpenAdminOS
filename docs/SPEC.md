@@ -317,6 +317,173 @@ generic model error.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
+### Tenant cache preparation and Nova
+
+Nova can retrieve a new report and prepare its delivery in one request, such as
+“send me an email with the list of non-compliant devices”. Delivery wording is
+separated from the read-only research question; the research model cannot decide
+Nova connector capabilities. Explicit connector requests also have a transcript
+fallback when hosted speech omits delegation, using the same consumed request
+and approval path. Voice startup receives connector status, and missing setup
+returns specific instructions before a report lookup.
+
+Nova can prepare the last completed backend result for WhatsApp, Outlook/Exchange
+email, Teams, Slack, Discord and Signal using existing connectors. A visible preview
+shows the exact body and resolved destination, even when Conversation is hidden.
+“My WhatsApp” means the linked account itself; “my email” means the active tenant
+account username. Other sends use configured connector destinations. Nova can also
+prepare an installed agent by name. A click confirms each action; spoken approval
+cannot authorize it. Agent launches retain ordinary runtime preflight, write-plan
+review and previously configured result delivery. Drafts expire after five minutes,
+are consumed once, and are invalidated by interruption, replacement or scope changes.
+Connector configuration is checked again before sending. Sends use the runtime
+connector wrapper, with the latest 200 connector audit entries retained locally and
+included in audit exports. Acceptance is distinct from recipient delivery; cancellation
+cannot recall a message already accepted by a connector. Shared Teams, Slack and
+Discord targets, and Signal recipient defaults, are not treated as verified personal
+self destinations. Nova explains the distinction and asks the admin to choose the
+configured destination explicitly. Long Discord, Slack and Teams reports are split
+into numbered, paced messages; the preview discloses the count and retains the full
+report. Failure or cancellation stops unsent parts, reports confirmed acceptance,
+and never automatically retries an uncertain send. Each part has a distinct audit ID.
+
+Nova conversation bubbles, retrieved results and action previews render safe Markdown,
+including nested lists, bold/italic text, headings, tables, quotes, links and code.
+HTML remains literal text and links permit only HTTP(S). The full retrieved result
+is returned separately for local visual review; only the bounded spoken summary is
+sent to hosted speech. Numbered Nova lists retain their numbering, including a
+single-item list; other report previews retain the existing numbered-section default.
+
+Fleet non-compliance and unencrypted-device lists use filtered SQLite fields directly,
+include snapshot freshness and coverage, and report the 50-row detail cap. Missing
+encryption is unknown. Fleet “why non-compliant” questions read live per-device
+compliance policy setting states with DeviceManagementConfiguration.Read.All consent; they investigate
+at most ten matching devices and explicitly disclose the remaining coverage. Each
+collection follows validated beta continuation links with a ten-page/1,000-row bound.
+Unavailable or missing failed settings are reported as unverified causes, never
+replaced by an OS, encryption or retirement inference. These direct answers bypass
+the reasoning model; scoped questions outside this route retain ordinary investigation.
+
+During hosted voice, spoken Stop and Stop answer silence playback and cancel pending
+investigation/drafts while retaining microphone access. End-session Stop and Escape
+still release the microphone. A combined Stop followed by a question retains the new
+question. Completion labels describe backend retrieval, not speech delivery; completed
+results are re-supplied when the user asks whether an already-finished task is running.
+OpenAI instructions request speech interruption while the application separately gates
+playback and backend work. Local voice remains recording-based, rather than an always
+listening barge-in session.
+
+Cache is a dedicated sidebar page with all 45 supported read-resource types
+selected by default. Search and attention filters do not change the selected
+refresh scope. Manual preloads expose progress, cancellation and incomplete-result
+retry. Scheduled refresh uses the same complete collection path. It follows all
+Graph `/beta` continuation links, deduplicates IDs and preserves previous complete
+snapshots when requests fail, are cancelled or hit the explicit 128 MiB per-resource
+refresh budget. Concurrent resource requests remain bounded; overlapping refreshes
+are serialized to prevent older partial refreshes overwriting newer complete data.
+“All” describes the supported collection catalogue, including available retained
+logs, not every Graph property, relationship or action. Device records include
+reported encryption; deterministic aggregates include OS versions and encryption
+with unknown values retained.
+
+Nova is available across app pages through Talk to Nova and Alt+V. Its compact
+panel can fill the app window for presentations, covering the sidebar and page.
+During an active session, the centered orb is the only visible element after three
+seconds without interaction; pointer or keyboard activity reveals the controls.
+An optional Conversation panel defaults hidden, with one saved visibility preference
+across compact and full-window views. On wide windows it sits on the right beside
+the orb; narrow windows stack it below the orb. User and Nova speech appear as
+separate chat bubbles; nearby overlapping fragments stay with their speaker. Request-scoped execution events show cache reads, Graph
+queries, web research and answer preparation, with completed, failed, replaced
+and stopped states. It displays no private model reasoning. The panel remains
+visible when enabled; hiding it never stops audio. Setup, errors,
+muted microphone and local recording submission remain discoverable. Full-window
+view traps keyboard focus and makes the background inert; exiting restores focus
+without restarting audio. Escape still stops the session. The Conversation toggle and
+separate microphone mute and session stop controls remain available. Orb motion follows microphone and WebRTC playback
+levels; transcript arrival does not imply speech playback. Orb artwork uses scalable
+vector ribbons, a crisp spherical rim and layered highlights. Interior animation
+changes playback rate without resetting its position across speech states; muted
+and error states pause the interior. Reduced-motion
+preferences suppress animated movement. Voice settings remain available from the
+idle panel. The microphone starts only on click.
+Stop, Escape, panel close, tenant/provider change and app backgrounding release
+microphone access. “Hey Nova” is handled during an active conversation; background
+wake-word detection is not implemented. Simple navigation is restricted to known
+app routes. Tenant questions reuse the existing Chat tools and approval boundary;
+voice cannot approve writes. Results remain reviewable in Chat. The voice model
+receives the selected tenant identity and explicit delegation rules at session
+creation. Tenant questions refresh missing/stale relevant cache resources on demand;
+preloading is optional. Voice responses are capped at 2,000 characters with full
+answers retained in Chat. Setup distinguishes speech from the selected reasoning
+provider and checks readiness before microphone access. Local voice checks Whisper
+and Kokoro availability; the optional OpenAI model-access check does not gate Live
+on a separate Models API permission.
+
+Common unfiltered inventory, reported encryption and OS-version questions, including
+polite requests and "currently installed OS versions on my devices", use exact
+snapshot metadata/SQL aggregates without a reasoning-model round trip. Filtered or
+investigative questions continue through Chat. Original input/output transcript
+fragments retain their session timestamps and are grouped at each delegation
+boundary, including a word that starts exactly at that offset; previously consumed requests are not concatenated into new questions.
+Greetings, identity questions, jokes and waiting chatter do not replace pending
+investigations. Bounded spoken and completed Chat history is reference context
+only for follow-up questions. Voice answers retain Nova’s identity and omit
+unrequested agent suggestions; source-link notices require actual search sources.
+The tool loop retries progress-only final answers up to twice, then reports an
+unfinished investigation instead of claiming the promised lookup continues. Nova limits model input to 12,000 UTF-8
+bytes (3,000 for Apple Foundation Models), preserves totals and coverage when
+compacting detail, and falls back from an oversized investigation to bounded
+retrieved evidence. These input budgets do not discover arbitrary custom models'
+context capacities. Questions that still exceed the budget get a recovery message.
+
+Stop aborts delegated model/Graph requests as well as audio. New delegated questions
+replace older pending work; late results are discarded. Queries have a two-minute
+deadline. Session startup cannot resume after Stop; tenant, reasoning model and
+local/hosted trust changes invalidate the session. Each new hosted voice session
+requires fresh consent. Local speech response bodies are bounded during reading.
+
+Hosted voice uses GPT-Live-1 WebRTC with client delegation. Electron creates the
+session and holds the API key in OS-secured storage. Every session requires explicit
+hosted voice/context consent. Tenant and agent-provider identity are bound to the
+session and checked before returning results. Local reasoning with hosted voice
+still sends audio and shared context to OpenAI, visibly disclosed in the voice panel.
+OpenAI Voice also grants its reasoning loop a general `web_search` tool after
+session consent. The selected reasoning model decides whether to use tenant tools,
+public research, or both. Public research uses the saved Nova key with OpenAI
+Responses, `gpt-5.4-mini` and hosted `web_search`; it sends the standalone public
+query rather than the tenant answer pack. The tool is scoped to the active hosted
+session, unavailable to local voice and ordinary Chat requests, limited to three
+searches per question, and cancelled with the session. Nova enables its tool loop
+for these hosted questions even when Chat's separate investigation setting is
+deterministic. Exact inventory shortcuts still avoid unnecessary searches.
+Voice research selects evidence through question-specific tools and does not load
+broad Microsoft documentation passages before tool selection. These passages can
+both exceed the voice budget and redirect public research to an unrelated product.
+Other voice investigations bound optional documentation and tool history in UTF-8
+bytes, retaining the newest observation and explicitly marking omitted evidence.
+Natural indirect counts such as “tell me how many devices I have in my tenant”
+use snapshot totals; filtered and compound requests still go through reasoning.
+Ordinary failed answers and question deadlines return a recoverable result after session/scope validation;
+hosted voice displays and speaks the recovery, stays connected and accepts the next
+question. Stop, transport errors and changed scope still invalidate the session.
+Context, malformed-tool, provider and iteration failures have distinct recovery copy.
+Search queries are limited to 1,000 characters, obvious emails/IDs/IPs/credentials
+are rejected, responses are bounded to 1 MiB, and retrieved evidence is bounded
+before returning to the reasoning model. Voice tool descriptions are compact to
+leave room for combined tenant and web evidence. These checks are not a general data-loss
+prevention system. The sharing notice includes public research queries and API
+charges. Search failures cannot silently fall back to uncited current claims.
+Citations and search traces persist in Chat; Nova speaks the answer and points to
+Chat for links. Public pages are reference data, never authority to run actions.
+No OS-specific routing, search engine dependency, or automatic local cloud fallback
+is added.
+
+Local voice connects only to separately installed whisper.cpp and Kokoro-FastAPI
+loopback services, with a local agent provider. It uses one-minute, explicitly
+submitted recordings with no cloud fallback. Runtime/model installation and a
+background wake-word engine are separate future work, not implied by the selector.
+
 ### Agent contract
 
 **Every agent invokes the LLM at least once.** The model is load-bearing, not optional polish. Agent Template manifests MUST declare at least one step with `format: llm`; the runtime hard-fails any LLM step that is reached without a connected provider (no silent skipping), and `startRun` preflights the active provider before queueing. This is what makes an agent an *agent* and not just a Graph query: the deterministic transforms shape the data, but the model is the part that reasons and produces the headline the admin reads.

@@ -1,3 +1,6 @@
+import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
+import type { WebSearch } from "./web-search.js";
+import { voiceConversationContext, voiceInventoryAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -183,7 +186,91 @@ export interface ChatServiceHost {
     | undefined;
 }
 
+export interface IntuneChatStreamOptions {
+  /** Main-process capability, passed only by a consented hosted Nova session. */
+  webSearch?: WebSearch;
+  voice?: boolean;
+  voiceHistory?: import("@openadminos/agent-sdk").NovaConversationTurn[];
+  signal?: AbortSignal;
+  /** Pin delegated voice work before fetching data or invoking a provider. */
+  scope?: { tenantId: string; providerId: ProviderId; model?: string; isLocal?: boolean };
+}
+
 export class IntuneChatService {
+  private readonly preloadJobs = new Map<
+    string,
+    {
+      controller: AbortController;
+      job: import("@openadminos/agent-sdk").GraphCachePreloadJob;
+    }
+  >();
+  private refreshTail: Promise<unknown> = Promise.resolve();
+
+  async startGraphCachePreload(
+    options: RefreshGraphCacheOptions = {},
+  ): Promise<void> {
+    const persisted = await this.host.read();
+    const tenant = this.host.resolveTenant(persisted, options.tenantId);
+    if (this.preloadJobs.get(tenant.id)?.job.status === "running")
+      throw new Error("A cache preload is already running for this tenant.");
+    if (options.resources?.length === 0)
+      throw new Error("Select at least one resource to preload.");
+    const resources = sanitizeGraphResources(options.resources);
+    const controller = new AbortController();
+    const job: import("@openadminos/agent-sdk").GraphCachePreloadJob = {
+      tenantId: tenant.id,
+      status: "running",
+      total: resources.length,
+      completed: 0,
+      active: [],
+      results: [],
+    };
+    this.preloadJobs.set(tenant.id, { controller, job });
+    void this.refreshGraphCacheInternal(
+      { ...options, tenantId: tenant.id, resources },
+      (event) => {
+        job.completed = event.completed;
+        if (event.type === "resource-start") job.active.push(event.label);
+        else {
+          job.active = job.active.filter(
+            (label) => label !== event.result.label,
+          );
+          job.results.push(event.result);
+        }
+      },
+      controller.signal,
+      true,
+    )
+      .then((result) => {
+        job.results = result.resources;
+        job.status = controller.signal.aborted
+          ? "cancelled"
+          : result.resources.length === resources.length &&
+              result.resources.every((r) => r.ok && !r.pageLimitReached)
+            ? "complete"
+            : "incomplete";
+      })
+      .catch((error) => {
+        job.status = controller.signal.aborted ? "cancelled" : "incomplete";
+        job.error = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        job.active = [];
+      });
+  }
+
+  async cancelGraphCachePreload(tenantId: string): Promise<void> {
+    const persisted = await this.host.read();
+    this.host.resolveTenant(persisted, tenantId);
+    this.preloadJobs
+      .get(tenantId)
+      ?.controller.abort(
+        new Error(
+          "Cache refresh cancelled. Previous complete snapshots were kept.",
+        ),
+      );
+  }
+
   constructor(private readonly host: ChatServiceHost) {}
 
   private async maybeCreateSelfTrainingSuggestionFromChat(input: {
@@ -1102,6 +1189,7 @@ export class IntuneChatService {
         [...GRAPH_CACHE_RESOURCES],
       ),
       schedule: store.getGraphCacheRefreshSchedule(resolvedTenant.id),
+      preload: this.preloadJobs.get(resolvedTenant.id)?.job,
     };
   }
 
@@ -1159,13 +1247,28 @@ export class IntuneChatService {
   async refreshGraphCache(
     options: RefreshGraphCacheOptions = {},
   ): Promise<GraphCacheRefreshResult> {
-    return this.refreshGraphCacheInternal(options);
+    return this.refreshGraphCacheInternal(options, undefined, undefined, true);
   }
 
   private async refreshGraphCacheInternal(
     options: RefreshGraphCacheOptions = {},
     onProgress?: (event: GraphCacheRefreshProgressEvent) => void,
     signal?: AbortSignal,
+    complete = false,
+  ): Promise<GraphCacheRefreshResult> {
+    const operation = this.refreshTail.catch(() => {}).then(() => {
+      signal?.throwIfAborted();
+      return this.collectGraphCache(options, onProgress, signal, complete);
+    });
+    this.refreshTail = operation;
+    return operation;
+  }
+
+  private async collectGraphCache(
+    options: RefreshGraphCacheOptions = {},
+    onProgress?: (event: GraphCacheRefreshProgressEvent) => void,
+    signal?: AbortSignal,
+    complete = false,
   ): Promise<GraphCacheRefreshResult> {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
@@ -1219,7 +1322,13 @@ export class IntuneChatService {
             ...(Object.keys(headers).length > 0 ? { headers } : {}),
           },
           signal,
+          complete,
         );
+        signal?.throwIfAborted();
+        const existing = store.getGraphCacheStatus(tenant.id, [definition])[0];
+        if (pageResult.pageLimitReached && existing?.refreshedAt && !existing.pageLimitReached) {
+          throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
+        }
         store.replaceGraphResources({
           tenantId: tenant.id,
           resource,
@@ -1228,7 +1337,8 @@ export class IntuneChatService {
           rows: pageResult.rows,
           pageCount: pageResult.pages,
           pageLimitReached: pageResult.pageLimitReached,
-          ...(pageResult.totalCount !== undefined
+          ...(!pageResult.pageLimitReached
+            ? { tenantTotal: pageResult.rows.length } : pageResult.totalCount !== undefined
             ? { tenantTotal: pageResult.totalCount }
             : {}),
           refreshedAt,
@@ -1423,7 +1533,7 @@ export class IntuneChatService {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
-        if (!status || status.rows === 0 || !status.refreshedAt) return true;
+        if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
         return (
           Date.now() - new Date(status.refreshedAt).getTime() >
           resourceStalenessMs(resource)
@@ -1548,7 +1658,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               assistantContent = agentic.answer;
               if (agentSuggestions.length > 0) {
@@ -1617,7 +1727,7 @@ export class IntuneChatService {
   async streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
-    options: { signal?: AbortSignal } = {},
+    options: IntuneChatStreamOptions = {},
   ): Promise<SendIntuneChatMessageResult> {
     const content = input.content.trim();
     if (!content) {
@@ -1631,10 +1741,15 @@ export class IntuneChatService {
     const provider =
       providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
     const providerId = provider?.id ?? persisted.activeProviderId;
+    options.signal?.throwIfAborted();
+    if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
+      throw new Error("Nova's tenant or provider changed. Start a new conversation.");
     const selectedModel = resolveProviderDefaultModel(
       provider,
       persisted.activeModelByProviderId,
     ).model;
+    if (options.scope && (("model" in options.scope && options.scope.model !== selectedModel) || (options.scope.isLocal !== undefined && options.scope.isLocal !== provider?.isLocal)))
+      throw new Error("Nova's reasoning model or provider trust changed. Start a new conversation.");
     const chatBudget = intuneChatProviderBudget(providerId);
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
@@ -1660,7 +1775,6 @@ export class IntuneChatService {
           : {}),
       });
     }
-    const planned = planChatContext(content);
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1678,6 +1792,13 @@ export class IntuneChatService {
       });
     }
 
+    const voiceContext = options.voice
+      ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
+      : undefined;
+    const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
+    const planned = planChatContext(voiceContext?.planningQuestion ?? content);
+    const directResources = options.voice ? (voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content)) : undefined;
+    if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -1802,7 +1923,7 @@ export class IntuneChatService {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
-        if (!status || status.rows === 0 || !status.refreshedAt) return true;
+        if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
         return (
           Date.now() - new Date(status.refreshedAt).getTime() >
           resourceStalenessMs(resource)
@@ -1891,7 +2012,7 @@ export class IntuneChatService {
     const answerGeneratedAt = new Date().toISOString();
     const rows = readPlannedChatRows(store, {
       tenantId: tenant.id,
-      question: content,
+      question: voiceContext?.planningQuestion ?? content,
       generatedAt: answerGeneratedAt,
       resources: planned.resources,
       searchTerms: planned.searchTerms,
@@ -1927,16 +2048,22 @@ export class IntuneChatService {
       });
     };
 
+    const directVoiceAnswer = options.voice ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) : undefined;
     if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
       emitDelta(assistantContent);
+    } else if (directVoiceAnswer !== undefined) {
+      assistantContent = directVoiceAnswer;
+      responseModel = undefined;
+      emitDelta(assistantContent);
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
+      const contextualQuestion = voiceContext?.history ?? content;
       const modelQuestion = workspaceContext
-        ? `${content}\n\n${workspaceContext.promptBlock}`
-        : content;
+        ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
+        : contextualQuestion;
       const streamDeterministicAnswer = async (notice?: string) => {
-        const answerPack = buildAnswerPack({
+        let answerPack = buildAnswerPack({
           question: modelQuestion,
           tenant,
           cacheStatus,
@@ -1952,11 +2079,16 @@ export class IntuneChatService {
           assistantContent = prefix;
           emitDelta(assistantContent, prefix);
         }
-        const streamDocumentation =
-          await this.retrieveDocumentationSafely(modelQuestion);
+        const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true), options.voice ? VOICE_ANSWER_INSTRUCTIONS : ""].filter(Boolean).join("\n");
+        const streamDocumentation = await this.retrieveDocumentationSafely(options.voice ? content : modelQuestion);
+        const documentation = options.voice ? streamDocumentation.slice(0, 2).map(d => ({ ...d, text: d.text.slice(0, 600) })) : streamDocumentation;
+        const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation)) + Buffer.byteLength(system);
+        if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
+        const prompt = buildAnswerPrompt(answerPack, documentation);
+        if (options.voice) assertVoicePromptBudget(system, prompt, voiceByteLimit);
         for await (const chunk of llm.stream({
-          system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
-          prompt: buildAnswerPrompt(answerPack, streamDocumentation),
+          system,
+          prompt,
           ...(selectedModel ? { model: selectedModel } : {}),
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
@@ -1970,7 +2102,7 @@ export class IntuneChatService {
           emitDelta(assistantContent, chunk.delta);
         }
         assistantContent = assistantContent.trim();
-        if (agentSuggestions.length > 0) {
+        if (!options.voice && agentSuggestions.length > 0) {
           assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
         }
         emitDelta(assistantContent, "");
@@ -1990,7 +2122,7 @@ export class IntuneChatService {
             providerId,
             model: selectedModel ?? llm.defaultModel,
           });
-          if (capability.enabled) {
+          if (capability.enabled || options.webSearch) {
             sendProgress({
               message: "Investigative mode started.",
               stage: "running-tools",
@@ -2004,15 +2136,18 @@ export class IntuneChatService {
             });
             const agentic = await runAgenticChat({
               question: modelQuestion,
-              documentation: await this.retrieveDocumentationSafely(modelQuestion),
+              documentation: options.voice && options.webSearch
+                ? []
+                : await this.retrieveDocumentationSafely(modelQuestion),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: this.buildChatToolContext(tenant.id),
+              tools: { ...this.buildChatToolContext(tenant.id, options.signal), webSearch: options.webSearch },
+              ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
-              agentSuggestions,
+              agentSuggestions: options.voice ? [] : agentSuggestions,
               generatedAt: answerGeneratedAt,
               maxTokens: chatBudget.maxTokens,
               signal: options.signal,
@@ -2069,7 +2204,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               sendProgress({
                 message: "Model response started.",
@@ -2083,18 +2218,32 @@ export class IntuneChatService {
                 },
               });
               assistantContent = agentic.answer.trim();
-              if (agentSuggestions.length > 0) {
+              if (!options.voice && agentSuggestions.length > 0) {
                 assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
               }
               emitDelta(assistantContent);
             } else {
               sendProgress({
-                message: agentic.fallbackNotice,
+                message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice,
                 stage: "building-context",
                 contextStatus: "active",
                 modelStatus: "pending",
               });
-              await streamDeterministicAnswer(agentic.fallbackNotice);
+              if (options.webSearch) {
+                // A tenant-only fallback would discard web evidence and could invent current facts.
+                assistantStatus = "failed";
+                assistantError = agentic.reason === "context-limit"
+                  ? "This question exceeded Nova's voice context budget. Ask about fewer details or open Chat for a longer investigation."
+                  : agentic.reason === "unfinished-answer"
+                    ? "The reasoning model described a lookup without finishing it. No completed answer is available. Retry or open Chat to inspect the evidence."
+                  : agentic.reason === "malformed-output"
+                    ? "The selected reasoning model could not produce a valid tool request. Retry or select a model that supports tool use."
+                    : agentic.reason === "provider-unavailable"
+                      ? "The selected reasoning model is unavailable. Check the provider connection and retry."
+                      : "Nova reached its tool-call limit before finishing. Ask a more focused question or open Chat to inspect the evidence.";
+                assistantContent = assistantError;
+                emitDelta(assistantContent);
+              } else await streamDeterministicAnswer(agentic.fallbackNotice);
             }
           } else {
             if (capability.reason === "capability-fallback" && capability.notice) {
@@ -2141,6 +2290,23 @@ export class IntuneChatService {
       return result;
     }
 
+    const webFailures = (toolTrace ?? []).filter(t => t.tool === "web_search" && t.error);
+    const searched = (toolTrace ?? []).some(t => t.tool === "web_search" && !t.error);
+    if (webFailures.length && !searched) {
+      assistantStatus = "failed";
+      assistantError = `Public web research could not be verified. ${webFailures[0]!.error}`;
+      assistantContent = assistantError;
+      emitDelta(assistantContent, "");
+    } else if (webFailures.length) {
+      assistantContent += "\n\nSome public searches failed; the web evidence is incomplete. See What ran for details.";
+    }
+    const webSources = [...new Map((toolTrace ?? []).flatMap(t => t.webSources ?? []).map(source => [source.url, source])).values()];
+    if (webSources.length) {
+      assistantContent += "\n\nPublic web sources:\n" + webSources.map(source =>
+        `- [${source.title.replace(/[\[\]\\\n\r]/g, " ") || "Source"}](<${source.url.replace(/>/g, "%3E")}>)`
+      ).join("\n");
+      emitDelta(assistantContent, "");
+    }
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,
       conversationId: conversation.id,
@@ -2254,7 +2420,7 @@ export class IntuneChatService {
     }
   }
 
-  private buildChatToolContext(tenantId: string): IntuneChatToolContext {
+  private buildChatToolContext(tenantId: string, signal?: AbortSignal): IntuneChatToolContext {
     const store = this.host.requireIntelligenceStore();
     const log = (
       level: RunLogLevel,
@@ -2266,6 +2432,7 @@ export class IntuneChatService {
     return {
       tenantId,
       store,
+      signal,
       graphForScopes: async (scopes) => {
         const uniqueScopes = [...new Set(scopes)].sort();
         return this.host.graphFactory
@@ -2276,7 +2443,7 @@ export class IntuneChatService {
         const result = await this.refreshGraphCacheInternal({
           tenantId,
           resources: [resource],
-        });
+        }, undefined, signal);
         const resourceResult = result.resources[0];
         if (resourceResult) return resourceResult;
         const definition = definitionForResource(resource);

@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nova Conversation · design reference</title><style>
+:root{
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --color-bg: #1c1917;
+  --color-bg-elevated: #252220;
+  --color-bg-raised: #2d2926;
+  --color-sidebar-solid: #191614;
+
+  --color-surface: #232120;
+  --color-surface-hover: #2a2724;
+
+  --color-border: #322e2a;
+  --color-border-strong: #403a35;
+  --color-border-soft: #2a2622;
+
+  --color-text: #f5f1eb;
+  --color-text-soft: #b5ada3;
+  --color-text-muted: #9a9085;
+  /* Placeholders are informative: must hold 4.5:1 on every input surface,
+   * including the lightest (--color-bg-raised). Faint is decorative only
+   * (dividers, dots, disabled ornament), never readable copy. */
+  --color-text-placeholder: #9c9186;
+  --color-text-faint: #6b6157;
+
+  --color-accent: #e8a87c;
+  --color-accent-hover: #efb88f;
+  --color-accent-soft: #e8a87c1f;
+  --color-accent-strong: #d99868;
+  --color-on-accent: #1a120c;
+
+  --color-success-fg: #9cc88f;
+  --color-success-bg: #9cc88f1f;
+  --color-warning-fg: #e5c678;
+  --color-warning-bg: #e5c6781f;
+  --color-danger-fg: #e58888;
+  --color-danger-bg: #e588881f;
+  --color-info-fg: #a3bfd9;
+  --color-info-bg: #a3bfd91f;
+  --color-think-fg: #c4a5d9;
+  --color-think-bg: #c4a5d91f;
+
+  /* Legacy semantic names: keep byte-identical to the -fg/-bg pairs above. */
+  --color-success: #9cc88f;
+  --color-success-soft: #9cc88f1f;
+  --color-warning: #e5c678;
+  --color-warning-soft: #e5c6781f;
+  --color-danger: #e58888;
+  --color-danger-soft: #e588881f;
+  --color-info: #a3bfd9;
+  --color-info-soft: #a3bfd91f;
+  --color-think: #c4a5d9;
+  --color-think-soft: #c4a5d91f;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(0, 0, 0, 0.22);
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+*{box-sizing:border-box;margin:0;padding:0}body{font:14px/1.55 var(--font-sans);color:var(--color-text);background:var(--color-bg)}button{font:inherit;cursor:pointer;border:0;background:transparent;color:inherit}svg{display:block}button:not(.nova-orb){padding:8px 12px}.nova-header{display:flex;align-items:center;justify-content:space-between}.nova-header>button{font-size:12px;color:var(--color-text-soft)}.nova-tenant,.nova-trust{font-size:12px;color:var(--color-text-muted)}.nova-trust{color:var(--color-accent)}.nova-session-controls{display:flex;justify-content:center;gap:8px}.nova-session-controls button{background:var(--color-surface);border:1px solid var(--color-border);border-radius:18px}.nova-status{text-align:center}.nova-footnote{font-size:11px;color:var(--color-text-muted)}
+.nova-root {
+  position: fixed;
+  right: 22px;
+  bottom: 40px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.nova-launch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-accent);
+  border-radius: 24px;
+  padding: 10px 14px;
+  color: var(--color-text);
+  font-size: 12px;
+  box-shadow: 0 5px 20px #0003;
+}
+.nova-launch kbd,
+.nova-eyebrow {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.12em;
+}
+.nova-eyebrow {
+  margin-left: 8px;
+  font-weight: normal;
+}
+.nova-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+.nova-panel {
+  order: -1;
+  width: 370px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 140px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 22px;
+  background: var(--color-bg);
+  box-shadow: 0 15px 65px #0006;
+}
+.nova-panel-expanded {
+  width: min(780px, calc(100vw - 44px));
+  max-height: calc(100dvh - 120px);
+}
+/* Only the artwork moves: the button and its focus ring stay in place. */
+.nova-orb {
+  --voice-level: 0;
+  position: relative;
+  flex-shrink: 0;
+  align-self: center;
+  width: 128px;
+  height: 128px;
+  margin: 30px 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+}
+.nova-panel-expanded .nova-orb {
+  width: 210px;
+  height: 210px;
+  margin: 44px 16px;
+}
+.nova-orb-core {
+  position: absolute;
+  inset: 5%;
+  pointer-events: none;
+  border-radius: 50%;
+  box-shadow:
+    0 18px 45px -20px #000a,
+    0 0 34px -14px #e5a26750;
+  transform: scale(calc(1 + var(--voice-level) * 0.16));
+  transition: transform 90ms linear;
+}
+.nova-orb-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.nova-orb-current,
+.nova-orb-undercurrent {
+  transform-origin: 100px 100px;
+  animation: nova-current 18s linear infinite;
+}
+.nova-orb-undercurrent {
+  animation: nova-undercurrent 23s linear infinite;
+}
+.nova-orb-glint {
+  animation: nova-glint 7s ease-in-out infinite;
+}
+.nova-orb-ring {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid #d9976618;
+  border-radius: 50%;
+  transform: scale(calc(1 + var(--voice-level) * 0.2));
+  transition: transform 120ms linear;
+}
+.nova-orb[data-phase="speaking"] .nova-orb-glint {
+  animation-duration: 2.8s;
+}
+.nova-orb[data-phase="speaking"] .nova-orb-ring {
+  border-color: #e8ba8655;
+}
+.nova-orb[data-phase="connecting"] .nova-orb-ring,
+.nova-orb[data-phase="thinking"] .nova-orb-ring {
+  border-top: 1px solid var(--color-accent);
+  border-right-color: transparent;
+  animation: nova-orbit 3s linear infinite;
+}
+.nova-orb[data-phase="muted"] .nova-orb-core {
+  filter: saturate(0.2);
+  transform: none;
+}
+.nova-orb[data-phase="error"] .nova-orb-core {
+  filter: saturate(0.4);
+}
+.nova-orb[data-phase="muted"] .nova-orb-art *,
+.nova-orb[data-phase="error"] .nova-orb-art *,
+.nova-orb:disabled .nova-orb-art * {
+  animation-play-state: paused;
+}
+.nova-orb:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.nova-orb:focus-visible,
+.nova-tools button:focus-visible,
+.nova-launch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 5px;
+}
+.nova-tools {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+.nova-tools button {
+  font-size: 11px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+}
+.nova-tools button[aria-pressed="true"] {
+  color: var(--color-text);
+  background: var(--color-bg-raised);
+}
+.nova-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+.nova-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+}
+.nova-field input,
+.nova-field select {
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px;
+  color: var(--color-text);
+}
+.nova-footnote {
+  text-align: center;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+@keyframes nova-current {
+  from {
+    transform: rotate(0deg) scale(1.04);
+  }
+  to {
+    transform: rotate(360deg) scale(1.04);
+  }
+}
+@keyframes nova-undercurrent {
+  from {
+    transform: rotate(360deg) scale(1.08);
+  }
+  to {
+    transform: rotate(0deg) scale(1.08);
+  }
+}
+@keyframes nova-glint {
+  0%,
+  100% {
+    opacity: 0.08;
+  }
+  50% {
+    opacity: 0.24;
+  }
+}
+@keyframes nova-orbit {
+  to {
+    rotate: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-orb-core,
+  .nova-orb-art *,
+  .nova-orb-ring {
+    animation: none !important;
+    transition: none;
+    transform: none;
+  }
+}
+@media (forced-colors: active) {
+  .nova-orb-core,
+  .nova-orb-ring {
+    border: 2px solid ButtonText;
+  }
+}
+@media (max-width: 600px) {
+  .nova-root {
+    right: 12px;
+    bottom: 36px;
+  }
+  .nova-panel {
+    width: calc(100vw - 24px);
+  }
+  .nova-panel-expanded .nova-orb {
+    width: 150px;
+    height: 150px;
+    margin: 24px 16px;
+  }
+}
+
+.nova-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+.nova-readiness strong {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+/* Full-window voice keeps the same session, media elements and animated orb. */
+.nova-root-fullscreen {
+  inset: 0;
+  z-index: 1000;
+}
+.nova-root-fullscreen > .nova-launch {
+  display: none;
+}
+.nova-root-fullscreen .nova-panel-expanded {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: max(32px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
+  align-items: center;
+  overscroll-behavior: contain;
+}
+.nova-panel-expanded > * {
+  width: min(100%, 600px);
+}
+.nova-panel-expanded > .nova-header {
+  width: 100%;
+  max-width: none;
+  gap: 12px;
+}
+.nova-header > strong {
+  margin-right: auto;
+}
+.nova-panel-expanded[data-active="true"] > .nova-orb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(34vw, 38dvh, 340px);
+  height: min(34vw, 38dvh, 340px);
+  min-width: 130px;
+  min-height: 130px;
+  margin: 0;
+  translate: -50% -50%;
+}
+.nova-panel-expanded[data-active="true"] > .nova-session-controls {
+  position: absolute;
+  bottom: 80px;
+  flex-wrap: wrap;
+}
+.nova-panel-expanded[data-active="true"] > .nova-tools {
+  position: absolute;
+  bottom: 28px;
+}
+.nova-panel-expanded[data-active="true"] > .nova-status {
+  position: absolute;
+  bottom: 140px;
+}
+.nova-panel-expanded[data-active="true"] > .nova-footnote,
+.nova-panel-expanded[data-active="true"] > .nova-evidence {
+  display: none;
+}
+.nova-panel-expanded[data-active="true"] > .nova-tenant,
+.nova-panel-expanded[data-active="true"] > .nova-trust {
+  align-self: flex-start;
+}
+.nova-panel-expanded[data-active="true"] > [role="alert"] {
+  position: absolute;
+  top: 130px;
+  max-height: min(15dvh, 110px);
+  overflow: auto;
+}
+.nova-panel-expanded[data-active="true"] > .nova-header,
+.nova-panel-expanded[data-active="true"] > .nova-session-controls,
+.nova-panel-expanded[data-active="true"] > .nova-tools,
+.nova-panel-expanded[data-active="true"] > .nova-tenant,
+.nova-panel-expanded[data-active="true"] > .nova-trust,
+.nova-panel-expanded[data-active="true"] > .nova-status {
+  transition: opacity 200ms ease;
+}
+.nova-panel-expanded[data-quiet="true"] > .nova-header:not(:focus-within),
+.nova-panel-expanded[data-quiet="true"]
+  > .nova-session-controls:not(:focus-within),
+.nova-panel-expanded[data-quiet="true"] > .nova-tools:not(:focus-within),
+.nova-panel-expanded[data-quiet="true"] > .nova-tenant,
+.nova-panel-expanded[data-quiet="true"] > .nova-trust,
+.nova-panel-expanded[data-quiet="true"] > .nova-status {
+  opacity: 0;
+  pointer-events: none;
+}
+.nova-panel-expanded[data-quiet="true"] {
+  cursor: none;
+}
+.nova-panel-expanded button {
+  min-height: 44px;
+}
+@media (max-height: 540px) {
+  .nova-panel-expanded[data-active="true"] > .nova-orb {
+    width: 130px;
+    height: 130px;
+  }
+  .nova-panel-expanded[data-active="true"] > .nova-status {
+    top: auto;
+    bottom: 135px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-panel-expanded > * {
+    transition: none !important;
+  }
+}
+
+.nova-panel-expanded[data-active="true"] > .nova-playback-recovery {
+  position: absolute;
+  top: 130px;
+  width: auto;
+}
+
+/* Conversation is optional; the orb keeps the entire stage when it is hidden. */
+.nova-conversation-toggle { display: inline-flex; align-items: center; gap: 8px; }
+.nova-conversation {
+  display: flex; flex-direction: column; flex-shrink: 0; min-height: 240px;
+  max-height: 380px; overflow: hidden; border: 1px solid var(--color-border);
+  border-radius: 18px; background: var(--color-bg-raised); color: var(--color-text);
+  text-align: left; cursor: auto; box-shadow: 0 12px 40px #0002;
+}
+.nova-conversation-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 20px 16px; border-bottom: 1px solid var(--color-border-soft); }
+.nova-conversation-eyebrow { display: block; font-size: 9px; letter-spacing: .17em; color: var(--color-accent); margin-bottom: 4px; }
+.nova-conversation-header h2 { font-size: 17px; font-weight: 500; letter-spacing: -.025em; }
+.nova-conversation-header button { display: grid; place-items: center; width: 36px; min-height: 36px; border-radius: 10px; color: var(--color-text-muted); }
+.nova-conversation-header button:hover { color: var(--color-text); background: var(--color-bg); }
+.nova-conversation-log { display: flex; flex-direction: column; gap: 20px; padding: 22px 18px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; scrollbar-width: thin; scrollbar-color: var(--color-border) transparent; }
+.nova-conversation-log:focus-visible, .nova-conversation button:focus-visible, .nova-conversation summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -3px; }
+.nova-message { max-width: 92%; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.nova-message-author { display: block; font-size: 10px; margin: 0 10px 6px; color: var(--color-text-muted); }
+.nova-message p { margin: 0; padding: 12px 15px; white-space: pre-wrap; border-radius: 14px 14px 14px 4px; background: var(--color-bg); border: 1px solid var(--color-border-soft); }
+.nova-message-user { align-self: flex-end; }
+.nova-message-user .nova-message-author { text-align: right; }
+.nova-message-user p { border-radius: 14px 14px 4px 14px; background: color-mix(in srgb, var(--color-accent) 9%, var(--color-bg)); border-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-border-soft)); }
+.nova-activity-card { margin: 0 3px; padding: 13px 0 13px 13px; border-left: 1px solid var(--color-border); font-size: 11px; line-height: 1.6; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.nova-activity-heading { display: flex; align-items: center; gap: 7px; }
+.nova-activity-heading strong { font-size: 11px; font-weight: 500; color: var(--color-text); }
+.nova-activity-label { margin-left: auto; font-size: 8px; letter-spacing: .1em; opacity: .7; }
+.nova-activity-mark { width: 13px; height: 13px; display: inline-grid; place-items: center; color: var(--color-accent); font-size: 11px; flex-shrink: 0; }
+.nova-activity-card[data-status="running"] .nova-activity-mark { border: 1.5px solid var(--color-border); border-top-color: var(--color-accent); border-radius: 50%; animation: nova-activity-spin 1s linear infinite; }
+.nova-activity-card[data-status="failed"] .nova-activity-mark { color: #edab9e; }
+.nova-activity-card ol { list-style: none; display: grid; gap: 4px; padding: 8px 0 0 20px; margin: 0; }
+.nova-activity-card li::before { content: "·"; margin-right: 6px; }
+.nova-activity-card li[data-status="failed"] { color: #edab9e; }
+.nova-activity-card details { margin: 9px 0 0 20px; }
+.nova-activity-card summary { cursor: pointer; color: var(--color-text-muted); font-size: 11px; }
+.nova-activity-result { margin-top: 10px; white-space: pre-wrap; color: var(--color-text); }
+.nova-conversation-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--color-border-soft); padding: 13px 18px; font-size: 9px; color: var(--color-text-muted); }
+.nova-conversation-footer button { color: var(--color-accent); min-height: 28px; font-size: 11px; }
+.nova-conversation-empty { margin: auto 12px; text-align: center; padding: 28px 0; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
+.nova-conversation-empty svg { margin: 0 auto 15px; width: 26px; height: 26px; opacity: .65; }
+.nova-conversation-empty p { color: var(--color-text); margin-bottom: 8px; }
+.nova-panel-expanded { --nova-conversation-width: clamp(310px, 30vw, 390px); }
+.nova-panel-expanded > .nova-conversation { position: absolute; top: 104px; right: 24px; bottom: 24px; width: var(--nova-conversation-width); max-height: none; min-height: 0; }
+.nova-panel-expanded[data-conversation="true"] > .nova-orb { left: calc((100% - var(--nova-conversation-width) - 32px) / 2); }
+.nova-panel-expanded[data-conversation="true"] > .nova-session-controls,
+.nova-panel-expanded[data-conversation="true"] > .nova-tools,
+.nova-panel-expanded[data-conversation="true"] > .nova-status { left: 24px; width: calc(100% - var(--nova-conversation-width) - 80px); }
+.nova-panel-expanded[data-conversation="true"] > .nova-tenant,
+.nova-panel-expanded[data-conversation="true"] > .nova-trust,
+.nova-panel-expanded[data-conversation="true"] > [role="alert"] { max-width: calc(100% - var(--nova-conversation-width) - 80px); }
+.nova-panel-expanded[data-conversation="true"]:not([data-active="true"]) { padding-right: calc(var(--nova-conversation-width) + 60px); align-items: flex-start; }
+.nova-panel-expanded[data-conversation="true"]:not([data-active="true"]) > .nova-header { width: calc(100vw - 48px); }
+@keyframes nova-activity-spin { to { transform: rotate(360deg); } }
+@media (max-width: 760px) {
+  .nova-panel-expanded > .nova-conversation { top: 43%; left: 12px; right: 12px; bottom: 144px; width: auto; }
+  .nova-panel-expanded[data-conversation="true"][data-active="true"] > .nova-orb { left: 50%; top: 26%; width: 130px; height: 130px; }
+  .nova-panel-expanded[data-conversation="true"] > .nova-session-controls,
+  .nova-panel-expanded[data-conversation="true"] > .nova-tools,
+  .nova-panel-expanded[data-conversation="true"] > .nova-status { left: 12px; width: calc(100% - 24px); }
+  .nova-panel-expanded[data-conversation="true"] > .nova-status { top: 38%; bottom: auto; }
+  .nova-panel-expanded[data-conversation="true"] > .nova-tenant,
+  .nova-panel-expanded[data-conversation="true"] > .nova-trust { max-width: 100%; }
+  .nova-panel-expanded[data-conversation="true"] > [role="alert"] { top: 65px; max-width: calc(100% - 24px); background: var(--color-bg); padding: 8px; z-index: 2; }
+  .nova-panel-expanded[data-conversation="true"]:not([data-active="true"]) { padding-right: 24px; }
+  .nova-panel-expanded:not([data-active="true"]) > .nova-conversation { position: static; min-height: 280px; width: 100%; }
+  .nova-conversation-header { padding: 12px 16px; }
+  .nova-conversation-footer { padding: 9px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .nova-activity-card[data-status="running"] .nova-activity-mark { animation: none; } }
+
+</style></head><body><!-- Production UI reference, synthetic tenant. Controls are illustrative. -->
+<section id="nova-panel" tabindex="-1" role="dialog" data-active="true" data-quiet="false" data-conversation="true" class="nova-panel nova-panel-expanded" aria-label="Nova voice assistant" aria-modal="true">
+<div class="nova-header flex items-center justify-between">
+<strong>Nova <span class="nova-eyebrow">VOICE</span>
+</strong>
+<button aria-pressed="true" class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 bg-transparent text-[var(--color-text-soft)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] h-7 px-2.5 text-[12px] rounded-md gap-1.5 ">Exit full screen</button>
+<button class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 bg-transparent text-[var(--color-text-soft)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] h-7 px-2.5 text-[12px] rounded-md gap-1.5 ">Close</button>
+</div>
+<p class="nova-tenant text-xs text-[var(--color-text-muted)]">Contoso IT · cache</p>
+<p class="nova-trust text-xs text-[var(--color-accent)]">Hosted voice + web search · audio, shared context and searches go to OpenAI</p>
+<button class="nova-orb" data-phase="listening" aria-label="Stop Nova" style="--voice-level: 0;">
+<span class="nova-orb-core" aria-hidden="true">
+<svg class="nova-orb-art" viewBox="0 0 200 200" aria-hidden="true" focusable="false">
+<defs>
+<radialGradient id="_r_0_-body" cx="32%" cy="18%" r="85%">
+<stop offset="0" stop-color="#fff9ee">
+</stop>
+<stop offset="0.33" stop-color="#f2d1aa">
+</stop>
+<stop offset="0.62" stop-color="#ba693e">
+</stop>
+<stop offset="0.86" stop-color="#522718">
+</stop>
+<stop offset="1" stop-color="#160f0d">
+</stop>
+</radialGradient>
+<linearGradient id="_r_0_-silk" x1="0" y1="0" x2="0.7" y2="1">
+<stop offset="0" stop-color="#fffef8">
+</stop>
+<stop offset="0.36" stop-color="#ffe7ca">
+</stop>
+<stop offset="0.57" stop-color="#d88955">
+</stop>
+<stop offset="0.78" stop-color="#814226">
+</stop>
+<stop offset="1" stop-color="#341b16">
+</stop>
+</linearGradient>
+<linearGradient id="_r_0_-edge" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#fffdf3" stop-opacity="0.95">
+</stop>
+<stop offset="0.5" stop-color="#ffcc90" stop-opacity="0.5">
+</stop>
+<stop offset="1" stop-color="#ffa26a" stop-opacity="0">
+</stop>
+</linearGradient>
+<radialGradient id="_r_0_-glass" cx="35%" cy="12%" r="88%">
+<stop offset="0" stop-color="#fffef7" stop-opacity="0.6">
+</stop>
+<stop offset="0.28" stop-color="#fffef7" stop-opacity="0">
+</stop>
+<stop offset="0.78" stop-color="#150b07" stop-opacity="0">
+</stop>
+<stop offset="1" stop-color="#150b07" stop-opacity="0.55">
+</stop>
+</radialGradient>
+<radialGradient id="_r_0_-specular">
+<stop offset="0" stop-color="#fffef6" stop-opacity="0.95">
+</stop>
+<stop offset="0.55" stop-color="#fffef6" stop-opacity="0.35">
+</stop>
+<stop offset="1" stop-color="#fffef6" stop-opacity="0">
+</stop>
+</radialGradient>
+<clipPath id="_r_0_-clip">
+<circle cx="100" cy="100" r="98">
+</circle>
+</clipPath>
+</defs>
+<g clip-path="url(#_r_0_-clip)">
+<circle cx="100" cy="100" r="100" fill="url(#_r_0_-body)">
+</circle>
+<g class="nova-orb-current">
+<path d="M-35 57 C30 -38 164 -4 172 48 C181 102 64 77 46 124 C25 181 161 160 227 116 L233 225 L-35 225Z" fill="url(#_r_0_-silk)">
+</path>
+<path d="M-35 57 C30 -38 164 -4 172 48 C181 102 64 77 46 124 C25 181 161 160 227 116" fill="none" stroke="url(#_r_0_-edge)" stroke-width="1.4">
+</path>
+</g>
+<g class="nova-orb-undercurrent">
+<path d="M-25 96 C15 163 89 201 142 158 C192 117 90 113 116 66 C137 29 191 43 227 62 L220 -30 L-25 -30Z" fill="url(#_r_0_-silk)" opacity="0.8">
+</path>
+<path d="M-25 96 C15 163 89 201 142 158 C192 117 90 113 116 66 C137 29 191 43 227 62" fill="none" stroke="url(#_r_0_-edge)" stroke-width="1">
+</path>
+</g>
+<circle cx="100" cy="100" r="98" fill="url(#_r_0_-glass)">
+</circle>
+<ellipse class="nova-orb-glint" cx="78" cy="30" rx="43" ry="12" fill="url(#_r_0_-specular)" opacity="0.12" transform="rotate(-28 78 30)">
+</ellipse>
+</g>
+<circle cx="100" cy="100" r="98" fill="none" stroke="url(#_r_0_-edge)" stroke-width="0.7">
+</circle>
+</svg>
+</span>
+<span class="nova-orb-ring" aria-hidden="true">
+</span>
+</button>
+<div role="status" class="nova-status text-center text-sm">Listening</div>
+<div class="nova-session-controls flex justify-center gap-2">
+<button aria-pressed="false" class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] ring-1 ring-[var(--color-border)] h-9 px-3.5 text-[13px] rounded-lg gap-2 ">Mute mic</button>
+<button class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] ring-1 ring-[var(--color-border)] h-9 px-3.5 text-[13px] rounded-lg gap-2 ">Stop</button>
+</div>
+<div class="nova-tools">
+<button type="button" class="nova-conversation-toggle" aria-label="Hide conversation panel" aria-pressed="true" aria-controls="nova-conversation">
+<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+<rect x="2.5" y="3" width="15" height="14" rx="3">
+</rect>
+<path d="M11.5 3v14M5.5 7h3M5.5 10h3">
+</path>
+</svg> Conversation</button>
+</div>
+<aside id="nova-conversation" class="nova-conversation" aria-label="Conversation">
+<div class="nova-conversation-header">
+<div>
+<span class="nova-conversation-eyebrow">NOVA</span>
+<h2>Conversation</h2>
+</div>
+<button type="button" aria-label="Hide conversation" title="Hide conversation">
+<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+<path d="m5 5 10 10M15 5 5 15">
+</path>
+</svg>
+</button>
+</div>
+<div class="nova-conversation-log" role="log" aria-label="Voice conversation and activity" aria-live="off" tabindex="0">
+<div class="nova-message nova-message-user">
+<span class="nova-message-author">You</span>
+<p>How many devices do I have in my tenant?</p>
+</div>
+<div class="nova-message nova-message-assistant">
+<span class="nova-message-author">Nova</span>
+<p>Let me check your device inventory.</p>
+</div>
+<div class="nova-activity-card" data-status="completed">
+<div class="nova-activity-heading">
+<span class="nova-activity-mark" aria-hidden="true">✓</span>
+<strong>Answer ready</strong>
+<span class="nova-activity-label">ACTIVITY</span>
+</div>
+<ol>
+<li data-status="running">Reading cached device inventory</li>
+<li data-status="completed">Answer ready</li>
+</ol>
+<details>
+<summary>View result</summary>
+<p class="nova-activity-result">Your cache contains 42 Intune devices. The snapshot is 12 minutes old.</p>
+</details>
+</div>
+<div class="nova-message nova-message-assistant">
+<span class="nova-message-author">Nova</span>
+<p>Your cache contains 42 Intune devices. The snapshot is 12 minutes old.</p>
+</div>
+</div>
+<div class="nova-conversation-footer">
+<span>Live updates from your app</span>
+<button type="button">Open evidence <span aria-hidden="true">↗</span>
+</button>
+</div>
+</aside>
+<audio hidden="">
+</audio>
+<button class="inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] ring-1 ring-[var(--color-border)] h-9 px-3.5 text-[13px] rounded-lg gap-2 nova-evidence">Open evidence in Chat</button>
+<p class="nova-footnote">Esc ends the session and releases your microphone.</p>
+</section>
+</body></html>

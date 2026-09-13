@@ -22,23 +22,23 @@ describe("documentation grounding in prompts", () => {
   });
 });
 
-describe("every answer path is grounded", () => {
-  it("passes documentation into all four chat answer paths", async () => {
+describe("Chat documentation grounding", () => {
+  it("retains documentation retrieval in all four Chat answer paths", async () => {
     const service = await readFile(
       new URL("../intune-chat/service.ts", import.meta.url),
       "utf8",
     );
     // Two deterministic paths (streaming and not) build their prompt via
     // buildAnswerPrompt; two agentic call sites pass `documentation`.
-    // Hosted providers always route agentic, so missing that side would
-    // silently leave every hosted user ungrounded.
+    // Voice research may omit broad documentation and use question-specific
+    // tools instead. Ordinary Chat must retain retrieval in both paths.
     assert.equal(
       (service.match(/buildAnswerPrompt\(answerPack/g) ?? []).length,
       2,
       "both deterministic paths should build a grounded prompt",
     );
     assert.equal(
-      (service.match(/documentation: await this\.retrieveDocumentationSafely/g) ?? [])
+      (service.match(/documentation:(?: options\.voice && options\.webSearch\s*\? \[\]\s*:)?\s*await this\.retrieveDocumentationSafely/g) ?? [])
         .length,
       2,
       "both agentic call sites should pass retrieved documentation",

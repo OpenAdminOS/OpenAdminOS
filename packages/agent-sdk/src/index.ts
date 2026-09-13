@@ -964,13 +964,15 @@ export type IntuneChatInvestigationToolName =
   | "find_graph_endpoint"
   | "graph_get"
   | "refresh_resource"
-  | "query_drift";
+  | "query_drift"
+  | "web_search";
 
 export interface IntuneChatToolTraceEntry {
   id: string;
   tool: IntuneChatInvestigationToolName;
   params: unknown;
   resultSummary: string;
+  webSources?: Array<{ title: string; url: string }>;
   durationMs: number;
   createdAt: string;
   completedAt: string;
@@ -1066,6 +1068,7 @@ export interface GraphCacheStatus {
   tenantId?: string;
   resources: GraphCacheResourceStatus[];
   schedule?: GraphCacheRefreshScheduleSettings;
+  preload?: GraphCachePreloadJob;
 }
 
 export type DriftTimelineChangeKind = "added" | "removed" | "modified" | "baseline";
@@ -1478,6 +1481,65 @@ export interface DriftTenantCompareResult {
 export interface RefreshGraphCacheOptions {
   resources?: GraphCacheResourceKind[];
   tenantId?: string;
+}
+
+export interface NovaActivity {
+  kind: "cache" | "graph" | "web" | "reasoning" | "answer" | "action";
+  status: "running" | "completed" | "failed";
+  message: string;
+}
+
+export interface NovaConversationTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface NovaActionPreview {
+  id: string; kind: "send" | "run"; title: string; target: string; body: string;
+  deliveryNote?: string;
+}
+
+export type NovaRequest =
+  | { action: "check"; mode: "openai" | "local"; connectivity?: boolean }
+  | { action: "status" }
+  | { action: "stop" }
+  | { action: "interrupt"; sessionId: string }
+  | { action: "decide-action"; sessionId: string; actionId: string; approved: boolean }
+  | { action: "configure"; apiKey: string | null }
+  | {
+      action: "start";
+      mode: "openai" | "local";
+      tenantId: string;
+      consent: boolean;
+      name?: string;
+      sdp?: string;
+    }
+  | { action: "answer"; sessionId: string; text: string; history?: NovaConversationTurn[] }
+  | { action: "speak"; sessionId: string; text: string }
+  | { action: "transcribe"; sessionId: string; audio: number[] };
+export interface NovaResponse {
+  /** Full local result for visual review; never sent to the speech model automatically. */
+  displayText?: string;
+  pendingAction?: NovaActionPreview;
+  /** A failed answer, with the session still valid for the next question. */
+  answerError?: string;
+  route?: string;
+  hasKey?: boolean;
+  sessionId?: string;
+  sdp?: string;
+  text?: string;
+  audio?: number[];
+  conversationId?: string;
+}
+
+export interface GraphCachePreloadJob {
+  tenantId: string;
+  status: "running" | "complete" | "incomplete" | "cancelled";
+  total: number;
+  completed: number;
+  active: string[];
+  results: GraphCacheRefreshResourceResult[];
+  error?: string;
 }
 
 export interface GraphCacheRefreshResourceResult {
@@ -2353,6 +2415,9 @@ export interface OpenAdminOSApi {
   ): Promise<QueueMultiTenantAgentBatchResult>;
   listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]>;
   getMultiTenantAgentBatch(id: string): Promise<MultiTenantAgentBatch | undefined>;
+  nova(input: NovaRequest, onActivity?: (activity: NovaActivity) => void): Promise<NovaResponse>;
+  startGraphCachePreload(options?: RefreshGraphCacheOptions): Promise<void>;
+  cancelGraphCachePreload(tenantId: string): Promise<void>;
   refreshGraphCache(options?: RefreshGraphCacheOptions): Promise<GraphCacheRefreshResult>;
   getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus>;
   getDriftTimeline?(input: DriftTimelineInput): Promise<DriftTimelineResult>;

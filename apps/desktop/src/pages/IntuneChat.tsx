@@ -1,3 +1,4 @@
+import { PublicWebSources } from "../components/PublicWebSources";
 import { useEffect, useId, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
@@ -3940,6 +3941,8 @@ function ChatMessageBubble({
   onPin: () => void;
 }) {
   const isUser = message.role === "user";
+  const hasWebSources = message.toolTrace?.some(t => t.webSources?.length);
+  const displayContent = hasWebSources ? message.content.split("\n\nPublic web sources:")[0] : message.content;
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={isUser ? "max-w-[76%]" : "w-full max-w-[760px]"}>
@@ -3954,15 +3957,16 @@ function ChatMessageBubble({
             <div className="space-y-4">
               <ChatProgressCard progress={progress} />
               {message.content.trim().length > 0 && (
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                <div className="whitespace-pre-wrap">{displayContent}</div>
               )}
             </div>
           ) : (
             <div className="whitespace-pre-wrap">
-              {message.content || (message.status === "streaming" ? "..." : "")}
+              {displayContent || (message.status === "streaming" ? "..." : "")}
             </div>
           )}
         </div>
+        {!isUser && <PublicWebSources trace={message.toolTrace} />}
         {!isUser && message.sources && message.sources.length > 0 && (
           <>
             <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-[var(--color-text-muted)]">

@@ -325,3 +325,7 @@ export const IconSlack = ({ size = 14, ...p }: IconProps) => (
     <rect x="12.6" y="9" width="2.4" height="2.4" rx="1.2" />
   </svg>
 );
+
+export const IconCache = ({ size = 18, ...p }: IconProps) => (
+  <svg {...base(size, p)}><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/></svg>
+);

@@ -1,3 +1,5 @@
+import { NovaService } from "./nova.js";
+import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
@@ -1487,7 +1489,12 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     setter?.call(textarea, value);
     textarea.focus();
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    await waitFor(() => textarea.value === value, "chat input value");
+    // Native value changes happen before React commits the draft. Waiting only
+    // for the DOM value can dispatch Enter into the previous empty-input closure.
+    await waitFor(() => {
+      const send = findButton("Send");
+      return textarea.value === value && Boolean(send && !send.disabled);
+    }, "chat draft ready to send");
   };
   const findSelectByAccessibleName = (name: string): HTMLSelectElement | undefined => {
     const byAriaLabel = document.querySelector(`select[aria-label="${name}"]`);
@@ -4430,13 +4437,13 @@ function validateResetSelfTrainingInput(value: unknown): ResetSelfTrainingInput 
 }
 
 function installSecurityGuards(): void {
-  // Deny every renderer-initiated permission request. The app has no
-  // legitimate need for camera, mic, geolocation, notifications-from-web,
-  // clipboard-read, etc. — anything we do need is wired through IPC.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => {
-    callback(false);
+  // Only trusted app frames may request microphone audio. Camera and all
+  // unrelated browser permissions remain denied.
+  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+    callback(permission === "media" && isAllowedAppNavigation(wc.getURL()) && details.isMainFrame && "mediaTypes" in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === "audio");
   });
-  session.defaultSession.setPermissionCheckHandler(() => false);
+  session.defaultSession.setPermissionCheckHandler((wc, permission, _origin, details) =>
+    !!wc && permission === "media" && isAllowedAppNavigation(wc.getURL()) && details.mediaType === "audio");
 
   // Defense in depth: even though webviewTag is off and we deny new windows
   // on the main BrowserWindow, harden any webContents that does get created
@@ -5283,6 +5290,21 @@ function registerIpcHandlers() {
       store.getMultiTenantAgentBatch(requireBoundedString(id, "batchId", 128)),
     ),
   );
+  const nova = new NovaService(
+    new SafeStorageProviderSecretStore(join(app.getPath("userData"), "providers", "secrets")).forProvider("nova"),
+    () => store.getAppState(),
+    (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
+    fetch,
+    { connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options) },
+  );
+  ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
+    const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
+    return nova.handle(input, activity => {
+      if (safeStreamId && !event.sender.isDestroyed()) event.sender.send("openadminos:nova-activity", { streamId: safeStreamId, activity });
+    });
+  }));
+  ipcMain.handle("openadminos:start-graph-cache-preload", handleTrusted((_event, options?: unknown) => store.startGraphCachePreload(validateRefreshGraphCacheOptions(options))));
+  ipcMain.handle("openadminos:cancel-graph-cache-preload", handleTrusted((_event, tenantId: unknown) => store.cancelGraphCachePreload(requireBoundedString(tenantId, "tenantId", 256))));
   ipcMain.handle(
     "openadminos:refresh-graph-cache",
     handleTrusted((_event, options?: unknown) =>

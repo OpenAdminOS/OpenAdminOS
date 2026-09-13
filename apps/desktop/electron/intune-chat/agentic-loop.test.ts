@@ -56,6 +56,26 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
+  it("requires a voice lookup to finish instead of accepting a progress promise", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "nova-unfinished-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat({ ...baseInput(store, scriptedLlm([
+        'Let me check the tenant device data.',
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":1}}\n```',
+        '```json\n{"final":true,"answer":"WIN-01 is in the cached inventory."}\n```',
+      ])), voice: true });
+      assert.equal(result.ok, true);
+      assert.equal(result.answer, "WIN-01 is in the cached inventory.");
+      assert.equal(result.toolTrace[0]?.tool, "query_cache");
+      const unfinished = await runAgenticChat({ ...baseInput(store, scriptedLlm([
+        'Let me check that.', 'I am checking the device inventory.', 'I will query that now.',
+      ])), voice: true });
+      assert.equal(unfinished.ok, false);
+      assert.equal(unfinished.reason, "unfinished-answer");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("repairs one malformed tool JSON response", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
@@ -293,4 +313,40 @@ describe("repair turns do not consume the investigation budget", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+});
+
+it("bounds voice documentation and UTF-8 evidence over multiple tool turns", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nova-context-budget-"));
+  const store = seededStore(dir);
+  try {
+    let calls = 0;
+    const prompts: string[] = [];
+    const llm: RunLlmApi = {
+      available: true,
+      async complete(input) {
+        prompts.push(input.prompt);
+        assert.ok(Buffer.byteLength(input.system ?? "") + Buffer.byteLength(input.prompt) <= 12000);
+        calls++;
+        return { text: calls <= 3
+          ? JSON.stringify({ tool: "graph_get", params: { path: "/deviceManagement/managedDevices", scopes: ["DeviceManagementManagedDevices.Read.All"] } })
+          : "Evidence is partial; I cannot infer a tenant-wide count from it.", model: "test" };
+      },
+      async *stream() {},
+    };
+    const tools = toolContext(store);
+    tools.graphForScopes = async () => ({
+      listManagedDevices: async () => [],
+      retireManagedDevice: async () => { throw Error("Unexpected write"); },
+      request: async () => ({ value: Array.from({ length: 4 }, () => ({ operatingSystem: "Windows", description: "漢字".repeat(5000) })) }),
+    });
+    const result = await runAgenticChat({
+      ...baseInput(store, llm), voice: true, observationCharBudget: 6000,
+      documentation: Array.from({ length: 12 }, () => ({ file: "reference.md", text: "Public documentation ".repeat(1000) })),
+      tools,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.toolTrace.length, 3);
+    assert.match(prompts.at(-1)!, /evidence truncated by voice budget/);
+    assert.match(prompts.at(-1)!, /Earlier tool exchanges were omitted/);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });

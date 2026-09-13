@@ -738,6 +738,7 @@ export async function fetchGraphCachePages(
   graph: RunGraphApi,
   request: GraphCacheRequestPage,
   signal?: AbortSignal,
+  complete = false,
 ): Promise<{
   rows: unknown[];
   pages: number;
@@ -749,12 +750,17 @@ export async function fetchGraphCachePages(
   let pages = 0;
   let nextRequest: GraphCacheRequestPage | undefined = request;
   let pendingNextLink: string | undefined;
+  let truncated = false;
+  let bytes = 0;
+  const seenLinks = new Set<string>();
+  const seenIds = new Set<string>();
 
   while (
     nextRequest &&
-    pages < GRAPH_CACHE_PAGE_LIMIT &&
-    rows.length < GRAPH_CACHE_ROW_LIMIT
+    (complete || pages < GRAPH_CACHE_PAGE_LIMIT) &&
+    (complete || rows.length < GRAPH_CACHE_ROW_LIMIT)
   ) {
+    signal?.throwIfAborted();
     const response = await graph.request({
       method: "GET",
       path: nextRequest.path,
@@ -764,13 +770,35 @@ export async function fetchGraphCachePages(
       ...(nextRequest.headers ? { headers: nextRequest.headers } : {}),
       ...(signal ? { signal } : {}),
     });
+    signal?.throwIfAborted();
     const page = unwrapGraphCollectionPage(response);
     if (totalCount === undefined && page.totalCount !== undefined) {
       totalCount = page.totalCount;
     }
     pages += 1;
-    const remainingRows = GRAPH_CACHE_ROW_LIMIT - rows.length;
-    rows.push(...page.rows.slice(0, remainingRows));
+    const remainingRows = complete
+      ? page.rows.length
+      : GRAPH_CACHE_ROW_LIMIT - rows.length;
+    truncated ||= page.rows.length > remainingRows;
+    for (const row of page.rows.slice(0, remainingRows)) {
+      const id =
+        row && typeof row === "object" && "id" in row
+          ? String(row.id)
+          : undefined;
+      if (complete && id && seenIds.has(id)) continue;
+      if (id) seenIds.add(id);
+      bytes += Buffer.byteLength(JSON.stringify(row));
+      if (complete && bytes > 128 * 1024 * 1024)
+        throw new Error(
+          "This resource exceeds the 128 MiB refresh memory limit. The previous snapshot was kept. Reduce the selected scope or contact support.",
+        );
+      rows.push(row);
+    }
+    if (page.nextLink && seenLinks.has(page.nextLink))
+      throw new Error(
+        "Graph repeated a continuation link. The previous snapshot was kept. Retry the refresh.",
+      );
+    if (page.nextLink) seenLinks.add(page.nextLink);
     pendingNextLink = page.nextLink;
     nextRequest = page.nextLink
       ? graphCacheRequestFromNextLink(page.nextLink, request.headers)
@@ -783,7 +811,7 @@ export async function fetchGraphCachePages(
     // A final page that overflows the row cap without advertising a
     // nextLink would otherwise be reported as complete while rows were
     // dropped, which is a silent truncation.
-    pageLimitReached: Boolean(pendingNextLink) || rows.length >= GRAPH_CACHE_ROW_LIMIT,
+    pageLimitReached: Boolean(pendingNextLink) || truncated,
     ...(totalCount !== undefined ? { totalCount } : {}),
   };
 }
@@ -964,10 +992,12 @@ export function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProv
 
 
 
-export function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
+export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicResearch = false): string {
   return [
     "You are OpenAdminOS Chat.",
-    "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
+    publicResearch
+      ? "Answer tenant questions from retrieved tenant evidence and public questions from retrieved web evidence. Clearly distinguish those sources."
+      : "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",
     "If the context is missing, stale, partial, or has Graph errors, say that plainly.",
     "Do not invent tenant state, counts, users, devices, policies, or remediation results.",
     "A tool returning zero rows means zero matched that query, not that the tenant has none. Never state that a tenant has none of something on the strength of an empty result; check the unfiltered count first.",
@@ -975,7 +1005,9 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean): string {
     "When cachedRows is below tenantTotal, or pageLimitReached is true, say that the detail rows cover only part of the tenant.",
     "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",
     isLocalProvider
-      ? "The selected provider is local; keep wording consistent with local-only trust."
+      ? publicResearch
+        ? "Reasoning is local, but this hosted Nova session shares audio, answers and public research queries with OpenAI under explicit session consent."
+        : "The selected provider is local; keep wording consistent with local-only trust."
       : "The selected provider is hosted; be explicit when tenant context is being used to produce the answer.",
     "Use concise admin-facing prose. No hype, no exclamation marks.",
   ].join("\n");

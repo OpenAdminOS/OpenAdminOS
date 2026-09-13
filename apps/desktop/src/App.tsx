@@ -16,6 +16,7 @@ const Changes = lazy(() => import("./pages/Changes"));
 const Fleet = lazy(() => import("./pages/Fleet"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Connectors = lazy(() => import("./pages/Connectors"));
+const Cache = lazy(() => import("./pages/Cache"));
 const Settings = lazy(() => import("./pages/Settings"));
 const RunResult = lazy(() => import("./pages/RunResult"));
 const Schedules = lazy(() => import("./pages/Schedules"));
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/agents/:slug" element={<AgentDetail />} />
           <Route path="/hub" element={<Navigate to="/agents/hub" replace />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
+          <Route path="/cache" element={<Cache />} />
           <Route path="/office" element={<Office />} />
           <Route path="/changes" element={<Changes />} />
           <Route path="/fleet" element={<FleetRoute />} />

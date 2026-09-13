@@ -1609,6 +1609,8 @@ function ChatSettingsSection() {
           }
         />
 
+        <Button variant="secondary" onClick={() => navigate("/cache")}>Open Cache · preload and inspect coverage</Button>
+
         <SettingRow
           id="tenant-cache"
           description={

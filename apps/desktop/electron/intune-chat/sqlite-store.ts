@@ -971,6 +971,8 @@ export class IntelligenceSqliteStore {
     const columns: Array<{ field: string; expression: string }> = [
       { field: "operatingSystem", expression: "operating_system" },
       { field: "complianceState", expression: "compliance_state" },
+      { field: "osVersion", expression: "COALESCE(json_extract(raw_json, '$.osVersion'), 'unknown')" },
+      { field: "isEncrypted", expression: "COALESCE(json_extract(raw_json, '$.isEncrypted'), 'unknown')" },
       { field: "userType", expression: "json_extract(raw_json, '$.userType')" },
       { field: "accountEnabled", expression: "json_extract(raw_json, '$.accountEnabled')" },
       { field: "trustType", expression: "json_extract(raw_json, '$.trustType')" },
@@ -3990,6 +3992,7 @@ function readToolTrace(row: ToolCallRow): IntuneChatToolTraceEntry {
       typeof output.resultSummary === "string"
         ? output.resultSummary
         : row.error ?? "Tool call completed.",
+    ...(Array.isArray(output.webSources) ? { webSources: output.webSources } : {}),
     durationMs:
       typeof output.durationMs === "number" && Number.isFinite(output.durationMs)
         ? output.durationMs
@@ -4019,6 +4022,7 @@ function isInvestigationToolName(value: unknown): value is IntuneChatInvestigati
     value === "query_cache" ||
     value === "graph_get" ||
     value === "refresh_resource" ||
+    value === "web_search" ||
     value === "query_drift"
   );
 }
