@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Recognize Codex and Claude Code in standard macOS and Windows install locations, preserve Claude's existing sign-in, and check Codex authentication through the CLI.
+
 ### Security
 
 ## [0.6.1] - 2026-09-11

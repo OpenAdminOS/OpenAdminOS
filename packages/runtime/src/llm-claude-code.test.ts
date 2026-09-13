@@ -71,6 +71,38 @@ describe("probeClaudeCodeLlm", () => {
   });
 });
 
+it("uses the existing default Claude login without creating a config override", async () => {
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  delete process.env.CLAUDE_CONFIG_DIR;
+  const fixture = await createFakeClaudeCodeBinary(true);
+  try {
+    const probe = await probeClaudeCodeLlm({ binaryPath: fixture.binaryPath });
+    assert.equal(probe.ready, true);
+    const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath });
+    assert.equal((await llm.complete({ prompt: "Hello" })).text, "Hello");
+    for await (const _chunk of llm.stream({ prompt: "Hello" })) { /* consume */ }
+    assert.doesNotMatch(await fixture.readEnv(), /^CLAUDE_CONFIG_DIR=/m);
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+    await fixture.cleanup();
+  }
+});
+
+it("preserves an explicitly configured Claude credential namespace", async () => {
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = "~/custom-claude";
+  const fixture = await createFakeClaudeCodeBinary();
+  try {
+    assert.equal((await probeClaudeCodeLlm({ binaryPath: fixture.binaryPath })).ready, true);
+    assert.match(await fixture.readEnv(), /^CLAUDE_CONFIG_DIR=~\/custom-claude$/m);
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+    await fixture.cleanup();
+  }
+});
+
 describe("createClaudeCodeLlm", () => {
   it("preserves punctuation and argument boundaries in completions and streams", async () => {
     const fixture = await createFakeClaudeCodeBinary();
@@ -161,7 +193,7 @@ describe("createClaudeCodeLlm", () => {
   });
 });
 
-async function createFakeClaudeCodeBinary(): Promise<{
+async function createFakeClaudeCodeBinary(defaultLogin = false): Promise<{
   binaryPath: string;
   homePath: string;
   readCalls(): Promise<string[]>;
@@ -181,6 +213,10 @@ async function createFakeClaudeCodeBinary(): Promise<{
   const script = `#!/usr/bin/env node
 const { appendFileSync, writeFileSync } = require("node:fs");
 const args = process.argv.slice(2);
+if (${defaultLogin} && process.env.CLAUDE_CONFIG_DIR) {
+  console.error("Not logged in: different credential namespace");
+  process.exit(1);
+}
 appendFileSync(${JSON.stringify(argumentsPath)}, JSON.stringify(args) + "\\n");
 appendFileSync(${JSON.stringify(callsPath)}, args.join(" ") + "\\n");
 writeFileSync(${JSON.stringify(envPath)}, Object.entries(process.env).map(([key, value]) => key + "=" + value).sort().join("\\n"));
