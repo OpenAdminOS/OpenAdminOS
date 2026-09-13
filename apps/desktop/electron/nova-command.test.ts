@@ -54,5 +54,5 @@ it('understands stop variants and preserves the next question', () => {
   for (const text of ['Never mind', 'Okay, cancel that email', 'Hey Nova, stop sending', 'Cancel this email', 'Stop now', 'No thanks', "Don't send it", 'Please cancel the action']) assert.equal(novaStopCommand(text), '', text);
   assert.equal(novaStopCommand('Stop and tell me how many devices there are'), 'tell me how many devices there are');
   for (const text of ['Do not stop', 'What does stop mean?', 'If I say stop', 'The report says stop']) assert.equal(novaStopCommand(text), undefined, text);
-  for (const text of ['Okay, are you still working?', 'Hey Nova, tell me a joke while we wait', 'Alright, thanks', 'Hey Nova', 'Okay']) assert.equal(isNovaConversationOnly(text), true, text);
+  for (const text of ['Okay, are you still working?', 'Hey Nova, tell me a joke while we wait', 'Alright, thanks', 'Hey Nova', 'Okay', 'How are you doing?', 'Good morning Nova', 'Thanks Nova', 'Are you done yet?']) assert.equal(isNovaConversationOnly(text), true, text);
 });

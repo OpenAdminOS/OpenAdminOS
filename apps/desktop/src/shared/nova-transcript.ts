@@ -74,6 +74,7 @@ export class NovaTranscript {
 export function isNovaConversationOnly(text: string): boolean {
   const question = conversationalText(text).replace(/[?.!]+$/, "").trim();
   if (!question) return true;
+  if (/^(?:how are you(?: doing)?|how's it going|good (?:morning|afternoon|evening)(?: nova)?|(?:thanks|thank you)(?: nova| a lot| very much)?|are you done(?: yet)?|any updates?|(?:can|could) you (?:tell me )?who you are)$/i.test(question)) return true;
   return /^(?:still there|are you (?:still )?there|are you (?:still )?(?:working|checking)|any (?:update|news)|(?:can you |could you |please )?(?:tell me|say) (?:a|another) joke(?: while (?:we|i) wait)?|who are you(?: and what can you do)?|what can you do|(?:hey|hi|hello)(?: nova)?|thanks|thank you)$/i.test(question);
 }
 

@@ -572,7 +572,11 @@ export function Nova({
         if (token !== generation.current || dc.readyState !== "open") return;
         const preview = transcript.capture(offsetMs, false);
         const actionRequest = preview && (novaActionIntent(preview.text) || novaConnectorQuestion(preview.text));
-        if (actionsOnly && (!preview?.text || isNovaConversationOnly(preview.text))) return;
+        if (actionsOnly && (!preview?.text || isNovaConversationOnly(preview.text))) {
+          // Consume settled small talk so it cannot prefix the next real command.
+          if (preview?.text) transcript.capture(offsetMs);
+          return;
+        }
         const request = transcript.capture(offsetMs);
         const activityId = id || `action-${++itemSequence.current}`;
         if (!request?.text || isNovaConversationOnly(request.text)) {
