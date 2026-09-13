@@ -3471,6 +3471,33 @@ export class AppStateStore {
     }
   }
 
+  /** Interpret a request with the session-pinned provider, without tools or tenant records. */
+  async classifyNovaCommand(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string> {
+    const check = async () => {
+      options.signal.throwIfAborted();
+      const state = await this.getAppState();
+      const provider = state.providers.find(p => p.id === state.activeProviderId);
+      if (state.activeTenantId !== options.scope.tenantId || state.activeProviderId !== options.scope.providerId ||
+          resolveProviderDefaultModel(provider, state.activeModelByProviderId).model !== options.scope.model || provider?.isLocal !== options.scope.isLocal)
+        throw new Error("Nova's tenant or provider changed. Start a new conversation.");
+    };
+    await check();
+    const { novaCommandInstructions } = await import("../src/shared/nova-command.js");
+    const budget = options.scope.providerId === "apple-foundation" ? 3000 : 12000;
+    const agents = context.agents.slice();
+    const encode = () => JSON.stringify({ currentRequest: text, ...(context.previousRequest ? { previousRequest: context.previousRequest } : {}), agents });
+    let prompt = encode();
+    while (agents.length && Buffer.byteLength(novaCommandInstructions + prompt, "utf8") > budget) { agents.pop(); prompt = encode(); }
+    if (Buffer.byteLength(novaCommandInstructions + prompt, "utf8") > budget)
+      throw new Error("This command exceeds the reasoning model's input budget. Repeat it as one shorter request.");
+    const llm = await this.buildLlm(options.scope.providerId, options.scope.model);
+    await check();
+    const result = await llm.complete({ system: novaCommandInstructions, prompt,
+      maxTokens: 400, temperature: 0, signal: options.signal });
+    await check();
+    return result.text;
+  }
+
   /** Called only after Nova consumes a one-use, session-scoped visual approval. */
   async sendNovaConnector(input: Parameters<import("./nova-actions.js").NovaActionHost["send"]>[0]): Promise<unknown> {
     const persisted = await this.read();

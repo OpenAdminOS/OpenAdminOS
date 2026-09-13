@@ -1,3 +1,4 @@
+import { conversationalText } from "./nova-action-intent.js";
 import type { NovaConversationTurn } from "@openadminos/agent-sdk";
 
 interface Fragment {
@@ -71,7 +72,8 @@ export class NovaTranscript {
 
 /** Known conversational turns must not replace a running investigation. */
 export function isNovaConversationOnly(text: string): boolean {
-  const question = text.trim().replace(/[?.!]+$/, "").trim();
+  const question = conversationalText(text).replace(/[?.!]+$/, "").trim();
+  if (!question) return true;
   return /^(?:still there|are you (?:still )?there|are you (?:still )?(?:working|checking)|any (?:update|news)|(?:can you |could you |please )?(?:tell me|say) (?:a|another) joke(?: while (?:we|i) wait)?|who are you(?: and what can you do)?|what can you do|(?:hey|hi|hello)(?: nova)?|thanks|thank you)$/i.test(question);
 }
 
@@ -101,6 +103,8 @@ export function novaCommentaryChunks(text: string): string[] {
 
 /** Recognize an explicit command at the start of the unconsumed utterance. */
 export function novaStopCommand(text: string): string | undefined {
-  const match = /^(?:(?:hey\s+)?nova[,\s]+)?(?:please\s+)?(?:stop|cancel)(?:\s+(?:speaking|talking|the (?:answer|investigation)|that|this))?(?:[.!?,]+\s*|\s+(?=(?:can|could|now|tell|show|why|what|which|list)\b)|$)/i.exec(text.trim());
-  return match ? text.trim().slice(match[0].length).trim() : undefined;
+  const q = conversationalText(text);
+  if (/^(?:no(?: thanks| thank you)?|don't (?:send|run|start)(?: (?:it|that|this))?)[.!?\s]*$/i.test(q)) return '';
+  const match = /^(?:(?:hey\s+)?nova[,\s]+)?(?:please\s+)?(?:stop|cancel|never mind|nevermind)(?:\s+(?:speaking|talking|sending|the (?:answer|investigation|email|message|action)|(?:that|this)(?: (?:email|message|action))?|now))?(?:[.!?,]+\s*|\s+(?=(?:and\s+)?(?:can|could|now|tell|show|why|what|which|list)\b)|$)/i.exec(q);
+  return match ? q.slice(match[0].length).trim().replace(/^and\s+/i, '') : undefined;
 }

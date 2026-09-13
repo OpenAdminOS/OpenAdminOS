@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Make Nova command routing handle unfamiliar wording, clarification replies, destination corrections, and cancellation while preserving report evidence and visual approval.
+
 - Recognize conversational Nova delivery requests and connector follow-up questions, preparing reviewed reports instead of returning generic email refusals or Outlook troubleshooting advice.
 
 - Verify the CLI adapters on macOS, including Codex and Claude live responses and Claude login-keychain access from the desktop session.

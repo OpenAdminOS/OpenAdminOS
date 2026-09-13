@@ -572,7 +572,7 @@ export function Nova({
         if (token !== generation.current || dc.readyState !== "open") return;
         const preview = transcript.capture(offsetMs, false);
         const actionRequest = preview && (novaActionIntent(preview.text) || novaConnectorQuestion(preview.text));
-        if (actionsOnly && !actionRequest) return;
+        if (actionsOnly && (!preview?.text || isNovaConversationOnly(preview.text))) return;
         const request = transcript.capture(offsetMs);
         const activityId = id || `action-${++itemSequence.current}`;
         if (!request?.text || isNovaConversationOnly(request.text)) {
@@ -676,9 +676,12 @@ export function Nova({
             if (!transcript.append(event)) return;
             appendSpeech(role === "User" ? "user" : "assistant", event.delta, event.start_ms, event.end_ms);
             if (role === "User") {
-              if (transcript.takeStopCommand()) { interruptCurrent.current(); return; }
+              if (transcript.takeStopCommand()) {
+                interruptCurrent.current();
+                if (!transcript.capture(undefined, false)?.text) return;
+              }
               if (actionFallback) { clearTimeout(actionFallback); delegationTimers.current.delete(actionFallback); }
-              // A settled explicit action reaches the app even if Live never delegates it.
+              // Every settled substantive request reaches the app even if Live never delegates it.
               // capture() consumes it once, so a later model delegation cannot duplicate it.
               actionFallback = setTimeout(() => {
                 delegationTimers.current.delete(actionFallback!);

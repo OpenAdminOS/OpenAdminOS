@@ -5295,7 +5295,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options) },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options) },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);

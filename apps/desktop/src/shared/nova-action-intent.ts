@@ -6,16 +6,16 @@ const channels = 'whatsapp|email|exchange|outlook|teams|slack|discord|signal';
 const aliases: Record<string, string> = { whatsapp: 'whatsapp-web', email: 'outlook', exchange: 'outlook', outlook: 'outlook', teams: 'teams', slack: 'slack', discord: 'discord', signal: 'signal' };
 const reference = /^(?:it|(?:this|that|the)(?: (?:list|result|answer|report|summary))?|an? (?:message|email))$/i;
 
-function conversationalText(text: string) {
+export function conversationalText(text: string) {
   const filler = /^(?:(?:alright|all right|okay|ok|so|well|then)\b[\s,.:;!-]*)+/i;
-  return text.trim().replace(filler, '').replace(/^(?:hey|hi)[,\s]+nova[,\s]*/i, '').replace(filler, '').trim();
+  return text.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().replace(filler, '').replace(/^(?:hey|hi)[,\s]+nova[,\s]*/i, '').replace(filler, '').trim();
 }
 
 function requestText(text: string) {
   return conversationalText(text).replace(/^(?:please\s+|(?:can|could|would) you\s+|are you able to\s+)+/i, '')
     .replace(/\bMicrosoft Teams\b/ig, 'Teams').replace(/\bWhatsApp Web\b/ig, 'WhatsApp').replace(/\be-mail\b/ig, 'email')
     .replace(/\bExchange Online\b/ig, 'Exchange').replace(/\bOutlook email\b/ig, 'email')
-    .replace(/^send an? email to me\b/i, 'send me an email').replace(/[?.!]+$/, '').trim();
+    .replace(/^send an? email to me\b/i, 'send me an email').replace(/,?\s+please[?.!]*$/i, '').replace(/[?.!]+$/, '').trim();
 }
 
 /** Parse user requests only. A parsed action prepares a preview, never authorizes a send. */
@@ -41,11 +41,11 @@ export function novaActionIntent(text: string): NovaActionIntent | undefined {
   if (send) {
     const content = (send[1] || '').replace(/\s+to me$/i, '');
     // Do not silently replace a named recipient with the configured default.
-    if (/\bto\s+/i.test(content)) return undefined;
+    if (/\bto\s+/i.test(content) || (content && !/^(?:it|this|that|the|a|an|my|list|report|summary|non[ -]?compliant|unencrypted|devices)\b/i.test(content))) return undefined;
     return delivery(send[2], content);
   }
   const email = /^email (?:me\s+)?(.+?)(?: to me)?$/i.exec(q);
-  if (email) return /\bto\s+/i.test(email[1]) ? undefined : delivery('email', email[1]);
+  if (email) return /\bto\s+/i.test(email[1]) || (!/^email me\b/i.test(q) && !/^(?:it|this|that|the|a|an|my|list|report|summary|non[ -]?compliant|unencrypted|devices)\b/i.test(email[1])) ? undefined : delivery('email', email[1]);
   // Existing short form: "send this WhatsApp" or "send WhatsApp".
   const short = new RegExp(`^(?:send|share|message|post)\\s+(?:(it|this|that|the (?:list|result|answer|report))\\s+)?(${channels})$`, 'i').exec(q);
   if (short) return delivery(short[2], short[1]);

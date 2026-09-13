@@ -319,12 +319,17 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   act(() => emit({ type: "session.delegation.created", delegation: { id: "late-email", target: "client" } }));
   await new Promise(resolve => setTimeout(resolve, 350));
   expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  for (const text of ["Pop those findings into my inbox", "Actually use Teams instead", "Outlook", "Could you bring up settings"]) {
+    act(() => emit({ type: "session.input_transcript.delta", delta: text }));
+    await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "answer", text }), expect.any(Function)), { timeout: 2000 });
+    await act(async () => finish({ text: "Request understood. Review in the app." }));
+  }
   act(() => emit({ type: "session.input_transcript.delta", delta: "Send this via Slack" }));
   await user.click(screen.getByRole("button", { name: "Stop" }));
   await new Promise(resolve => setTimeout(resolve, 1100));
-  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 5);
   expect(track.stop).toHaveBeenCalled();
-});
+}, 15000);
 
 it("explains microphone permission recovery without starting a hosted session", async () => {
   Object.defineProperty(navigator, "mediaDevices", {

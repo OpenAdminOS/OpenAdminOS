@@ -1,5 +1,5 @@
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
-import { novaActionIntent, novaConnectorQuestion } from "../src/shared/nova-action-intent.js";
+import { novaCommand, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
 import { novaConnectorSetupIssue, prepareNovaAction, type NovaActionHost, type PreparedNovaAction } from "./nova-actions.js";
 import { clipVoiceText } from "./intune-chat/voice-context.js";
 import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
@@ -44,6 +44,7 @@ export class NovaService {
     mode: "openai" | "local";
     conversationId?: string;
     lastEvidence?: string;
+    commandContext?: { request: string; at: number };
     pendingAction?: PreparedNovaAction;
     actionPreparedAt?: number;
     consent: boolean;
@@ -86,6 +87,7 @@ export class NovaService {
     const generation = this.generation;
     const revision =
       input.action === "answer" ? ++this.answerRevision : undefined;
+    const priorAction = this.session?.pendingAction;
     if (input.action === "answer") { this.pendingAnswer?.abort(); if (this.session) this.session.pendingAction = undefined; }
     const state = await this.state();
     if (
@@ -221,11 +223,13 @@ export class NovaService {
       ++this.answerRevision;
       this.pendingAnswer?.abort();
       session.pendingAction = undefined;
+      session.commandContext = undefined;
       return { text: "Stopped. Listening for your next question." };
     }
     if (input.action === "decide-action") {
       const action = session.pendingAction;
       if (!action || action.preview.id !== input.actionId || Date.now() - (session.actionPreparedAt ?? 0) > 300000) throw new Error("This action expired. Ask Nova to prepare it again.");
+      session.commandContext = undefined;
       session.pendingAction = undefined; // consume before any asynchronous work: no replay or duplicate sends
       if (input.approved !== true) return { text: "Action cancelled. Nothing was sent or started." };
       const controller = new AbortController();
@@ -251,6 +255,7 @@ export class NovaService {
       const afterStop = novaStopCommand(input.text);
       if (afterStop !== undefined) {
         session.pendingAction = undefined;
+        session.commandContext = undefined;
         if (!afterStop) return { text: "Stopped. You can ask another question." };
         input.text = afterStop;
       }
@@ -261,47 +266,79 @@ export class NovaService {
             : "Hey, how are you?",
         };
       }
-      if (
-        /^(?:hey[,\s]*)?(?:are you connected to (?:any|a|my|the) tenant|(?:which|what) tenant (?:are (?:you|we) (?:connected to|using)|is (?:connected|selected)))[?.!\s]*$/i.test(
-          input.text.trim(),
-        )
-      ) {
-        const tenant = state.tenants.find((t) => t.id === session.tenantId);
-        return {
-          text: `Yes. OpenAdminOS is connected to ${tenant?.displayName || "the selected tenant"}. I can ask the app to retrieve devices and other permitted tenant data. A missing cache does not mean the tenant is disconnected.`,
-        };
+      const previous = session.commandContext;
+      session.commandContext = undefined;
+      const followUp = previous && Date.now() - previous.at < 300000 &&
+        (/^(?:actually|instead|no[, ]|use |make (?:it|that)|via |on |through |to my )/i.test(input.text.trim()) || input.text.trim().split(/\s+/).length <= 4);
+      let command: NovaCommand | undefined = novaCommand(input.text);
+      if (command?.kind === "run") {
+        const name = command.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (!(state.installedAgents ?? []).some(a => [a.name, a.slug].some(n => n.toLowerCase().replace(/[^a-z0-9]/g, "") === name))) command = undefined;
       }
-      const page =
-        /^(?:please )?(?:open|show|go to)(?: the)? (cache|chat|agents|agent team|office|changes|settings|connectors)(?: page)?[.!?]*$/i
-          .exec(input.text.trim())?.[1]
-          ?.toLowerCase();
-      if (page) {
-        const route = page === "agent team" ? "/office" : `/${page}`;
-        return { text: `Opening ${page}.`, route };
+      if (!command) {
+        const context = { agents: (state.installedAgents ?? []).slice(0, 40).map(a => ({ name: a.name.slice(0, 100), slug: a.slug })), ...(followUp ? { previousRequest: previous.request } : {}) };
+        const controller = new AbortController();
+        this.pendingAnswer = controller;
+        const signal = AbortSignal.any([controller.signal, session.controller.signal, AbortSignal.timeout(15000)]);
+        onActivity?.({ kind: "action", status: "running", message: "Understanding your request." });
+        try {
+          const raw = await Promise.race([
+            (input.text.length <= 2400 ? this.actions?.classifyCommand?.(input.text, context, { signal, scope: { tenantId: session.tenantId, providerId: session.providerId, model: session.model, isLocal: session.reasoningIsLocal } }) : undefined) ?? Promise.resolve(''),
+            new Promise<never>((_, reject) => { signal.addEventListener("abort", () => reject(new Error("Command interpretation stopped.")), { once: true }); }),
+          ]);
+          command = parseNovaCommand(raw, context);
+          // Only the explicit approval fast path can preserve a pending preview.
+          if (command.kind === "clarify" && command.reason === "approval") command = { kind: "clarify", reason: "ambiguous" };
+        } catch { command = { kind: "clarify", reason: "unavailable" }; }
+        finally { controller.abort(); if (this.pendingAnswer === controller) this.pendingAnswer = undefined; }
+        const latest = await this.state();
+        if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
+            latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
+            selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+          throw new Error("This request was replaced or its tenant/provider changed.");
       }
-      if (/^(?:what|which) agents (?:can you run|are (?:available|installed))[?.!\s]*$|^(?:can|could) you run agents[?.!\s]*$/i.test(input.text.trim())) {
+      if (command.kind === "clarify") {
+        if (command.reason === "approval" && priorAction && Date.now() - (session.actionPreparedAt ?? 0) < 300000) {
+          session.pendingAction = priorAction;
+          session.commandContext = previous;
+          return { text: novaClarifications.approval, pendingAction: priorAction.preview, displayText: priorAction.preview.body };
+        }
+        if (command.reason !== "approval") session.commandContext = { request: (followUp ? previous.request : input.text).slice(0, 1200), at: Date.now() };
+        return { text: novaClarifications[command.reason] };
+      }
+      if (command.kind === "navigate") return { text: `Opening ${command.page}.`, route: novaPages[command.page] };
+      if (command.kind === "capabilities" && command.topic === "tenant") {
+        const tenant = state.tenants.find(t => t.id === session.tenantId);
+        return { text: `Yes. OpenAdminOS is connected to ${tenant?.displayName || "the selected tenant"}. I can ask the app to retrieve devices and other permitted tenant data. A missing cache does not mean the tenant is disconnected.` };
+      }
+      if (command.kind === "capabilities" && command.topic === "agents") {
         return { text: `I can prepare installed agents for you to review and start. Write plans still require approval. Installed agents: ${(state.installedAgents ?? []).map(a => a.name).slice(0, 20).join(", ") || "none; open Agents to install one"}. Say run followed by the agent name.` };
       }
-      const intent = novaActionIntent(input.text);
+      const intent = command.kind === "send" || command.kind === "run" ? command : undefined;
       const prepare = async (): Promise<NovaResponse> => {
         if (!this.actions) return { text: "Nova actions are unavailable in this app session. Reopen the latest app build and try again.", answerError: "Nova actions are unavailable." };
+        if (!intent) return { text: novaClarifications.ambiguous };
         let prepared: PreparedNovaAction | undefined;
         let failure: string | undefined;
-        try { prepared = await prepareNovaAction(input.text, session.lastEvidence, state, this.actions); }
+        try { prepared = await prepareNovaAction(intent, session.lastEvidence, state, this.actions); }
         catch (error) { failure = error instanceof Error ? error.message : "Action setup failed. Open Connectors or Agents to check configuration."; }
         const latest = await this.state();
         if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
             latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
             selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
           throw new Error("This request was replaced or its tenant/provider changed.");
-        if (failure) return { text: failure, answerError: failure, conversationId: session.conversationId };
+        if (failure) {
+          if (intent) session.commandContext = { request: JSON.stringify(intent.kind === "send" ? { ...intent, question: undefined } : intent).slice(0, 1200), at: Date.now() };
+          return { text: failure, answerError: failure, conversationId: session.conversationId };
+        }
         if (!prepared) return { text: "Name a connector and the result you want to send. Nothing has been sent." };
+        session.commandContext = { request: JSON.stringify(intent.kind === "send" ? { ...intent, question: undefined } : intent).slice(0, 1200), at: Date.now() };
         session.pendingAction = prepared;
         session.actionPreparedAt = Date.now();
         return { text: "Review the destination and content in Nova, then confirm. Nothing has been sent or started yet.", pendingAction: prepared.preview, displayText: prepared.preview.body, conversationId: session.conversationId };
       };
       if (intent && (intent.kind === "run" || !intent.question)) return prepare();
-      if (!intent && novaConnectorQuestion(input.text)) {
+      if (command.kind === "capabilities" && command.topic === "connectors") {
         if (!this.actions) return prepare();
         const connectors = await this.actions?.connectors();
         if (revision !== this.answerRevision || session !== this.session) throw new Error("This request was replaced.");
@@ -313,7 +350,10 @@ export class NovaService {
         const connector = (await this.actions.connectors()).find(c => c.descriptor.id === intent.connectorId);
         if (revision !== this.answerRevision || session !== this.session) throw new Error("This request was replaced.");
         const setupIssue = connector ? novaConnectorSetupIssue(connector) : "This connector is unavailable. Open Connectors to check setup.";
-        if (setupIssue) return { text: setupIssue, answerError: setupIssue };
+        if (setupIssue) {
+          session.commandContext = { request: JSON.stringify(intent).slice(0, 1200), at: Date.now() };
+          return { text: setupIssue, answerError: setupIssue };
+        }
       }
       const voiceHistory = normalizeNovaHistory(input.history);
       const controller = new AbortController();

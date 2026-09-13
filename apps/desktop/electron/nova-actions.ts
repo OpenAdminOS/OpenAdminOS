@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AppState, ConnectorSummary, NovaActionPreview, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
 
 export interface NovaActionHost {
+  classifyCommand?(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string>;
   connectors(): Promise<ConnectorSummary[]>;
   send(input: { connectorId: string; config: Record<string, unknown>; method: string; args: Record<string, unknown>; tenantId: string; actionId: string; signal: AbortSignal }): Promise<unknown>;
   startRun(slug: string, options: StartRunOptions): Promise<RunRecord>;
@@ -12,7 +13,7 @@ export interface PreparedNovaAction {
   execute(signal: AbortSignal): Promise<{ text: string; route?: string }>;
 }
 export { novaActionIntent } from '../src/shared/nova-action-intent.js';
-import { novaActionIntent } from '../src/shared/nova-action-intent.js';
+import { novaActionIntent, type NovaActionIntent } from '../src/shared/nova-action-intent.js';
 export function novaConnectorSetupIssue(connector: ConnectorSummary): string | undefined {
   if (connector.status === 'connected' || connector.status === undefined) return undefined;
   const name = connector.descriptor.name;
@@ -51,8 +52,8 @@ export function novaMessageParts(text: string, connectorId: string): string[] {
   return parts;
 }
 
-export async function prepareNovaAction(text: string, evidence: string | undefined, state: AppState, host: NovaActionHost): Promise<PreparedNovaAction | undefined> {
-  const intent = novaActionIntent(text);
+export async function prepareNovaAction(text: string | NovaActionIntent, evidence: string | undefined, state: AppState, host: NovaActionHost): Promise<PreparedNovaAction | undefined> {
+  const intent = typeof text === 'string' ? novaActionIntent(text) : text;
   if (!intent) return undefined;
   if (!state.activeTenantId) throw new Error('Select a tenant before using Nova actions.');
   const tenantId = state.activeTenantId;
