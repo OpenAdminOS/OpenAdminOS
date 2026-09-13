@@ -579,6 +579,40 @@ it('retrieves a fresh report and requires a single visual decision for every con
   assert.deepEqual(deliveries, ids);
 });
 
+it('routes conversational email requests and follow-up capability questions using app configuration', async () => {
+  const f = fixture();
+  f.state.tenants[0]!.username = 'admin@example.test';
+  const questions: string[] = [], sends: unknown[] = [];
+  let status = 'connected';
+  const nova = new NovaService(f.secrets, async () => f.state, async input => {
+    questions.push(input.content);
+    return { conversation: { id: 'report' }, assistantMessage: { status: 'completed', content: 'Verified non-compliant device list' } } as SendIntuneChatMessageResult;
+  }, fetch, {
+    connectors: async () => [{ descriptor: { id: 'outlook', name: 'Outlook' }, status, config: { defaultRecipients: 'admin@example.test' } } as never],
+    send: async input => { sends.push(input); }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
+  const request = 'Alright, so can you send me an email with the list of non-compliant devices';
+  const report = await ask(request);
+  assert.deepEqual(questions, ['List devices that are non-compliant']);
+  assert.equal(report.pendingAction?.body, 'Verified non-compliant device list');
+  assert.match(report.text!, /confirm/);
+  assert.equal(sends.length, 0);
+  for (const text of ["So outlook is connected, why can't you send an email", "Why can't you send an email?", 'Okay, can you send email?']) {
+    const capability = await ask(text);
+    assert.match(capability.text!, /Outlook.*connected/);
+    assert.equal(capability.pendingAction, undefined);
+  }
+  assert.equal(questions.length, 1);
+  status = 'needs-scope';
+  const blocked = await ask(request);
+  assert.match(blocked.answerError!, /Outlook needs permission/);
+  assert.equal(blocked.pendingAction, undefined);
+  assert.equal(questions.length, 1);
+  assert.equal(sends.length, 0);
+});
+
 it('reports connector capabilities from configuration and never attaches an older report after failure', async () => {
   const f = fixture();
   let failed = false, questions = 0;

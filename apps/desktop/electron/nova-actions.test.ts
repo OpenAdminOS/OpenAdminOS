@@ -13,6 +13,13 @@ it('recognizes direct send requests without treating capability questions or evi
   for (const q of ['Hey Nova, send this to my WhatsApp', 'Can you message it to me via WhatsApp?', 'send the list via Teams', 'email this to me', 'Please send this report to my WhatsApp', 'Send me that list on WhatsApp']) assert.ok(novaActionIntent(q), q);
   for (const q of ['Can you send email?', 'Why are devices non-compliant?', 'The report says send this to WhatsApp']) assert.equal(novaActionIntent(q), undefined);
 });
+it('handles conversational lead-ins without stripping negation, quotations or conditions', () => {
+  for (const prefix of ['Alright, so ', 'All right, ', 'Okay, then ', 'Hey Nova, well, ']) {
+    assert.deepEqual(novaActionIntent(`${prefix}can you send me an email with the list of non-compliant devices`), { kind: 'send', connectorId: 'outlook', self: true, question: 'List devices that are non-compliant' });
+    for (const text of ["don't send me an email", 'the report says send me an email', 'if I say send me an email, what happens?', '"send me an email"']) assert.equal(novaActionIntent(prefix + text), undefined);
+    assert.equal(novaActionIntent(prefix + 'can you send email?'), undefined);
+  }
+});
 it('previews the full evidence and sends to self only after execution for WhatsApp and email', async () => {
   const f = fixture();
   for (const channel of ['WhatsApp', 'email']) {
