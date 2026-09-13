@@ -11,6 +11,8 @@ import {
   createClaudeCodeLlm,
   createAzureOpenAiLlm,
   createCodexLlm,
+  createCopilotLlm,
+  createGeminiLlm,
   createAppleFoundationLlm,
   createLmStudioLlm,
   DEFAULT_AUTHORITY,
@@ -237,6 +239,7 @@ import {
   checkAzureOpenAI,
   checkClaudeCode,
   checkCodex,
+  checkAdditionalCli,
   checkLmStudio,
   checkOllama,
   isProviderId,
@@ -2347,6 +2350,7 @@ export class AppStateStore {
         if (provider.id === "lm-studio") return checkLmStudio(provider);
         if (provider.id === "anthropic") return checkClaudeCode(provider);
         if (provider.id === "openai") return checkCodex(provider);
+        if (provider.id === "copilot" || provider.id === "gemini") return checkAdditionalCli(provider);
         if (provider.id === "azure-openai") {
           if (azureOpenAIConfigError) {
             return {
@@ -2380,7 +2384,8 @@ export class AppStateStore {
     }
     const providerReady =
       provider.status === "connected" ||
-      (provider.id === "azure-openai" && provider.status === "available");
+      (provider.id === "azure-openai" && provider.status === "available") ||
+      (provider.id === "gemini" && provider.status !== "not-installed" && provider.cli?.state !== "unsupported-version");
     if (!providerReady) {
       return {
         providerId,
@@ -2420,7 +2425,7 @@ export class AppStateStore {
       }
     }
 
-    const llm = await this.buildLlm(providerId, selectedModel);
+    const llm = providerId === "gemini" ? createGeminiLlm({ defaultModel: selectedModel }) : await this.buildLlm(providerId, selectedModel);
     if (!llm.available) {
       return {
         providerId,
@@ -5297,6 +5302,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (providerId === "openai") {
       return createCodexLlm({ defaultModel });
     }
+    if (providerId === "copilot") return createCopilotLlm({ defaultModel });
+    if (providerId === "gemini") return createGeminiLlm({ defaultModel });
     if (providerId === "azure-openai") {
       try {
         return createAzureOpenAiLlm(

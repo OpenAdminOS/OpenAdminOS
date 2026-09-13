@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { basename, dirname, extname, join, resolve, posix, win32 } from "node:path";
+import { basename, dirname, extname, join, resolve, posix, win32, delimiter } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 
@@ -70,7 +70,11 @@ export function cliInvocation(
       ? "@anthropic-ai/claude-code/cli.js"
       : name === "codex"
         ? "@openai/codex/bin/codex.js"
-        : undefined;
+        : name === "copilot"
+          ? "@github/copilot/npm-loader.js"
+          : name === "gemini"
+            ? "@google/gemini-cli/bundle/gemini.js"
+            : undefined;
   const folder = dirname(resolved);
   const roots =
     basename(folder).toLowerCase() === ".bin"
@@ -103,4 +107,16 @@ export function cliArgs<
     command.args,
     { ...options, env: command.env, shell: false },
   ];
+}
+
+export function cliExecutablePath(binary: string, source: NodeJS.ProcessEnv = process.env): string {
+  if (existsSync(binary)) return resolve(binary);
+  const env = cliProcessEnv(source);
+  for (const directory of (env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const suffix of process.platform === "win32" ? [".exe", ".cmd", ""] : [""]) {
+      const candidate = join(directory, binary + suffix);
+      if (existsSync(candidate)) return resolve(candidate);
+    }
+  }
+  return binary;
 }

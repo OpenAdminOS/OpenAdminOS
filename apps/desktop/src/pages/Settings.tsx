@@ -387,6 +387,7 @@ function ProvidersSection({
             activeModel={activeModelByProviderId?.[p.id]}
             onSetActiveProvider={onSetActiveProvider}
             onSetActiveModel={onSetActiveModel}
+            onRefresh={onProviderConfigSaved}
           />
         ))}
       </div>
@@ -399,9 +400,14 @@ function ProvidersSection({
       </div>
       <p className="mb-4 max-w-[640px] text-[12px] text-[var(--color-text-muted)]">
         These providers are accessed by invoking the vendor's locally-installed
-        CLI. Your existing subscription is used. OpenAdminOS never sees an API
-        key.
+        CLI and its existing authentication. Account limits and organization policies apply.
+        No additional API key is stored in OpenAdminOS for these providers.
       </p>
+      <div className="mb-3 flex justify-end">
+        <Button variant="secondary" size="sm" onClick={() => { void onProviderConfigSaved(); }}>
+          <IconRefresh size={12} /> Refresh providers
+        </Button>
+      </div>
       <div className="grid grid-cols-1 gap-3">
         {cliHostedProviders.map((p) => (
           <ProviderRow
@@ -411,6 +417,7 @@ function ProvidersSection({
             activeModel={activeModelByProviderId?.[p.id]}
             onSetActiveProvider={onSetActiveProvider}
             onSetActiveModel={onSetActiveModel}
+            onRefresh={onProviderConfigSaved}
           />
         ))}
       </div>
@@ -435,6 +442,7 @@ function ProvidersSection({
               activeModel={activeModelByProviderId?.[azureOpenAIProvider.id]}
               onSetActiveProvider={onSetActiveProvider}
               onSetActiveModel={onSetActiveModel}
+            onRefresh={onProviderConfigSaved}
             />
             <AzureOpenAIConfigForm onSaved={onProviderConfigSaved} />
           </div>
@@ -450,12 +458,14 @@ function ProviderRow({
   activeModel,
   onSetActiveProvider,
   onSetActiveModel,
+  onRefresh,
 }: {
   provider: ProviderSummary;
   activeProviderId: ProviderId;
   activeModel: string | undefined;
   onSetActiveProvider: (id: ProviderId) => Promise<void>;
   onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }) {
   const isActive = provider.id === activeProviderId;
   const implemented = isProviderImplemented(provider.id);
@@ -466,16 +476,8 @@ function ProviderRow({
     provider,
     activeModel ? { [provider.id]: activeModel } : undefined,
   ).model;
-  const providerReadyForTest =
-    provider.status === "connected" ||
-    (provider.id === "azure-openai" && provider.status === "available");
-  const canTest =
-    implemented &&
-    providerReadyForTest &&
-    (provider.id === "openai" ||
-      provider.id === "ollama" ||
-      provider.id === "azure-openai" ||
-      provider.id === "apple-foundation");
+  const canTest = implemented && provider.status !== "not-installed" && provider.cli?.state !== "unsupported-version";
+  const cliLabel = provider.cli ? ({ ready: "Connected", "check-required": "Test required", "not-installed": "Not installed", "signed-out": "Signed out", "access-denied": "Access denied", "unsupported-version": "Update required", "request-failed": "Request failed" } as const)[provider.cli.state] : undefined;
 
   const handleTest = async () => {
     setTesting(true);
@@ -483,6 +485,7 @@ function ProviderRow({
     try {
       const result = await window.openAdminOS?.testProvider(provider.id, effectiveModel);
       if (result) setTestResult(result);
+      await onRefresh();
     } catch (error) {
       setTestResult({
         providerId: provider.id,
@@ -524,7 +527,7 @@ function ProviderRow({
                 )}
                 {provider.status === "available" && (
                   <Pill tone="warning">
-                    <StatusDot tone="warning" /> Available
+                    <StatusDot tone="warning" /> {cliLabel ?? "Available"}
                   </Pill>
                 )}
                 {provider.status === "not-installed" && (
@@ -534,7 +537,7 @@ function ProviderRow({
                 )}
                 {provider.status === "error" && (
                   <Pill tone="danger">
-                    <StatusDot tone="danger" /> Error
+                    <StatusDot tone="danger" /> {cliLabel ?? "Error"}
                   </Pill>
                 )}
               </>
@@ -553,12 +556,12 @@ function ProviderRow({
               {provider.detail}
             </div>
           )}
-          {provider.id === "openai" && implemented && (
-            <div className="mt-3 grid gap-2 rounded-md bg-[var(--color-bg-raised)] p-3 text-[11px] ring-1 ring-[var(--color-border-soft)] sm:grid-cols-3">
-              <ProviderFact label="Codex auth" value={provider.status === "connected" ? "Detected" : "Check required"} />
-              <ProviderFact label="Default model" value={effectiveModel ?? "Provider default"} />
-              <ProviderFact label="Models" value={`${installedModels.length} available`} />
-            </div>
+          {provider.cli && implemented && (
+            <dl className="mt-3 grid gap-3 rounded-md bg-[var(--color-bg-raised)] p-3 text-[11px] ring-1 ring-[var(--color-border-soft)] sm:grid-cols-2">
+              <div><dt className="text-[var(--color-text-muted)]">CLI version</dt><dd className="mt-1 font-mono">{provider.cli.version ?? "Not detected"}</dd></div>
+              <div><dt className="text-[var(--color-text-muted)]">Default model</dt><dd className="mt-1 font-mono">{effectiveModel ?? "CLI default"}</dd></div>
+              <div className="min-w-0 sm:col-span-2"><dt className="text-[var(--color-text-muted)]">Executable</dt><dd className="mt-1 break-all font-mono">{provider.cli.binaryPath ?? "Not detected"}</dd></div>
+            </dl>
           )}
           {implemented && installedModels.length > 0 && (
             <div className="mt-3">
@@ -647,7 +650,7 @@ function ProviderRow({
             </Button>
           )}
           {implemented &&
-            (provider.status === "connected" || provider.status === "available") &&
+            (provider.status === "connected" || (provider.status === "available" && !provider.cli)) &&
             !isActive && (
             <Button
               variant="secondary"
@@ -659,7 +662,7 @@ function ProviderRow({
               Set active
             </Button>
           )}
-          {implemented && provider.status === "not-installed" && providerInstallGuideUrl(provider.id) && (
+          {implemented && (provider.status === "not-installed" || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) && (
             <Button
               variant="ghost"
               size="sm"
@@ -668,7 +671,7 @@ function ProviderRow({
                 if (url) void window.openAdminOS?.openExternal(url);
               }}
             >
-              Install guide
+              {provider.status === "not-installed" ? "Install guide" : "Setup guide"}
             </Button>
           )}
         </div>
@@ -1053,6 +1056,10 @@ function providerInstallGuideUrl(providerId: ProviderId): string | undefined {
       return "https://docs.anthropic.com/en/docs/claude-code/overview";
     case "openai":
       return "https://github.com/openai/codex";
+    case "copilot":
+      return "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli";
+    case "gemini":
+      return "https://geminicli.com/docs/get-started/authentication/";
     case "azure-openai":
       return "https://learn.microsoft.com/en-us/azure/ai-services/openai/";
     default:

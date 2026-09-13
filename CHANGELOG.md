@@ -12,6 +12,20 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+### Security
+
+## [0.6.3] - 2026-09-13
+
+### Added
+
+- Add GitHub Copilot CLI and Gemini CLI providers with streamed responses, connection testing, executable/version diagnostics, and distinct sign-in and access errors.
+
+### Changed
+
+### Removed
+
+### Fixed
+
 - Recognize Codex and Claude Code in standard macOS and Windows install locations, preserve Claude's existing sign-in, and check Codex authentication through the CLI.
 
 ### Security

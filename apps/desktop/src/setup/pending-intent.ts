@@ -150,6 +150,8 @@ function isProviderId(value: unknown): value is ProviderId {
     value === "lm-studio" ||
     value === "anthropic" ||
     value === "openai" ||
+    value === "copilot" ||
+    value === "gemini" ||
     value === "azure-openai"
   );
 }

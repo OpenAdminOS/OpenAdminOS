@@ -4,6 +4,9 @@ import {
   probeAppleFoundationLlm,
   probeClaudeCodeLlm,
   probeCodexLlm,
+  probeCopilotLlm,
+  probeGeminiLlm,
+  type CliProbe,
   probeLmStudioLlm,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
@@ -282,9 +285,13 @@ export function lmStudioEndpointDetail(
 
 export async function checkClaudeCode(provider: ProviderSummary): Promise<ProviderSummary> {
   const probe = await probeClaudeCodeLlm();
+  const cli: ProviderSummary["cli"] = {
+    binaryPath: probe.binaryPath, version: probe.version,
+    state: !probe.installed ? "not-installed" : probe.ready ? "ready" : probe.failure ?? "request-failed",
+  };
   if (!probe.installed) {
     return {
-      ...provider,
+      ...provider, cli,
       status: "not-installed",
       detail: probe.detail ?? "Claude Code CLI (`claude`) is not installed or not on PATH.",
       models: [],
@@ -293,7 +300,7 @@ export async function checkClaudeCode(provider: ProviderSummary): Promise<Provid
 
   if (!probe.ready) {
     return {
-      ...provider,
+      ...provider, cli,
       status: "error",
       detail:
         probe.detail ??
@@ -304,7 +311,7 @@ export async function checkClaudeCode(provider: ProviderSummary): Promise<Provid
   }
 
   return {
-    ...provider,
+    ...provider, cli,
     status: "connected",
     detail: probe.detail ?? "Authenticated through the local Claude Code CLI.",
     models: probe.models,
@@ -316,9 +323,13 @@ export async function checkClaudeCode(provider: ProviderSummary): Promise<Provid
 
 export async function checkCodex(provider: ProviderSummary): Promise<ProviderSummary> {
   const probe = await probeCodexLlm();
+  const cli: ProviderSummary["cli"] = {
+    binaryPath: probe.binaryPath, version: probe.version,
+    state: !probe.installed ? "not-installed" : probe.ready ? "ready" : probe.failure ?? "request-failed",
+  };
   if (!probe.installed) {
     return {
-      ...provider,
+      ...provider, cli,
       status: "not-installed",
       detail: probe.detail ?? "Codex CLI (`codex`) is not installed or not on PATH.",
       models: [],
@@ -327,7 +338,7 @@ export async function checkCodex(provider: ProviderSummary): Promise<ProviderSum
 
   if (!probe.ready) {
     return {
-      ...provider,
+      ...provider, cli,
       status: "error",
       detail:
         probe.detail ??
@@ -338,10 +349,20 @@ export async function checkCodex(provider: ProviderSummary): Promise<ProviderSum
   }
 
   return {
-    ...provider,
+    ...provider, cli,
     status: "connected",
     detail: probe.detail ?? `Authenticated via ${probe.authPath}`,
     models: probe.models,
     defaultModel: probe.defaultModel,
+  };
+}
+
+export async function checkAdditionalCli(provider: ProviderSummary): Promise<ProviderSummary> {
+  const probe: CliProbe = provider.id === "copilot" ? await probeCopilotLlm() : await probeGeminiLlm();
+  return {
+    ...provider,
+    status: !probe.installed ? "not-installed" : probe.ready ? "connected" : probe.failure ? "error" : "available",
+    detail: probe.detail, models: probe.models, defaultModel: probe.defaultModel,
+    cli: { binaryPath: probe.binaryPath, version: probe.version, state: probe.ready ? "ready" : probe.failure ?? "check-required" },
   };
 }

@@ -4,7 +4,9 @@ export type ProviderId =
   | "lm-studio"
   | "anthropic"
   | "openai"
-  | "azure-openai";
+  | "azure-openai"
+  | "copilot"
+  | "gemini";
 
 export type ProviderStatus = "connected" | "available" | "not-installed" | "error";
 
@@ -17,6 +19,11 @@ export interface ProviderSummary {
   detail?: string;
   models: string[];
   defaultModel?: string;
+  cli?: {
+    binaryPath?: string;
+    version?: string;
+    state: "ready" | "check-required" | "not-installed" | "signed-out" | "access-denied" | "unsupported-version" | "request-failed";
+  };
 }
 
 export interface ProviderTestResult {
@@ -3574,6 +3581,24 @@ export const providerCatalog: readonly ProviderSummary[] = [
     isLocal: false,
     status: "available",
     detail: "Waiting for Codex CLI connection check",
+    models: [],
+  },
+  {
+    id: "copilot",
+    name: "GitHub Copilot",
+    description: "Use models through the GitHub Copilot CLI and your existing account. Tenant prompts leave this device and are processed through GitHub Copilot when active.",
+    isLocal: false,
+    status: "available",
+    detail: "Waiting for Copilot CLI connection check",
+    models: [],
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    description: "Use Gemini through the installed Gemini CLI. Tenant prompts are sent to Google's service when active.",
+    isLocal: false,
+    status: "available",
+    detail: "Waiting for Gemini CLI connection check",
     models: [],
   },
   {

@@ -2362,3 +2362,9 @@ and formatted conversation results. Windows and macOS artifacts must be signed,
 macOS must be notarized, and Linux packages must include checksums and signed apt
 metadata. Live connector delivery and microphone checks on user devices remain
 separate from automated regression and packaging verification.
+
+### v0.6.3 CLI provider expansion
+
+GitHub Copilot CLI and Google Gemini CLI join the existing Codex and Claude Code providers. All four reuse existing vendor authentication and report executable/version and distinct discovery, sign-in, access, and request errors. Copilot uses its CLI SDK JSON-RPC transport and account model catalog; Gemini uses headless structured streaming and its configured default. Gemini is not marked connected until an explicit test or request succeeds in the current app process. Supported minimum stable versions are Copilot 1.0.83 and Gemini 0.59.0, matching the protocols and isolation controls verified for this integration.
+
+New adapters disable native CLI tools, MCP servers, skills, hooks, and project instructions, and run in temporary working directories. They provide model text to the shared app runtime, preserving tenant scoping and action confirmation. Prompts are supplied over pipes, child environments exclude unrelated credentials and redirects, requests have cancellation/output/time limits, and errors do not expose raw CLI logs. Vendor CLI local history can still apply. Copilot cleanup waits for process exit before deleting temporary directories on Windows. Chat, Agent Team, schedules, and Nova reasoning use the existing provider adapter boundary; Nova audio remains separately configured.

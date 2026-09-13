@@ -22,6 +22,25 @@ function provider(id: string) {
 }
 
 describe("Settings provider section", () => {
+  it("requires a real Gemini test and shows CLI diagnostics before activation", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({
+      testProvider: vi.fn(async () => ({ providerId: "gemini" as const, ok: false, message: "Sign in with Gemini CLI, then test again." })),
+    }, createMockAppState({
+      activeProviderId: "ollama",
+      providers: [{ ...provider("openai"), id: "gemini", name: "Google Gemini", status: "available", models: [], defaultModel: undefined,
+        cli: { state: "check-required", version: "0.59.0", binaryPath: "/example/bin/gemini" } }],
+    }));
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge });
+    expect(await screen.findByText("Test required")).toBeInTheDocument();
+    expect(screen.getByText("/example/bin/gemini")).toBeInTheDocument();
+    expect(screen.getByText("0.59.0")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set active" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    await waitFor(() => expect(bridge.testProvider).toHaveBeenCalledWith("gemini", undefined));
+    expect(await screen.findByText("Sign in with Gemini CLI, then test again.")).toBeInTheDocument();
+  });
+
   it("restores a Settings section from its URL", async () => {
     renderRoute(<Settings />, {
       path: "/settings/:section?",

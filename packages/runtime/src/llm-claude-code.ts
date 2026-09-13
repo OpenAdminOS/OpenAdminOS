@@ -1,5 +1,6 @@
+import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { spawn } from "node:child_process";
-import { cliArgs } from "./cli-invocation.js";
+import { cliArgs, cliExecutablePath } from "./cli-invocation.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -22,6 +23,7 @@ export interface ClaudeCodeProviderOptions {
 export interface ClaudeCodeProbeResult {
   installed: boolean;
   ready: boolean;
+  failure?: CliFailure;
   version?: string;
   binaryPath?: string;
   authPath: string;
@@ -183,6 +185,7 @@ export async function probeClaudeCodeLlm(
       binaryPath: binaryProbe.binaryPath,
       authPath,
       models: [],
+      failure: "unsupported-version",
       detail: `Claude Code ${version} is installed. Update to ${MIN_CLAUDE_CODE_VERSION} or newer with \`claude update\` so OpenAdminOS can disable Claude Code tools safely.`,
     };
   }
@@ -196,7 +199,7 @@ export async function probeClaudeCodeLlm(
     }),
   });
   if (authResult.exitCode !== 0) {
-    const detail = compactProcessMessage(authResult.stderr || authResult.stdout);
+    const failure = cliFailure("Claude Code", authResult.stderr || authResult.stdout || (authResult.exitCode === 1 ? "not signed in" : "request failed"));
     return {
       installed: true,
       ready: false,
@@ -204,9 +207,8 @@ export async function probeClaudeCodeLlm(
       binaryPath: binaryProbe.binaryPath,
       authPath,
       models: [],
-      detail:
-        detail ||
-        "Claude Code is installed. Run `claude auth login` in a terminal to authenticate.",
+      failure: failure.failure,
+      detail: failure.failure === "signed-out" ? "Claude Code is installed. Run `claude auth login` in a terminal to authenticate." : failure.message,
     };
   }
 
@@ -286,7 +288,7 @@ async function probeClaudeCodeBinary(preferredBinaryPath?: string): Promise<{
       args: ["--version"],
       timeoutMs: 5_000,
     });
-    const current = { binaryPath, versionResult };
+    const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
     if (versionResult.exitCode === 0) return current;
     last = current;
   }

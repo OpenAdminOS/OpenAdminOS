@@ -1,5 +1,6 @@
+import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { spawn } from "node:child_process";
-import { cliArgs } from "./cli-invocation.js";
+import { cliArgs, cliExecutablePath } from "./cli-invocation.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -21,7 +22,9 @@ export interface CodexProviderOptions {
 export interface CodexProbeResult {
   installed: boolean;
   ready: boolean;
+  failure?: CliFailure;
   version?: string;
+  binaryPath?: string;
   authPath: string;
   models: string[];
   defaultModel?: string;
@@ -151,13 +154,16 @@ export async function probeCodexLlm(
     env: { CODEX_HOME: homePath },
   });
   if (authResult.exitCode !== 0) {
+    const failure = cliFailure("Codex CLI", authResult.stderr || authResult.stdout || (authResult.exitCode === 1 ? "not signed in" : "request failed"));
     return {
+      failure: failure.failure,
       installed: true,
       ready: false,
       version,
+      binaryPath: binaryProbe.binaryPath,
       authPath,
       models: [],
-      detail: "Codex CLI is installed. Run `codex login` in a terminal to authenticate.",
+      detail: failure.failure === "signed-out" ? "Codex CLI is installed. Run `codex login` in a terminal to authenticate." : failure.message,
     };
   }
 
@@ -166,6 +172,7 @@ export async function probeCodexLlm(
     installed: true,
     ready: true,
     version,
+    binaryPath: binaryProbe.binaryPath,
     authPath,
     models: modelMetadata.models,
     ...(modelMetadata.defaultModel ? { defaultModel: modelMetadata.defaultModel } : {}),
@@ -230,7 +237,7 @@ async function probeCodexBinary(preferredBinaryPath?: string): Promise<{
       args: ["--version"],
       timeoutMs: 5_000,
     });
-    const current = { binaryPath, versionResult };
+    const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
     if (versionResult.exitCode === 0) return current;
     last = current;
   }
