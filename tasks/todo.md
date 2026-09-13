@@ -1,5 +1,7 @@
 # Current active plan
 
+- [x] Prepare **0.6.2** after PR #86 with Cache, Nova voice and web research, reviewed connector delivery, formatted conversations, and aligned installer/update metadata. Publish through the signed release workflow after all gates pass.
+
 - [x] Prepare **0.6.1** after PR #83: guided teammate setup, native office fullscreen, correct workflow evidence, and Windows reliability/security fixes. Linux, macOS, and Windows native-flow and visual evidence is recorded in the 0.6.1 review reports. Full publication is authorized and follows release validation.
 
 - [x] Prepare Agent Team as version **0.6.0**, with aligned workspace versions, release notes, and a 0.6.0 minimum for the new evidence workflows. Published as v0.6.0 on 2026-09-11.
