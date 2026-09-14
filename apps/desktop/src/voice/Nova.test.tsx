@@ -212,6 +212,28 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     "data-phase",
     "thinking",
   );
+  // Repeat the actual help question with different transcript/delegation arrival orders.
+  // None may enter the backend or replace the already running inventory question.
+  vi.useFakeTimers({toFake:["setTimeout", "clearTimeout", "Date"]});
+  try {
+    for (const delay of [25, 75, 125]) {
+      for (const order of ["early", "fallback", "late", "answered"]) {
+        const chunksBefore = dc.send.mock.calls.filter(([event]) => String(event).includes("I'm Nova, the voice assistant")).length;
+        await act(async () => {
+          const parts = order === "early" ? ["What can", " you do and", " what can you", " help me with"] : ["What can you do and what can you help me with"];
+          emit({type:"session.input_transcript.delta",delta:parts[0]});
+          if (order === "early") emit({type:"session.delegation.created",delegation:{id:`intro-${delay}-${order}`,target:"client"}});
+          for (const part of parts.slice(1)) {await vi.advanceTimersByTimeAsync(delay);emit({type:"session.input_transcript.delta",delta:part});}
+          emit({type:"session.output_transcript.delta",delta:order === "answered" ? "I'm Nova. I can help you explore your tenant and prepare reports." : "Sure, I'm checking that."});
+          await vi.advanceTimersByTimeAsync(1100);
+          if (order === "late") {emit({type:"session.delegation.created",delegation:{id:`intro-${delay}-${order}`,target:"client"}});await vi.advanceTimersByTimeAsync(400);}
+        });
+        expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(1);
+        const chunksAfter=dc.send.mock.calls.filter(([event]) => String(event).includes("I'm Nova, the voice assistant")).length;
+        expect(chunksAfter-chunksBefore).toBe(order === "answered" ? 0 : 1);
+      }
+    }
+  } finally {vi.useRealTimers();}
   const oldFinish = finish;
   act(() => {
     emit({ type: "session.input_transcript.delta", delta: "Can you tell me a joke while we wait" });

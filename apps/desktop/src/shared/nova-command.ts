@@ -1,10 +1,11 @@
+import { isNovaIntroduction } from "./nova-conversation.js";
 import { conversationalText, requestText, novaActionIntent, novaConnectorQuestion, type NovaActionIntent } from './nova-action-intent.js';
 
 export const novaPages = { cache: '/cache', chat: '/chat', agents: '/agents', 'agent team': '/office', office: '/office', changes: '/changes', settings: '/settings', connectors: '/connectors' } as const;
 export type NovaCommand =
   | NovaActionIntent
   | { kind: 'navigate'; page: keyof typeof novaPages }
-  | { kind: 'capabilities'; topic: 'connectors' | 'agents' | 'tenant' }
+  | { kind: 'capabilities'; topic: 'connectors' | 'agents' | 'tenant' | 'general' }
   | { kind: 'clarify'; reason: 'ambiguous' | 'destination' | 'approval' | 'unavailable' }
   | { kind: 'research' };
 export interface NovaCommandContext { previousRequest?: string; agents: { name: string; slug: string }[] }
@@ -17,6 +18,7 @@ export const novaClarifications = {
 
 /** Fast paths are deliberately conservative. Unfamiliar wording goes to a bounded classifier. */
 export function novaCommand(text: string): NovaCommand | undefined {
+  if (isNovaIntroduction(text)) return { kind: "capabilities", topic: "general" };
   const q = requestText(text).replace(/^(?:hey|hello|hi)[,\s]+(?=are|what|which)/i, '').replace(/[?.!]+$/, '').trim();
   if (/^(?:yes|yes please|confirm|approve|do it|go ahead|send it now|run it now)$/i.test(q)) return { kind: 'clarify', reason: 'approval' };
   // Never interpret quoted examples, negation or conditional instructions as an action.
@@ -58,7 +60,7 @@ export function parseNovaCommand(raw: string, context: NovaCommandContext): Nova
   const keys = (...allowed: string[]) => Object.keys(value).every(k => ['kind', ...allowed].includes(k));
   if (value.kind === 'research' && keys()) return { kind: 'research' };
   if (value.kind === 'navigate' && keys('page') && typeof value.page === 'string' && Object.hasOwn(novaPages, value.page)) return { kind: 'navigate', page: value.page as keyof typeof novaPages };
-  if (value.kind === 'capabilities' && keys('topic') && ['connectors','agents','tenant'].includes(String(value.topic))) return { kind: 'capabilities', topic: value.topic as 'connectors' | 'agents' | 'tenant' };
+  if (value.kind === 'capabilities' && keys('topic') && ['connectors','agents','tenant','general'].includes(String(value.topic))) return { kind: 'capabilities', topic: value.topic as 'connectors' | 'agents' | 'tenant' | 'general' };
   if (value.kind === 'clarify' && keys('reason') && Object.hasOwn(novaClarifications, String(value.reason))) return { kind: 'clarify', reason: value.reason as keyof typeof novaClarifications };
   if (value.kind === 'run' && keys('name') && typeof value.name === 'string' && context.agents.some(a => a.slug === value.name)) return { kind: 'run', name: value.name };
   if (value.kind === 'send' && keys('connectorId','self','question') && ['outlook','whatsapp-web','teams','slack','discord','signal'].includes(String(value.connectorId)) && typeof value.self === 'boolean' && (value.question === undefined || value.question === null || (typeof value.question === 'string' && value.question.trim().length > 0 && value.question.length <= 1200))) {
@@ -71,7 +73,7 @@ export const novaCommandInstructions = `Classify the user's current OpenAdminOS 
 Allowed shapes:
 {"kind":"research"} for information requests, including web and tenant data.
 {"kind":"navigate","page":"cache|chat|agents|agent team|office|changes|settings|connectors"} (choose one exact page). ONLY when the user asks to open, show, visit, or switch to a page. Questions about cache freshness or settings facts are research, NOT navigation.
-{"kind":"capabilities","topic":"connectors|agents|tenant"} for app ability, connection or setup questions, including why cannot send and how to send through an app connector.
+{"kind":"capabilities","topic":"connectors|agents|tenant|general"} for app ability, connection or setup questions. General covers introductions and what-can-you-help-with conversation, including why cannot send and how to send through an app connector.
 {"kind":"send","connectorId":"outlook|whatsapp-web|teams|slack|discord|signal","self":true|false,"question":null|string}. Choose one connector. Email and Exchange mean outlook. self=true ONLY when the user asks for delivery to themselves (me/my). self=false means the configured default, not an arbitrary recipient. question=null references the last completed result; otherwise write the requested read-only report query, without delivery instructions. Do not invent report content.
 {"kind":"run","name":"installed-agent-slug"} for one unambiguously identified installed agent. Never invent a slug or pick an agent from a vague task.
 {"kind":"clarify","reason":"ambiguous|destination|approval"}. Clarify missing connector, named recipient, multiple actions/destinations, conditional/scheduled/destructive actions, ambiguous agent, or missing context. Use reason=approval ONLY for an explicit yes/confirm/go ahead response. Unsupported actions, including scheduling, disabling, retiring or deleting, use reason=ambiguous and must not suggest an existing approval button. Approval or yes/go ahead must NEVER become a send/run.

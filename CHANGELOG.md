@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Answer Nova introductions and general help questions conversationally, preserve running tasks and previews during these turns, and bind delayed voice delegation to its original utterance.
+
 - Preserve Nova device-list contents across connector changes, resolve spoken Outlook and named Teams-channel requests, answer app counts directly, and avoid duplicate confirmations or stale waiting updates.
 
 - Make Nova command routing handle unfamiliar wording, clarification replies, destination corrections, and cancellation while preserving report evidence and visual approval; settled small talk stays out of subsequent commands.

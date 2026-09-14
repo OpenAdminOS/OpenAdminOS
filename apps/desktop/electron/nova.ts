@@ -1,3 +1,4 @@
+import { isNovaIntroduction, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
 import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
 import { novaConnectorSetupIssue, prepareNovaAction, type NovaActionHost, type PreparedNovaAction } from "./nova-actions.js";
@@ -85,10 +86,10 @@ export class NovaService {
     }
     if (input.action === "start") this.invalidate();
     const generation = this.generation;
-    const revision =
-      input.action === "answer" ? ++this.answerRevision : undefined;
+    const introduction = input.action === "answer" && typeof input.text === "string" && input.text.length <= 12000 && isNovaIntroduction(input.text);
+    const revision = input.action === "answer" && !introduction ? ++this.answerRevision : undefined;
     const priorAction = this.session?.pendingAction;
-    if (input.action === "answer") { this.pendingAnswer?.abort(); if (this.session) this.session.pendingAction = undefined; }
+    if (input.action === "answer" && !introduction) { this.pendingAnswer?.abort(); if (this.session) this.session.pendingAction = undefined; }
     const state = await this.state();
     if (
       generation !== this.generation ||
@@ -219,6 +220,7 @@ export class NovaService {
       throw new Error(
         "Nova's tenant or provider changed. Start a new conversation.",
       );
+    if (introduction) return { text: NOVA_INTRODUCTION };
     if (input.action === "interrupt") {
       ++this.answerRevision;
       this.pendingAnswer?.abort();
@@ -312,6 +314,7 @@ export class NovaService {
         return { text: novaClarifications[command.reason] };
       }
       if (command.kind === "navigate") return { text: `Opening ${command.page}.`, route: novaPages[command.page] };
+      if (command.kind === "capabilities" && command.topic === "general") return { text: NOVA_INTRODUCTION };
       if (command.kind === "capabilities" && command.topic === "tenant") {
         const tenant = state.tenants.find(t => t.id === session.tenantId);
         return { text: `Yes. OpenAdminOS is connected to ${tenant?.displayName || "the selected tenant"}. I can ask the app to retrieve devices and other permitted tenant data. A missing cache does not mean the tenant is disconnected.` };
@@ -675,6 +678,8 @@ export function buildNovaInstructions(state: AppState, name: string, webSearch =
     "If greeted with Hey Nova, greet the user warmly by their greeting name when one is set.",
     "If asked whether a tenant is connected, say yes and name the selected tenant. Do not claim that you have no tenant access just because records are not in this prompt.",
     "You access permitted tenant data THROUGH the OpenAdminOS backend. You do not need a separate Microsoft sign-in inside the voice model.",
+    `General introduction, available without any lookup: ${NOVA_INTRODUCTION}`,
+    "Conversation comes first: answer greetings, introductions, small talk, and general questions about what you can do directly and naturally. This includes combined questions such as What can you do and what can you help me with. Do not say checking, looking that up, or one moment for these turns; no task has started. Mention abilities without claiming a specific connector is ready. Only delegate a specific configuration check, tenant-data question, research request or action. A conversational turn must not cancel a pending investigation or approval.",
     "Delegation policy:",
     webSearch
       ? "The backend can also search the public web for any topic. Delegate questions needing current information, web research, external documentation, recommendations or comparisons with public facts. The backend chooses tenant tools, web search, or both. Do not answer current public facts from memory. Tell the user when research failed; sources remain in Chat."

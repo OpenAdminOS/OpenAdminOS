@@ -763,3 +763,32 @@ it('speaks readable freshness while preserving the original evidence timestamp e
   assert.match(boundedVoiceAnswer('9 devices, refreshed 2026-09-13T21:56:23.006Z.'), /13 September.*21:56 UTC/);
   assert.doesNotMatch(boundedVoiceAnswer('9 devices, refreshed 2026-09-13T21:56:23.006Z.'), /T21|\.006/);
 });
+
+it('answers general capabilities directly while preserving a running task and its subsequent action preview', async () => {
+  const f = fixture();
+  let finish!: (value: SendIntuneChatMessageResult) => void;
+  let signal: AbortSignal | undefined;
+  let chats = 0, sends = 0;
+  const nova = new NovaService(f.secrets, async () => f.state, async (_input, options) => {
+    chats++; signal=options.signal; return new Promise<SendIntuneChatMessageResult>(resolve=>{finish=resolve;});
+  }, fetch, {classifyCommand: async () => {throw new Error('No classifier needed');},
+    connectors:async()=>[{descriptor:{id:'outlook',name:'Outlook'},status:'connected',config:{defaultRecipients:'admin@example.test'}} as never],
+    send:async()=>{sends++;},startRun:async()=>{throw new Error('Unexpected run');}});
+  const {sessionId} = await nova.handle({action:'start',mode:'local',tenantId:'tenant-a',consent:false});
+  const ask=(text:string)=>nova.handle({action:'answer',sessionId:sessionId!,text});
+  const first=await ask('What can you do and what can you help me with');
+  assert.match(first.text!, /I'm Nova/); assert.match(first.text!, /configured connectors/);
+  assert.equal(chats,0); assert.equal(first.pendingAction,undefined);
+  const pending=ask('How many devices do I have?');
+  await new Promise(r=>setImmediate(r));
+  for (const text of ['Who are you and how can you help me?', 'What can you do and what can you help me with']) {
+    assert.match((await ask(text)).text!, /I'm Nova/);
+    assert.equal(signal?.aborted,false); assert.equal(chats,1);
+  }
+  finish({conversation:{id:'conversation'},assistantMessage:{content:'9 devices',status:'completed'}} as SendIntuneChatMessageResult);
+  await pending;
+  const draft=await ask('Send this via Outlook');
+  await ask('Tell me about yourself');
+  await nova.handle({action:'decide-action',sessionId:sessionId!,actionId:draft.pendingAction!.id,approved:true});
+  assert.equal(sends,1);
+});

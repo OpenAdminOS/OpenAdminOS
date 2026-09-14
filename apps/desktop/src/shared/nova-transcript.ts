@@ -1,3 +1,4 @@
+import { isNovaIntroduction } from "./nova-conversation.js";
 import { conversationalText } from "./nova-action-intent.js";
 import type { NovaConversationTurn } from "@openadminos/agent-sdk";
 
@@ -44,7 +45,8 @@ export class NovaTranscript {
     return true;
   }
 
-  capture(offsetMs?: number, consume = true): { text: string; history: NovaConversationTurn[] } | undefined {
+  capture(offsetMs?: number, consume = true, anchor?: string): { text: string; history: NovaConversationTurn[]; anchor: string; responseText?: string } | undefined {
+    if (anchor && this.consumed.has(anchor)) return undefined;
     const cutoff = Number.isFinite(offsetMs) && offsetMs! >= 0 ? offsetMs : undefined;
     const fragments = this.fragments.filter(fragment => cutoff === undefined || fragment.start === undefined || fragment.start <= cutoff);
     fragments.sort((a, b) => a.start !== undefined && b.start !== undefined ? a.start - b.start || a.sequence - b.sequence : a.sequence - b.sequence);
@@ -60,18 +62,21 @@ export class NovaTranscript {
       if (target) { target.text += fragment.text; target.fragments.push(fragment); }
       else turns.push({ role: fragment.role, text: fragment.text, fragments: [fragment] });
     }
-    const current = turns.slice().reverse().find(turn => turn.role === "user");
+    const current = anchor ? turns.find(turn => turn.role === "user" && turn.fragments.some(f => f.key === anchor)) : turns.slice().reverse().find(turn => turn.role === "user");
     if (!current || current.fragments.every(fragment => this.consumed.has(fragment.key))) return undefined;
     const text = current.fragments.filter(fragment => !this.consumed.has(fragment.key)).map(fragment => fragment.text).join("").trim();
     // Earlier greetings and waiting chatter remain reference history, never the new request.
-    if (consume) for (const fragment of fragments) if (fragment.role === "user") this.consumed.add(fragment.key);
+    const requestAnchor = current.fragments.find(fragment => !this.consumed.has(fragment.key))!.key;
+    if (consume) for (const turn of turns.slice(0, turns.indexOf(current) + 1)) for (const fragment of turn.fragments) if (fragment.role === "user") this.consumed.add(fragment.key);
     const history = turns.slice(0, turns.indexOf(current)).slice(-6).map(({ role, text }) => ({ role, text: text.slice(-600) }));
-    return { text, history };
+    const responseText = turns.slice(turns.indexOf(current) + 1).filter(turn => turn.role === "assistant").map(turn => turn.text).join(" ").trim();
+    return { text, history, anchor: requestAnchor, ...(responseText ? { responseText } : {}) };
   }
 }
 
 /** Known conversational turns must not replace a running investigation. */
 export function isNovaConversationOnly(text: string): boolean {
+  if (isNovaIntroduction(text)) return true;
   const question = conversationalText(text).replace(/[?.!]+$/, "").trim();
   if (!question) return true;
   if (/^(?:how are you(?: doing)?|how's it going|good (?:morning|afternoon|evening)(?: nova)?|(?:thanks|thank you)(?: nova| a lot| very much)?|are you done(?: yet)?|any updates?|(?:can|could) you (?:tell me )?who you are)$/i.test(question)) return true;
