@@ -7,6 +7,8 @@ export function voiceDeviceEvidenceIntent(question: string): 'compliance' | 'enc
   const q = question.toLowerCase().trim().replace(/non[ -]compliant/g, 'noncompliant')
     .replace(/^(?:stop[,.!]?\s+)?(?:can|could|would) you (?:please )?(?:tell me )?/, '')
     .replace(/^(?:please |tell me )/, '').replace(/[?.!]+$/, '').trim();
+  if (/^(?:(?:list|show)(?: me)? )?(?:(?:a |the )?list of )?(?:all )?(?:the )?noncompliant devices(?: as a list)?$/.test(q)) return 'compliance';
+  if (/^(?:(?:list|show)(?: me)? )?(?:(?:a |the )?list of )?(?:all )?(?:the )?unencrypted devices(?: as a list)?$/.test(q)) return 'encryption';
   if (/^(?:why (?:they|these devices|those devices|my devices|the devices) (?:are|are marked)|why are (?:they|these devices|those devices|my devices|the devices)) noncompliant$/.test(q)) return 'causes';
   if (/^(?:(?:list|show)(?: me)? (?:the )?devices (?:that |which )?(?:are )?|which (?:of my )?devices are )noncompliant$/.test(q)) return 'compliance';
   if (/^(?:(?:list|show)(?: me)? (?:the )?devices (?:that |which )?(?:are )?|which (?:of my )?devices are )(?:not encrypted|unencrypted)$/.test(q)) return 'encryption';

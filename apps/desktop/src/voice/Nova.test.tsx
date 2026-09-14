@@ -316,11 +316,21 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   expect(screen.getByRole("region", { name: "Review Nova action" })).toHaveTextContent("admin@example.test");
   expect(screen.getByRole("region", { name: "Review Nova action" })).toHaveTextContent("2 numbered messages");
   expect(dc.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.commentary.append", delegation_id: null, content: "Review the email." }));
+  // Hosted action text is spoken once, and only its audio transcript becomes a chat bubble.
+  await user.click(screen.getByRole("button", { name: "Confirm send" }));
+  await act(async () => finishAction({ text: "Outlook accepted the email for sending." }));
+  expect(screen.queryByText("Outlook accepted the email for sending.")).not.toBeInTheDocument();
+  act(() => emit({type:"session.output_transcript.delta",delta:"Outlook accepted the email for sending."}));
+  expect(screen.getAllByText(/Outlook accepted the email for sending/)).toHaveLength(1);
   act(() => emit({ type: "session.delegation.created", delegation: { id: "late-email", target: "client" } }));
   await new Promise(resolve => setTimeout(resolve, 350));
   expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
   act(() => emit({ type: "session.input_transcript.delta", delta: "How are you doing?" }));
   await new Promise(resolve => setTimeout(resolve, 1100));
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  const waitingUpdates = dc.send.mock.calls.filter(([event]) => String(event).includes("Do not say you are still checking")).length;
+  act(() => emit({type:"session.input_transcript.delta",delta:"Are you still working?"}));
+  await waitFor(() => expect(dc.send.mock.calls.filter(([event]) => String(event).includes("Do not say you are still checking")).length).toBe(waitingUpdates + 1), {timeout:2000});
   expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
   for (const text of ["Pop those findings into my inbox", "Actually use Teams instead", "Outlook", "Could you bring up settings"]) {
     act(() => emit({ type: "session.input_transcript.delta", delta: text }));
@@ -332,7 +342,7 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   await new Promise(resolve => setTimeout(resolve, 1100));
   expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 5);
   expect(track.stop).toHaveBeenCalled();
-}, 15000);
+}, 20000);
 
 it("explains microphone permission recovery without starting a hosted session", async () => {
   Object.defineProperty(navigator, "mediaDevices", {

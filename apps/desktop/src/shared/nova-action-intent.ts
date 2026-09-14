@@ -1,5 +1,5 @@
 export type NovaActionIntent =
-  | { kind: 'send'; connectorId: string; self: boolean; question?: string }
+  | { kind: 'send'; connectorId: string; self: boolean; question?: string; channelName?: string }
   | { kind: 'run'; name: string };
 
 const channels = 'whatsapp|email|exchange|outlook|teams|slack|discord|signal';
@@ -7,21 +7,29 @@ const aliases: Record<string, string> = { whatsapp: 'whatsapp-web', email: 'outl
 const reference = /^(?:it|(?:this|that|the)(?: (?:list|result|answer|report|summary))?|an? (?:message|email))$/i;
 
 export function conversationalText(text: string) {
-  const filler = /^(?:(?:alright|all right|okay|ok|so|well|then)\b[\s,.:;!-]*)+/i;
+  const filler = /^(?:(?:alright|all right|okay|ok|so|well|then|uh|um)\b[\s,.:;!-]*)+/i;
   return text.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim().replace(filler, '').replace(/^(?:hey|hi)[,\s]+nova[,\s]*/i, '').replace(filler, '').trim();
 }
 
-function requestText(text: string) {
-  return conversationalText(text).replace(/^(?:please\s+|(?:can|could|would) you\s+|are you able to\s+)+/i, '')
+export function requestText(text: string) {
+  return conversationalText(text).replace(/^(?:what I want you to do is|I want you to|I would like you to)\s+/i, '').replace(/^(?:please\s+|(?:can|could|would) you\s+|are you able to\s+)+/i, '')
+    .replace(/^(?:also\s+)+/i, '').replace(/^(send|share|post)\s+(?:it|this|that)\s*[-–—,]\s*(?=\1\b)/i, '')
     .replace(/\bMicrosoft Teams\b/ig, 'Teams').replace(/\bWhatsApp Web\b/ig, 'WhatsApp').replace(/\be-mail\b/ig, 'email')
     .replace(/\bExchange Online\b/ig, 'Exchange').replace(/\bOutlook email\b/ig, 'email')
+    .replace(/\bvia email with (?:the )?Outlook connector\b/ig, 'via email').replace(/\s+connector[?.!]*$/i, '')
     .replace(/^send an? email to me\b/i, 'send me an email').replace(/,?\s+please[?.!]*$/i, '').replace(/[?.!]+$/, '').trim();
 }
 
 /** Parse user requests only. A parsed action prepares a preview, never authorizes a send. */
 export function novaActionIntent(text: string): NovaActionIntent | undefined {
   const q = requestText(text);
-  const delivery = (channel: string, content = '', self = /^(?:send|share|message|post|email)\s+me\b|\b(?:to|via|on|through|using|by)\s+(?:me|my)\b/i.test(q)): NovaActionIntent => {
+  const namedChannel = /^(.*?)\s+to (?:the )?(.+?) channel$/i.exec(q);
+  if (namedChannel && /\bteams\b/i.test(namedChannel[1])) {
+    const base = novaActionIntent(namedChannel[1]);
+    if (base?.kind === 'send' && base.connectorId === 'teams') return { ...base, self: false, channelName: namedChannel[2].trim() };
+    return undefined;
+  }
+  const delivery = (channel: string, content = '', self = /^(?:send|share|message|post|email)\s+me\b|\b(?:to|via|on|through|using|by|with)\s+(?:me|my)\b/i.test(q)): NovaActionIntent => {
     const topic = content.trim();
     let question: string | undefined;
     if (topic && !reference.test(topic)) {
@@ -37,9 +45,9 @@ export function novaActionIntent(text: string): NovaActionIntent | undefined {
     return delivery(message[1], message[2]);
   }
   // Result references and named new reports, followed by an explicit connector.
-  const send = new RegExp(`^(?:send|share|message|post|email)\\s+(?:me\\s+)?(?:(.+?)\\s+)?(?:to|via|on|through|using|by)\\s+(?:(?:me|my)\\s+)?(?:on |via |to )?(${channels})$`, 'i').exec(q);
+  const send = new RegExp(`^(?:send|share|message|post|email)\\s+(?:me\\s+)?(?:(.+?)\\s+)?(?:to|via|on|through|using|by|with)\\s+(?:(?:me|my)\\s+)?(?:on |via |to )?(${channels})$`, 'i').exec(q);
   if (send) {
-    const content = (send[1] || '').replace(/\s+to me$/i, '');
+    const content = (send[1] || '').replace(/^(?:also )|(?: also)$/ig, '').replace(/\s+to me$/i, '');
     // Do not silently replace a named recipient with the configured default.
     if (/\bto\s+/i.test(content) || (content && !/^(?:it|this|that|the|a|an|my|list|report|summary|non[ -]?compliant|unencrypted|devices)\b/i.test(content))) return undefined;
     return delivery(send[2], content);

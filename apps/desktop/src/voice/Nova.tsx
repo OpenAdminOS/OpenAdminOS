@@ -121,6 +121,7 @@ export function Nova({
     orb = useRef<HTMLButtonElement>(null),
     recorder = useRef<MediaRecorder | null>(null),
     sessionId = useRef("");
+  const completedResult = useRef<string | undefined>(undefined);
   const delegationTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     blobUrl = useRef("");
@@ -136,8 +137,9 @@ export function Nova({
       if (token !== generation.current || revision !== actionRevision.current) return;
       setPendingAction(undefined);
       setError(answer.answerError || "");
-      appendSpeech("assistant", answer.text || "No action result returned.");
+      completedResult.current = answer.text;
       const dc = channel.current;
+      if (dc?.readyState !== "open") appendSpeech("assistant", answer.text || "No action result returned.");
       if (dc?.readyState === "open") {
         if (output.current) output.current.muted = false;
         for (const content of novaCommentaryChunks(answer.text || "No action result returned."))
@@ -549,13 +551,13 @@ export function Nova({
       channel.current = dc;
       const transcript = new NovaTranscript();
       let answerRevision = 0;
-      let lastCompletedResult: string | undefined;
+      completedResult.current = undefined;
       const delegated = new Set<string>();
       interruptCurrent.current = () => {
         ++answerRevision;
         ++actionRevision.current;
         setActionBusy(false);
-        lastCompletedResult = undefined;
+        completedResult.current = undefined;
         pendingAnswers = 0;
         delegationTimers.current.forEach(clearTimeout);
         delegationTimers.current.clear();
@@ -572,7 +574,7 @@ export function Nova({
         if (token !== generation.current || dc.readyState !== "open") return;
         const preview = transcript.capture(offsetMs, false);
         const actionRequest = preview && (novaActionIntent(preview.text) || novaConnectorQuestion(preview.text));
-        if (actionsOnly && (!preview?.text || isNovaConversationOnly(preview.text))) {
+        if (actionsOnly && (!preview?.text || (isNovaConversationOnly(preview.text) && !/^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(preview.text)))) {
           // Consume settled small talk so it cannot prefix the next real command.
           if (preview?.text) transcript.capture(offsetMs);
           return;
@@ -580,10 +582,10 @@ export function Nova({
         const request = transcript.capture(offsetMs);
         const activityId = id || `action-${++itemSequence.current}`;
         if (!request?.text || isNovaConversationOnly(request.text)) {
-          if (request?.text && /^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(request.text) && !pendingAnswers && lastCompletedResult) {
+          if (request?.text && /^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(request.text) && !pendingAnswers && completedResult.current) {
             dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
               content: "The investigation is complete. Answer the waiting question using the completed result that follows. Do not say you are still checking." }));
-            for (const content of novaCommentaryChunks(lastCompletedResult)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
+            for (const content of novaCommentaryChunks(completedResult.current)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
             return;
           }
           dc.send(
@@ -605,7 +607,7 @@ export function Nova({
         setActionBusy(false);
         setPendingAction(undefined);
         endActivities("replaced");
-        lastCompletedResult = undefined;
+        completedResult.current = undefined;
         const revision = ++answerRevision;
         pendingAnswers = 1;
         setPhase("thinking");
@@ -639,7 +641,7 @@ export function Nova({
           }
           const result =
             answer.text || "No answer available. Open Chat for details.";
-          lastCompletedResult = result;
+          completedResult.current = result;
           recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || result);
           setPhase("listening");
           dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,

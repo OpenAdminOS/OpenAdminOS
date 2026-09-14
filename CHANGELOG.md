@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Preserve Nova device-list contents across connector changes, resolve spoken Outlook and named Teams-channel requests, answer app counts directly, and avoid duplicate confirmations or stale waiting updates.
+
 - Make Nova command routing handle unfamiliar wording, clarification replies, destination corrections, and cancellation while preserving report evidence and visual approval; settled small talk stays out of subsequent commands.
 
 - Recognize conversational Nova delivery requests and connector follow-up questions, preparing reviewed reports instead of returning generic email refusals or Outlook troubleshooting advice.

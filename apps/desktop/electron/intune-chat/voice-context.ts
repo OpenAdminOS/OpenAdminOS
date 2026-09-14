@@ -57,7 +57,7 @@ export function voiceInventoryAnswer(
       const name =
         kind === "managedDevices"
           ? "Intune managed devices"
-          : "Entra device records";
+          : kind === "mobileApps" ? "Intune app catalog entries" : kind === "detectedApps" ? "detected app inventory entries" : "Entra device records";
       const status = statuses.find((s) => s.resource === kind);
       if (!status?.refreshedAt)
         return `I could not retrieve ${name}. Open Cache for connection and permission details; this does not mean there are none.`;
@@ -186,6 +186,8 @@ function classifyVoiceQuestion(question: string): VoiceQuestion | undefined {
     .replace(/^(?:tell|show) me (?=how many )/i, "")
     .replace(/[?.!]+$/, "")
     .trim();
+  const apps = /^how many (?:(intune|managed|detected|installed) )?apps(?: do (?:i|we) have(?: in (?:my|our|the) tenant)?| are there(?: in (?:my|our|the) tenant)?)?$/i.exec(text);
+  if (apps) return { kind: "inventory", resources: /detected|installed/i.test(apps[1] ?? "") ? ["detectedApps"] : apps[1] ? ["mobileApps"] : ["mobileApps", "detectedApps"] };
   const count = /^(?:what(?: is|'s) (?:the )?(?:total )?(?:number|count) of|(?:show|tell) me (?:the )?(?:total )?(?:number|count) of) (?:(intune|managed|entra) )?devices(?: (?:in|connected to|enrolled in) (?:my|our|the) tenant)?$/i.exec(text);
   if (count) return { kind: "inventory", resources: count[1]?.toLowerCase() === "entra" ? ["entraDevices"] : count[1] ? ["managedDevices"] : ["managedDevices", "entraDevices"] };
   if (/^(?:(?:what|which) (?:are )?(?:the )?(?:currently )?(?:installed )?(?:os|operating system) versions (?:are (?:currently )?installed on|are running on|on|across|of) (?:my|our|the) devices|(?:show|list)(?: me)? (?:the )?(?:os|operating system) versions (?:on|across|of) (?:my|our|the) devices)$/i.test(text))

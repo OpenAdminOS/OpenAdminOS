@@ -43,3 +43,14 @@ it('reports unavailable causes when policy settings fail or are absent', async (
     assert.match(text!, fail ? /reason unavailable.*403/ : /reason is unverified/);
   }
 });
+
+it('renders actual rows for list wording instead of asking the model to summarize unseen rows', async () => {
+  const f = fixture(async () => { throw new Error('Unexpected Graph call'); });
+  for (const question of ['Show all the non-compliant devices as a list', 'list of non-compliant devices', 'List noncompliant devices', 'Show the list of non-compliant devices']) {
+    assert.equal(voiceDeviceEvidenceIntent(question), 'compliance', question);
+    const answer = await voiceDeviceEvidenceAnswer(question, status, f.ctx, () => {});
+    assert.match(answer!, /- Test device/);
+    assert.doesNotMatch(answer!, /refer to.*rows/);
+  }
+  for (const question of ['List non-compliant devices except Windows', 'Show all the non-compliant devices in Sales as a list']) assert.equal(voiceDeviceEvidenceIntent(question), undefined);
+});

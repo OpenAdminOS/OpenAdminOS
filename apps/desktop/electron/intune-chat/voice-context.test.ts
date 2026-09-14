@@ -176,3 +176,14 @@ it('retains the device question for why they follow-ups', () => {
   assert.match(result.history, /Device A and Device B/);
   assert.match(result.planningQuestion, /Which devices are non-compliant/);
 });
+
+it('answers app counts directly without conflating catalog entries and discovered software', () => {
+  const data = [status({resource:'mobileApps',rows:4}), status({resource:'detectedApps',rows:35})];
+  const answer = voiceInventoryAnswer('How many apps do I have?', data)!;
+  assert.match(answer, /4 Intune app catalog entries/);
+  assert.match(answer, /35 detected app inventory entries/);
+  assert.doesNotMatch(answer, /39 /);
+  assert.doesNotMatch(voiceInventoryAnswer('How many Intune apps do I have?', data)!, /detected/);
+  assert.equal(voiceInventoryAnswer('How many apps do I have on Windows?',data), undefined);
+  assert.match(voiceInventoryAnswer('How many apps do I have?',[])!, /could not retrieve/);
+});

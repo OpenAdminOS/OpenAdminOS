@@ -88,6 +88,7 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
       method = 'sendMail'; args = { markdown: evidence, to, subject: 'Nova result · OpenAdminOS' }; target = to.join(', '); break;
     }
     case 'teams':
+      if (intent.channelName && intent.channelName.toLowerCase() !== str('defaultChannelName').toLowerCase()) throw new Error(`Teams is configured for ${str('defaultChannelName') || 'a different channel'}. Open Connectors to select ${intent.channelName}, then ask again.`);
       if (intent.self) throw new Error(`Your Teams connector is configured for shared destinations, not a verified private chat with you.${str('defaultTeamId') && str('defaultChannelId') ? ` I can prepare a post to ${str('defaultTeamName') || 'the configured team'} / ${str('defaultChannelName') || 'the configured channel'}. Say send this via Teams to review that shared destination.` : ' Open Connectors to choose a Teams destination.'}`);
       if (str('defaultTeamId') && str('defaultChannelId')) { method = 'postChannelMessage'; args = { markdown: evidence, teamId: str('defaultTeamId'), channelId: str('defaultChannelId') }; target = `${str('defaultTeamName') || str('defaultTeamId')} / ${str('defaultChannelName') || str('defaultChannelId')}`; }
       else if (str('defaultChatId')) { method = 'postChatMessage'; args = { markdown: evidence, chatId: str('defaultChatId') }; target = str('defaultChatName') || str('defaultChatId'); }

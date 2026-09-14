@@ -1,5 +1,5 @@
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
-import { novaCommand, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
+import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
 import { novaConnectorSetupIssue, prepareNovaAction, type NovaActionHost, type PreparedNovaAction } from "./nova-actions.js";
 import { clipVoiceText } from "./intune-chat/voice-context.js";
 import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
@@ -270,13 +270,16 @@ export class NovaService {
       session.commandContext = undefined;
       const followUp = previous && Date.now() - previous.at < 300000 &&
         (/^(?:actually|instead|no[, ]|use |make (?:it|that)|via |on |through |to my )/i.test(input.text.trim()) || input.text.trim().split(/\s+/).length <= 4);
-      let command: NovaCommand | undefined = novaCommand(input.text);
+      const context = { agents: (state.installedAgents ?? []).slice(0, 40).map(a => ({ name: a.name.slice(0, 100), slug: a.slug })), ...(followUp ? { previousRequest: previous.request } : {}) };
+      const connectorReply = novaConnectorReply(input.text);
+      let command: NovaCommand | undefined = novaContextualCommand(input.text, context);
       if (command?.kind === "run") {
         const name = command.name.toLowerCase().replace(/[^a-z0-9]/g, "");
         if (!(state.installedAgents ?? []).some(a => [a.name, a.slug].some(n => n.toLowerCase().replace(/[^a-z0-9]/g, "") === name))) command = undefined;
       }
       if (!command) {
-        const context = { agents: (state.installedAgents ?? []).slice(0, 40).map(a => ({ name: a.name.slice(0, 100), slug: a.slug })), ...(followUp ? { previousRequest: previous.request } : {}) };
+        // Keep the unfinished request available if a late speech fragment replaces classification.
+        session.commandContext = { request: (followUp ? previous.request : input.text).slice(0, 1200), at: Date.now() };
         const controller = new AbortController();
         this.pendingAnswer = controller;
         const signal = AbortSignal.any([controller.signal, session.controller.signal, AbortSignal.timeout(15000)]);
@@ -297,6 +300,8 @@ export class NovaService {
             selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
           throw new Error("This request was replaced or its tenant/provider changed.");
       }
+      if (command.kind === "research" && (novaDeliveryRequest(input.text) || (connectorReply && followUp)))
+        command = { kind: "clarify", reason: "destination" };
       if (command.kind === "clarify") {
         if (command.reason === "approval" && priorAction && Date.now() - (session.actionPreparedAt ?? 0) < 300000) {
           session.pendingAction = priorAction;
@@ -645,6 +650,10 @@ export function boundedVoiceAnswer(text: string, hasPublicSources = false): stri
   const sourceIndex = text.indexOf("\n\nPublic web sources:");
   if (sourceIndex >= 0) text = text.slice(0, sourceIndex);
   text = text.replace(/\n\nDetected matching agent:[^\n]*/g, "").trim();
+  text = text.replace(/\b(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):\d{2}(?:\.\d+)?Z\b/g, (_, year, month, day, hour, minute) => {
+    const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
+    return Number.isNaN(date.getTime()) ? "an unavailable timestamp" : date.toLocaleString("en-GB", { timeZone: "UTC", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) + " UTC";
+  });
   if (hasPublicSources) text += " Public source links are available in Chat.";
   if (text.length <= 2000) return text;
   return `${text.slice(0, 1900)}… The full answer and evidence are available in Chat.`;

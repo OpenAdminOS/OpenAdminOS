@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { novaCommand, parseNovaCommand } from '../src/shared/nova-command.js';
+import { novaCommand, novaContextualCommand, parseNovaCommand } from '../src/shared/nova-command.js';
 import { novaStopCommand, isNovaConversationOnly } from '../src/shared/nova-transcript.js';
 
 const connectors = ['Outlook','Exchange','email','WhatsApp','Teams','Slack','Discord','Signal'];
@@ -55,4 +55,27 @@ it('understands stop variants and preserves the next question', () => {
   assert.equal(novaStopCommand('Stop and tell me how many devices there are'), 'tell me how many devices there are');
   for (const text of ['Do not stop', 'What does stop mean?', 'If I say stop', 'The report says stop']) assert.equal(novaStopCommand(text), undefined, text);
   for (const text of ['Okay, are you still working?', 'Hey Nova, tell me a joke while we wait', 'Alright, thanks', 'Hey Nova', 'Okay', 'How are you doing?', 'Good morning Nova', 'Thanks Nova', 'Are you done yet?']) assert.equal(isNovaConversationOnly(text), true, text);
+});
+
+it('preserves explicit destinations and speech repairs from the Mac transcript', () => {
+  for (const [text, connector] of [
+    ['Send this via Teams to the General channel', 'teams'],
+    ['Can you send it also via WhatsApp', 'whatsapp-web'],
+    ['Can you also send it- send it with Outlook', 'outlook'],
+    ['What I want you to do is send me a list of non-compliant devices via email with the Outlook connector', 'outlook'],
+  ]) {
+    const command = novaCommand(text!);
+    assert.equal(command?.kind, 'send', text);
+    assert.equal(command?.kind === 'send' && command.connectorId, connector, text);
+  }
+  assert.deepEqual(novaCommand('I need this delivered to Alice'), {kind:'clarify', reason:'destination'});
+  for (const text of ['Send this via Teams to the General channel and email Alice', 'Send this to Alice via Teams to the General channel']) assert.notEqual(novaCommand(text)?.kind, 'send');
+});
+
+it('resolves installed names and connector clarification replies without a model', () => {
+  const context = {agents:[{name:'Tenant change audit',slug:'tenant-change-audit'}]};
+  assert.deepEqual(novaContextualCommand('Tenant change audit', context), {kind:'run',name:'tenant-change-audit'});
+  assert.deepEqual(novaContextualCommand('Outlook', context), {kind:'capabilities',topic:'connectors'});
+  assert.deepEqual(novaContextualCommand('email Outlook email', {...context,previousRequest:JSON.stringify({kind:'send',connectorId:'teams',self:false})}), {kind:'send',connectorId:'outlook',self:false});
+  assert.deepEqual(parseNovaCommand('{"kind":"send","connectorId":"whatsapp-web","self":true,"question":"those findings"}', context), {kind:'send',connectorId:'whatsapp-web',self:true});
 });

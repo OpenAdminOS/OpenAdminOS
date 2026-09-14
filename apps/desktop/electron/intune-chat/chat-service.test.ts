@@ -1254,3 +1254,34 @@ describe("Graph cache refresh concurrency and cancellation", () => {
     }
   });
 });
+
+it('renders device lists and app counts from SQLite and recognizes an installed audit name without model guesses', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'openadminos-nova-reports-'));
+  const filePath = join(dir, 'state.json');
+  await writeFile(filePath, JSON.stringify({activeProviderId:'ollama', activeModelByProviderId:{ollama:'qwen3:8b'}, activeTenantId:'tenant-test',
+    tenants:[{id:'tenant-test',displayName:'Test tenant',username:'admin@example.test',homeAccountId:'test',addedAt:new Date().toISOString()}], runs:[],
+    installedAgents:[{id:'tenant-change-audit',slug:'tenant-change-audit',name:'Tenant change audit',description:'Review directory audit logs',mode:'read',category:'policies',tier:'agent',requiresEntraTier:'free',scopes:['AuditLog.Read.All'],author:{name:'Test'},version:'1.0.0',installedAt:new Date().toISOString()}]}));
+  const requests: string[] = [];
+  const graph: RunGraphApi = {listManagedDevices:async () => [], retireManagedDevice:async () => {throw new Error('Unexpected write');}, request:async ({path}) => {
+    requests.push(path);
+    if (path === '/deviceManagement/managedDevices') return {value:[{id:'a',deviceName:'Device A',complianceState:'noncompliant'},{id:'b',deviceName:'Device B',complianceState:'noncompliant'},{id:'c',deviceName:'Compliant device',complianceState:'compliant'}]};
+    if (path === '/deviceAppManagement/mobileApps') return {value:[{id:'app-a',displayName:'Managed app'}]};
+    if (path === '/deviceManagement/detectedApps') return {value:[{id:'detected-a',displayName:'Detected app A'},{id:'detected-b',displayName:'Detected app B'}]};
+    return {value:[]};
+  }};
+  const store = new AppStateStore({filePath,tokenStore,userDataPath:dir,statsApiUrl:'',graphFactory:()=>graph,llmFactory:()=>{throw new Error('These requests must not invoke the reasoning model');}});
+  try {
+    const report = await store.streamIntuneChatMessage({content:'Show all the non-compliant devices as a list'}, ()=>{});
+    assert.match(report.assistantMessage.content, /- Device A/);
+    assert.match(report.assistantMessage.content, /- Device B/);
+    assert.doesNotMatch(report.assistantMessage.content, /Compliant device/);
+    assert.deepEqual(requests, ['/deviceManagement/managedDevices']);
+    const apps = await store.streamIntuneChatMessage({content:'How many apps do I have'}, ()=>{});
+    assert.match(apps.assistantMessage.content, /1 Intune app catalog entries/);
+    assert.match(apps.assistantMessage.content, /2 detected app inventory entries/);
+    assert.deepEqual(requests.slice(1).sort(), ['/deviceAppManagement/mobileApps','/deviceManagement/detectedApps'].sort());
+    const agent = await store.streamIntuneChatMessage({content:'Tenant change audit',refreshIfStale:false}, ()=>{});
+    assert.match(agent.assistantMessage.content, /installed read-only agent/);
+    assert.doesNotMatch(agent.assistantMessage.content, /cannot perform tenant changes/);
+  } finally {store.close();await rm(dir,{recursive:true,force:true});}
+});
