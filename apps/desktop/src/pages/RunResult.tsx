@@ -130,6 +130,7 @@ export default function RunResult() {
         createPendingIntent({
           kind: "agent-run",
           slug: run.agentSlug,
+          ...(run.officeContext ? { retryOfRunId: run.id } : {}),
           ...(run.tenantId ? { tenantId: run.tenantId } : {}),
           ...(run.providerId ? { providerId: run.providerId } : {}),
           ...(run.model ? { model: run.model } : {}),
@@ -143,10 +144,12 @@ export default function RunResult() {
     // override so re-runs don't silently drift to whatever's currently
     // active globally.
     const options: {
+      retryOfRunId?: string;
       tenantId?: string;
       providerId?: typeof run.providerId;
       model?: string;
     } = {};
+    if (run.officeContext) options.retryOfRunId = run.id;
     if (run.tenantId) options.tenantId = run.tenantId;
     if (run.providerId) options.providerId = run.providerId;
     if (run.model) options.model = run.model;

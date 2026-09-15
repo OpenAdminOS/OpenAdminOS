@@ -1480,13 +1480,15 @@ interface CountByFieldSpec {
   field: string;
   /**
    * Optional explicit list of bucket names. When provided, the output
-   * keys are exactly these (zero-filled for missing values) so the
+   * keys include these (zero-filled for absent states), plus observed values, so the
    * resulting object has a stable shape across runs — useful when the
    * downstream template renders specific keys (`{{ x.output.compliant }}`).
    * When omitted, the keys are whatever values actually appear in the
    * source array.
    */
   buckets?: string[];
+  /** Optional bucket for null, absent or empty field values. */
+  missingBucket?: string;
 }
 
 function transformCountByField(
@@ -1511,9 +1513,10 @@ function transformCountByField(
 
   for (const item of spec.source as Array<Record<string, unknown>>) {
     const raw = readFieldPath(item, spec.field);
-    if (raw === undefined || raw === null) continue;
-    const key = typeof raw === "string" ? raw : String(raw);
-    result[key] = (result[key] ?? 0) + 1;
+    const missing = raw === undefined || raw === null || (raw === "" && spec.missingBucket !== undefined);
+    if (missing && !spec.missingBucket) continue;
+    const key = missing ? spec.missingBucket! : typeof raw === "string" ? raw : String(raw);
+    Object.defineProperty(result, key, { value: (Object.hasOwn(result, key) ? result[key]! : 0) + 1, writable: true, enumerable: true, configurable: true });
   }
 
   const total = (spec.source as unknown[]).length;
@@ -1569,6 +1572,7 @@ async function runLlmSkill(
         `Prompt began with: ${promptSnippet}${promptSnippet.length === 160 ? "…" : ""}`,
     );
   }
+  if (!cleaned) throw new Error(`LLM step "${skill.label}" returned no usable answer. Retry with a smaller task or another configured model.`);
   return {
     text: cleaned,
     model: completion.model,

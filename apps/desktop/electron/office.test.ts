@@ -357,6 +357,10 @@ test("approval expires independently and rejects changed workflow consent", asyn
     run.status = "awaiting-confirmation";
     await f.service.tick();
     await f.service.validateApproval(run);
+    f.context.runs.push({ ...run, id: "manual-retry", status: "running", office: undefined,
+      officeContext: { tenantId: "tenant-a", question: "Retry", instructions: "", evidence: [] } });
+    await assert.rejects(f.service.validateApproval(run), /execution slot/);
+    f.context.runs.pop();
     f.context.providerConfigKey = "changed";
     await assert.rejects(f.service.validateApproval(run), /changed/);
     f.advance(600001);

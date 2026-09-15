@@ -3142,6 +3142,7 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     throw new Error("start run options must be an object.");
   }
   const options: StartRunOptions = {};
+  if (value.retryOfRunId !== undefined) options.retryOfRunId = requireBoundedString(value.retryOfRunId, "startRun.retryOfRunId", 256);
   if (value.tenantId !== undefined) {
     options.tenantId = requireBoundedString(value.tenantId, "startRun.tenantId", 256);
   }

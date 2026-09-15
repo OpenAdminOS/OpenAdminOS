@@ -91,6 +91,40 @@ export interface RunServiceHost {
 
 export class RunService {
   private readonly controllers = new Map<string, AbortController>();
+  private readonly progress = new Map<string, { snapshot: RunRecord; waiters: Array<{ resolve(): void; reject(error: unknown): void }> }>();
+  private readonly progressDrains = new Set<string>();
+
+  /** Coalesce cumulative streaming snapshots so a terminal state cannot queue behind every token. */
+  queueRunSnapshot(run: RunRecord): Promise<void> {
+    const finished = new Promise<void>((resolve, reject) => {
+      const pending = this.progress.get(run.id);
+      if (pending) {
+        pending.snapshot = run;
+        pending.waiters.push({ resolve, reject });
+      } else {
+        this.progress.set(run.id, { snapshot: run, waiters: [{ resolve, reject }] });
+      }
+    });
+    if (!this.progressDrains.has(run.id)) {
+      this.progressDrains.add(run.id);
+      void this.drainProgress(run.id);
+    }
+    return finished;
+  }
+
+  private async drainProgress(runId: string): Promise<void> {
+    try {
+      while (this.progress.has(runId)) {
+        const pending = this.progress.get(runId)!;
+        this.progress.delete(runId);
+        try {
+          await this.persistRunSnapshot(pending.snapshot);
+          for (const waiter of pending.waiters) waiter.resolve();
+        } catch (error) { for (const waiter of pending.waiters) waiter.reject(error); }
+      }
+    } finally { this.progressDrains.delete(runId); }
+  }
+
 
   constructor(private readonly host: RunServiceHost) {}
 
@@ -174,6 +208,15 @@ export class RunService {
         "run",
       );
 
+      if (options.retryOfRunId) {
+        const original = persisted.runs.find(run => run.id === options.retryOfRunId);
+        if (!original || original.agentSlug !== agentSlug || !original.officeContext || !original.tenantId || !isTerminalRunStatus(original.status)) throw new Error("The original Team task is unavailable or still running. Open Agent Team to review the assignment.");
+        if (agent.mode !== 'read') throw new Error("Retry write assignments from Agent Team so their assignment approval is reviewed again.");
+        if (options.tenantId && options.tenantId !== original.tenantId) throw new Error("A Team retry cannot move evidence to another tenant.");
+        if (options.office || options.officeContext) throw new Error("A retry must use the original host-owned task context.");
+        options = { ...options, tenantId: original.tenantId, providerId: options.providerId ?? original.providerId, model: options.model ?? original.model, officeContext: structuredClone(original.officeContext) };
+      }
+
       const providers = await this.host.listProviders();
       // Honor a per-run provider override if supplied; otherwise fall
       // back to the globally-active provider. Unknown ids are an error
@@ -235,6 +278,10 @@ export class RunService {
         );
       }
 
+      if (options.retryOfRunId && activeProvider?.isLocal !== true) {
+        throw new Error("Review and retry this assignment in Agent Team to confirm the hosted provider destination before sending its evidence.");
+      }
+
       // Resolve the effective tenant at queue time. Runs cannot proceed
       // without a connected tenant — onboarding is the gate that gets a
       // user here in the first place, but defend in depth.
@@ -274,16 +321,17 @@ export class RunService {
         }
       }
 
-      if (options.office && persisted.runs.some(r=>r.office && ["queued","running"].includes(r.status))) throw new Error("Team compute slot is occupied. This assignment remains queued.");
+      if ((options.office || options.officeContext) && persisted.runs.some(r=>(r.office || r.officeContext) && ["queued","running"].includes(r.status))) throw new Error("Team compute slot is occupied. This assignment remains queued.");
       const queuedRun = createQueuedRun({ agent, providerId, model });
       queuedRun.assessmentKey = createHash("sha256").update(JSON.stringify({ schema: 1,
         slug: agent.slug, version: agent.version, manifest: agent.provenance?.manifestSha256,
         settings: agent.settings, personaId: options.office?.personaId, officeAssessment:options.officeContext?.assessmentKey })).digest("hex");
+      if (options.retryOfRunId) queuedRun.retryOfRunId = options.retryOfRunId;
       queuedRun.tenantId = pinnedTenantId;
       queuedRun.trigger = options.trigger ?? "manual";
       if (options.office) queuedRun.office = options.office;
       if (options.officeContext) {
-        if (!options.office || options.officeContext.tenantId !== pinnedTenantId || Buffer.byteLength(JSON.stringify(options.officeContext), "utf8") > 40000) throw new Error("Invalid team task context.");
+        if ((!options.office && !options.retryOfRunId) || options.officeContext.tenantId !== pinnedTenantId || Buffer.byteLength(JSON.stringify(options.officeContext), "utf8") > 40000) throw new Error("Invalid team task context.");
         for (const source of options.officeContext.evidence) {
           const evidence = persisted.runs.find(r=>r.id===source.runId);
           if (!evidence || evidence.tenantId !== pinnedTenantId || evidence.status !== "completed") throw new Error("Team evidence is missing or belongs to another tenant.");
@@ -710,7 +758,7 @@ export class RunService {
         confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
         onProgress: (next) =>
-          this.persistRunSnapshot(this.stampTenant(next, selection.tenantId)),
+          this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
@@ -771,7 +819,7 @@ export class RunService {
         confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
         onProgress: (next) =>
-          this.persistRunSnapshot(this.stampTenant(next, selection.tenantId)),
+          this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);

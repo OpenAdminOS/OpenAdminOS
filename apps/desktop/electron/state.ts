@@ -2161,6 +2161,8 @@ export class AppStateStore {
       // receive progress snapshots, logs, connector audit entries, or results.
       if (run.status === "queued" || run.status === "running" || (run.office && officeMissionIds.has(run.office.missionId))) {
         active.add(run.id);
+        if (run.retryOfRunId && knownRunIds.has(run.retryOfRunId)) active.add(run.retryOfRunId);
+        for (const source of run.officeContext?.evidence ?? []) if (knownRunIds.has(source.runId)) active.add(source.runId);
       }
       // Exclusion: awaiting-confirmation runs are the human-in-the-loop write
       // safety gate. Pruning must never erase a pending approval decision.

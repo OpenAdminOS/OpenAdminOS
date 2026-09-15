@@ -10,8 +10,8 @@ pipeline lives entirely in `manifest.yaml` and is interpreted by
 
 ## Pipeline
 
-1. **Load managed device inventory** — `GET /deviceManagement/managedDevices` (one call, no paging knob).
-2. **Count devices by compliance state** — the `count-by-field` transform tallies devices by `complianceState`. Buckets are pinned to `compliant` / `noncompliant` / `unknown` so the result shape is stable.
+1. **Load managed device inventory** — `GET /deviceManagement/managedDevices` (follows collection pages).
+2. **Count devices by compliance state** — the `count-by-field` transform tallies devices by `complianceState`. The result preserves all reported states, including grace period, errors, conflicts and future states. Missing or empty states count as `unknown`, so the buckets reconcile with the inventory total.
 3. **Break down posture signals** — count by operating system, ownership, and enrollment type.
 4. **Find stale inventory** — flag devices whose `lastSyncDateTime` is older than `staleSyncDays` (default 14).
 5. **Summarise with LLM** — compact report with main finding, drift signals, and recommended next action.

@@ -762,7 +762,7 @@ export class OfficeService {
       if (current) continue;
       // A retained mission must never replay a child whose run was removed.
       if (
-        c.runs.some((r) => r.office && ["queued", "running"].includes(r.status))
+        c.runs.some((r) => (r.office || r.officeContext) && ["queued", "running"].includes(r.status))
       )
         continue;
       try {
@@ -914,7 +914,7 @@ export class OfficeService {
         continue;
       if (
         p.planning === "model" &&
-        c.runs.some((r) => r.office && ["running", "queued"].includes(r.status))
+        c.runs.some((r) => (r.office || r.officeContext) && ["running", "queued"].includes(r.status))
       )
         continue;
       const watch = p.watch!;
@@ -1128,7 +1128,7 @@ export class OfficeService {
       c.runs.some(
         (r) =>
           r.id !== run.id &&
-          r.office &&
+          (r.office || r.officeContext) &&
           ["queued", "running"].includes(r.status),
       )
     )

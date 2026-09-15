@@ -483,6 +483,8 @@ export type RunStatus =
   | "cancelled";
 
 export interface StartRunOptions {
+  /** Host reloads a prior read-only Team task; renderer never supplies its evidence. */
+  retryOfRunId?: string;
   /** Host-owned Office correlation, never accepted by the generic renderer run IPC. */
   office?: { missionId: string; personaId: string; step: number };
   officeContext?: OfficeTaskContext;
@@ -681,6 +683,7 @@ export interface RunLogRecord {
 }
 
 export interface RunRecord {
+  retryOfRunId?: string;
   assessmentKey?: string;
   office?: { missionId: string; personaId: string; step: number };
   officeContext?: OfficeTaskContext;

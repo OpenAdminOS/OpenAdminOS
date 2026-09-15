@@ -203,3 +203,13 @@ describe("RunResult write confirmation", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+it('retries Team evidence by source ID without sending evidence through the renderer', async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: 'failed', plan: undefined, officeContext: { tenantId: 'tenant-1', question: 'Draft a diagnostic.', evidence: [] } });
+  const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: 'read' })], runs: [run] }));
+  renderRoute(<RunResult />, { path: '/runs/:id', route: `/runs/${run.id}`, bridge });
+  await user.click(await screen.findByRole('button', { name: 'Run again' }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ retryOfRunId: run.id })));
+  expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, { retryOfRunId: run.id, tenantId: run.tenantId, providerId: run.providerId, model: run.model });
+});

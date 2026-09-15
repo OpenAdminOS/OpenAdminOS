@@ -92,7 +92,7 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { tenantId?: string; providerId?: ProviderId; model?: string } | null
+    { retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
@@ -131,6 +131,7 @@ export default function AgentDetail({
   };
 
   const queueRunPreflight = useCallback((choice?: {
+    retryOfRunId?: string;
     tenantId?: string;
     providerId?: ProviderId;
     model?: string;
@@ -141,6 +142,7 @@ export default function AgentDetail({
         createPendingIntent({
           kind: "agent-run",
           slug: agent.slug,
+          ...(choice?.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
           ...(choice?.tenantId ? { tenantId: choice.tenantId } : {}),
           ...(choice?.providerId ? { providerId: choice.providerId } : {}),
           ...(choice?.model ? { model: choice.model } : {}),
@@ -202,6 +204,7 @@ export default function AgentDetail({
       ...(restoredTenantId ? { tenantId: restoredTenantId } : {}),
       ...(resumed.providerId ? { providerId: resumed.providerId } : {}),
       ...(resumed.model ? { model: resumed.model } : {}),
+      ...(resumed.retryOfRunId ? { retryOfRunId: resumed.retryOfRunId } : {}),
     });
   }, [
     activeTenant,
@@ -248,6 +251,7 @@ export default function AgentDetail({
   };
 
   const handleStartRun = async (choice?: {
+    retryOfRunId?: string;
     tenantId?: string;
     providerId?: ProviderId;
     model?: string;
@@ -257,8 +261,9 @@ export default function AgentDetail({
     try {
       await waitForDeliverySaves();
       const options =
-        choice && (choice.tenantId || choice.providerId || choice.model)
+        choice && (choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model)
           ? {
+              ...(choice.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
               ...(choice.tenantId ? { tenantId: choice.tenantId } : {}),
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
               ...(choice.model ? { model: choice.model } : {}),
