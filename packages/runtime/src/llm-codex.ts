@@ -326,8 +326,14 @@ async function* runCodexExecStream(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): AsyncIterable<LlmStreamChunk> {
+  const authStore = await readCodexAuthStore(input.homePath);
   const args = [
     "exec",
+    // Keep existing authentication, but do not import terminal-user agents,
+    // MCP servers, plugins or hooks into an app-owned completion.
+    "--ignore-user-config",
+    "--ignore-rules",
+    ...(authStore ? ['--config', `cli_auth_credentials_store="${authStore}"`] : []),
     "--ephemeral",
     "--skip-git-repo-check",
     "-s",
@@ -336,6 +342,24 @@ async function* runCodexExecStream(input: {
     ...(input.model ? ["--model", input.model] : []),
     "--config",
     'model_reasoning_effort="low"',
+    ...[
+      'project_doc_max_bytes=0',
+      'skills.include_instructions=false',
+      'features.skip_host_skill_discovery=true',
+      'features.hooks=false',
+      'features.plugins=false',
+      'features.apps=false',
+      'features.shell_tool=false',
+      'features.unified_exec=false',
+      'features.code_mode_host=false',
+      'features.browser_use=false',
+      'features.computer_use=false',
+      'features.image_generation=false',
+      'features.multi_agent=false',
+      'features.multi_agent_v2=false',
+      'web_search="disabled"',
+      'approval_policy="never"',
+    ].flatMap(value => ['--config', value]),
     "--output-last-message",
     input.outputPath,
     "-",
@@ -423,6 +447,9 @@ async function* runCodexExecStream(input: {
       throw new Error("Codex CLI request stopped by user.");
     }
     const detail = stderr || stdout;
+    if (/unexpected argument.*--ignore-(?:user-config|rules)|unknown feature/i.test(detail)) {
+      throw new Error("Update Codex CLI to a version that supports isolated app completions, then test the provider again in Settings.");
+    }
     throw new Error(
       detail
         ? `Codex CLI command failed: ${truncate(detail, 500)}`
@@ -442,6 +469,14 @@ async function* runCodexExecStream(input: {
     done: true,
     model,
   };
+}
+
+/** Preserve the sign-in backend without loading user tools or instructions. */
+async function readCodexAuthStore(homePath: string): Promise<string | undefined> {
+  try {
+    const root = (await readFile(join(homePath, 'config.toml'), 'utf8')).split(/^\s*\[/m)[0] ?? '';
+    return root.match(/^\s*cli_auth_credentials_store\s*=\s*["'](file|keyring|auto|ephemeral)["']/m)?.[1];
+  } catch { return undefined; }
 }
 
 function parseCodexJsonLine(line: string): unknown | undefined {
