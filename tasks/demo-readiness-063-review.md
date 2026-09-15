@@ -66,3 +66,33 @@ Private answers, prompts, run identifiers and draft artifacts remain outside thi
 public repository. No tenant changes, message sends or generated-script execution
 were performed. PR publication/checks and installed-build results will be recorded
 when complete. This review does not mark the live demo ready.
+
+## Codex provider and UI audit follow-up
+
+The admin selected the already configured OpenAI Codex provider for Team rehearsals,
+with supplied tenant evidence sent to that provider. Three source-runtime chains
+completed before isolation and another three completed after isolation. Every chain
+completed the assessment, two evidence reviews and script draft. The isolated trials
+reported the correct structured totals and retained ancestor evidence through the
+last handoff. Their three scripts include existing delegated authentication checks,
+GET pagination, selected fields and explicit timestamp parsing. All six Codex scripts
+pass PowerShell syntax and installed command-parameter metadata checks. None was
+executed. Assessment recommendations still require judgment: old inventory alone
+does not establish a broken check-in, as the downstream reviews correctly note.
+
+The initial Codex trial inherited terminal hooks and appended an unrelated memory
+lookup error. The adapter now preserves existing sign-in while excluding user
+configuration, rules, hooks, skills and terminal tools. A live isolated connection
+and three repeated chains passed without those contamination markers.
+
+Computer Use found an Escape dismissal failure in the per-run model menu and an
+actual JSON/CSV audit-export failure above the renderer text-file limit. Both have
+source fixes and regression coverage. The audit ledger in `ui-audit-063.md` records
+verified controls and untested boundaries. Local diagnostics export was saved and
+parsed successfully. The full installed-app audit and all-agent runs remain pending;
+the old app window became inaccessible to Computer Use (`cgWindowNotFound`).
+
+The 492e08d CI typecheck caught an unsupported option in the new renderer test,
+added after the prior local typecheck. The query is corrected, and the desktop
+TypeScript checks and all 12 Settings tests pass locally. New-head CI and installer
+packaging must pass before installed acceptance. No release has been published.

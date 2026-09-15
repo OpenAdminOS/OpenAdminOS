@@ -54,3 +54,25 @@ or agent works has been established yet.
 - General > Export audit log fails for both JSON and CSV with `content is too long` at 702 retained run records. Source now saves host-generated content directly through the native dialog; large-file regression passes. Installed verification pending.
 - Privacy > Copy telemetry payload and documentation Refresh accepted clicks but exposed no visible confirmation. Copy success is not established by accessibility state alone.
 - General retention prune controls invoke permanent deletion directly in source. Not clicked against retained user evidence.
+
+## Additional controls checked
+
+- Privacy registry Change opens review, custom input exposes trust acknowledgment,
+  Use official restores the canonical field, and Cancel retains the original source.
+- Documentation Install from folder opens the native picker; Cancel returns with the
+  existing index available. Actual replacement was not needed for this baseline.
+- About Create issue opens a review with public-data warnings and disabled submission
+  until acknowledgment. Cancel exits without publication.
+- Export diagnostics JSON saved to the private local review folder. The UI reported
+  success and the file parsed as JSON. No upload occurred.
+- What's new opened the correct public CHANGELOG in the browser; test tab closed.
+- Chat Clear history opens a deletion review; Cancel preserved the conversations.
+- Chat Clear active tenant cache opens a correctly scoped deletion review. No Clear
+  action was performed. Computer Use then lost the window before cancellation could
+  be verified. Earlier commentary overstated that cancellation; this remains pending.
+- Gateway is off. Enabling external-client tenant access requires a separate concrete
+  access decision, so the enable control was inspected without activating it.
+- About retains an outdated `0.2 readiness` heading in the 0.6.3 build, cosmetic issue.
+
+Computer Use stopped finding the app window after the cache review, including after
+session reset and full-path reacquisition. The user was asked to restore the window.
