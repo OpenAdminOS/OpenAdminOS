@@ -1501,6 +1501,7 @@ export class IntuneChatService {
       });
     }
     const planned = planChatContext(content);
+    if (voiceDeviceEvidenceIntent(content) && !planned.hasWriteIntent) planned.resources = ["managedDevices"];
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1588,12 +1589,16 @@ export class IntuneChatService {
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
 
+    const directDeviceAnswer = !planned.hasWriteIntent ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id), () => {}, entry => { (toolTrace ??= []).push(entry); }) : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
       responseModel = undefined;
     } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
+    } else if (directDeviceAnswer !== undefined) {
+      assistantContent = directDeviceAnswer;
+      responseModel = undefined;
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
       const modelQuestion = workspaceContext

@@ -122,3 +122,38 @@ it("preloads all pages and preserves the complete snapshot after a paging failur
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it('preloads incidents within their 50-row endpoint limit and follows the next page', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'incidents-preload-'));
+  const filePath = join(dir, 'state.json');
+  await writeFile(filePath, JSON.stringify({ activeTenantId: 'tenant-1', activeProviderId: 'ollama', tenants: [{ id: 'tenant-1', displayName: 'Test', homeAccountId: 'test', username: 'test@example.invalid', addedAt: new Date().toISOString() }], installedAgents: [], runs: [] }));
+  const requests: string[] = [];
+  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: '', tokenStore: { read: async () => '', write: async () => {} }, graphFactory: () => ({
+    request: async (input: { path: string; query?: Record<string, string> }) => {
+      assert.equal(input.path, '/security/incidents');
+      if (Number(input.query?.$top) > 50) throw Error("The limit of '50' for Top query has been exceeded.");
+      requests.push(input.query?.$skiptoken ?? 'first');
+      return input.query?.$skiptoken ? { value: [{ id: 'incident-last' }] } : {
+        value: Array.from({ length: 50 }, (_, i) => ({ id: `incident-${i}` })),
+        '@odata.nextLink': 'https://graph.microsoft.com/beta/security/incidents?$top=50&$skiptoken=next',
+      };
+    },
+  } as unknown as RunGraphApi) });
+  try {
+    await store.startGraphCachePreload({ tenantId: 'tenant-1', resources: ['securityIncidents'] });
+    for (let i = 0; i < 500; i++) {
+      const status = await store.getGraphCacheStatus('tenant-1');
+      if (status.preload?.status !== 'running') {
+        assert.equal(status.preload?.status, 'complete');
+        const incidents = status.resources.find(r => r.resource === 'securityIncidents')!;
+        assert.equal(incidents.rows, 51);
+        assert.equal(incidents.pageLimitReached, false);
+        assert.equal(incidents.lastError, undefined);
+        assert.deepEqual(requests, ['first', 'next']);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.fail('Incident preload did not complete');
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});

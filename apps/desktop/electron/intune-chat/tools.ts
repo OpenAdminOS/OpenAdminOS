@@ -27,6 +27,8 @@ import type {
   IntelligenceSqliteStore,
 } from "./sqlite-store.js";
 
+class InvalidCacheQueryError extends Error {}
+
 export const QUERY_CACHE_ROW_CAP = 50;
 export const GRAPH_GET_ROW_CAP = 50;
 export const GRAPH_GET_PAYLOAD_BYTE_CAP = 24_000;
@@ -96,6 +98,7 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
           description:
             'Only for comparisons other than equality: [{"field":"lastSyncDateTime","op":"lt","value":"2026-01-01"}]. Ops: eq, neq, contains, startsWith, in, lt, lte, gt, gte.',
         },
+        select: { type: "array", items: { type: "string" }, description: "Optional returned fields (at most 20). For counts use select:[id] and limit:1; totalCount still counts all matches." },
         sort: {
           type: "object",
           description: "{field, direction:'asc'|'desc'}",
@@ -206,7 +209,7 @@ export const INTUNE_CHAT_TOOL_DEFINITIONS: readonly IntuneChatToolDefinition[] =
 export function toolDefinitionsForPrompt(webSearch = false, compact = false): string {
   if (compact) return [
     "- list_cached_resources {}: list available resource names, counts, freshness and errors.",
-    '- query_cache {resource, where?:{field:value}, filters?:[{field,op,value}], limit?:number}: read up to 50 cached rows; default 25. Filters support eq,neq,contains,startsWith,in,lt,lte,gt,gte. Use managedDevices for Intune devices, entraDevices for directory devices. Empty matches do not prove an empty tenant.',
+    '- query_cache {resource, where?:{field:value}, filters?:[{field,op,value}], select?:string[], limit?:number}: read up to 50 cached rows; default 25. Filters support eq,neq,contains,startsWith,in,lt,lte,gt,gte. Use managedDevices for Intune devices, entraDevices for directory devices. Empty matches do not prove an empty tenant.',
     '- find_graph_endpoint {query, limit?:number}: discover permitted GET paths; do not guess unknown paths.',
     '- graph_get {path, query?:object}: live Graph GET only; query may include $select,$top,$filter,$orderby,$count. At most 50 rows.',
     '- refresh_resource {resource}: refresh one cached resource before querying missing/stale data.',
@@ -256,7 +259,7 @@ export async function executeIntuneChatTool(
       error: message,
     };
     return {
-      result: { ok: false, error: message },
+      result: { ok: false, error: message, ...(caught instanceof InvalidCacheQueryError ? { code: "invalid-cache-query" } : {}) },
       trace,
     };
   }
@@ -323,8 +326,38 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
 
 function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
   const resource = resourceParam(params, "resource");
-  const filters = filtersParam(params);
-  const sort = sortParam(params);
+  let filters: GraphCacheQueryPredicate[] | undefined;
+  let sort: ReturnType<typeof sortParam>;
+  let selectedFields: string[] | undefined;
+  const availableFields = fieldsForResource(ctx, resource);
+  try {
+    const extras = Object.keys(params as Record<string, unknown>).filter(key => !['resource', 'where', 'filters', 'sort', 'limit', 'select'].includes(key));
+    if (extras.length) throw new Error(`Unsupported query_cache parameters: ${extras.join(', ')}. Use resource, where, filters, sort, select or limit; no supplied criteria were applied.`);
+    const projectionFields = [...(pathForResource(resource).select ?? []), ...ctx.store.graphCacheFields(ctx.tenantId, resource)];
+    const selection = (params as Record<string, unknown>).select;
+    if (selection !== undefined) {
+      if (!Array.isArray(selection) || !selection.length || selection.length > 20 || selection.some(field => typeof field !== 'string' || !projectionFields.includes(field))) throw new Error('select must contain 1–20 resource field names; normalized filter aliases cannot be projected.');
+      selectedFields = selection as string[];
+    }
+    filters = filtersParam(params);
+    sort = sortParam(params);
+    for (const field of [...(filters ?? []).map(f => f.field), ...(sort ? [sort.field] : [])]) {
+      if (!availableFields.includes(field)) throw new Error(`Unsupported ${resource} field: ${field}. This failed query provides no matching count.`);
+    }
+    for (const filter of filters ?? []) {
+      const types = ctx.store.graphCacheFieldTypes(ctx.tenantId, resource, filter.field);
+      if (types.length && types.every(type => type === 'true' || type === 'false')) {
+        const values = Array.isArray(filter.value) ? filter.value : [filter.value];
+        if (values.some(value => typeof value !== 'boolean' && value !== null)) throw new Error(`${filter.field} is a boolean field. Use true or false, not strings or numbers.`);
+      }
+      if (filter.field === 'isEncrypted' && (filter.op !== 'eq' && filter.op !== 'neq' || typeof filter.value !== 'boolean' && filter.value !== null)) {
+        throw new Error('isEncrypted requires eq or neq with boolean true, false, or null (unknown), not an encryption-state string. Retry the query.');
+      }
+    }
+  } catch (error) {
+    throw new InvalidCacheQueryError(`${error instanceof Error ? error.message : String(error)} Use where:{"fieldName":value} or filters:[{"field":"fieldName","op":"eq","value":value}]. Values must be scalars. Available fields: ${availableFields.join(', ')}.`);
+  }
+  const snapshot = ctx.store.getGraphCacheStatus(ctx.tenantId, [definitionForResource(resource)])[0];
   const limit = numberParam(params, "limit") ?? 25;
   const result = ctx.store.queryGraphCache({
     tenantId: ctx.tenantId,
@@ -356,19 +389,19 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
       emptyHint = {
         cachedRowsForResource,
         ...(availableFields ? { availableFields } : {}),
-        note: `No row matched this filter, but ${resource} holds ${cachedRowsForResource} cached rows, so the tenant is NOT empty and you must not answer that it has none. The filter named a field or value that does not exist on these rows. Retry using one of availableFields above, matching the field whose name is closest to what the question asks about.`,
+        note: `No row matched this filter, but this ${resource} snapshot holds ${cachedRowsForResource} cached rows. Report no matches in this snapshot, not an empty tenant. The validated filter matched no cached rows. This is not proof of the current tenant-wide count; check snapshot coverage and freshness.`,
       };
     } else {
       emptyHint = {
         cachedRowsForResource: 0,
-        note: `Nothing is cached for ${resource}, so this query cannot show whether the tenant has any. Refresh the resource before concluding anything about it.`,
+        note: snapshot?.refreshedAt ? `The ${resource} snapshot contains zero rows. Check snapshot coverage and freshness before making a tenant-wide claim.` : `Nothing is cached for ${resource}, so this query cannot show whether the tenant has any. Refresh the resource before concluding anything about it.`,
       };
     }
   }
 
-  const availableFields = fieldsForResource(ctx, resource);
   return {
     resource,
+    snapshot,
     totalCount: result.totalCount,
     returnedRows: result.returnedRows,
     limit: result.limit,
@@ -377,49 +410,20 @@ function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
     ...(emptyHint ?? {}),
     rows: result.rows.map((entry) => ({
       refreshedAt: entry.refreshedAt,
-      row: compactValue(entry.row),
+      row: compactValue(selectedFields && entry.row && typeof entry.row === 'object' ? Object.fromEntries(selectedFields.filter(field => Object.hasOwn(entry.row as object, field)).map(field => [field, (entry.row as Record<string, unknown>)[field]])) : entry.row),
     })),
   };
 }
 
 export const FIND_ENDPOINT_LIMIT_CAP = 15;
 
-/** How many field names to advertise for a resource. */
-const FIELD_HINT_CAP = 40;
-
-/**
- * Field names present on the cached rows of a resource.
- *
- * A model cannot filter on a field it does not know exists. Measured
- * against a real tenant, "which laptops are not encrypted" was answered
- * with "none" while six of nine devices carried `isEncrypted: false`,
- * simply because the model never saw that the field was available.
- * Advertising the field list on every read, rather than only after a
- * query has already failed, is what makes an unanticipated question
- * answerable.
- *
- * Only `query_cache` carries this. The cache inventory covers every
- * resource at once, so attaching field lists there added dozens of
- * names per resource to a single observation and slowed the model down
- * far more than it helped.
- */
-function fieldsForResource(
-  ctx: IntuneChatToolContext,
-  resource: GraphCacheResourceKind,
-): string[] | undefined {
-  try {
-    const sample = ctx.store.queryGraphCache({
-      tenantId: ctx.tenantId,
-      resource,
-      limit: 1,
-    });
-    const row = sample.rows[0]?.row;
-    if (!row || typeof row !== "object" || Array.isArray(row)) return undefined;
-    const keys = Object.keys(row as Record<string, unknown>);
-    return keys.length > 0 ? keys.slice(0, FIELD_HINT_CAP) : undefined;
-  } catch {
-    return undefined;
-  }
+/** Selected schema fields remain valid even when all cached values are absent. */
+function fieldsForResource(ctx: IntuneChatToolContext, resource: GraphCacheResourceKind): string[] {
+  return [...new Set([
+    ...(pathForResource(resource).select ?? []),
+    ...ctx.store.graphCacheFields(ctx.tenantId, resource),
+    'id', 'graphId', 'searchText', 'displayName', 'lastSeenAt', 'refreshedAt',
+  ])];
 }
 
 /**
@@ -862,6 +866,7 @@ function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
   const predicates: GraphCacheQueryPredicate[] = [];
 
   const where = record.where;
+  if (where !== undefined && (!where || typeof where !== "object" || Array.isArray(where))) throw new Error("query_cache where must be a field/value object.");
   if (where && typeof where === "object" && !Array.isArray(where)) {
     for (const [field, value] of Object.entries(where as Record<string, unknown>)) {
       predicates.push({ field, op: "eq", value: value as GraphCacheQueryPredicate["value"] });
@@ -869,11 +874,11 @@ function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
   }
 
   const filters = record.filters;
+  if (filters !== undefined && !Array.isArray(filters)) throw new Error("query_cache filters must be an array.");
   if (Array.isArray(filters)) {
     for (const filter of filters) {
       if (!filter || typeof filter !== "object" || Array.isArray(filter)) {
-        // Stray scalars inside the array are ignored rather than fatal.
-        continue;
+        throw new Error("Every query_cache filter must be an object.");
       }
       const entry = filter as Record<string, unknown>;
       if (typeof entry.field === "string") {
@@ -901,7 +906,14 @@ function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
     }
   }
 
-  return predicates.length > 0 ? predicates.slice(0, 8) : undefined;
+  if (predicates.length > 8) throw new Error("query_cache supports at most eight filters; no filters were applied.");
+  for (const predicate of predicates) {
+    const values = predicate.op === 'in' ? predicate.value : [predicate.value];
+    if (!Array.isArray(values) || values.length > 20 || values.some(value => value !== null && !['string', 'number', 'boolean'].includes(typeof value))) throw new Error("query_cache needs scalar filter values, or at most 20 values for in.");
+    if (predicate.op === 'in' && (values as unknown[]).includes(null)) throw new Error("Use eq or neq for null instead of an in filter.");
+    if (predicate.value === null && predicate.op !== 'eq' && predicate.op !== 'neq') throw new Error("Null filters require eq or neq.");
+  }
+  return predicates.length > 0 ? predicates : undefined;
 }
 
 function isGraphCacheQueryOperator(value: string): value is GraphCacheQueryPredicate["op"] {

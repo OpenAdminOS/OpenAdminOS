@@ -2,37 +2,65 @@ import { graphCacheRequestFromNextLink } from "../state-helpers.js";
 import { randomUUID } from "node:crypto";
 import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from '@openadminos/agent-sdk';
 import type { IntuneChatToolContext } from './tools.js';
+import type { GraphCacheQueryPredicate } from './sqlite-store.js';
 
-export function voiceDeviceEvidenceIntent(question: string): 'compliance' | 'encryption' | 'causes' | undefined {
+interface DeviceEvidenceQuery {
+  kind: 'compliance' | 'encryption' | 'causes';
+  filters: GraphCacheQueryPredicate[];
+  label: string;
+  countOnly?: boolean;
+}
+
+// Only consume the whole question when every requested criterion is supported.
+// Group, version, ownership and compound filters remain investigative queries.
+function deviceEvidenceQuery(question: string): DeviceEvidenceQuery | undefined {
   const q = question.toLowerCase().trim().replace(/non[ -]compliant/g, 'noncompliant')
     .replace(/^(?:stop[,.!]?\s+)?(?:can|could|would) you (?:please )?(?:tell me )?/, '')
     .replace(/^(?:please |tell me )/, '').replace(/[?.!]+$/, '').trim();
-  if (/^(?:(?:list|show)(?: me)? )?(?:(?:a |the )?list of )?(?:all )?(?:the )?noncompliant devices(?: as a list)?$/.test(q)) return 'compliance';
-  if (/^(?:(?:list|show)(?: me)? )?(?:(?:a |the )?list of )?(?:all )?(?:the )?unencrypted devices(?: as a list)?$/.test(q)) return 'encryption';
-  if (/^(?:why (?:they|these devices|those devices|my devices|the devices) (?:are|are marked)|why are (?:they|these devices|those devices|my devices|the devices)) noncompliant$/.test(q)) return 'causes';
-  if (/^(?:(?:list|show)(?: me)? (?:the )?devices (?:that |which )?(?:are )?|which (?:of my )?devices are )noncompliant$/.test(q)) return 'compliance';
-  if (/^(?:(?:list|show)(?: me)? (?:the )?devices (?:that |which )?(?:are )?|which (?:of my )?devices are )(?:not encrypted|unencrypted)$/.test(q)) return 'encryption';
-  return undefined;
+  if (/^(?:why (?:they|these devices|those devices|my devices|the devices) (?:are|are marked)|why are (?:they|these devices|those devices|my devices|the devices)) noncompliant$/.test(q)) {
+    return { kind: 'causes', filters: [{ field: 'complianceState', op: 'eq', value: 'noncompliant' }], label: 'are marked non-compliant' };
+  }
+  const osNames: Record<string, string> = { windows: 'Windows', macos: 'macOS', ios: 'iOS', android: 'Android', linux: 'Linux' };
+  const os = '(?:(windows|macos|ios|android|linux) )?';
+  const state = '(not encrypted|unencrypted|encrypted|noncompliant|compliant|in grace period|with unknown encryption status)';
+  const suffix = new RegExp('^(?:(?:list|show)(?: me)? (?:all )?(?:the )?|which (?:of my )?|how many )' + os + 'devices (?:that |which )?(?:are )?' + state + '(?: as a list)?$').exec(q);
+  const prefix = new RegExp('^(?:(?:list|show)(?: me)? |how many )?(?:(?:a |the )?list of )?(?:all )?(?:the )?' + state + ' ' + os + 'devices(?: as a list| are there| do we have)?$').exec(q);
+  if (!suffix && !prefix) return undefined;
+  const platform = suffix ? suffix[1] : prefix![2];
+  const requested = suffix ? suffix[2] : prefix![1];
+  const encryption = ['not encrypted', 'unencrypted', 'encrypted', 'with unknown encryption status'].includes(requested!);
+  const value = encryption ? (requested === 'encrypted' ? true : requested === 'with unknown encryption status' ? null : false)
+    : requested === 'in grace period' ? 'inGracePeriod' : requested;
+  const filters: GraphCacheQueryPredicate[] = [{ field: encryption ? 'isEncrypted' : 'complianceState', op: 'eq', value }];
+  if (platform) filters.push({ field: 'operatingSystem', op: 'eq', value: osNames[platform]! });
+  const label = encryption ? value === null ? 'have unknown encryption status' : value ? 'report encrypted' : 'report not encrypted'
+    : requested === 'in grace period' ? 'are in grace period' : `are marked ${requested === 'noncompliant' ? 'non-compliant' : 'compliant'}`;
+  return { kind: encryption ? 'encryption' : 'compliance', filters, label: `${platform ? osNames[platform] + ' ' : ''}devices ${label}`, countOnly: q.startsWith('how many ') };
+}
+
+export function voiceDeviceEvidenceIntent(question: string): DeviceEvidenceQuery['kind'] | undefined {
+  return deviceEvidenceQuery(question)?.kind;
 }
 
 /** Render verified fields directly. No model can invent causal explanations on this path. */
 export async function voiceDeviceEvidenceAnswer(question: string, statuses: GraphCacheResourceStatus[], ctx: IntuneChatToolContext, progress: (message: string) => void, trace?: (entry: IntuneChatToolTraceEntry) => void): Promise<string | undefined> {
-  const kind = voiceDeviceEvidenceIntent(question);
-  if (!kind) return undefined;
+  const query = deviceEvidenceQuery(question);
+  if (!query) return undefined;
+  const { kind } = query;
   const status = statuses.find(s => s.resource === 'managedDevices');
   if (!status?.refreshedAt) return 'Device inventory is unavailable. Open Cache to resolve the connection or permission error; I cannot establish which devices match.';
   const result = ctx.store.queryGraphCache({ tenantId: ctx.tenantId, resource: 'managedDevices', limit: 50,
-    filters: [{ field: kind === 'encryption' ? 'isEncrypted' : 'complianceState', op: 'eq', value: kind === 'encryption' ? false : 'noncompliant' }] });
-  trace?.({ id: randomUUID(), tool: "query_cache", params: { resource: "managedDevices", where: kind === "encryption" ? { isEncrypted: false } : { complianceState: "noncompliant" }, limit: 50 }, resultSummary: `${result.returnedRows} of ${result.totalCount} matching rows; snapshot ${status.refreshedAt}`, durationMs: 0, createdAt: new Date().toISOString(), completedAt: new Date().toISOString() });
+    filters: query.filters });
+  trace?.({ id: randomUUID(), tool: "query_cache", params: { resource: "managedDevices", filters: query.filters, limit: 50 }, resultSummary: `${result.returnedRows} of ${result.totalCount} matching rows; snapshot ${status.refreshedAt}`, durationMs: 0, createdAt: new Date().toISOString(), completedAt: new Date().toISOString() });
   const rows = result.rows.map(r => r.row as Record<string, unknown>);
   const partial = status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal);
   const prefix = `Intune snapshot refreshed ${status.refreshedAt}: ${status.rows} cached device records${partial ? '; coverage is partial' : ''}.${status.lastError ? ' The latest refresh failed; this is older evidence.' : ''}`;
-  const label = kind === 'encryption' ? 'report not encrypted' : 'are marked non-compliant';
+  const label = result.totalCount === 1 ? query.label.replace(/\bdevices\b/, 'device').replace(/\breport\b/, 'reports').replace(/\bhave\b/, 'has').replace(/\bare\b/, 'is') : query.label;
   progress(`Reading reported ${kind === 'encryption' ? 'encryption' : 'compliance'}: ${result.returnedRows} of ${result.totalCount} matching cached devices.`);
   if (kind !== 'causes') {
     const names = rows.map(r => String(r.deviceName || r.id || 'Unnamed device'));
-    const unknown = kind === 'encryption' ? ' Missing encryption values are unknown, not counted as unencrypted.' : '';
-    return `${prefix}\n${result.totalCount} ${label}.${unknown}${result.totalCount > rows.length ? ` Showing the first ${rows.length}; this is not the complete list.` : ''}\n${names.map(n => `- ${n}`).join('\n')}`;
+    const unknown = kind === 'encryption' ? ' Missing encryption values are unknown, not counted as encrypted or unencrypted.' : '';
+    return `${prefix}\n${result.totalCount} ${label} in this snapshot.${partial || status.lastError ? ' This does not establish the current tenant-wide count.' : ''}${unknown}${!query.countOnly && result.totalCount > rows.length ? ` Showing the first ${rows.length}; this is not the complete list.` : ''}\n${query.countOnly ? '' : names.map(n => `- ${n}`).join('\n')}`;
   }
   const lines = [prefix, `${result.totalCount} devices are marked non-compliant. Causes below come from live policy setting states checked ${new Date().toISOString()}, not inferred from inventory fields.`];
   let graph: Awaited<ReturnType<IntuneChatToolContext['graphForScopes']>>;
