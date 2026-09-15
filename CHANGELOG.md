@@ -8,9 +8,19 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Track the remaining Chat, Nova and Agent Team demo blockers with explicit installed-build and live-provider acceptance checks.
+
+- Record the installed-app Agent Team rehearsal, live evidence handoffs, and remaining compliance-report and script-draft quality gaps.
+
 ### Removed
 
+- Remove catalog signing keys and detached registry signatures. Catalogs use their reviewed HTTPS source, manifest hashes and revision checks; desktop installer signing remains unchanged.
+
 ### Fixed
+
+- Preserve every compliance state in Team assessments, retain task evidence on local read-only retries, reject empty model drafts and coalesce streaming persistence so terminal states do not wait behind every token.
+
+- Correct Chat and Nova device encryption/compliance filters, reject invalid cache queries instead of reporting false zero counts, and respect the security-incidents page limit during cache preload.
 
 - Answer Nova introductions and general help questions conversationally, preserve running tasks and previews during these turns, and bind delayed voice delegation to its original utterance.
 

@@ -913,8 +913,8 @@ The app binary ships with **zero agents**. At runtime the desktop app fetches th
 Distribution semantics:
 
 - **Source of truth:** `https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/`
-- **Index:** `agents/index.json` is generated from `agents/*/manifest.yaml` after the agent QA gate and carries a SHA-256 digest for every exact manifest. The official index has a detached Ed25519 signature (`agents/index.sig`) verified against the public key pinned in the app. It also carries an explicit monotonic revision; the generator requires a revision bump when entries change, and the client rejects a revision older than its highest verified cache. An unsigned, modified, or replayed older official index is never cached or used.
-- **Per-agent install:** verify index signature → fetch manifest → verify SHA-256 and trust metadata → validate schema → atomically write to userData → version-pin. Updates use the same chain, roll the manifest back if state persistence fails, and remove downloaded manifest files on uninstall.
+- **Index:** `agents/index.json` is generated from `agents/*/manifest.yaml` after the agent QA gate and carries a SHA-256 digest for every exact manifest. Per the 2026-09-15 product decision, catalog signatures and publisher signing keys are no longer required. Catalog authenticity relies on the configured HTTPS source. The official catalog retains a monotonic revision; the client rejects revisions older than its highest accepted cache. Manifest hashes establish agreement with that catalog, not independent publisher identity. Older desktop clients requiring signatures need an app update before refreshing the unsigned catalog; existing caches remain available. Installer signing and notarization are unaffected.
+- **Per-agent install:** validate catalog source, revision and metadata → fetch manifest → verify SHA-256 and trust metadata → validate schema → atomically write to userData → version-pin. Updates use the same chain, roll the manifest back if state persistence fails, and remove downloaded manifest files on uninstall.
 - **Forkable:** Settings exposes a "Registry source" field under Privacy. Enterprises can fork this repo, curate `/agents/`, and point the app at their fork. Custom sources open a trust-review modal and require explicit acknowledgement before persistence.
 - **App↔manifest version coupling:** each `index.json` entry carries `minAppVersion`. The app hides agents it can't run with a "Update OpenAdminOS to use this agent" note. This is how the DSL can evolve without orphaning users on older app versions.
 
@@ -923,7 +923,7 @@ Cache lifecycle:
 - The first registry refresh starts in the background when the desktop host initializes. Browsing Chat does not wait for network, MSAL, or provider detection.
 - On every subsequent launch (online): refresh `index.json` in the background. Compare to cached per-agent versions, surface per-agent update badges.
 - Registry source URLs must use HTTPS, must not include credentials, query strings, fragments, or an `index.json` suffix, and are normalized before persistence. Localhost/private registry sources are blocked unless an explicit dev-only override is enabled (`OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE=1` in an unpackaged app).
-- Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source. Official cached indexes must also record a successful signature verification, so legacy unsigned cache content is not trusted.
+- Registry cache is source-bound. A cached index is reused only when its recorded `sourceUrl` matches the currently configured normalized source. Official cached indexes must retain a valid revision, and all cached entries pass the same schema and manifest-metadata validation as fetched entries. Legacy signature metadata is ignored.
 - Failed refresh is silent: keep using the cache, show a small "last refreshed N ago" indicator in Agent Hub. No blocking errors for a transient network blip.
 - App works fully offline against the cached set after the first successful fetch.
 
@@ -1068,8 +1068,8 @@ and deterministic fallback, then asks the selected provider to use a prompt
 protocol with one fenced JSON tool call per iteration:
 `{"tool":"query_cache","params":{...}}` or a final
 `{"final":true,"answer":"..."}` object. The host parses the response, executes
-only host-owned read tools, appends observations, and stops after at most six
-iterations. Malformed tool JSON gets one repair prompt; a second malformed
+only host-owned read tools, appends observations, and stops after at most eight
+iterations. Malformed tool JSON gets up to three repair prompts; another malformed
 response or the iteration cap produces a visible fallback notice and answers
    through the deterministic planner path. The toolset is strictly read-only:
    `list_cached_resources`, `query_cache`, `graph_get`, `refresh_resource`, and
@@ -1085,6 +1085,23 @@ errors. Settings -> Intune Chat exposes **Chat investigation mode** with `auto`
 providers and known-capable local models use investigative mode; local models
 whose names indicate a tiny/small/mini/<7B class fall back to deterministic
 retrieval with honest copy.
+
+Common device encryption and compliance lists and counts in Chat and Nova use
+host-owned cache predicates, including explicitly supported operating-system
+filters. Unknown encryption means null or missing `isEncrypted`, never false.
+These answers include snapshot freshness, partial/failed-refresh caveats and list
+caps. Questions with additional unsupported criteria remain investigative; direct
+routing must not discard group, version, ownership or compound filters.
+
+`query_cache` validates fields against selected schema fields and keys actually
+present in the active tenant's snapshot, including optional fields absent from the
+first row. Unsupported fields, malformed filters and unsupported parameters are
+errors, never zero-match evidence. Tool results include snapshot coverage. An
+unresolved failed cache query blocks a model's final answer and cannot fall through
+malformed-output or iteration-limit fallback into an unsupported count. The host
+returns a clear lookup failure after bounded repair attempts. A valid empty result
+remains distinct from an unavailable snapshot. Security-incidents preload requests
+at most 50 records per page and follows continuation links.
 
 Chat does not run without an active tenant. The status strip shows the active
 tenant, provider, model, and data freshness. When the selected provider is local,
@@ -2033,6 +2050,23 @@ stand in for representative Windows/macOS hardware or native assistive-technolog
 validation. Lokka beta reads verified the compliance selection, next-link paging, and
 invalid-field 400 behavior; the rehearsal performs no live tenant writes.
 
+The [2026-09-15 installed-app review](../tasks/agent-team-063-live-review.md)
+separately checks the admin's configured tenant and local providers. Its findings
+distinguish completed execution and valid evidence links from report/script quality.
+Compliance assessments preserve every observed state, including future values, and bucket
+missing states as unknown so their counts reconcile with the complete retrieved inventory.
+Successive Team handoffs retain up to eight host-resolved source records, including
+ancestors of intermediate model reports, so structured assessments are available for
+checking summary claims. Cross-tenant, missing or incomplete selected sources block
+the handoff. Existing byte limits still apply and omitted payloads are labeled.
+Read-only Team retries recover their original host-owned task and evidence references,
+remain pinned to the source tenant, and do not replay the old mission or its handoffs.
+Hosted-provider and write-assignment retries return to Agent Team for review. Streaming
+snapshots are coalesced to avoid delaying final states behind token-by-token persistence.
+Empty model drafts fail with a recovery action; nonempty generated scripts remain visibly
+unexecuted and unvalidated until separately reviewed. Reopening
+an unchanged finding for a rehearsal must not be presented as newly detected drift.
+
 ## 5a. v0.1: Public preview foundation
 
 The first public-preview milestone. Goal: a polished Electron app that visually represents the full product vision, runs one agent end-to-end against synthetic data, and is paired with a public landing page with download, GitHub, trust-model, registry, and write-confirmation proof points. Built to generate screenshots, demo videos, downloads, and GitHub interest while establishing the public preview path toward real-tenant deployment.
@@ -2117,7 +2151,7 @@ These must exist and work well before any public release.
 4. **Diff confirmation for write agents**: Side-by-side before/after, scope summary, typed confirmation for destructive actions.
 5. **Error and failure states**: Designed states for: auth expired, Graph throttling, Ollama unreachable, model JSON validation fail, missing scope, hosted quota exceeded, tenant drift, network offline. (Reference: `docs/mockups/06-error-states.html`.)
 6. **Empty states**: Zero agents installed, zero runs, zero tenants. These teach new users what the product is for.
-7. **Registry browse**: Search, filter (author, mode, model requirements), install, signing/verification status, screenshots, changelog.
+7. **Registry browse**: Search, filter (author, mode, model requirements), install, source trust and manifest integrity status, screenshots, changelog.
 8. **Multi-tenant switcher done properly**: Search, color-coding, "currently scoped to" badges, scope guard against running an agent on the wrong tenant.
 9. **Teams connector (graph-delegated)**: first connector to validate the abstraction. Channel + chat picker, post-message capabilities, Teams scopes folded into the MSAL consent flow, trust messaging integrated with the status strip. See §2 Connector abstraction.
 10. **WhatsApp Web connector (external local session)**: second connector to validate QR-based local setup and non-Graph egress. QR linking, default/test target selection, outbound-only run notifications, no incoming-message access, Baileys reconnect handling, and explicit "delivered by WhatsApp" trust messaging. See §2 Connector abstraction.

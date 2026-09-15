@@ -13,15 +13,15 @@ Investigates evidence handed to an Agent Team persona without collecting tenant 
 | Field | Value |
 | --- | --- |
 | Agent ID | `team-evidence-review` |
-| Version | `1.0.0` |
+| Version | `1.0.1` |
 | Mode | `read` |
 | Tier | `agent` |
 | Category | `compliance` |
 | Required Entra tier | `free` |
 | Preferred model | `not pinned` |
-| Minimum app version | `0.6.0` |
+| Minimum app version | `0.6.3` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-09-11 · `13dad4d` |
+| Last changed | 2026-09-15 · `7d94ce4` |
 
 ## Execution
 
@@ -43,7 +43,7 @@ This is a read-only agent. It does not declare write operations.
 
 | Step | Settings |
 | --- | --- |
-| Team evidence review | temperature 0.1 · max tokens 1800 |
+| Team evidence review | temperature 0.1 · max tokens 800 |
 
 ## Settings
 

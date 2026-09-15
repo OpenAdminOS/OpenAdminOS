@@ -31,7 +31,7 @@ encryption question, adjacent device queries and cache-query failure handling.
 | Scripted model behavior | False zero after invalid lookup, malformed replies after failure, missing/unknown resource, valid repair, Chat and voice modes | Passed |
 | Desktop service | Reported question through Chat, Nova and nonstreaming send; saved evidence sources; no model calls for supported direct answers | Passed |
 | Preload service | 51 incidents over two pages under endpoint limit; existing 1,200-device paging/failure/cancellation retention test | Passed |
-| Repository suite | 613 Node tests plus 125 renderer tests passed; one runtime test skipped | Passed |
+| Repository suite | 614 Node tests plus 125 renderer tests passed; one runtime test skipped | Passed |
 | Static checks | Repository typecheck; desktop production build; Graph QA | Passed; QA has four existing warnings for scope-free Team evidence/draft agents |
 
 Focused Chat regression tests were rerun after the final guard changes. Source
