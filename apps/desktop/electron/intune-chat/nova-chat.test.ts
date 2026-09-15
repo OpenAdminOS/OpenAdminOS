@@ -7,7 +7,7 @@ import { it } from "node:test";
 import { AppStateStore } from "../state.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 
-async function fixture(empty = false) {
+async function fixture(empty = false, deviceRows?: unknown[]) {
   const dir = await mkdtemp(join(tmpdir(), "nova-chat-review-"));
   const path = join(dir, "state.json");
   await writeFile(
@@ -43,7 +43,7 @@ async function fixture(empty = false) {
         return {
           value: empty
             ? []
-            : [
+            : deviceRows ?? [
                 {
                   id: "device-1",
                   operatingSystem: "Windows",
@@ -97,7 +97,7 @@ async function fixture(empty = false) {
     llm,
     calls,
     prompts,
-    cleanup: () => rm(dir, { recursive: true, force: true }),
+    cleanup: () => { store.close(); return rm(dir, { recursive: true, force: true }); },
   };
 }
 const options = {
@@ -372,4 +372,28 @@ it("answers the real multi-turn Nova sequence from cache with no reasoning or re
     assert.equal(f.prompts.length, 0);
     assert.equal(f.calls.length, 2, "fresh cache reused across both questions");
   } finally { await f.cleanup(); }
+});
+
+it('answers the reported Windows encryption question through both Chat and Nova without model guesses', async () => {
+  for (const voice of [false, true]) {
+    const f = await fixture(false, [
+      { id: 'win-false', deviceName: 'WIN-FALSE', operatingSystem: 'Windows', isEncrypted: false },
+      { id: 'win-true', deviceName: 'WIN-TRUE', operatingSystem: 'Windows', isEncrypted: true },
+      { id: 'win-missing', deviceName: 'WIN-UNKNOWN', operatingSystem: 'Windows' },
+      { id: 'mac-false', deviceName: 'MAC-FALSE', operatingSystem: 'macOS', isEncrypted: false },
+    ]);
+    try {
+      const result = await f.store.streamIntuneChatMessage({ content: 'Which Windows devices are not encrypted?' }, () => {}, { ...options, voice });
+      assert.match(result.assistantMessage.content, /1 Windows device reports not encrypted/);
+      assert.match(result.assistantMessage.content, /- WIN-FALSE/);
+      assert.doesNotMatch(result.assistantMessage.content, /WIN-TRUE|WIN-UNKNOWN|MAC-FALSE/);
+      assert.equal(result.assistantMessage.status, 'completed');
+      assert.equal(f.prompts.length, 0);
+      assert.ok(result.assistantMessage.sources?.some(source => source.resource === 'managedDevices'));
+      assert.deepEqual(f.calls, ['/deviceManagement/managedDevices']);
+      const nonstreaming = await f.store.sendIntuneChatMessage({ content: 'Which Windows devices are not encrypted?' });
+      assert.match(nonstreaming.assistantMessage.content, /- WIN-FALSE/);
+      assert.equal(f.prompts.length, 0);
+    } finally { await f.cleanup(); }
+  }
 });

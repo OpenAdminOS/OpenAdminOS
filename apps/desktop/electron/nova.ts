@@ -1,5 +1,6 @@
+import { isNovaIntroduction, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
-import { novaActionIntent, novaConnectorQuestion } from "../src/shared/nova-action-intent.js";
+import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
 import { novaConnectorSetupIssue, prepareNovaAction, type NovaActionHost, type PreparedNovaAction } from "./nova-actions.js";
 import { clipVoiceText } from "./intune-chat/voice-context.js";
 import { searchPublicWeb, type WebSearch } from "./intune-chat/web-search.js";
@@ -44,6 +45,7 @@ export class NovaService {
     mode: "openai" | "local";
     conversationId?: string;
     lastEvidence?: string;
+    commandContext?: { request: string; at: number };
     pendingAction?: PreparedNovaAction;
     actionPreparedAt?: number;
     consent: boolean;
@@ -84,9 +86,10 @@ export class NovaService {
     }
     if (input.action === "start") this.invalidate();
     const generation = this.generation;
-    const revision =
-      input.action === "answer" ? ++this.answerRevision : undefined;
-    if (input.action === "answer") { this.pendingAnswer?.abort(); if (this.session) this.session.pendingAction = undefined; }
+    const introduction = input.action === "answer" && typeof input.text === "string" && input.text.length <= 12000 && isNovaIntroduction(input.text);
+    const revision = input.action === "answer" && !introduction ? ++this.answerRevision : undefined;
+    const priorAction = this.session?.pendingAction;
+    if (input.action === "answer" && !introduction) { this.pendingAnswer?.abort(); if (this.session) this.session.pendingAction = undefined; }
     const state = await this.state();
     if (
       generation !== this.generation ||
@@ -217,15 +220,18 @@ export class NovaService {
       throw new Error(
         "Nova's tenant or provider changed. Start a new conversation.",
       );
+    if (introduction) return { text: NOVA_INTRODUCTION };
     if (input.action === "interrupt") {
       ++this.answerRevision;
       this.pendingAnswer?.abort();
       session.pendingAction = undefined;
+      session.commandContext = undefined;
       return { text: "Stopped. Listening for your next question." };
     }
     if (input.action === "decide-action") {
       const action = session.pendingAction;
       if (!action || action.preview.id !== input.actionId || Date.now() - (session.actionPreparedAt ?? 0) > 300000) throw new Error("This action expired. Ask Nova to prepare it again.");
+      session.commandContext = undefined;
       session.pendingAction = undefined; // consume before any asynchronous work: no replay or duplicate sends
       if (input.approved !== true) return { text: "Action cancelled. Nothing was sent or started." };
       const controller = new AbortController();
@@ -251,6 +257,7 @@ export class NovaService {
       const afterStop = novaStopCommand(input.text);
       if (afterStop !== undefined) {
         session.pendingAction = undefined;
+        session.commandContext = undefined;
         if (!afterStop) return { text: "Stopped. You can ask another question." };
         input.text = afterStop;
       }
@@ -261,47 +268,85 @@ export class NovaService {
             : "Hey, how are you?",
         };
       }
-      if (
-        /^(?:hey[,\s]*)?(?:are you connected to (?:any|a|my|the) tenant|(?:which|what) tenant (?:are (?:you|we) (?:connected to|using)|is (?:connected|selected)))[?.!\s]*$/i.test(
-          input.text.trim(),
-        )
-      ) {
-        const tenant = state.tenants.find((t) => t.id === session.tenantId);
-        return {
-          text: `Yes. OpenAdminOS is connected to ${tenant?.displayName || "the selected tenant"}. I can ask the app to retrieve devices and other permitted tenant data. A missing cache does not mean the tenant is disconnected.`,
-        };
+      const previous = session.commandContext;
+      session.commandContext = undefined;
+      const followUp = previous && Date.now() - previous.at < 300000 &&
+        (/^(?:actually|instead|no[, ]|use |make (?:it|that)|via |on |through |to my )/i.test(input.text.trim()) || input.text.trim().split(/\s+/).length <= 4);
+      const context = { agents: (state.installedAgents ?? []).slice(0, 40).map(a => ({ name: a.name.slice(0, 100), slug: a.slug })), ...(followUp ? { previousRequest: previous.request } : {}) };
+      const connectorReply = novaConnectorReply(input.text);
+      let command: NovaCommand | undefined = novaContextualCommand(input.text, context);
+      if (command?.kind === "run") {
+        const name = command.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (!(state.installedAgents ?? []).some(a => [a.name, a.slug].some(n => n.toLowerCase().replace(/[^a-z0-9]/g, "") === name))) command = undefined;
       }
-      const page =
-        /^(?:please )?(?:open|show|go to)(?: the)? (cache|chat|agents|agent team|office|changes|settings|connectors)(?: page)?[.!?]*$/i
-          .exec(input.text.trim())?.[1]
-          ?.toLowerCase();
-      if (page) {
-        const route = page === "agent team" ? "/office" : `/${page}`;
-        return { text: `Opening ${page}.`, route };
+      if (!command) {
+        // Keep the unfinished request available if a late speech fragment replaces classification.
+        session.commandContext = { request: (followUp ? previous.request : input.text).slice(0, 1200), at: Date.now() };
+        const controller = new AbortController();
+        this.pendingAnswer = controller;
+        const signal = AbortSignal.any([controller.signal, session.controller.signal, AbortSignal.timeout(15000)]);
+        onActivity?.({ kind: "action", status: "running", message: "Understanding your request." });
+        try {
+          const raw = await Promise.race([
+            (input.text.length <= 2400 ? this.actions?.classifyCommand?.(input.text, context, { signal, scope: { tenantId: session.tenantId, providerId: session.providerId, model: session.model, isLocal: session.reasoningIsLocal } }) : undefined) ?? Promise.resolve(''),
+            new Promise<never>((_, reject) => { signal.addEventListener("abort", () => reject(new Error("Command interpretation stopped.")), { once: true }); }),
+          ]);
+          command = parseNovaCommand(raw, context);
+          // Only the explicit approval fast path can preserve a pending preview.
+          if (command.kind === "clarify" && command.reason === "approval") command = { kind: "clarify", reason: "ambiguous" };
+        } catch { command = { kind: "clarify", reason: "unavailable" }; }
+        finally { controller.abort(); if (this.pendingAnswer === controller) this.pendingAnswer = undefined; }
+        const latest = await this.state();
+        if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
+            latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
+            selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
+          throw new Error("This request was replaced or its tenant/provider changed.");
       }
-      if (/^(?:what|which) agents (?:can you run|are (?:available|installed))[?.!\s]*$|^(?:can|could) you run agents[?.!\s]*$/i.test(input.text.trim())) {
+      if (command.kind === "research" && (novaDeliveryRequest(input.text) || (connectorReply && followUp)))
+        command = { kind: "clarify", reason: "destination" };
+      if (command.kind === "clarify") {
+        if (command.reason === "approval" && priorAction && Date.now() - (session.actionPreparedAt ?? 0) < 300000) {
+          session.pendingAction = priorAction;
+          session.commandContext = previous;
+          return { text: novaClarifications.approval, pendingAction: priorAction.preview, displayText: priorAction.preview.body };
+        }
+        if (command.reason !== "approval") session.commandContext = { request: (followUp ? previous.request : input.text).slice(0, 1200), at: Date.now() };
+        return { text: novaClarifications[command.reason] };
+      }
+      if (command.kind === "navigate") return { text: `Opening ${command.page}.`, route: novaPages[command.page] };
+      if (command.kind === "capabilities" && command.topic === "general") return { text: NOVA_INTRODUCTION };
+      if (command.kind === "capabilities" && command.topic === "tenant") {
+        const tenant = state.tenants.find(t => t.id === session.tenantId);
+        return { text: `Yes. OpenAdminOS is connected to ${tenant?.displayName || "the selected tenant"}. I can ask the app to retrieve devices and other permitted tenant data. A missing cache does not mean the tenant is disconnected.` };
+      }
+      if (command.kind === "capabilities" && command.topic === "agents") {
         return { text: `I can prepare installed agents for you to review and start. Write plans still require approval. Installed agents: ${(state.installedAgents ?? []).map(a => a.name).slice(0, 20).join(", ") || "none; open Agents to install one"}. Say run followed by the agent name.` };
       }
-      const intent = novaActionIntent(input.text);
+      const intent = command.kind === "send" || command.kind === "run" ? command : undefined;
       const prepare = async (): Promise<NovaResponse> => {
         if (!this.actions) return { text: "Nova actions are unavailable in this app session. Reopen the latest app build and try again.", answerError: "Nova actions are unavailable." };
+        if (!intent) return { text: novaClarifications.ambiguous };
         let prepared: PreparedNovaAction | undefined;
         let failure: string | undefined;
-        try { prepared = await prepareNovaAction(input.text, session.lastEvidence, state, this.actions); }
+        try { prepared = await prepareNovaAction(intent, session.lastEvidence, state, this.actions); }
         catch (error) { failure = error instanceof Error ? error.message : "Action setup failed. Open Connectors or Agents to check configuration."; }
         const latest = await this.state();
         if (revision !== this.answerRevision || session !== this.session || session.controller.signal.aborted ||
             latest.activeTenantId !== session.tenantId || latest.activeProviderId !== session.providerId ||
             selectedNovaModel(latest) !== session.model || latest.providers.find(p => p.id === session.providerId)?.isLocal !== session.reasoningIsLocal)
           throw new Error("This request was replaced or its tenant/provider changed.");
-        if (failure) return { text: failure, answerError: failure, conversationId: session.conversationId };
+        if (failure) {
+          if (intent) session.commandContext = { request: JSON.stringify(intent.kind === "send" ? { ...intent, question: undefined } : intent).slice(0, 1200), at: Date.now() };
+          return { text: failure, answerError: failure, conversationId: session.conversationId };
+        }
         if (!prepared) return { text: "Name a connector and the result you want to send. Nothing has been sent." };
+        session.commandContext = { request: JSON.stringify(intent.kind === "send" ? { ...intent, question: undefined } : intent).slice(0, 1200), at: Date.now() };
         session.pendingAction = prepared;
         session.actionPreparedAt = Date.now();
         return { text: "Review the destination and content in Nova, then confirm. Nothing has been sent or started yet.", pendingAction: prepared.preview, displayText: prepared.preview.body, conversationId: session.conversationId };
       };
       if (intent && (intent.kind === "run" || !intent.question)) return prepare();
-      if (!intent && novaConnectorQuestion(input.text)) {
+      if (command.kind === "capabilities" && command.topic === "connectors") {
         if (!this.actions) return prepare();
         const connectors = await this.actions?.connectors();
         if (revision !== this.answerRevision || session !== this.session) throw new Error("This request was replaced.");
@@ -313,7 +358,10 @@ export class NovaService {
         const connector = (await this.actions.connectors()).find(c => c.descriptor.id === intent.connectorId);
         if (revision !== this.answerRevision || session !== this.session) throw new Error("This request was replaced.");
         const setupIssue = connector ? novaConnectorSetupIssue(connector) : "This connector is unavailable. Open Connectors to check setup.";
-        if (setupIssue) return { text: setupIssue, answerError: setupIssue };
+        if (setupIssue) {
+          session.commandContext = { request: JSON.stringify(intent).slice(0, 1200), at: Date.now() };
+          return { text: setupIssue, answerError: setupIssue };
+        }
       }
       const voiceHistory = normalizeNovaHistory(input.history);
       const controller = new AbortController();
@@ -605,6 +653,10 @@ export function boundedVoiceAnswer(text: string, hasPublicSources = false): stri
   const sourceIndex = text.indexOf("\n\nPublic web sources:");
   if (sourceIndex >= 0) text = text.slice(0, sourceIndex);
   text = text.replace(/\n\nDetected matching agent:[^\n]*/g, "").trim();
+  text = text.replace(/\b(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):\d{2}(?:\.\d+)?Z\b/g, (_, year, month, day, hour, minute) => {
+    const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
+    return Number.isNaN(date.getTime()) ? "an unavailable timestamp" : date.toLocaleString("en-GB", { timeZone: "UTC", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) + " UTC";
+  });
   if (hasPublicSources) text += " Public source links are available in Chat.";
   if (text.length <= 2000) return text;
   return `${text.slice(0, 1900)}… The full answer and evidence are available in Chat.`;
@@ -626,6 +678,8 @@ export function buildNovaInstructions(state: AppState, name: string, webSearch =
     "If greeted with Hey Nova, greet the user warmly by their greeting name when one is set.",
     "If asked whether a tenant is connected, say yes and name the selected tenant. Do not claim that you have no tenant access just because records are not in this prompt.",
     "You access permitted tenant data THROUGH the OpenAdminOS backend. You do not need a separate Microsoft sign-in inside the voice model.",
+    `General introduction, available without any lookup: ${NOVA_INTRODUCTION}`,
+    "Conversation comes first: answer greetings, introductions, small talk, and general questions about what you can do directly and naturally. This includes combined questions such as What can you do and what can you help me with. Do not say checking, looking that up, or one moment for these turns; no task has started. Mention abilities without claiming a specific connector is ready. Only delegate a specific configuration check, tenant-data question, research request or action. A conversational turn must not cancel a pending investigation or approval.",
     "Delegation policy:",
     webSearch
       ? "The backend can also search the public web for any topic. Delegate questions needing current information, web research, external documentation, recommendations or comparisons with public facts. The backend chooses tenant tools, web search, or both. Do not answer current public facts from memory. Tell the user when research failed; sources remain in Chat."

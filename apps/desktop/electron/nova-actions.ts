@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AppState, ConnectorSummary, NovaActionPreview, RunRecord, StartRunOptions } from '@openadminos/agent-sdk';
 
 export interface NovaActionHost {
+  classifyCommand?(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string>;
   connectors(): Promise<ConnectorSummary[]>;
   send(input: { connectorId: string; config: Record<string, unknown>; method: string; args: Record<string, unknown>; tenantId: string; actionId: string; signal: AbortSignal }): Promise<unknown>;
   startRun(slug: string, options: StartRunOptions): Promise<RunRecord>;
@@ -12,7 +13,7 @@ export interface PreparedNovaAction {
   execute(signal: AbortSignal): Promise<{ text: string; route?: string }>;
 }
 export { novaActionIntent } from '../src/shared/nova-action-intent.js';
-import { novaActionIntent } from '../src/shared/nova-action-intent.js';
+import { novaActionIntent, type NovaActionIntent } from '../src/shared/nova-action-intent.js';
 export function novaConnectorSetupIssue(connector: ConnectorSummary): string | undefined {
   if (connector.status === 'connected' || connector.status === undefined) return undefined;
   const name = connector.descriptor.name;
@@ -51,8 +52,8 @@ export function novaMessageParts(text: string, connectorId: string): string[] {
   return parts;
 }
 
-export async function prepareNovaAction(text: string, evidence: string | undefined, state: AppState, host: NovaActionHost): Promise<PreparedNovaAction | undefined> {
-  const intent = novaActionIntent(text);
+export async function prepareNovaAction(text: string | NovaActionIntent, evidence: string | undefined, state: AppState, host: NovaActionHost): Promise<PreparedNovaAction | undefined> {
+  const intent = typeof text === 'string' ? novaActionIntent(text) : text;
   if (!intent) return undefined;
   if (!state.activeTenantId) throw new Error('Select a tenant before using Nova actions.');
   const tenantId = state.activeTenantId;
@@ -87,6 +88,7 @@ export async function prepareNovaAction(text: string, evidence: string | undefin
       method = 'sendMail'; args = { markdown: evidence, to, subject: 'Nova result · OpenAdminOS' }; target = to.join(', '); break;
     }
     case 'teams':
+      if (intent.channelName && intent.channelName.toLowerCase() !== str('defaultChannelName').toLowerCase()) throw new Error(`Teams is configured for ${str('defaultChannelName') || 'a different channel'}. Open Connectors to select ${intent.channelName}, then ask again.`);
       if (intent.self) throw new Error(`Your Teams connector is configured for shared destinations, not a verified private chat with you.${str('defaultTeamId') && str('defaultChannelId') ? ` I can prepare a post to ${str('defaultTeamName') || 'the configured team'} / ${str('defaultChannelName') || 'the configured channel'}. Say send this via Teams to review that shared destination.` : ' Open Connectors to choose a Teams destination.'}`);
       if (str('defaultTeamId') && str('defaultChannelId')) { method = 'postChannelMessage'; args = { markdown: evidence, teamId: str('defaultTeamId'), channelId: str('defaultChannelId') }; target = `${str('defaultTeamName') || str('defaultTeamId')} / ${str('defaultChannelName') || str('defaultChannelId')}`; }
       else if (str('defaultChatId')) { method = 'postChatMessage'; args = { markdown: evidence, chatId: str('defaultChatId') }; target = str('defaultChatName') || str('defaultChatId'); }

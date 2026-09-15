@@ -1,4 +1,3 @@
-# Preserve signed registry and manifest bytes on Windows checkouts.
+# Preserve registry and manifest digest bytes on Windows checkouts.
 agents/index.json text eol=lf
-agents/index.sig text eol=lf
 agents/**/manifest.yaml text eol=lf

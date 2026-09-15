@@ -7,6 +7,8 @@ const IMPLEMENTED_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set([
   "anthropic",
   "openai",
   "azure-openai",
+  "copilot",
+  "gemini",
 ]);
 
 export function isProviderImplemented(id: ProviderId): boolean {

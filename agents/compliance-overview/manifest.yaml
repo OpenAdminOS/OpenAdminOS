@@ -15,8 +15,8 @@ descriptor:
   id: compliance-overview
   name: Compliance overview
   description: Reviews Intune compliance by state, operating system, ownership, enrollment, and stale inventory signals.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.1.1
+  minAppVersion: 0.6.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -52,22 +52,25 @@ skills:
       scopes:
         - DeviceManagementManagedDevices.Read.All
 
-  # 2) Tally devices by complianceState. The bucket list is pinned so the
-  #    output always has all three keys, even on a tenant that happens to
-  #    have zero noncompliant or zero unknown devices — the result data
-  #    shape stays stable across runs.
+  # Preserve all reported states. Missing values count as unknown.
   - id: by_state
     format: transform
     label: Count devices by compliance state
-    detail: Tabulates compliant / noncompliant / unknown counts.
+    detail: Preserves every reported compliance state and counts missing values as unknown.
     settings:
       kind: count-by-field
       source: "{{ load_devices.output }}"
       field: complianceState
+      missingBucket: unknown
       buckets:
         - compliant
         - noncompliant
         - unknown
+        - inGracePeriod
+        - error
+        - conflict
+        - notApplicable
+        - notEvaluated
 
   - id: by_os
     format: transform
@@ -122,7 +125,10 @@ skills:
         Tenant managed devices: {{ load_devices.output | size }}.
         Compliant: {{ by_state.output.compliant }}.
         Noncompliant: {{ by_state.output.noncompliant }}.
+        In grace period: {{ by_state.output.inGracePeriod }}.
         Unknown: {{ by_state.output.unknown }}.
+        Full compliance state map, including zero and unexpected states: {{ by_state.output }}.
+        The total inventory is not the compliant count. OS, ownership and enrollment are overlapping breakdowns of the same inventory; never add them to the inventory or compliance counts.
         By OS: {{ by_os.output }}.
         By ownership: {{ by_owner_type.output }}.
         By enrollment: {{ by_enrollment_type.output }}.
@@ -130,9 +136,11 @@ skills:
 
         Write a compact report with these sections:
         1. Main finding.
-        2. Compliance drift signals.
+        2. Current state breakdown and freshness caveats.
         3. Recommended next action.
 
+        Do not claim drift without a prior comparable assessment. Use each fact once,
+        avoid repeating sections, and keep the report under 160 words.
         Call out whether noncompliance or unknown status appears material,
         and whether stale inventory weakens the confidence of the counts.
       temperature: 0.2
@@ -160,10 +168,7 @@ definition:
       {{ summarize.output.text | default("Summary unavailable.") }}
     data:
       totalDevices: "{{ load_devices.output | size }}"
-      counts:
-        compliant: "{{ by_state.output.compliant }}"
-        noncompliant: "{{ by_state.output.noncompliant }}"
-        unknown: "{{ by_state.output.unknown }}"
+      counts: "{{ by_state.output }}"
       byOs: "{{ by_os.output }}"
       byOwnerType: "{{ by_owner_type.output }}"
       byEnrollmentType: "{{ by_enrollment_type.output }}"

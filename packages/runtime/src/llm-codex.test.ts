@@ -1,7 +1,10 @@
+import { mkdtemp, mkdir, writeFile, chmod, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { createCodexProcessEnv } from "./llm-codex.js";
+import { createCodexProcessEnv, createCodexLlm, probeCodexLlm } from "./llm-codex.js";
 
 describe("createCodexProcessEnv", () => {
   it("keeps only CLI-required environment fields and CODEX_HOME", () => {
@@ -72,4 +75,59 @@ describe("codex child environment", () => {
     assert.notEqual(env.EDITOR, "code --wait");
     assert.notEqual(env.VISUAL, "code --wait");
   });
+});
+
+describe("Codex sign-in detection", () => {
+  for (const loggedIn of [true, false]) {
+    it(loggedIn ? "accepts a CLI login without auth.json" : "rejects a stale auth.json when the CLI is signed out", async () => {
+      const root = await mkdtemp(join(tmpdir(), "codex-auth-probe-"));
+      try {
+        const script = `#!/usr/bin/env node
+if (process.argv.includes('--version')) { console.log('codex-cli 0.100.0'); }
+else if (process.argv.slice(2).join(' ') === 'login status') { process.exit(${loggedIn ? 0 : 1}); }
+else { process.exit(99); }
+`;
+        let binaryPath = join(root, "codex");
+        if (process.platform === "win32") {
+          binaryPath += ".cmd";
+          const folder = join(root, "node_modules/@openai/codex/bin");
+          await mkdir(folder, { recursive: true });
+          await writeFile(join(folder, "codex.js"), script);
+          await writeFile(binaryPath, "@exit /b 99\r\n");
+        } else {
+          await writeFile(binaryPath, script);
+          await chmod(binaryPath, 0o755);
+        }
+        if (!loggedIn) await writeFile(join(root, "auth.json"), "{}");
+        const probe = await probeCodexLlm({ binaryPath, homePath: root });
+        assert.equal(probe.installed, true);
+        assert.equal(probe.ready, loggedIn);
+      } finally { await rm(root, { recursive: true, force: true }); }
+    });
+  }
+});
+
+
+it("isolates app completions from user hooks and tools while preserving the auth backend", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-isolation-"));
+  try {
+    const script = `#!/usr/bin/env node
+const text=JSON.stringify({args:process.argv.slice(2),home:process.env.CODEX_HOME});
+console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text}}));
+`;
+    let binaryPath = join(root, "codex");
+    if (process.platform === "win32") {
+      binaryPath += ".cmd";
+      const folder = join(root, "node_modules/@openai/codex/bin");
+      await mkdir(folder, { recursive: true });
+      await writeFile(join(folder, "codex.js"), script);
+      await writeFile(binaryPath, "@exit /b 99\r\n");
+    } else { await writeFile(binaryPath, script); await chmod(binaryPath, 0o755); }
+    await writeFile(join(root, "config.toml"), 'cli_auth_credentials_store = "keyring"\n[mcp_servers.private]\ncommand = "must-not-run"\n');
+    const response = await createCodexLlm({ binaryPath, homePath: root }).complete({ prompt: 'Review supplied evidence only.' });
+    const captured = JSON.parse(response.text) as { args: string[]; home: string };
+    assert.equal(captured.home, root);
+    for (const arg of ['--ignore-user-config', '--ignore-rules', '--ephemeral', 'read-only', 'cli_auth_credentials_store="keyring"', 'project_doc_max_bytes=0', 'features.hooks=false', 'features.plugins=false', 'features.apps=false', 'features.shell_tool=false', 'features.multi_agent=false', 'web_search="disabled"']) assert.ok(captured.args.includes(arg), arg);
+    assert.ok(!captured.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

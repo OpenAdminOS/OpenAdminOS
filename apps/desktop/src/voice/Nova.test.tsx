@@ -212,6 +212,28 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
     "data-phase",
     "thinking",
   );
+  // Repeat the actual help question with different transcript/delegation arrival orders.
+  // None may enter the backend or replace the already running inventory question.
+  vi.useFakeTimers({toFake:["setTimeout", "clearTimeout", "Date"]});
+  try {
+    for (const delay of [25, 75, 125]) {
+      for (const order of ["early", "fallback", "late", "answered"]) {
+        const chunksBefore = dc.send.mock.calls.filter(([event]) => String(event).includes("I'm Nova, the voice assistant")).length;
+        await act(async () => {
+          const parts = order === "early" ? ["What can", " you do and", " what can you", " help me with"] : ["What can you do and what can you help me with"];
+          emit({type:"session.input_transcript.delta",delta:parts[0]});
+          if (order === "early") emit({type:"session.delegation.created",delegation:{id:`intro-${delay}-${order}`,target:"client"}});
+          for (const part of parts.slice(1)) {await vi.advanceTimersByTimeAsync(delay);emit({type:"session.input_transcript.delta",delta:part});}
+          emit({type:"session.output_transcript.delta",delta:order === "answered" ? "I'm Nova. I can help you explore your tenant and prepare reports." : "Sure, I'm checking that."});
+          await vi.advanceTimersByTimeAsync(1100);
+          if (order === "late") {emit({type:"session.delegation.created",delegation:{id:`intro-${delay}-${order}`,target:"client"}});await vi.advanceTimersByTimeAsync(400);}
+        });
+        expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(1);
+        const chunksAfter=dc.send.mock.calls.filter(([event]) => String(event).includes("I'm Nova, the voice assistant")).length;
+        expect(chunksAfter-chunksBefore).toBe(order === "answered" ? 0 : 1);
+      }
+    }
+  } finally {vi.useRealTimers();}
   const oldFinish = finish;
   act(() => {
     emit({ type: "session.input_transcript.delta", delta: "Can you tell me a joke while we wait" });
@@ -316,15 +338,33 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   expect(screen.getByRole("region", { name: "Review Nova action" })).toHaveTextContent("admin@example.test");
   expect(screen.getByRole("region", { name: "Review Nova action" })).toHaveTextContent("2 numbered messages");
   expect(dc.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.commentary.append", delegation_id: null, content: "Review the email." }));
+  // Hosted action text is spoken once, and only its audio transcript becomes a chat bubble.
+  await user.click(screen.getByRole("button", { name: "Confirm send" }));
+  await act(async () => finishAction({ text: "Outlook accepted the email for sending." }));
+  expect(screen.queryByText("Outlook accepted the email for sending.")).not.toBeInTheDocument();
+  act(() => emit({type:"session.output_transcript.delta",delta:"Outlook accepted the email for sending."}));
+  expect(screen.getAllByText(/Outlook accepted the email for sending/)).toHaveLength(1);
   act(() => emit({ type: "session.delegation.created", delegation: { id: "late-email", target: "client" } }));
   await new Promise(resolve => setTimeout(resolve, 350));
   expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  act(() => emit({ type: "session.input_transcript.delta", delta: "How are you doing?" }));
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  const waitingUpdates = dc.send.mock.calls.filter(([event]) => String(event).includes("Do not say you are still checking")).length;
+  act(() => emit({type:"session.input_transcript.delta",delta:"Are you still working?"}));
+  await waitFor(() => expect(dc.send.mock.calls.filter(([event]) => String(event).includes("Do not say you are still checking")).length).toBe(waitingUpdates + 1), {timeout:2000});
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  for (const text of ["Pop those findings into my inbox", "Actually use Teams instead", "Outlook", "Could you bring up settings"]) {
+    act(() => emit({ type: "session.input_transcript.delta", delta: text }));
+    await waitFor(() => expect(bridge.nova).toHaveBeenCalledWith(expect.objectContaining({ action: "answer", text }), expect.any(Function)), { timeout: 2000 });
+    await act(async () => finish({ text: "Request understood. Review in the app." }));
+  }
   act(() => emit({ type: "session.input_transcript.delta", delta: "Send this via Slack" }));
   await user.click(screen.getByRole("button", { name: "Stop" }));
   await new Promise(resolve => setTimeout(resolve, 1100));
-  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 1);
+  expect(vi.mocked(bridge.nova).mock.calls.filter(([request]) => request.action === "answer")).toHaveLength(beforeFallback + 5);
   expect(track.stop).toHaveBeenCalled();
-});
+}, 20000);
 
 it("explains microphone permission recovery without starting a hosted session", async () => {
   Object.defineProperty(navigator, "mediaDevices", {

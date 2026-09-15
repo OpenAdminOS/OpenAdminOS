@@ -9,6 +9,7 @@ import type {
   TenantRecord,
 } from "@openadminos/agent-sdk";
 
+import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import {
   executeIntuneChatTool,
@@ -129,6 +130,14 @@ export async function runAgenticChat(
   let malformedCount = 0;
   let unfinishedCount = 0;
   let responseModel = input.model;
+  const invalidQueries = new Map<string, string>();
+  const failedGraphFields = new Map<string, string[]>();
+  let invalidFinals = 0;
+  const blockedAnswer = (): RunAgenticChatResult => ({
+    ok: true,
+    answer: 'I could not establish which records match because a data lookup failed. No verified count is available. Open What ran to inspect the failed lookup, then retry the question.',
+    toolTrace, iterations: iteration, model: responseModel,
+  });
 
   // Turns spent coaching the model back into valid JSON must not eat
   // the investigation budget: a model that slips twice and then works
@@ -147,6 +156,7 @@ export async function runAgenticChat(
     if (input.voice) {
       try { assertVoicePromptBudget(system, prompt, input.promptByteLimit); }
       catch {
+        if (invalidQueries.size) return blockedAnswer();
         return { ok: false, reason: "context-limit", fallbackNotice: "Nova used bounded retrieved evidence because this investigation exceeded its voice context budget.", toolTrace, iterations: iteration, model: responseModel };
       }
     }
@@ -166,6 +176,7 @@ export async function runAgenticChat(
     if (action.kind === "malformed") {
       malformedCount += 1;
       if (malformedCount > MAX_MALFORMED_RETRIES) {
+        if (invalidQueries.size) return blockedAnswer();
         return {
           ok: false,
           reason: "malformed-output",
@@ -191,6 +202,7 @@ export async function runAgenticChat(
       continue;
     }
 
+    if (invalidQueries.size && action.kind === "final" && ++invalidFinals >= 2) return blockedAnswer();
     if (input.voice && action.kind === "final" && (!action.answer.trim() || /\b(?:let me (?:check|look|query|search|investigate|find|retrieve)|i(?:'ll| will) (?:check|look|query|search|investigate|find|retrieve)|i(?:'m| am) (?:currently )?(?:checking|querying|searching|investigating|retrieving))\b/i.test(action.answer))) {
       if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
         ok: false, reason: "unfinished-answer", fallbackNotice: "The model returned progress instead of a completed answer.",
@@ -202,6 +214,10 @@ export async function runAgenticChat(
     malformedCount = 0;
     iteration += 1;
     if (action.kind === "final") {
+      if (invalidQueries.size) {
+        turns.push({ role: 'repair', content: `A failed data lookup cannot support a final answer or a zero count. Correct the query for ${[...invalidQueries.keys()].join(', ')} using the available fields before answering.` });
+        continue;
+      }
       return {
         ok: true,
         answer: action.answer.trim(),
@@ -220,6 +236,27 @@ export async function runAgenticChat(
     });
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params);
     toolTrace.push(execution.trace);
+    if (action.tool === 'query_cache') {
+      const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
+      if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);
+      else {
+        invalidQueries.delete(resource); invalidQueries.delete('unknown');
+        const graphKey = `graph:${pathForResource(resource as GraphCacheResourceKind).path}`;
+        const result = execution.result as { availableFields?: string[]; snapshot?: { refreshedAt?: string; lastError?: string } };
+        if (result.snapshot?.refreshedAt && !result.snapshot.lastError && (failedGraphFields.get(graphKey) ?? []).every(field => result.availableFields?.includes(field))) {
+          invalidQueries.delete(graphKey); failedGraphFields.delete(graphKey);
+        }
+      }
+    }
+    if (action.tool === 'graph_get') {
+      const params = action.params as { path?: string; query?: { $select?: string | string[] } };
+      const key = `graph:${String(params?.path ?? 'unknown')}`;
+      if (execution.trace.error) {
+        invalidQueries.set(key, execution.trace.error);
+        const selection = params.query?.$select;
+        failedGraphFields.set(key, Array.isArray(selection) ? selection : typeof selection === 'string' ? selection.split(',').map(field => field.trim()) : []);
+      } else { invalidQueries.delete(key); failedGraphFields.delete(key); }
+    }
     input.onToolFinish?.({
       traceEntry: execution.trace,
       message: execution.trace.error
@@ -245,6 +282,7 @@ export async function runAgenticChat(
     trimTurns(turns, input.observationCharBudget ?? DEFAULT_OBSERVATION_CHAR_BUDGET);
   }
 
+  if (invalidQueries.size) return blockedAnswer();
   return {
     ok: false,
     reason: "iteration-cap",
@@ -263,6 +301,13 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput): string {
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
     "You can investigate read-only tenant data by asking the host to run tools.",
+    ...input.plannedResources.slice(0, 6).map(resource => `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${(pathForResource(resource).select ?? input.tools.store.graphCacheFields(input.tenant.id, resource)).slice(0, 24).join(', ')}.`),
+    'Filters preserve JSON types: accountEnabled, securityEnabled and isEncrypted take boolean true or false. For a count, request limit:1 and select:["id"], then use totalCount from the filtered query, not the number of returned rows. A list is capped; say so when more rows match.',
+
+    input.plannedResources.includes('managedDevices')
+      ? 'managedDevices cache fields: operatingSystem (for example "Windows"), deviceName, complianceState, isEncrypted (boolean true = encrypted, false = not encrypted, null = unknown). Encryption is separate from compliance. For unencrypted Windows devices use query_cache with {"resource":"managedDevices","where":{"operatingSystem":"Windows","isEncrypted":false}}. Pass select as a top-level array of available field names, never inside where.'
+      : '',
+
     "Every tool call is visible to the admin and recorded with the final answer.",
     "STRICT READ-ONLY: never request writes, deletes, creates, updates, retirements, wipes, assignments, or connector sends.",
     "If the admin asks for a change, say chat cannot perform changes and point them to installed write agents.",

@@ -7,6 +7,19 @@ description: "How OpenAdminOS treats public agent registry updates."
 
 The public Agent Hub, reached from the Hub tab under Agents, is backed by the OpenAdminOS repository. Public agents are reviewed manifests, not arbitrary TypeScript from an untrusted source.
 
+## Catalog Source
+
+OpenAdminOS downloads the catalog from the configured HTTPS source. Catalog signing
+keys are not required. The official catalog retains monotonic revision checks,
+and downloaded manifests must match the catalog's SHA-256 digests and declared
+trust metadata. These hashes detect mismatches with the catalog; they do not
+independently authenticate its publisher. Changing to a custom source still
+requires trust review.
+
+Desktop installer signing and macOS notarization are separate and remain enabled.
+Older desktop versions that require catalog signatures must be updated before
+refreshing the new catalog. Their previously cached catalog can still be used.
+
 ## Install Provenance
 
 When a public agent is installed, OpenAdminOS records where it came from: source URL, registry reference, manifest SHA-256 when available, installed version, minimum app version, and install time.

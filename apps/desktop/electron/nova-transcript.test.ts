@@ -80,3 +80,15 @@ it('consumes a spoken stop without losing the next question or matching quoted s
   transcript.append({ type: 'session.input_transcript.delta', delta: "Do not stop" });
   assert.equal(transcript.takeStopCommand(), false);
 });
+
+it('binds a delayed handoff to its original utterance without consuming a newer question', () => {
+  const t = new NovaTranscript();
+  t.append({type:'session.input_transcript.delta',delta:'What can you do'});
+  const anchor=t.capture(undefined,false)!.anchor;
+  t.append({type:'session.input_transcript.delta',delta:' and what can you help me with'});
+  t.append({type:'session.output_transcript.delta',delta:'I can help you explore your tenant.'});
+  t.append({type:'session.input_transcript.delta',delta:'How many devices do I have?'});
+  assert.equal(t.capture(undefined,true,anchor)!.text,'What can you do and what can you help me with');
+  assert.equal(t.capture(undefined,true,anchor),undefined);
+  assert.equal(t.capture()!.text,'How many devices do I have?');
+});

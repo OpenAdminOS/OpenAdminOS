@@ -1,6 +1,42 @@
 import { existsSync } from "node:fs";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve, posix, win32, delimiter } from "node:path";
+import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
+
+/** Desktop launches can miss terminal PATH setup. Add standard install locations
+ * without loading shell startup files or unrelated environment variables. */
+export function cliProcessEnv(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+): NodeJS.ProcessEnv {
+  if (platform !== "darwin" && platform !== "win32") return env;
+  const windows = platform === "win32";
+  const pathKeys = Object.keys(env).filter((key) =>
+    windows ? key.toLowerCase() === "path" : key === "PATH",
+  );
+  const separator = windows ? ";" : ":";
+  const existing = pathKeys.map((key) => env[key] ?? "").join(separator);
+  const defaults = windows
+    ? [
+        win32.join(env.APPDATA || win32.join(home, "AppData", "Roaming"), "npm"),
+        win32.join(home, ".local", "bin"),
+      ]
+    : ["/opt/homebrew/bin", "/usr/local/bin", posix.join(home, ".local", "bin")];
+  const paths = (existing || (windows
+    ? win32.join(env.SystemRoot || "C:\\Windows", "System32")
+    : "/usr/bin:/bin:/usr/sbin:/sbin")).split(separator).concat(defaults);
+  const seen = new Set<string>();
+  const result = { ...env };
+  for (const key of pathKeys) delete result[key];
+  result.PATH = paths.filter((path) => {
+    const key = windows ? path.toLowerCase() : path;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).join(separator);
+  return result;
+}
 
 /** Resolve Windows npm launchers to their Node entry point so prompts never cross cmd.exe. */
 export function cliInvocation(
@@ -8,6 +44,7 @@ export function cliInvocation(
   args: string[],
   env: NodeJS.ProcessEnv,
 ) {
+  env = cliProcessEnv(env);
   if (process.platform !== "win32") return { binary, args, env };
   const explicitPath = existsSync(binary) ? resolve(binary) : undefined;
   const result = explicitPath
@@ -33,7 +70,11 @@ export function cliInvocation(
       ? "@anthropic-ai/claude-code/cli.js"
       : name === "codex"
         ? "@openai/codex/bin/codex.js"
-        : undefined;
+        : name === "copilot"
+          ? "@github/copilot/npm-loader.js"
+          : name === "gemini"
+            ? "@google/gemini-cli/bundle/gemini.js"
+            : undefined;
   const folder = dirname(resolved);
   const roots =
     basename(folder).toLowerCase() === ".bin"
@@ -66,4 +107,16 @@ export function cliArgs<
     command.args,
     { ...options, env: command.env, shell: false },
   ];
+}
+
+export function cliExecutablePath(binary: string, source: NodeJS.ProcessEnv = process.env): string {
+  if (existsSync(binary)) return resolve(binary);
+  const env = cliProcessEnv(source);
+  for (const directory of (env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const suffix of process.platform === "win32" ? [".exe", ".cmd", ""] : [""]) {
+      const candidate = join(directory, binary + suffix);
+      if (existsSync(candidate)) return resolve(candidate);
+    }
+  }
+  return binary;
 }

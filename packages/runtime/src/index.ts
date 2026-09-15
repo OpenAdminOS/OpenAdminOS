@@ -1222,3 +1222,7 @@ function toAgentDefinition(agent: AgentSummary): RunContext["agent"] {
     execution: agent.execution,
   };
 }
+
+export { createCopilotLlm, probeCopilotLlm } from "./llm-copilot.js";
+export { createGeminiLlm, probeGeminiLlm } from "./llm-gemini.js";
+export type { CliProbe, CliFailure } from "./cli-provider.js";

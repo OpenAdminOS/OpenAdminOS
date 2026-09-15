@@ -1,3 +1,4 @@
+import { isNovaIntroduction, NOVA_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { novaActionIntent, novaConnectorQuestion } from "../shared/nova-action-intent";
 import { NovaConversation, ConversationIcon, type NovaConversationItem } from "./NovaConversation";
@@ -121,6 +122,7 @@ export function Nova({
     orb = useRef<HTMLButtonElement>(null),
     recorder = useRef<MediaRecorder | null>(null),
     sessionId = useRef("");
+  const completedResult = useRef<string | undefined>(undefined);
   const delegationTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     blobUrl = useRef("");
@@ -136,8 +138,9 @@ export function Nova({
       if (token !== generation.current || revision !== actionRevision.current) return;
       setPendingAction(undefined);
       setError(answer.answerError || "");
-      appendSpeech("assistant", answer.text || "No action result returned.");
+      completedResult.current = answer.text;
       const dc = channel.current;
+      if (dc?.readyState !== "open") appendSpeech("assistant", answer.text || "No action result returned.");
       if (dc?.readyState === "open") {
         if (output.current) output.current.muted = false;
         for (const content of novaCommentaryChunks(answer.text || "No action result returned."))
@@ -549,13 +552,13 @@ export function Nova({
       channel.current = dc;
       const transcript = new NovaTranscript();
       let answerRevision = 0;
-      let lastCompletedResult: string | undefined;
+      completedResult.current = undefined;
       const delegated = new Set<string>();
       interruptCurrent.current = () => {
         ++answerRevision;
         ++actionRevision.current;
         setActionBusy(false);
-        lastCompletedResult = undefined;
+        completedResult.current = undefined;
         pendingAnswers = 0;
         delegationTimers.current.forEach(clearTimeout);
         delegationTimers.current.clear();
@@ -568,18 +571,35 @@ export function Nova({
         setPhase("listening");
       };
       let actionFallback: ReturnType<typeof setTimeout> | undefined;
-      const runRequest = (id: string | null, offsetMs?: number, actionsOnly = false) => {
+      let lastInputAt = 0;
+      const runRequest = (id: string | null, offsetMs?: number, actionsOnly = false, anchor?: string) => {
         if (token !== generation.current || dc.readyState !== "open") return;
-        const preview = transcript.capture(offsetMs, false);
+        const preview = transcript.capture(offsetMs, false, anchor);
         const actionRequest = preview && (novaActionIntent(preview.text) || novaConnectorQuestion(preview.text));
-        if (actionsOnly && !actionRequest) return;
-        const request = transcript.capture(offsetMs);
+        if (preview?.text && isNovaIntroduction(preview.text)) {
+          transcript.capture(offsetMs, true, anchor);
+          // A successful conversational reply needs no second answer from the fallback.
+          const alreadyAnswered = /\b(?:i'm nova|i am nova|i can|help you|assistant)\b/i.test(preview.responseText ?? "") && !/\b(?:checking|looking (?:that|it) up|one moment)\b/i.test(preview.responseText ?? "");
+          if (!alreadyAnswered) {
+            if (output.current) output.current.muted = false;
+            dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
+              content: "For this conversational turn only, answer the user's introduction or general help question directly using the product description that follows. No lookup is needed; do not say checking or start a task. Any existing investigation or unapproved preview stays unchanged. Later task requests still use normal delegation." }));
+            for (const content of novaCommentaryChunks(NOVA_INTRODUCTION)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
+          }
+          return;
+        }
+        if (actionsOnly && (!preview?.text || (isNovaConversationOnly(preview.text) && !/^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(preview.text)))) {
+          // Consume settled small talk so it cannot prefix the next real command.
+          if (preview?.text) transcript.capture(offsetMs, true, anchor);
+          return;
+        }
+        const request = transcript.capture(offsetMs, true, anchor);
         const activityId = id || `action-${++itemSequence.current}`;
         if (!request?.text || isNovaConversationOnly(request.text)) {
-          if (request?.text && /^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(request.text) && !pendingAnswers && lastCompletedResult) {
+          if (request?.text && /^(?:still there|are you (?:still )?(?:there|working|checking)|any (?:update|news))[?.!\s]*$/i.test(request.text) && !pendingAnswers && completedResult.current) {
             dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
               content: "The investigation is complete. Answer the waiting question using the completed result that follows. Do not say you are still checking." }));
-            for (const content of novaCommentaryChunks(lastCompletedResult)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
+            for (const content of novaCommentaryChunks(completedResult.current)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
             return;
           }
           dc.send(
@@ -601,7 +621,7 @@ export function Nova({
         setActionBusy(false);
         setPendingAction(undefined);
         endActivities("replaced");
-        lastCompletedResult = undefined;
+        completedResult.current = undefined;
         const revision = ++answerRevision;
         pendingAnswers = 1;
         setPhase("thinking");
@@ -635,7 +655,7 @@ export function Nova({
           }
           const result =
             answer.text || "No answer available. Open Chat for details.";
-          lastCompletedResult = result;
+          completedResult.current = result;
           recordActivity(activityId, { kind: "answer", status: answer.answerError ? "failed" : "completed", message: answer.answerError || (answer.pendingAction ? "Awaiting your review" : "Result retrieved") }, answer.displayText || result);
           setPhase("listening");
           dc.send(JSON.stringify({ type: "session.thinking.append", delegation_id: id,
@@ -676,9 +696,13 @@ export function Nova({
             if (!transcript.append(event)) return;
             appendSpeech(role === "User" ? "user" : "assistant", event.delta, event.start_ms, event.end_ms);
             if (role === "User") {
-              if (transcript.takeStopCommand()) { interruptCurrent.current(); return; }
+              lastInputAt = Date.now();
+              if (transcript.takeStopCommand()) {
+                interruptCurrent.current();
+                if (!transcript.capture(undefined, false)?.text) return;
+              }
               if (actionFallback) { clearTimeout(actionFallback); delegationTimers.current.delete(actionFallback); }
-              // A settled explicit action reaches the app even if Live never delegates it.
+              // Every settled substantive request reaches the app even if Live never delegates it.
               // capture() consumes it once, so a later model delegation cannot duplicate it.
               actionFallback = setTimeout(() => {
                 delegationTimers.current.delete(actionFallback!);
@@ -696,13 +720,24 @@ export function Nova({
             const id = event.delegation.id;
             if (delegated.has(id)) return;
             delegated.add(id);
+            // Bind untimed delegations too: a delayed handoff must not take a newer turn.
+            const anchor = transcript.capture(event.offset_ms, false)?.anchor;
+            if (!anchor) return;
             // Use the delegation's timeline boundary even if later speech arrives first.
-            const timer = setTimeout(() => {
+            const dispatch = () => {
               delegationTimers.current.delete(timer);
-              if (token !== generation.current || dc.readyState !== "open")
+              if (token !== generation.current || dc.readyState !== "open") return;
+              // A delegation can arrive before the remaining transcript deltas.
+              // Wait for input to settle rather than dispatching a partial sentence.
+              const remaining = 300 - (Date.now() - lastInputAt);
+              if (remaining > 0) {
+                timer = setTimeout(dispatch, remaining);
+                delegationTimers.current.add(timer);
                 return;
-              runRequest(id, event.offset_ms);
-            }, 250);
+              }
+              runRequest(id, event.offset_ms, false, anchor);
+            };
+            let timer = setTimeout(dispatch, 250);
             delegationTimers.current.add(timer);
           } else if (event.type === "session.closed") stop();
           else if (event.type === "error")

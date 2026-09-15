@@ -1501,6 +1501,7 @@ export class IntuneChatService {
       });
     }
     const planned = planChatContext(content);
+    if (voiceDeviceEvidenceIntent(content) && !planned.hasWriteIntent) planned.resources = ["managedDevices"];
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1588,8 +1589,16 @@ export class IntuneChatService {
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
 
-    if (planned.hasWriteIntent) {
+    const directDeviceAnswer = !planned.hasWriteIntent ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id), () => {}, entry => { (toolTrace ??= []).push(entry); }) : undefined;
+    const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
+    if (namedAgent) {
+      assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
+      responseModel = undefined;
+    } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
+    } else if (directDeviceAnswer !== undefined) {
+      assistantContent = directDeviceAnswer;
+      responseModel = undefined;
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
       const modelQuestion = workspaceContext
@@ -1797,7 +1806,7 @@ export class IntuneChatService {
       : undefined;
     const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
-    const directResources = options.voice ? (voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content)) : undefined;
+    const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
@@ -2048,8 +2057,13 @@ export class IntuneChatService {
       });
     };
 
-    const directVoiceAnswer = options.voice ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices) : undefined;
-    if (planned.hasWriteIntent) {
+    const directVoiceAnswer = await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+    const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
+    if (namedAgent) {
+      assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
+      responseModel = undefined;
+      emitDelta(assistantContent);
+    } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
       emitDelta(assistantContent);
     } else if (directVoiceAnswer !== undefined) {

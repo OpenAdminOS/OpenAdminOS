@@ -4,6 +4,27 @@ import assert from "node:assert/strict";
 import { renderDeep, renderTemplate } from "./template-engine.js";
 
 describe("renderTemplate", () => {
+  it("bounds evidence without clipping records or hiding omitted coverage", () => {
+    const records = [{ id: "oversized", data: "x".repeat(5000) }, { id: "small", nested: { values: [1, 2] } }, ...Array.from({ length: 30 }, (_, i) => ({ id: i, data: "é".repeat(200) }))];
+    const result = renderTemplate("{{ records | boundedJson(1000) }}", { records }) as string;
+    assert.ok(result.length <= 1000);
+    const parsed = JSON.parse(result);
+    assert.equal(parsed.totalRecords, records.length);
+    assert.equal(parsed.includedRecords + parsed.omittedRecords, records.length);
+    assert.deepEqual(parsed.records[0], records[1]);
+    assert.match(parsed.coverage, /partial/);
+    assert.equal(records.length, 32);
+  });
+
+  it("identifies complete, empty and entirely omitted evidence accurately", () => {
+    for (const records of [[], [{ id: "one" }], [{ data: "x".repeat(5000) }]]) {
+      const parsed = JSON.parse(renderTemplate("{{ records | boundedJson(512) }}", { records }) as string);
+      assert.equal(parsed.totalRecords, records.length);
+      assert.equal(parsed.coverage === "complete", parsed.omittedRecords === 0);
+    }
+    assert.throws(() => renderTemplate("{{ records | boundedJson(10) }}", { records: [] }), /character budget/);
+    assert.throws(() => renderTemplate("{{ records | boundedJson(512) }}", { records: {} }), /requires an array/);
+  });
   it("returns the raw typed value for a standalone expression", () => {
     assert.equal(renderTemplate("{{ count }}", { count: 47 }), 47);
     assert.deepEqual(renderTemplate("{{ items }}", { items: [1, 2, 3] }), [1, 2, 3]);

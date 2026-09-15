@@ -57,6 +57,12 @@ export function voiceInventoryAnswer(
       const name =
         kind === "managedDevices"
           ? "Intune managed devices"
+          : kind === "mobileApps" ? "Intune app catalog entries"
+          : kind === "detectedApps" ? "detected app inventory entries"
+          : kind === "users" ? "user accounts"
+          : kind === "groups" ? "groups"
+          : kind === "applications" ? "app registrations"
+          : kind === "conditionalAccessPolicies" ? "Conditional Access policies"
           : "Entra device records";
       const status = statuses.find((s) => s.resource === kind);
       if (!status?.refreshedAt)
@@ -186,6 +192,13 @@ function classifyVoiceQuestion(question: string): VoiceQuestion | undefined {
     .replace(/^(?:tell|show) me (?=how many )/i, "")
     .replace(/[?.!]+$/, "")
     .trim();
+  const directoryCount = /^(?:how many|what(?: is|'s) (?:the )?(?:total )?(?:number|count) of) (users|user accounts|groups|app registrations|conditional access policies)(?: (?:are (?:there(?: in (?:my|our|the|this) tenant)?|in (?:my|our|the|this) tenant)|do (?:i|we) have(?: in (?:my|our|the|this) tenant)?|in (?:my|our|the|this) tenant))?$/i.exec(text);
+  if (directoryCount) {
+    const resources: Record<string, GraphCacheResourceKind> = { users: "users", "user accounts": "users", groups: "groups", "app registrations": "applications", "conditional access policies": "conditionalAccessPolicies" };
+    return { kind: "inventory", resources: [resources[directoryCount[1]!.toLowerCase()]!] };
+  }
+  const apps = /^how many (?:(intune|managed|detected|installed) )?apps(?: do (?:i|we) have(?: in (?:my|our|the) tenant)?| are there(?: in (?:my|our|the) tenant)?)?$/i.exec(text);
+  if (apps) return { kind: "inventory", resources: /detected|installed/i.test(apps[1] ?? "") ? ["detectedApps"] : apps[1] ? ["mobileApps"] : ["mobileApps", "detectedApps"] };
   const count = /^(?:what(?: is|'s) (?:the )?(?:total )?(?:number|count) of|(?:show|tell) me (?:the )?(?:total )?(?:number|count) of) (?:(intune|managed|entra) )?devices(?: (?:in|connected to|enrolled in) (?:my|our|the) tenant)?$/i.exec(text);
   if (count) return { kind: "inventory", resources: count[1]?.toLowerCase() === "entra" ? ["entraDevices"] : count[1] ? ["managedDevices"] : ["managedDevices", "entraDevices"] };
   if (/^(?:(?:what|which) (?:are )?(?:the )?(?:currently )?(?:installed )?(?:os|operating system) versions (?:are (?:currently )?installed on|are running on|on|across|of) (?:my|our|the) devices|(?:show|list)(?: me)? (?:the )?(?:os|operating system) versions (?:on|across|of) (?:my|our|the) devices)$/i.test(text))

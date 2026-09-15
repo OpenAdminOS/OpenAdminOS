@@ -4,7 +4,9 @@ export type ProviderId =
   | "lm-studio"
   | "anthropic"
   | "openai"
-  | "azure-openai";
+  | "azure-openai"
+  | "copilot"
+  | "gemini";
 
 export type ProviderStatus = "connected" | "available" | "not-installed" | "error";
 
@@ -17,6 +19,11 @@ export interface ProviderSummary {
   detail?: string;
   models: string[];
   defaultModel?: string;
+  cli?: {
+    binaryPath?: string;
+    version?: string;
+    state: "ready" | "check-required" | "not-installed" | "signed-out" | "access-denied" | "unsupported-version" | "request-failed";
+  };
 }
 
 export interface ProviderTestResult {
@@ -476,6 +483,8 @@ export type RunStatus =
   | "cancelled";
 
 export interface StartRunOptions {
+  /** Host reloads a prior read-only Team task; renderer never supplies its evidence. */
+  retryOfRunId?: string;
   /** Host-owned Office correlation, never accepted by the generic renderer run IPC. */
   office?: { missionId: string; personaId: string; step: number };
   officeContext?: OfficeTaskContext;
@@ -674,6 +683,7 @@ export interface RunLogRecord {
 }
 
 export interface RunRecord {
+  retryOfRunId?: string;
   assessmentKey?: string;
   office?: { missionId: string; personaId: string; step: number };
   officeContext?: OfficeTaskContext;
@@ -822,6 +832,8 @@ export interface DriftHistoryPruneResult {
 export type AuditLogExportFormat = "json" | "csv";
 
 export interface ExportAuditLogInput {
+  /** Save through the native dialog in the main process; omit content from the response. */
+  saveToFile?: boolean;
   format: AuditLogExportFormat;
   /** Inclusive ISO timestamp lower bound. */
   from?: string;
@@ -836,6 +848,7 @@ export interface AuditLogHashChainSummary {
 }
 
 export interface AuditLogExportResult {
+  savedFile?: SaveTextFileResult;
   format: AuditLogExportFormat;
   suggestedName: string;
   mimeType: "application/json" | "text/csv";
@@ -3574,6 +3587,24 @@ export const providerCatalog: readonly ProviderSummary[] = [
     isLocal: false,
     status: "available",
     detail: "Waiting for Codex CLI connection check",
+    models: [],
+  },
+  {
+    id: "copilot",
+    name: "GitHub Copilot",
+    description: "Use models through the GitHub Copilot CLI and your existing account. Tenant prompts leave this device and are processed through GitHub Copilot when active.",
+    isLocal: false,
+    status: "available",
+    detail: "Waiting for Copilot CLI connection check",
+    models: [],
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    description: "Use Gemini through the installed Gemini CLI. Tenant prompts are sent to Google's service when active.",
+    isLocal: false,
+    status: "available",
+    detail: "Waiting for Gemini CLI connection check",
     models: [],
   },
   {

@@ -11,6 +11,8 @@ import {
   createClaudeCodeLlm,
   createAzureOpenAiLlm,
   createCodexLlm,
+  createCopilotLlm,
+  createGeminiLlm,
   createAppleFoundationLlm,
   createLmStudioLlm,
   DEFAULT_AUTHORITY,
@@ -237,6 +239,7 @@ import {
   checkAzureOpenAI,
   checkClaudeCode,
   checkCodex,
+  checkAdditionalCli,
   checkLmStudio,
   checkOllama,
   isProviderId,
@@ -2158,6 +2161,8 @@ export class AppStateStore {
       // receive progress snapshots, logs, connector audit entries, or results.
       if (run.status === "queued" || run.status === "running" || (run.office && officeMissionIds.has(run.office.missionId))) {
         active.add(run.id);
+        if (run.retryOfRunId && knownRunIds.has(run.retryOfRunId)) active.add(run.retryOfRunId);
+        for (const source of run.officeContext?.evidence ?? []) if (knownRunIds.has(source.runId)) active.add(source.runId);
       }
       // Exclusion: awaiting-confirmation runs are the human-in-the-loop write
       // safety gate. Pruning must never erase a pending approval decision.
@@ -2347,6 +2352,7 @@ export class AppStateStore {
         if (provider.id === "lm-studio") return checkLmStudio(provider);
         if (provider.id === "anthropic") return checkClaudeCode(provider);
         if (provider.id === "openai") return checkCodex(provider);
+        if (provider.id === "copilot" || provider.id === "gemini") return checkAdditionalCli(provider);
         if (provider.id === "azure-openai") {
           if (azureOpenAIConfigError) {
             return {
@@ -2380,7 +2386,8 @@ export class AppStateStore {
     }
     const providerReady =
       provider.status === "connected" ||
-      (provider.id === "azure-openai" && provider.status === "available");
+      (provider.id === "azure-openai" && provider.status === "available") ||
+      (provider.id === "gemini" && provider.status !== "not-installed" && provider.cli?.state !== "unsupported-version");
     if (!providerReady) {
       return {
         providerId,
@@ -2420,7 +2427,7 @@ export class AppStateStore {
       }
     }
 
-    const llm = await this.buildLlm(providerId, selectedModel);
+    const llm = providerId === "gemini" ? createGeminiLlm({ defaultModel: selectedModel }) : await this.buildLlm(providerId, selectedModel);
     if (!llm.available) {
       return {
         providerId,
@@ -3464,6 +3471,33 @@ export class AppStateStore {
     } finally {
       await instance.dispose().catch(() => undefined);
     }
+  }
+
+  /** Interpret a request with the session-pinned provider, without tools or tenant records. */
+  async classifyNovaCommand(text: string, context: import("../src/shared/nova-command.js").NovaCommandContext, options: Pick<import("./nova.js").NovaChatOptions, "scope" | "signal">): Promise<string> {
+    const check = async () => {
+      options.signal.throwIfAborted();
+      const state = await this.getAppState();
+      const provider = state.providers.find(p => p.id === state.activeProviderId);
+      if (state.activeTenantId !== options.scope.tenantId || state.activeProviderId !== options.scope.providerId ||
+          resolveProviderDefaultModel(provider, state.activeModelByProviderId).model !== options.scope.model || provider?.isLocal !== options.scope.isLocal)
+        throw new Error("Nova's tenant or provider changed. Start a new conversation.");
+    };
+    await check();
+    const { novaCommandInstructions } = await import("../src/shared/nova-command.js");
+    const budget = options.scope.providerId === "apple-foundation" ? 3000 : 12000;
+    const agents = context.agents.slice();
+    const encode = () => JSON.stringify({ currentRequest: text, ...(context.previousRequest ? { previousRequest: context.previousRequest } : {}), agents });
+    let prompt = encode();
+    while (agents.length && Buffer.byteLength(novaCommandInstructions + prompt, "utf8") > budget) { agents.pop(); prompt = encode(); }
+    if (Buffer.byteLength(novaCommandInstructions + prompt, "utf8") > budget)
+      throw new Error("This command exceeds the reasoning model's input budget. Repeat it as one shorter request.");
+    const llm = await this.buildLlm(options.scope.providerId, options.scope.model);
+    await check();
+    const result = await llm.complete({ system: novaCommandInstructions, prompt,
+      maxTokens: 400, temperature: 0, signal: options.signal });
+    await check();
+    return result.text;
   }
 
   /** Called only after Nova consumes a one-use, session-scoped visual approval. */
@@ -5297,6 +5331,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (providerId === "openai") {
       return createCodexLlm({ defaultModel });
     }
+    if (providerId === "copilot") return createCopilotLlm({ defaultModel });
+    if (providerId === "gemini") return createGeminiLlm({ defaultModel });
     if (providerId === "azure-openai") {
       try {
         return createAzureOpenAiLlm(

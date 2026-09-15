@@ -8,9 +8,56 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Record signed-preview UI and Codex agent acceptance, Nova session lifecycle checks, and remaining local-model, audio and exhaustive-coverage gaps.
+
+- Track the remaining Chat, Nova and Agent Team demo blockers with explicit installed-build and live-provider acceptance checks.
+
+- Record the installed-app Agent Team rehearsal, live evidence handoffs, and remaining compliance-report and script-draft quality gaps.
+
+### Removed
+
+- Remove catalog signing keys and detached registry signatures. Catalogs use their reviewed HTTPS source, manifest hashes and revision checks; desktop installer signing remains unchanged.
+
+### Fixed
+
+- Route license-seat discovery to subscribed SKUs, honor its supported query parameters and existing read permissions, and exclude unrelated endpoints when a search has no matching terms.
+
+- Bound app-registration and audit-report detail samples with explicit omission counts, preserve every tenant-health compliance state, and direct hosted Team retries back to assignment review with visible start errors.
+- Recognize natural unknown-encryption questions and answer exact user, group, app-registration and Conditional Access policy counts from verified snapshots.
+
+- Save large JSON and CSV audit histories through the native dialog without the renderer text limit, and dismiss per-run model menus with Escape while restoring keyboard focus.
+
+- Preserve every compliance state in Team assessments, retain task evidence on local read-only retries, reject empty model drafts and coalesce streaming persistence so terminal states do not wait behind every token.
+
+- Correct Chat and Nova device encryption/compliance filters, reject invalid cache queries instead of reporting false zero counts, and respect the security-incidents page limit during cache preload.
+
+- Answer Nova introductions and general help questions conversationally, preserve running tasks and previews during these turns, and bind delayed voice delegation to its original utterance.
+
+- Preserve Nova device-list contents across connector changes, resolve spoken Outlook and named Teams-channel requests, answer app counts directly, and avoid duplicate confirmations or stale waiting updates.
+
+- Make Nova command routing handle unfamiliar wording, clarification replies, destination corrections, and cancellation while preserving report evidence and visual approval; settled small talk stays out of subsequent commands.
+
+- Recognize conversational Nova delivery requests and connector follow-up questions, preparing reviewed reports instead of returning generic email refusals or Outlook troubleshooting advice.
+
+- Verify the CLI adapters on macOS, including Codex and Claude live responses and Claude login-keychain access from the desktop session.
+
+### Security
+
+- Isolate Codex completions from terminal-user instructions, hooks, plugins and tools while retaining the existing sign-in backend. Older CLIs report an actionable update requirement.
+
+## [0.6.3] - 2026-09-13
+
+### Added
+
+- Add GitHub Copilot CLI and Gemini CLI providers with streamed responses, connection testing, executable/version diagnostics, and distinct sign-in and access errors.
+
+### Changed
+
 ### Removed
 
 ### Fixed
+
+- Recognize Codex and Claude Code in standard macOS and Windows install locations, preserve Claude's existing sign-in, and check Codex authentication through the CLI.
 
 ### Security
 

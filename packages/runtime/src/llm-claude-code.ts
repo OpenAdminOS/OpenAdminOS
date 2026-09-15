@@ -1,5 +1,6 @@
+import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { spawn } from "node:child_process";
-import { cliArgs } from "./cli-invocation.js";
+import { cliArgs, cliExecutablePath } from "./cli-invocation.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -22,6 +23,7 @@ export interface ClaudeCodeProviderOptions {
 export interface ClaudeCodeProbeResult {
   installed: boolean;
   ready: boolean;
+  failure?: CliFailure;
   version?: string;
   binaryPath?: string;
   authPath: string;
@@ -63,6 +65,7 @@ const CLAUDE_CODE_MODELS = [
 const CLAUDE_CODE_ENV_ALLOWLIST = new Set([
   "ALL_PROXY",
   "all_proxy",
+  "APPDATA",
   "COMSPEC",
   "HOME",
   "HOMEDRIVE",
@@ -97,7 +100,7 @@ const CLAUDE_CODE_ENV_ALLOWLIST = new Set([
 export function createClaudeCodeLlm(
   options: ClaudeCodeProviderOptions = {},
 ): RunLlmApi {
-  const homePath = resolveClaudeCodeHome(options.homePath);
+  const homePath = resolveClaudeCodeConfig(options.homePath);
   const defaultModel = options.defaultModel ?? DEFAULT_CLAUDE_CODE_MODEL;
   const configuredTimeout = Number.parseInt(
     process.env.OPENADMINOS_CLAUDE_CODE_TIMEOUT_MS ?? "",
@@ -153,8 +156,8 @@ export function createClaudeCodeLlm(
 export async function probeClaudeCodeLlm(
   options: ClaudeCodeProviderOptions = {},
 ): Promise<ClaudeCodeProbeResult> {
-  const homePath = resolveClaudeCodeHome(options.homePath);
-  const authPath = join(homePath, ".credentials.json");
+  const homePath = resolveClaudeCodeConfig(options.homePath);
+  const authPath = join(expandHome(homePath ?? "~/.claude"), ".credentials.json");
   const binaryProbe = await probeClaudeCodeBinary(options.binaryPath);
   const { versionResult } = binaryProbe;
 
@@ -182,6 +185,7 @@ export async function probeClaudeCodeLlm(
       binaryPath: binaryProbe.binaryPath,
       authPath,
       models: [],
+      failure: "unsupported-version",
       detail: `Claude Code ${version} is installed. Update to ${MIN_CLAUDE_CODE_VERSION} or newer with \`claude update\` so OpenAdminOS can disable Claude Code tools safely.`,
     };
   }
@@ -195,7 +199,7 @@ export async function probeClaudeCodeLlm(
     }),
   });
   if (authResult.exitCode !== 0) {
-    const detail = compactProcessMessage(authResult.stderr || authResult.stdout);
+    const failure = cliFailure("Claude Code", authResult.stderr || authResult.stdout || (authResult.exitCode === 1 ? "not signed in" : "request failed"));
     return {
       installed: true,
       ready: false,
@@ -203,9 +207,8 @@ export async function probeClaudeCodeLlm(
       binaryPath: binaryProbe.binaryPath,
       authPath,
       models: [],
-      detail:
-        detail ||
-        "Claude Code is installed. Run `claude auth login` in a terminal to authenticate.",
+      failure: failure.failure,
+      detail: failure.failure === "signed-out" ? "Claude Code is installed. Run `claude auth login` in a terminal to authenticate." : failure.message,
     };
   }
 
@@ -285,7 +288,7 @@ async function probeClaudeCodeBinary(preferredBinaryPath?: string): Promise<{
       args: ["--version"],
       timeoutMs: 5_000,
     });
-    const current = { binaryPath, versionResult };
+    const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
     if (versionResult.exitCode === 0) return current;
     last = current;
   }
@@ -318,7 +321,7 @@ function claudeCodeBinaryCandidates(preferredBinaryPath?: string): string[] {
 
 async function runClaudeCodeJson(input: {
   binaryPath: string;
-  homePath: string;
+  homePath?: string;
   cwd: string;
   model?: string;
   system?: string;
@@ -378,7 +381,7 @@ async function runClaudeCodeJson(input: {
 
 async function* runClaudeCodeStream(input: {
   binaryPath: string;
-  homePath: string;
+  homePath?: string;
   cwd: string;
   model?: string;
   system?: string;
@@ -535,9 +538,9 @@ function claudeCodeSafetyArgs(): string[] {
   ];
 }
 
-function claudeCodeEnvOverrides(homePath: string): NodeJS.ProcessEnv {
+function claudeCodeEnvOverrides(homePath?: string): NodeJS.ProcessEnv {
   return {
-    CLAUDE_CONFIG_DIR: homePath,
+    ...(homePath ? { CLAUDE_CONFIG_DIR: homePath } : {}),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   };
 }
@@ -613,8 +616,12 @@ async function runProcess(input: {
   });
 }
 
-function resolveClaudeCodeHome(homePath?: string): string {
-  return expandHome(homePath ?? process.env.CLAUDE_CONFIG_DIR ?? "~/.claude");
+function resolveClaudeCodeConfig(homePath?: string): string | undefined {
+  // Setting even the default directory changes Claude's macOS Keychain namespace.
+  // Leave its default unset, and preserve an explicit environment value verbatim.
+  return homePath === undefined
+    ? process.env.CLAUDE_CONFIG_DIR || undefined
+    : expandHome(homePath);
 }
 
 function parseClaudeCodeJson(line: string): ClaudeCodeStreamEvent | undefined {

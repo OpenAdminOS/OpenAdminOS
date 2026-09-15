@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "revision": 3,
+  "revision": 8,
   "agents": [
     {
       "id": "compliance-overview",
       "slug": "compliance-overview",
       "name": "Compliance overview",
       "description": "Reviews Intune compliance by state, operating system, ownership, enrollment, and stale inventory signals.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "mode": "read",
       "category": "compliance",
       "tier": "dashboard",
@@ -20,16 +20,16 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
-      "minAppVersion": "0.1.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/compliance-overview/manifest.yaml",
-      "manifestSha256": "642d6d4fb7797f1a95425a3ee5f75a7cbd13ede7fb10774731e0220302878d9c"
+      "manifestSha256": "5fa20fe11c97cd25da99e291c214f386b714823f01ed8fc8a5fc40cf2bd18ddf"
     },
     {
       "id": "conditional-access-explainer",
       "slug": "conditional-access-explainer",
       "name": "Conditional Access explainer",
       "description": "Reviews Conditional Access policies for coverage, exclusions, report-only controls, overlaps, and common Zero Trust gaps.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "mode": "read",
       "category": "policies",
       "tier": "agent",
@@ -42,16 +42,16 @@
       "scopes": [
         "Policy.Read.All"
       ],
-      "minAppVersion": "0.1.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml",
-      "manifestSha256": "2413d28485f94c8b258749829992b63f941ef1a2bffd14f56da6237dbad79ad6"
+      "manifestSha256": "d5aee8cbacfd904318ad103c12d136ec1a407d4c1c85f10d8a55cd2625aacdff"
     },
     {
       "id": "dormant-app-registrations",
       "slug": "dormant-app-registrations",
       "name": "Dormant app registrations",
       "description": "Reviews app registrations for stale experiments, risky exposure, credentials, and cleanup candidates with evidence-backed recommendations.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "mode": "read",
       "category": "apps",
       "tier": "agent",
@@ -64,9 +64,9 @@
       "scopes": [
         "Application.Read.All"
       ],
-      "minAppVersion": "0.1.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/dormant-app-registrations/manifest.yaml",
-      "manifestSha256": "88b8c588ae70d4627298a1e09e813e0ae2bc1fb1a58bb75015757b8d513ce6de"
+      "manifestSha256": "5612b44b2c9edd8c80860035bf0cccb81b93f850549a2b3a635a13076b9f561f"
     },
     {
       "id": "find-inactive-devices",
@@ -260,7 +260,7 @@
       "slug": "team-evidence-review",
       "name": "Team evidence review",
       "description": "Investigates evidence handed to an Agent Team persona without collecting tenant data again.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "mode": "read",
       "category": "compliance",
       "tier": "agent",
@@ -271,16 +271,16 @@
         "verified": true
       },
       "scopes": [],
-      "minAppVersion": "0.6.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-evidence-review/manifest.yaml",
-      "manifestSha256": "c2dea87c71e5d26588fbc2473899e73a51b12cd75c4fa91c0a934f2e247f8874"
+      "manifestSha256": "a26c849387968867ab54091fbfca16d51c1c6ad10db4fbef7ff07da4a28bf97c"
     },
     {
       "id": "team-script-draft",
       "slug": "team-script-draft",
       "name": "Team PowerShell draft",
       "description": "Prepares a PowerShell script for review from an Agent Team task and its supplied evidence.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "mode": "read",
       "category": "devices",
       "tier": "agent",
@@ -293,14 +293,14 @@
       "scopes": [],
       "minAppVersion": "0.6.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-script-draft/manifest.yaml",
-      "manifestSha256": "db746cc242cdffc1b318acb0bceb0017a9ddaf7a1c1a42c8c423b56fa9eb1dca"
+      "manifestSha256": "5fab6b6e65e322e85d7e639ffff24991ca8ba93f7aa592fd336af7ab1aa24e90"
     },
     {
       "id": "tenant-change-audit",
       "slug": "tenant-change-audit",
       "name": "Tenant change audit",
       "description": "Reviews recent directory audit entries by activity, category, result, actor, and target context to flag changes worth checking.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "mode": "read",
       "category": "policies",
       "tier": "agent",
@@ -314,16 +314,16 @@
         "AuditLog.Read.All",
         "Directory.Read.All"
       ],
-      "minAppVersion": "0.1.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml",
-      "manifestSha256": "6d94f4fe9e1393eee3d531712e2571d92e314bb237ed492a5d4e714c7a0676f7"
+      "manifestSha256": "8c4f8bbdda80d9b1655df9fb8dfd326cd53d48725047979ed3fccfcf1dc23574"
     },
     {
       "id": "tenant-health-report",
       "slug": "tenant-health-report",
       "name": "Tenant health report",
       "description": "Summarizes Intune tenant health from compliance, OS, ownership, and stale inventory signals for scheduled or manual review.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "mode": "read",
       "category": "compliance",
       "tier": "dashboard",
@@ -336,9 +336,9 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
-      "minAppVersion": "0.1.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-health-report/manifest.yaml",
-      "manifestSha256": "a331e2e21e33c7798fb80ab2552b5b85378418c37cafeccea743a3be31143b54"
+      "manifestSha256": "460bcc85932a98e50fd49e31564ecc73000daab4cf69db5c1a6d68f8524a54b9"
     },
     {
       "id": "user-license-overview",

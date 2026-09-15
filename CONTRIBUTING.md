@@ -57,12 +57,11 @@ The synthetic Graph fixture in `@openadminos/runtime` is also cross-checked agai
 
 Agent changes also regenerate `agents/index.json`, whose entries pin the exact
 manifest SHA-256 digest. Increment `agents/registry-revision.txt` whenever the
-generated entries change; clients retain the highest verified revision they
-have seen and reject older signed indexes. A maintainer must then create the detached Ed25519
-signature with `npm run registry:sign -- --key /secure/path/to/private.pem`.
-The private key must remain outside the repository; only
-`agents/registry-public-key.pem` and `agents/index.sig` are committed. Registry
-QA fails if the index, signature, or manifest digests do not agree.
+generated entries change; clients retain the highest accepted official revision they
+have seen and reject older indexes. No catalog signing key is required. Registry
+QA verifies the revision, metadata and manifest digests against the source files.
+Catalog authenticity relies on the configured HTTPS source; the hashes ensure
+that downloaded manifests match that catalog, not independent publisher identity.
 
 ## Code of conduct
 
