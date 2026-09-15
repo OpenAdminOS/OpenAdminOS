@@ -346,6 +346,34 @@ function toolContext(
 }
 
 describe("Graph endpoint discovery and reachability", () => {
+  it("ranks license inventory for seat questions and returns no unrelated endpoints for unmatched words", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-license-search-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store);
+      const result = await executeIntuneChatTool(ctx, "find_graph_endpoint", { query: "licenses available seats" });
+      assert.equal((result.result as { candidates: Array<{ path: string }> }).candidates[0]?.path, "/subscribedSkus");
+      const absent = await executeIntuneChatTool(ctx, "find_graph_endpoint", { query: "unmatchablezzzzzz" });
+      assert.deepEqual((absent.result as { candidates: unknown[] }).candidates, []);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("reads subscribed SKUs without injecting unsupported paging and rejects unsupported filtering", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-license-query-"));
+    const store = seededStore(dir, 1);
+    let requests = 0;
+    try {
+      const ctx = toolContext(store, { graphForScopes: async () => ({
+        async request(input) { requests++; assert.deepEqual(input.query, { $select: "skuPartNumber,prepaidUnits,consumedUnits" }); return { value: [{ skuPartNumber: "TEST", prepaidUnits: { enabled: 10 }, consumedUnits: 4 }] }; },
+      }) as RunGraphApi });
+      const ok = await executeIntuneChatTool(ctx, "graph_get", { path: "/subscribedSkus", query: { $select: "skuPartNumber,prepaidUnits,consumedUnits" } });
+      assert.equal(ok.trace.error, undefined);
+      const blocked = await executeIntuneChatTool(ctx, "graph_get", { path: "/subscribedSkus", query: { $filter: "consumedUnits eq 0" } });
+      assert.match(blocked.trace.error!, /supports only \$select/);
+      assert.equal(requests, 1);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("finds candidate endpoints from plain words so a path need not be recalled", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-"));
     const store = seededStore(dir, 1);

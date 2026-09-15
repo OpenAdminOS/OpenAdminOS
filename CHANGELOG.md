@@ -18,6 +18,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Route license-seat discovery to subscribed SKUs, honor its supported query parameters and existing read permissions, and exclude unrelated endpoints when a search has no matching terms.
+
 - Bound app-registration and audit-report detail samples with explicit omission counts, preserve every tenant-health compliance state, and direct hosted Team retries back to assignment review with visible start errors.
 - Recognize natural unknown-encryption questions and answer exact user, group, app-registration and Conditional Access policy counts from verified snapshots.
 

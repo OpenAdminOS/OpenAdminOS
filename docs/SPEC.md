@@ -2459,3 +2459,12 @@ recommendations require review of impact and recovery access before enforcement.
 Exact unfiltered user, group, app-registration and Conditional Access policy totals
 use verified snapshot metadata in Chat and Nova. Filtered or compound requests stay
 on the investigation path; failed or partial collections retain explicit caveats.
+
+Endpoint discovery gives collection endpoints a ranking bonus only after an actual
+term match. License terminology includes the subscribed-SKU inventory. The shipped
+catalog's missing higher-privileged read alternatives for `/subscribedSkus` are
+supplemented with the already requested Organization.Read.All and Directory.Read.All
+permissions. No new consent scope is introduced. Chat omits automatic `$top` for this
+endpoint and rejects unsupported parameters rather than silently dropping filters.
+Microsoft documents `$select` as its only supported query option:
+https://learn.microsoft.com/en-us/graph/api/subscribedsku-list?view=graph-rest-1.0.

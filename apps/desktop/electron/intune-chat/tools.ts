@@ -474,7 +474,14 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
   }
   const path = normalizeGraphPath(stringParam(params, "path"));
   const validation = validateGraphGetPath(path);
-  const query = cappedGraphQuery(objectParam(params, "query"));
+  const queryInput = objectParam(params, "query");
+  const skuInventory = path.toLowerCase() === "/subscribedskus";
+  if (skuInventory && Object.keys(queryInput ?? {}).some((key) => key !== "$select")) {
+    throw new Error("GET /subscribedSkus supports only $select. Retrieve the license inventory without $top or $filter, then calculate seat availability from prepaidUnits and consumedUnits.");
+  }
+  const query = cappedGraphQuery(queryInput);
+  // This collection does not support $top. The response cap still applies.
+  if (skuInventory) delete query.$top;
   const headers = graphHeaders(objectParam(params, "headers"));
   const graph = await ctx.graphForScopes(validation.scopes);
   const request: GraphRequestInput = {
