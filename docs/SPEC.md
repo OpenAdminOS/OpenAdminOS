@@ -2468,3 +2468,11 @@ permissions. No new consent scope is introduced. Chat omits automatic `$top` for
 endpoint and rejects unsupported parameters rather than silently dropping filters.
 Microsoft documents `$select` as its only supported query option:
 https://learn.microsoft.com/en-us/graph/api/subscribedsku-list?view=graph-rest-1.0.
+
+
+Installed acceptance on September 15-16 established a complete Codex Team chain and
+standalone report comparisons. Runtime completion remains separate from factual
+quality: the configured local 8B model still misstates some summaries and fails some
+investigative queries. Nova reaching Listening and passing mute/unmute/stop verifies
+session lifecycle only; spoken question/answer acceptance remains a separate gate.
+See `tasks/ui-audit-063.md` for observed coverage and remaining limitations.

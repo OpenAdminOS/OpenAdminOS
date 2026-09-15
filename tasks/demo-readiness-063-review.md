@@ -3,6 +3,23 @@
 Date: 2026-09-15. Scope: Chat/cache evidence, Team assessments, handoffs, retries,
 streaming persistence, generated drafts, and unsigned agent installation.
 
+## Current conclusion, September 16
+
+The signed preview is installed and the live Codex Team chain and all installed-agent
+paths have been exercised. The selected evidence-and-draft walkthrough works, but an
+unrestricted live demo is not ready: the local 8B model still produces unsupported
+summaries and failed investigative answers, a spoken Nova question/reply is unverified,
+and the exhaustive UI inventory and three installed-chain gate remain incomplete.
+
+Current code build: `db19a6d`. Current-head checks and all three platform packaging
+jobs passed. No merge or release publication occurred. See [UI audit](ui-audit-063.md)
+for the installed build hash, exact coverage, boundaries and provider comparisons.
+
+During the earlier standalone audit, pre-existing delivery rules sent three reports
+to the configured Teams channel before manual delivery was disabled. The user was
+notified. The historical no-message-send statement below applies only to the source
+rehearsals preceding that audit. No tenant write or generated-script execution occurred.
+
 ## Findings and fixes
 
 - **Fixed: invalid queries became false zero answers.** Cache field/type/shape checks
@@ -43,7 +60,7 @@ streaming persistence, generated drafts, and unsigned agent installation.
    succeeds; an audience-filtered question still picked an unrelated endpoint. License
    replays explicitly report inability to verify from this saved-cache setup. Live
    collection/provider behavior must still be tested before presenting these topics.
-4. **Installed acceptance pending.** Local source tests and real-provider saved-cache
+4. **Historical installed acceptance gap, since partly closed.** Local source tests and real-provider saved-cache
    rehearsals do not establish that the installed binary contains these fixes or that
    its live tenant collection, microphone, cancel/retry and selected demo sequence pass.
 
@@ -63,9 +80,9 @@ streaming persistence, generated drafts, and unsigned agent installation.
   authentication checks or generated script safety.
 
 Private answers, prompts, run identifiers and draft artifacts remain outside this
-public repository. No tenant changes, message sends or generated-script execution
-were performed. PR publication/checks and installed-build results will be recorded
-when complete. This review does not mark the live demo ready.
+public repository. At this source-review stage no tenant changes, message sends or
+generated-script execution had occurred. The later installed audit and its delivery
+incident are recorded above. This review does not mark the unrestricted live demo ready.
 
 ## Codex provider and UI audit follow-up
 

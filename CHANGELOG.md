@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Record signed-preview UI and Codex agent acceptance, Nova session lifecycle checks, and remaining local-model, audio and exhaustive-coverage gaps.
+
 - Track the remaining Chat, Nova and Agent Team demo blockers with explicit installed-build and live-provider acceptance checks.
 
 - Record the installed-app Agent Team rehearsal, live evidence handoffs, and remaining compliance-report and script-draft quality gaps.

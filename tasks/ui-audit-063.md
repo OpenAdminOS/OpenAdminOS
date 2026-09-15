@@ -157,3 +157,111 @@ need installation and live retest.
 - Local validation after source fixes: 624 Node tests passed, one skipped; 129
   renderer tests passed; full typecheck passed; registry QA 181 pass, four warnings,
   zero failures. Focused Team retry tests passed after adding the cross-tenant guard.
+
+
+## Final installed-preview follow-up, September 15-16
+
+Code build `db19a6d64209bfc3b84e444e2a99220b39dc83ae` passed current-head
+CI, generated-doc verification, Vercel and GitBook checks. Release workflow
+35026726405 passed source verification and Windows, macOS and Linux packaging.
+Publishing jobs were intentionally skipped; no release was published. The macOS
+artifact passed strict/deep codesign verification and Gatekeeper notarization.
+The app and complete local data were backed up before replacement. Installed
+app.asar SHA-256 is `2dd76b50b4b3df19f2f7699cec6aa87377ff059cbbb3e0c7a452a5163a6ab8f8`.
+Tenant, 12 installed agents, history, registry source and configured providers survived.
+
+### Agent results and report quality
+
+All 12 installed agents were exercised through the desktop, including Team workflows
+and write-proposal review. This does not mean all model answers passed. Seven
+standalone read agents completed with Codex. Updated manifests for dormant apps,
+change audit, tenant health and Conditional Access installed through the unsigned
+preview catalog with hashes and permission review. No new permission consent occurred.
+
+- Updated dormant-app and change-audit templates also complete locally without their
+  previous context overflows. The local model still invents facts or misstates sample
+  counts. Completion is a runtime pass and an answer-quality failure.
+- Codex retests of the updated templates correctly distinguish full aggregate counts
+  from partial detail samples, state included/omitted counts and avoid extrapolation.
+- Updated health evidence and Codex prose reconcile all compliance states and lead
+  with stale-inventory limits. Conditional Access prose distinguishes report-only
+  evaluation from enforcement and requested targeting from resolved membership.
+- The installed Codex Team chain completed assessment, Chief review, Research handoff
+  and a PowerShell draft. Original structured evidence remains in the final handoff.
+  The draft passed syntax and installed command-parameter checks; it was not executed.
+  One complete installed chain is established, not three consecutive installed chains.
+- Hosted Team retry now opens the owning assignment through Review in Agent Team.
+  List/office, zoom/fit, pause/resume motion, hide/show details and fullscreen/exit
+  controls changed state and returned successfully.
+
+### Chat and cache
+
+- Direct installed answers passed for the original Windows encryption question,
+  encrypted Windows, unencrypted macOS, Windows compliance and unknown-encryption
+  wording, plus exact user/group/app-registration/Conditional Access inventory totals.
+  Counts were checked against source rows; cache limitations remain visible.
+- Conversation rename, pin/unpin and Markdown export passed. The exported local file
+  was present. Prompt edit/resend, regeneration and cancellation were exercised.
+- Sign-in request failed answer quality: it did not list the five requested entries
+  and recorded outcomes. The licensing fix discovers the correct endpoint, but the
+  local model still requested invalid fields and then an unsupported cache resource.
+  Those requests were rejected. A usable licensing seat table is not established.
+- Retry incomplete repaired the Defender incidents collection. Cancel preload produced
+  a cancelled terminal state while retaining prior snapshots. A subsequent full
+  refresh completed all 45 selected catalog resources. This does not mean every Graph
+  endpoint is covered or that stale devices recently checked in.
+
+### Nova voice and other UI
+
+With explicit approval for the configured OpenAI speech provider, setup validation
+passed and Start reached Listening. Mute changed the state to microphone muted;
+Stop returned to idle and reset session consent. Fullscreen, conversation visibility
+and voice-settings navigation worked. No spoken question and audible answer were
+verified. This is session-lifecycle evidence, not complete audio acceptance.
+
+Quick search filtered navigation and dismissed with Escape. Changes field diff and
+attribution opened; time comparison returned rows. A local audit baseline was created
+with zero drift and retired while preserving history. Cross-tenant comparison needs
+a second connected tenant. A local audit workspace was created, received a note and
+was archived without deleting chat/run/cache history. Native run-link picker opened
+and was cancelled; actual linking was not established.
+
+### Coverage limits
+
+The audit remains incomplete for every-control acceptance: some provider/connector
+paths need accounts, multi-tenant paths need another tenant, destructive operations
+were not applied, actual voice conversation is unverified, and local-model factual
+failures remain. Every search/filter combination and all lifecycle variants have not been
+exhaustively exercised. These are not passing results.
+
+
+### Final cleanup and review
+
+All nine manual-delivery toggles were restored through the desktop after the test
+runs completed. A read-only comparison of every installed agent's delivery object
+against the pre-audit backup found zero differences. There were no queued, running
+or awaiting-approval agent runs at cleanup. The earlier three Teams reports remain;
+no cleanup message or deletion was sent.
+
+The final-build Nova retest also exercised unmute back to Listening and Stop answer
+while idle, followed by Stop Nova and overlay close. Actual interruption of spoken
+output remains unverified. The final license answer explicitly states that failed
+lookups prevent a verified count, rather than reporting zero.
+
+The teammate wizard exercised all role choices, required-field validation, workflow
+refresh, schedule/advanced disclosure, final work-order review and Back/Cancel.
+No additional teammate or scheduled assignment was created.
+
+Code review revisited catalog schema/revision/hash enforcement without signatures,
+Codex completion isolation, bounded record envelopes, direct-count routing, licensing
+query constraints and Team retry tenant boundaries. Current-head checks passed and
+GitHub reported no reviews or unresolved review threads. This is an author review,
+not an independent reviewer approval.
+
+
+Custom builder follow-up: the local model's generated YAML failed parsing after its
+repair attempt. The UI displayed the line-specific error and blocked Test/Save. Manual
+YAML correction and removal of an unsupported selected user field passed validation.
+Test draft passed tenant/provider/schema/scopes/connector/write-gate preflight and
+unlocked Save & install. The unsaved draft was closed; no extra agent was installed
+or run. Generation quality failed, while validation and recovery controls passed.

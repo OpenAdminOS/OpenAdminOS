@@ -21,26 +21,26 @@ Evidence: [Chat regression review](chat-063-regression-review.md).
   prompt, including grace period, error, conflict, not evaluated and unexpected states.
 - [x] Require state counts to reconcile with the inventory total; keep unknown values explicit.
 - [x] Preserve source run references and coverage when handing the assessment to Research.
-- [ ] Rehearse report quality with the assigned provider, including repetitive-output handling.
+- [x] Rehearse report quality with the assigned provider, including repetitive-output handling.
 
 ## 3. Dependable draft generation and recovery
 
 - [x] Preserve the original task and evidence when retrying a Team run.
 - [ ] Diagnose the observed delay between step timeout and final failed-run state.
 - [ ] Bound draft scope and output; make timeout/cancellation recoverable without losing evidence.
-- [ ] Check generated PowerShell syntax, command parameters, Graph paths, permissions,
+- [x] Check generated PowerShell syntax, command parameters, Graph paths, permissions,
   authentication guidance and pagination. Validate against command metadata where available.
-- [ ] Keep unverified drafts visibly unverified. A completed model response alone is not a
+- [x] Keep unverified drafts visibly unverified. A completed model response alone is not a
   validated script. Do not execute generated scripts or tenant changes during rehearsal.
 
 Evidence: [installed Agent Team review](agent-team-063-live-review.md).
 
 ## 4. Deliver the verified source to the desktop
 
-- [ ] Update PR #88 with focused fixes and regression evidence; verify checks on its current head.
-- [ ] Produce a signed preview build identifying the source commit.
-- [ ] Preserve existing local data and install that build; verify the running binary/version.
-- [ ] Refresh the affected cache collections and inspect per-resource coverage/errors.
+- [x] Update PR #88 with focused fixes and regression evidence; verify checks on its current head.
+- [x] Produce a signed preview build identifying the source commit.
+- [x] Preserve existing local data and install that build; verify the running binary/version.
+- [x] Refresh the affected cache collections and inspect per-resource coverage/errors.
 
 ## 5. Live acceptance rehearsal
 
@@ -65,8 +65,9 @@ and expansion beyond the known blockers are separate decisions.
 
 Source fixes are implemented and tested. The current local providers still produce
 occasional incorrect numeric summaries and drafts with semantic errors despite
-successful execution and source-linked handoffs. The installed-build acceptance
-gate remains open. See [follow-up review](demo-readiness-063-review.md).
+successful execution and source-linked handoffs. The signed preview is installed and one complete Codex Team chain passed. The full
+installed-build acceptance gate remains open, including three consecutive chains,
+spoken audio and the remaining investigative-answer and UI coverage gaps. See [follow-up review](demo-readiness-063-review.md).
 
 Installing or updating agents requires no catalog or manifest signatures. HTTPS
 source review, manifest hashes and permission review remain. Desktop installer
