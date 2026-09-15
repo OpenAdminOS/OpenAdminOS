@@ -2432,3 +2432,26 @@ Common unfiltered noncompliant/encryption lists and device/app counts use verifi
 General Nova introductions and help questions, including compound conversational clauses, have a shared direct response and do not start cache/research work. They preserve a running investigation, its evidence, and any unapproved preview. A compound turn containing a specific tenant question or action still goes through normal task routing. Hosted instructions require natural conversation without lookup acknowledgments for general help. If the speech model delegates such a turn or stalls with an acknowledgment, the app supplies the static capability description; a completed spoken introduction does not receive a duplicate fallback response.
 
 Voice delegation is bound to the original unconsumed transcript fragment. Delayed handoffs cannot consume a newer question. Dispatch waits for a short pause in arriving input deltas before interpreting the sentence. The fallback and model delegation consume an utterance once. These are deterministic app guarantees for identified turns, not a guarantee of speech-recognition accuracy or unrestricted natural-language understanding.
+
+
+### Expanded desktop acceptance fixes (2026-09-15)
+
+The installed-build UI sweep is tracked in `tasks/ui-audit-063.md`. Passing fixture
+rehearsals or a completed run is not proof that every configured provider produces
+an accurate report. Acceptance includes source/count comparison and resulting draft
+review. The maintainer approved OpenAI Codex for both Team and standalone-agent
+comparisons; the default Chat provider remains local.
+
+Hosted or write Team retries return to the owning Team assignment for review.
+Ordinary failed starts display their actionable error. Team evidence cannot be
+retargeted through the generic current-tenant retry button.
+
+Report templates may use `boundedJson(maxChars)` on an array to supply whole records
+within an explicit character budget. Its JSON envelope identifies total, included
+and omitted records and partial coverage. Oversized records are omitted explicitly,
+not clipped; later fitting records may still be included. This is a character bound,
+not a provider token guarantee. Full structured counts remain independent of the
+sample. Dormant-app and change-audit prompts limit detail samples to 6,000 characters;
+age group counts replace repeated full app arrays. Tenant health preserves every
+compliance state, including grace periods and future values. Conditional Access
+recommendations require review of impact and recovery access before enforcement.

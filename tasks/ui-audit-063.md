@@ -76,3 +76,84 @@ or agent works has been established yet.
 
 Computer Use stopped finding the app window after the cache review, including after
 session reset and full-path reacquisition. The user was asked to restore the window.
+
+## Installed build 0a11988, resumed after unlock
+
+- Backed up the prior application and complete app data under the private build
+  review directory, installed the signed/notarized artifact, and launched via CUA.
+  Installed app.asar SHA-256 matches the verified artifact.
+- Cancelled the previously open cache deletion review; existing data remained.
+- The exact Windows-not-encrypted prompt refreshed live managed-device evidence and
+  correctly listed three matches from nine records. Source details and What ran
+  showed the endpoint, selected fields and boolean/Windows filters. Regeneration
+  returned the same result.
+- Edited/resubmitted prompt: encrypted Windows count one, unencrypted macOS count
+  three, noncompliant Windows count four and compliant Windows count zero, all
+  correctly qualified by the snapshot.
+- Unknown-encryption wording with `have` missed direct routing. The investigator
+  rejected its invalid field and fetched evidence; Stop produced a terminal cancelled
+  response and restored controls. Direct phrasing coverage is fixed in source with
+  a regression preserving unsupported extra-filter rejection. Installed retest pending.
+- Codex (4.4s), Ollama (1.3s), Apple Foundation (1.3s) and Anthropic (3.5s) provider
+  smoke tests passed in Settings. Global provider remains the configured local model.
+- JSON (2,366,892 bytes) and CSV (2,118,207 bytes) audit exports both saved through
+  the native dialog. Parsed files each contain 2,123 events. This verifies the old
+  two-million-character failure is fixed in the installed app.
+- Preview catalog uses the same public repository and immutable reviewed manifest
+  commit 0a11988 via `demo/pr88-catalog-0a11988`. All 16 hashes verified before push.
+  This branch has no Actions trigger without a PR; its Vercel check passed. Main
+  catalog is unchanged. Settings source review/save and refresh succeeded.
+
+
+### Completed Codex Team chain and result controls
+
+- Updated Compliance overview, Team evidence review and Team PowerShell draft through
+  the reviewed unsigned preview catalog. No catalog signing key was required.
+- Chief, Research and Script use the already configured Codex provider. Script was
+  re-enabled after its earlier paused rehearsal. A complete installed chain finished:
+  `run_mu35fbtf_kak9sc`, `run_mu35fpab_xh8igq`, `run_mu35g1nc_o7fb3v`,
+  `run_mu35i9xs_dqbk7e`. Counts reconcile: nine devices, eight noncompliant, one grace.
+  Root structured evidence reaches the final draft. The draft cites all three source
+  run IDs. Private exports and PowerShell AST/parameter checks passed; no draft executed.
+- Evidence link opens the correct new run. An earlier stale AX URL was an automation
+  observation issue. Logs, severity filter, reasoning, Markdown and JSON exports pass.
+- Run again on hosted Team results silently failed. Source now routes to assignment
+  review and catches ordinary start errors; eight RunResult tests passed before the
+  additional tenant-retarget restriction. Installed retest is pending.
+- Per-run provider menu closes with Escape and restores focus on the updated build.
+
+### Expanded standalone sweep on the installed build
+
+| Agent | Local configured 8B outcome |
+| --- | --- |
+| Conditional Access explainer | Completed, but invented a coverage fraction and prematurely suggested enabling a report-only policy |
+| Dormant app registrations | Failed: approximately 77,068 input tokens exceed 16,384 context |
+| OS update posture | Completed, but unsupported vulnerability-zero wording in summary |
+| Tenant change audit | Failed: approximately 16,988 input tokens exceed 16,384 context |
+| Tenant health report | Completed, but result omitted grace state and summary skipped stale-inventory-first action |
+| Find inactive devices | Completed, but summary overreached toward retirement from inventory alone |
+| Intune Device Posture Auditor | Completed, but invented user-assignment conclusion and wrong device names in a state list |
+
+Existing delivery rules caused three reports (OS posture, tenant health and inactive
+ devices) to be sent to the configured Teams General channel before the rules were
+identified. This was disclosed to the user. WhatsApp attempts failed because it is
+unlinked. Further manual delivery is being disabled through UI for the rehearsal;
+original delivery settings are retained in the pre-install backup and will be
+restored after testing. Do not treat delivery as newly authorized test scope.
+
+The maintainer explicitly approved standalone Codex comparisons. Dormant-app and OS
+posture Codex runs completed; content review and remaining comparisons are in progress.
+New evidence-budget tests cover oversized individual records, preserved totals,
+whole-record samples and explicit partial coverage. Health counts reconcile in a
+regression containing grace, missing and future states. These source changes still
+need installation and live retest.
+
+
+- Codex comparisons also completed tenant change audit and tenant health; exact
+  report review continues. Stale guest cleanup returned zero planned changes.
+- Offboarding produced one proposed action and paused at typed confirmation.
+  An incorrect phrase did not arm Apply; Cancel rejected the proposal. No tenant
+  mutation was approved. No new permission consent was accepted.
+- Local validation after source fixes: 624 Node tests passed, one skipped; 129
+  renderer tests passed; full typecheck passed; registry QA 181 pass, four warnings,
+  zero failures. Focused Team retry tests passed after adding the cross-tenant guard.
