@@ -757,6 +757,7 @@ function createIntuneChatSmokeGraph(): RunGraphApi {
             {
               id: "managed-device-1",
               deviceName: "WIN-01",
+              isEncrypted: false,
               userPrincipalName: "user@smoke.invalid",
               operatingSystem: "Windows",
               osVersion: "10.0.22631",
@@ -1680,6 +1681,15 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
         "write-intent agent handoff",
       );
       sawAgentSuggestion = bodyText().includes("Offboarding agent");
+      await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
+      continue;
+    }
+    if (prompt === "Which Windows devices are not encrypted?") {
+      // This question now uses exact cache evidence instead of the model stub.
+      await waitFor(
+        () => bodyText().includes("1 Windows device reports not encrypted in this snapshot.") && bodyText().includes("WIN-01"),
+        "cache-grounded Windows encryption answer",
+      );
       await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
       continue;
     }
