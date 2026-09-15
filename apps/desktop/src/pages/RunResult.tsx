@@ -124,7 +124,12 @@ export default function RunResult() {
     );
   }
 
+  const requiresTeamReview = Boolean(run.officeContext && (agent?.mode === "write" || !runTrust.isLocal));
   const reRun = () => {
+    if (requiresTeamReview) {
+      navigate(run.office?.personaId ? `/office?persona=${encodeURIComponent(run.office.personaId)}` : "/office");
+      return;
+    }
     if (
       !requireTenantAndProvider(
         createPendingIntent({
@@ -153,9 +158,9 @@ export default function RunResult() {
     if (run.tenantId) options.tenantId = run.tenantId;
     if (run.providerId) options.providerId = run.providerId;
     if (run.model) options.model = run.model;
-    void startRun(run.agentSlug, options).then((nextRun) =>
-      navigate(`/runs/${nextRun.id}`),
-    );
+    void startRun(run.agentSlug, options)
+      .then((nextRun) => navigate(`/runs/${nextRun.id}`))
+      .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   };
 
   return (
@@ -321,9 +326,9 @@ export default function RunResult() {
                 size="md"
                 leadingIcon={<IconPlay size={12} />}
                 onClick={reRun}
-                title="Re-run with the same tenant pinning"
+                title={requiresTeamReview ? "Review this assignment and its provider in Agent Team" : "Re-run with the same tenant pinning"}
               >
-                Run again
+                {requiresTeamReview ? "Review in Agent Team" : "Run again"}
               </Button>
             )}
           </>
@@ -335,6 +340,7 @@ export default function RunResult() {
             runTenantId={run.tenantId}
             activeTenantId={state.activeTenantId}
             tenants={state.tenants}
+            allowRetarget={!run.officeContext}
             onRetargetCurrent={() => {
               if (
                 !requireTenantAndProvider(
@@ -352,9 +358,9 @@ export default function RunResult() {
               }
               const options: { tenantId?: string } = {};
               if (state.activeTenantId) options.tenantId = state.activeTenantId;
-              void startRun(run.agentSlug, options).then((nextRun) =>
-                navigate(`/runs/${nextRun.id}`),
-              );
+              void startRun(run.agentSlug, options)
+                .then((nextRun) => navigate(`/runs/${nextRun.id}`))
+                .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
             }}
           />
         ) : null}
@@ -666,11 +672,13 @@ function TenantDriftNote({
   runTenantId,
   activeTenantId,
   tenants,
+  allowRetarget,
   onRetargetCurrent,
 }: {
   runTenantId: string | undefined;
   activeTenantId: string | undefined;
   tenants: TenantRecord[];
+  allowRetarget: boolean;
   onRetargetCurrent: () => void;
 }) {
   if (!runTenantId) return null;
@@ -695,9 +703,9 @@ function TenantDriftNote({
           , so the results below reflect the original tenant.
         </div>
       </div>
-      <Button variant="secondary" size="sm" onClick={onRetargetCurrent}>
+      {allowRetarget ? <Button variant="secondary" size="sm" onClick={onRetargetCurrent}>
         Re-run against current tenant
-      </Button>
+      </Button> : null}
     </div>
   );
 }
