@@ -10,8 +10,8 @@ descriptor:
   id: conditional-access-explainer
   name: Conditional Access explainer
   description: Reviews Conditional Access policies for coverage, exclusions, report-only controls, overlaps, and common Zero Trust gaps.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.1.1
+  minAppVersion: 0.6.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -114,7 +114,10 @@ skills:
         apps, or controls. If the JSON does not prove coverage, say
         "not proven from this policy set." Treat report-only and
         disabled policies as not enforcing protection. Treat exclusions
-        as important risk evidence, not noise.
+        as important risk evidence, not noise. Do not invent coverage fractions
+        or treat a group/application ID as a resolved membership list. Distinguish
+        disabled from report-only. This policy inventory does not contain sign-in
+        impact analysis or prove that enforcement is safe.
       prompt: |-
         The tenant has {{ load_policies.output | size }} CA policies
         by state: {{ by_state.output }}.
@@ -154,7 +157,10 @@ skills:
         Three to five bullets tied to concrete baseline areas. Include disabled/report-only policies and policies not modified for a long time when relevant.
 
         5. Next action.
-        One concrete first admin action. Prefer reviewing exclusions or moving a critical report-only policy toward enforcement when supported by evidence.
+        One concrete read-only review action. Review report-only sign-in impact,
+        intended scope, exclusions and emergency access before proposing any
+        enforcement change. Do not tell the admin to enable a policy based only
+        on this inventory.
       temperature: 0.2
       maxTokens: 1100
 

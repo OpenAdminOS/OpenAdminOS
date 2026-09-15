@@ -87,8 +87,8 @@ for (const slug of ["team-evidence-review", "team-script-draft"])
     assert.match(prompt, /Cite the source/);
   });
 
-test('compliance assessment preserves every state and reconciles missing values with the total', async () => {
-  const slug = 'compliance-overview';
+for (const slug of ['compliance-overview', 'tenant-health-report'])
+test(`${slug} preserves every state and reconciles missing values with the total`, async () => {
   const agent = { id: slug, slug, name: slug, description: 'Test', mode: 'read', category: 'compliance', tier: 'dashboard', requiresEntraTier: 'free', scopes: ['DeviceManagementManagedDevices.Read.All'], version: '1.1.1', installedAt: new Date().toISOString(), author: { name: 'Test', verified: false }, settings: { staleSyncDays: 14 }, registryPath: resolve(fileURLToPath(new URL('../../../agents/', import.meta.url)), slug) } as AgentSummary;
   const states = ['compliant', 'noncompliant', 'inGracePeriod', 'error', 'conflict', 'notApplicable', 'futureState', null, undefined, ''];
   let prompt = '';

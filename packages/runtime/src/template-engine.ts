@@ -6,7 +6,7 @@
 //   {{ path.to.value | filter(arg) }}
 //
 // Filters: size, total (alias for size), sample(n), default("..."), join(", "),
-// upper, lower, length, type. New filters can be added to FILTERS below.
+// boundedJson(maxChars), upper, lower, length, type.
 //
 // Type preservation: when the entire string IS a single {{ ... }} expression
 // the raw value is returned (number stays number, array stays array). When
@@ -23,6 +23,26 @@ export interface TemplateFilter {
 }
 
 const FILTERS: Record<string, TemplateFilter> = {
+  boundedJson(value, maxChars) {
+    if (!Array.isArray(value) || typeof maxChars !== "number" || !Number.isInteger(maxChars) || maxChars < 512) {
+      throw new Error("boundedJson requires an array and an integer character budget of at least 512.");
+    }
+    // Preserve whole records. Skipping an oversized record must not hide the
+    // coverage gap, and must not prevent smaller later records from fitting.
+    const records: unknown[] = [];
+    const envelope = () => JSON.stringify({
+      totalRecords: value.length,
+      includedRecords: records.length,
+      omittedRecords: value.length - records.length,
+      coverage: records.length === value.length ? "complete" : "partial: omitted records are not assessed; do not extrapolate sample findings",
+      records,
+    });
+    for (const record of value) {
+      records.push(record);
+      if (envelope().length > maxChars) records.pop();
+    }
+    return envelope();
+  },
   size(value) {
     if (Array.isArray(value)) return value.length;
     if (value && typeof value === "object") return Object.keys(value as object).length;
