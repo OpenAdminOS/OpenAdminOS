@@ -111,3 +111,14 @@ it('answers encryption and compliance lists/counts across platforms using actual
     assert.equal(capped!.split('\n').filter(line => line.startsWith('- ')).length, 50);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+it('answers natural unknown-encryption phrasing without dropping additional conditions', async () => {
+  const f = fixture(async () => { throw new Error('Unexpected network'); });
+  const answer = await voiceDeviceEvidenceAnswer('Which Windows devices have unknown encryption status?', status, f.ctx, () => {});
+  assert.match(answer!, /Windows device has unknown encryption status/);
+  assert.deepEqual(f.reads[0].filters, [
+    { field: 'isEncrypted', op: 'eq', value: null },
+    { field: 'operatingSystem', op: 'eq', value: 'Windows' },
+  ]);
+  assert.equal(voiceDeviceEvidenceIntent('Which Windows devices have unknown encryption status in group Sales?'), undefined);
+});

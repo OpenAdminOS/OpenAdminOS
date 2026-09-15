@@ -16,7 +16,8 @@ interface DeviceEvidenceQuery {
 function deviceEvidenceQuery(question: string): DeviceEvidenceQuery | undefined {
   const q = question.toLowerCase().trim().replace(/non[ -]compliant/g, 'noncompliant')
     .replace(/^(?:stop[,.!]?\s+)?(?:can|could|would) you (?:please )?(?:tell me )?/, '')
-    .replace(/^(?:please |tell me )/, '').replace(/[?.!]+$/, '').trim();
+    .replace(/^(?:please |tell me )/, '').replace(/[?.!]+$/, '').trim()
+    .replace(/\bdevices (?:that |which )?have unknown encryption status\b/, 'devices with unknown encryption status');
   if (/^(?:why (?:they|these devices|those devices|my devices|the devices) (?:are|are marked)|why are (?:they|these devices|those devices|my devices|the devices)) noncompliant$/.test(q)) {
     return { kind: 'causes', filters: [{ field: 'complianceState', op: 'eq', value: 'noncompliant' }], label: 'are marked non-compliant' };
   }
