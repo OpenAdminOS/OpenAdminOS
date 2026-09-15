@@ -123,7 +123,12 @@ skills:
         conclusions.
       prompt: |-
         Tenant managed devices: {{ load_devices.output | size }}.
-        All compliance states: {{ by_state.output }}.
+        Compliant: {{ by_state.output.compliant }}.
+        Noncompliant: {{ by_state.output.noncompliant }}.
+        In grace period: {{ by_state.output.inGracePeriod }}.
+        Unknown: {{ by_state.output.unknown }}.
+        Full compliance state map, including zero and unexpected states: {{ by_state.output }}.
+        The total inventory is not the compliant count. OS, ownership and enrollment are overlapping breakdowns of the same inventory; never add them to the inventory or compliance counts.
         By OS: {{ by_os.output }}.
         By ownership: {{ by_owner_type.output }}.
         By enrollment: {{ by_enrollment_type.output }}.

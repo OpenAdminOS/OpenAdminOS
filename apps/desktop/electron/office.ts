@@ -816,21 +816,31 @@ export class OfficeService {
     c: Context,
     handoff?: OfficeHandoff,
   ): OfficeTaskContext {
-    const ids = [...(handoff?.sourceRunIds ?? []), ...runs.map((r) => r.id)];
-    const evidence = [...new Set(ids)].slice(-8).map((id) => {
+    const ids = [...new Set([...(handoff?.sourceRunIds ?? []), ...runs.map((r) => r.id)])].slice(-8);
+    const selected = new Set<string>();
+    const evidence: OfficeTaskContext["evidence"] = [];
+    // Keep original structured evidence through successive report handoffs.
+    // Resolve references from host history, never from a model's copied payload.
+    for (let index = 0; index < ids.length && selected.size < 8; index++) {
+      const id = ids[index]!;
+      if (selected.has(id)) continue;
+      selected.add(id);
       const run = c.runs.find((r) => r.id === id);
       if (!run || run.tenantId !== p.tenantId || run.status !== "completed")
         throw new Error(
           "Handoff evidence is missing or belongs to another tenant. Review the source assignment.",
         );
-      return {
+      evidence.push({
         runId: run.id,
         agentSlug: run.agentSlug,
         finishedAt: run.finishedAt,
         summary: (run.summary ?? "").slice(0, 2000),
         result: run.result,
-      };
-    });
+      });
+      for (const source of run.officeContext?.evidence ?? []) {
+        if (!selected.has(source.runId) && !ids.includes(source.runId)) ids.push(source.runId);
+      }
+    }
     const context: OfficeTaskContext = {
       tenantId: p.tenantId,
       question:
