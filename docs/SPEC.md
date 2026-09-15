@@ -953,7 +953,11 @@ running, or awaiting write confirmation. Settings surfaces the last prune result
 so local deletion is not silent.
 
 Audit log export lives in Settings -> General next to run-history retention.
-It is an explicit local save only, never an upload. JSON and CSV exports include
+It is an explicit local save only, never an upload. The native save dialog writes
+host-generated audit content directly in the main process, so retained histories
+above the renderer text-file IPC limit remain exportable. Cancellation writes no
+file and the response contains metadata rather than the full audit payload.
+JSON and CSV exports include
 retained run-history events, write-confirmation request/accepted/rejected
 events without exporting the typed phrase content, connector delivery audit
 entries from `ConnectorAuditEntry`, and hosted-provider consent events recorded
@@ -2066,6 +2070,13 @@ snapshots are coalesced to avoid delaying final states behind token-by-token per
 Empty model drafts fail with a recovery action; nonempty generated scripts remain visibly
 unexecuted and unvalidated until separately reviewed. Reopening
 an unchanged finding for a rehearsal must not be presented as newly detected drift.
+
+Codex app completions keep the existing authentication home and explicitly selected
+credential backend, while ignoring terminal-user configuration and execpolicy rules.
+They disable project instructions, skill instructions, hooks, plugins, apps, shell,
+browser/computer tools, web search and subagents. Unsupported isolation flags fail
+with an instruction to update Codex CLI. This prevents a global terminal setup from
+changing the app's evidence review or opening a separate action path.
 
 ## 5a. v0.1: Public preview foundation
 

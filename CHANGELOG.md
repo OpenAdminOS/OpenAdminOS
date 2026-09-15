@@ -18,6 +18,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Save large JSON and CSV audit histories through the native dialog without the renderer text limit, and dismiss per-run model menus with Escape while restoring keyboard focus.
+
 - Preserve every compliance state in Team assessments, retain task evidence on local read-only retries, reject empty model drafts and coalesce streaming persistence so terminal states do not wait behind every token.
 
 - Correct Chat and Nova device encryption/compliance filters, reject invalid cache queries instead of reporting false zero counts, and respect the security-incidents page limit during cache preload.
@@ -33,6 +35,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Verify the CLI adapters on macOS, including Codex and Claude live responses and Claude login-keychain access from the desktop session.
 
 ### Security
+
+- Isolate Codex completions from terminal-user instructions, hooks, plugins and tools while retaining the existing sign-in backend. Older CLIs report an actionable update requirement.
 
 ## [0.6.3] - 2026-09-13
 
