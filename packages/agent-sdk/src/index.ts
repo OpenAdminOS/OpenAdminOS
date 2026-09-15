@@ -832,6 +832,8 @@ export interface DriftHistoryPruneResult {
 export type AuditLogExportFormat = "json" | "csv";
 
 export interface ExportAuditLogInput {
+  /** Save through the native dialog in the main process; omit content from the response. */
+  saveToFile?: boolean;
   format: AuditLogExportFormat;
   /** Inclusive ISO timestamp lower bound. */
   from?: string;
@@ -846,6 +848,7 @@ export interface AuditLogHashChainSummary {
 }
 
 export interface AuditLogExportResult {
+  savedFile?: SaveTextFileResult;
   format: AuditLogExportFormat;
   suggestedName: string;
   mimeType: "application/json" | "text/csv";

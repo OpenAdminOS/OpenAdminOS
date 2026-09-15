@@ -494,6 +494,7 @@ export function makeMockBridge(
         startHash: "0".repeat(64),
         finalHash: "0".repeat(64),
       },
+      ...(input.saveToFile ? { savedFile: { canceled: false, filePath: "/tmp/audit.json" } } : {}),
       ...(input.from ? { from: input.from } : {}),
       ...(input.to ? { to: input.to } : {}),
     })),

@@ -2884,15 +2884,9 @@ function GeneralSection() {
     setRunHistoryNotice(null);
     setAuditExportNotice(null);
     try {
-      const exported = await api.exportAuditLog({ format: auditExportFormat });
-      const saved = await api.saveTextFile({
-        suggestedName: exported.suggestedName,
-        content: exported.content,
-        filters:
-          auditExportFormat === "json"
-            ? [{ name: "JSON", extensions: ["json"] }]
-            : [{ name: "CSV", extensions: ["csv"] }],
-      });
+      const exported = await api.exportAuditLog({ format: auditExportFormat, saveToFile: true });
+      const saved = exported.savedFile;
+      if (!saved) throw new Error("The desktop did not return a save result. Restart the app and try again.");
       if (saved.canceled) {
         setAuditExportNotice("Audit log export cancelled.");
         return;
@@ -2903,7 +2897,7 @@ function GeneralSection() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRunHistoryError(
-        `Audit log export failed: ${message} Try again, choose another save location, or narrow the date range through the export API.`,
+        `Audit log export failed: ${message} Try again and choose a writable local folder in the save dialog.`,
       );
     } finally {
       setAuditExportBusy(false);

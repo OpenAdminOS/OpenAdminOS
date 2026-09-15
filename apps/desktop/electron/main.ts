@@ -1,3 +1,4 @@
+import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
@@ -4371,6 +4372,10 @@ function validateExportAuditLogInput(value: unknown): ExportAuditLogInput {
     throw new Error("Audit log export format must be json or csv.");
   }
   const input: ExportAuditLogInput = { format: value.format };
+  if (value.saveToFile !== undefined) {
+    if (typeof value.saveToFile !== "boolean") throw new Error("Audit log saveToFile must be a boolean.");
+    input.saveToFile = value.saveToFile;
+  }
   const from = validateOptionalAuditLogBoundary(value.from, "from");
   const to = validateOptionalAuditLogBoundary(value.to, "to");
   if (from !== undefined) input.from = from;
@@ -5691,9 +5696,14 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:export-audit-log",
-    handleTrusted((_event, input: unknown) =>
-      store.exportAuditLog(validateExportAuditLogInput(input)),
-    ),
+    handleTrusted(async (_event, input: unknown) => {
+      const validated = validateExportAuditLogInput(input);
+      const exported = await store.exportAuditLog(validated);
+      if (!validated.saveToFile) return exported;
+      return saveAuditLogExport(exported, (options) => mainWindow
+        ? dialog.showSaveDialog(mainWindow, options)
+        : dialog.showSaveDialog(options));
+    }),
   );
   ipcMain.handle(
     "openadminos:get-self-training-settings",

@@ -22,6 +22,19 @@ function provider(id: string) {
 }
 
 describe("Settings provider section", () => {
+  it("saves audit exports in the host without resubmitting content through text-file IPC", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge();
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/general", bridge });
+    await user.click(await screen.findByRole("button", { name: "Export audit log" }));
+    expect(await screen.findByText(/Audit log saved locally/)).toBeInTheDocument();
+    expect(bridge.exportAuditLog).toHaveBeenCalledWith({ format: "json", saveToFile: true });
+    expect(bridge.saveTextFile).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "csv", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Export audit log" }));
+    await waitFor(() => expect(bridge.exportAuditLog).toHaveBeenLastCalledWith({ format: "csv", saveToFile: true }));
+  });
+
   it("requires a real Gemini test and shows CLI diagnostics before activation", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({
