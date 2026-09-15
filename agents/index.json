@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "revision": 3,
+  "revision": 6,
   "agents": [
     {
       "id": "compliance-overview",
       "slug": "compliance-overview",
       "name": "Compliance overview",
       "description": "Reviews Intune compliance by state, operating system, ownership, enrollment, and stale inventory signals.",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "mode": "read",
       "category": "compliance",
       "tier": "dashboard",
@@ -20,9 +20,9 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
-      "minAppVersion": "0.1.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/compliance-overview/manifest.yaml",
-      "manifestSha256": "642d6d4fb7797f1a95425a3ee5f75a7cbd13ede7fb10774731e0220302878d9c"
+      "manifestSha256": "6a3ca247aa9f30460f0a5cd70b5ac7e521874bd68721338cdf86a822e091e64e"
     },
     {
       "id": "conditional-access-explainer",
@@ -280,7 +280,7 @@
       "slug": "team-script-draft",
       "name": "Team PowerShell draft",
       "description": "Prepares a PowerShell script for review from an Agent Team task and its supplied evidence.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "mode": "read",
       "category": "devices",
       "tier": "agent",
@@ -293,7 +293,7 @@
       "scopes": [],
       "minAppVersion": "0.6.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-script-draft/manifest.yaml",
-      "manifestSha256": "db746cc242cdffc1b318acb0bceb0017a9ddaf7a1c1a42c8c423b56fa9eb1dca"
+      "manifestSha256": "5fab6b6e65e322e85d7e639ffff24991ca8ba93f7aa592fd336af7ab1aa24e90"
     },
     {
       "id": "tenant-change-audit",

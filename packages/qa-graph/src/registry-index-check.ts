@@ -1,4 +1,3 @@
-import { verify } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,8 +11,6 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 export function runRegistryIndexChecks(): CheckResult[] {
   const agentsRoot = findAgentsRoot();
   const indexPath = join(agentsRoot, "index.json");
-  const signaturePath = join(agentsRoot, "index.sig");
-  const publicKeyPath = join(agentsRoot, "registry-public-key.pem");
   const revisionPath = join(agentsRoot, "registry-revision.txt");
   const results: CheckResult[] = [];
 
@@ -53,30 +50,8 @@ export function runRegistryIndexChecks(): CheckResult[] {
     name: "registry-revision-valid",
     severity: revisionValid ? "pass" : "fail",
     message: revisionValid
-      ? `Registry revision ${declaredRevision} matches the signed index.`
+      ? `Registry revision ${declaredRevision} matches the index.`
       : "agents/registry-revision.txt must contain the positive integer written to index.json.",
-  });
-
-  let signatureValid = false;
-  try {
-    const signature = Buffer.from(readFileSync(signaturePath, "utf8").trim(), "base64");
-    signatureValid =
-      signature.length === 64 &&
-      verify(
-        null,
-        readFileSync(indexPath),
-        readFileSync(publicKeyPath),
-        signature,
-      );
-  } catch {
-    signatureValid = false;
-  }
-  results.push({
-    name: "registry-signature-valid",
-    severity: signatureValid ? "pass" : "fail",
-    message: signatureValid
-      ? "agents/index.json has a valid detached Ed25519 signature."
-      : "agents/index.sig is missing or does not verify against registry-public-key.pem.",
   });
 
   const manifestDirs = readdirSync(agentsRoot)

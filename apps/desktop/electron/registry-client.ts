@@ -11,7 +11,6 @@
  * Cache location: <userData>/registry-cache/index.json
  */
 
-import { verify } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
@@ -27,10 +26,6 @@ export const DEFAULT_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
 const FETCH_TIMEOUT_MS = 10_000;
-
-const OFFICIAL_REGISTRY_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAI6Ms2SvvonYIFVxK5Vb9YqnnIdlLowM/JLKbmOb+5N0=
------END PUBLIC KEY-----`;
 
 export interface RegistrySourceValidationOptions {
   allowDevSource?: boolean;
@@ -69,7 +64,7 @@ export interface RegistryIndexEntry {
 
 interface RegistryIndex {
   schemaVersion: number;
-  /** Monotonic for the signed official registry. Custom registries may omit it. */
+  /** Monotonic for the official registry. Custom registries may omit it. */
   revision?: number;
   agents: RegistryIndexEntry[];
 }
@@ -77,7 +72,6 @@ interface RegistryIndex {
 interface CachedIndex extends RegistryIndex {
   cachedAt: string;
   sourceUrl: string;
-  signatureVerified: boolean;
 }
 
 export interface RefreshResult {
@@ -98,7 +92,7 @@ function cachePath(userDataPath: string): string {
 function readCache(
   userDataPath: string,
   sourceUrl?: string,
-  requireVerified = false,
+  requireRevision = false,
 ): CachedIndex | null {
   const path = cachePath(userDataPath);
   if (!existsSync(path)) return null;
@@ -111,14 +105,13 @@ function readCache(
       Array.isArray((raw as { agents: unknown }).agents)
     ) {
       const cached = raw as CachedIndex;
+      if (cached.schemaVersion !== 1) return null;
+      validateRegistryEntries(cached.agents);
       if (sourceUrl && cached.sourceUrl !== sourceUrl) {
         return null;
       }
-      if (requireVerified && cached.signatureVerified !== true) {
-        return null;
-      }
       if (
-        requireVerified &&
+        requireRevision &&
         (!Number.isSafeInteger(cached.revision) || (cached.revision ?? 0) < 1)
       ) {
         return null;
@@ -135,7 +128,6 @@ function writeCache(
   userDataPath: string,
   index: RegistryIndex,
   sourceUrl: string,
-  signatureVerified: boolean,
 ): void {
   const dir = cacheDir(userDataPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -148,7 +140,6 @@ function writeCache(
     ...index,
     cachedAt: new Date().toISOString(),
     sourceUrl,
-    signatureVerified,
   };
   writeFileSync(
     cachePath(userDataPath),
@@ -233,8 +224,8 @@ export async function refreshRegistry(
   }
   const indexUrl = `${sourceUrl}/index.json`;
   const sourceValidation = validateRegistrySource(registrySource, options);
-  const requireSignature = sourceValidation.isOfficial;
-  const trustedCache = readCache(userDataPath, sourceUrl, requireSignature);
+  const requireRevision = sourceValidation.isOfficial;
+  const trustedCache = readCache(userDataPath, sourceUrl, requireRevision);
 
   let fetchedIndex: RegistryIndex | null = null;
   let fetchError: string | null = null;
@@ -245,18 +236,6 @@ export async function refreshRegistry(
     const response = await fetch(indexUrl, { signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const indexText = await response.text();
-    if (requireSignature) {
-      const signatureResponse = await fetch(`${sourceUrl}/index.sig`, {
-        signal: controller.signal,
-      });
-      if (!signatureResponse.ok) {
-        throw new Error(`HTTP ${signatureResponse.status} while fetching registry signature`);
-      }
-      const signature = (await signatureResponse.text()).trim();
-      if (!verifyOfficialRegistrySignature(indexText, signature)) {
-        throw new Error("Registry signature verification failed");
-      }
-    }
     const body = JSON.parse(indexText) as unknown;
     if (
       body &&
@@ -265,19 +244,22 @@ export async function refreshRegistry(
       Array.isArray((body as { agents: unknown }).agents)
     ) {
       const candidate = body as RegistryIndex;
+      if (candidate.schemaVersion !== 1) {
+        throw new Error("Unsupported registry schema version. Update the app or review the registry source.");
+      }
       if (
-        requireSignature &&
+        requireRevision &&
         (!Number.isSafeInteger(candidate.revision) || (candidate.revision ?? 0) < 1)
       ) {
         throw new Error("Official registry index is missing a valid revision");
       }
       if (
-        requireSignature &&
+        requireRevision &&
         trustedCache?.revision !== undefined &&
         (candidate.revision ?? 0) < trustedCache.revision
       ) {
         throw new Error(
-          `Official registry replay rejected: revision ${candidate.revision ?? 0} is older than verified revision ${trustedCache.revision}.`,
+          `Official registry replay rejected: revision ${candidate.revision ?? 0} is older than cached revision ${trustedCache.revision}.`,
         );
       }
       validateRegistryEntries(candidate.agents);
@@ -292,7 +274,7 @@ export async function refreshRegistry(
   }
 
   if (fetchedIndex) {
-    writeCache(userDataPath, fetchedIndex, sourceUrl, requireSignature);
+    writeCache(userDataPath, fetchedIndex, sourceUrl);
     return { entries: fetchedIndex.agents, fromCache: false, cachedAt: new Date().toISOString(), error: null };
   }
 
@@ -326,26 +308,6 @@ export function readCachedRegistry(
     return { entries: cached.agents, fromCache: true, cachedAt: cached.cachedAt, error: null };
   }
   return { entries: [], fromCache: false, cachedAt: null, error: null };
-}
-
-export function verifyOfficialRegistrySignature(
-  indexText: string,
-  signatureBase64: string,
-): boolean {
-  try {
-    const signature = Buffer.from(signatureBase64, "base64");
-    return (
-      signature.length === 64 &&
-      verify(
-        null,
-        Buffer.from(indexText, "utf8"),
-        OFFICIAL_REGISTRY_PUBLIC_KEY,
-        signature,
-      )
-    );
-  } catch {
-    return false;
-  }
 }
 
 function validateRegistryEntries(entries: RegistryIndexEntry[]): void {

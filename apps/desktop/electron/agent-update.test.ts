@@ -14,7 +14,7 @@ const tokenStore: TokenCacheStorage = {
   clear: async () => undefined,
 };
 
-describe("signed registry manifest lifecycle", () => {
+describe("registry manifest integrity and update lifecycle", () => {
   it("downloads verified manifests atomically and removes them on uninstall", async () => {
     const repoRoot = await findRepoRoot();
     const source = "https://registry.example/agents";

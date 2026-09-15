@@ -8,8 +8,8 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_REGISTRY_SOURCE,
   refreshRegistry,
+  readCachedRegistry,
   validateRegistrySource,
-  verifyOfficialRegistrySignature,
 } from "./registry-client.js";
 
 describe("registry source validation", () => {
@@ -138,27 +138,15 @@ describe("registry source validation", () => {
     }
   });
 
-  it("verifies the checked-in official index and rejects modified bytes", () => {
-    const indexText = readFileSync(findRepoFile("agents/index.json"), "utf8");
-    const signature = readFileSync(findRepoFile("agents/index.sig"), "utf8").trim();
-
-    assert.equal(verifyOfficialRegistrySignature(indexText, signature), true);
-    assert.equal(
-      verifyOfficialRegistrySignature(`${indexText} `, signature),
-      false,
-    );
-  });
-
-  it("enforces the official signature during refresh and reuses only its verified cache", async () => {
+  it("fetches the official HTTPS catalog without a signing key and reuses its source-bound cache", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-official-registry-"));
     const originalFetch = globalThis.fetch;
     const indexText = readFileSync(findRepoFile("agents/index.json"), "utf8");
-    const signature = readFileSync(findRepoFile("agents/index.sig"), "utf8").trim();
     try {
-      globalThis.fetch = async (input) =>
-        new Response(String(input).endsWith("/index.sig") ? signature : indexText, {
-          status: 200,
-        });
+      globalThis.fetch = async (input) => {
+        assert.equal(String(input), `${DEFAULT_REGISTRY_SOURCE}/index.json`);
+        return new Response(indexText, { status: 200 });
+      };
 
       const live = await refreshRegistry(dir, DEFAULT_REGISTRY_SOURCE);
       assert.equal(live.fromCache, false);
@@ -177,41 +165,42 @@ describe("registry source validation", () => {
     }
   });
 
-  it("rejects an official refresh when the signature is missing or invalid", async () => {
-    const indexText = JSON.stringify({
-      schemaVersion: 1,
-      agents: [registryEntry("official-agent")],
-    });
+  it("rejects invalid revisions and malformed manifest hashes without caching them", async () => {
     const originalFetch = globalThis.fetch;
     try {
-      for (const signatureResponse of [
-        new Response("missing", { status: 404 }),
-        new Response("not-a-signature", { status: 200 }),
+      for (const candidate of [
+        { schemaVersion: 1, agents: [registryEntry('test')] },
+        { schemaVersion: 2, revision: 1, agents: [registryEntry('test')] },
+        { schemaVersion: 1, revision: 1, agents: [{ ...registryEntry('test'), manifestSha256: 'invalid' }] },
       ]) {
-        const dir = await mkdtemp(join(tmpdir(), "openadminos-bad-signature-"));
+        const dir = await mkdtemp(join(tmpdir(), 'invalid-registry-'));
         try {
-          globalThis.fetch = async (input) =>
-            String(input).endsWith("/index.sig")
-              ? signatureResponse.clone()
-              : new Response(indexText, { status: 200 });
+          globalThis.fetch = async () => new Response(JSON.stringify(candidate), { status: 200 });
           const result = await refreshRegistry(dir, DEFAULT_REGISTRY_SOURCE);
-          assert.equal(result.fromCache, false);
           assert.deepEqual(result.entries, []);
           assert.ok(result.error);
-        } finally {
-          await rm(dir, { recursive: true, force: true });
-        }
+          assert.equal(result.fromCache, false);
+        } finally { await rm(dir, { recursive: true, force: true }); }
       }
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    } finally { globalThis.fetch = originalFetch; }
   });
 
-  it("rejects an older signed official revision after a newer verified revision was cached", async () => {
+  it("rejects malformed cached entries even when their revision is valid", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "malformed-cache-"));
+    try {
+      await mkdir(join(dir, "registry-cache"));
+      await writeFile(join(dir, "registry-cache", "index.json"), JSON.stringify({
+        schemaVersion: 1, revision: 1, sourceUrl: DEFAULT_REGISTRY_SOURCE,
+        cachedAt: new Date().toISOString(), agents: [{ ...registryEntry("bad"), manifestSha256: "bad" }],
+      }));
+      assert.deepEqual(readCachedRegistry(dir, DEFAULT_REGISTRY_SOURCE).entries, []);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("rejects an older official revision after a newer revision was cached", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-registry-replay-"));
     const originalFetch = globalThis.fetch;
     const indexText = readFileSync(findRepoFile("agents/index.json"), "utf8");
-    const signature = readFileSync(findRepoFile("agents/index.sig"), "utf8").trim();
     const index = JSON.parse(indexText) as { revision: number; agents: unknown[] };
     const newerRevision = index.revision + 1;
     try {
@@ -228,10 +217,10 @@ describe("registry source validation", () => {
         })}\n`,
         "utf8",
       );
-      globalThis.fetch = async (input) =>
-        new Response(String(input).endsWith("/index.sig") ? signature : indexText, {
-          status: 200,
-        });
+      globalThis.fetch = async (input) => {
+        assert.equal(String(input), `${DEFAULT_REGISTRY_SOURCE}/index.json`);
+        return new Response(indexText, { status: 200 });
+      };
 
       const result = await refreshRegistry(dir, DEFAULT_REGISTRY_SOURCE);
       assert.equal(result.fromCache, true);

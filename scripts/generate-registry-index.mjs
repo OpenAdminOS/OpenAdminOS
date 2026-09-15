@@ -128,7 +128,7 @@ if (errors.length > 0) {
 
 // `revision` is deliberately explicit rather than time-based so index
 // generation stays deterministic. The client remembers the highest
-// verified revision and refuses older signed indexes. Force maintainers
+// cached revision and refuses older indexes. Force maintainers
 // to bump it whenever the generated agent set changes.
 if (existsSync(outPath)) {
   try {
@@ -138,7 +138,7 @@ if (existsSync(outPath)) {
       JSON.stringify(previous.agents) !== JSON.stringify(entries)
     ) {
       console.error(
-        "Registry entries changed without a revision bump. Increment agents/registry-revision.txt, then regenerate and sign the index.",
+        "Registry entries changed without a revision bump. Increment agents/registry-revision.txt, then regenerate the index.",
       );
       process.exit(1);
     }
