@@ -19,7 +19,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Bound app-registration and audit-report detail samples with explicit omission counts, preserve every tenant-health compliance state, and direct hosted Team retries back to assignment review with visible start errors.
-- Recognize natural “devices have unknown encryption status” questions in the direct evidence path.
+- Recognize natural unknown-encryption questions and answer exact user, group, app-registration and Conditional Access policy counts from verified snapshots.
 
 - Save large JSON and CSV audit histories through the native dialog without the renderer text limit, and dismiss per-run model menus with Escape while restoring keyboard focus.
 

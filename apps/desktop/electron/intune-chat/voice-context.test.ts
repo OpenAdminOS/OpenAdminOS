@@ -6,6 +6,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import {
   voiceInventoryAnswer,
+  voiceResourcesForQuestion,
   voiceDeviceSummaryAnswer,
   voiceConversationContext,
   compactVoiceAnswerPack,
@@ -21,6 +22,25 @@ const status = (
   refreshedAt: "2026-09-12T09:00:00Z",
   scopeSet: [],
   ...overrides,
+});
+it('routes exact directory totals to their own verified resource and preserves coverage caveats', () => {
+  const questions = [
+    ['How many users are in this tenant?', 'users', 'user accounts'],
+    ['How many groups are in this tenant?', 'groups', 'groups'],
+    ['What is the total number of app registrations in our tenant?', 'applications', 'app registrations'],
+    ['How many Conditional Access policies do we have?', 'conditionalAccessPolicies', 'Conditional Access policies'],
+  ] as const;
+  for (const [question, resource, label] of questions) {
+    assert.deepEqual(voiceResourcesForQuestion(question), [resource]);
+    const answer = voiceInventoryAnswer(question, [status({ resource, rows: 23, pageLimitReached: true, lastError: 'Cancelled' })])!;
+    assert.ok(answer.includes(`at least 23 ${label}`));
+    assert.match(answer, /latest refresh failed/);
+    assert.match(voiceInventoryAnswer(question, [])!, /does not mean there are none/);
+  }
+  for (const question of ['How many disabled users are in this tenant?', 'How many groups do we have without owners?', 'How many Conditional Access policies are enabled?', 'How many users are in this tenant and which have licenses?']) {
+    assert.equal(voiceResourcesForQuestion(question), undefined);
+    assert.equal(voiceInventoryAnswer(question, []), undefined);
+  }
 });
 it("answers unfiltered inventory questions from exact resource totals without conflating Entra and Intune", () => {
   const answer = voiceInventoryAnswer("Do you see any of my devices?", [

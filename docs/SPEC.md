@@ -2455,3 +2455,7 @@ sample. Dormant-app and change-audit prompts limit detail samples to 6,000 chara
 age group counts replace repeated full app arrays. Tenant health preserves every
 compliance state, including grace periods and future values. Conditional Access
 recommendations require review of impact and recovery access before enforcement.
+
+Exact unfiltered user, group, app-registration and Conditional Access policy totals
+use verified snapshot metadata in Chat and Nova. Filtered or compound requests stay
+on the investigation path; failed or partial collections retain explicit caveats.
