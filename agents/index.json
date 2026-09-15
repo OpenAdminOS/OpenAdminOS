@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 6,
+  "revision": 7,
   "agents": [
     {
       "id": "compliance-overview",
@@ -22,7 +22,7 @@
       ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/compliance-overview/manifest.yaml",
-      "manifestSha256": "6a3ca247aa9f30460f0a5cd70b5ac7e521874bd68721338cdf86a822e091e64e"
+      "manifestSha256": "5fa20fe11c97cd25da99e291c214f386b714823f01ed8fc8a5fc40cf2bd18ddf"
     },
     {
       "id": "conditional-access-explainer",
@@ -260,7 +260,7 @@
       "slug": "team-evidence-review",
       "name": "Team evidence review",
       "description": "Investigates evidence handed to an Agent Team persona without collecting tenant data again.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "mode": "read",
       "category": "compliance",
       "tier": "agent",
@@ -271,9 +271,9 @@
         "verified": true
       },
       "scopes": [],
-      "minAppVersion": "0.6.0",
+      "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-evidence-review/manifest.yaml",
-      "manifestSha256": "c2dea87c71e5d26588fbc2473899e73a51b12cd75c4fa91c0a934f2e247f8874"
+      "manifestSha256": "a26c849387968867ab54091fbfca16d51c1c6ad10db4fbef7ff07da4a28bf97c"
     },
     {
       "id": "team-script-draft",
