@@ -30,7 +30,7 @@ describe("Settings provider section", () => {
     expect(await screen.findByText(/Audit log saved locally/)).toBeInTheDocument();
     expect(bridge.exportAuditLog).toHaveBeenCalledWith({ format: "json", saveToFile: true });
     expect(bridge.saveTextFile).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "csv", exact: true }));
+    await user.click(screen.getByRole("button", { name: "csv" }));
     await user.click(screen.getByRole("button", { name: "Export audit log" }));
     await waitFor(() => expect(bridge.exportAuditLog).toHaveBeenLastCalledWith({ format: "csv", saveToFile: true }));
   });
