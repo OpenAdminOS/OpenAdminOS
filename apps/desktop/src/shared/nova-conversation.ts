@@ -15,14 +15,14 @@ export function hasNovaAudienceGreeting(text: string): boolean {
 
 /** Pure stage context and spoken greetings do not request an app action. */
 export function novaAudienceReply(text: string): string | undefined {
-  const clauses = conversationalText(text).replace(/^[.\s]+/, '').split(/[.!?]+|\s+and\s+/i)
+  const clauses = conversationalText(text).replace(/^[.\s]+/, '').split(/[.!?]+|\s+and\s+|,\s*(?=(?:can|could|would) you\b)/i)
     .map(c => conversationalText(c).replace(/^and\s+/i, '').trim()).filter(Boolean);
   if (!clauses.length) return undefined;
   let greet = false;
   for (const clause of clauses) {
     const q = clause.replace(/^(?:I (?:want|would like) you to |(?:can|could|would) you |please )/i, '').replace(/,? please$/i, '');
-    if (/^(?:say (?:hello|hi)(?: to)?|greet|welcome) (?:them|everyone|everybody|(?:the |our |this )?audience|(?:the )?(?:people|folks)(?: here| in the audience)?)$/i.test(q)) { greet = true; continue; }
-    if (/^(?:we(?: are|'re)|I(?: am|'m)) (?:right now |now )?(?:on (?:the |a )?stage(?: (?:in front of|with) (?:an? |the |our )?audience)?|in front of (?:an? |the |our )?audience)$/i.test(q)) continue;
+    if (/^say (?:hello|hi)$/i.test(q) || /^(?:say (?:hello|hi)(?: to)?|greet|welcome) (?:them|everyone|everybody|(?:the |our |this )?audience|(?:the )?(?:people|folks)(?: here| in the audience)?)$/i.test(q)) { greet = true; continue; }
+    if (/^(?:(?:we|you)(?: are|'re)|I(?: am|'m)) (?:right now |now )?(?:on (?:the |a )?stage(?: (?:in front of|with) (?:an? |the |our )?audience)?|in front of (?:an? |the |our )?audience)$/i.test(q)) continue;
     return undefined; // Never swallow a compound tenant question or command.
   }
   return greet ? "Hello everyone. I'm Nova, the voice assistant in OpenAdminOS. It's good to be here with you. What would you like to explore together?" : '';

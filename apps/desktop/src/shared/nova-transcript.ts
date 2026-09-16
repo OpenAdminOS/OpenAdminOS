@@ -1,5 +1,6 @@
 import { isNovaAudienceGreeting, isNovaIntroduction } from "./nova-conversation.js";
 import { conversationalText } from "./nova-action-intent.js";
+import { isNovaInputIncomplete } from "./nova-input-boundary.js";
 import type { NovaConversationTurn } from "@openadminos/agent-sdk";
 
 interface Fragment {
@@ -57,7 +58,11 @@ export class NovaTranscript {
       const lastUser = turns.slice().reverse().find(turn => turn.role === "user");
       const lastInput = lastUser?.fragments.at(-1);
       const acknowledgment = previous?.role === "assistant" && (/^(?:(?:mm[ -]?hmm|mhm|uh[ -]?huh|okay|ok|right|got it)[\s,.!?]*)+$/i.test(previous.text.trim()) || isNovaAudienceGreeting(previous.text));
-      const continuing = acknowledgment && lastInput && !this.consumed.has(lastInput.key);
+      // An early lookup acknowledgment can be longer than "okay". It must not
+      // strand a still-pending incomplete question before its qualifier arrives.
+      const continuing = lastInput && !this.consumed.has(lastInput.key) && (acknowledgment ||
+        (isNovaInputIncomplete(lastUser!.text) && novaStopCommand(fragment.text) === undefined &&
+          !/^(?:which|what|how|why|who|when|where|show|list|tell|run|send)\b/i.test(conversationalText(fragment.text))));
       const overlapping = fragment.role === "user" && previous?.role === "assistant" && lastInput?.end !== undefined &&
         previous.fragments.every(output => output.start !== undefined && output.start < lastInput.end! && output.end !== undefined && fragment.start !== undefined && output.end > fragment.start);
       const target = previous?.role === fragment.role ? previous : fragment.role === "user" && (overlapping || continuing) ? lastUser : undefined;

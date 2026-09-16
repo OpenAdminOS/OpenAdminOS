@@ -4,6 +4,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+- Keep internal Nova activity, page and approval status out of voice updates, recognize audience greetings addressed to Nova, and retain unfinished questions across lookup acknowledgments.
+
 ### Added
 
 ### Changed

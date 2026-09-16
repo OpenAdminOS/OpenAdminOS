@@ -27,6 +27,27 @@ it('retains a qualifier beyond the delegation offset and across acknowledgment',
   assert.equal(t.capture()?.text,'How many apps?');
 });
 
+it('retains an unfinished question across a lookup reply while preserving explicit Stop', () => {
+  for (const prefix of ['Which Windows devices', 'Which Windows devices are']) {
+    const t = new NovaTranscript();
+    t.append({type:'session.input_transcript.delta',delta:prefix});
+    const anchor = t.capture(undefined, false)!.anchor;
+    t.append({type:'session.output_transcript.delta',delta:'Checking tenant'});
+    t.append({type:'session.input_transcript.delta',delta:prefix.endsWith(' are') ? ' not encrypted' : ' are not encrypted'});
+    assert.equal(t.capture(undefined, true, anchor)?.text, 'Which Windows devices are not encrypted');
+  }
+  const t = new NovaTranscript();
+  t.append({type:'session.input_transcript.delta',delta:'Which Windows devices are'});
+  t.append({type:'session.output_transcript.delta',delta:'Checking tenant'});
+  t.append({type:'session.input_transcript.delta',delta:'Stop'});
+  assert.equal(t.takeStopCommand(), true);
+  const next = new NovaTranscript();
+  next.append({type:'session.input_transcript.delta',delta:'Which Windows devices are'});
+  next.append({type:'session.output_transcript.delta',delta:'Checking tenant'});
+  next.append({type:'session.input_transcript.delta',delta:'How many apps?'});
+  assert.equal(next.capture()?.text, 'How many apps?');
+});
+
 it('keeps the reported audience exchange conversational without hiding appended tasks', () => {
   const t = new NovaTranscript();
   t.append({type:'session.input_transcript.delta',delta:'So- Okay, so we are right now on the stage in front of an audience'});
@@ -36,6 +57,11 @@ it('keeps the reported audience exchange conversational without hiding appended 
   const request = t.capture()!.text;
   assert.match(novaAudienceReply(request)!,/^Hello everyone/);
   assert.equal(novaAudienceReply('we are on stage'), '');
+  const greeting = 'Alright, so you are now in front of an audience, can you say hi';
+  assert.match(novaAudienceReply(greeting)!, /^Hello everyone/);
+  for (const task of [' and run Compliance overview', '. Send this via Teams', ' and which devices are not encrypted?']) {
+    assert.equal(novaAudienceReply(greeting + task), undefined);
+  }
   assert.match(novaAudienceReply('. And I want you to say hello to them')!,/^Hello everyone/);
   for (const task of [' and run Compliance overview', ' and list unencrypted devices', '. Send this via Teams']) {
     assert.equal(novaAudienceReply(`Say hello to the audience${task}`),undefined);

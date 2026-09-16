@@ -2501,3 +2501,18 @@ installed-build audio acceptance. Signed build `575febf` subsequently kept the g
 conversational but a repeated 1,400 ms pause submitted only “Which Windows devices”.
 The question-prefix heuristic now also waits before the verb arrives. Earlier
 single-trial success is not repeatability evidence; see `tasks/nova-audio-2026-09-16.md`.
+
+
+Nova voice status separation (2026-09-16): page context, activity labels, routing
+status and internal approval-state notes belong in the UI and are not appended
+to the hosted voice conversation. Live thinking context can influence later speech;
+it is not a private channel. Only conversational guidance and verified user-facing
+results should enter voice updates. Actual action review and permission enforcement
+remain in the host. An audience greeting addressed to "you" stays conversational,
+including the reported comma-separated "can you say hi" request.
+
+Signed build `5bdfd8b` still split a 1,400 ms paused question across "Checking tenant".
+Pending incomplete questions now retain their continuation across longer replies,
+while explicit Stop and new question/command openings remain separate. This is a
+bounded heuristic, not an authoritative speech-end signal. The status separation
+and continuation changes require repeated installed microphone acceptance.

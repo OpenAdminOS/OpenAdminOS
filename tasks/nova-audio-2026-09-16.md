@@ -148,3 +148,27 @@ frames while testing microphone activity and late qualifiers. This removes the
 visual-frame dependency; event-loop delays and audio recognition remain limitations.
 The live trial did not record frame delivery, so this finding is not claimed as
 its verified cause.
+
+
+## Latest installed trial and status leak
+
+Signed build `5bdfd8b` was installed after the Mac was unlocked, with the previous
+app and local app data backed up. In the 11:25 UTC session, the first 1,400 ms pause
+trial showed `Which Windows devices are`, Nova's `Checking tenant`, then separate
+`Not encrypted`. App activity showed `Understanding your request.` and the spoken
+output transcript repeated that label. **Fail.** No new Chat messages were found
+in the scoped read-only check; the visible classifier activity still establishes
+that app routing ran. The microphone was stopped before further source work.
+
+The user independently reported: `Alright, so you are now in front of an audience,
+can you say hi`, followed by a greeting plus internal activity, page and approval
+text. Inspection found those same values appended to the Live context. According
+to [OpenAI's Live context guidance](https://developers.openai.com/api/docs/guides/live-conversations#add-context-during-the-conversation),
+thinking appends can influence later speech. They must not contain internal text
+that must never be spoken.
+
+The follow-up removes all runtime thinking/status appends and page broadcasts.
+UI activity remains visible; verified results still use commentary. Additional
+regressions cover the exact greeting, appended task rejection, incomplete questions
+across longer acknowledgments, explicit Stop, new questions and outbound status
+separation. These checks do not establish microphone acceptance for the new build.

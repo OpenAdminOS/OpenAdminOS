@@ -785,7 +785,9 @@ it('answers general capabilities directly while preserving a running task and it
     assert.match((await ask(text)).text!, /I'm Nova/);
     assert.equal(signal?.aborted,false); assert.equal(chats,1);
   }
-  assert.match((await ask('We are on stage. And I want you to say hello to them')).text!, /Hello everyone/);
+  for (const greeting of ['We are on stage. And I want you to say hello to them', 'Alright, so you are now in front of an audience, can you say hi']) {
+    assert.match((await ask(greeting)).text!, /Hello everyone/);
+  }
   assert.equal(signal?.aborted, false);
   assert.equal(chats, 1);
   finish({conversation:{id:'conversation'},assistantMessage:{content:'9 devices',status:'completed'}} as SendIntuneChatMessageResult);
