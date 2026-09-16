@@ -1,4 +1,4 @@
-import { isNovaIntroduction, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
+import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../src/shared/nova-conversation.js";
 import { novaStopCommand } from "../src/shared/nova-transcript.js";
 import { novaContextualCommand, novaConnectorReply, novaDeliveryRequest, novaPages, novaClarifications, parseNovaCommand, type NovaCommand } from "../src/shared/nova-command.js";
 import { novaConnectorSetupIssue, prepareNovaAction, type NovaActionHost, type PreparedNovaAction } from "./nova-actions.js";
@@ -87,9 +87,11 @@ export class NovaService {
     if (input.action === "start") this.invalidate();
     const generation = this.generation;
     const introduction = input.action === "answer" && typeof input.text === "string" && input.text.length <= 12000 && isNovaIntroduction(input.text);
-    const revision = input.action === "answer" && !introduction ? ++this.answerRevision : undefined;
+    const audienceReply = input.action === "answer" && typeof input.text === "string" && input.text.length <= 12000 ? novaAudienceReply(input.text) : undefined;
+    const conversationOnly = introduction || audienceReply !== undefined;
+    const revision = input.action === "answer" && !conversationOnly ? ++this.answerRevision : undefined;
     const priorAction = this.session?.pendingAction;
-    if (input.action === "answer" && !introduction) { this.pendingAnswer?.abort(); if (this.session) this.session.pendingAction = undefined; }
+    if (input.action === "answer" && !conversationOnly) { this.pendingAnswer?.abort(); if (this.session) this.session.pendingAction = undefined; }
     const state = await this.state();
     if (
       generation !== this.generation ||
@@ -221,6 +223,7 @@ export class NovaService {
         "Nova's tenant or provider changed. Start a new conversation.",
       );
     if (introduction) return { text: NOVA_INTRODUCTION };
+    if (audienceReply !== undefined) return { text: audienceReply || "I'm listening." };
     if (input.action === "interrupt") {
       ++this.answerRevision;
       this.pendingAnswer?.abort();
@@ -680,6 +683,7 @@ export function buildNovaInstructions(state: AppState, name: string, webSearch =
     "You access permitted tenant data THROUGH the OpenAdminOS backend. You do not need a separate Microsoft sign-in inside the voice model.",
     `General introduction, available without any lookup: ${NOVA_INTRODUCTION}`,
     "Conversation comes first: answer greetings, introductions, small talk, and general questions about what you can do directly and naturally. This includes combined questions such as What can you do and what can you help me with. Do not say checking, looking that up, or one moment for these turns; no task has started. Mention abilities without claiming a specific connector is ready. Only delegate a specific configuration check, tenant-data question, research request or action. A conversational turn must not cancel a pending investigation or approval.",
+    "Let the user finish their thought, including words after a pause. Your brief acknowledgments such as mm-hmm or okay do not end their request. Being on stage and asking you to say hello to an audience is spoken conversation, not a request to start an agent or send a connector message. Greet the audience naturally without requesting an agent name.",
     "Delegation policy:",
     webSearch
       ? "The backend can also search the public web for any topic. Delegate questions needing current information, web research, external documentation, recommendations or comparisons with public facts. The backend chooses tenant tools, web search, or both. Do not answer current public facts from memory. Tell the user when research failed; sources remain in Chat."

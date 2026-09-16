@@ -366,6 +366,110 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   expect(track.stop).toHaveBeenCalled();
 }, 20000);
 
+it('preserves paused qualifiers and stage greetings through microphone activity and early delegation', async () => {
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+  let micSample = 128;
+  let frame!: FrameRequestCallback;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const track = { stop: vi.fn(), addEventListener: vi.fn() };
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+    getUserMedia: vi.fn(async () => ({ getTracks: () => [track], getAudioTracks: () => [track] })),
+  }});
+  vi.stubGlobal('AudioContext', class {
+    resume = async () => {}; close = async () => {};
+    createAnalyser = () => ({ fftSize: 512, getByteTimeDomainData: (v: Uint8Array) => v.fill(micSample) });
+    createMediaStreamSource = () => ({ connect: vi.fn() });
+  });
+  const dc = { readyState: 'open', send: vi.fn(), close: vi.fn(), addEventListener: vi.fn(),
+    onmessage: undefined as undefined | ((event: {data: string}) => void) };
+  vi.stubGlobal('RTCPeerConnection', class {
+    iceGatheringState = 'complete'; localDescription = { sdp: 'v=0' };
+    addTrack = vi.fn(); createDataChannel = () => dc;
+    createOffer = async () => ({ sdp: 'v=0' }); setLocalDescription = async () => {};
+    setRemoteDescription = async () => {}; close = vi.fn();
+  });
+  const bridge = makeMockBridge({ nova: vi.fn(async input => {
+    if (input.action === 'status') return { hasKey: true };
+    if (input.action === 'start') return { sessionId: 'audio-regression', sdp: 'v=0' };
+    if (input.action === 'answer') return { text: 'Three Windows devices report not encrypted.' };
+    return {};
+  }) });
+  renderRoute(<Nova />, { bridge, route: '/cache', path: '/cache' });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', {name: /Talk to Nova/}));
+  await user.click(screen.getByRole('checkbox'));
+  await user.click(screen.getByRole('button', {name: 'Start Nova'}));
+  await waitFor(() => expect(dc.onmessage).toBeTypeOf('function'));
+  const emit = (event: object) => dc.onmessage!({data: JSON.stringify(event)});
+  const input = (delta: string, start_ms: number, end_ms: number) => emit({type:'session.input_transcript.delta', delta, start_ms, end_ms});
+  const answers = () => vi.mocked(bridge.nova).mock.calls.flatMap(([r]) => r.action === 'answer' ? [r.text] : []);
+  vi.useFakeTimers({toFake:['setTimeout', 'clearTimeout', 'Date']});
+  try {
+    await act(async () => {
+      emit({type:'session.started'});
+      input('Which Windows devices are', 0, 900);
+      emit({type:'session.delegation.created',offset_ms:900,delegation:{id:'prefix'}});
+      await vi.advanceTimersByTimeAsync(1400);
+    });
+    expect(answers()).toEqual([]);
+    await act(async () => {
+      emit({type:'session.output_transcript.delta',delta:'Mm-hmm.',start_ms:1000,end_ms:1400});
+      input(' not encrypted', 2300, 2800);
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    expect(answers()).toEqual(['Which Windows devices are not encrypted']);
+    expect(dc.send).toHaveBeenCalledWith(JSON.stringify({type:'session.commentary.append',delegation_id:'prefix',content:'Three Windows devices report not encrypted.'}));
+
+    await act(async () => {
+      micSample = 145; frame(0);
+      input('Which devices are not encrypted', 5000, 5900);
+      emit({type:'session.delegation.created',offset_ms:5900,delegation:{id:'platform'}});
+      micSample = 128;
+      await vi.advanceTimersByTimeAsync(800);
+      micSample = 145; frame(0); // qualifier starts before the transcript reaches us
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(answers()).toHaveLength(1);
+    await act(async () => {
+      input(' on Windows', 6700, 7100);
+      micSample = 128;
+      await vi.advanceTimersByTimeAsync(1100);
+      emit({type:'session.delegation.created',offset_ms:5900,delegation:{id:'late-platform'}});
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    expect(answers()).toEqual(['Which Windows devices are not encrypted', 'Which devices are not encrypted on Windows']);
+
+    await act(async () => {
+      input('So- Okay, so we are right now on the stage in front of an audience', 9000, 11000);
+      emit({type:'session.delegation.created',offset_ms:11000,delegation:{id:'audience'}});
+      emit({type:'session.output_transcript.delta',delta:'Mm-hmm.',start_ms:11050,end_ms:11200});
+      await vi.advanceTimersByTimeAsync(500);
+      input('. And I want you to say hello to them', 11300, 12000);
+      emit({type:'session.output_transcript.delta',delta:'Okay.',start_ms:12100,end_ms:12300});
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    expect(answers()).toHaveLength(2);
+    expect(dc.send.mock.calls.some(([raw]) => JSON.parse(raw).type === 'session.commentary.append' && JSON.parse(raw).content.startsWith('Hello everyone'))).toBe(true);
+
+    await act(async () => {
+      input('Stop', 14000, 14500);
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(bridge.nova).toHaveBeenCalledWith({action:'interrupt',sessionId:'audio-regression'});
+    await act(async () => {
+      input('Which devices are', 15000, 16000);
+      emit({type:'session.delegation.created',offset_ms:900,delegation:{id:'stale'}});
+      await vi.advanceTimersByTimeAsync(1400);
+    });
+    expect(answers()).toHaveLength(2);
+    act(() => screen.getByRole('button', {name:'Stop'}).click());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(answers()).toHaveLength(2);
+    expect(track.stop).toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
+
 it("explains microphone permission recovery without starting a hosted session", async () => {
   Object.defineProperty(navigator, "mediaDevices", {
     value: {

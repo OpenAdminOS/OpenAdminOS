@@ -785,10 +785,14 @@ it('answers general capabilities directly while preserving a running task and it
     assert.match((await ask(text)).text!, /I'm Nova/);
     assert.equal(signal?.aborted,false); assert.equal(chats,1);
   }
+  assert.match((await ask('We are on stage. And I want you to say hello to them')).text!, /Hello everyone/);
+  assert.equal(signal?.aborted, false);
+  assert.equal(chats, 1);
   finish({conversation:{id:'conversation'},assistantMessage:{content:'9 devices',status:'completed'}} as SendIntuneChatMessageResult);
   await pending;
   const draft=await ask('Send this via Outlook');
   await ask('Tell me about yourself');
+  await ask('Say hello to the audience');
   await nova.handle({action:'decide-action',sessionId:sessionId!,actionId:draft.pendingAction!.id,approved:true});
   assert.equal(sends,1);
 });

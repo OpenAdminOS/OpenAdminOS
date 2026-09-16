@@ -56,9 +56,11 @@ export class NovaTranscript {
       // Overlapping assistant acknowledgments do not split an ongoing user utterance.
       const lastUser = turns.slice().reverse().find(turn => turn.role === "user");
       const lastInput = lastUser?.fragments.at(-1);
+      const acknowledgment = previous?.role === "assistant" && /^(?:(?:mm[ -]?hmm|mhm|uh[ -]?huh|okay|ok|right|got it)[\s,.!?]*)+$/i.test(previous.text.trim());
+      const continuing = acknowledgment && lastInput && !this.consumed.has(lastInput.key);
       const overlapping = fragment.role === "user" && previous?.role === "assistant" && lastInput?.end !== undefined &&
         previous.fragments.every(output => output.start !== undefined && output.start < lastInput.end! && output.end !== undefined && fragment.start !== undefined && output.end > fragment.start);
-      const target = previous?.role === fragment.role ? previous : overlapping ? lastUser : undefined;
+      const target = previous?.role === fragment.role ? previous : fragment.role === "user" && (overlapping || continuing) ? lastUser : undefined;
       if (target) { target.text += fragment.text; target.fragments.push(fragment); }
       else turns.push({ role: fragment.role, text: fragment.text, fragments: [fragment] });
     }

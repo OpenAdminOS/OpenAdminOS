@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Record six real Nova audio trials, including two premature-submission failures that motivated the speech-boundary correction.
+
 - Record signed-preview UI and Codex agent acceptance, Nova session lifecycle checks, and remaining local-model, audio and exhaustive-coverage gaps.
 
 - Track the remaining Chat, Nova and Agent Team demo blockers with explicit installed-build and live-provider acceptance checks.
@@ -19,6 +21,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Remove catalog signing keys and detached registry signatures. Catalogs use their reviewed HTTPS source, manifest hashes and revision checks; desktop installer signing remains unchanged.
 
 ### Fixed
+
+- Preserve Nova's trailing qualifiers across early delegation and short acknowledgments, check microphone activity before submitting, and keep spoken audience greetings out of agent execution routing.
 
 - Route license-seat discovery to subscribed SKUs, honor its supported query parameters and existing read permissions, and exclude unrelated endpoints when a search has no matching terms.
 

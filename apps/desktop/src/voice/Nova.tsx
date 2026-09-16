@@ -1,8 +1,9 @@
-import { isNovaIntroduction, NOVA_INTRODUCTION } from "../shared/nova-conversation";
+import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { novaActionIntent, novaConnectorQuestion } from "../shared/nova-action-intent";
 import { NovaConversation, ConversationIcon, type NovaConversationItem } from "./NovaConversation";
 import { NovaTranscript, isNovaConversationOnly, novaCommentaryChunks } from "../shared/nova-transcript";
+import { novaInputWaitMs } from "../shared/nova-input-boundary";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
@@ -365,6 +366,7 @@ export function Nova({
       let level = 0,
         lastPlayback = 0,
         pendingAnswers = 0;
+      let lastVoiceAt = Date.now();
       const rms = (values: Uint8Array) => {
         let sum = 0;
         for (const sample of values) sum += ((sample - 128) / 128) ** 2;
@@ -373,6 +375,9 @@ export function Nova({
       const animate = () => {
         if (token !== generation.current) return;
         analyser.getByteTimeDomainData(samples);
+        // Transcript delivery can pause while the microphone still carries speech.
+        // This is an amplitude guard, not a claim of semantic end-of-speech detection.
+        if (!mutedRef.current && rms(samples) > 0.08) lastVoiceAt = Date.now();
         let outputLevel = 0;
         if (playbackAnalyser.current) {
           playbackAnalyser.current.getByteTimeDomainData(playbackSamples);
@@ -554,6 +559,7 @@ export function Nova({
       let answerRevision = 0;
       completedResult.current = undefined;
       const delegated = new Set<string>();
+      const delegationByAnchor = new Map<string, string>();
       interruptCurrent.current = () => {
         ++answerRevision;
         ++actionRevision.current;
@@ -562,6 +568,7 @@ export function Nova({
         pendingAnswers = 0;
         delegationTimers.current.forEach(clearTimeout);
         delegationTimers.current.clear();
+        delegationByAnchor.clear();
         setPendingAction(undefined);
         endActivities("stopped");
         if (output.current) output.current.muted = true;
@@ -570,12 +577,23 @@ export function Nova({
         void api.nova({ action: "interrupt", sessionId: sessionId.current }).catch(error => setError(String(error)));
         setPhase("listening");
       };
-      let actionFallback: ReturnType<typeof setTimeout> | undefined;
+      let actionFallback: (() => void) | undefined;
       let lastInputAt = 0;
       const runRequest = (id: string | null, offsetMs?: number, actionsOnly = false, anchor?: string) => {
         if (token !== generation.current || dc.readyState !== "open") return;
         const preview = transcript.capture(offsetMs, false, anchor);
         const actionRequest = preview && (novaActionIntent(preview.text) || novaConnectorQuestion(preview.text));
+        const audienceReply = preview && novaAudienceReply(preview.text);
+        if (audienceReply !== undefined) {
+          transcript.capture(offsetMs, true, anchor);
+          if (audienceReply && !/\b(?:hello|hi|welcome) (?:everyone|everybody|all|folks)\b/i.test(preview?.responseText ?? '')) {
+            if (output.current) output.current.muted = false;
+            dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
+              content: "The user is asking you to greet the audience aloud. This is conversation, not an agent run or connector message. Say the greeting that follows naturally. Existing tasks and unapproved previews stay unchanged." }));
+            for (const content of novaCommentaryChunks(audienceReply)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
+          }
+          return;
+        }
         if (preview?.text && isNovaIntroduction(preview.text)) {
           transcript.capture(offsetMs, true, anchor);
           // A successful conversational reply needs no second answer from the fallback.
@@ -672,6 +690,28 @@ export function Nova({
           if (revision === answerRevision) fail(error);
         });
       };
+      const scheduleRequest = (id: string | null, anchor: string) => {
+        if (id !== null) delegationByAnchor.set(anchor, id);
+        const dispatch = () => {
+          delegationTimers.current.delete(timer);
+          if (token !== generation.current || dc.readyState !== "open") return;
+          const request = transcript.capture(undefined, false, anchor);
+          if (!request) return;
+          const remaining = novaInputWaitMs(request.text, Date.now() - lastInputAt, Date.now() - lastVoiceAt);
+          if (remaining > 0) {
+            timer = setTimeout(dispatch, remaining);
+            delegationTimers.current.add(timer);
+            return;
+          }
+          // The delegation offset selects the original turn, not its final word.
+          const delegationId = delegationByAnchor.get(anchor) ?? null;
+          runRequest(delegationId, undefined, delegationId === null, anchor);
+          delegationByAnchor.delete(anchor);
+        };
+        let timer = setTimeout(dispatch, 650);
+        delegationTimers.current.add(timer);
+        return () => { clearTimeout(timer); delegationTimers.current.delete(timer); };
+      };
       dc.onmessage = (e) => {
         if (token !== generation.current) return;
         try {
@@ -701,14 +741,11 @@ export function Nova({
                 interruptCurrent.current();
                 if (!transcript.capture(undefined, false)?.text) return;
               }
-              if (actionFallback) { clearTimeout(actionFallback); delegationTimers.current.delete(actionFallback); }
+              actionFallback?.();
               // Every settled substantive request reaches the app even if Live never delegates it.
               // capture() consumes it once, so a later model delegation cannot duplicate it.
-              actionFallback = setTimeout(() => {
-                delegationTimers.current.delete(actionFallback!);
-                runRequest(null, undefined, true);
-              }, 1000);
-              delegationTimers.current.add(actionFallback);
+              const anchor = transcript.capture(undefined, false)?.anchor;
+              if (anchor) actionFallback = scheduleRequest(null, anchor);
               if (output.current) output.current.muted = false;
               setError("");
               setPhase("listening");
@@ -723,22 +760,7 @@ export function Nova({
             // Bind untimed delegations too: a delayed handoff must not take a newer turn.
             const anchor = transcript.capture(event.offset_ms, false)?.anchor;
             if (!anchor) return;
-            // Use the delegation's timeline boundary even if later speech arrives first.
-            const dispatch = () => {
-              delegationTimers.current.delete(timer);
-              if (token !== generation.current || dc.readyState !== "open") return;
-              // A delegation can arrive before the remaining transcript deltas.
-              // Wait for input to settle rather than dispatching a partial sentence.
-              const remaining = 300 - (Date.now() - lastInputAt);
-              if (remaining > 0) {
-                timer = setTimeout(dispatch, remaining);
-                delegationTimers.current.add(timer);
-                return;
-              }
-              runRequest(id, event.offset_ms, false, anchor);
-            };
-            let timer = setTimeout(dispatch, 250);
-            delegationTimers.current.add(timer);
+            scheduleRequest(id, anchor);
           } else if (event.type === "session.closed") stop();
           else if (event.type === "error")
             fail(

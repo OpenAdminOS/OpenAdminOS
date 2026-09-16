@@ -2431,7 +2431,9 @@ Common unfiltered noncompliant/encryption lists and device/app counts use verifi
 
 General Nova introductions and help questions, including compound conversational clauses, have a shared direct response and do not start cache/research work. They preserve a running investigation, its evidence, and any unapproved preview. A compound turn containing a specific tenant question or action still goes through normal task routing. Hosted instructions require natural conversation without lookup acknowledgments for general help. If the speech model delegates such a turn or stalls with an acknowledgment, the app supplies the static capability description; a completed spoken introduction does not receive a duplicate fallback response.
 
-Voice delegation is bound to the original unconsumed transcript fragment. Delayed handoffs cannot consume a newer question. Dispatch waits for a short pause in arriving input deltas before interpreting the sentence. The fallback and model delegation consume an utterance once. These are deterministic app guarantees for identified turns, not a guarantee of speech-recognition accuracy or unrestricted natural-language understanding.
+Voice delegation is bound to the original unconsumed transcript fragment. Delayed handoffs cannot consume a newer question. The delegation timestamp selects a turn, not its final word. Dispatch and fallback share a gate: 650 ms without an input delta and 1,000 ms without above-threshold microphone activity. An apparently unfinished clause receives a 2,500 ms allowance; recognized complete introductions retain the ordinary delay. The user chose responsive replies over a blanket two-second quiet period. Short acknowledgments such as mm-hmm and okay do not split unconsumed user speech. The fallback and model delegation consume an utterance once. These are app heuristics for identified turns, not a guarantee of end-of-speech detection, recognition accuracy or unrestricted natural-language understanding. Background noise, quieter speech, arbitrary pauses and late network delivery still require live acceptance.
+
+Pure audience greetings and stage context are conversation, not an agent run. The renderer handles recognized greetings directly; the host uses the same recognition before interrupting backend work or clearing a preview. Compound requests containing an additional tenant question or app action retain normal routing and approval requirements.
 
 
 ### Expanded desktop acceptance fixes (2026-09-15)
@@ -2476,3 +2478,20 @@ quality: the configured local 8B model still misstates some summaries and fails 
 investigative queries. Nova reaching Listening and passing mute/unmute/stop verifies
 session lifecycle only; spoken question/answer acceptance remains a separate gate.
 See `tasks/ui-audit-063.md` for observed coverage and remaining limitations.
+
+
+Nova speech-boundary finding (2026-09-16): the previous hosted renderer
+dispatched delegated input after 300 ms without a transcript delta, or used a
+1,000 ms fallback. These are transcript-arrival gaps, not proof of speech ending.
+A deterministic replay reproduces a question prefix being consumed before its
+trailing qualifier, which is then captured separately. A delegation timestamp can
+also exclude a continuation already received. Existing short-delta tests do not
+establish complete-utterance capture under longer delivery gaps. Real speaker-to-mic
+tests now reproduce premature submission: a 1,400 ms pause before “not encrypted”
+splits the request; an 800 ms pause before “on Windows” submits an all-platform
+query even though the visible transcript later contains the complete question.
+Four other clips retained the complete request. A source correction now uses the
+shared microphone/transcript gate above and retains continuation fragments beyond
+the original delegation offset. Deterministic renderer and host regressions cover
+both audio failures and the reported stage greeting. Installed-build audio acceptance
+of the correction remains pending; see `tasks/nova-audio-2026-09-16.md`.
