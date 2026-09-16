@@ -1,8 +1,9 @@
 # Nova audio acceptance, September 16, 2026
 
-Latest result: the corrected signed build retained complete requests in all six
-quiet-room tenant-question trials. The audience greeting still triggered an
-unwanted clarification; the unrestricted live demo is not accepted.
+Latest result: a second signed build kept the audience greeting conversational,
+but a repeated long-pause trial still submitted a noun-phrase prefix early. The
+unrestricted live demo is not accepted. Earlier six-case success did not establish
+repeatable complete-request capture.
 
 ## Setup and method
 
@@ -118,3 +119,32 @@ answers still separate turns. Audience instructions apply only to that turn.
 Speech instructions now ask for the current request's language without mixed
 translations; this is model guidance, not a guarantee of audio-language accuracy.
 The follow-up fix still requires installed-build audio acceptance.
+
+
+## Second signed build: repeated timing failure
+
+Runtime `575febf`, packaging `35085627357`, passed all CI and signing checks and
+was installed after backups. The 10:49 UTC microphone session used the same setup.
+The stage greeting preserved both user sentences, greeted the audience and produced
+no backend Chat records or UI task activity. Nova repeated greeting wording.
+
+The next 1,400 ms pause clip failed: Chat received only `Which Windows devices`
+at 10:51:43.422 UTC. The UI later showed the complete sentence, `Question replaced`
+and an app clarification. This prefix lacked even the verb `are`, so the existing
+unfinished-ending check did not recognize it. The microphone session was stopped.
+These results show why a single passing trial is insufficient.
+
+A further correction treats `which`/`what` question prefixes without a recognized
+predicate as unfinished. Complete encryption questions and `How many` counts keep
+the ordinary short delay; the existing 2,500 ms allowance applies to the prefix.
+A renderer regression now exercises delegation before the verb arrives. Longer
+spoken introductions count as already-greeted responses, avoiding another supplied
+greeting. These remain bounded heuristics and require repeated installed audio tests.
+
+Code review also found that microphone activity sampling depended on the orb's
+animation frames. A session-scoped sampler now runs independently every 50 ms and
+at dispatch, with cleanup on Stop. The renderer regression delivers no animation
+frames while testing microphone activity and late qualifiers. This removes the
+visual-frame dependency; event-loop delays and audio recognition remain limitations.
+The live trial did not record frame delivery, so this finding is not claimed as
+its verified cause.

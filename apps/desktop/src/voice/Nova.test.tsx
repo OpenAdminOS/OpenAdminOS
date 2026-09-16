@@ -369,8 +369,7 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
 it('preserves paused qualifiers and stage greetings through microphone activity and early delegation', async () => {
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   let micSample = 128;
-  let frame!: FrameRequestCallback;
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1; });
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); // no visual frames are delivered
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   const track = { stop: vi.fn(), addEventListener: vi.fn() };
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
@@ -399,35 +398,36 @@ it('preserves paused qualifiers and stage greetings through microphone activity 
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', {name: /Talk to Nova/}));
   await user.click(screen.getByRole('checkbox'));
-  await user.click(screen.getByRole('button', {name: 'Start Nova'}));
-  await waitFor(() => expect(dc.onmessage).toBeTypeOf('function'));
   const emit = (event: object) => dc.onmessage!({data: JSON.stringify(event)});
   const input = (delta: string, start_ms: number, end_ms: number) => emit({type:'session.input_transcript.delta', delta, start_ms, end_ms});
   const answers = () => vi.mocked(bridge.nova).mock.calls.flatMap(([r]) => r.action === 'answer' ? [r.text] : []);
-  vi.useFakeTimers({toFake:['setTimeout', 'clearTimeout', 'Date']});
+  vi.useFakeTimers({toFake:['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
   try {
+    await act(async () => { screen.getByRole('button', {name:'Start Nova'}).click(); });
+    expect(dc.onmessage).toBeTypeOf('function');
     await act(async () => {
       emit({type:'session.started'});
-      input('Which Windows devices are', 0, 900);
+      input('Which Windows devices', 0, 900);
       emit({type:'session.delegation.created',offset_ms:900,delegation:{id:'prefix'}});
       await vi.advanceTimersByTimeAsync(1400);
     });
     expect(answers()).toEqual([]);
     await act(async () => {
       emit({type:'session.output_transcript.delta',delta:'Mm-hmm.',start_ms:1000,end_ms:1400});
-      input(' not encrypted', 2300, 2800);
+      input(' are not encrypted', 2300, 2800);
       await vi.advanceTimersByTimeAsync(1100);
     });
     expect(answers()).toEqual(['Which Windows devices are not encrypted']);
     expect(dc.send).toHaveBeenCalledWith(JSON.stringify({type:'session.commentary.append',delegation_id:'prefix',content:'Three Windows devices report not encrypted.'}));
 
     await act(async () => {
-      micSample = 145; frame(0);
+      micSample = 145;
+      await vi.advanceTimersByTimeAsync(50); // activity sampling works without animation frames
       input('Which devices are not encrypted', 5000, 5900);
       emit({type:'session.delegation.created',offset_ms:5900,delegation:{id:'platform'}});
       micSample = 128;
       await vi.advanceTimersByTimeAsync(800);
-      micSample = 145; frame(0); // qualifier starts before the transcript reaches us
+      micSample = 145; // qualifier starts before the transcript reaches us
       await vi.advanceTimersByTimeAsync(500);
     });
     expect(answers()).toHaveLength(1);
@@ -457,9 +457,10 @@ it('preserves paused qualifiers and stage greetings through microphone activity 
     await act(async () => {
       input('And I want you to say hello', 12400, 12600);
       emit({type:'session.delegation.created',offset_ms:12600,delegation:{id:'interleaved-greeting'}});
-      emit({type:'session.output_transcript.delta',delta:'Hi, folks!',start_ms:12700,end_ms:12900});
+      emit({type:'session.output_transcript.delta',delta:'Of course. Hi, folks!',start_ms:12700,end_ms:12900});
       await vi.advanceTimersByTimeAsync(400);
       input(' to them', 13000, 13200);
+      emit({type:'session.output_transcript.delta',delta:" I'm Nova, the voice assistant in OpenAdminOS.",start_ms:13200,end_ms:13250});
       await vi.advanceTimersByTimeAsync(1100);
     });
     expect(answers()).toHaveLength(2);

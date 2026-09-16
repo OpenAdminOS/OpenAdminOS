@@ -22,6 +22,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Wait for the predicate in incomplete Nova which/what questions, sample microphone activity independently of orb animation frames, and recognize longer completed audience greetings before supplying another reply.
+
 - Keep Nova audience requests intact when a brief spoken greeting arrives between user fragments, avoid duplicate greeting prompts, and request consistent response language.
 
 - Preserve Nova's trailing qualifiers across early delegation and short acknowledgments, check microphone activity before submitting, and keep spoken audience greetings out of agent execution routing.

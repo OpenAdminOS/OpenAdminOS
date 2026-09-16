@@ -1,4 +1,4 @@
-import { isNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../shared/nova-conversation";
+import { hasNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { novaActionIntent, novaConnectorQuestion } from "../shared/nova-action-intent";
 import { NovaConversation, ConversationIcon, type NovaConversationItem } from "./NovaConversation";
@@ -125,6 +125,7 @@ export function Nova({
     sessionId = useRef("");
   const completedResult = useRef<string | undefined>(undefined);
   const delegationTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const micActivityTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const timeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined),
     blobUrl = useRef("");
   const api = window.openAdminOS;
@@ -162,6 +163,8 @@ export function Nova({
     setConsent(false);
     setKey("");
     clearTimeout(timeout.current);
+    clearInterval(micActivityTimer.current);
+    micActivityTimer.current = undefined;
     delegationTimers.current.forEach(clearTimeout);
     delegationTimers.current.clear();
     cancelAnimationFrame(frame.current);
@@ -372,12 +375,18 @@ export function Nova({
         for (const sample of values) sum += ((sample - 128) / 128) ** 2;
         return Math.min(1, Math.sqrt(sum / values.length) * 7);
       };
-      const animate = () => {
+      const sampleMicrophone = () => {
         if (token !== generation.current) return;
         analyser.getByteTimeDomainData(samples);
         // Transcript delivery can pause while the microphone still carries speech.
         // This is an amplitude guard, not a claim of semantic end-of-speech detection.
         if (!mutedRef.current && rms(samples) > 0.08) lastVoiceAt = Date.now();
+      };
+      // Request routing must not depend on the orb receiving animation frames.
+      micActivityTimer.current = setInterval(sampleMicrophone, 50);
+      const animate = () => {
+        if (token !== generation.current) return;
+        sampleMicrophone();
         let outputLevel = 0;
         if (playbackAnalyser.current) {
           playbackAnalyser.current.getByteTimeDomainData(playbackSamples);
@@ -586,7 +595,7 @@ export function Nova({
         const audienceReply = preview && novaAudienceReply(preview.text);
         if (audienceReply !== undefined) {
           transcript.capture(offsetMs, true, anchor);
-          if (audienceReply && !isNovaAudienceGreeting(preview?.responseText ?? '')) {
+          if (audienceReply && !hasNovaAudienceGreeting(preview?.responseText ?? '')) {
             if (output.current) output.current.muted = false;
             dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
               content: "For this conversational turn only, greet the audience aloud using the greeting that follows naturally. This is conversation, not an agent run or connector message. Existing tasks and unapproved previews stay unchanged. Later task requests still use normal delegation." }));
@@ -697,6 +706,7 @@ export function Nova({
           if (token !== generation.current || dc.readyState !== "open") return;
           const request = transcript.capture(undefined, false, anchor);
           if (!request) return;
+          sampleMicrophone();
           const remaining = novaInputWaitMs(request.text, Date.now() - lastInputAt, Date.now() - lastVoiceAt);
           if (remaining > 0) {
             timer = setTimeout(dispatch, remaining);

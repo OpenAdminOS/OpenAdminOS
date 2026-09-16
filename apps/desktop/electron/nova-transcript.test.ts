@@ -7,6 +7,8 @@ import { novaAudienceReply } from '../src/shared/nova-conversation.js';
 it('waits through ongoing microphone speech and incomplete clauses without a blanket two-second delay', () => {
   assert.ok(novaInputWaitMs('Which devices are not encrypted', 1500, 100) > 0);
   assert.ok(novaInputWaitMs('Which Windows devices are', 1400, 1400) > 0);
+  assert.ok(novaInputWaitMs('Which Windows devices', 1400, 1400) > 0);
+  assert.equal(novaInputWaitMs('How many Windows devices?', 700, 1050), 0);
   assert.equal(novaInputWaitMs('Which Windows devices are not encrypted', 700, 1050), 0);
   assert.equal(novaInputWaitMs('What can you help me with?', 700, 1050), 0);
   assert.ok(novaInputWaitMs('Which devices are not encrypted on Windows', 100, 1200) > 0);

@@ -5,7 +5,12 @@ export const NOVA_INTRODUCTION = "I'm Nova, the voice assistant in OpenAdminOS. 
 
 /** A brief spoken greeting can arrive before the user's remaining words. */
 export function isNovaAudienceGreeting(text: string): boolean {
-  return /^(?:(?:oh[,\s]+)?(?:hello|hi|hey|welcome)[,\s]+(?:everyone|everybody|all|folks)[\s,.!?]*)+$/i.test(text.trim());
+  return /^(?:(?:(?:oh|of course)[,.\s]+)?(?:hello|hi|hey|welcome)[,\s]+(?:everyone|everybody|all|folks)[\s,.!?]*)+$/i.test(text.trim());
+}
+
+/** A longer completed introduction also counts as having greeted the audience. */
+export function hasNovaAudienceGreeting(text: string): boolean {
+  return /\b(?:hello|hi|hey|welcome)[,\s]+(?:everyone|everybody|all|folks)\b/i.test(text);
 }
 
 /** Pure stage context and spoken greetings do not request an app action. */
