@@ -40,6 +40,23 @@ it('keeps the reported audience exchange conversational without hiding appended 
   }
 });
 
+it('keeps an audience request together when Nova greets between its input fragments', () => {
+  const text = 'And I want you to say hello to them';
+  for (const greeting of ['Oh, hello everyone!', 'Hi folks!', 'Hello, everyone.']) {
+    for (const split of [3, 13, 20, 26]) {
+      const t = new NovaTranscript();
+      t.append({type:'session.input_transcript.delta',delta:text.slice(0, split)});
+      const anchor = t.capture(undefined, false)!.anchor;
+      t.append({type:'session.output_transcript.delta',delta:greeting});
+      t.append({type:'session.input_transcript.delta',delta:text.slice(split)});
+      assert.equal(t.capture(undefined, false, anchor)?.text, text);
+      assert.match(novaAudienceReply(t.capture()!.text)!, /^Hello everyone/);
+      t.append({type:'session.input_transcript.delta',delta:'Which Windows devices are not encrypted?'});
+      assert.equal(t.capture()?.text, 'Which Windows devices are not encrypted?');
+    }
+  }
+});
+
 it("isolates the reported questions from greetings, waiting chatter and jokes", () => {
   const transcript = new NovaTranscript();
   let time = 0;

@@ -22,6 +22,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Keep Nova audience requests intact when a brief spoken greeting arrives between user fragments, avoid duplicate greeting prompts, and request consistent response language.
+
 - Preserve Nova's trailing qualifiers across early delegation and short acknowledgments, check microphone activity before submitting, and keep spoken audience greetings out of agent execution routing.
 
 - Route license-seat discovery to subscribed SKUs, honor its supported query parameters and existing read permissions, and exclude unrelated endpoints when a search has no matching terms.

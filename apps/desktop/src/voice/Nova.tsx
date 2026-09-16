@@ -1,4 +1,4 @@
-import { isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../shared/nova-conversation";
+import { isNovaAudienceGreeting, isNovaIntroduction, novaAudienceReply, NOVA_INTRODUCTION } from "../shared/nova-conversation";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { novaActionIntent, novaConnectorQuestion } from "../shared/nova-action-intent";
 import { NovaConversation, ConversationIcon, type NovaConversationItem } from "./NovaConversation";
@@ -586,10 +586,10 @@ export function Nova({
         const audienceReply = preview && novaAudienceReply(preview.text);
         if (audienceReply !== undefined) {
           transcript.capture(offsetMs, true, anchor);
-          if (audienceReply && !/\b(?:hello|hi|welcome) (?:everyone|everybody|all|folks)\b/i.test(preview?.responseText ?? '')) {
+          if (audienceReply && !isNovaAudienceGreeting(preview?.responseText ?? '')) {
             if (output.current) output.current.muted = false;
             dc.send(JSON.stringify({ type: "session.instructions.append", delegation_id: id,
-              content: "The user is asking you to greet the audience aloud. This is conversation, not an agent run or connector message. Say the greeting that follows naturally. Existing tasks and unapproved previews stay unchanged." }));
+              content: "For this conversational turn only, greet the audience aloud using the greeting that follows naturally. This is conversation, not an agent run or connector message. Existing tasks and unapproved previews stay unchanged. Later task requests still use normal delegation." }));
             for (const content of novaCommentaryChunks(audienceReply)) dc.send(JSON.stringify({ type: "session.commentary.append", delegation_id: id, content }));
           }
           return;

@@ -452,6 +452,25 @@ it('preserves paused qualifiers and stage greetings through microphone activity 
     expect(answers()).toHaveLength(2);
     expect(dc.send.mock.calls.some(([raw]) => JSON.parse(raw).type === 'session.commentary.append' && JSON.parse(raw).content.startsWith('Hello everyone'))).toBe(true);
 
+    const greetingCount = () => dc.send.mock.calls.filter(([raw]) => JSON.parse(raw).type === 'session.commentary.append' && JSON.parse(raw).content.startsWith('Hello everyone')).length;
+    const greetingsBefore = greetingCount();
+    await act(async () => {
+      input('And I want you to say hello', 12400, 12600);
+      emit({type:'session.delegation.created',offset_ms:12600,delegation:{id:'interleaved-greeting'}});
+      emit({type:'session.output_transcript.delta',delta:'Hi, folks!',start_ms:12700,end_ms:12900});
+      await vi.advanceTimersByTimeAsync(400);
+      input(' to them', 13000, 13200);
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    expect(answers()).toHaveLength(2);
+    expect(greetingCount()).toBe(greetingsBefore);
+
+    await act(async () => {
+      input('Which Windows devices are not encrypted?', 13300, 13500);
+      await vi.advanceTimersByTimeAsync(1100);
+    });
+    expect(answers()).toEqual(['Which Windows devices are not encrypted', 'Which devices are not encrypted on Windows', 'Which Windows devices are not encrypted?']);
+
     await act(async () => {
       input('Stop', 14000, 14500);
       await vi.advanceTimersByTimeAsync(1);
@@ -462,10 +481,10 @@ it('preserves paused qualifiers and stage greetings through microphone activity 
       emit({type:'session.delegation.created',offset_ms:900,delegation:{id:'stale'}});
       await vi.advanceTimersByTimeAsync(1400);
     });
-    expect(answers()).toHaveLength(2);
+    expect(answers()).toHaveLength(3);
     act(() => screen.getByRole('button', {name:'Stop'}).click());
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(answers()).toHaveLength(2);
+    expect(answers()).toHaveLength(3);
     expect(track.stop).toHaveBeenCalled();
   } finally { vi.useRealTimers(); }
 });

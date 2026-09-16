@@ -3,6 +3,11 @@ import { conversationalText } from './nova-action-intent.js';
 /** Static product abilities, not a claim that a particular connector or permission is ready. */
 export const NOVA_INTRODUCTION = "I'm Nova, the voice assistant in OpenAdminOS. We can chat, and I can help you explore devices, apps, compliance, and policies in your connected tenant. I can explain findings, prepare reports, and prepare messages through configured connectors or installed agent runs for you to review. Sending messages and starting agents require your confirmation in the app. What would you like help with?";
 
+/** A brief spoken greeting can arrive before the user's remaining words. */
+export function isNovaAudienceGreeting(text: string): boolean {
+  return /^(?:(?:oh[,\s]+)?(?:hello|hi|hey|welcome)[,\s]+(?:everyone|everybody|all|folks)[\s,.!?]*)+$/i.test(text.trim());
+}
+
 /** Pure stage context and spoken greetings do not request an app action. */
 export function novaAudienceReply(text: string): string | undefined {
   const clauses = conversationalText(text).replace(/^[.\s]+/, '').split(/[.!?]+|\s+and\s+/i)

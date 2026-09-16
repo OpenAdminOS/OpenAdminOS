@@ -1,7 +1,8 @@
 # Nova audio acceptance, September 16, 2026
 
-Result: four complete-request passes and two premature-submission failures in six
-trials. The listening cutoff is reproduced in the installed desktop, not fixed.
+Latest result: the corrected signed build retained complete requests in all six
+quiet-room tenant-question trials. The audience greeting still triggered an
+unwanted clarification; the unrestricted live demo is not accepted.
 
 ## Setup and method
 
@@ -81,3 +82,39 @@ The timing policy is application-owned: [Live client delegation](https://develop
 requires the app to maintain transcript context, and the [official evaluation guide](https://developers.openai.com/cookbook/examples/audio/voice_agent_evaluation)
 notes the absence of authoritative turn/audio-done events. No Realtime-only VAD
 configuration was added to the Live session protocol.
+
+
+## Corrected signed build: quiet-room retest
+
+Installed runtime `3e251b0`, packaging run `35063781806`, tested through the same
+QuickTime speaker-to-built-in-microphone path with Nova full screen. An earlier
+trial was inconclusive because competing speech entered the microphone. After the
+user confirmed quiet surroundings, a new session began at 10:22 UTC.
+
+| Clip | Backend request time (UTC) | Outcome |
+| --- | --- | --- |
+| 1,400 ms pause | 10:22:59 | Complete Windows encryption question; three Windows matches. |
+| Late platform, 800 ms pause | 10:23:45 | Complete request including `on Windows`; three Windows matches. |
+| Stage greeting | Between 10:24 and 10:25 | Both user sentences appeared in the transcript. Nova greeted the audience, then app task routing returned an unwanted clarification. **Fail.** |
+| Normal, after greeting | 10:25:27 | Complete request; three Windows matches; normal task routing still worked. |
+| Fast, 245 wpm | 10:26:26 | Complete request; three Windows matches. |
+| 350 ms pause | 10:27:18 | Complete request; three Windows matches. Output transcript contained a Georgian word inside the English answer. |
+| 800 ms pause | 10:28:22 | Complete request; three Windows matches. Same output-language anomaly. |
+
+Read-only Chat records confirm six complete user requests and six completed
+answers. No shortened prefix, all-platform count, or replaced-question activity
+was observed in these six trials. Each clip was played once. This establishes
+complete-request acceptance for these cases, not unrestricted audio quality.
+The snapshot used by the answers was refreshed at 07:47 UTC and contained nine
+managed devices. Nova was stopped after the final answer; microphone consent reset.
+
+Follow-up code review reproduced a remaining fragment-grouping gap: a brief spoken
+`Hi folks` or `Oh, hello everyone` between user fragments splits an unconsumed
+sentence. This is consistent with the visible greeting failure; raw Live event
+timings were not recorded, so it is not proof of that trial's exact event order.
+Regression tests now retain pending input across these brief audience greetings,
+avoid an extra supplied greeting, and preserve the next tenant question. Full
+answers still separate turns. Audience instructions apply only to that turn.
+Speech instructions now ask for the current request's language without mixed
+translations; this is model guidance, not a guarantee of audio-language accuracy.
+The follow-up fix still requires installed-build audio acceptance.
