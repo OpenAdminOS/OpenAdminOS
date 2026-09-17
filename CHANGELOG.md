@@ -4,15 +4,37 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-09-17
+
 ### Added
 
-### Changed
+- Add GitHub Copilot CLI and Gemini CLI providers with streamed responses, connection testing, executable/version diagnostics, and distinct sign-in and access errors. Administrators can select these hosted providers using their existing CLI installation and sign-in.
 
-### Removed
+### Reliability and fixes
 
-### Fixed
+- Improve Codex and Claude Code discovery in standard macOS and Windows installation locations, preserve existing sign-in, and check Codex authentication through the CLI. Connection failures include actionable provider setup or update guidance.
+- Correct Chat and Nova device encryption and compliance filters, answer common device and directory counts from verified snapshots, and reject invalid cache queries instead of reporting false zero counts. Repair license-seat discovery and supported query handling, and respect security-incident limits during cache preload.
+- Preserve all reported compliance states and original structured evidence through Agent Team handoffs and local read-only retries. App-registration and audit-report detail samples now show when results are omitted, helping administrators distinguish complete counts from bounded detail lists.
+- Return hosted Team retries to assignment review, surface start failures, reject empty model drafts, and reduce persistence delays at run completion. Report delivery and tenant writes still require the existing application review and confirmation.
+- Improve Nova handling of paused questions, trailing qualifiers, brief acknowledgments, audience greetings, destination corrections, and cancellations. Incomplete questions retain continuations across lookup replies; explicit Stop clears pending work. General conversation stays separate from agent execution, and internal activity, page, and approval-status messages stay in the UI instead of being supplied as spoken conversation.
+- Preserve Nova device lists across connector changes and improve routing for Outlook and named Teams-channel requests. Delivery requests prepare reviewable reports rather than returning generic email refusals.
+- Save large JSON and CSV audit exports through the native file dialog without the renderer text limit. Per-run model menus now dismiss with Escape and restore focus.
 
-### Security
+### Security and trust
+
+- Isolate Codex app completions from terminal-user instructions, hooks, plugins, and tools while retaining the existing sign-in backend. Older CLI versions that cannot provide the required isolation report an update requirement.
+- Remove detached agent catalog signatures, catalog signing keys, and manifest signing requirements. Agent catalogs now rely on their reviewed HTTPS source, manifest hashes, metadata and revision checks, declared scopes, and application write confirmation. This changes the catalog authenticity model: detached signature verification is no longer required. Desktop installer signing remains unchanged.
+
+### Upgrade notes
+
+- Copilot, Gemini, Codex, and Claude Code integrations require their corresponding CLI and a valid sign-in. These are hosted model integrations; selecting them sends supplied prompts and tenant context to the selected provider. A locally installed CLI does not make hosted inference local.
+- Custom catalog operators no longer need detached signature files or catalog signing keys. Manifest integrity and revision checks still apply. Existing write and destructive-action confirmation requirements remain in force.
+
+### Known limitations
+
+- Local model output still requires evidence review. In installed testing, the configured 8B model made unsupported report claims and failed some sign-in, license-seat, and custom-agent drafting requests. Invalid agent YAML was blocked, but successful execution does not establish factual correctness.
+- Nova speech settlement uses bounded heuristics. Earlier installed builds split questions during pauses or mixed reply languages, and repeated microphone acceptance of the final corrections remains incomplete. This release does not establish readiness for an unrestricted live voice demo.
+- Installed testing covered a complete Codex Team chain and selected UI flows; three consecutive installed Team chains, exhaustive UI coverage, and broader multi-tenant and connector/provider acceptance remain incomplete. Generated scripts were reviewed and validated but were not executed against a tenant.
 
 ## [0.6.2] - 2026-09-13
 

@@ -1,3 +1,4 @@
+import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
@@ -757,6 +758,7 @@ function createIntuneChatSmokeGraph(): RunGraphApi {
             {
               id: "managed-device-1",
               deviceName: "WIN-01",
+              isEncrypted: false,
               userPrincipalName: "user@smoke.invalid",
               operatingSystem: "Windows",
               osVersion: "10.0.22631",
@@ -1680,6 +1682,15 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
         "write-intent agent handoff",
       );
       sawAgentSuggestion = bodyText().includes("Offboarding agent");
+      await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
+      continue;
+    }
+    if (prompt === "Which Windows devices are not encrypted?") {
+      // This question now uses exact cache evidence instead of the model stub.
+      await waitFor(
+        () => bodyText().includes("1 Windows device reports not encrypted in this snapshot.") && bodyText().includes("WIN-01"),
+        "cache-grounded Windows encryption answer",
+      );
       await waitFor(() => !bodyText().includes("Thinking"), "chat send settled");
       continue;
     }
@@ -3142,6 +3153,7 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     throw new Error("start run options must be an object.");
   }
   const options: StartRunOptions = {};
+  if (value.retryOfRunId !== undefined) options.retryOfRunId = requireBoundedString(value.retryOfRunId, "startRun.retryOfRunId", 256);
   if (value.tenantId !== undefined) {
     options.tenantId = requireBoundedString(value.tenantId, "startRun.tenantId", 256);
   }
@@ -4360,6 +4372,10 @@ function validateExportAuditLogInput(value: unknown): ExportAuditLogInput {
     throw new Error("Audit log export format must be json or csv.");
   }
   const input: ExportAuditLogInput = { format: value.format };
+  if (value.saveToFile !== undefined) {
+    if (typeof value.saveToFile !== "boolean") throw new Error("Audit log saveToFile must be a boolean.");
+    input.saveToFile = value.saveToFile;
+  }
   const from = validateOptionalAuditLogBoundary(value.from, "from");
   const to = validateOptionalAuditLogBoundary(value.to, "to");
   if (from !== undefined) input.from = from;
@@ -5295,7 +5311,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options) },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options) },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -5680,9 +5696,14 @@ function registerIpcHandlers() {
   );
   ipcMain.handle(
     "openadminos:export-audit-log",
-    handleTrusted((_event, input: unknown) =>
-      store.exportAuditLog(validateExportAuditLogInput(input)),
-    ),
+    handleTrusted(async (_event, input: unknown) => {
+      const validated = validateExportAuditLogInput(input);
+      const exported = await store.exportAuditLog(validated);
+      if (!validated.saveToFile) return exported;
+      return saveAuditLogExport(exported, (options) => mainWindow
+        ? dialog.showSaveDialog(mainWindow, options)
+        : dialog.showSaveDialog(options));
+    }),
   );
   ipcMain.handle(
     "openadminos:get-self-training-settings",

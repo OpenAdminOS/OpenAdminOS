@@ -17,6 +17,7 @@ export type PendingIntent =
   | {
       kind: "agent-run";
       slug: string;
+      retryOfRunId?: string;
       tenantId?: string;
       providerId?: ProviderId;
       model?: string;
@@ -103,12 +104,14 @@ function isPendingIntent(value: unknown): value is PendingIntent {
         (value.tenantId === undefined || isBoundedString(value.tenantId, 256)) &&
         (value.providerId === undefined || isProviderId(value.providerId)) &&
         (value.model === undefined || isBoundedString(value.model, 256)) &&
+        (value.retryOfRunId === undefined || isBoundedString(value.retryOfRunId, 256)) &&
         onlyKnownKeys(value, [
           "kind",
           "slug",
           "tenantId",
           "providerId",
           "model",
+          "retryOfRunId",
           "returnTo",
           "createdAt",
         ])
@@ -150,6 +153,8 @@ function isProviderId(value: unknown): value is ProviderId {
     value === "lm-studio" ||
     value === "anthropic" ||
     value === "openai" ||
+    value === "copilot" ||
+    value === "gemini" ||
     value === "azure-openai"
   );
 }

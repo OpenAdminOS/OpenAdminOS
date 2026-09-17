@@ -7,8 +7,8 @@ descriptor:
   id: dormant-app-registrations
   name: Dormant app registrations
   description: Reviews app registrations for stale experiments, risky exposure, credentials, and cleanup candidates with evidence-backed recommendations.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.1.1
+  minAppVersion: 0.6.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -111,13 +111,18 @@ skills:
         The tenant has {{ load_apps.output | size }} app registrations.
         Audience breakdown: {{ by_audience.output }}.
         Publisher domain breakdown: {{ by_publisher_domain.output }}.
-        Created-age breakdown: {{ by_created_age.output }}.
+        Created-age groups overlap; do not add their counts:
+        Created 3y+ ago: {{ by_created_age.output.created 3y+ ago | size }}.
+        Created 1y+ ago: {{ by_created_age.output.created 1y+ ago | size }}.
+        Created 90d+ ago: {{ by_created_age.output.created 90d+ ago | size }}.
 
-        Oldest 25 app registrations (JSON):
-        {{ oldest_apps.output }}
-
-        Full app registration list with selected risk signals (JSON):
-        {{ load_apps.output }}
+        Bounded evidence from the oldest 25 app registrations (JSON):
+        {{ oldest_apps.output | boundedJson(6000) }}
+        The totals above cover the full fetched list. Detailed review covers only
+        included records in this oldest-app sample, not the tenant's full app list.
+        State the included and omitted record counts. Do not infer cluster counts
+        for the full tenant from this sample. If no records fit, report that detail
+        review is unavailable and use only the supplied aggregate counts.
 
         Review for these signals:
         - broad exposure: signInAudience other than AzureADMyOrg
@@ -135,7 +140,7 @@ skills:
 
         2. Review first.
         Three to five bullets. Each bullet must include: cluster name,
-        member count, representative app names, evidence, and action
+        included-sample member count, representative app names, evidence, and action
         (`keep`, `review`, `rotate credentials`, `restrict exposure`, or
         `delete after owner confirmation`).
 

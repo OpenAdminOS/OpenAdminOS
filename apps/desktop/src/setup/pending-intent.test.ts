@@ -7,6 +7,11 @@ import {
 } from "./pending-intent";
 
 describe("pending setup intents", () => {
+  it.each(["copilot", "gemini"] as const)("preserves %s when resuming a pinned agent run", (providerId) => {
+    const intent = createPendingIntent({ kind: "agent-run", slug: "device-inventory", tenantId: "tenant-1", providerId, model: "selected-model", returnTo: "/agents" });
+    writePendingIntent(intent);
+    expect(readPendingIntent()).toEqual(intent);
+  });
   beforeEach(() => clearPendingIntent());
 
   it("persists only safe action metadata", () => {

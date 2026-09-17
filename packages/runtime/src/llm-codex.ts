@@ -1,6 +1,6 @@
+import { cliFailure, type CliFailure } from "./cli-provider.js";
 import { spawn } from "node:child_process";
-import { cliArgs } from "./cli-invocation.js";
-import { existsSync } from "node:fs";
+import { cliArgs, cliExecutablePath } from "./cli-invocation.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -22,7 +22,9 @@ export interface CodexProviderOptions {
 export interface CodexProbeResult {
   installed: boolean;
   ready: boolean;
+  failure?: CliFailure;
   version?: string;
+  binaryPath?: string;
   authPath: string;
   models: string[];
   defaultModel?: string;
@@ -41,6 +43,7 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const CODEX_ENV_ALLOWLIST = new Set([
   "ALL_PROXY",
   "all_proxy",
+  "APPDATA",
   "COMSPEC",
   "HOME",
   "HOMEDRIVE",
@@ -144,14 +147,23 @@ export async function probeCodexLlm(
   }
 
   const version = parseVersion(versionResult.stdout || versionResult.stderr);
-  if (!existsSync(authPath)) {
+  const authResult = await runProcess({
+    binaryPath: binaryProbe.binaryPath,
+    args: ["login", "status"],
+    timeoutMs: 5_000,
+    env: { CODEX_HOME: homePath },
+  });
+  if (authResult.exitCode !== 0) {
+    const failure = cliFailure("Codex CLI", authResult.stderr || authResult.stdout || (authResult.exitCode === 1 ? "not signed in" : "request failed"));
     return {
+      failure: failure.failure,
       installed: true,
       ready: false,
       version,
+      binaryPath: binaryProbe.binaryPath,
       authPath,
       models: [],
-      detail: "Codex CLI is installed. Run `codex login` in a terminal to authenticate.",
+      detail: failure.failure === "signed-out" ? "Codex CLI is installed. Run `codex login` in a terminal to authenticate." : failure.message,
     };
   }
 
@@ -160,6 +172,7 @@ export async function probeCodexLlm(
     installed: true,
     ready: true,
     version,
+    binaryPath: binaryProbe.binaryPath,
     authPath,
     models: modelMetadata.models,
     ...(modelMetadata.defaultModel ? { defaultModel: modelMetadata.defaultModel } : {}),
@@ -224,7 +237,7 @@ async function probeCodexBinary(preferredBinaryPath?: string): Promise<{
       args: ["--version"],
       timeoutMs: 5_000,
     });
-    const current = { binaryPath, versionResult };
+    const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
     if (versionResult.exitCode === 0) return current;
     last = current;
   }
@@ -313,8 +326,14 @@ async function* runCodexExecStream(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): AsyncIterable<LlmStreamChunk> {
+  const authStore = await readCodexAuthStore(input.homePath);
   const args = [
     "exec",
+    // Keep existing authentication, but do not import terminal-user agents,
+    // MCP servers, plugins or hooks into an app-owned completion.
+    "--ignore-user-config",
+    "--ignore-rules",
+    ...(authStore ? ['--config', `cli_auth_credentials_store="${authStore}"`] : []),
     "--ephemeral",
     "--skip-git-repo-check",
     "-s",
@@ -323,6 +342,32 @@ async function* runCodexExecStream(input: {
     ...(input.model ? ["--model", input.model] : []),
     "--config",
     'model_reasoning_effort="low"',
+    ...[
+      'project_doc_max_bytes=0',
+      'skills.include_instructions=false',
+      'features.skip_host_skill_discovery=true',
+      'features.hooks=false',
+      'features.plugins=false',
+      'features.apps=false',
+      'features.shell_tool=false',
+      'features.unified_exec=false',
+      'features.code_mode_host=false',
+      'features.code_mode=false',
+      'features.browser_use=false',
+      'features.browser_use_external=false',
+      'features.in_app_browser=false',
+      'features.computer_use=false',
+      'features.image_generation=false',
+      'features.view_image=false',
+      'features.memories=false',
+      'features.skill_search=false',
+      'features.tool_suggest=false',
+      'features.workspace_dependencies=false',
+      'features.multi_agent=false',
+      'features.multi_agent_v2=false',
+      'web_search="disabled"',
+      'approval_policy="never"',
+    ].flatMap(value => ['--config', value]),
     "--output-last-message",
     input.outputPath,
     "-",
@@ -410,6 +455,9 @@ async function* runCodexExecStream(input: {
       throw new Error("Codex CLI request stopped by user.");
     }
     const detail = stderr || stdout;
+    if (/unexpected argument.*--ignore-(?:user-config|rules)|unknown feature/i.test(detail)) {
+      throw new Error("Update Codex CLI to a version that supports isolated app completions, then test the provider again in Settings.");
+    }
     throw new Error(
       detail
         ? `Codex CLI command failed: ${truncate(detail, 500)}`
@@ -429,6 +477,14 @@ async function* runCodexExecStream(input: {
     done: true,
     model,
   };
+}
+
+/** Preserve the sign-in backend without loading user tools or instructions. */
+async function readCodexAuthStore(homePath: string): Promise<string | undefined> {
+  try {
+    const root = (await readFile(join(homePath, 'config.toml'), 'utf8')).split(/^\s*\[/m)[0] ?? '';
+    return root.match(/^\s*cli_auth_credentials_store\s*=\s*["'](file|keyring|auto|ephemeral)["']/m)?.[1];
+  } catch { return undefined; }
 }
 
 function parseCodexJsonLine(line: string): unknown | undefined {

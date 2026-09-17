@@ -76,18 +76,19 @@ describe("Intune Chat agentic loop", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
-  it("repairs one malformed tool JSON response", async () => {
+  it("repairs a salvaged tool call with missing parameters before accepting an answer", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
     try {
       const llm = scriptedLlm([
         "```json\n{\"tool\":\"query_cache\",\n```",
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices"}}\n```',
         '```json\n{"final":true,"answer":"Repaired response."}\n```',
       ]);
       const result = await runAgenticChat(baseInput(store, llm));
       assert.equal(result.ok, true);
       assert.equal(result.answer, "Repaired response.");
-      assert.equal(result.iterations, 2);
+      assert.equal(result.iterations, 3);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -348,5 +349,55 @@ it("bounds voice documentation and UTF-8 evidence over multiple tool turns", asy
     assert.equal(result.toolTrace.length, 3);
     assert.match(prompts.at(-1)!, /evidence truncated by voice budget/);
     assert.match(prompts.at(-1)!, /Earlier tool exchanges were omitted/);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+it('does not accept a false zero after an invalid filter, and permits a corrected query', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agentic-invalid-filter-'));
+  const store = seededStore(dir);
+  const badQuery = JSON.stringify({ tool: 'query_cache', params: { resource: 'managedDevices', where: { deviceEncryptionState: 'unencrypted', platform: 'Windows' } } });
+  try {
+    for (const voice of [false, true]) {
+      const blocked = await runAgenticChat({ ...baseInput(store, scriptedLlm([badQuery, 'There are zero unencrypted devices.', 'There are zero unencrypted devices.'])), voice });
+      assert.equal(blocked.ok, true);
+      assert.match(blocked.answer, /No verified count is available/);
+      assert.doesNotMatch(blocked.answer, /There are zero/);
+      const unknownResource = await runAgenticChat({ ...baseInput(store, scriptedLlm([
+        JSON.stringify({ tool: 'query_cache', params: { resource: 'madeUpEncryptionInventory' } }),
+        'No matching devices.', 'No matching devices.',
+      ])), voice });
+      assert.equal(unknownResource.ok, true);
+      assert.match(unknownResource.answer, /No verified count is available/);
+
+      assert.match(blocked.toolTrace[0]!.error!, /Unsupported managedDevices field/);
+      const malformed = await runAgenticChat({ ...baseInput(store, scriptedLlm([badQuery, ...Array(4).fill('```json\n{"tool":"query_ca')])), voice });
+      assert.equal(malformed.ok, true);
+      assert.match(malformed.answer, /No verified count is available/);
+
+      const repaired = await runAgenticChat({ ...baseInput(store, scriptedLlm([badQuery,
+        JSON.stringify({ tool: 'query_cache', params: { resource: 'managedDevices', where: { operatingSystem: 'Windows' } } }),
+        'WIN-01 is in the Windows inventory.',
+      ])), voice });
+      assert.equal(repaired.ok, true);
+      assert.equal(repaired.answer, 'WIN-01 is in the Windows inventory.');
+    }
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+it('does not turn failed license reads into an empty-tenant answer from unrelated cached users', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agentic-failed-license-'));
+  const store = seededStore(dir);
+  try {
+    const input = baseInput(store, scriptedLlm([
+      JSON.stringify({ tool: 'graph_get', params: { path: '/subscribedSkus' } }),
+      JSON.stringify({ tool: 'query_cache', params: { resource: 'users', where: { accountEnabled: false } } }),
+      'No matching records, so there are no unused seats.',
+      'No matching records, so there are no unused seats.',
+    ]));
+    input.tools.graphForScopes = async () => { throw Error('License read unavailable'); };
+    const result = await runAgenticChat(input);
+    assert.equal(result.ok, true);
+    assert.match(result.answer, /No verified count is available/);
+    assert.doesNotMatch(result.answer, /no unused seats/);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });

@@ -36,7 +36,7 @@ it('answers the reported fleet conversation through real SQLite and prepares the
     const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
     const combined = await ask('Can you send me an email with the list of non-compliant devices');
     assert.equal(combined.pendingAction?.target, 'admin@example.test');
-    assert.match(combined.pendingAction!.body, /2 are marked non-compliant/);
+    assert.match(combined.pendingAction!.body, /2 devices are marked non-compliant/);
     assert.match(combined.pendingAction!.body, /Device A/);
     assert.match(combined.pendingAction!.body, /Device C/);
     assert.equal(sends, 0);
@@ -47,11 +47,11 @@ it('answers the reported fleet conversation through real SQLite and prepares the
     assert.equal(teams.pendingAction?.target, 'Test team / General');
     assert.equal(teams.pendingAction?.body, combined.pendingAction?.body);
     const noncompliant = await ask('Can you tell me which devices are non-compliant');
-    assert.match(noncompliant.text!, /2 are marked non-compliant/); assert.match(noncompliant.text!, /Device A/); assert.match(noncompliant.text!, /Device C/);
+    assert.match(noncompliant.text!, /2 devices are marked non-compliant/); assert.match(noncompliant.text!, /Device A/); assert.match(noncompliant.text!, /Device C/);
     const why = await ask('Can you tell me why they are non-compliant');
     assert.match(why.text!, /RequireRemainContact/); assert.doesNotMatch(why.text!, /missing encryption/);
     const encrypted = await ask('Can you list the devices that are not encrypted');
-    assert.match(encrypted.text!, /1 report not encrypted/); assert.match(encrypted.text!, /Device A/); assert.doesNotMatch(encrypted.text!, /Device C/);
+    assert.match(encrypted.text!, /1 device reports not encrypted/); assert.match(encrypted.text!, /Device A/); assert.doesNotMatch(encrypted.text!, /Device C/);
     const preview = await ask('Send this to my WhatsApp');
     assert.match(preview.pendingAction!.body, /Device A/); assert.match(preview.pendingAction!.body, /unknown/);
     assert.equal(modelCalls, 0); assert.equal(sends, 0);

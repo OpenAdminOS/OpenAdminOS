@@ -91,3 +91,49 @@ describe("run lifecycle", () => {
     assert.equal(h.requests.length, 0);
   });
 });
+
+it('coalesces a streaming burst and persists its terminal state without a per-token backlog', async () => {
+  const h = harness();
+  const run = await queue(h);
+  const entered = deferred(), release = deferred();
+  const write = h.host.write;
+  let writes = 0;
+  h.host.write = async state => { if (++writes === 1) { entered.resolve(); await release.promise; } await write(state); };
+  const first = h.service.queueRunSnapshot({ ...run, status: 'running', summary: 'first' });
+  await entered.promise;
+  const updates = Array.from({ length: 300 }, (_, index) => h.service.queueRunSnapshot({ ...run, status: 'running', summary: String(index) }));
+  const final = h.service.queueRunSnapshot({ ...run, status: 'failed', error: 'Model timeout', summary: 'Model timeout', finishedAt: new Date().toISOString() });
+  release.resolve();
+  await Promise.all([first, ...updates, final]);
+  assert.equal(writes, 2);
+  assert.equal(h.state().runs[0]?.status, 'failed');
+  assert.equal(h.state().runs[0]?.error, 'Model timeout');
+});
+
+it('retries a read-only Team task using host-owned evidence and rejects cross-tenant or missing sources', async () => {
+  const h = harness();
+  const source = { id: 'source', agentSlug: 'assessment', status: 'completed', tenantId: 'tenant-a', queuedAt: new Date().toISOString(), steps: [], logs: [] } as RunRecord;
+  const original = { ...source, id: 'original', agentSlug: 'draft', status: 'failed', providerId: 'ollama', model: 'test', officeContext: { tenantId: 'tenant-a', question: 'Draft the diagnostics.', instructions: 'Read only.', evidence: [{ runId: 'source', agentSlug: 'assessment', finishedAt: new Date().toISOString(), summary: 'Assessment', result: { counts: { inGracePeriod: 1 } } }] } } as RunRecord;
+  const agent = { id: 'draft', slug: 'draft', name: 'Draft', description: 'Evidence draft', requiresEntraTier: 'free', version: '1.0.0', mode: 'read', category: 'devices', tier: 'agent', scopes: [], author: { name: 'Test' }, installedAt: new Date().toISOString() } as AgentSummary;
+  Object.assign(h.host, { appVersion: '0.6.3', listProviders: async () => [{ id: 'ollama', status: 'connected', models: ['test'], defaultModel: 'test', isLocal: true }], providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  const reset = async (runs = [original, source]) => h.host.write({ ...h.state(), runs, installedAgents: [agent], tenants: [{ id: 'tenant-a' }, { id: 'tenant-b' }] as any, activeTenantId: 'tenant-b' });
+  await reset();
+  const retried = await h.service.startRun('draft', { retryOfRunId: original.id });
+  assert.equal(retried.tenantId, 'tenant-a');
+  assert.equal(retried.providerId, 'ollama');
+  assert.equal(retried.model, 'test');
+  assert.deepEqual(retried.officeContext, original.officeContext);
+  assert.equal(retried.retryOfRunId, original.id);
+  assert.equal(retried.office, undefined, 'manual retry must not impersonate a mission child');
+  await reset();
+  await assert.rejects(h.service.startRun('draft', { retryOfRunId: original.id, tenantId: 'tenant-b' }), /another tenant/);
+  await reset([original]);
+  await assert.rejects(h.service.startRun('draft', { retryOfRunId: original.id }), /evidence is missing/);
+  await reset([original, { ...source, tenantId: 'tenant-b' }]);
+  await assert.rejects(h.service.startRun('draft', { retryOfRunId: original.id }), /another tenant/);
+  await reset();
+  Object.assign(h.host, { listProviders: async () => [{ id: 'ollama', status: 'connected', models: ['test'], isLocal: false }] });
+  await assert.rejects(h.service.startRun('draft', { retryOfRunId: original.id }), /hosted provider destination/);
+  agent.mode = 'write'; await reset();
+  await assert.rejects(h.service.startRun('draft', { retryOfRunId: original.id }), /Retry write assignments from Agent Team/);
+});

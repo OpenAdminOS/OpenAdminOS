@@ -13,7 +13,7 @@ Prepares a PowerShell script for review from an Agent Team task and its supplied
 | Field | Value |
 | --- | --- |
 | Agent ID | `team-script-draft` |
-| Version | `1.0.0` |
+| Version | `1.0.1` |
 | Mode | `read` |
 | Tier | `agent` |
 | Category | `devices` |
@@ -21,7 +21,7 @@ Prepares a PowerShell script for review from an Agent Team task and its supplied
 | Preferred model | `not pinned` |
 | Minimum app version | `0.6.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-09-11 · `13dad4d` |
+| Last changed | 2026-09-15 · `fd6c994` |
 
 ## Execution
 
@@ -43,7 +43,7 @@ This is a read-only agent. It does not declare write operations.
 
 | Step | Settings |
 | --- | --- |
-| Team PowerShell draft | temperature 0.1 · max tokens 1800 |
+| Team PowerShell draft | temperature 0.1 · max tokens 1200 |
 
 ## Settings
 

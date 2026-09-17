@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 
 import type { TokenCacheStorage } from "@openadminos/runtime";
 import { AppStateStore } from "./state.js";
+import { DEFAULT_REGISTRY_SOURCE } from "./registry-client.js";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -14,10 +15,10 @@ const tokenStore: TokenCacheStorage = {
   clear: async () => undefined,
 };
 
-describe("signed registry manifest lifecycle", () => {
-  it("downloads verified manifests atomically and removes them on uninstall", async () => {
+describe("registry manifest integrity and update lifecycle", () => {
+  for (const source of [DEFAULT_REGISTRY_SOURCE, "https://registry.example/agents"]) {
+  it(`installs and updates unsigned agents with manifest integrity from ${source}`, async () => {
     const repoRoot = await findRepoRoot();
-    const source = "https://registry.example/agents";
     const originalIndex = JSON.parse(
       await readFile(join(repoRoot, "agents", "index.json"), "utf8"),
     ) as { agents: Array<Record<string, unknown>> };
@@ -49,7 +50,7 @@ describe("signed registry manifest lifecycle", () => {
       const url = String(input);
       if (url === `${source}/index.json`) {
         return new Response(
-          JSON.stringify({ schemaVersion: 1, agents: [currentEntry] }),
+          JSON.stringify({ schemaVersion: 1, revision: 1, agents: [currentEntry] }),
           { status: 200 },
         );
       }
@@ -99,6 +100,8 @@ describe("signed registry manifest lifecycle", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  }
 
   it("rejects a manifest whose bytes do not match the registry digest", async () => {
     const repoRoot = await findRepoRoot();

@@ -939,7 +939,7 @@ export function pathForResource(resource: GraphCacheResourceKind): {
           "createdDateTime",
           "lastUpdateDateTime",
         ],
-        query: { "$top": "250", "$orderby": "createdDateTime desc" },
+        query: { "$top": "50", "$orderby": "createdDateTime desc" },
       };
     case "secureScores":
       // Daily snapshots, newest first by default; ~90 days of history.

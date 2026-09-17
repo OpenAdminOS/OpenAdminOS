@@ -331,7 +331,7 @@ it("replaces an older question without speaking its late result", async () => {
     secrets,
     async () => state,
     async (input, options) => {
-      if (input.content === "Old question") {
+      if (input.content === "Show old devices") {
         firstSignal = options.signal;
         return new Promise((resolve) => {
           finish = resolve;
@@ -349,13 +349,13 @@ it("replaces an older question without speaking its late result", async () => {
   const first = nova.handle({
     action: "answer",
     sessionId: sessionId!,
-    text: "Old question",
+    text: "Show old devices",
   });
   await new Promise((resolve) => setImmediate(resolve));
   const second = await nova.handle({
     action: "answer",
     sessionId: sessionId!,
-    text: "New question",
+    text: "Show new devices",
   });
   assert.equal(firstSignal.aborted, true);
   assert.equal(second.text, "Current answer");
@@ -579,6 +579,40 @@ it('retrieves a fresh report and requires a single visual decision for every con
   assert.deepEqual(deliveries, ids);
 });
 
+it('routes conversational email requests and follow-up capability questions using app configuration', async () => {
+  const f = fixture();
+  f.state.tenants[0]!.username = 'admin@example.test';
+  const questions: string[] = [], sends: unknown[] = [];
+  let status = 'connected';
+  const nova = new NovaService(f.secrets, async () => f.state, async input => {
+    questions.push(input.content);
+    return { conversation: { id: 'report' }, assistantMessage: { status: 'completed', content: 'Verified non-compliant device list' } } as SendIntuneChatMessageResult;
+  }, fetch, {
+    connectors: async () => [{ descriptor: { id: 'outlook', name: 'Outlook' }, status, config: { defaultRecipients: 'admin@example.test' } } as never],
+    send: async input => { sends.push(input); }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
+  const request = 'Alright, so can you send me an email with the list of non-compliant devices';
+  const report = await ask(request);
+  assert.deepEqual(questions, ['List devices that are non-compliant']);
+  assert.equal(report.pendingAction?.body, 'Verified non-compliant device list');
+  assert.match(report.text!, /confirm/);
+  assert.equal(sends.length, 0);
+  for (const text of ["So outlook is connected, why can't you send an email", "Why can't you send an email?", 'Okay, can you send email?']) {
+    const capability = await ask(text);
+    assert.match(capability.text!, /Outlook.*connected/);
+    assert.equal(capability.pendingAction, undefined);
+  }
+  assert.equal(questions.length, 1);
+  status = 'needs-scope';
+  const blocked = await ask(request);
+  assert.match(blocked.answerError!, /Outlook needs permission/);
+  assert.equal(blocked.pendingAction, undefined);
+  assert.equal(questions.length, 1);
+  assert.equal(sends.length, 0);
+});
+
 it('reports connector capabilities from configuration and never attaches an older report after failure', async () => {
   const f = fixture();
   let failed = false, questions = 0;
@@ -598,4 +632,169 @@ it('reports connector capabilities from configuration and never attaches an olde
   assert.match(report.answerError!, /No permission/); assert.equal(report.pendingAction, undefined);
   const old = await ask('Send this via email');
   assert.match(old.text!, /no completed result/); assert.equal(old.pendingAction, undefined);
+});
+
+it('interprets unfamiliar delivery wording, resolves corrections and keeps approval visual', async () => {
+  const f = fixture();
+  const sends: unknown[] = [], questions: string[] = [], contexts: unknown[] = [];
+  let reply = { kind: 'clarify', reason: 'destination' } as Record<string, unknown>;
+  const nova = new NovaService(f.secrets, async () => f.state, async input => {
+    questions.push(input.content);
+    return { conversation: { id: 'report' }, assistantMessage: { content: 'Verified report', status: 'completed' } } as SendIntuneChatMessageResult;
+  }, fetch, {
+    classifyCommand: async (_text, context, options) => { contexts.push(context); assert.equal(options.scope.providerId, 'ollama'); assert.equal(options.scope.isLocal, true); return JSON.stringify(reply); },
+    connectors: async () => ['outlook', 'teams'].map(id => ({ descriptor: { id, name: id }, status: 'connected', config: { defaultRecipients: 'admin@example.test', defaultTeamId: 'team', defaultChannelId: 'channel' } } as never)),
+    send: async input => { sends.push(input); }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
+  const clarification = await ask('Could you get the non-compliant device report over to me?');
+  assert.match(clarification.text!, /specify the destination/); assert.equal(questions.length, 0);
+  reply = { kind: 'send', connectorId: 'outlook', self: false, question: 'List non-compliant devices' };
+  const draft = await ask('Outlook');
+  assert.match((contexts[1] as any).previousRequest, /non-compliant device report/);
+  assert.equal(draft.pendingAction?.body, 'Verified report'); assert.equal(questions.length, 1);
+  const spokenApproval = await ask('Yes please');
+  assert.equal(spokenApproval.pendingAction?.id, draft.pendingAction?.id);
+  assert.equal(sends.length, 0); assert.equal(contexts.length, 2);
+  reply = { kind: 'send', connectorId: 'teams', self: false, question: null };
+  const correction = await ask('Actually use Teams instead');
+  assert.equal(contexts.length, 2);
+  assert.equal(correction.pendingAction?.target, 'team / channel');
+  assert.equal(correction.pendingAction?.body, 'Verified report');
+  assert.equal(questions.length, 1); assert.equal(sends.length, 0);
+  await assert.rejects(nova.handle({ action: 'decide-action', sessionId: sessionId!, actionId: draft.pendingAction!.id, approved: true }), /expired/);
+  await nova.handle({ action: 'decide-action', sessionId: sessionId!, actionId: correction.pendingAction!.id, approved: true });
+  assert.equal(sends.length, 1);
+});
+
+it('fails closed on interpretation failures and discards replaced or cross-tenant classifications', async () => {
+  const f = fixture();
+  let resolve: (s: string) => void = () => {}, signal: AbortSignal | undefined;
+  let mode = 'invalid';
+  let chats = 0;
+  const contexts: unknown[] = [];
+  const nova = new NovaService(f.secrets, async () => f.state, async () => { chats++; throw new Error('Unexpected research'); }, fetch, {
+    classifyCommand: async (_text, context, options) => {
+      contexts.push(context); signal = options.signal;
+      if (mode === 'invalid') return '{"kind":"send","connectorId":"outlook","self":false,"to":"invented"}';
+      if (mode === 'error') throw new Error('Model failed');
+      return new Promise<string>(r => { resolve = r; });
+    },
+    connectors: async () => [], send: async () => { throw new Error('Unexpected send'); }, startRun: async () => { throw new Error('Unexpected run'); },
+  });
+  const { sessionId } = await nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
+  const ask = (text: string) => nova.handle({ action: 'answer', sessionId: sessionId!, text });
+  assert.match((await ask('Pop the report in my inbox')).text!, /could not reliably interpret/);
+  mode = 'error'; assert.match((await ask('Outlook')).text!, /could not reliably interpret/);
+  await ask('Never mind');
+  mode = 'pending';
+  const pending = ask('Forward those findings');
+  await new Promise(r => setImmediate(r));
+  assert.equal((contexts.at(-1) as any).previousRequest, undefined);
+  const rejected = assert.rejects(pending, /replaced/);
+  await ask('Open connectors');
+  assert.equal(signal?.aborted, true);
+  resolve('{"kind":"send","connectorId":"outlook","self":false}');
+  await rejected;
+  const changed = ask('Forward those findings');
+  await new Promise(r => setImmediate(r));
+  const changedRejected = assert.rejects(changed, /changed/);
+  f.state.activeTenantId = 'other-tenant';
+  resolve('{"kind":"navigate","page":"connectors"}');
+  await changedRejected;
+  assert.equal(chats, 0);
+});
+
+it('keeps the full noncompliant list through channel selection, failed setup and Outlook speech repair', async () => {
+  const { voiceDeviceEvidenceAnswer } = await import('./intune-chat/voice-device-evidence.js');
+  const f = fixture();
+  f.state.tenants[0]!.username = 'admin@example.test';
+  const sends: any[] = [], questions: string[] = [];
+  const nova = new NovaService(f.secrets, async () => f.state, async input => {
+    questions.push(input.content);
+    const content = await voiceDeviceEvidenceAnswer(input.content, [{resource:'managedDevices',rows:9,refreshedAt:'2026-09-13T21:56:23.006Z'}] as any, {
+      tenantId:'tenant-a', store:{queryGraphCache: () => ({totalCount:2,returnedRows:2,rows:[{row:{deviceName:'Device A'}},{row:{deviceName:'Device B'}}]})}
+    } as any, () => {});
+    assert.ok(content, input.content);
+    return {conversation:{id:'report'},assistantMessage:{content,status:'completed'}} as SendIntuneChatMessageResult;
+  }, fetch, {
+    classifyCommand: async () => { throw new Error('Explicit commands must not need a model'); },
+    connectors: async () => ['outlook','teams','whatsapp-web'].map(id => ({descriptor:{id,name:id},status:id==='whatsapp-web'?'needs-setup':'connected',config:{defaultRecipients:'admin@example.test',defaultTeamId:'team',defaultChannelId:'channel',defaultChannelName:'General'}} as never)),
+    send:async input => {sends.push(input);}, startRun:async () => {throw new Error('Unexpected run');}
+  });
+  const {sessionId} = await nova.handle({action:'start',mode:'local',tenantId:'tenant-a',consent:false});
+  const ask = (text:string) => nova.handle({action:'answer',sessionId:sessionId!,text});
+  assert.match((await ask('Send me a Teams message with all the non-compliant devices as a list')).text!, /shared destinations/);
+  const teams = await ask('Send this via Teams to the General channel');
+  assert.match(teams.pendingAction!.body, /- Device A\n- Device B/);
+  assert.equal(questions.length,1);
+  assert.match((await ask('Can you send it also via WhatsApp')).text!, /setup/);
+  const email = await ask('Can you also send it- send it with Outlook');
+  assert.match(email.pendingAction!.body, /- Device A\n- Device B/);
+  assert.equal(questions.length,1);
+  const explicit = await ask('Stop What I want you to do is send me a list of non-compliant devices via email with the Outlook connector');
+  assert.match(explicit.pendingAction!.body, /- Device A\n- Device B/);
+  assert.equal(sends.length,0);
+  await nova.handle({action:'decide-action',sessionId:sessionId!,actionId:explicit.pendingAction!.id,approved:true});
+  assert.equal(sends.length,1);
+  assert.match(sends[0].args.markdown, /Device A/);
+  assert.match(sends[0].args.markdown, /Device B/);
+});
+
+it('retains a split spoken delivery request while interpretation is pending and never researches its connector fragment', async () => {
+  const f = fixture();
+  let contexts: any[] = [];
+  const nova = new NovaService(f.secrets, async () => f.state, async () => {throw new Error('Unexpected research');}, fetch, {
+    classifyCommand: async (_text, context) => {contexts.push(context); if(contexts.length===1) return new Promise<string>(()=>{}); return '{"kind":"research"}';},
+    connectors:async () => [], send:async () => {throw new Error('Unexpected send');},startRun:async () => {throw new Error('Unexpected run');}
+  });
+  const {sessionId} = await nova.handle({action:'start',mode:'local',tenantId:'tenant-a',consent:false});
+  const pending = nova.handle({action:'answer',sessionId:sessionId!,text:'Can you also send it- send it with'});
+  const replaced = assert.rejects(pending, /replaced/);
+  await new Promise(r=>setImmediate(r));
+  const next = await nova.handle({action:'answer',sessionId:sessionId!,text:'Outlook'});
+  await replaced;
+  assert.equal(contexts.length, 1);
+  assert.match(next.text!, /connector is unavailable/);
+});
+
+it('speaks readable freshness while preserving the original evidence timestamp elsewhere', () => {
+  assert.match(boundedVoiceAnswer('9 devices, refreshed 2026-09-13T21:56:23.006Z.'), /13 September.*21:56 UTC/);
+  assert.doesNotMatch(boundedVoiceAnswer('9 devices, refreshed 2026-09-13T21:56:23.006Z.'), /T21|\.006/);
+});
+
+it('answers general capabilities directly while preserving a running task and its subsequent action preview', async () => {
+  const f = fixture();
+  let finish!: (value: SendIntuneChatMessageResult) => void;
+  let signal: AbortSignal | undefined;
+  let chats = 0, sends = 0;
+  const nova = new NovaService(f.secrets, async () => f.state, async (_input, options) => {
+    chats++; signal=options.signal; return new Promise<SendIntuneChatMessageResult>(resolve=>{finish=resolve;});
+  }, fetch, {classifyCommand: async () => {throw new Error('No classifier needed');},
+    connectors:async()=>[{descriptor:{id:'outlook',name:'Outlook'},status:'connected',config:{defaultRecipients:'admin@example.test'}} as never],
+    send:async()=>{sends++;},startRun:async()=>{throw new Error('Unexpected run');}});
+  const {sessionId} = await nova.handle({action:'start',mode:'local',tenantId:'tenant-a',consent:false});
+  const ask=(text:string)=>nova.handle({action:'answer',sessionId:sessionId!,text});
+  const first=await ask('What can you do and what can you help me with');
+  assert.match(first.text!, /I'm Nova/); assert.match(first.text!, /configured connectors/);
+  assert.equal(chats,0); assert.equal(first.pendingAction,undefined);
+  const pending=ask('How many devices do I have?');
+  await new Promise(r=>setImmediate(r));
+  for (const text of ['Who are you and how can you help me?', 'What can you do and what can you help me with']) {
+    assert.match((await ask(text)).text!, /I'm Nova/);
+    assert.equal(signal?.aborted,false); assert.equal(chats,1);
+  }
+  for (const greeting of ['We are on stage. And I want you to say hello to them', 'Alright, so you are now in front of an audience, can you say hi']) {
+    assert.match((await ask(greeting)).text!, /Hello everyone/);
+  }
+  assert.equal(signal?.aborted, false);
+  assert.equal(chats, 1);
+  finish({conversation:{id:'conversation'},assistantMessage:{content:'9 devices',status:'completed'}} as SendIntuneChatMessageResult);
+  await pending;
+  const draft=await ask('Send this via Outlook');
+  await ask('Tell me about yourself');
+  await ask('Say hello to the audience');
+  await nova.handle({action:'decide-action',sessionId:sessionId!,actionId:draft.pendingAction!.id,approved:true});
+  assert.equal(sends,1);
 });

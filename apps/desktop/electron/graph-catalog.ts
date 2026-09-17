@@ -114,6 +114,12 @@ export function loadCatalog(): CatalogState {
       queryParams: docs?.queryParams ?? [],
       requiredHeaders: docs?.requiredHeaders ?? [],
     };
+    if (summary.method === "GET" && entry.path.toLowerCase() === "/subscribedskus") {
+      // The bundled index omits documented higher-privileged read alternatives.
+      // https://learn.microsoft.com/graph/api/subscribedsku-list (verified 2026-09-15).
+      summary.scopesDelegated = [...new Set([...summary.scopesDelegated, "Organization.Read.All", "Directory.Read.All"])];
+      summary.queryParams = ["$select"];
+    }
     byKey.set(key, summary);
     all.push(summary);
   }
@@ -279,10 +285,14 @@ function looksLikeId(segment: string): boolean {
 }
 
 function tokenize(s: string): string[] {
-  return s
+  const tokens = s
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 3);
+    .filter((t) => t.length >= 3)
+    .map((t) => /^(?:licenses|licensing)$/.test(t) ? "license" : t);
+  // Graph names the tenant's commercial-license inventory subscribedSkus.
+  if (tokens.includes("license")) tokens.push("subscribedskus");
+  return [...new Set(tokens)];
 }
 
 function scoreEndpoint(ep: EndpointSummary, tokens: string[]): number {
@@ -298,6 +308,6 @@ function scoreEndpoint(ep: EndpointSummary, tokens: string[]): number {
   }
   // Prefer collection endpoints (shorter, no trailing template segments)
   // for ambiguous queries — they're usually what an agent wants.
-  if (!ep.path.includes("{")) score += 1;
+  if (score > 0 && !ep.path.includes("{")) score += 1;
   return score;
 }

@@ -37,6 +37,11 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(result.returnedRows, 50);
       assert.equal(result.limit, 50);
       assert.equal(result.rows.length, 50);
+      const count = await executeIntuneChatTool(ctx, 'query_cache', { resource: 'managedDevices', select: ['id'], limit: 1 });
+      const projected = count.result as { totalCount: number; rows: Array<{ row: Record<string, unknown> }> };
+      assert.equal(projected.totalCount, 75);
+      assert.deepEqual(Object.keys(projected.rows[0]!.row), ['id']);
+
       assert.match(query.trace.resultSummary, /50 of 75 cached rows returned/);
     } finally {
       store.close();
@@ -341,6 +346,34 @@ function toolContext(
 }
 
 describe("Graph endpoint discovery and reachability", () => {
+  it("ranks license inventory for seat questions and returns no unrelated endpoints for unmatched words", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-license-search-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store);
+      const result = await executeIntuneChatTool(ctx, "find_graph_endpoint", { query: "licenses available seats" });
+      assert.equal((result.result as { candidates: Array<{ path: string }> }).candidates[0]?.path, "/subscribedSkus");
+      const absent = await executeIntuneChatTool(ctx, "find_graph_endpoint", { query: "unmatchablezzzzzz" });
+      assert.deepEqual((absent.result as { candidates: unknown[] }).candidates, []);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("reads subscribed SKUs without injecting unsupported paging and rejects unsupported filtering", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-license-query-"));
+    const store = seededStore(dir, 1);
+    let requests = 0;
+    try {
+      const ctx = toolContext(store, { graphForScopes: async () => ({
+        async request(input) { requests++; assert.deepEqual(input.query, { $select: "skuPartNumber,prepaidUnits,consumedUnits" }); return { value: [{ skuPartNumber: "TEST", prepaidUnits: { enabled: 10 }, consumedUnits: 4 }] }; },
+      }) as RunGraphApi });
+      const ok = await executeIntuneChatTool(ctx, "graph_get", { path: "/subscribedSkus", query: { $select: "skuPartNumber,prepaidUnits,consumedUnits" } });
+      assert.equal(ok.trace.error, undefined);
+      const blocked = await executeIntuneChatTool(ctx, "graph_get", { path: "/subscribedSkus", query: { $filter: "consumedUnits eq 0" } });
+      assert.match(blocked.trace.error!, /supports only \$select/);
+      assert.equal(requests, 1);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("finds candidate endpoints from plain words so a path need not be recalled", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-"));
     const store = seededStore(dir, 1);
@@ -487,7 +520,7 @@ describe("an empty query result is not evidence of an empty tenant", () => {
         9,
         "the model must be told the resource is populated, or it reports the tenant as empty",
       );
-      assert.match(record.note, /must not answer that it has none/i);
+      assert.match(record.note, /not an empty tenant/i);
       assert.match(
         result.trace.resultSummary,
         /9 rows are cached/,
@@ -562,4 +595,46 @@ describe("cached rows advertise the fields available to filter on", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+});
+
+it('rejects invented or malformed filters, preserves optional fields, and handles null as unknown', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cache-filter-guards-'));
+  const store = seededStore(dir, 2);
+  try {
+    const ctx = toolContext(store);
+    for (const params of [
+      { where: { deviceEncryptionState: 'unencrypted', platform: 'Windows' } },
+      { where: { isEncrypted: 'false' } },
+      { filters: ['isEncrypted=false'] },
+      { filters: { isEncrypted: false } },
+      { where: { isEncrypted: {} } },
+      { filters: Array.from({ length: 9 }, () => ({ field: 'id', op: 'eq', value: 'device-1' })) },
+      { sort: { field: 'platform' } },
+      { filter: { isEncrypted: false } },
+      { where: { isEncrypted: false }, select: ['platform'] },
+    ]) {
+      const result = await executeIntuneChatTool(ctx, 'query_cache', { resource: 'managedDevices', ...params });
+      assert.equal((result.result as { code: string }).code, 'invalid-cache-query', JSON.stringify(params));
+      assert.ok(result.trace.error);
+      assert.equal((result.result as { totalCount?: number }).totalCount, undefined);
+    }
+    // isEncrypted is a supported selected field even when every record omits it.
+    const unknown = await executeIntuneChatTool(ctx, 'query_cache', { resource: 'managedDevices', where: { isEncrypted: null } });
+    assert.equal(unknown.trace.error, undefined);
+    assert.equal((unknown.result as { totalCount: number }).totalCount, 2);
+    const known = await executeIntuneChatTool(ctx, 'query_cache', { resource: 'managedDevices', filters: [{ field: 'isEncrypted', op: 'neq', value: null }] });
+    assert.equal((known.result as { totalCount: number }).totalCount, 0);
+    assert.doesNotMatch((known.result as { note: string }).note, /field or value that does not exist/);
+    assert.ok((known.result as { snapshot: unknown }).snapshot);
+    store.replaceGraphResources({ tenantId: 'tenant-1', resource: 'managedDevices', label: 'Devices', scopeSet: [], refreshedAt: new Date().toISOString(), rows: [{ id: 'first' }, { id: 'second', optionalField: 'present' }] });
+    const optional = await executeIntuneChatTool(ctx, 'query_cache', { resource: 'managedDevices', where: { optionalField: 'present' } });
+    assert.equal(optional.trace.error, undefined);
+    assert.equal((optional.result as { totalCount: number }).totalCount, 1);
+    store.replaceGraphResources({ tenantId: 'tenant-1', resource: 'users', label: 'Users', scopeSet: [], refreshedAt: new Date().toISOString(), rows: [{ id: 'user-1', accountEnabled: false }] });
+    const invalidBoolean = await executeIntuneChatTool(ctx, 'query_cache', { resource: 'users', where: { accountEnabled: 'false' } });
+    assert.match(invalidBoolean.trace.error!, /boolean field/);
+    const validBoolean = await executeIntuneChatTool(ctx, 'query_cache', { resource: 'users', where: { accountEnabled: false } });
+    assert.equal((validBoolean.result as { totalCount: number }).totalCount, 1);
+
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });

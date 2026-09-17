@@ -1,6 +1,89 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { NovaTranscript, isNovaConversationOnly, novaCommentaryChunks } from "../src/shared/nova-transcript.js";
+import { novaInputWaitMs } from '../src/shared/nova-input-boundary.js';
+import { novaAudienceReply } from '../src/shared/nova-conversation.js';
+
+it('waits through ongoing microphone speech and incomplete clauses without a blanket two-second delay', () => {
+  assert.ok(novaInputWaitMs('Which devices are not encrypted', 1500, 100) > 0);
+  assert.ok(novaInputWaitMs('Which Windows devices are', 1400, 1400) > 0);
+  assert.ok(novaInputWaitMs('Which Windows devices', 1400, 1400) > 0);
+  assert.equal(novaInputWaitMs('How many Windows devices?', 700, 1050), 0);
+  assert.equal(novaInputWaitMs('Which Windows devices are not encrypted', 700, 1050), 0);
+  assert.equal(novaInputWaitMs('What can you help me with?', 700, 1050), 0);
+  assert.ok(novaInputWaitMs('Which devices are not encrypted on Windows', 100, 1200) > 0);
+});
+
+it('retains a qualifier beyond the delegation offset and across acknowledgment', () => {
+  const t = new NovaTranscript();
+  t.append({type:'session.input_transcript.delta',delta:'Which devices are not encrypted',start_ms:0,end_ms:900});
+  const anchor = t.capture(900, false)!.anchor;
+  t.append({type:'session.output_transcript.delta',delta:'Mm-hmm.',start_ms:950,end_ms:1300});
+  t.append({type:'session.input_transcript.delta',delta:' on Windows',start_ms:1700,end_ms:2100});
+  assert.equal(t.capture(undefined,true,anchor)?.text,'Which devices are not encrypted on Windows');
+  assert.equal(t.capture(undefined,true,anchor),undefined);
+  t.append({type:'session.input_transcript.delta',delta:'How many apps?',start_ms:5000,end_ms:5500});
+  assert.equal(t.capture(undefined,true,anchor),undefined,'old delegation cannot steal a new question');
+  assert.equal(t.capture()?.text,'How many apps?');
+});
+
+it('retains an unfinished question across a lookup reply while preserving explicit Stop', () => {
+  for (const prefix of ['Which Windows devices', 'Which Windows devices are']) {
+    const t = new NovaTranscript();
+    t.append({type:'session.input_transcript.delta',delta:prefix});
+    const anchor = t.capture(undefined, false)!.anchor;
+    t.append({type:'session.output_transcript.delta',delta:'Checking tenant'});
+    t.append({type:'session.input_transcript.delta',delta:prefix.endsWith(' are') ? ' not encrypted' : ' are not encrypted'});
+    assert.equal(t.capture(undefined, true, anchor)?.text, 'Which Windows devices are not encrypted');
+  }
+  const t = new NovaTranscript();
+  t.append({type:'session.input_transcript.delta',delta:'Which Windows devices are'});
+  t.append({type:'session.output_transcript.delta',delta:'Checking tenant'});
+  t.append({type:'session.input_transcript.delta',delta:'Stop'});
+  assert.equal(t.takeStopCommand(), true);
+  const next = new NovaTranscript();
+  next.append({type:'session.input_transcript.delta',delta:'Which Windows devices are'});
+  next.append({type:'session.output_transcript.delta',delta:'Checking tenant'});
+  next.append({type:'session.input_transcript.delta',delta:'How many apps?'});
+  assert.equal(next.capture()?.text, 'How many apps?');
+});
+
+it('keeps the reported audience exchange conversational without hiding appended tasks', () => {
+  const t = new NovaTranscript();
+  t.append({type:'session.input_transcript.delta',delta:'So- Okay, so we are right now on the stage in front of an audience'});
+  t.append({type:'session.output_transcript.delta',delta:'Mm-hmm.'});
+  t.append({type:'session.input_transcript.delta',delta:'. And I want you to say hello to them'});
+  t.append({type:'session.output_transcript.delta',delta:'Okay.'});
+  const request = t.capture()!.text;
+  assert.match(novaAudienceReply(request)!,/^Hello everyone/);
+  assert.equal(novaAudienceReply('we are on stage'), '');
+  const greeting = 'Alright, so you are now in front of an audience, can you say hi';
+  assert.match(novaAudienceReply(greeting)!, /^Hello everyone/);
+  for (const task of [' and run Compliance overview', '. Send this via Teams', ' and which devices are not encrypted?']) {
+    assert.equal(novaAudienceReply(greeting + task), undefined);
+  }
+  assert.match(novaAudienceReply('. And I want you to say hello to them')!,/^Hello everyone/);
+  for (const task of [' and run Compliance overview', ' and list unencrypted devices', '. Send this via Teams']) {
+    assert.equal(novaAudienceReply(`Say hello to the audience${task}`),undefined);
+  }
+});
+
+it('keeps an audience request together when Nova greets between its input fragments', () => {
+  const text = 'And I want you to say hello to them';
+  for (const greeting of ['Oh, hello everyone!', 'Hi folks!', 'Hello, everyone.']) {
+    for (const split of [3, 13, 20, 26]) {
+      const t = new NovaTranscript();
+      t.append({type:'session.input_transcript.delta',delta:text.slice(0, split)});
+      const anchor = t.capture(undefined, false)!.anchor;
+      t.append({type:'session.output_transcript.delta',delta:greeting});
+      t.append({type:'session.input_transcript.delta',delta:text.slice(split)});
+      assert.equal(t.capture(undefined, false, anchor)?.text, text);
+      assert.match(novaAudienceReply(t.capture()!.text)!, /^Hello everyone/);
+      t.append({type:'session.input_transcript.delta',delta:'Which Windows devices are not encrypted?'});
+      assert.equal(t.capture()?.text, 'Which Windows devices are not encrypted?');
+    }
+  }
+});
 
 it("isolates the reported questions from greetings, waiting chatter and jokes", () => {
   const transcript = new NovaTranscript();
@@ -79,4 +162,16 @@ it('consumes a spoken stop without losing the next question or matching quoted s
   assert.equal(transcript.capture()?.text, 'Can you tell me why they are non-compliant?');
   transcript.append({ type: 'session.input_transcript.delta', delta: "Do not stop" });
   assert.equal(transcript.takeStopCommand(), false);
+});
+
+it('binds a delayed handoff to its original utterance without consuming a newer question', () => {
+  const t = new NovaTranscript();
+  t.append({type:'session.input_transcript.delta',delta:'What can you do'});
+  const anchor=t.capture(undefined,false)!.anchor;
+  t.append({type:'session.input_transcript.delta',delta:' and what can you help me with'});
+  t.append({type:'session.output_transcript.delta',delta:'I can help you explore your tenant.'});
+  t.append({type:'session.input_transcript.delta',delta:'How many devices do I have?'});
+  assert.equal(t.capture(undefined,true,anchor)!.text,'What can you do and what can you help me with');
+  assert.equal(t.capture(undefined,true,anchor),undefined);
+  assert.equal(t.capture()!.text,'How many devices do I have?');
 });

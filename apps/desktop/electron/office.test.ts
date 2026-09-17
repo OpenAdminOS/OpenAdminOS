@@ -357,6 +357,10 @@ test("approval expires independently and rejects changed workflow consent", asyn
     run.status = "awaiting-confirmation";
     await f.service.tick();
     await f.service.validateApproval(run);
+    f.context.runs.push({ ...run, id: "manual-retry", status: "running", office: undefined,
+      officeContext: { tenantId: "tenant-a", question: "Retry", instructions: "", evidence: [] } });
+    await assert.rejects(f.service.validateApproval(run), /execution slot/);
+    f.context.runs.pop();
     f.context.providerConfigKey = "changed";
     await assert.rejects(f.service.validateApproval(run), /changed/);
     f.advance(600001);
@@ -735,4 +739,19 @@ test("saving an unchanged work order renews its review after an assigned provide
   } finally {
     await f.close();
   }
+});
+
+test('handoffs retain host-owned ancestor evidence and reject foreign ancestors', async () => {
+  const f = await fixture();
+  try {
+    const { personas: [p] } = await f.service.save(f.input);
+    const root = { id: 'root', agentSlug: 'assessment', status: 'completed', tenantId: 'tenant-a', result: { totalDevices: 9, counts: { noncompliant: 8, inGracePeriod: 1 } } } as RunRecord;
+    const review = { ...root, id: 'review', agentSlug: 'review', result: { report: 'Model interpretation' }, officeContext: { tenantId: 'tenant-a', question: 'Review', instructions: '', evidence: [{ runId: 'root', agentSlug: 'assessment', summary: 'Copied text', result: { totalDevices: 999 } }] } } as RunRecord;
+    f.context.runs.push(root, review);
+    const context = (f.service as any).taskContext(p, [review], f.context);
+    assert.deepEqual(context.evidence.map((e: any) => e.runId), ['review', 'root']);
+    assert.deepEqual(context.evidence[1].result, root.result);
+    root.tenantId = 'tenant-b';
+    assert.throws(() => (f.service as any).taskContext(p, [review], f.context), /another tenant/);
+  } finally { await f.close(); }
 });

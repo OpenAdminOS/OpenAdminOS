@@ -143,7 +143,7 @@ describe("Office", () => {
     const install = vi
       .fn()
       .mockRejectedValueOnce(
-        new Error("Registry signature could not be verified"),
+        new Error("Registry manifest hash could not be verified"),
       )
       .mockResolvedValueOnce({ ...state, installedAgents: [workflow] });
     const save = vi.fn().mockResolvedValue(state.office);
@@ -174,7 +174,7 @@ describe("Office", () => {
     expect(install).not.toHaveBeenCalled();
     await user.click(review.getByRole("button", { name: "Confirm install" }));
     expect(await review.findByRole("alert")).toHaveTextContent(
-      "Registry signature could not be verified",
+      "Registry manifest hash could not be verified",
     );
     await user.click(review.getByRole("button", { name: "Confirm install" }));
     await user.click(

@@ -8,8 +8,8 @@ descriptor:
   id: tenant-change-audit
   name: Tenant change audit
   description: Reviews recent directory audit entries by activity, category, result, actor, and target context to flag changes worth checking.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.1.1
+  minAppVersion: 0.6.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -105,7 +105,10 @@ skills:
         By category: {{ by_category.output }}
         By result: {{ by_result.output }}
         By actor: {{ by_actor.output }}
-        Recent sample: {{ recent_sample.output }}
+        Recent sample: {{ recent_sample.output | boundedJson(6000) }}
+        State the sample included/omitted record counts. The aggregates describe
+        the fetched batch; detailed findings apply only to included records.
+        An empty or partial sample cannot establish that all changes were routine.
 
         Write a compact report with these sections:
         1. Main finding.

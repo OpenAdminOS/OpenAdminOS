@@ -11,8 +11,8 @@ descriptor:
   id: tenant-health-report
   name: Tenant health report
   description: Summarizes Intune tenant health from compliance, OS, ownership, and stale inventory signals for scheduled or manual review.
-  version: 1.1.0
-  minAppVersion: 0.1.0
+  version: 1.1.1
+  minAppVersion: 0.6.3
   author:
     name: OpenAdminOS
     handle: openadminos
@@ -56,10 +56,16 @@ skills:
       kind: count-by-field
       source: "{{ load_devices.output }}"
       field: complianceState
+      missingBucket: unknown
       buckets:
         - compliant
         - noncompliant
         - unknown
+        - inGracePeriod
+        - error
+        - conflict
+        - notApplicable
+        - notEvaluated
 
   - id: by_os
     format: transform
@@ -99,12 +105,14 @@ skills:
         You are an Intune tenant health reviewer. Plain English, no
         exclamation marks, no marketing language. Never invent figures - use
         only the counts you are given. Treat stale inventory as a data-quality
-        caveat before making compliance claims.
+        caveat before making compliance claims. If any inventory is stale,
+        explicitly state that the snapshot does not establish current device
+        condition and make checking sync the first action. Do not recommend
+        retirement, deletion or re-enrollment based on this inventory alone.
       prompt: |-
         Tenant managed devices: {{ load_devices.output | size }}.
-        Compliant: {{ by_state.output.compliant }}.
-        Noncompliant: {{ by_state.output.noncompliant }}.
-        Unknown: {{ by_state.output.unknown }}.
+        Complete compliance-state counts: {{ by_state.output }}.
+        Preserve inGracePeriod and any other reported state; they are not noncompliant.
         By OS: {{ by_os.output }}.
         By ownership: {{ by_owner_type.output }}.
         Stale inventory >= {{ settings.staleSyncDays }} days: {{ stale_inventory.output | size }}.
@@ -138,10 +146,7 @@ definition:
       {{ summarize.output.text | default("Summary unavailable.") }}
     data:
       totalDevices: "{{ load_devices.output | size }}"
-      counts:
-        compliant: "{{ by_state.output.compliant }}"
-        noncompliant: "{{ by_state.output.noncompliant }}"
-        unknown: "{{ by_state.output.unknown }}"
+      counts: "{{ by_state.output }}"
       byOs: "{{ by_os.output }}"
       byOwnerType: "{{ by_owner_type.output }}"
       staleInventoryCount: "{{ stale_inventory.output | size }}"

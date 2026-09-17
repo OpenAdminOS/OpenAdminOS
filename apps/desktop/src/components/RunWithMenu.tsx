@@ -66,7 +66,14 @@ export function RunWithMenu({
   }
 
   return (
-    <div ref={ref} className="relative inline-flex">
+    <div ref={ref} className="relative inline-flex" onKeyDown={(event) => {
+      if (open && event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+        ref.current?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.focus();
+      }
+    }}>
       <Button
         variant="primary"
         size="md"

@@ -1,6 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { Routes, Route, useLocation } from "react-router";
 
 import RunResult from "./RunResult";
 import {
@@ -9,6 +10,7 @@ import {
   createMockAppState,
   makeMockBridge,
   renderRoute,
+  renderWithAppState,
 } from "../test/test-utils";
 
 describe("RunResult write confirmation", () => {
@@ -202,4 +204,36 @@ describe("RunResult write confirmation", () => {
       screen.queryByRole("button", { name: "Run again" }),
     ).not.toBeInTheDocument();
   });
+});
+
+it('retries Team evidence by source ID without sending evidence through the renderer', async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: 'failed', plan: undefined, officeContext: { tenantId: 'tenant-1', question: 'Draft a diagnostic.', evidence: [] } });
+  const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: 'read' })], runs: [run] }));
+  renderRoute(<RunResult />, { path: '/runs/:id', route: `/runs/${run.id}`, bridge });
+  await user.click(await screen.findByRole('button', { name: 'Run again' }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ retryOfRunId: run.id })));
+  expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, { retryOfRunId: run.id, tenantId: run.tenantId, providerId: run.providerId, model: run.model });
+});
+
+it('routes hosted Team retries to the owning assignment for review', async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: 'failed', plan: undefined, providerId: 'openai', office: { personaId: 'script-bot', missionId: 'mission-1', step: 0 }, officeContext: { tenantId: 'tenant-1', question: 'Draft a diagnostic.', evidence: [] } });
+  const bridge = makeMockBridge({}, createMockAppState({ activeTenantId: 'another-tenant', installedAgents: [createMockAgent({ slug: run.agentSlug, mode: 'read' })], runs: [run] }));
+  function TeamDestination() { const location = useLocation(); return <p>{`Team review ${location.search}`}</p>; }
+  renderWithAppState(<Routes><Route path="/runs/:id" element={<RunResult />} /><Route path="/office" element={<TeamDestination />} /></Routes>, { route: `/runs/${run.id}`, bridge });
+  await screen.findByRole('button', { name: 'Review in Agent Team' });
+  expect(screen.queryByRole('button', { name: 'Re-run against current tenant' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Review in Agent Team' }));
+  expect(await screen.findByText('Team review ?persona=script-bot')).toBeInTheDocument();
+  expect(bridge.startRun).not.toHaveBeenCalled();
+});
+
+it('shows a failed rerun reason instead of silently leaving the result unchanged', async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: 'failed', plan: undefined });
+  const bridge = makeMockBridge({ startRun: vi.fn(async () => { throw new Error('Ollama is unavailable. Start Ollama and try again.'); }) }, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: 'read' })], runs: [run] }));
+  renderRoute(<RunResult />, { path: '/runs/:id', route: `/runs/${run.id}`, bridge });
+  await user.click(await screen.findByRole('button', { name: 'Run again' }));
+  expect(await screen.findByText('Ollama is unavailable. Start Ollama and try again.')).toBeInTheDocument();
 });

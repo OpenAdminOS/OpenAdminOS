@@ -295,7 +295,7 @@ export type GraphCacheQueryOperator =
 export interface GraphCacheQueryPredicate {
   field: string;
   op: GraphCacheQueryOperator;
-  value: string | number | boolean | Array<string | number | boolean>;
+  value: string | number | boolean | null | Array<string | number | boolean>;
 }
 
 export interface GraphCacheQueryResult {
@@ -1996,6 +1996,21 @@ export class IntelligenceSqliteStore {
       out[resource] = parsed;
     }
     return out;
+  }
+
+  /** Include optional fields present only on later rows, within this tenant. */
+  graphCacheFields(tenantId: string, resource: GraphCacheResourceKind): string[] {
+    return (this.db.prepare(`
+      SELECT DISTINCT j.key AS field FROM graph_resources AS r, json_each(r.raw_json) AS j
+      WHERE r.tenant_id = ? AND r.resource = ? AND typeof(j.key) = 'text'
+      ORDER BY j.key
+    `).all(tenantId, resource) as unknown as Array<{ field: string }>).map(row => row.field);
+  }
+
+  graphCacheFieldTypes(tenantId: string, resource: GraphCacheResourceKind, field: string): string[] {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) return [];
+    return (this.db.prepare(`SELECT DISTINCT json_type(raw_json, ?) AS type FROM graph_resources WHERE tenant_id = ? AND resource = ?`)
+      .all(`$.${field}`, tenantId, resource) as unknown as Array<{ type: string | null }>).flatMap(row => row.type && row.type !== 'null' ? [row.type] : []);
   }
 
   queryGraphCache(input: {
@@ -4039,9 +4054,9 @@ function buildGraphCachePredicateSql(predicate: GraphCacheQueryPredicate): {
   const value = predicate.value;
   switch (predicate.op) {
     case "eq":
-      return { sql: `${field} = ?`, args: [sqlScalar(value)] };
+      return value === null ? { sql: `${field} IS NULL`, args: [] } : { sql: `${field} = ?`, args: [sqlScalar(value)] };
     case "neq":
-      return { sql: `${field} != ?`, args: [sqlScalar(value)] };
+      return value === null ? { sql: `${field} IS NOT NULL`, args: [] } : { sql: `${field} != ?`, args: [sqlScalar(value)] };
     case "contains":
       return {
         sql: `CAST(${field} AS TEXT) LIKE ? ESCAPE '\\'`,
