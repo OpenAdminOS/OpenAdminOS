@@ -4,72 +4,37 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
-- Keep internal Nova activity, page and approval status out of voice updates, recognize audience greetings addressed to Nova, and retain unfinished questions across lookup acknowledgments.
+## [0.6.3] - 2026-09-17
 
 ### Added
 
-### Changed
+- Add GitHub Copilot CLI and Gemini CLI providers with streamed responses, connection testing, executable/version diagnostics, and distinct sign-in and access errors. Administrators can select these hosted providers using their existing CLI installation and sign-in.
 
-- Record six real Nova audio trials, including two premature-submission failures that motivated the speech-boundary correction.
+### Reliability and fixes
 
-- Record signed-preview UI and Codex agent acceptance, Nova session lifecycle checks, and remaining local-model, audio and exhaustive-coverage gaps.
+- Improve Codex and Claude Code discovery in standard macOS and Windows installation locations, preserve existing sign-in, and check Codex authentication through the CLI. Connection failures include actionable provider setup or update guidance.
+- Correct Chat and Nova device encryption and compliance filters, answer common device and directory counts from verified snapshots, and reject invalid cache queries instead of reporting false zero counts. Repair license-seat discovery and supported query handling, and respect security-incident limits during cache preload.
+- Preserve all reported compliance states and original structured evidence through Agent Team handoffs and local read-only retries. App-registration and audit-report detail samples now show when results are omitted, helping administrators distinguish complete counts from bounded detail lists.
+- Return hosted Team retries to assignment review, surface start failures, reject empty model drafts, and reduce persistence delays at run completion. Report delivery and tenant writes still require the existing application review and confirmation.
+- Improve Nova handling of paused questions, trailing qualifiers, brief acknowledgments, audience greetings, destination corrections, and cancellations. Incomplete questions retain continuations across lookup replies; explicit Stop clears pending work. General conversation stays separate from agent execution, and internal activity, page, and approval-status messages stay in the UI instead of being supplied as spoken conversation.
+- Preserve Nova device lists across connector changes and improve routing for Outlook and named Teams-channel requests. Delivery requests prepare reviewable reports rather than returning generic email refusals.
+- Save large JSON and CSV audit exports through the native file dialog without the renderer text limit. Per-run model menus now dismiss with Escape and restore focus.
 
-- Track the remaining Chat, Nova and Agent Team demo blockers with explicit installed-build and live-provider acceptance checks.
+### Security and trust
 
-- Record the installed-app Agent Team rehearsal, live evidence handoffs, and remaining compliance-report and script-draft quality gaps.
+- Isolate Codex app completions from terminal-user instructions, hooks, plugins, and tools while retaining the existing sign-in backend. Older CLI versions that cannot provide the required isolation report an update requirement.
+- Remove detached agent catalog signatures, catalog signing keys, and manifest signing requirements. Agent catalogs now rely on their reviewed HTTPS source, manifest hashes, metadata and revision checks, declared scopes, and application write confirmation. This changes the catalog authenticity model: detached signature verification is no longer required. Desktop installer signing remains unchanged.
 
-### Removed
+### Upgrade notes
 
-- Remove catalog signing keys and detached registry signatures. Catalogs use their reviewed HTTPS source, manifest hashes and revision checks; desktop installer signing remains unchanged.
+- Copilot, Gemini, Codex, and Claude Code integrations require their corresponding CLI and a valid sign-in. These are hosted model integrations; selecting them sends supplied prompts and tenant context to the selected provider. A locally installed CLI does not make hosted inference local.
+- Custom catalog operators no longer need detached signature files or catalog signing keys. Manifest integrity and revision checks still apply. Existing write and destructive-action confirmation requirements remain in force.
 
-### Fixed
+### Known limitations
 
-- Wait for the predicate in incomplete Nova which/what questions, sample microphone activity independently of orb animation frames, and recognize longer completed audience greetings before supplying another reply.
-
-- Keep Nova audience requests intact when a brief spoken greeting arrives between user fragments, avoid duplicate greeting prompts, and request consistent response language.
-
-- Preserve Nova's trailing qualifiers across early delegation and short acknowledgments, check microphone activity before submitting, and keep spoken audience greetings out of agent execution routing.
-
-- Route license-seat discovery to subscribed SKUs, honor its supported query parameters and existing read permissions, and exclude unrelated endpoints when a search has no matching terms.
-
-- Bound app-registration and audit-report detail samples with explicit omission counts, preserve every tenant-health compliance state, and direct hosted Team retries back to assignment review with visible start errors.
-- Recognize natural unknown-encryption questions and answer exact user, group, app-registration and Conditional Access policy counts from verified snapshots.
-
-- Save large JSON and CSV audit histories through the native dialog without the renderer text limit, and dismiss per-run model menus with Escape while restoring keyboard focus.
-
-- Preserve every compliance state in Team assessments, retain task evidence on local read-only retries, reject empty model drafts and coalesce streaming persistence so terminal states do not wait behind every token.
-
-- Correct Chat and Nova device encryption/compliance filters, reject invalid cache queries instead of reporting false zero counts, and respect the security-incidents page limit during cache preload.
-
-- Answer Nova introductions and general help questions conversationally, preserve running tasks and previews during these turns, and bind delayed voice delegation to its original utterance.
-
-- Preserve Nova device-list contents across connector changes, resolve spoken Outlook and named Teams-channel requests, answer app counts directly, and avoid duplicate confirmations or stale waiting updates.
-
-- Make Nova command routing handle unfamiliar wording, clarification replies, destination corrections, and cancellation while preserving report evidence and visual approval; settled small talk stays out of subsequent commands.
-
-- Recognize conversational Nova delivery requests and connector follow-up questions, preparing reviewed reports instead of returning generic email refusals or Outlook troubleshooting advice.
-
-- Verify the CLI adapters on macOS, including Codex and Claude live responses and Claude login-keychain access from the desktop session.
-
-### Security
-
-- Isolate Codex completions from terminal-user instructions, hooks, plugins and tools while retaining the existing sign-in backend. Older CLIs report an actionable update requirement.
-
-## [0.6.3] - 2026-09-13
-
-### Added
-
-- Add GitHub Copilot CLI and Gemini CLI providers with streamed responses, connection testing, executable/version diagnostics, and distinct sign-in and access errors.
-
-### Changed
-
-### Removed
-
-### Fixed
-
-- Recognize Codex and Claude Code in standard macOS and Windows install locations, preserve Claude's existing sign-in, and check Codex authentication through the CLI.
-
-### Security
+- Local model output still requires evidence review. In installed testing, the configured 8B model made unsupported report claims and failed some sign-in, license-seat, and custom-agent drafting requests. Invalid agent YAML was blocked, but successful execution does not establish factual correctness.
+- Nova speech settlement uses bounded heuristics. Earlier installed builds split questions during pauses or mixed reply languages, and repeated microphone acceptance of the final corrections remains incomplete. This release does not establish readiness for an unrestricted live voice demo.
+- Installed testing covered a complete Codex Team chain and selected UI flows; three consecutive installed Team chains, exhaustive UI coverage, and broader multi-tenant and connector/provider acceptance remain incomplete. Generated scripts were reviewed and validated but were not executed against a tenant.
 
 ## [0.6.2] - 2026-09-13
 
