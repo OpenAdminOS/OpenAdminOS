@@ -1,6 +1,5 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
-import { spawn } from "node:child_process";
-import { cliArgs, cliExecutablePath } from "./cli-invocation.js";
+import { cliExecutablePath, cliSpawn } from "./cli-invocation.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -389,7 +388,7 @@ async function* runClaudeCodeStream(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): AsyncIterable<LlmStreamChunk> {
-  const child = spawn(...cliArgs(
+  const spawned = cliSpawn(
     input.binaryPath,
     [
       "-p",
@@ -410,7 +409,11 @@ async function* runClaudeCodeStream(input: {
       }),
       stdio: ["ignore", "pipe", "pipe"],
     },
-  ));
+  );
+  if (spawned.error) {
+    throw new Error(spawned.error.message);
+  }
+  const child = spawned.child;
 
   let stdout = "";
   let stderr = "";
@@ -554,11 +557,16 @@ async function runProcess(input: {
   signal?: AbortSignal;
 }): Promise<{ exitCode: number | "spawn-error"; stdout: string; stderr: string }> {
   return new Promise((resolveResult) => {
-    const child = spawn(...cliArgs(input.binaryPath, input.args, {
+    const spawned = cliSpawn(input.binaryPath, input.args, {
       cwd: input.cwd,
       env: input.env ?? createClaudeCodeProcessEnv(),
       stdio: ["ignore", "pipe", "pipe"],
-    }));
+    });
+    if (spawned.error) {
+      resolveResult({ exitCode: "spawn-error", stdout: "", stderr: spawned.error.message });
+      return;
+    }
+    const child = spawned.child;
 
     let stdout = "";
     let stderr = "";

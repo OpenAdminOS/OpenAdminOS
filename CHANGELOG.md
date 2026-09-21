@@ -4,6 +4,10 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep tenant sign-in working when a provider CLI cannot be probed. On Windows, a `.cmd`/`.bat` CLI launcher that cannot be resolved to its official Node entry point is refused with a designed message instead of a synchronous `spawn EINVAL`, and a single failing provider check no longer aborts the whole app state.
+
 ## [0.6.3] - 2026-09-17
 
 ### Added

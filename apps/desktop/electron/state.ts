@@ -2347,27 +2347,42 @@ export class AppStateStore {
 
     return Promise.all(
       providerCatalog.map(async (provider) => {
-        if (provider.id === "ollama") return checkOllama(provider);
-        if (provider.id === "apple-foundation") return checkAppleFoundation(provider);
-        if (provider.id === "lm-studio") return checkLmStudio(provider);
-        if (provider.id === "anthropic") return checkClaudeCode(provider);
-        if (provider.id === "openai") return checkCodex(provider);
-        if (provider.id === "copilot" || provider.id === "gemini") return checkAdditionalCli(provider);
-        if (provider.id === "azure-openai") {
-          if (azureOpenAIConfigError) {
-            return {
-              ...provider,
-              status: "error",
-              detail: azureOpenAIConfigError,
-              models: [],
-            };
+        try {
+          if (provider.id === "ollama") return await checkOllama(provider);
+          if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
+          if (provider.id === "lm-studio") return await checkLmStudio(provider);
+          if (provider.id === "anthropic") return await checkClaudeCode(provider);
+          if (provider.id === "openai") return await checkCodex(provider);
+          if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);
+          if (provider.id === "azure-openai") {
+            if (azureOpenAIConfigError) {
+              return {
+                ...provider,
+                status: "error",
+                detail: azureOpenAIConfigError,
+                models: [],
+              };
+            }
+            return await checkAzureOpenAI(
+              provider,
+              azureOpenAIConfig ?? this.emptyAzureOpenAIConfig(),
+            );
           }
-          return checkAzureOpenAI(
-            provider,
-            azureOpenAIConfig ?? this.emptyAzureOpenAIConfig(),
-          );
+          return provider;
+        } catch (error) {
+          // A single provider check must never abort the whole app state.
+          // Tenant connection reads app state, so a probing failure here used
+          // to surface as a failed sign-in (e.g. a Windows spawn EINVAL).
+          return {
+            ...provider,
+            status: "error",
+            detail:
+              error instanceof Error
+                ? error.message
+                : `${provider.name} could not be checked. Refresh providers to retry.`,
+            models: [],
+          };
         }
-        return provider;
       }),
     );
   }

@@ -1,8 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
-import { cliArgs, cliProcessEnv } from "./cli-invocation.js";
+import { cliProcessEnv, cliSpawn } from "./cli-invocation.js";
 
 export type CliFailure = "not-installed" | "signed-out" | "access-denied" | "unsupported-version" | "request-failed";
 export interface CliProbe {
@@ -77,7 +77,14 @@ export function requireCliVersion(version: string, minimum: string, name: string
 }
 
 export function spawnProvider(binary: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): ChildProcessWithoutNullStreams {
-  return spawn(...cliArgs(binary, args, { env, cwd, windowsHide: true, stdio: "pipe" }));
+  const spawned = cliSpawn(binary, args, { env, cwd, windowsHide: true, stdio: "pipe" });
+  if (spawned.error) {
+    throw new CliProviderError(
+      "request-failed",
+      "The provider CLI could not be started. Reinstall the official CLI or select its native executable, then test again.",
+    );
+  }
+  return spawned.child;
 }
 
 /** Async events with a bounded queue; used for actual streaming rather than a buffered final answer. */
