@@ -326,6 +326,11 @@ configuration directory remains unset unless explicitly configured: forcing even
 its default directory selects a different macOS Keychain credential namespace.
 Codex readiness uses `codex login status`, not the presence of `auth.json`, so
 CLI-managed credential storage and signed-out states are handled consistently.
+A Windows batch launcher is always resolved to its official Node entry point;
+one that cannot be resolved is refused with a designed message rather than being
+handed to `spawn`, which would throw a synchronous `spawn EINVAL`. Provider
+probing is fail-soft: a single provider that cannot be checked is reported on its
+own card and never aborts app-state assembly, so it cannot fail tenant sign-in.
 
 ### Tenant cache preparation and Nova
 
