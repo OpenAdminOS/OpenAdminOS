@@ -1,5 +1,6 @@
 # Current active plan
 
+- [ ] Prepare **0.6.4** after PR #91: fix issue #89 where a Windows provider-probe `spawn EINVAL` aborted tenant connection. Batch launchers are resolved or refused, synchronous spawn failures are contained, and provider checks are isolated. Verified on the Windows mini PC and macOS.
 - [ ] Close the known Chat, Nova and Agent Team demo blockers using the [0.6.3 live desktop readiness plan](./demo-readiness-063-plan.md), then verify the signed installed build against the configured tenant/providers.
 
 - [x] Prepare **0.6.3 CLI providers** in PR #88: Copilot/Gemini adapters and PR #85 discovery/auth fixes are implemented. Native protocol tests passed on Linux, Windows, and macOS; live Mac Codex/Claude completions passed. Authenticated Copilot/Gemini tests remain unverified because no accounts are available. Evidence: [CLI provider review](./v0.6.3-cli-provider-review.md).
