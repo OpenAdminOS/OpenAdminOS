@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-22T12:00:47.435Z",
+  "updatedAt": "2026-09-22T17:00:47.384Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 19,
@@ -19,7 +19,7 @@
     },
     "os-update-posture": {
       "installs": 14,
-      "installs7d": 2
+      "installs7d": 1
     },
     "tenant-health-report": {
       "installs": 21,
@@ -31,10 +31,10 @@
     },
     "conditional-access-explainer": {
       "installs": 34,
-      "installs7d": 5
+      "installs7d": 4
     },
     "dormant-app-registrations": {
-      "installs": 24,
+      "installs": 25,
       "installs7d": 4
     },
     "risky-sign-in-triage": {
