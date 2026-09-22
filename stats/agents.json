@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-09-22T07:00:47.227Z",
+  "updatedAt": "2026-09-22T11:00:47.108Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 18,
@@ -14,8 +14,8 @@
       "installs7d": 0
     },
     "compliance-overview": {
-      "installs": 28,
-      "installs7d": 3
+      "installs": 29,
+      "installs7d": 4
     },
     "os-update-posture": {
       "installs": 13,
@@ -30,12 +30,12 @@
       "installs7d": 1
     },
     "conditional-access-explainer": {
-      "installs": 32,
-      "installs7d": 3
+      "installs": 33,
+      "installs7d": 4
     },
     "dormant-app-registrations": {
-      "installs": 22,
-      "installs7d": 2
+      "installs": 23,
+      "installs7d": 3
     },
     "risky-sign-in-triage": {
       "installs": 11,
