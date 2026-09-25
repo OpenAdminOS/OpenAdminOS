@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-09-24T19:00:47.486Z",
+  "updatedAt": "2026-09-25T16:00:47.325Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 20,
-      "installs7d": 2
+      "installs": 21,
+      "installs7d": 3
     },
     "intune-device-posture-auditor": {
       "installs": 4,
@@ -63,7 +63,7 @@
     },
     "team-script-draft": {
       "installs": 4,
-      "installs7d": 2
+      "installs7d": 1
     }
   }
 }
