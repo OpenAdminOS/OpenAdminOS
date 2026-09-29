@@ -1,25 +1,25 @@
 {
-  "updatedAt": "2026-09-29T12:00:48.144Z",
+  "updatedAt": "2026-09-29T13:00:47.360Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 23,
-      "installs7d": 4
+      "installs": 24,
+      "installs7d": 5
     },
     "intune-device-posture-auditor": {
-      "installs": 5,
-      "installs7d": 1
+      "installs": 6,
+      "installs7d": 2
     },
     "offboarding-agent": {
-      "installs": 17,
-      "installs7d": 1
+      "installs": 18,
+      "installs7d": 2
     },
     "compliance-overview": {
       "installs": 34,
       "installs7d": 4
     },
     "os-update-posture": {
-      "installs": 15,
-      "installs7d": 1
+      "installs": 16,
+      "installs7d": 2
     },
     "tenant-health-report": {
       "installs": 24,
@@ -30,16 +30,16 @@
       "installs7d": 3
     },
     "conditional-access-explainer": {
-      "installs": 39,
-      "installs7d": 5
+      "installs": 40,
+      "installs7d": 6
     },
     "dormant-app-registrations": {
-      "installs": 27,
-      "installs7d": 3
+      "installs": 28,
+      "installs7d": 4
     },
     "risky-sign-in-triage": {
-      "installs": 12,
-      "installs7d": 1
+      "installs": 13,
+      "installs7d": 2
     },
     "secure-score-prioritizer": {
       "installs": 15,
@@ -58,8 +58,8 @@
       "installs7d": 3
     },
     "team-evidence-review": {
-      "installs": 2,
-      "installs7d": 1
+      "installs": 3,
+      "installs7d": 2
     },
     "team-script-draft": {
       "installs": 4,
