@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-09-29T13:00:47.360Z",
+  "updatedAt": "2026-09-30T16:00:47.546Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 24,
-      "installs7d": 5
+      "installs": 25,
+      "installs7d": 6
     },
     "intune-device-posture-auditor": {
       "installs": 6,
@@ -35,7 +35,7 @@
     },
     "dormant-app-registrations": {
       "installs": 28,
-      "installs7d": 4
+      "installs7d": 3
     },
     "risky-sign-in-triage": {
       "installs": 13,
