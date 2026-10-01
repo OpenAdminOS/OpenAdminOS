@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-01T12:00:47.362Z",
+  "updatedAt": "2026-10-01T13:00:48.784Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 26,
@@ -50,8 +50,8 @@
       "installs7d": 1
     },
     "stale-guest-cleanup": {
-      "installs": 14,
-      "installs7d": 1
+      "installs": 15,
+      "installs7d": 2
     },
     "tenant-change-audit": {
       "installs": 13,
