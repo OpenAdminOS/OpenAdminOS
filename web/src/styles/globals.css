@@ -235,3 +235,48 @@
 }
 
 html { color-scheme: light; background: var(--color-brand-bg); color: var(--color-brand-ink); }
+
+/* Editorial product story: product examples carry the visual hierarchy. */
+.home-page { background: #f4f5f7; }
+.home-hero { padding-top: 64px; }
+.home-hero-title { max-width: 1100px; font-size: clamp(42px, 6.4vw, 82px); line-height: 1.04; letter-spacing: -0.055em; }
+.home-section { width: 100%; max-width: 1280px; padding: 88px 0; border-bottom: 1px solid #17191d18; }
+.home-section-heading { display: grid; grid-template-columns: 1.1fr .9fr; gap: 48px; align-items: end; margin-bottom: 36px; }
+.home-section-heading h2 { margin-top: 14px; font-size: clamp(30px, 4vw, 48px); line-height: 1.12; letter-spacing: -.04em; font-weight: 600; text-wrap: balance; }
+.home-section-heading > p { max-width: 440px; color: var(--color-brand-muted); line-height: 1.75; }
+.home-eyebrow { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: var(--color-brand-muted); }
+.home-text-link { display: inline-flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; text-decoration: none; }
+.home-text-link:hover { text-decoration: underline; text-underline-offset: 5px; }
+.home-page :is(a, button, summary):focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+.scenario-layout { display: grid; grid-template-columns: .75fr 1.5fr; gap: 32px; align-items: start; }
+.scenario-options { display: grid; gap: 12px; }
+.scenario-option { padding: 22px; text-align: left; border-radius: 12px; border: 1px solid #17191d18; background: transparent; transition: background-color 160ms, color 160ms; cursor: pointer; }
+.scenario-option:hover { background: #e4e7ec; }
+.scenario-option[aria-pressed="true"] { background: #17191d; color: #f4f5f7; border-color: #17191d; }
+.scenario-result { min-width: 0; padding: 28px; border-radius: 16px; background: #fff; box-shadow: 0 8px 28px -16px #17191d30; }
+.scenario-question { margin-top: 24px; margin-left: auto; max-width: 90%; padding: 14px 18px; border-radius: 12px 12px 2px 12px; background: #e9ecf0; font-size: 14px; line-height: 1.7; }
+.workflow-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; }
+.workflow-local { grid-row: span 2; padding: 32px; background: #e9ecf0; border-radius: 16px; }
+.workflow-detail { padding: 28px; background: white; border-radius: 16px; }
+.data-route { padding-top: 35px; text-align: center; }
+.data-source { display: inline-flex; flex-direction: column; gap: 8px; }
+.data-source > span { margin: auto; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; background: #17191d; color: white; font-size: 24px; }
+.data-source small { font-size: 12px; color: var(--color-brand-muted); }
+.data-route-arrow { display: block; margin: 16px auto; font-size: 24px; color: var(--color-brand-muted); }
+.device-boundary { border: 1px dashed #747d8b; border-radius: 12px; padding: 24px 16px; background: #f4f5f7; }
+.manifest-preview { margin-top: 20px; border-radius: 10px; padding: 20px; background: #f4f5f7; font-size: 13px; }
+.run-trail { display: grid; gap: 14px; margin-top: 24px; font-size: 13px; }
+.run-trail li { display: flex; align-items: center; gap: 12px; }
+.run-trail li > span { display: grid; place-items: center; width: 24px; height: 24px; background: #e9ecf0; border-radius: 50%; }
+.home-final-cta { margin: 32px 0 56px; padding: 64px 24px; border-radius: 20px; background: #17191d; color: #f4f5f7; }
+@media (max-width: 760px) {
+  .home-hero { padding-top: 32px; }
+  .home-section { padding: 56px 0; }
+  .home-section-heading, .scenario-layout, .workflow-grid { grid-template-columns: 1fr; gap: 24px; }
+  .home-section-heading { gap: 16px; }
+  .scenario-option { padding: 16px; }
+  .scenario-result, .workflow-local, .workflow-detail { padding: 20px; }
+  .scenario-question { max-width: 100%; }
+  .home-final-cta { padding: 44px 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .scenario-option { transition: none; } }

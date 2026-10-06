@@ -1714,6 +1714,17 @@ Semantic success, warning, danger, information, and reasoning colors remain
 separate from the brand accent. Destructive approval uses danger; typed
 confirmation and tenant/provider trust behavior are unchanged.
 
+### Public landing-page presentation
+
+The homepage explains the product through a short admin-focused hero, the
+borderless desktop screenshot, selectable synthetic workflow examples, and a
+visual local-processing boundary. Show evidence sources, declared scopes,
+local history, and human approval in context. Examples are illustrative, never
+presented as live tenant results. Benchmark bars use the published dataset and
+link to methodology. Testimonials follow the product explanation; FAQ rows
+and a contrasting download section complete the page. Reference research and
+implementation notes live in `docs/brand/landing-page-direction.md`.
+
 ### Tokens
 
 `apps/desktop/src/styles/globals.css` is the production source of truth for both
