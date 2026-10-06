@@ -10,6 +10,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Switch the public website to off-white light mode with graphite controls, readable status colors and charts, and a matching light desktop preview.
+
 - Redesign the desktop UI and website branding with graphite/off-white colors, a vector OA monogram, compact shared controls, and refreshed installer, app, and social icons while retaining semantic status colors and approval safeguards.
 
 ### Removed

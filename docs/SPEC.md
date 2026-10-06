@@ -1709,7 +1709,7 @@ public website branding. `docs/brand/oa-mark.svg` is the vector reference;
 
 Desktop appearance defaults to dark. Settings > General offers a saved light
 or dark preference, stored locally and synchronized across renderer windows.
-Native window controls follow this preference. The website retains a dark theme.
+Native window controls follow this preference. The public website uses the off-white light theme with graphite actions, slate secondary text, and a matching light desktop screenshot.
 Semantic success, warning, danger, information, and reasoning colors remain
 separate from the brand accent. Destructive approval uses danger; typed
 confirmation and tenant/provider trust behavior are unchanged.

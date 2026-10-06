@@ -46,7 +46,7 @@ export default function PrivacyPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-brand-bg text-white">
+    <div className="relative flex min-h-screen flex-col bg-brand-bg text-brand-ink">
       <JsonLd data={structuredData} />
       <div
         aria-hidden
@@ -72,13 +72,13 @@ export default function PrivacyPage() {
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
           Privacy policy
         </h1>
-        <p className="mt-2 text-sm text-white/50">
+        <p className="mt-2 text-sm text-brand-muted">
           Last updated: {LAST_UPDATED}
         </p>
 
-        <div className="mt-10 space-y-10 text-sm leading-relaxed text-white/75">
+        <div className="mt-10 space-y-10 text-sm leading-relaxed text-brand-ink/75">
           <section>
-            <h2 className="text-base font-semibold text-white">Summary</h2>
+            <h2 className="text-base font-semibold text-brand-ink">Summary</h2>
             <p className="mt-3">
               OpenAdminOS is a desktop app for Microsoft 365 administrators. It
               runs on your computer. Your Microsoft 365 tenant data, local
@@ -95,7 +95,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Who is responsible
             </h2>
             <p className="mt-3">
@@ -105,20 +105,20 @@ export default function PrivacyPage() {
                 href="https://github.com/OpenAdminOS/OpenAdminOS"
                 target="_blank"
                 rel="noreferrer"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
               . You can reach support at{" "}
               <Link
                 href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 {SUPPORT_EMAIL}
               </Link>
               .
             </p>
-            <address className="mt-4 not-italic text-white/65">
+            <address className="mt-4 not-italic text-brand-muted">
               {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
                 <span key={line} className="block">
                   {line}
@@ -129,7 +129,7 @@ export default function PrivacyPage() {
               The full provider disclosure is available in the{" "}
               <Link
                 href="/legal-notice"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 legal notice
               </Link>
@@ -138,12 +138,12 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               What the desktop app does on your computer
             </h2>
-            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-white/30">
+            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
               <li>
-                <span className="text-white">
+                <span className="text-brand-ink">
                   Microsoft 365 authentication.
                 </span>{" "}
                 When you connect a tenant, the app signs you in to Microsoft
@@ -155,7 +155,7 @@ export default function PrivacyPage() {
                 OpenAdminOS.
               </li>
               <li>
-                <span className="text-white">Microsoft Graph data.</span>{" "}
+                <span className="text-brand-ink">Microsoft Graph data.</span>{" "}
                 Agents you run call Microsoft Graph on your behalf and process
                 the returned data (devices, users, policies, etc.) in memory
                 on your machine. Selected fields may be written to a local
@@ -164,7 +164,7 @@ export default function PrivacyPage() {
                 uploaded anywhere.
               </li>
               <li>
-                <span className="text-white">
+                <span className="text-brand-ink">
                   Language-model prompts (local provider).
                 </span>{" "}
                 When you select a local LLM provider such as Ollama or LM
@@ -172,7 +172,7 @@ export default function PrivacyPage() {
                 does not see them.
               </li>
               <li>
-                <span className="text-white">
+                <span className="text-brand-ink">
                   Language-model prompts (hosted provider).
                 </span>{" "}
                 When you select Anthropic, OpenAI, or Azure OpenAI, prompts
@@ -183,13 +183,13 @@ export default function PrivacyPage() {
                 copy of these prompts.
               </li>
               <li>
-                <span className="text-white">No tenant telemetry.</span> The
+                <span className="text-brand-ink">No tenant telemetry.</span> The
                 desktop app does not collect tenant data, prompts, run results,
                 analytics events, or error-reporting data. Crash logs stay on
                 your machine.
               </li>
               <li>
-                <span className="text-white">Registry install counts.</span> In
+                <span className="text-brand-ink">Registry install counts.</span> In
                 packaged production builds, the app can send a small registry
                 install count event when you install a public registry agent.
                 You can disable this in Settings. The event contains the agent
@@ -202,7 +202,7 @@ export default function PrivacyPage() {
                 counts are used only to publish aggregate registry stats.
               </li>
               <li>
-                <span className="text-white">Support issue reports.</span> If
+                <span className="text-brand-ink">Support issue reports.</span> If
                 you choose Report issue, review the form, and confirm public
                 submission, the app sends the report to the OpenAdminOS website
                 so the server can create a public GitHub issue. Optional
@@ -213,7 +213,7 @@ export default function PrivacyPage() {
                 for rate limiting and stores a short-lived deduplication hash.
               </li>
               <li>
-                <span className="text-white">Auto-update.</span> The app can
+                <span className="text-brand-ink">Auto-update.</span> The app can
                 check GitHub Releases for a new version and download the signed
                 installer. These checks send a standard HTTPS request to GitHub;
                 refer to{" "}
@@ -221,7 +221,7 @@ export default function PrivacyPage() {
                   href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-white underline underline-offset-4 transition hover:text-white/70"
+                  className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
                 >
                   GitHub&rsquo;s privacy statement
                 </Link>{" "}
@@ -231,12 +231,12 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               What this website does
             </h2>
-            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-white/30">
+            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
               <li>
-                <span className="text-white">Hosting and logs.</span> The site
+                <span className="text-brand-ink">Hosting and logs.</span> The site
                 is deployed on Vercel. Vercel records standard server access
                 logs (IP address, user-agent, timestamps) as a normal part of
                 serving the site; see{" "}
@@ -244,14 +244,14 @@ export default function PrivacyPage() {
                   href="https://vercel.com/legal/privacy-policy"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-white underline underline-offset-4 transition hover:text-white/70"
+                  className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
                 >
                   Vercel&rsquo;s privacy policy
                 </Link>
                 .
               </li>
               <li>
-                <span className="text-white">
+                <span className="text-brand-ink">
                   Privacy-friendly website analytics.
                 </span>{" "}
                 The public marketing website uses{" "}
@@ -259,7 +259,7 @@ export default function PrivacyPage() {
                   href="https://plausible.io/"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-white underline underline-offset-4 transition hover:text-white/70"
+                  className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
                 >
                   Plausible Analytics
                 </Link>{" "}
@@ -273,7 +273,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Your rights
             </h2>
             <p className="mt-3">
@@ -289,7 +289,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Changes to this policy
             </h2>
             <p className="mt-3">
@@ -301,10 +301,10 @@ export default function PrivacyPage() {
           </section>
         </div>
 
-        <div className="mt-16 border-t border-white/10 pt-8 text-xs text-white/40">
+        <div className="mt-16 border-t border-brand-ink/10 pt-8 text-xs text-brand-muted">
           <Link
             href="/"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             &larr; Back to OpenAdminOS
           </Link>
@@ -312,26 +312,26 @@ export default function PrivacyPage() {
       </main>
 
       <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-white/40">
+        <span className="text-xs text-brand-muted">
           &copy; {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Privacy
           </Link>
           {" · "}
           <Link
             href="/terms"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Terms
           </Link>
           {" · "}
           <Link
             href="/legal-notice"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Legal notice
           </Link>

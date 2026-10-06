@@ -48,7 +48,7 @@ export default function LegalNoticePage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-brand-bg text-white">
+    <div className="relative flex min-h-screen flex-col bg-brand-bg text-brand-ink">
       <JsonLd data={structuredData} />
       <div
         aria-hidden
@@ -74,20 +74,20 @@ export default function LegalNoticePage() {
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
           Legal notice
         </h1>
-        <p className="mt-2 text-sm text-white/50">
+        <p className="mt-2 text-sm text-brand-muted">
           Last updated: {LAST_UPDATED}
         </p>
 
-        <div className="mt-10 space-y-10 text-sm leading-relaxed text-white/75">
+        <div className="mt-10 space-y-10 text-sm leading-relaxed text-brand-ink/75">
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Provider identification
             </h2>
             <p className="mt-3">
               This page is the Impressum / provider identification for
               OpenAdminOS under § 5 DDG.
             </p>
-            <address className="mt-3 not-italic text-white/70">
+            <address className="mt-3 not-italic text-brand-muted">
               {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
                 <span key={line} className="block">
                   {line}
@@ -97,12 +97,12 @@ export default function LegalNoticePage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">Contact</h2>
+            <h2 className="text-base font-semibold text-brand-ink">Contact</h2>
             <p className="mt-3">
               Email:{" "}
               <Link
                 href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 {SUPPORT_EMAIL}
               </Link>
@@ -110,14 +110,14 @@ export default function LegalNoticePage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Managing director
             </h2>
             <p className="mt-3">{MANAGING_DIRECTOR_NAME}</p>
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Open-source project
             </h2>
             <p className="mt-3">
@@ -128,7 +128,7 @@ export default function LegalNoticePage() {
                 href={GITHUB_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
@@ -137,7 +137,7 @@ export default function LegalNoticePage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Microsoft trademarks
             </h2>
             <p className="mt-3">
@@ -148,10 +148,10 @@ export default function LegalNoticePage() {
           </section>
         </div>
 
-        <div className="mt-16 border-t border-white/10 pt-8 text-xs text-white/40">
+        <div className="mt-16 border-t border-brand-ink/10 pt-8 text-xs text-brand-muted">
           <Link
             href="/"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             &larr; Back to OpenAdminOS
           </Link>
@@ -159,26 +159,26 @@ export default function LegalNoticePage() {
       </main>
 
       <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-white/40">
+        <span className="text-xs text-brand-muted">
           &copy; {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Privacy
           </Link>
           {" · "}
           <Link
             href="/terms"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Terms
           </Link>
           {" · "}
           <Link
             href="/legal-notice"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Legal notice
           </Link>
