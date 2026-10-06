@@ -18,7 +18,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
-- Strengthen the website screenshot frame and animated change-review borders, with visible device rows before playback and solid confirmation states in light mode.
+- Keep the website hero screenshot borderless with a soft shadow; strengthen animated change-review borders, with visible device rows before playback and solid confirmation states in light mode.
 
 ### Security
 
