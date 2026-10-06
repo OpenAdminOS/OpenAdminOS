@@ -1657,7 +1657,7 @@ export default function IntuneChat() {
         inert={!historyOpen}
         className={`flex min-h-0 flex-col bg-[var(--color-sidebar-solid)] transition-[transform,width] duration-150 ${
           historyIsOverlay
-            ? `absolute inset-y-0 left-0 z-30 w-[284px] border-r border-[var(--color-border-soft)] shadow-[18px_0_48px_rgba(0,0,0,0.42)] ${historyOpen ? "translate-x-0" : "-translate-x-full"}`
+            ? `absolute inset-y-0 left-0 z-30 w-[284px] border-r border-[var(--color-border-soft)] ${historyOpen ? "translate-x-0 shadow-[18px_0_48px_rgba(0,0,0,0.25)]" : "-translate-x-full"}`
             : historyOpen
               ? "relative w-[284px] shrink-0 border-r border-[var(--color-border-soft)]"
               : "relative w-0 shrink-0 overflow-hidden border-r-0"

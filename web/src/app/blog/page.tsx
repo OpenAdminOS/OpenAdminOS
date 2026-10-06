@@ -143,7 +143,7 @@ export default function BlogIndexPage() {
               </p>
               <Link
                 href={blogPostPath(featuredPost)}
-                className="mt-6 inline-flex rounded-md bg-white px-3 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+                className="mt-6 inline-flex rounded-md bg-white px-3 py-2 text-sm font-semibold text-brand-bg transition hover:bg-white/90"
               >
                 Read first
               </Link>

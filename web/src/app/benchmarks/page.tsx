@@ -357,7 +357,7 @@ export default function BenchmarksPage() {
             </p>
             <Link
               href="/download"
-              className="mt-6 inline-flex rounded-md bg-white px-4 py-2 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+              className="mt-6 inline-flex rounded-md bg-white px-4 py-2 text-sm font-semibold text-brand-bg transition hover:bg-white/90"
             >
               Download OpenAdminOS
             </Link>

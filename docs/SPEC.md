@@ -168,7 +168,7 @@ installed on Vercel) into committed `web/public/videos/` assets; the embed is
 a muted autoplay loop that falls back to a static poster when
 `prefers-reduced-motion` is set. The composition is a faithful recreation of
 the real desktop app UI: it uses the design tokens from
-`apps/desktop/src/styles/globals.css` (warm stone palette, amber accent) and
+`apps/desktop/src/styles/globals.css` (graphite/off-white palette, light and dark themes) and
 mirrors the actual chrome (sidebar, tenant card, status strip) against
 `web/public/openadminos-app.png`; it must not drift into an invented visual
 style.
@@ -1700,51 +1700,38 @@ The macOS menu bar companion must be created during any interactive app launch, 
 
 ## 3. Design system
 
-### Tokens (from `apps/desktop/src/styles/globals.css`)
+### Monochrome identity (2026-10-06)
 
-```
---color-bg: #1c1917              Background base
---color-bg-elevated: #252220     Elevated background
---color-bg-raised: #2d2926       Highest elevation
---color-sidebar-solid: #191614   Sidebar and rail (warm near-black, no cool cast)
---color-surface: #232120         Cards and controls
---color-surface-hover: #2a2724   Hovered surface
+The approved identity uses the OA monogram in graphite `#17191D` and off-white
+`#F4F5F7` across every desktop surface, packaged icons, installer artwork, and
+public website branding. `docs/brand/oa-mark.svg` is the vector reference;
+`docs/mockups/22-monochrome-brand.html` records the original interactive study.
 
---color-text: #f5f1eb           Primary text
---color-text-soft: #b5ada3      Secondary text
---color-text-muted: #9a9085     Metadata and labels (≥ 4.6:1 on production surfaces)
---color-text-placeholder: #9c9186  Form and composer placeholders (≥ 4.5:1 on every input surface, including bg-raised)
---color-text-faint: #6b6157     Decorative marks only (dots, dividers, disabled ornament); never readable copy
+Desktop appearance defaults to dark. Settings > General offers a saved light
+or dark preference, stored locally and synchronized across renderer windows.
+Native window controls follow this preference. The website retains a dark theme.
+Semantic success, warning, danger, information, and reasoning colors remain
+separate from the brand accent. Destructive approval uses danger; typed
+confirmation and tenant/provider trust behavior are unchanged.
 
---color-border: #322e2a
---color-border-strong: #403a35
---color-border-soft: #2a2622
+### Tokens
 
---color-accent: #e8a87c         Warm copper; reserved for primary actions, focus, and active navigation
---color-accent-hover: #efb88f
---color-accent-soft: #e8a87c1f
---color-on-accent: #1a120c      Foreground on accent- and warning-filled controls (no hardcoded literals)
+`apps/desktop/src/styles/globals.css` is the production source of truth for both
+themes. All shared controls, navigation, dialogs, page layouts, and custom voice
+and companion surfaces consume these tokens. The Agent Team illustration is
+neutral, while activity and attention indicators retain semantic color.
 
---color-success-fg: #9cc88f     Success and the local-only trust line (paired bg: #9cc88f1f)
---color-warning-fg: #e5c678     Write operations and attention (paired bg: #e5c6781f)
---color-danger-fg: #e58888      Errors and destructive actions (paired bg: #e588881f)
---color-info-fg: #a3bfd9        Informational and live-activity states: meters, pulses, spinners (paired bg: #a3bfd91f)
---color-think-fg: #c4a5d9       LLM reasoning blocks (paired bg: #c4a5d91f)
+- Dark: graphite base, off-white primary actions, slate borders and surfaces.
+- Light: off-white base, white surfaces, graphite primary actions.
+- Body, metadata, placeholder, and semantic text meet 4.5:1 contrast against
+  their supported surfaces in both themes, verified by automated tests.
+- Cards use a 10px radius; status badges use a compact 6px radius.
+- The sidebar is 232px wide (212px below 1100px); shared page padding is 24px
+  vertically and 32px horizontally.
 
-Legacy names (--color-success/-warning/-danger/-info/-think and their -soft
-variants) remain defined and byte-identical to the -fg/-bg pairs above.
-
---radius-sm: 6px
---radius-md: 10px
---radius-lg: 14px
---radius-xl: 18px
-```
-
-Accent allocation: copper marks what the user can act on (primary buttons, focus
-rings, active navigation, selected scope). Live activity uses info, pins and
-decorative bullets use neutral text tokens, and the Chat user message is a
-neutral raised bubble with a 2px copper right edge instead of a solid copper
-fill. Destructive approval controls stay danger-coded; they are never copper.
+Regenerate raster brand assets with `node scripts/generate-brand-assets.mjs`.
+The macOS multi-resolution installer TIFF additionally uses `tiffutil`, as
+explained in `apps/desktop/build/README.md`.
 
 ### Typography
 

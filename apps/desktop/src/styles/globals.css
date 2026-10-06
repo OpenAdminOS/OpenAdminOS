@@ -6,39 +6,39 @@
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
-  --color-bg: #1c1917;
-  --color-bg-elevated: #252220;
-  --color-bg-raised: #2d2926;
-  --color-sidebar-solid: #191614;
+  --color-bg: #17191d;
+  --color-bg-elevated: #202329;
+  --color-bg-raised: #292d34;
+  --color-sidebar-solid: #121418;
 
-  --color-surface: #232120;
-  --color-surface-hover: #2a2724;
+  --color-surface: #1e2126;
+  --color-surface-hover: #262a31;
 
-  --color-border: #322e2a;
-  --color-border-strong: #403a35;
-  --color-border-soft: #2a2622;
+  --color-border: #343940;
+  --color-border-strong: #626a75;
+  --color-border-soft: #2d323a;
 
-  --color-text: #f5f1eb;
-  --color-text-soft: #b5ada3;
-  --color-text-muted: #9a9085;
+  --color-text: #f4f5f7;
+  --color-text-soft: #c2c7ce;
+  --color-text-muted: #a8b0bb;
   /* Placeholders are informative: must hold 4.5:1 on every input surface,
    * including the lightest (--color-bg-raised). Faint is decorative only
    * (dividers, dots, disabled ornament), never readable copy. */
-  --color-text-placeholder: #9c9186;
-  --color-text-faint: #6b6157;
+  --color-text-placeholder: #a8b0bb;
+  --color-text-faint: #737c89;
 
-  --color-accent: #e8a87c;
-  --color-accent-hover: #efb88f;
-  --color-accent-soft: #e8a87c1f;
-  --color-accent-strong: #d99868;
-  --color-on-accent: #1a120c;
+  --color-accent: #f4f5f7;
+  --color-accent-hover: #ffffff;
+  --color-accent-soft: #f4f5f71f;
+  --color-accent-strong: #dce0e6;
+  --color-on-accent: #17191d;
 
   --color-success-fg: #9cc88f;
   --color-success-bg: #9cc88f1f;
   --color-warning-fg: #e5c678;
   --color-warning-bg: #e5c6781f;
-  --color-danger-fg: #e58888;
-  --color-danger-bg: #e588881f;
+  --color-danger-fg: #f1a0a0;
+  --color-danger-bg: #f1a0a01f;
   --color-info-fg: #a3bfd9;
   --color-info-bg: #a3bfd91f;
   --color-think-fg: #c4a5d9;
@@ -49,20 +49,66 @@
   --color-success-soft: #9cc88f1f;
   --color-warning: #e5c678;
   --color-warning-soft: #e5c6781f;
-  --color-danger: #e58888;
-  --color-danger-soft: #e588881f;
+  --color-danger: #f1a0a0;
+  --color-danger-soft: #f1a0a01f;
   --color-info: #a3bfd9;
   --color-info-soft: #a3bfd91f;
   --color-think: #c4a5d9;
   --color-think-soft: #c4a5d91f;
 
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 18px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
 
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(0, 0, 0, 0.22);
   --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Appearance is device-local and shared with the menu-bar companion. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f4f5f7;
+  --color-bg-elevated: #ffffff;
+  --color-bg-raised: #e4e7ec;
+  --color-sidebar-solid: #e9ecf0;
+  --color-surface: #ffffff;
+  --color-surface-hover: #e8ebef;
+  --color-border: #cdd2da;
+  --color-border-strong: #747d8b;
+  --color-border-soft: #d9dde3;
+  --color-text: #17191d;
+  --color-text-soft: #424b58;
+  --color-text-muted: #535e6c;
+  --color-text-placeholder: #535e6c;
+  --color-text-faint: #737d8a;
+  --color-accent: #17191d;
+  --color-accent-hover: #30353d;
+  --color-accent-soft: #17191d0c;
+  --color-accent-strong: #30353d;
+  --color-on-accent: #f4f5f7;
+  --color-success-fg: #32632b;
+  --color-success-bg: #32632b0c;
+  --color-success: #32632b;
+  --color-success-soft: #32632b0c;
+  --color-warning-fg: #765609;
+  --color-warning-bg: #7656090c;
+  --color-warning: #765609;
+  --color-warning-soft: #7656090c;
+  --color-danger-fg: #a52732;
+  --color-danger-bg: #a527320c;
+  --color-danger: #a52732;
+  --color-danger-soft: #a527320c;
+  --color-info-fg: #345d83;
+  --color-info-bg: #345d830c;
+  --color-info: #345d83;
+  --color-info-soft: #345d830c;
+  --color-think-fg: #6c4387;
+  --color-think-bg: #6c43870c;
+  --color-think: #6c4387;
+  --color-think-soft: #6c43870c;
+  --shadow-soft: 0 1px 3px #17191d0c, 0 6px 20px #17191d08;
+  --shadow-modal: 0 20px 64px #17191d26;
 }
 
 html,
@@ -106,7 +152,7 @@ body {
   background: var(--color-border-strong);
 }
 
-/* Focus ring tuned for the warm palette */
+/* High-contrast focus ring shared by both neutral themes */
 *:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
@@ -198,8 +244,6 @@ button:disabled {
 .companion-shell {
   position: relative;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent 34%),
-    linear-gradient(145deg, rgba(232, 168, 124, 0.055), transparent 42%),
     var(--color-bg);
 }
 
@@ -303,7 +347,7 @@ button:disabled {
   width: 100%;
   resize: none;
   border-radius: 9px;
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--color-surface);
   padding: 10px 11px;
   color: var(--color-text);
   font-size: 12.5px;
@@ -371,7 +415,7 @@ button:disabled {
   justify-content: space-between;
   gap: 9px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--color-surface);
   padding: 8px 9px;
   text-align: left;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -482,4 +526,21 @@ html[data-reduced-motion] *::after {
 
 .app-region-no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* Shared desktop rhythm: quiet surfaces, explicit boundaries, compact headers. */
+.app-page-header { padding: 24px 32px 20px; gap: 20px; align-items: center; }
+.app-page-body { padding: 24px 32px; }
+.app-sidebar { width: 232px; }
+.app-titlebar { border-bottom: 1px solid var(--color-border-soft); }
+table { font-variant-numeric: tabular-nums; }
+input::placeholder, textarea::placeholder { color: var(--color-text-placeholder); }
+select { color-scheme: inherit; }
+.companion-shell { background: var(--color-bg); }
+.companion-shell::before { display: none; }
+.companion-panel { background: var(--color-surface); border-color: var(--color-border); box-shadow: var(--shadow-soft); }
+@media (max-width: 1100px) {
+  .app-sidebar { width: 212px; }
+  .app-page-header { padding: 20px 24px 16px; flex-wrap: wrap; gap: 12px; }
+  .app-page-body { padding: 20px 24px; }
 }

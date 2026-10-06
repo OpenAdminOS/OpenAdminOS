@@ -82,7 +82,7 @@ export function MobileNav({ items }: { items: readonly MobileNavItem[] }) {
         id={menuId}
         aria-label="Mobile navigation"
         aria-hidden={!isOpen}
-        className={`absolute right-0 top-[calc(100%+0.75rem)] z-40 w-[min(18rem,calc(100vw-3rem))] origin-top-right overflow-hidden rounded-lg border border-white/10 bg-[#101116]/95 p-1 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur transition ${
+        className={`absolute right-0 top-[calc(100%+0.75rem)] z-40 w-[min(18rem,calc(100vw-3rem))] origin-top-right overflow-hidden rounded-lg border border-white/10 bg-brand-raised/95 p-1 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur transition ${
           isOpen
             ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
             : "pointer-events-none -translate-y-1 scale-[0.98] opacity-0"
@@ -98,7 +98,7 @@ export function MobileNav({ items }: { items: readonly MobileNavItem[] }) {
             onClick={() => closeIfRouteWillNotChange(item)}
             className={`block rounded-md px-3 py-2.5 text-sm transition ${
               item.primary
-                ? "bg-white text-[#070709] hover:bg-white/90"
+                ? "bg-white text-brand-bg hover:bg-white/90"
                 : "text-white/70 hover:bg-white/[0.06] hover:text-white"
             }`}
           >

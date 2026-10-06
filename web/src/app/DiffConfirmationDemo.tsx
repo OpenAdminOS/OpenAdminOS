@@ -32,7 +32,7 @@ export function DiffConfirmationDemo() {
   return (
     <div
       ref={rootRef}
-      className={`relative overflow-hidden rounded-xl border border-white/10 bg-[#0d0e12] p-4 shadow-[0_30px_120px_-30px_rgba(251,191,36,0.25)] ${
+      className={`relative overflow-hidden rounded-xl border border-white/10 bg-brand-surface p-4 shadow-[0_30px_120px_-30px_rgba(251,191,36,0.25)] ${
         hasPlayed ? "diff-demo-active" : ""
       } ${isApproved ? "diff-demo-approved" : ""}`}
     >

@@ -12,6 +12,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  nativeTheme,
   Notification,
   session,
   shell,
@@ -1037,6 +1038,31 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Settings",
     },
   ];
+
+  if (process.env.OPENADMINOS_BRAND_CAPTURE === "1") {
+    const extraShots = [
+      { route: "/cache", name: "cache", waitFor: ["Cache"] },
+      { route: "/office", name: "agent-team", waitFor: ["Agent Team"] },
+      { route: "/fleet", name: "fleet", waitFor: [] },
+      { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
+      { route: "/connectors", name: "connectors", waitFor: ["Connectors"] },
+      { route: "/activity", name: "activity", waitFor: ["Run history"] },
+      { route: "/agents/schedules", name: "schedules", waitFor: ["Schedules"] },
+      { route: "/settings/general", name: "appearance", waitFor: ["Graphite dark"] },
+    ];
+    window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
+    for (const theme of ["dark", "light"]) {
+      await window.webContents.executeJavaScript(`window.openAdminOS.setAppearance(${JSON.stringify(theme)})`);
+      await window.webContents.executeJavaScript(`localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)}); window.dispatchEvent(new StorageEvent("storage", {key:"openadminos:appearance:v1"}));`);
+      for (const shot of [...appShots, ...extraShots]) {
+        await runScreenshotCaptureStep(window, { kind: "route", ...shot, reducedMotion: true });
+        await captureScreenshotPng(window, `app/brand-${theme}-${shot.name}.png`);
+      }
+    }
+    console.log("[screenshot-capture] passed both brand themes and all route families");
+    app.exit(0);
+    return;
+  }
 
   let count = 0;
   const chatEmptyShot = appShots.find((shot) => shot.name === "chat-empty");
@@ -4718,7 +4744,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: "#1c1917",
+    backgroundColor: "#17191d",
     show: false,
     // Windows: draw our own chrome and overlay the system buttons on it,
     // so the app header replaces the native title bar instead of stacking
@@ -4736,8 +4762,8 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
             // Must match --color-bg and --color-text-muted in
             // src/styles/globals.css. Any drift paints the window-control
             // strip as a visibly different block from the app chrome.
-            color: "#1c1917",
-            symbolColor: "#9a9085",
+            color: "#17191d",
+            symbolColor: "#a8b0bb",
             height: 32,
           },
         }
@@ -4838,7 +4864,7 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     fullscreenable: false,
     skipTaskbar: true,
     title: "OpenAdminOS Menu Bar",
-    backgroundColor: "#1c1917",
+    backgroundColor: "#17191d",
     vibrancy: process.platform === "darwin" ? "menu" : undefined,
     visualEffectState: "active",
     webPreferences: {
@@ -4991,6 +5017,17 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
+    if (theme !== "dark" && theme !== "light") throw new Error("Choose dark or light appearance.");
+    nativeTheme.themeSource = theme;
+    const color = theme === "light" ? "#f4f5f7" : "#17191d";
+    const symbolColor = theme === "light" ? "#535e6c" : "#a8b0bb";
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue;
+      window.setBackgroundColor(color);
+      if (process.platform === "win32") window.setTitleBarOverlay({ color, symbolColor, height: 32 });
+    }
+  }));
   ipcMain.handle(
     "openadminos:get-companion-snapshot",
     handleTrusted(() => getCompanionSnapshot()),

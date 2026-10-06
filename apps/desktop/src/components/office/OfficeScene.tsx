@@ -50,7 +50,7 @@ export function PersonaAvatar({
             rx="13"
             fill="currentColor"
           />
-          <rect x="27" y="32" width="46" height="24" rx="8" fill="#24211f" />
+          <rect x="27" y="32" width="46" height="24" rx="8" fill="#202329" />
         </>
       ) : (
         <>
@@ -65,14 +65,14 @@ export function PersonaAvatar({
           <ellipse cx="50" cy="44" rx="31" ry="25" fill="currentColor" />
           {avatar === "owl" && (
             <>
-              <circle cx="37" cy="43" r="13" fill="#f5f1eb" opacity=".8" />
-              <circle cx="63" cy="43" r="13" fill="#f5f1eb" opacity=".8" />
+              <circle cx="37" cy="43" r="13" fill="#f4f5f7" opacity=".8" />
+              <circle cx="63" cy="43" r="13" fill="#f4f5f7" opacity=".8" />
             </>
           )}
           {avatar === "fox" && (
             <path
               d="M22 43 50 67 78 43 59 49 50 42 41 49Z"
-              fill="#f5f1eb"
+              fill="#f4f5f7"
               opacity=".8"
             />
           )}
@@ -84,7 +84,7 @@ export function PersonaAvatar({
         width="6"
         height="10"
         rx="3"
-        fill={avatar === "robot" ? "currentColor" : "#24211f"}
+        fill={avatar === "robot" ? "currentColor" : "#202329"}
       />
       <rect
         x="60"
@@ -92,16 +92,16 @@ export function PersonaAvatar({
         width="6"
         height="10"
         rx="3"
-        fill={avatar === "robot" ? "currentColor" : "#24211f"}
+        fill={avatar === "robot" ? "currentColor" : "#202329"}
       />
-      {avatar !== "robot" && <path d="m46 53 4 4 4-4" fill="#24211f" />}
+      {avatar !== "robot" && <path d="m46 53 4 4 4-4" fill="#202329" />}
       <rect
         x="41"
         y="68"
         width="18"
         height="4"
         rx="2"
-        fill="#24211f"
+        fill="#202329"
         opacity=".4"
       />
     </svg>

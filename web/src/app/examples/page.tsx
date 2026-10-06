@@ -417,7 +417,7 @@ export default function ExamplesPage() {
             </Link>
             <Link
               href="/download"
-              className="inline-flex min-h-10 items-center justify-center rounded-md bg-white px-4 text-sm font-semibold text-[#070709] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+              className="inline-flex min-h-10 items-center justify-center rounded-md bg-white px-4 text-sm font-semibold text-brand-bg transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
             >
               Download OpenAdminOS
             </Link>

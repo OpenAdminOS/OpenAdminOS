@@ -25,7 +25,7 @@ export function TitleBarInset() {
   return (
     <div
       aria-hidden
-      className="app-region-drag shrink-0 bg-[var(--color-bg)]"
+      className="app-titlebar app-region-drag shrink-0 bg-[var(--color-bg)]"
       style={{ height: TITLE_BAR_HEIGHT }}
     />
   );
@@ -104,7 +104,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="flex shrink-0 items-end justify-between gap-6 border-b border-[var(--color-border-soft)] px-10 pt-10 pb-6">
+    <header className="app-page-header flex shrink-0 justify-between border-b border-[var(--color-border)]">
       <div className="min-w-0">
         {eyebrow && (
           <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
@@ -120,14 +120,14 @@ export function PageHeader({
           </div>
         )}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </header>
   );
 }
 
 export function PageBody({ children }: { children: ReactNode }) {
   return (
-    <div className="flex-1 overflow-y-auto px-10 py-8 animate-fade-in">
+    <div className="app-page-body min-w-0 flex-1 overflow-y-auto animate-fade-in">
       {children}
     </div>
   );

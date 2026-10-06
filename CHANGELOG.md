@@ -6,7 +6,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Add a saved light/dark appearance setting and an interactive monochrome design reference.
+
 ### Changed
+
+- Redesign the desktop UI and website branding with graphite/off-white colors, a vector OA monogram, compact shared controls, and refreshed installer, app, and social icons while retaining semantic status colors and approval safeguards.
 
 ### Removed
 

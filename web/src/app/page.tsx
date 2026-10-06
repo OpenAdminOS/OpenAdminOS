@@ -9,7 +9,6 @@ import {
 } from "~/lib/benchmarks/data";
 import { getAgentStatsSummary } from "~/lib/stats/summary";
 
-import { AmbientVideo } from "./AmbientVideo";
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
 import { getGitHubDownloadCount } from "./github-downloads";
 import { getGitHubRepoStats } from "./github-repo";
@@ -164,7 +163,7 @@ export default async function HomePage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#070709] text-white">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-brand-bg text-white">
       <JsonLd data={structuredData} />
       <div
         aria-hidden
@@ -176,7 +175,7 @@ export default async function HomePage() {
       />
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#070709]"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg"
       >
         Skip to content
       </a>
@@ -203,7 +202,7 @@ export default async function HomePage() {
               rel={item.external ? "noreferrer" : undefined}
               className={
                 item.primary
-                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
+                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-white/90"
                   : "transition hover:text-white"
               }
             >
@@ -245,7 +244,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.macosDmgUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
                 <svg
                   aria-hidden
@@ -266,7 +265,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.linuxAppImageUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
                 <img
                   src="/linux.svg"
@@ -288,7 +287,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.windowsExeUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
               >
                 <svg
                   aria-hidden
@@ -322,15 +321,18 @@ export default async function HomePage() {
         </section>
 
         <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
-          <AmbientVideo
-            src="/videos/hero-demo.mp4"
-            poster="/videos/hero-demo-poster.jpg"
-            alt="OpenAdminOS agent run: manifest scopes, local run log, results, and a write-change diff awaiting confirmation"
-            className="aspect-video h-auto w-full rounded-xl object-cover drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)] sm:rounded-2xl"
+          {/* Synthetic tenant fixture, refreshed with the current desktop design. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/openadminos-app.png"
+            width={1600}
+            height={1000}
+            alt="OpenAdminOS Chat with active tenant scope, a local provider, and example questions"
+            className="h-auto w-full rounded-xl border border-white/15 shadow-2xl"
           />
         </section>
 
-        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-white/10 bg-[#070709]/75 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
+        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-white/10 bg-brand-bg/75 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
           <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-x-6 gap-y-5 px-6 py-5 text-left sm:grid-cols-4 sm:px-10">
             {tractionItems.map((item) => (
               <div key={item.label} className="min-w-0">
@@ -603,7 +605,7 @@ export default async function HomePage() {
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/download"
-              className="rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+              className="rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-brand-bg transition hover:bg-white/90"
             >
               View downloads
             </Link>

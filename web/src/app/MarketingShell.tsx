@@ -14,14 +14,14 @@ const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
 
 export function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#070709] text-white">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-brand-bg text-white">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_72%)]"
       />
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#070709]"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg"
       >
         Skip to content
       </a>
@@ -47,7 +47,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
               rel={item.external ? "noreferrer" : undefined}
               className={
                 item.primary
-                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
+                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-white/90"
                   : "transition hover:text-white"
               }
             >

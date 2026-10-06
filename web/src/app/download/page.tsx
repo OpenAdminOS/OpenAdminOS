@@ -290,7 +290,7 @@ function DownloadRow({ item }: { item: DownloadItem }) {
         rel="noreferrer"
         className={
           item.primary
-            ? "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md bg-white px-3 text-sm font-semibold text-[#070709] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:w-44"
+            ? "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md bg-white px-3 text-sm font-semibold text-brand-bg transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:w-44"
             : "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md border border-white/10 px-3 text-sm font-semibold text-white/70 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:w-44"
         }
       >

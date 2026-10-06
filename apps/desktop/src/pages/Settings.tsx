@@ -1,3 +1,4 @@
+import { useAppearance } from "../styles/appearance";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
@@ -2628,6 +2629,7 @@ function gatewayConfirmationCopy(
 }
 
 function GeneralSection() {
+  const appearance = useAppearance();
   const { state, refresh } = useAppState();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
@@ -3054,11 +3056,16 @@ function GeneralSection() {
         />
         <SettingRow
           id="theme"
-          description="OpenAdminOS is dark-only today. A light theme is on the v1.x list."
+          description={appearance.error ?? "Choose graphite dark or off-white light. Saved on this device and shared with the menu-bar companion."}
           control={
-            <Pill>
-              <StatusDot tone="muted" /> Dark only
-            </Pill>
+            <Select
+              aria-label="Color theme"
+              value={appearance.theme}
+              onChange={(event) => appearance.setAppearance(event.target.value === "light" ? "light" : "dark")}
+            >
+              <option value="dark">Graphite dark</option>
+              <option value="light">Off-white light</option>
+            </Select>
           }
         />
         <SettingRow

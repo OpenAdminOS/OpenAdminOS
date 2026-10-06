@@ -48,7 +48,7 @@ export default function LegalNoticePage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#0a0a0c] text-white">
+    <div className="relative flex min-h-screen flex-col bg-brand-bg text-white">
       <JsonLd data={structuredData} />
       <div
         aria-hidden
