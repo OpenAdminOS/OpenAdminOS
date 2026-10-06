@@ -10,7 +10,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
-- Rework the landing-page story with selectable admin workflow examples, a local-processing diagram, clearer permission and history components, benchmark bars, and a shorter hero.
+- Restore the prior light-mode landing page, reverting the experimental workflow sections and revised page layout.
 
 - Switch the public website to off-white light mode with graphite controls, readable status colors and charts, and a matching light desktop preview.
 
