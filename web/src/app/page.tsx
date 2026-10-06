@@ -320,7 +320,7 @@ export default async function HomePage() {
           </p>
         </section>
 
-        <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
+        <section className="mt-12 w-full max-w-[88rem] rounded-2xl border-2 border-brand-ink/40 bg-brand-raised p-2 shadow-[0_20px_60px_-20px_rgba(23,25,29,0.3)] sm:mt-16 sm:p-3">
           {/* Synthetic tenant fixture, refreshed with the current desktop design. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -328,7 +328,7 @@ export default async function HomePage() {
             width={1600}
             height={1000}
             alt="OpenAdminOS Chat with active tenant scope, a local provider, and example questions"
-            className="h-auto w-full rounded-xl border border-brand-ink/15 shadow-2xl"
+            className="h-auto w-full rounded-lg border border-brand-ink/30"
           />
         </section>
 
