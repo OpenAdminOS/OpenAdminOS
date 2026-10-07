@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Add an interactive, synthetic-data desktop demo to the homepage with clickable navigation, device evidence, sample change review, agent browsing, and provider/appearance previews.
+
 - Add a saved light/dark appearance setting and an interactive monochrome design reference.
 
 ### Changed

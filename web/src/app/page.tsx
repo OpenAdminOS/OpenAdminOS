@@ -9,6 +9,7 @@ import {
 } from "~/lib/benchmarks/data";
 import { getAgentStatsSummary } from "~/lib/stats/summary";
 
+import { ProductDemo } from "./product-demo/ProductDemo";
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
 import { getGitHubDownloadCount } from "./github-downloads";
 import { getGitHubRepoStats } from "./github-repo";
@@ -321,15 +322,12 @@ export default async function HomePage() {
         </section>
 
         <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
-          {/* Synthetic tenant fixture, refreshed with the current desktop design. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/openadminos-app.png"
-            width={1600}
-            height={1000}
-            alt="OpenAdminOS Chat with active tenant scope, a local provider, and example questions"
-            className="h-auto w-full rounded-xl shadow-[0_16px_48px_-16px_rgba(23,25,29,0.18)]"
-          />
+          <ProductDemo />
+          <noscript>
+            <style>{`#product-demo { display: none; }`}</style>
+            <img src="/openadminos-app.png" width={1600} height={1000} alt="OpenAdminOS desktop with Chat, tenant scope, and local provider" className="h-auto w-full rounded-xl" />
+            <p className="mt-4 text-center text-sm text-brand-muted">Enable JavaScript to explore the interactive demo, or download the desktop app.</p>
+          </noscript>
         </section>
 
         <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-brand-ink/10 bg-brand-bg/75 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">

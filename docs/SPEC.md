@@ -150,11 +150,23 @@ items, because they target durable admin search and product-evaluation topics.
 The examples gallery at `/examples` is also a secondary marketing page, with
 copyable Build your own Agent prompts grouped by read investigations, confirmed
 write plans, and connector-backed delivery examples.
-The marketing homepage uses a seven-section structure: hero ("AI agents for
-your Microsoft 365 tenant. Run locally, approved by you."), a pre-rendered
-product demo video, a traction strip, a three-step "How it works" section, the
-write-gate diff demo, the top most-installed registry agents, and open
-source + FAQ + final CTA. The traction strip and CTA star count only render
+The marketing homepage retains its light-mode hero, traction, testimonials,
+how-it-works, write-gate, benchmarks, open-source, FAQ, and download sections.
+The hero product area is an interactive simulation of the desktop UI, replacing
+the static screenshot. It exposes Chat, Agent Team, Agents (installed, hub,
+schedules, and run history), Changes, Cache, Settings, Workspaces, and Connectors.
+The initial screen shows a completed synthetic device investigation. Visitors
+can inspect evidence, prepare a sample proposal, and try typed confirmation;
+completion explicitly states that no operation was sent. Native dialogs support
+Escape and focus restoration. All demo state is in-memory and resets on reload
+or Reset. The demo never imports desktop IPC, authenticates, connects to Graph
+or a provider, sends prompts, installs agents, or schedules work. Controls for
+capabilities outside the simulation explain the desktop behavior. Provider and
+appearance choices affect only the demo. Small screens use scrollable navigation
+and tables; motion respects reduced-motion preferences. The demo reuses the
+monochrome desktop visual language, with synthetic content rather than test-run
+screenshots. The existing screenshot remains the no-JavaScript fallback.
+The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API and total release
 asset downloads across all releases (both revalidated hourly), plus the community
 agent count from the synced `public/stats/agents.json`. Downloads replace the
@@ -162,16 +174,13 @@ aggregate agent installation count and match the README's total-downloads badge.
 When a source is unavailable its cell is omitted, never faked. Registry
 agent display metadata (names, descriptions, mode, scopes) is curated in
 `web/src/lib/stats/summary.ts` because repo-root `agents/index.json` is not
-available inside the `web/` Vercel build. The demo video is rendered offline
-from the top-level `remotion/` project (not part of the npm workspace, never
-installed on Vercel) into committed `web/public/videos/` assets; the embed is
-a muted autoplay loop that falls back to a static poster when
-`prefers-reduced-motion` is set. The composition is a faithful recreation of
-the real desktop app UI: it uses the design tokens from
-`apps/desktop/src/styles/globals.css` (graphite/off-white palette, light and dark themes) and
-mirrors the actual chrome (sidebar, tenant card, status strip) against
-`web/public/openadminos-app.png`; it must not drift into an invented visual
-style.
+available inside the `web/` Vercel build. Historical demo video assets are rendered offline from the top-level `remotion/`
+project (not part of the npm workspace, never installed on Vercel) and retained
+under `web/public/videos/`. The current homepage uses the interactive simulation
+instead. Its styling follows the graphite/off-white desktop tokens and preserves
+the sidebar, tenant context, provider disclosure, and status-strip conventions.
+See `docs/brand/interactive-product-demo.md` for the interaction contract and
+verification notes.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
