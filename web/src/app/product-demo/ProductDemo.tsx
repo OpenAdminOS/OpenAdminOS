@@ -34,6 +34,8 @@ function destination(hotspot: Hotspot, current: string): string | undefined {
   };
   if (commands[label]) return commands[label];
   if (agentTargets[label]) return agentTargets[label];
+  if (label === "Pause motion") return "team-paused";
+  if (label === "Resume motion") return "team";
   if (label === "Manage") return "tenants";
   if (label.startsWith("Quick search")) return "quick-search";
   if (label.startsWith("Workspaces Saved")) return "workspaces";
@@ -221,6 +223,9 @@ export function ProductDemo() {
             draggable={false}
             onError={() => setError(true)}
           />
+          {screen.baseId === "team" && screen.officeBounds && (
+            <OfficeMotion bounds={screen.officeBounds} />
+          )}
           <div
             className={styles.controls}
             aria-label={`${screen.label} controls`}
@@ -337,5 +342,61 @@ export function ProductDemo() {
         <a href="/download">Download OpenAdminOS ↗</a>
       </dialog>
     </section>
+  );
+}
+
+function OfficeMotion({
+  bounds,
+}: {
+  bounds: { x: number; y: number; width: number; height: number };
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const element = video.current;
+    if (!element) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let visible = false;
+    const update = () => {
+      if (reduced.matches || document.hidden || !visible) {
+        element.pause();
+        element.style.visibility = reduced.matches ? "hidden" : "visible";
+      } else {
+        element.style.visibility = "visible";
+        void element.play().catch(() => {
+          element.style.visibility = "hidden";
+        });
+      }
+    };
+    const observer = new IntersectionObserver(([entry]) => {
+      visible = entry?.isIntersecting ?? false;
+      update();
+    });
+    observer.observe(element);
+    reduced.addEventListener("change", update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      observer.disconnect();
+      reduced.removeEventListener("change", update);
+      document.removeEventListener("visibilitychange", update);
+      element.pause();
+    };
+  }, []);
+  return (
+    <video
+      ref={video}
+      className={styles.officeMotion}
+      src="/product-demo/office-motion.mp4"
+      muted
+      loop
+      playsInline
+      preload="none"
+      aria-hidden="true"
+      style={{
+        left: `${bounds.x}%`,
+        top: `${bounds.y}%`,
+        width: `${bounds.width}%`,
+        height: `${bounds.height}%`,
+      }}
+    />
   );
 }

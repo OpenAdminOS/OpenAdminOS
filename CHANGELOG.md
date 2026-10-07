@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Show the full three-teammate office in the website preview, using the built app’s real movement with pause and reduced-motion support.
+
 - Remove preview labels from captured tenant fields and add clickable Dev Tenant and Customer Tenant choices that persist across page navigation.
 
 - Replace the recreated homepage preview with real screenshots of the built desktop app and control-aligned clickable navigation.

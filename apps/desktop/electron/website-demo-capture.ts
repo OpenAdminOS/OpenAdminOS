@@ -1,7 +1,9 @@
 /** Development-only capture, called behind the unpackaged screenshot guard. */
 import type { BrowserWindow } from "electron";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
 
 type CaptureRoute = (
   route: string,
@@ -31,6 +33,12 @@ export async function captureWebsiteDemo(
       click: "Devices",
     },
     { id: "team", route: "/office", label: "Agent Team", wait: ["Agent Team"] },
+    {
+      id: "team-paused",
+      route: "/office",
+      label: "Agent Team, motion paused",
+      wait: ["Agent Team"],
+    },
     {
       id: "agents",
       route: "/agents",
@@ -229,6 +237,22 @@ export async function captureWebsiteDemo(
   ];
   await mkdir(outDir, { recursive: true });
   window.setContentSize(1600, 1000);
+  window.webContents.setBackgroundThrottling(false);
+  await window.webContents.executeJavaScript(`(async () => {
+    const state = await window.openAdminOS.getAppState();
+    if (state.office.personas.length) return;
+    for (const [name, avatar, color, agentSlugs, responsibility] of [
+      ['Chief of Staff', 'robot', 'amber', ['compliance-overview','team-evidence-review'], 'Coordinate checks and review findings.'],
+      ['Policy Watcher', 'fox', 'sage', ['compliance-overview'], 'Review compliance posture and flag changes.'],
+      ['Device Investigator', 'owl', 'blue', ['find-inactive-devices'], 'Investigate inactive devices and stale inventory.'],
+    ]) await window.openAdminOS.saveOfficePersona({name,avatar,color,agentSlugs,responsibility,tenantId:state.activeTenantId,providerId:'ollama',intervalMinutes:null,maxMinutes:30,enabled:true});
+  })()`);
+  const loaded = new Promise<void>((resolve) =>
+    window.webContents.once("did-finish-load", () => resolve()),
+  );
+  window.webContents.reload();
+  await loaded;
+  await new Promise((resolve) => setTimeout(resolve, 1000));
   await window.webContents.executeJavaScript(
     'window.openAdminOS.setAppearance("light")',
   );
@@ -304,6 +328,26 @@ export async function captureWebsiteDemo(
         if (missing) throw new Error(`Missing ${screen.click}: ${missing}`);
         await new Promise((resolve) => setTimeout(resolve, 350));
       }
+      if (screen.id === "team" || screen.id === "team-paused") {
+        await window.webContents.executeJavaScript(`(() => {
+          document.documentElement.removeAttribute('data-reduced-motion');
+          const expand = [...document.querySelectorAll('button')].find(b => b.textContent === 'Expand office');
+          expand?.click();
+          [...document.querySelectorAll('button')].find(b => b.textContent === 'Resume motion')?.click();
+        })()`);
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        const count = await window.webContents.executeJavaScript(
+          `document.querySelectorAll('.scene-persona').length`,
+        );
+        if (screen.id === "team-paused") {
+          await window.webContents.executeJavaScript(
+            `[...document.querySelectorAll('button')].find(b => b.textContent === 'Pause motion')?.click()`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+        if (count !== 3)
+          throw new Error(`Expected three teammates, got ${count}`);
+      }
       await window.webContents.executeJavaScript("document.fonts.ready");
       window.webContents.invalidate();
       await window.webContents.capturePage();
@@ -321,7 +365,16 @@ export async function captureWebsiteDemo(
       const id =
         tenant.key === "contoso" ? screen.id : `${screen.id}--${tenant.key}`;
       await writeFile(join(outDir, `${id}.png`), screenshot.toPNG());
+      const officeBounds =
+        screen.id === "team"
+          ? await window.webContents.executeJavaScript(
+              `(() => {const r=document.querySelector('.scene-viewport').getBoundingClientRect();return {x:r.x/innerWidth*100,y:r.y/innerHeight*100,width:r.width/innerWidth*100,height:r.height/innerHeight*100};})()`,
+            )
+          : null;
+      if (screen.id === "team" && tenant.key === "contoso")
+        await captureOfficeMotion(window, outDir);
       const entry = {
+        officeBounds,
         id,
         baseId: screen.id,
         tenant: tenant.key,
@@ -354,6 +407,7 @@ function readHotspots() {
       'a,button,input,textarea,select,summary,[role="button"]',
     ),
   ).flatMap((element) => {
+    if (element.classList.contains("scene-persona")) return [];
     const rect = element.getBoundingClientRect();
     const style = getComputedStyle(element);
     if (
@@ -396,4 +450,60 @@ function readHotspots() {
       },
     ];
   });
+}
+
+async function captureOfficeMotion(window: BrowserWindow, outDir: string) {
+  const framesDir = await mkdtemp(join(tmpdir(), "openadminos-office-"));
+  try {
+    const rect = await window.webContents.executeJavaScript(
+      `(() => {const r=document.querySelector('.scene-viewport').getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height)};})()`,
+    );
+    const start = Date.now();
+    let frames = 0;
+    while (Date.now() - start < 32000) {
+      const frame = await window.webContents.capturePage(rect);
+      await writeFile(
+        join(framesDir, `${String(frames++).padStart(4, "0")}.jpg`),
+        frame.toJPEG(90),
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, start + frames * 100 - Date.now())),
+      );
+    }
+    const fps = frames / ((Date.now() - start) / 1000);
+    await new Promise<void>((resolve, reject) => {
+      const encoder = spawn(
+        "ffmpeg",
+        [
+          "-y",
+          "-loglevel",
+          "error",
+          "-framerate",
+          String(fps),
+          "-i",
+          join(framesDir, "%04d.jpg"),
+          "-vf",
+          "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "22",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          join(outDir, "office-motion.mp4"),
+        ],
+        { stdio: "inherit" },
+      );
+      encoder.once("error", reject);
+      encoder.once("exit", (code) =>
+        code === 0
+          ? resolve()
+          : reject(new Error(`Office video encoding exited ${code}`)),
+      );
+    });
+  } finally {
+    await rm(framesDir, { recursive: true, force: true });
+  }
 }

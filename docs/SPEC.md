@@ -165,7 +165,11 @@ preserves the current page and uses that tenant’s real captures throughout
 navigation. Tenant names and account identifiers use plain customer labels. Screenshots keep
 the actual app aspect ratio. Small screens can pan within the preview instead of
 receiving a different invented mobile UI. Screenshot transitions respect reduced
-motion. The current Contoso Chat capture is also the no-JavaScript fallback.
+motion. Agent Team opens in the expanded office with Chief of Staff, Policy Watcher,
+and Device Investigator. Its room animation is a muted recording of the built app,
+positioned over the matching room capture. The pause control switches to an actual
+paused capture; reduced-motion users see the static office. Playback stops when
+the preview is offscreen or the browser tab is hidden. The current Contoso Chat capture is also the no-JavaScript fallback.
 The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API and total release
 asset downloads across all releases (both revalidated hourly), plus the community
