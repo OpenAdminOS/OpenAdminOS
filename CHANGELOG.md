@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Remove the label, walkthrough, and reset toolbar above the homepage app preview.
+
 - Restore the prior light-mode landing page, reverting the experimental workflow sections and revised page layout.
 
 - Switch the public website to off-white light mode with graphite controls, readable status colors and charts, and a matching light desktop preview.

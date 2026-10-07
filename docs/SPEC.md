@@ -158,8 +158,8 @@ schedules, and run history), Changes, Cache, Settings, Workspaces, and Connector
 The initial screen shows a completed synthetic device investigation. Visitors
 can inspect evidence, prepare a sample proposal, and try typed confirmation;
 completion explicitly states that no operation was sent. Native dialogs support
-Escape and focus restoration. All demo state is in-memory and resets on reload
-or Reset. The demo never imports desktop IPC, authenticates, connects to Graph
+Escape and focus restoration. All demo state is in-memory and resets on reload. The preview starts directly
+with the app shell, without a demo toolbar, walkthrough, or reset control. The demo never imports desktop IPC, authenticates, connects to Graph
 or a provider, sends prompts, installs agents, or schedules work. Controls for
 capabilities outside the simulation explain the desktop behavior. Provider and
 appearance choices affect only the demo. Small screens use scrollable navigation

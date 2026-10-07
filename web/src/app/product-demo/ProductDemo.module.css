@@ -107,16 +107,6 @@
   line-height: 1.7;
   margin-bottom: 18px;
 }
-.demoBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  font-size: 12px;
-  color: var(--ink);
-}
 .demoBar button {
   background: transparent;
   border-color: transparent;
@@ -586,27 +576,8 @@
   margin: 12px 0;
   font-size: 11px;
 }
-.guide {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--ink);
-  color: var(--bg);
-  border-radius: 8px;
-  margin-bottom: 12px;
-  font-size: 12px;
-}
 .guide strong {
   margin-right: 12px;
-}
-.guide button {
-  background: none;
-  color: inherit;
-  border-color: transparent;
-  padding: 0 8px;
-  font-size: 20px;
 }
 .dialog {
   position: fixed;
@@ -817,16 +788,9 @@
   .status span:nth-child(2) {
     display: none;
   }
-  .demoBar {
-    gap: 3px;
-  }
   .demoBar > .actions {
     width: 100%;
     justify-content: flex-start;
-  }
-  .guide {
-    align-items: flex-start;
-    line-height: 1.6;
   }
   .cards {
     gap: 10px;
@@ -852,12 +816,4 @@
   .demo button {
     transition: none;
   }
-}
-/* Demo controls sit on the light marketing page, including in dark app preview. */
-.dark .demoBar {
-  --ink: #17191d;
-  --muted: #535e6c;
-  --panel: #fff;
-  --raised: #e4e7ec;
-  --line: #cfd5de;
 }

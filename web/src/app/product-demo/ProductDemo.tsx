@@ -150,7 +150,6 @@ export function ProductDemo() {
   const [question, setQuestion] = useState("stale");
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState("");
-  const [guided, setGuided] = useState(false);
   const [teammate, setTeammate] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [dark, setDark] = useState(false);
@@ -177,23 +176,6 @@ export function ProductDemo() {
   function closeDialog() {
     dialogRef.current?.close();
     setDialog(null);
-  }
-  function reset() {
-    setPage("Chat");
-    setAgentTab("Installed");
-    setSettingsTab("Providers");
-    setSearch("");
-    setApproved(false);
-    setProposal(false);
-    setProvider("Ollama");
-    setQuestion("stale");
-    setDraft("");
-    setNotice("Demo reset. All records are synthetic.");
-    setGuided(false);
-    setTeammate(false);
-    setInstalled(false);
-    setDark(false);
-    contentRef.current?.scrollTo({ top: 0 });
   }
   function inspectDevice(index: number) {
     const device = devices[index]!;
@@ -241,43 +223,6 @@ export function ProductDemo() {
       className={`${styles.demo} ${dark ? styles.dark : ""}`}
       aria-label="Interactive OpenAdminOS product demo"
     >
-      <div className={styles.demoBar}>
-        <span>
-          <span className={styles.liveDot} /> Interactive demo{" "}
-          <span className={styles.muted}>· Synthetic data</span>
-        </span>
-        <div className={styles.actions}>
-          <button
-            onClick={() => {
-              reset();
-              setGuided(true);
-            }}
-          >
-            Try a walkthrough
-          </button>
-          <button onClick={reset} aria-label="Reset interactive demo">
-            Reset ↺
-          </button>
-        </div>
-      </div>
-      {guided && (
-        <div className={styles.guide}>
-          <span>
-            <strong>{approved ? "3 / 3" : proposal ? "2 / 3" : "1 / 3"}</strong>{" "}
-            {approved
-              ? "Review complete. No tenant was changed."
-              : proposal
-                ? "Inspect the targets, then try typed confirmation."
-                : "Start with the evidence. Select a device or prepare a proposal."}
-          </span>
-          <button
-            onClick={() => setGuided(false)}
-            aria-label="Close walkthrough"
-          >
-            ×
-          </button>
-        </div>
-      )}
       <div className={styles.shell}>
         <aside className={styles.sidebar}>
           <div className={styles.logo}>
