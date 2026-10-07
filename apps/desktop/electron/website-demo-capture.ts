@@ -290,7 +290,7 @@ export async function captureWebsiteDemo(
         click: "__tenant_menu__",
       },
     ]) {
-      if (only && screen.id !== only) continue;
+      if (only && !only.split(",").includes(screen.id)) continue;
       window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
       window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -460,7 +460,7 @@ async function captureOfficeMotion(window: BrowserWindow, outDir: string) {
     );
     const start = Date.now();
     let frames = 0;
-    while (Date.now() - start < 32000) {
+    while (Date.now() - start < 76000) {
       const frame = await window.webContents.capturePage(rect);
       await writeFile(
         join(framesDir, `${String(frames++).padStart(4, "0")}.jpg`),

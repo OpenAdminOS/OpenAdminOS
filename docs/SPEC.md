@@ -2020,7 +2020,11 @@ where supplied; monetary cost is not inferred.
 **The office.** The original SVG studio includes desks, lounge seating, and a TV game
 corner. Six personas occupy each of up to four floors. Reserved per-persona locations,
 aisle paths, interruptible directional walking, seated typing/controller poses, and
-foreground furniture give the room depth. Idle timing is independent. Actual run and
+foreground furniture give the room depth. Idle timing is independent. Idle teammates cycle through their reserved workstation,
+lounge seat, and game station. Decorative workstation visits do not mark a task as
+working; actual work and approval states override the idle circuit. Movement uses
+a slower distance-based walking pace and staggered 18–33 second destination
+intervals, leaving time to settle at each stop. Actual run and
 handoff events populate a stationary timestamped evidence strip and trigger a brief
 visit to the shared table; games remain decorative.
 Search and floor attention indicators route to distant teammates. Zoom/fit, expanded

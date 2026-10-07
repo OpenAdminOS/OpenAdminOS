@@ -493,7 +493,7 @@ function ScenePersona({
   };
 }) {
   const seed = index * 3; // Stable seat timing makes rehearsal captures repeatable.
-  const [idle, setIdle] = useState(seed % 2);
+  const [idle, setIdle] = useState(index % 3);
   const [walking, setWalking] = useState(false);
   const [meeting, setMeeting] = useState(false);
   useEffect(() => {
@@ -507,9 +507,10 @@ function ScenePersona({
   const [facing, setFacing] = useState("right");
   const element = useRef<HTMLDivElement>(null);
   const last = useRef<Point | undefined>(undefined);
-  const atDesk = label === "Working";
+  const working = label === "Working";
   const attention = label === "Needs approval" || label === "Needs attention";
-  const gaming = !meeting && !atDesk && !attention && idle % 2 === 1;
+  const atDesk = working || (!meeting && !attention && idle % 3 === 2);
+  const gaming = !meeting && !atDesk && !attention && idle % 3 === 1;
   const x = meeting
     ? 52 + (index % 3) * 10
     : atDesk || attention
@@ -523,13 +524,13 @@ function ScenePersona({
         ? 66 + Math.floor(index / 3) * 13
         : 29 + Math.floor(index / 3) * 13;
   useEffect(() => {
-    if (!motion || atDesk || attention) return;
+    if (!motion || working || attention || meeting) return;
     const timer = setInterval(
       () => setIdle((i) => i + 1),
-      12000 + (seed % 8) * 1700,
+      18000 + (seed % 8) * 2200,
     );
     return () => clearInterval(timer);
-  }, [motion, atDesk, attention, seed]);
+  }, [motion, working, attention, meeting, seed]);
   useLayoutEffect(() => {
     const el = element.current;
     if (!el) return;
@@ -553,7 +554,7 @@ function ScenePersona({
         : Math.hypot(p.x - points[i - 1].x, (p.y - points[i - 1].y) * 0.56),
     );
     const total = distances.reduce((a, b) => a + b, 0);
-    const duration = Math.min(6500, Math.max(700, total * 55));
+    const duration = Math.min(11000, Math.max(1400, total * 90));
     let distance = 0;
     const offsets = distances.map((d) => (distance += d) / total);
     const animation = el.animate(
@@ -602,7 +603,7 @@ function ScenePersona({
   return (
     <div
       ref={element}
-      className={`scene-persona-position ${walking ? "is-walking" : "is-sitting"} ${atDesk ? "is-working" : ""} ${gaming ? "is-gaming" : ""}`}
+      className={`scene-persona-position ${walking ? "is-walking" : "is-sitting"} ${working ? "is-working" : ""} ${gaming ? "is-gaming" : ""}`}
       data-facing={facing}
       data-seat={`${meeting ? "meeting" : atDesk || attention ? "desk" : gaming ? "game" : "lounge"}-${index}`}
       style={

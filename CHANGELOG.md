@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Cycle idle teammates through workstations, sofa seats, and the game station in the desktop office and website recording, while preserving real task and approval states.
+
 - Show the full three-teammate office in the website preview, using the built app’s real movement with pause and reduced-motion support.
 
 - Remove preview labels from captured tenant fields and add clickable Dev Tenant and Customer Tenant choices that persist across page navigation.
