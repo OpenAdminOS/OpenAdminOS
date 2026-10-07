@@ -522,6 +522,7 @@ interface ScreenshotRegistryEntry {
 function seedScreenshotCaptureState(userDataDir: string): void {
   if (!isScreenshotCaptureLaunch) return;
   mkdirSync(userDataDir, { recursive: true });
+  const isWebsiteCapture = process.env.OPENADMINOS_WEBSITE_CAPTURE === "1";
   const now = new Date().toISOString();
   const entries = loadScreenshotRegistryEntries();
   const installedSlugs = new Set([
@@ -570,7 +571,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
             startedAt: now,
             providerId: "ollama",
             model: "screenshot-local-model-with-a-deliberately-long-identifier",
-            tenantId: "contoso-demo-tenant",
+            tenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             summary: "Write plan is ready for review.",
             steps: [],
             logs: [],
@@ -606,15 +607,19 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         ],
         tenants: [
           {
-            id: "contoso-demo-tenant",
-            displayName: "Contoso Demo — European Endpoint Administration and Security",
-            username: "admin@contoso-demo.invalid",
-            homeAccountId: "contoso-demo-home-account",
+            id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
+            displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo — European Endpoint Administration and Security",
+            username: isWebsiteCapture ? "admin@contoso.invalid" : "admin@contoso-demo.invalid",
+            homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
             entraTier: "p2",
           },
+          ...(isWebsiteCapture ? [
+            { id: "website-dev", displayName: "Dev Tenant", username: "admin@dev.invalid", homeAccountId: "website-dev-account", addedAt: now, entraTier: "p2" },
+            { id: "website-customer", displayName: "Customer Tenant", username: "admin@customer.invalid", homeAccountId: "website-customer-account", addedAt: now, entraTier: "p2" },
+          ] : []),
         ],
-        activeTenantId: "contoso-demo-tenant",
+        activeTenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
         registryInstallCountsEnabled: false,
       },
       null,

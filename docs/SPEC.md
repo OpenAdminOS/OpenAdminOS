@@ -159,10 +159,13 @@ settings sections, agent details, and selected dialogs navigate between those
 screens. The website must not re-create or approximate the desktop interface in
 HTML. Actions not represented by a captured screen explain that they require the
 desktop app; they do not simulate a successful write, installation, or connection.
-No external demo label, walkthrough, or reset toolbar is shown. Screenshots keep
+No external preview label, walkthrough, or reset toolbar is shown. The tenant
+selector offers Contoso, Dev Tenant, and Customer Tenant. Selecting a tenant
+preserves the current page and uses that tenant’s real captures throughout
+navigation. Tenant names and account identifiers use plain customer labels. Screenshots keep
 the actual app aspect ratio. Small screens can pan within the preview instead of
 receiving a different invented mobile UI. Screenshot transitions respect reduced
-motion. The original static screenshot remains the no-JavaScript fallback.
+motion. The current Contoso Chat capture is also the no-JavaScript fallback.
 The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API and total release
 asset downloads across all releases (both revalidated hourly), plus the community

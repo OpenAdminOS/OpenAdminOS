@@ -34,7 +34,7 @@ function destination(hotspot: Hotspot, current: string): string | undefined {
   };
   if (commands[label]) return commands[label];
   if (agentTargets[label]) return agentTargets[label];
-  if (label.startsWith("CS Contoso")) return "tenants";
+  if (label === "Manage") return "tenants";
   if (label.startsWith("Quick search")) return "quick-search";
   if (label.startsWith("Workspaces Saved")) return "workspaces";
   if (label.startsWith("Connectors External")) return "connectors";
@@ -109,6 +109,7 @@ function destination(hotspot: Hotspot, current: string): string | undefined {
 /** Actual Electron captures with DOM-measured hit areas. No re-created app chrome. */
 export function ProductDemo() {
   const [active, setActive] = useState("chat");
+  const [tenantMenu, setTenantMenu] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -127,7 +128,9 @@ export function ProductDemo() {
     [],
   );
 
-  function show(id: string, remember = true) {
+  function show(id: string, remember = true, tenant = screen.tenant) {
+    if (tenant !== "contoso" && !id.includes("--")) id = `${id}--${tenant}`;
+    setTenantMenu(false);
     if (!screens.has(id) || id === active) return;
     const token = ++request.current;
     setPending(id);
@@ -148,10 +151,18 @@ export function ProductDemo() {
     image.src = `/product-demo/${id}.png`;
   }
   function back() {
-    show(history.current.pop() ?? "chat", false);
+    if (tenantMenu) {
+      setTenantMenu(false);
+      return;
+    }
+    show(history.current.pop() ?? "chat", false, "contoso");
   }
   function activate(hotspot: Hotspot) {
-    const target = destination(hotspot, active);
+    if (/admin@(contoso|dev|customer)\.invalid/.test(hotspot.label)) {
+      setTenantMenu(!tenantMenu);
+      return;
+    }
+    const target = destination(hotspot, screen.baseId);
     if (target) {
       show(target);
       return;
@@ -174,6 +185,12 @@ export function ProductDemo() {
     );
   }
 
+  const menu = screens.get(
+    screen.tenant === "contoso"
+      ? "tenant-menu"
+      : `tenant-menu--${screen.tenant}`,
+  );
+  const bounds = menu?.menuBounds;
   return (
     <section
       id="product-demo"
@@ -207,6 +224,7 @@ export function ProductDemo() {
           <div
             className={styles.controls}
             aria-label={`${screen.label} controls`}
+            inert={tenantMenu}
           >
             {screen.hotspots.map((hotspot, index) => (
               <button
@@ -226,6 +244,58 @@ export function ProductDemo() {
               />
             ))}
           </div>
+          {tenantMenu && menu && bounds && (
+            <div className={styles.tenantLayer}>
+              <button
+                autoFocus
+                className={styles.dismiss}
+                aria-label="Close tenant selector"
+                onClick={() => setTenantMenu(false)}
+              />
+              <img
+                src={`/product-demo/${menu.id}.png`}
+                alt=""
+                className={styles.menuScreenshot}
+                style={{
+                  clipPath: `inset(${bounds.y}% ${100 - bounds.x - bounds.width}% ${100 - bounds.y - bounds.height}% ${bounds.x}%)`,
+                }}
+              />
+              {menu.hotspots
+                .filter(
+                  (h) =>
+                    h.y >= bounds.y &&
+                    h.y < bounds.y + bounds.height &&
+                    h.x >= bounds.x &&
+                    h.x < bounds.x + bounds.width,
+                )
+                .map((hotspot, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    className={styles.hotspot}
+                    aria-label={hotspot.label}
+                    disabled={hotspot.disabled || pending !== null}
+                    style={{
+                      left: `${hotspot.x}%`,
+                      top: `${hotspot.y}%`,
+                      width: `${hotspot.width}%`,
+                      height: `${hotspot.height}%`,
+                    }}
+                    onClick={() => {
+                      const tenant =
+                        /admin@(contoso|dev|customer)\.invalid/.exec(
+                          hotspot.label,
+                        )?.[1];
+                      if (tenant) show(screen.baseId, true, tenant);
+                      else {
+                        setTenantMenu(false);
+                        activate(hotspot);
+                      }
+                    }}
+                  />
+                ))}
+            </div>
+          )}
           {pending && (
             <div className={styles.loading} role="status">
               Opening {screens.get(pending)?.label}…

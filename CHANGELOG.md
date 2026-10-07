@@ -6,13 +6,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Add an interactive, synthetic-data desktop demo to the homepage with clickable navigation, device evidence, sample change review, agent browsing, and provider/appearance previews.
+- Add a clickable desktop preview to the homepage using actual app captures for navigation, agent browsing, change review, and Settings.
 
 - Add a saved light/dark appearance setting and an interactive monochrome design reference.
 
 ### Changed
 
-- Replace the recreated homepage demo with real screenshots of the built desktop app and control-aligned clickable navigation.
+- Remove preview labels from captured tenant fields and add clickable Dev Tenant and Customer Tenant choices that persist across page navigation.
+
+- Replace the recreated homepage preview with real screenshots of the built desktop app and control-aligned clickable navigation.
 
 - Remove the label, walkthrough, and reset toolbar above the homepage app preview.
 

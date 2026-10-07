@@ -1,6 +1,6 @@
 /** Development-only capture, called behind the unpackaged screenshot guard. */
 import type { BrowserWindow } from "electron";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 type CaptureRoute = (
@@ -28,6 +28,7 @@ export async function captureWebsiteDemo(
       label: "Chat",
       wait: ["What do you want to inspect?"],
       prepare: "chat-empty" as const,
+      click: "Devices",
     },
     { id: "team", route: "/office", label: "Agent Team", wait: ["Agent Team"] },
     {
@@ -62,6 +63,7 @@ export async function captureWebsiteDemo(
       wait: ["Write operation paused for confirmation"],
       prepare: "write-confirmation" as const,
     },
+    { id: "fleet", route: "/fleet", label: "Fleet", wait: ["Fleet"] },
     { id: "cache", route: "/cache", label: "Cache", wait: ["Cache"] },
     {
       id: "settings",
@@ -233,57 +235,112 @@ export async function captureWebsiteDemo(
   await window.webContents.executeJavaScript(
     'localStorage.setItem("openadminos:appearance:v1","light");window.dispatchEvent(new StorageEvent("storage",{key:"openadminos:appearance:v1"}));',
   );
-  const manifest = [];
-  for (const screen of screens) {
-    await window.webContents.executeJavaScript(
-      `document.querySelector('.fixed button[aria-label="Close"]')?.click()`,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    await navigate(screen.route, screen.wait, screen.prepare);
-    const heading =
-      screen.route === "/workspaces"
-        ? "No workspace selected"
-        : screen.route === "/connectors"
-          ? "Connector routing"
-          : screen.route.startsWith("/settings")
-            ? "Settings"
-            : screen.route.startsWith("/agents/hub") ||
-                screen.route === "/agents/schedules" ||
-                screen.route === "/agents"
-              ? "Agents"
-              : screen.route.startsWith("/runs/")
-                ? "Offboarding agent"
-                : screen.wait[0];
-    await window.webContents.executeJavaScript(
-      `(async () => { const start=Date.now(); while(Date.now()-start<8000) { const ready=${JSON.stringify(screen.route)} === '/chat' ? !!document.querySelector('#intune-chat-composer') : [...document.querySelectorAll('h1,h2')].some(h=>(h.textContent||'').includes(${JSON.stringify(heading)})); if(ready)return;await new Promise(r=>setTimeout(r,100)); } throw new Error('Screen heading not ready'); })()`,
-    );
-    if (screen.click) {
-      const missing = await window.webContents.executeJavaScript(
-        `(() => { const button = [...document.querySelectorAll('button')].find(b => (b.innerText || '').trim().replace(/\\s+/g,' ').startsWith( ${JSON.stringify(screen.click)}) || b.getAttribute('aria-label') === ${JSON.stringify(screen.click)}); if (!button) return [...document.querySelectorAll('button')].map(b=>b.textContent).join(' | '); button.click(); return null; })()`,
-      );
-      if (missing) throw new Error(`Missing ${screen.click}: ${missing}`);
-      await new Promise((resolve) => setTimeout(resolve, 350));
+  const only = process.env.OPENADMINOS_WEBSITE_CAPTURE_ONLY;
+  const manifest = only
+    ? JSON.parse(await readFile(join(outDir, "screens.json"), "utf8"))
+    : [];
+  for (const tenant of [
+    { key: "contoso" },
+    { key: "dev" },
+    { key: "customer" },
+  ]) {
+    if (tenant.key !== "contoso") {
+      await window.webContents.executeJavaScript(`(() => {
+        if (!document.querySelector('[role="menu"]')) document.querySelector('button[aria-haspopup="menu"]')?.click();
+      })()`);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await window.webContents.executeJavaScript(`(() => {
+        const choice = [...document.querySelectorAll('button[role="menuitem"]')].find(b => b.textContent.includes(${JSON.stringify(`admin@${tenant.key}.invalid`)}));
+        if (!choice) throw new Error('Tenant choice missing');
+        choice.click();
+      })()`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    await window.webContents.executeJavaScript("document.fonts.ready");
-    window.webContents.invalidate();
-    await window.webContents.capturePage();
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const hotspots = await window.webContents.executeJavaScript(
-      `(${readHotspots.toString()})()`,
-    );
-    const screenshot = await window.webContents.capturePage();
-    await writeFile(join(outDir, `${screen.id}.png`), screenshot.toPNG());
-    manifest.push({
-      id: screen.id,
-      route: screen.route,
-      label: screen.label,
-      width: screenshot.getSize().width,
-      height: screenshot.getSize().height,
-      hotspots,
-    });
-    console.log(
-      `[website-demo] captured ${screen.id}: ${hotspots.length} controls`,
-    );
+    for (const screen of [
+      ...screens,
+      {
+        id: "tenant-menu",
+        route: "/chat",
+        label: "Tenant selector",
+        wait: ["Chat"],
+        click: "__tenant_menu__",
+      },
+    ]) {
+      if (only && screen.id !== only) continue;
+      window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+      window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await window.webContents.executeJavaScript(
+        `document.querySelector('.fixed button[aria-label="Close"]')?.click()`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      await navigate(screen.route, screen.wait, screen.prepare);
+      const heading =
+        screen.route === "/workspaces"
+          ? "No workspace selected"
+          : screen.route === "/connectors"
+            ? "Connector routing"
+            : screen.route.startsWith("/settings")
+              ? "Settings"
+              : screen.route.startsWith("/agents/hub") ||
+                  screen.route === "/agents/schedules" ||
+                  screen.route === "/agents"
+                ? "Agents"
+                : screen.route.startsWith("/runs/")
+                  ? "Offboarding agent"
+                  : screen.wait[0];
+      await window.webContents.executeJavaScript(
+        `(async () => { const start=Date.now(); while(Date.now()-start<8000) { const ready=${JSON.stringify(screen.route)} === '/chat' ? !!document.querySelector('#intune-chat-composer') : [...document.querySelectorAll('h1,h2')].some(h=>(h.textContent||'').includes(${JSON.stringify(heading)})); if(ready)return;await new Promise(r=>setTimeout(r,100)); } throw new Error('Screen heading not ready'); })()`,
+      );
+      if (screen.click === "__tenant_menu__") {
+        await window.webContents.executeJavaScript(
+          `document.querySelector('button[aria-haspopup="menu"]')?.click()`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      } else if (screen.click) {
+        const missing = await window.webContents.executeJavaScript(
+          `(() => { const button = [...document.querySelectorAll('button')].find(b => (b.innerText || '').trim().replace(/\\s+/g,' ').startsWith( ${JSON.stringify(screen.click)}) || b.getAttribute('aria-label') === ${JSON.stringify(screen.click)}); if (!button) return [...document.querySelectorAll('button')].map(b=>b.textContent).join(' | '); button.click(); return null; })()`,
+        );
+        if (missing) throw new Error(`Missing ${screen.click}: ${missing}`);
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+      await window.webContents.executeJavaScript("document.fonts.ready");
+      window.webContents.invalidate();
+      await window.webContents.capturePage();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const hotspots = await window.webContents.executeJavaScript(
+        `(${readHotspots.toString()})()`,
+      );
+      const menuBounds =
+        screen.id === "tenant-menu"
+          ? await window.webContents.executeJavaScript(
+              `(() => { const r=document.querySelector('[role="menu"]').getBoundingClientRect(); return {x:r.x/innerWidth*100,y:r.y/innerHeight*100,width:r.width/innerWidth*100,height:r.height/innerHeight*100}; })()`,
+            )
+          : null;
+      const screenshot = await window.webContents.capturePage();
+      const id =
+        tenant.key === "contoso" ? screen.id : `${screen.id}--${tenant.key}`;
+      await writeFile(join(outDir, `${id}.png`), screenshot.toPNG());
+      const entry = {
+        id,
+        baseId: screen.id,
+        tenant: tenant.key,
+        menuBounds,
+        route: screen.route,
+        label: screen.label,
+        width: screenshot.getSize().width,
+        height: screenshot.getSize().height,
+        hotspots,
+      };
+      const previous = manifest.findIndex(
+        (item: { id: string }) => item.id === id,
+      );
+      if (previous >= 0) manifest[previous] = entry;
+      else manifest.push(entry);
+      console.log(
+        `[website-demo] captured ${screen.id}: ${hotspots.length} controls`,
+      );
+    }
   }
   await writeFile(
     join(outDir, "screens.json"),

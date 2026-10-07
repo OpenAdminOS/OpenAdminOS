@@ -325,8 +325,8 @@ export default async function HomePage() {
           <ProductDemo />
           <noscript>
             <style>{`#product-demo { display: none; }`}</style>
-            <img src="/openadminos-app.png" width={1600} height={1000} alt="OpenAdminOS desktop with Chat, tenant scope, and local provider" className="h-auto w-full rounded-xl" />
-            <p className="mt-4 text-center text-sm text-brand-muted">Enable JavaScript to explore the interactive demo, or download the desktop app.</p>
+            <img src="/product-demo/chat.png" width={1600} height={1000} alt="OpenAdminOS desktop with Chat, tenant scope, and local provider" className="h-auto w-full rounded-xl" />
+            <p className="mt-4 text-center text-sm text-brand-muted">Enable JavaScript to explore the app, or download the desktop app.</p>
           </noscript>
         </section>
 

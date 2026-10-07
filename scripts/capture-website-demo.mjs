@@ -56,7 +56,7 @@ try {
     ["apps/desktop", ...(process.platform === "linux" ? ["--no-sandbox"] : [])],
     { cwd: root, env, stdio: "inherit" },
   );
-  const timeout = setTimeout(() => child.kill("SIGTERM"), 180000);
+  const timeout = setTimeout(() => child.kill("SIGTERM"), 600000);
   try {
     await new Promise((res, rej) => {
       child.once("error", rej);
