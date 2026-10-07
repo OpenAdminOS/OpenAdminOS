@@ -4,6 +4,7 @@ import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
+import { captureWebsiteDemo } from "./website-demo-capture.js";
 import {
   app,
   BrowserWindow,
@@ -968,6 +969,14 @@ async function runScreenshotCapture(): Promise<void> {
   if (process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
     await runOfficeSmoke(window, screenshotCaptureOutDir);
     await runOfficeRehearsal(window,screenshotCaptureOutDir,async()=>{officeRehearsalRevision=1;await store.tickOffice();});
+    app.exit(0);
+    return;
+  }
+
+  if (process.env.OPENADMINOS_WEBSITE_CAPTURE === "1") {
+    await captureWebsiteDemo(window, screenshotCaptureOutDir, (route, waitFor, prepare) =>
+      runScreenshotCaptureStep(window, { kind: "route", route, waitFor, prepare, reducedMotion: true }),
+    );
     app.exit(0);
     return;
   }

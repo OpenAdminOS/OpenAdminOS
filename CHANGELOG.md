@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Replace the recreated homepage demo with real screenshots of the built desktop app and control-aligned clickable navigation.
+
 - Remove the label, walkthrough, and reset toolbar above the homepage app preview.
 
 - Restore the prior light-mode landing page, reverting the experimental workflow sections and revised page layout.

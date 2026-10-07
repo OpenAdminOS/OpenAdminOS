@@ -1,27 +1,28 @@
-# Interactive product demo
+# Clickable desktop screenshots
 
-The homepage product area is a scripted, in-memory simulation of the monochrome desktop app. The rest of the restored landing-page layout is unchanged.
+The homepage preview displays actual screenshots from the built Electron app. It does not reimplement the app's layout or controls in HTML.
 
-## Interaction contract
+## Capture
 
-- Eight sidebar areas: Chat, Agent Team, Agents, Changes, Cache, Settings, Workspaces, and Connectors.
-- Chat opens on a completed device investigation with synthetic names and evidence. Device rows open details. The composer always identifies its response as scripted.
-- Agents exposes Installed, Hub, Schedules, and Run history. Search filters the sample catalog; adding a hub item only updates in-memory demo state.
-- The core journey is evidence, proposal, typed confirmation, then sample run history. Wrong or empty confirmation phrases cannot complete the simulation. Completion never claims a real retirement occurred.
-- Agent Team supports a sample teammate. Settings switches the provider disclosure and the demo theme. Connector details explain desktop behavior without sign-in or delivery.
-- Reloading the page clears all demo state. The app shell has no external demo label, walkthrough, or reset toolbar. There are no credentials, persisted records, provider requests, Graph operations, installations, or background jobs.
-- Buttons, inputs, native disclosures, and native dialogs provide real keyboard interactions. Escape closes dialogs and returns focus. Reduced motion disables transitions. On small screens the navigation and tables scroll within the demo.
-- With JavaScript disabled, the interactive shell is hidden and the existing desktop screenshot remains visible.
+```sh
+npm run build -w @openadminos/desktop
+node scripts/capture-website-demo.mjs
+```
 
-## Visual reference
+The capture script serves the compiled `apps/desktop/dist` assets on a temporary loopback port, launches Electron with the existing isolated screenshot fixture, captures the app's pages and selected dialogs, then closes the process and deletes its temporary user profile. It does not use the operator's app profile. Only the unpackaged screenshot harness can invoke this capture path.
 
-Desktop screenshots in `docs/screenshots/app/brand-light-*.png` and `docs/mockups/22-monochrome-brand.html` provide the reference. Responsive HTML replaces test-run screenshot text and makes the controls usable without a screen-coordinate hotspot map.
+`web/public/product-demo/*.png` are unedited Electron `capturePage()` outputs. `screens.json` records each image's dimensions and the DOM bounds and accessible labels of its visible controls. Hidden or occluded controls are excluded. No tenant or model credentials are required.
 
-- [Desktop demo](../screenshots/web/interactive-demo-desktop.png)
-- [Mobile demo](../screenshots/web/interactive-demo-mobile.png)
+## Website behavior
 
-## Verification
+- Sidebar navigation, agent tabs and details, settings sections, change tabs, and captured dialogs switch between the real screenshots.
+- Buttons are transparent overlays at the recorded percentage coordinates, with hover/focus feedback. The image's aspect ratio is preserved.
+- Unsupported actions explain that the desktop app is required. The site never reports that a tenant change or installation succeeded.
+- No extra label, walkthrough, or reset toolbar is added above the app.
+- On narrow screens, the desktop canvas pans horizontally within its container. It is not replaced with a redesigned mobile app.
+- Only the initial screenshot loads immediately. A requested screenshot is loaded before its hotspots become active; failures provide recovery.
+- JavaScript-disabled visitors see the existing static desktop screenshot.
 
-Run `npm --prefix web run typecheck` and `npm --prefix web run build`. Start the production site with `npm --prefix web run start -- --port 3017` and open `http://localhost:3017/#product-demo`.
+## Validation
 
-Browser checks cover every sidebar area, catalog search and installation, teammate creation, local/hosted disclosure, dark appearance, valid and invalid confirmation, Escape/focus restoration, completion history, and the no-JavaScript fallback. Layouts were checked at 1280px and 375px. Reduced-motion styling was checked in an emulated reduced-motion context. The proposal-to-history journey made no fetch or XHR requests. Production browser checks reported no console errors.
+Build the desktop before capturing. Then run `npm --prefix web run typecheck` and `npm --prefix web run build`. Verify the sidebar, settings tabs, detail/modal navigation, keyboard focus, and image alignment at desktop and mobile widths. Confirm that every navigation target exists and every hotspot stays within its image bounds.

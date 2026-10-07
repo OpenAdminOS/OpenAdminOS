@@ -152,20 +152,17 @@ copyable Build your own Agent prompts grouped by read investigations, confirmed
 write plans, and connector-backed delivery examples.
 The marketing homepage retains its light-mode hero, traction, testimonials,
 how-it-works, write-gate, benchmarks, open-source, FAQ, and download sections.
-The hero product area is an interactive simulation of the desktop UI, replacing
-the static screenshot. It exposes Chat, Agent Team, Agents (installed, hub,
-schedules, and run history), Changes, Cache, Settings, Workspaces, and Connectors.
-The initial screen shows a completed synthetic device investigation. Visitors
-can inspect evidence, prepare a sample proposal, and try typed confirmation;
-completion explicitly states that no operation was sent. Native dialogs support
-Escape and focus restoration. All demo state is in-memory and resets on reload. The preview starts directly
-with the app shell, without a demo toolbar, walkthrough, or reset control. The demo never imports desktop IPC, authenticates, connects to Graph
-or a provider, sends prompts, installs agents, or schedules work. Controls for
-capabilities outside the simulation explain the desktop behavior. Provider and
-appearance choices affect only the demo. Small screens use scrollable navigation
-and tables; motion respects reduced-motion preferences. The demo reuses the
-monochrome desktop visual language, with synthetic content rather than test-run
-screenshots. The existing screenshot remains the no-JavaScript fallback.
+The hero product area uses unedited screenshots captured from the built Electron
+app with an isolated synthetic-data profile. Invisible, keyboard-accessible
+hotspots are measured from the actual controls in each captured screen. Sidebar,
+settings sections, agent details, and selected dialogs navigate between those
+screens. The website must not re-create or approximate the desktop interface in
+HTML. Actions not represented by a captured screen explain that they require the
+desktop app; they do not simulate a successful write, installation, or connection.
+No external demo label, walkthrough, or reset toolbar is shown. Screenshots keep
+the actual app aspect ratio. Small screens can pan within the preview instead of
+receiving a different invented mobile UI. Screenshot transitions respect reduced
+motion. The original static screenshot remains the no-JavaScript fallback.
 The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API and total release
 asset downloads across all releases (both revalidated hourly), plus the community
@@ -176,7 +173,7 @@ agent display metadata (names, descriptions, mode, scopes) is curated in
 `web/src/lib/stats/summary.ts` because repo-root `agents/index.json` is not
 available inside the `web/` Vercel build. Historical demo video assets are rendered offline from the top-level `remotion/`
 project (not part of the npm workspace, never installed on Vercel) and retained
-under `web/public/videos/`. The current homepage uses the interactive simulation
+under `web/public/videos/`. The current homepage uses the clickable screenshot viewer
 instead. Its styling follows the graphite/off-white desktop tokens and preserves
 the sidebar, tenant context, provider disclosure, and status-strip conventions.
 See `docs/brand/interactive-product-demo.md` for the interaction contract and
