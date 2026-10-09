@@ -1,9 +1,9 @@
 {
-  "updatedAt": "2026-10-07T15:00:47.917Z",
+  "updatedAt": "2026-10-09T16:00:47.206Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 26,
-      "installs7d": 2
+      "installs": 27,
+      "installs7d": 1
     },
     "intune-device-posture-auditor": {
       "installs": 6,
@@ -19,7 +19,7 @@
     },
     "os-update-posture": {
       "installs": 17,
-      "installs7d": 1
+      "installs7d": 0
     },
     "tenant-health-report": {
       "installs": 25,
@@ -51,7 +51,7 @@
     },
     "stale-guest-cleanup": {
       "installs": 16,
-      "installs7d": 2
+      "installs7d": 1
     },
     "tenant-change-audit": {
       "installs": 13,
