@@ -14,14 +14,14 @@ const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
 
 export function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#070709] text-white">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-brand-bg text-brand-ink">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_72%)]"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(23,25,29,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(23,25,29,0.03)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_72%)]"
       />
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#070709]"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg"
       >
         Skip to content
       </a>
@@ -38,7 +38,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
           />
           OpenAdminOS
         </Link>
-        <nav className="hidden items-center gap-6 text-sm text-white/55 md:flex">
+        <nav className="hidden items-center gap-6 text-sm text-brand-muted md:flex">
           {MARKETING_NAV_ITEMS.map((item) => (
             <Link
               key={item.href}
@@ -47,8 +47,8 @@ export function MarketingShell({ children }: { children: ReactNode }) {
               rel={item.external ? "noreferrer" : undefined}
               className={
                 item.primary
-                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
-                  : "transition hover:text-white"
+                  ? "rounded-md bg-brand-ink px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-brand-ink/90"
+                  : "transition hover:text-brand-ink"
               }
             >
               {item.label}
@@ -67,33 +67,33 @@ export function MarketingShell({ children }: { children: ReactNode }) {
       </main>
 
       <footer className="relative z-10 flex flex-col items-center gap-2 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-white/40">
+        <span className="text-xs text-brand-muted">
           © {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Privacy
           </Link>
           {" · "}
           <Link
             href="/terms"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Terms
           </Link>
           {" · "}
           <Link
             href="/legal-notice"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Legal notice
           </Link>
           {" · "}
           <Link
             href="/examples"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Examples
           </Link>
@@ -102,7 +102,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             GitHub
           </Link>
@@ -111,12 +111,12 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             href={LINKEDIN_URL}
             target="_blank"
             rel="noreferrer"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             LinkedIn
           </Link>
         </span>
-        <p className="max-w-2xl text-balance text-[11px] leading-5 text-white/30">
+        <p className="max-w-2xl text-balance text-[11px] leading-5 text-brand-muted">
           Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks of the
           Microsoft group of companies. OpenAdminOS is not affiliated with,
           endorsed by, or sponsored by Microsoft.
@@ -137,13 +137,13 @@ export function PageIntro({
 }) {
   return (
     <section className="max-w-3xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
         {eyebrow}
       </p>
       <h1 className="mt-3 text-balance text-4xl font-semibold tracking-tight sm:text-6xl">
         {title}
       </h1>
-      <p className="mt-5 text-base leading-7 text-white/62 sm:text-lg">
+      <p className="mt-5 text-base leading-7 text-brand-muted sm:text-lg">
         {description}
       </p>
     </section>
@@ -162,12 +162,12 @@ export function TextCard({
   return (
     <section
       id={id}
-      className="rounded-lg border border-white/10 bg-white/[0.035] p-5"
+      className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.035] p-5"
     >
-      <h2 className="text-lg font-semibold tracking-tight text-white">
+      <h2 className="text-lg font-semibold tracking-tight text-brand-ink">
         {title}
       </h2>
-      <div className="mt-3 text-sm leading-6 text-white/60">{children}</div>
+      <div className="mt-3 text-sm leading-6 text-brand-muted">{children}</div>
     </section>
   );
 }

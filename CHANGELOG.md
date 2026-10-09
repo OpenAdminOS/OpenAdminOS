@@ -6,11 +6,33 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Add a clickable desktop preview to the homepage using actual app captures for navigation, agent browsing, change review, and Settings.
+
+- Add a saved light/dark appearance setting and an interactive monochrome design reference.
+
 ### Changed
+
+- Cycle idle teammates through workstations, sofa seats, and the game station in the desktop office and website recording, while preserving real task and approval states.
+
+- Show the full three-teammate office in the website preview, using the built app’s real movement with pause and reduced-motion support.
+
+- Remove preview labels from captured tenant fields and add clickable Dev Tenant and Customer Tenant choices that persist across page navigation.
+
+- Replace the recreated homepage preview with real screenshots of the built desktop app and control-aligned clickable navigation.
+
+- Remove the label, walkthrough, and reset toolbar above the homepage app preview.
+
+- Restore the prior light-mode landing page, reverting the experimental workflow sections and revised page layout.
+
+- Switch the public website to off-white light mode with graphite controls, readable status colors and charts, and a matching light desktop preview.
+
+- Redesign the desktop UI and website branding with graphite/off-white colors, a vector OA monogram, compact shared controls, and refreshed installer, app, and social icons while retaining semantic status colors and approval safeguards.
 
 ### Removed
 
 ### Fixed
+
+- Keep the website hero screenshot borderless with a soft shadow; strengthen animated change-review borders, with visible device rows before playback and solid confirmation states in light mode.
 
 ### Security
 

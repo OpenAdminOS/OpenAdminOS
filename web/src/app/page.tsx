@@ -9,7 +9,7 @@ import {
 } from "~/lib/benchmarks/data";
 import { getAgentStatsSummary } from "~/lib/stats/summary";
 
-import { AmbientVideo } from "./AmbientVideo";
+import { ProductDemo } from "./product-demo/ProductDemo";
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
 import { getGitHubDownloadCount } from "./github-downloads";
 import { getGitHubRepoStats } from "./github-repo";
@@ -164,19 +164,19 @@ export default async function HomePage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#070709] text-white">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-brand-bg text-brand-ink">
       <JsonLd data={structuredData} />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(23,25,29,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(23,25,29,0.035)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-ink/30 to-transparent"
       />
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#070709]"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg"
       >
         Skip to content
       </a>
@@ -194,7 +194,7 @@ export default async function HomePage() {
           />
           OpenAdminOS
         </Link>
-        <nav className="hidden items-center gap-6 text-sm text-white/55 md:flex">
+        <nav className="hidden items-center gap-6 text-sm text-brand-muted md:flex">
           {HOME_NAV_ITEMS.map((item) => (
             <Link
               key={item.href}
@@ -203,8 +203,8 @@ export default async function HomePage() {
               rel={item.external ? "noreferrer" : undefined}
               className={
                 item.primary
-                  ? "rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-[#070709] transition hover:bg-white/90"
-                  : "transition hover:text-white"
+                  ? "rounded-md bg-brand-ink px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-brand-ink/90"
+                  : "transition hover:text-brand-ink"
               }
             >
               {item.label}
@@ -224,7 +224,7 @@ export default async function HomePage() {
             href={latestRelease.releaseNotesUrl}
             target="_blank"
             rel="noreferrer"
-            className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-wider text-white/70 transition hover:border-white/20 hover:text-white"
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-brand-ink/10 bg-brand-ink/5 px-3 py-1 text-xs font-medium uppercase tracking-wider text-brand-muted transition hover:border-brand-ink/20 hover:text-brand-ink"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
             {latestRelease.version} — release notes
@@ -235,7 +235,7 @@ export default async function HomePage() {
             <span className="block">Run locally, approved by you.</span>
           </h1>
 
-          <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-white/60 sm:text-lg">
+          <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-brand-muted sm:text-lg">
             OpenAdminOS is an open-source desktop app for Intune and Entra
             admins. Agents investigate your tenant with local models, and every
             Graph change waits for your confirmation.
@@ -245,7 +245,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.macosDmgUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(23,25,29,0.25)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
               >
                 <svg
                   aria-hidden
@@ -258,7 +258,7 @@ export default async function HomePage() {
               </a>
               <Link
                 href="/download#macos-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
               >
                 Downloads the DMG. PKG is available for managed rollout.
               </Link>
@@ -266,7 +266,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.linuxAppImageUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(23,25,29,0.25)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
               >
                 <img
                   src="/linux.svg"
@@ -274,13 +274,13 @@ export default async function HomePage() {
                   aria-hidden
                   width={16}
                   height={16}
-                  className="h-4 w-4"
+                  className="h-4 w-4 invert"
                 />
                 Download for Linux
               </a>
               <Link
                 href="/download#linux-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
               >
                 AppImage direct. DEB/RPM available.
               </Link>
@@ -288,7 +288,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.windowsExeUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-white px-4 text-sm font-semibold text-[#0a0a0c] shadow-[0_8px_30px_-4px_rgba(255,255,255,0.25)] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(23,25,29,0.25)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
               >
                 <svg
                   aria-hidden
@@ -301,20 +301,20 @@ export default async function HomePage() {
               </a>
               <Link
                 href="/download#windows-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-white/38 underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
               >
                 Signed per-user installer. No admin rights needed.
               </Link>
             </div>
           </div>
 
-          <p className="mt-3 text-[11.5px] text-white/40">
+          <p className="mt-3 text-[11.5px] text-brand-muted">
             Free and open-source. MIT licensed.{" "}
             <Link
               href={GITHUB_URL}
               target="_blank"
               rel="noreferrer"
-              className="underline-offset-4 hover:text-white/70 hover:underline"
+              className="underline-offset-4 hover:text-brand-muted hover:underline"
             >
               github.com/OpenAdminOS/OpenAdminOS
             </Link>
@@ -322,22 +322,22 @@ export default async function HomePage() {
         </section>
 
         <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
-          <AmbientVideo
-            src="/videos/hero-demo.mp4"
-            poster="/videos/hero-demo-poster.jpg"
-            alt="OpenAdminOS agent run: manifest scopes, local run log, results, and a write-change diff awaiting confirmation"
-            className="aspect-video h-auto w-full rounded-xl object-cover drop-shadow-[0_40px_120px_rgba(140,140,255,0.18)] sm:rounded-2xl"
-          />
+          <ProductDemo />
+          <noscript>
+            <style>{`#product-demo { display: none; }`}</style>
+            <img src="/product-demo/chat.png" width={1600} height={1000} alt="OpenAdminOS desktop with Chat, tenant scope, and local provider" className="h-auto w-full rounded-xl" />
+            <p className="mt-4 text-center text-sm text-brand-muted">Enable JavaScript to explore the app, or download the desktop app.</p>
+          </noscript>
         </section>
 
-        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-white/10 bg-[#070709]/75 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
+        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-brand-ink/10 bg-brand-bg/75 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
           <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-x-6 gap-y-5 px-6 py-5 text-left sm:grid-cols-4 sm:px-10">
             {tractionItems.map((item) => (
               <div key={item.label} className="min-w-0">
-                <p className="font-mono text-2xl font-semibold tabular-nums text-white sm:text-3xl">
+                <p className="font-mono text-2xl font-semibold tabular-nums text-brand-ink sm:text-3xl">
                   {item.value}
                 </p>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
                   {item.label}
                 </p>
               </div>
@@ -352,9 +352,9 @@ export default async function HomePage() {
           {testimonials.map((item) => (
             <figure
               key={item.name}
-              className="flex flex-col justify-between rounded-lg border border-white/10 bg-white/[0.03] p-6 sm:p-8"
+              className="flex flex-col justify-between rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-6 sm:p-8"
             >
-              <blockquote className="text-lg leading-8 text-white/85 sm:text-xl sm:leading-9">
+              <blockquote className="text-lg leading-8 text-brand-ink/85 sm:text-xl sm:leading-9">
                 &ldquo;{item.quote}&rdquo;
               </blockquote>
               <figcaption className="mt-7 flex items-center gap-4">
@@ -364,18 +364,18 @@ export default async function HomePage() {
                   width="56"
                   height="56"
                   loading="lazy"
-                  className="h-14 w-14 rounded-full border border-white/10 object-cover"
+                  className="h-14 w-14 rounded-full border border-brand-ink/10 object-cover"
                 />
                 <div className="min-w-0">
                   <Link
                     href={item.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-base font-semibold text-white transition hover:text-sky-200"
+                    className="text-base font-semibold text-brand-ink transition hover:text-sky-800"
                   >
                     {item.name}
                   </Link>
-                  <p className="text-sm text-white/50">{item.role}</p>
+                  <p className="text-sm text-brand-muted">{item.role}</p>
                 </div>
               </figcaption>
             </figure>
@@ -384,7 +384,7 @@ export default async function HomePage() {
 
         <section className="w-full max-w-7xl py-20">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
               How it works
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -393,12 +393,12 @@ export default async function HomePage() {
           </div>
 
           <div className="mt-8 grid gap-3 lg:grid-cols-3">
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 sm:p-6">
-              <p className="font-mono text-2xl text-white/25">01</p>
+            <div className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4 sm:p-6">
+              <p className="font-mono text-2xl text-brand-muted">01</p>
               <h3 className="mt-5 text-base font-semibold">
                 Install from an open registry.
               </h3>
-              <p className="mt-3 text-sm leading-6 text-white/55">
+              <p className="mt-3 text-sm leading-6 text-brand-muted">
                 Each agent&apos;s manifest lists its Microsoft Graph scopes,
                 read or write mode, and model requirements before you install
                 it. Enterprises can point the app at a private registry; the
@@ -406,45 +406,45 @@ export default async function HomePage() {
               </p>
               <Link
                 href="/registry"
-                className="mt-4 inline-flex text-sm font-medium text-sky-200 underline-offset-4 transition hover:text-white hover:underline"
+                className="mt-4 inline-flex text-sm font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
               >
                 Browse the registry
               </Link>
             </div>
 
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 sm:p-6">
-              <p className="font-mono text-2xl text-white/25">02</p>
+            <div className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4 sm:p-6">
+              <p className="font-mono text-2xl text-brand-muted">02</p>
               <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <h3 className="text-base font-semibold">
                   Run it against your tenant.
                 </h3>
-                <code className="w-fit rounded border border-white/10 bg-black/35 px-2 py-1 font-mono text-[11px] text-white/50">
+                <code className="w-fit rounded border border-brand-ink/10 bg-brand-raised px-2 py-1 font-mono text-[11px] text-brand-muted">
                   ollama serve
                 </code>
               </div>
-              <p className="mt-3 text-sm leading-6 text-white/55">
+              <p className="mt-3 text-sm leading-6 text-brand-muted">
                 The app signs in with MSAL and reads tenant data through
                 Microsoft Graph. With a local model like Ollama, prompts and
                 tenant data stay on this device. Hosted providers are optional
                 and labeled before anything leaves.
               </p>
-              <p className="mt-3 font-mono text-[12px] leading-5 text-white/42">
+              <p className="mt-3 font-mono text-[12px] leading-5 text-brand-muted">
                 Investigate · Explain · Prioritize · Prepare changes
               </p>
               <Link
                 href="/llm-providers"
-                className="mt-4 inline-flex text-sm font-medium text-emerald-200 underline-offset-4 transition hover:text-white hover:underline"
+                className="mt-4 inline-flex text-sm font-medium text-emerald-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
               >
                 Compare model providers
               </Link>
             </div>
 
-            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4 sm:p-6">
-              <p className="font-mono text-2xl text-white/25">03</p>
+            <div className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4 sm:p-6">
+              <p className="font-mono text-2xl text-brand-muted">03</p>
               <h3 className="mt-5 text-base font-semibold">
                 Approve every change.
               </h3>
-              <p className="mt-3 text-sm leading-6 text-white/55">
+              <p className="mt-3 text-sm leading-6 text-brand-muted">
                 Read-only agents run autonomously. Write agents stop at a diff
                 of the proposed Graph change, and destructive operations require
                 typed confirmation. There is no trust-this-agent bypass.
@@ -455,41 +455,41 @@ export default async function HomePage() {
 
         <section
           id="safety"
-          className="grid w-full max-w-7xl gap-8 border-t border-white/10 py-20 lg:grid-cols-[1fr_1fr] lg:items-center"
+          className="grid w-full max-w-7xl gap-8 border-t border-brand-ink/10 py-20 lg:grid-cols-[1fr_1fr] lg:items-center"
         >
           <DiffConfirmationDemo />
 
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/80">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-800/80">
               Human in the loop
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
               Changes wait for your approval.
             </h2>
-            <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+            <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
               Read-only agents can run autonomously. Any change shows a diff
               first, and destructive actions require typed confirmation. There
               is no trust-this-agent bypass.
             </p>
             <Link
               href="/trust-model"
-              className="mt-5 inline-flex text-sm font-medium text-amber-200 underline-offset-4 transition hover:text-white hover:underline"
+              className="mt-5 inline-flex text-sm font-medium text-amber-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
             >
               Review the trust model
             </Link>
           </div>
         </section>
 
-        <section className="w-full max-w-7xl border-t border-white/10 py-20">
+        <section className="w-full max-w-7xl border-t border-brand-ink/10 py-20">
           <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-800/80">
                 Benchmarks
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
                 You do not need a frontier model for this work.
               </h2>
-              <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+              <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
                 We put OpenAdmin 8B, Claude Opus 5 and GPT-5.6-sol through{" "}
                 {benchmarks.taskCount} identical Microsoft 365 administration
                 tasks and scored them mechanically. The {ownModel.sizeOnDisk}{" "}
@@ -499,7 +499,7 @@ export default async function HomePage() {
               </p>
               <Link
                 href="/benchmarks"
-                className="mt-5 inline-flex text-sm font-medium text-sky-300 underline-offset-4 transition hover:text-white hover:underline"
+                className="mt-5 inline-flex text-sm font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
               >
                 See the full benchmark
               </Link>
@@ -508,12 +508,12 @@ export default async function HomePage() {
               {benchmarkTiles.map((model) => (
                 <div
                   key={model.id}
-                  className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+                  className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4"
                 >
-                  <p className="text-xs text-white/50">{model.name}</p>
+                  <p className="text-xs text-brand-muted">{model.name}</p>
                   <p className="mt-2 text-2xl font-semibold tabular-nums">
                     {model.score}
-                    <span className="text-sm font-normal text-white/40">
+                    <span className="text-sm font-normal text-brand-muted">
                       /{benchmarks.taskCount}
                     </span>
                   </p>
@@ -523,15 +523,15 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <section className="w-full max-w-7xl border-t border-white/10 py-20">
+        <section className="w-full max-w-7xl border-t border-brand-ink/10 py-20">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
               Open source
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
               No vendor-owned agent runtime.
             </h2>
-            <p className="mt-4 text-sm leading-6 text-white/60 sm:text-base">
+            <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
               The app, runtime, agents, and registry contract are open from day
               one. Audit them, change them, or point OpenAdminOS at your own
               curated registry.
@@ -541,25 +541,25 @@ export default async function HomePage() {
             {PROOF_ITEMS.map(([label, detail]) => (
               <div
                 key={label}
-                className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
+                className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4"
               >
                 <p className="text-sm font-semibold">{label}</p>
-                <p className="mt-2 text-sm leading-5 text-white/50">{detail}</p>
+                <p className="mt-2 text-sm leading-5 text-brand-muted">{detail}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="w-full max-w-7xl border-t border-white/10 py-20">
+        <section className="w-full max-w-7xl border-t border-brand-ink/10 py-20">
           <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
                 Common questions
               </p>
               <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
                 Questions admins usually ask first.
               </h2>
-              <p className="mt-4 max-w-xl text-sm leading-6 text-white/60 sm:text-base">
+              <p className="mt-4 max-w-xl text-sm leading-6 text-brand-muted sm:text-base">
                 These answers summarize the product boundary: desktop app,
                 Microsoft Graph, local-first model choice, declared agent
                 permissions, and write confirmation.
@@ -570,20 +570,20 @@ export default async function HomePage() {
                 <details
                   key={item.question}
                   open={index === 0}
-                  className="group rounded-lg border border-white/10 bg-white/[0.035] transition hover:border-white/18"
+                  className="group rounded-lg border border-brand-ink/10 bg-brand-ink/[0.035] transition hover:border-brand-ink/18"
                 >
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 text-left [&::-webkit-details-marker]:hidden">
-                    <span className="text-base font-semibold tracking-tight text-white/92">
+                    <span className="text-base font-semibold tracking-tight text-brand-ink/92">
                       {item.question}
                     </span>
                     <span
                       aria-hidden="true"
-                      className="grid size-7 shrink-0 place-items-center rounded-md border border-white/10 text-lg leading-none text-white/48 transition group-open:rotate-45 group-open:border-white/20 group-open:text-white/72"
+                      className="grid size-7 shrink-0 place-items-center rounded-md border border-brand-ink/10 text-lg leading-none text-brand-muted transition group-open:rotate-45 group-open:border-brand-ink/20 group-open:text-brand-muted"
                     >
                       +
                     </span>
                   </summary>
-                  <p className="px-4 pb-4 text-sm leading-6 text-white/58">
+                  <p className="px-4 pb-4 text-sm leading-6 text-brand-muted">
                     {item.answer}
                   </p>
                 </details>
@@ -596,14 +596,14 @@ export default async function HomePage() {
           <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl">
             Run tenant agents on your terms.
           </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-white/60 sm:text-base">
+          <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-brand-muted sm:text-base">
             Use local models by default, hosted models by choice, and approve
             every Graph change.
           </p>
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/download"
-              className="rounded-lg bg-white px-5 py-2.5 text-sm font-semibold text-[#070709] transition hover:bg-white/90"
+              className="rounded-lg bg-brand-ink px-5 py-2.5 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90"
             >
               View downloads
             </Link>
@@ -611,7 +611,7 @@ export default async function HomePage() {
               href={GITHUB_URL}
               target="_blank"
               rel="noreferrer"
-              className="rounded-lg border border-white/10 bg-white/[0.03] px-5 py-2.5 text-sm font-medium text-white/72 transition hover:border-white/20 hover:text-white"
+              className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] px-5 py-2.5 text-sm font-medium text-brand-muted transition hover:border-brand-ink/20 hover:text-brand-ink"
             >
               {githubRepoStats
                 ? `Star on GitHub · ${formatStat(githubRepoStats.stars)}`
@@ -622,54 +622,54 @@ export default async function HomePage() {
       </main>
 
       <footer className="relative z-10 flex flex-col items-center gap-2 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-white/40">
+        <span className="text-xs text-brand-muted">
           © {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Privacy
           </Link>
           {" · "}
           <Link
             href="/terms"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Terms
           </Link>
           {" · "}
           <Link
             href="/legal-notice"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Legal notice
           </Link>
           {" · "}
           <Link
             href="/examples"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Examples
           </Link>
           {" · "}
           <Link
             href="/registry"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Registry
           </Link>
           {" · "}
           <Link
             href="/trust-model"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Trust model
           </Link>
           {" · "}
           <Link
             href="/download"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Download
           </Link>
@@ -679,7 +679,7 @@ export default async function HomePage() {
             target="_blank"
             rel="noreferrer"
             aria-label="OpenAdminOS on LinkedIn"
-            className="inline-flex align-[-2px] text-white/45 transition hover:text-white/75"
+            className="inline-flex align-[-2px] text-brand-muted transition hover:text-brand-ink/75"
           >
             <svg
               aria-hidden
@@ -690,7 +690,7 @@ export default async function HomePage() {
             </svg>
           </Link>
         </span>
-        <p className="max-w-2xl text-balance text-[11px] leading-5 text-white/30">
+        <p className="max-w-2xl text-balance text-[11px] leading-5 text-brand-muted">
           Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks of
           the Microsoft group of companies. OpenAdminOS is not affiliated with,
           endorsed by, or sponsored by Microsoft.

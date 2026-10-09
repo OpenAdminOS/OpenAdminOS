@@ -1,0 +1,168 @@
+.demo {
+  width: 100%;
+  scroll-margin-top: 24px;
+  color: #17191d;
+}
+.viewport {
+  width: 100%;
+  overflow: auto;
+  border-radius: 12px;
+  box-shadow: 0 16px 48px -16px #17191d2e;
+  scrollbar-width: thin;
+  scrollbar-color: #b9c0ca #f4f5f7;
+}
+.stage {
+  position: relative;
+  width: 100%;
+  min-width: 960px;
+  background: #f4f5f7;
+}
+.screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  animation: reveal 0.16s ease-out;
+}
+.controls {
+  position: absolute;
+  inset: 0;
+}
+.hotspot {
+  position: absolute;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.hotspot:hover:not(:disabled) {
+  background: #17191d08;
+  box-shadow: inset 0 0 0 1px #17191d40;
+}
+.hotspot:focus-visible {
+  outline: 2px solid #17191d;
+  outline-offset: 1px;
+  background: #17191d0d;
+}
+.hotspot:disabled {
+  cursor: default;
+}
+.viewport:focus-visible {
+  outline: 2px solid #535e6c;
+  outline-offset: 4px;
+}
+.loading {
+  position: absolute;
+  bottom: 28px;
+  right: 20px;
+  background: #17191d;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+}
+.dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(420px, calc(100vw - 32px));
+  max-height: 80dvh;
+  overflow: auto;
+  border: 1px solid #cfd5de;
+  border-radius: 12px;
+  padding: 28px;
+  background: #f4f5f7;
+  color: #17191d;
+  box-shadow: 0 24px 80px #0003;
+  overscroll-behavior: contain;
+}
+.dialog::backdrop {
+  background: #17191d55;
+}
+.dialog h3 {
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  margin: 12px 0;
+}
+.dialog p {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #535e6c;
+  margin: 16px 0 24px;
+}
+.dialog a {
+  display: inline-block;
+  background: #17191d;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: transparent;
+  border: 0;
+  font-size: 24px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.dialog :is(a, button):focus-visible,
+.error button:focus-visible {
+  outline: 2px solid #17191d;
+  outline-offset: 3px;
+}
+.error {
+  font-size: 13px;
+  margin: 14px 0;
+  color: #a42525;
+}
+.error button {
+  text-decoration: underline;
+  cursor: pointer;
+}
+@keyframes reveal {
+  from {
+    opacity: 0.75;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screenshot {
+    animation: none;
+  }
+}
+
+.tenantLayer,
+.dismiss,
+.menuScreenshot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.dismiss {
+  border: 0;
+  background: transparent;
+}
+.menuScreenshot {
+  pointer-events: none;
+}
+
+.officeMotion {
+  position: absolute;
+  pointer-events: none;
+  object-fit: fill;
+}
+@media (prefers-reduced-motion: reduce) {
+  .officeMotion {
+    display: none;
+  }
+}

@@ -78,16 +78,16 @@ export default function TrustModelPage() {
         ))}
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-white/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300/80">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-800/80">
             Write safety
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
             There is no trust-this-agent bypass.
           </h2>
         </div>
-        <div className="space-y-5 text-sm leading-6 text-white/62">
+        <div className="space-y-5 text-sm leading-6 text-brand-muted">
           <p>
             Read-only agents can run autonomously against the active tenant.
             Write agents cannot. They produce a proposed change set, show the
@@ -101,7 +101,7 @@ export default function TrustModelPage() {
           </p>
           <Link
             href="/registry"
-            className="inline-flex font-medium text-amber-200 underline-offset-4 transition hover:text-white hover:underline"
+            className="inline-flex font-medium text-amber-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             Review the agent registry contract
           </Link>

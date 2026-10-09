@@ -6,6 +6,9 @@ import { ToastProvider } from "./components/Toast";
 import { SetupFlowProvider } from "./setup/SetupFlowContext";
 import { AppStateProvider } from "./state";
 import "./styles/globals.css";
+import { initializeAppearance } from "./styles/appearance";
+
+initializeAppearance();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

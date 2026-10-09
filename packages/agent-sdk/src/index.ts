@@ -2670,6 +2670,8 @@ export interface OpenAdminOSApi {
    * the model belongs to the provider's installed list.
    */
   setActiveModel(providerId: ProviderId, model: string | null): Promise<AppState>;
+  /** Update native window chrome to match the device-local renderer theme. */
+  setAppearance?(theme: "dark" | "light"): Promise<void>;
   setOfficeFullscreen?(active: boolean): Promise<boolean>;
   onOfficeFullscreenChanged?(listener: (active: boolean) => void): () => void;
   saveOfficePersona?(input: OfficePersonaInput): Promise<OfficeState>;

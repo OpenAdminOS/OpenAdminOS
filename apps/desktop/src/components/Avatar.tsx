@@ -1,20 +1,3 @@
-function hashString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-const palettes = [
-  ["#e8a87c", "#c97b5a"],
-  ["#a3bfd9", "#6d8db0"],
-  ["#9cc88f", "#6ea566"],
-  ["#c4a5d9", "#9579b5"],
-  ["#e5c678", "#bc9a4a"],
-  ["#dd9090", "#b46c6c"],
-  ["#7fb6b4", "#4f8987"],
-  ["#d49da8", "#a8757f"],
-];
-
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
@@ -32,19 +15,16 @@ export function Avatar({
   ring?: boolean;
   className?: string;
 }) {
-  const hash = hashString(name);
-  const [a, b] = palettes[hash % palettes.length];
-  const angle = (hash % 360);
   return (
     <div
-      className={`inline-flex shrink-0 items-center justify-center font-medium text-[var(--color-on-accent)] select-none ${
-        ring ? "ring-2 ring-[var(--color-bg)]" : ""
+      className={`inline-flex shrink-0 items-center justify-center font-medium text-[var(--color-text-soft)] select-none ${
+        ring ? "ring-2 ring-[var(--color-bg)]" : "ring-1 ring-[var(--color-border)]"
       } ${className}`}
       style={{
         width: size,
         height: size,
         borderRadius: "50%",
-        background: `linear-gradient(${angle}deg, ${a}, ${b})`,
+        background: "var(--color-bg-raised)",
         fontSize: Math.round(size * 0.42),
         letterSpacing: "0.01em",
       }}

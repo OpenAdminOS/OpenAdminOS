@@ -63,7 +63,7 @@ export function StatusStrip({ voiceHosted = false }: { voiceHosted?: boolean }) 
             )}
             {activeTenant?.entraTier && activeTenant.entraTier !== "unknown" && (
               <span
-                className="ml-0.5 rounded px-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                className="ml-0.5 shrink-0 whitespace-nowrap rounded px-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
                 title="Detected from /subscribedSkus — used to badge incompatible agents."
               >
                 {activeTenant.entraTier === "free"

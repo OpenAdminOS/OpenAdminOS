@@ -2,9 +2,11 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-const stylesheet = readFileSync(resolve(process.cwd(), "src/styles/globals.css"), "utf8");
+const fullStylesheet = readFileSync(resolve(process.cwd(), "src/styles/globals.css"), "utf8");
+
+let stylesheet = fullStylesheet;
 
 function token(name: string) {
   const match = stylesheet.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`));
@@ -48,7 +50,10 @@ function composite(overlay: string, surface: string) {
 const componentSource = (relativePath: string) =>
   readFileSync(resolve(process.cwd(), relativePath), "utf8");
 
-describe("accessibility design tokens", () => {
+describe.each(["dark", "light"])("%s accessibility design tokens", (theme) => {
+  beforeEach(() => {
+    stylesheet = theme === "light" ? fullStylesheet.slice(fullStylesheet.indexOf(':root[data-theme="light"]')) : fullStylesheet;
+  });
   it("keeps primary, secondary, and informative metadata copy above 4.5:1", () => {
     const foregrounds = [token("color-text"), token("color-text-soft"), token("color-text-muted")];
     const surfaces = [
@@ -73,6 +78,7 @@ describe("accessibility design tokens", () => {
       token("color-accent-hover"),
       token("color-accent-strong"),
       token("color-warning-fg"),
+      token("color-danger-fg"),
     ];
     for (const fill of fills) {
       expect(contrastRatio(onAccent, fill)).toBeGreaterThanOrEqual(4.5);
@@ -135,7 +141,7 @@ describe("accessibility design tokens", () => {
   });
 
   it("defines reduced-motion and forced-colors fallbacks", () => {
-    expect(stylesheet).toContain("@media (prefers-reduced-motion: reduce)");
-    expect(stylesheet).toContain("@media (forced-colors: active)");
+    expect(fullStylesheet).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(fullStylesheet).toContain("@media (forced-colors: active)");
   });
 });

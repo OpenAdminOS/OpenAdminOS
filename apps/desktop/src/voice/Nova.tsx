@@ -1302,34 +1302,34 @@ function NovaOrbArtwork() {
     >
       <defs>
         <radialGradient id={`${id}-body`} cx="32%" cy="18%" r="85%">
-          <stop offset="0" stopColor="#fff9ee" />
-          <stop offset="0.33" stopColor="#f2d1aa" />
-          <stop offset="0.62" stopColor="#ba693e" />
-          <stop offset="0.86" stopColor="#522718" />
-          <stop offset="1" stopColor="#160f0d" />
+          <stop offset="0" stopColor="#f4f5f7" />
+          <stop offset="0.33" stopColor="#dce0e6" />
+          <stop offset="0.62" stopColor="#8a94a3" />
+          <stop offset="0.86" stopColor="#3b434e" />
+          <stop offset="1" stopColor="#17191d" />
         </radialGradient>
         <linearGradient id={`${id}-silk`} x1="0" y1="0" x2="0.7" y2="1">
-          <stop offset="0" stopColor="#fffef8" />
-          <stop offset="0.36" stopColor="#ffe7ca" />
-          <stop offset="0.57" stopColor="#d88955" />
-          <stop offset="0.78" stopColor="#814226" />
-          <stop offset="1" stopColor="#341b16" />
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="0.36" stopColor="#e4e7ec" />
+          <stop offset="0.57" stopColor="#a8b0bb" />
+          <stop offset="0.78" stopColor="#626a75" />
+          <stop offset="1" stopColor="#292d34" />
         </linearGradient>
         <linearGradient id={`${id}-edge`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#fffdf3" stopOpacity="0.95" />
-          <stop offset="0.5" stopColor="#ffcc90" stopOpacity="0.5" />
-          <stop offset="1" stopColor="#ffa26a" stopOpacity="0" />
+          <stop offset="0" stopColor="#ffffff" stopOpacity="0.95" />
+          <stop offset="0.5" stopColor="#c2c7ce" stopOpacity="0.5" />
+          <stop offset="1" stopColor="#a8b0bb" stopOpacity="0" />
         </linearGradient>
         <radialGradient id={`${id}-glass`} cx="35%" cy="12%" r="88%">
-          <stop offset="0" stopColor="#fffef7" stopOpacity="0.6" />
-          <stop offset="0.28" stopColor="#fffef7" stopOpacity="0" />
-          <stop offset="0.78" stopColor="#150b07" stopOpacity="0" />
-          <stop offset="1" stopColor="#150b07" stopOpacity="0.55" />
+          <stop offset="0" stopColor="#f4f5f7" stopOpacity="0.6" />
+          <stop offset="0.28" stopColor="#f4f5f7" stopOpacity="0" />
+          <stop offset="0.78" stopColor="#121418" stopOpacity="0" />
+          <stop offset="1" stopColor="#121418" stopOpacity="0.55" />
         </radialGradient>
         <radialGradient id={`${id}-specular`}>
-          <stop offset="0" stopColor="#fffef6" stopOpacity="0.95" />
-          <stop offset="0.55" stopColor="#fffef6" stopOpacity="0.35" />
-          <stop offset="1" stopColor="#fffef6" stopOpacity="0" />
+          <stop offset="0" stopColor="#f4f5f7" stopOpacity="0.95" />
+          <stop offset="0.55" stopColor="#f4f5f7" stopOpacity="0.35" />
+          <stop offset="1" stopColor="#f4f5f7" stopOpacity="0" />
         </radialGradient>
         <clipPath id={`${id}-clip`}>
           <circle cx="100" cy="100" r="98" />

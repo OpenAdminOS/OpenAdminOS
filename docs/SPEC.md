@@ -150,11 +150,27 @@ items, because they target durable admin search and product-evaluation topics.
 The examples gallery at `/examples` is also a secondary marketing page, with
 copyable Build your own Agent prompts grouped by read investigations, confirmed
 write plans, and connector-backed delivery examples.
-The marketing homepage uses a seven-section structure: hero ("AI agents for
-your Microsoft 365 tenant. Run locally, approved by you."), a pre-rendered
-product demo video, a traction strip, a three-step "How it works" section, the
-write-gate diff demo, the top most-installed registry agents, and open
-source + FAQ + final CTA. The traction strip and CTA star count only render
+The marketing homepage retains its light-mode hero, traction, testimonials,
+how-it-works, write-gate, benchmarks, open-source, FAQ, and download sections.
+The hero product area uses unedited screenshots captured from the built Electron
+app with an isolated synthetic-data profile. Invisible, keyboard-accessible
+hotspots are measured from the actual controls in each captured screen. Sidebar,
+settings sections, agent details, and selected dialogs navigate between those
+screens. The website must not re-create or approximate the desktop interface in
+HTML. Actions not represented by a captured screen explain that they require the
+desktop app; they do not simulate a successful write, installation, or connection.
+No external preview label, walkthrough, or reset toolbar is shown. The tenant
+selector offers Contoso, Dev Tenant, and Customer Tenant. Selecting a tenant
+preserves the current page and uses that tenant’s real captures throughout
+navigation. Tenant names and account identifiers use plain customer labels. Screenshots keep
+the actual app aspect ratio. Small screens can pan within the preview instead of
+receiving a different invented mobile UI. Screenshot transitions respect reduced
+motion. Agent Team opens in the expanded office with Chief of Staff, Policy Watcher,
+and Device Investigator. Its room animation is a muted recording of the built app,
+positioned over the matching room capture. The pause control switches to an actual
+paused capture; reduced-motion users see the static office. Playback stops when
+the preview is offscreen or the browser tab is hidden. The current Contoso Chat capture is also the no-JavaScript fallback.
+The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API and total release
 asset downloads across all releases (both revalidated hourly), plus the community
 agent count from the synced `public/stats/agents.json`. Downloads replace the
@@ -162,16 +178,13 @@ aggregate agent installation count and match the README's total-downloads badge.
 When a source is unavailable its cell is omitted, never faked. Registry
 agent display metadata (names, descriptions, mode, scopes) is curated in
 `web/src/lib/stats/summary.ts` because repo-root `agents/index.json` is not
-available inside the `web/` Vercel build. The demo video is rendered offline
-from the top-level `remotion/` project (not part of the npm workspace, never
-installed on Vercel) into committed `web/public/videos/` assets; the embed is
-a muted autoplay loop that falls back to a static poster when
-`prefers-reduced-motion` is set. The composition is a faithful recreation of
-the real desktop app UI: it uses the design tokens from
-`apps/desktop/src/styles/globals.css` (warm stone palette, amber accent) and
-mirrors the actual chrome (sidebar, tenant card, status strip) against
-`web/public/openadminos-app.png`; it must not drift into an invented visual
-style.
+available inside the `web/` Vercel build. Historical demo video assets are rendered offline from the top-level `remotion/`
+project (not part of the npm workspace, never installed on Vercel) and retained
+under `web/public/videos/`. The current homepage uses the clickable screenshot viewer
+instead. Its styling follows the graphite/off-white desktop tokens and preserves
+the sidebar, tenant context, provider disclosure, and status-strip conventions.
+See `docs/brand/interactive-product-demo.md` for the interaction contract and
+verification notes.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
@@ -1700,51 +1713,38 @@ The macOS menu bar companion must be created during any interactive app launch, 
 
 ## 3. Design system
 
-### Tokens (from `apps/desktop/src/styles/globals.css`)
+### Monochrome identity (2026-10-06)
 
-```
---color-bg: #1c1917              Background base
---color-bg-elevated: #252220     Elevated background
---color-bg-raised: #2d2926       Highest elevation
---color-sidebar-solid: #191614   Sidebar and rail (warm near-black, no cool cast)
---color-surface: #232120         Cards and controls
---color-surface-hover: #2a2724   Hovered surface
+The approved identity uses the OA monogram in graphite `#17191D` and off-white
+`#F4F5F7` across every desktop surface, packaged icons, installer artwork, and
+public website branding. `docs/brand/oa-mark.svg` is the vector reference;
+`docs/mockups/22-monochrome-brand.html` records the original interactive study.
 
---color-text: #f5f1eb           Primary text
---color-text-soft: #b5ada3      Secondary text
---color-text-muted: #9a9085     Metadata and labels (≥ 4.6:1 on production surfaces)
---color-text-placeholder: #9c9186  Form and composer placeholders (≥ 4.5:1 on every input surface, including bg-raised)
---color-text-faint: #6b6157     Decorative marks only (dots, dividers, disabled ornament); never readable copy
+Desktop appearance defaults to dark. Settings > General offers a saved light
+or dark preference, stored locally and synchronized across renderer windows.
+Native window controls follow this preference. The public website uses the off-white light theme with graphite actions, slate secondary text, and a matching light desktop screenshot. The screenshot has no visible border or padded frame, using only rounded corners and a soft shadow for separation; the animated change-review demo uses stronger panel/input borders and solid confirmation states so it remains legible on light backgrounds.
+Semantic success, warning, danger, information, and reasoning colors remain
+separate from the brand accent. Destructive approval uses danger; typed
+confirmation and tenant/provider trust behavior are unchanged.
 
---color-border: #322e2a
---color-border-strong: #403a35
---color-border-soft: #2a2622
+### Tokens
 
---color-accent: #e8a87c         Warm copper; reserved for primary actions, focus, and active navigation
---color-accent-hover: #efb88f
---color-accent-soft: #e8a87c1f
---color-on-accent: #1a120c      Foreground on accent- and warning-filled controls (no hardcoded literals)
+`apps/desktop/src/styles/globals.css` is the production source of truth for both
+themes. All shared controls, navigation, dialogs, page layouts, and custom voice
+and companion surfaces consume these tokens. The Agent Team illustration is
+neutral, while activity and attention indicators retain semantic color.
 
---color-success-fg: #9cc88f     Success and the local-only trust line (paired bg: #9cc88f1f)
---color-warning-fg: #e5c678     Write operations and attention (paired bg: #e5c6781f)
---color-danger-fg: #e58888      Errors and destructive actions (paired bg: #e588881f)
---color-info-fg: #a3bfd9        Informational and live-activity states: meters, pulses, spinners (paired bg: #a3bfd91f)
---color-think-fg: #c4a5d9       LLM reasoning blocks (paired bg: #c4a5d91f)
+- Dark: graphite base, off-white primary actions, slate borders and surfaces.
+- Light: off-white base, white surfaces, graphite primary actions.
+- Body, metadata, placeholder, and semantic text meet 4.5:1 contrast against
+  their supported surfaces in both themes, verified by automated tests.
+- Cards use a 10px radius; status badges use a compact 6px radius.
+- The sidebar is 232px wide (212px below 1100px); shared page padding is 24px
+  vertically and 32px horizontally.
 
-Legacy names (--color-success/-warning/-danger/-info/-think and their -soft
-variants) remain defined and byte-identical to the -fg/-bg pairs above.
-
---radius-sm: 6px
---radius-md: 10px
---radius-lg: 14px
---radius-xl: 18px
-```
-
-Accent allocation: copper marks what the user can act on (primary buttons, focus
-rings, active navigation, selected scope). Live activity uses info, pins and
-decorative bullets use neutral text tokens, and the Chat user message is a
-neutral raised bubble with a 2px copper right edge instead of a solid copper
-fill. Destructive approval controls stay danger-coded; they are never copper.
+Regenerate raster brand assets with `node scripts/generate-brand-assets.mjs`.
+The macOS multi-resolution installer TIFF additionally uses `tiffutil`, as
+explained in `apps/desktop/build/README.md`.
 
 ### Typography
 
@@ -2020,7 +2020,11 @@ where supplied; monetary cost is not inferred.
 **The office.** The original SVG studio includes desks, lounge seating, and a TV game
 corner. Six personas occupy each of up to four floors. Reserved per-persona locations,
 aisle paths, interruptible directional walking, seated typing/controller poses, and
-foreground furniture give the room depth. Idle timing is independent. Actual run and
+foreground furniture give the room depth. Idle timing is independent. Idle teammates cycle through their reserved workstation,
+lounge seat, and game station. Decorative workstation visits do not mark a task as
+working; actual work and approval states override the idle circuit. Movement uses
+a slower distance-based walking pace and staggered 18–33 second destination
+intervals, leaving time to settle at each stop. Actual run and
 handoff events populate a stationary timestamped evidence strip and trigger a brief
 visit to the shared table; games remain decorative.
 Search and floor attention indicators route to distant teammates. Zoom/fit, expanded

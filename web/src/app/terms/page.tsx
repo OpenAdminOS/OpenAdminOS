@@ -46,7 +46,7 @@ export default function TermsPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#0a0a0c] text-white">
+    <div className="relative flex min-h-screen flex-col bg-brand-bg text-brand-ink">
       <JsonLd data={structuredData} />
       <div
         aria-hidden
@@ -72,13 +72,13 @@ export default function TermsPage() {
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
           Terms of use
         </h1>
-        <p className="mt-2 text-sm text-white/50">
+        <p className="mt-2 text-sm text-brand-muted">
           Last updated: {LAST_UPDATED}
         </p>
 
-        <div className="mt-10 space-y-10 text-sm leading-relaxed text-white/75">
+        <div className="mt-10 space-y-10 text-sm leading-relaxed text-brand-ink/75">
           <section>
-            <h2 className="text-base font-semibold text-white">Summary</h2>
+            <h2 className="text-base font-semibold text-brand-ink">Summary</h2>
             <p className="mt-3">
               OpenAdminOS is open-source software operated by{" "}
               {LEGAL_ENTITY_NAME} and distributed under the MIT License. These
@@ -89,7 +89,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               The software is provided as-is
             </h2>
             <p className="mt-3">
@@ -99,7 +99,7 @@ export default function TermsPage() {
                 href="https://github.com/OpenAdminOS/OpenAdminOS/blob/main/LICENSE"
                 target="_blank"
                 rel="noreferrer"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
@@ -112,10 +112,10 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               You are responsible for what you run
             </h2>
-            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-white/30">
+            <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
               <li>
                 You are responsible for ensuring you have authorization to
                 connect any Microsoft 365 tenant you sign in to. Connecting a
@@ -139,7 +139,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Third-party services
             </h2>
             <p className="mt-3">
@@ -154,7 +154,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Acceptable use
             </h2>
             <p className="mt-3">
@@ -166,14 +166,14 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Privacy
             </h2>
             <p className="mt-3">
               Use of the desktop app and website is also governed by the{" "}
               <Link
                 href="/privacy"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 privacy policy
               </Link>
@@ -182,7 +182,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Microsoft trademarks
             </h2>
             <p className="mt-3">
@@ -194,7 +194,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Changes
             </h2>
             <p className="mt-3">
@@ -206,20 +206,20 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-brand-ink">
               Contact
             </h2>
             <p className="mt-3">
               Questions about these terms or the website:{" "}
               <Link
                 href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 {SUPPORT_EMAIL}
               </Link>
               .
             </p>
-            <address className="mt-4 not-italic text-white/65">
+            <address className="mt-4 not-italic text-brand-muted">
               {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
                 <span key={line} className="block">
                   {line}
@@ -230,7 +230,7 @@ export default function TermsPage() {
               Provider details are listed in the{" "}
               <Link
                 href="/legal-notice"
-                className="text-white underline underline-offset-4 transition hover:text-white/70"
+                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
               >
                 legal notice
               </Link>
@@ -239,10 +239,10 @@ export default function TermsPage() {
           </section>
         </div>
 
-        <div className="mt-16 border-t border-white/10 pt-8 text-xs text-white/40">
+        <div className="mt-16 border-t border-brand-ink/10 pt-8 text-xs text-brand-muted">
           <Link
             href="/"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             &larr; Back to OpenAdminOS
           </Link>
@@ -250,26 +250,26 @@ export default function TermsPage() {
       </main>
 
       <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-white/40">
+        <span className="text-xs text-brand-muted">
           &copy; {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Privacy
           </Link>
           {" · "}
           <Link
             href="/terms"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Terms
           </Link>
           {" · "}
           <Link
             href="/legal-notice"
-            className="underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Legal notice
           </Link>

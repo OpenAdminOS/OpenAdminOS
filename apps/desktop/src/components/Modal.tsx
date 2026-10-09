@@ -90,7 +90,7 @@ export function Modal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center px-6 py-10"
-      style={{ background: "rgba(10, 8, 6, 0.62)" }}
+      style={{ background: "rgba(10, 12, 16, 0.62)" }}
       onClick={() => {
         if (closeOnScrim) onClose();
       }}
