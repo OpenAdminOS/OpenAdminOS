@@ -1831,14 +1831,15 @@ The sidebar contains exactly five destinations in this order:
 
 | Nav item | Route | Contains |
 |---|---|---|
-| Chat | `/chat` | Tenant Q&A and, after consolidation, Workspaces |
+| Chat | `/chat` and `/chat/workspaces/:workspaceId` | Tenant Q&A, conversation history, and Workspaces |
 | Agents | `/agents` | Team roster, installed and Hub libraries, schedules, and agent details |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
 | Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, Appearance, Privacy, and About |
 
-Workspaces remain separately routable and reachable from the command palette
-until Chat consolidation lands. Agent Team now renders at the top of Agents,
+Workspaces live in the Chat left panel and remain reachable from the command
+palette. Legacy `/workspaces` and `/workspaces/:workspaceId` URLs redirect to
+the corresponding Chat panel and detail routes. Agent Team now renders at the top of Agents,
 with the full office at `/agents/office` and persona details at
 `/agents/team/:personaId`. Installed agents and Hub share the Library section;
 schedule filtering and controls live there and in each agent drawer. Legacy
@@ -1893,7 +1894,7 @@ North-star metric: time from install to first successful result, target under 5 
 | Hub | Library source inside Agents (was "Agent Hub" nav item) | Community agent store |
 | Schedule | Library filter and agent drawer section | Recurring agent runs |
 | Agent Team | Team section and full office inside Agents | Persistent personas, assignments, and evidence-linked briefings |
-| Workspace | Palette destination until Chat consolidation | Saved multi-tenant working set |
+| Workspace | Chat panel and palette destination | Tenant-scoped evidence, notes, linked chats, runs, and local instructions |
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls |
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
@@ -1909,7 +1910,7 @@ North-star metric: time from install to first successful result, target under 5 
 - Persisted conversations use `/chat/:conversationId` and Settings sections use `/settings/:section`. Reload and browser history restore those selections; `/chat` remains a new draft, and deleted or unknown conversation links render an explicit local recovery state instead of silently selecting another conversation.
 - User-visible error details pass through the typed copy sanitizer before rendering. Stack frames, local paths, multiline exceptions, and oversized implementation details stay out of Chat, Settings, and write confirmation surfaces while short actionable provider or tenant messages remain visible.
 - Hosted multi-tenant consent is recorded as a one-response acknowledgement. The batch modal does not offer a remembered-consent choice, so its audit payload must not claim one; every later hosted batch prompts again.
-- At 1100 px and below, Chat history closes into a full-text overlay drawer; it never becomes a numbered mini-rail. The primary navigation frame remains fixed. Production screenshot evidence covers seven states, including typed write confirmation, at 900, 1100, and 1600 px with long tenant/model fixtures, default and reduced-motion lanes, and page-level overflow failure.
+- At 1100 px and below, the Chat and Workspaces panel closes into a full-text overlay drawer; it never becomes a numbered mini-rail. The primary navigation frame remains fixed. Production screenshot evidence covers seven states, including typed write confirmation, at 900, 1100, and 1600 px with long tenant/model fixtures, default and reduced-motion lanes, and page-level overflow failure.
 - Informative metadata uses at least 11 px and a minimum 4.5:1 token contrast on production surfaces. Placeholder text uses `--color-text-placeholder` and holds 4.5:1 on every input surface; `--color-text-faint` is decorative-only. Accent-filled controls use `--color-on-accent` rather than hardcoded ink literals. Semantic foreground tokens hold 4.5:1 on their paired soft backgrounds over every production surface. Reduced-motion and forced-colors fallbacks are global.
 - Newly enabled schedules anchor their first due time at the enable action; enabling an interval never creates an immediate surprise run.
 - Destructive write plans require a count-bound uppercase phrase that names the operation and target. The same grammar is enforced for declarative manifests, sandboxed plans, and runtime plans before the confirmation UI can appear.
@@ -1918,7 +1919,7 @@ North-star metric: time from install to first successful result, target under 5 
 
 ### Deliberately not done in v0.4
 
-- Workspace code remains a separate route until Chat consolidation. Connector setup stays componentized, but renders in the Settings section and URL-addressable drawer.
+- Connector setup stays componentized, but renders in the Settings section and URL-addressable drawer.
 - No LLM-driven agent suggestions in chat: matching is deterministic, local keyword/category matching against installed manifests.
 - No platform-specific screen-reader integration or release-evidence gate. Platform-neutral keyboard, focus, semantic, contrast, forced-colors, and reduced-motion support remains part of the production UI.
 - Usability validation with 3–5 external Intune admins is still owed; these decisions are the best pre-validation guess and should be revisited against real hesitation points.

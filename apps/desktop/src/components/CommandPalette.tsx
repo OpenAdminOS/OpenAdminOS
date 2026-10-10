@@ -24,12 +24,13 @@ import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { openNovaPanel } from "../shared/nova-panel";
 import { Kbd } from "./ui";
+import type { IntuneChatConversation, WorkspaceSummary } from "../shared/openAdminOS";
 
 interface PaletteItem {
   id: string;
   label: string;
   hint?: string;
-  group: "Agents" | "Hub" | "Navigate" | "Actions";
+  group: "Agents" | "Hub" | "Navigate" | "Actions" | "Chats" | "Workspaces";
   icon: React.ReactNode;
   shortcut?: string;
   action: () => void | Promise<void>;
@@ -48,6 +49,8 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [recentConversations, setRecentConversations] = useState<IntuneChatConversation[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -103,6 +106,30 @@ export function CommandPalette({
           navigate(`/runs/${run.id}`);
           onClose();
         },
+      })),
+      {
+        id: "act-new-chat",
+        label: "New chat",
+        hint: "Start a local conversation",
+        group: "Actions",
+        icon: <IconChat size={13} className="text-[var(--color-accent)]" />,
+        action: go("/chat?new=1"),
+      },
+      ...recentConversations.map((conversation) => ({
+        id: `chat-${conversation.id}`,
+        label: conversation.title,
+        hint: "Recent conversation",
+        group: "Chats" as const,
+        icon: <IconChat size={13} className="text-[var(--color-text-soft)]" />,
+        action: go(`/chat/${encodeURIComponent(conversation.id)}`),
+      })),
+      ...workspaces.map((workspace) => ({
+        id: `workspace-${workspace.id}`,
+        label: workspace.title,
+        hint: workspace.tenantName ?? "Workspace",
+        group: "Workspaces" as const,
+        icon: <IconHardDrive size={13} className="text-[var(--color-text-soft)]" />,
+        action: go(`/chat/workspaces/${encodeURIComponent(workspace.id)}`),
       })),
       {
         id: "nav-chat",
@@ -179,10 +206,10 @@ export function CommandPalette({
         : []),
       {
         id: "nav-workspaces",
-        label: "Go to Workspaces",
+        label: "Workspaces",
         group: "Navigate",
         icon: <IconHardDrive size={13} className="text-[var(--color-accent)]" />,
-        action: go("/workspaces"),
+        action: go("/chat?panel=workspaces"),
       },
       {
         id: "nav-settings",
@@ -239,7 +266,7 @@ export function CommandPalette({
           ] as PaletteItem[])
         : []),
     ];
-  }, [navigate, onClose, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length]);
+  }, [navigate, onClose, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
@@ -253,7 +280,7 @@ export function CommandPalette({
   }, [items, query]);
 
   const grouped = useMemo(() => {
-    const order: PaletteItem["group"][] = ["Actions", "Navigate", "Agents", "Hub"];
+    const order: PaletteItem["group"][] = ["Actions", "Chats", "Workspaces", "Navigate", "Agents", "Hub"];
     const map: Record<string, PaletteItem[]> = {};
     for (const i of filtered) {
       if (!map[i.group]) map[i.group] = [];
@@ -283,6 +310,23 @@ export function CommandPalette({
       };
     }
     return undefined;
+  }, [open]);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!open || !api) return;
+    void Promise.all([
+      api.listIntuneChatConversations(),
+      api.listWorkspaces(),
+    ])
+      .then(([nextConversations, nextWorkspaces]) => {
+        setRecentConversations(nextConversations);
+        setWorkspaces(nextWorkspaces);
+      })
+      .catch(() => {
+        setRecentConversations([]);
+        setWorkspaces([]);
+      });
   }, [open]);
 
   useEffect(() => {

@@ -12,6 +12,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Consolidate conversations and Workspaces in Chat, with an integrated scope composer, compact suggested agents, inline answer details, and addressable Workspace views.
 - Consolidate run review, live progress, and searchable history in Runs, with focused write confirmation and URL-addressable run details.
 - Consolidate Agent Team, installed agents, Hub browsing, schedules, and agent details into one Agents surface with URL-addressable drawers and a full office view.
 - Consolidate provider, tenant, data, chat, connector, gateway, general, appearance, privacy, and about controls into one searchable Settings page with section links and connector drawers.

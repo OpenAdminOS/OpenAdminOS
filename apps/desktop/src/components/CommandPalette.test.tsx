@@ -76,7 +76,8 @@ it("lists the shell destinations and every Settings section", async () => {
     "Team office",
     "Add teammate",
     "Changes: All tenants",
-    "Go to Workspaces",
+    "New chat",
+    "Workspaces",
     "Open Voice",
   ]) {
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -115,4 +116,47 @@ it("lists the shell destinations and every Settings section", async () => {
 
   expect(screen.queryByRole("option", { name: /Go to Cache/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /Go to Connectors/ })).not.toBeInTheDocument();
+});
+
+it("lists recent conversations and Workspaces with their Chat routes", async () => {
+  const bridge = makeMockBridge({
+    listIntuneChatConversations: vi.fn(async () => [
+      {
+        id: "conversation-1",
+        title: "Review stale devices",
+        createdAt: "2026-10-10T08:00:00.000Z",
+        updatedAt: "2026-10-10T09:00:00.000Z",
+        tenantId: "tenant-1",
+        scopeKind: "single-tenant" as const,
+      },
+    ]),
+    listWorkspaces: vi.fn(async () => [
+      {
+        id: "workspace-1",
+        tenantId: "tenant-1",
+        tenantName: "Contoso IT",
+        title: "Device investigation",
+        status: "active" as const,
+        evidenceCount: 1,
+        conversationCount: 1,
+        runCount: 0,
+        noteCount: 0,
+        createdAt: "2026-10-10T08:00:00.000Z",
+        updatedAt: "2026-10-10T09:00:00.000Z",
+      },
+    ]),
+  });
+
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge,
+  });
+
+  expect(
+    await screen.findByRole("option", { name: /Review stale devices/ }),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByRole("option", { name: /Device investigation/ }),
+  ).toBeInTheDocument();
 });

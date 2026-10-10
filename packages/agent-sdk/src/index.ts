@@ -965,6 +965,8 @@ export interface IntuneChatMessage {
   status: IntuneChatMessageStatus;
   providerId?: ProviderId;
   model?: string;
+  /** Runtime explanation shown with source details, separate from answer text. */
+  engineNotice?: string;
   sources?: IntuneChatSource[];
   toolTrace?: IntuneChatToolTraceEntry[];
   agentSuggestions?: IntuneChatAgentSuggestion[];

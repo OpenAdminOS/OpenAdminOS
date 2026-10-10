@@ -9,7 +9,6 @@ const Agents = lazy(() => import("./pages/Agents"));
 const Runs = lazy(() => import("./pages/Runs"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
-const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Settings = lazy(() => import("./pages/Settings"));
 const RunResult = lazy(() => import("./pages/RunResult"));
 const MenuBarCompanion = lazy(() => import("./pages/MenuBarCompanion"));
@@ -63,12 +62,14 @@ export default function App() {
           <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
           <Route path="/agents/:slug" element={<Agents />} />
           <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
+          <Route path="/chat/workspaces/:workspaceId" element={<IntuneChat />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
           <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
           <Route path="/office" element={<OfficeRedirect />} />
           <Route path="/changes" element={<Changes />} />
           <Route path="/fleet" element={<FleetRedirect />} />
-          <Route path="/workspaces" element={<Workspaces />} />
+          <Route path="/workspaces" element={<WorkspacesRedirect />} />
+          <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailRedirect />} />
           <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
           <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
           <Route path="/runs" element={<Runs />} />
@@ -87,6 +88,39 @@ export function ActivityRedirect() {
   return (
     <Navigate
       to={{ pathname: "/runs", search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+export function WorkspacesRedirect() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  search.set("panel", "workspaces");
+  return (
+    <Navigate
+      to={{
+        pathname: "/chat",
+        search: `?${search.toString()}`,
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function WorkspaceDetailRedirect() {
+  const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId: string }>();
+  return (
+    <Navigate
+      to={{
+        pathname: workspaceId
+          ? `/chat/workspaces/${encodeURIComponent(workspaceId)}`
+          : "/chat",
+        search: location.search,
+        hash: location.hash,
+      }}
       replace
     />
   );

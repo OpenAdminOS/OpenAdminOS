@@ -8,6 +8,8 @@ import {
   LegacyConnectorRedirect,
   LegacySettingsRedirect,
   OfficeRedirect,
+  WorkspaceDetailRedirect,
+  WorkspacesRedirect,
 } from "./App";
 import { renderWithAppState } from "./test/test-utils";
 
@@ -23,6 +25,36 @@ describe("legacy activity route", () => {
 
     expect(await screen.findByTestId("location")).toHaveTextContent(
       "/runs?filter=needs-review&tenant=contoso",
+    );
+  });
+});
+
+describe("legacy Workspace routes", () => {
+  it("redirects the Workspace list into Chat and preserves query state", async () => {
+    renderWithAppState(
+      <Routes>
+        <Route path="/workspaces" element={<WorkspacesRedirect />} />
+        <Route path="/chat" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/workspaces?tenant=contoso#saved" },
+    );
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/chat?tenant=contoso&panel=workspaces#saved",
+    );
+  });
+
+  it("redirects Workspace details into the addressable Chat detail route", async () => {
+    renderWithAppState(
+      <Routes>
+        <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailRedirect />} />
+        <Route path="/chat/workspaces/:workspaceId" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/workspaces/workspace-1?source=recent#notes" },
+    );
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/chat/workspaces/workspace-1?source=recent#notes",
     );
   });
 });

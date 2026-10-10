@@ -53,6 +53,7 @@ interface MessageRow {
   status: IntuneChatMessage["status"];
   provider_id: string | null;
   model: string | null;
+  engine_notice: string | null;
   sources_json: string | null;
   agent_suggestions_json: string | null;
   error: string | null;
@@ -571,9 +572,9 @@ export class IntelligenceSqliteStore {
       .prepare(
         `INSERT INTO chat_messages (
           id, conversation_id, role, content, status, provider_id, model,
-          sources_json, agent_suggestions_json, error, created_at
+          engine_notice, sources_json, agent_suggestions_json, error, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -583,6 +584,7 @@ export class IntelligenceSqliteStore {
         message.status,
         message.providerId ?? null,
         message.model ?? null,
+        message.engineNotice ?? null,
         message.sources ? JSON.stringify(message.sources) : null,
         message.agentSuggestions ? JSON.stringify(message.agentSuggestions) : null,
         message.error ?? null,
@@ -594,7 +596,7 @@ export class IntelligenceSqliteStore {
     const rows = this.db
       .prepare(
         `SELECT id, conversation_id, role, content, status, provider_id, model,
-                sources_json, agent_suggestions_json, error, created_at
+                engine_notice, sources_json, agent_suggestions_json, error, created_at
          FROM chat_messages
          WHERE conversation_id = ?
          ORDER BY created_at ASC`,
@@ -3123,6 +3125,7 @@ export class IntelligenceSqliteStore {
         status TEXT NOT NULL,
         provider_id TEXT,
         model TEXT,
+        engine_notice TEXT,
         sources_json TEXT,
         agent_suggestions_json TEXT,
         error TEXT,
@@ -3414,6 +3417,7 @@ export class IntelligenceSqliteStore {
     ensureColumn(this.db, "chat_conversations", "scope_kind", "TEXT");
     ensureColumn(this.db, "chat_conversations", "scope_json", "TEXT");
     ensureColumn(this.db, "chat_conversations", "multi_tenant_job_id", "TEXT");
+    ensureColumn(this.db, "chat_messages", "engine_notice", "TEXT");
     this.ensureDefaultSavedQueries(new Date().toISOString());
   }
 
@@ -3667,6 +3671,7 @@ function readMessage(row: MessageRow): IntuneChatMessage {
     status: row.status,
     providerId: row.provider_id as IntuneChatMessage["providerId"],
     model: row.model ?? undefined,
+    engineNotice: row.engine_notice ?? undefined,
     sources: row.sources_json ? readJson(row.sources_json, []) : undefined,
     agentSuggestions: row.agent_suggestions_json
       ? readJson(row.agent_suggestions_json, [])

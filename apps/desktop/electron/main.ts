@@ -1058,7 +1058,7 @@ async function runScreenshotCapture(): Promise<void> {
       { route: "/settings/data", name: "cache", waitFor: ["Data", "Tenant cache"] },
       { route: "/agents/office", name: "agent-team", waitFor: ["Team office"] },
       { route: "/changes?scope=all", name: "fleet", waitFor: [] },
-      { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
+      { route: "/chat?panel=workspaces", name: "workspaces", waitFor: ["Workspaces"] },
       { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
       { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Scheduled only"] },
@@ -1638,16 +1638,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     () => bodyText().includes("Smoke Tenant") && bodyText().includes("New conversation"),
     "tenant-connected chat shell",
   );
-  await clickNamedButton("Hide chat history");
-  await waitFor(() => Boolean(findNamedButton("Show chat history")), "collapsed chat history");
+  await clickNamedButton("Collapse chat panel");
+  await waitFor(() => Boolean(findNamedButton("Show chat panel")), "collapsed chat panel");
   await waitFor(
-    () => Boolean(findNamedButton("New conversation")),
-    "collapsed new conversation action",
+    () => Boolean(findNamedButton("Show chat panel")),
+    "collapsed panel action",
   );
-  await clickNamedButton("Show chat history");
-  await waitFor(() => bodyText().includes("Smoke Tenant"), "expanded chat history");
+  await clickNamedButton("Show chat panel");
+  await waitFor(() => bodyText().includes("Chats"), "expanded chat panel");
 
-  await selectFirstOption("Saved multi-tenant query");
+  await clickNamedButton("Saved queries");
+  await clickButton("Windows compliance by tenant");
   await waitFor(() => {
     const textarea = document.querySelector("textarea");
     return textarea instanceof HTMLTextAreaElement &&
@@ -1667,7 +1668,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => bodyText().includes("Created") && bodyText().includes("evidence"), "split workspace evidence");
   const sawSplitToWorkspaces = bodyText().includes("workspace evidence");
   await clickModalButton("Close");
-  await clickButton("New");
+  await clickNamedButton("New chat");
   await waitFor(
     () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
     "new conversation after multi-tenant result",
@@ -1683,7 +1684,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   await waitFor(() => !bodyText().includes("Thinking"), "stopped chat send settled");
   const sawStopGeneration = bodyText().includes("Response stopped by user");
-  await clickButton("New");
+  await clickNamedButton("New chat");
   await waitFor(
     () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
     "new conversation after stopped response",
@@ -1709,7 +1710,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const writeBlockedAnswer = "I cannot perform tenant changes directly from chat.";
   for (const [index, prompt] of testPrompts.entries()) {
     if (index === 1) {
-      await clickButton("New");
+      await clickNamedButton("New chat");
       await waitFor(
         () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
         "visible new conversation draft",
@@ -1759,7 +1760,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     responseCount = expectedResponseCount;
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
-  await clickSummary("Source details");
+  await clickSummary("How this was answered");
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
@@ -1786,7 +1787,8 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     () => bodyText().includes(smokeAnswer),
     "read conversation transcript restored",
   );
-  await clickButton("Workspace");
+  await clickNamedButton("Conversation actions");
+  await clickButton("Move to workspace");
   await waitFor(
     () => bodyText().includes("Created workspace") && bodyText().includes("linked this conversation"),
     "workspace created from conversation",
@@ -1796,16 +1798,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await clickModalButton("Pin answer");
   await waitFor(() => bodyText().includes("Pinned evidence to"), "pinned answer evidence");
   const sawWorkspacePin = bodyText().includes("Pinned evidence to");
-  await clickButton("New");
+  await clickNamedButton("New chat");
   await waitFor(
     () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
     "new conversation for workspace context",
   );
-  await selectFirstOption("Attach workspace context");
+  await clickSummary("Smoke Tenant");
+  await selectFirstOption("Workspace context");
   await waitFor(() => bodyText().includes("Chat answer"), "workspace evidence option");
   await clickFirstEnabledCheckbox("workspace context evidence");
   await waitFor(
-    () => bodyText().includes("Workspace context selected: 1 evidence"),
+    () => bodyText().includes("Context"),
     "workspace context attached",
   );
   await setTextarea("Use the attached workspace context to summarize the device evidence.");
@@ -1816,7 +1819,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   const workspaceResponseCount = textOccurrenceCount(smokeAnswer);
   const sawWorkspaceContextAttachment =
-    bodyText().includes("Workspace context selected: 1 evidence") ||
+    bodyText().includes("Context") ||
     bodyText().includes("Use the attached workspace context");
   await clickButton("Regenerate");
   await waitFor(

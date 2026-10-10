@@ -1586,6 +1586,7 @@ export class IntuneChatService {
     let assistantContent: string;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
+    let engineNotice: string | undefined;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
 
@@ -1607,6 +1608,7 @@ export class IntuneChatService {
       const buildDeterministicAnswer = async (
         notice?: string,
       ): Promise<{ content: string; model?: string }> => {
+        engineNotice = notice;
         const answerPack = buildAnswerPack({
           question: modelQuestion,
           tenant,
@@ -1631,7 +1633,7 @@ export class IntuneChatService {
           content = `${content}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
         }
         return {
-          content: [notice, content].filter((part): part is string => Boolean(part)).join("\n\n"),
+          content,
           model: completion.model,
         };
       };
@@ -1700,6 +1702,7 @@ export class IntuneChatService {
       createdAt: new Date().toISOString(),
       providerId,
       model: responseModel,
+      ...(engineNotice ? { engineNotice } : {}),
       sources,
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
@@ -2042,6 +2045,7 @@ export class IntuneChatService {
     let assistantContent = "";
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
+    let engineNotice: string | undefined;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
 
@@ -2077,6 +2081,7 @@ export class IntuneChatService {
         ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
         : contextualQuestion;
       const streamDeterministicAnswer = async (notice?: string) => {
+        engineNotice = notice;
         let answerPack = buildAnswerPack({
           question: modelQuestion,
           tenant,
@@ -2088,11 +2093,6 @@ export class IntuneChatService {
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
-        const prefix = notice ? `${notice}\n\n` : "";
-        if (prefix) {
-          assistantContent = prefix;
-          emitDelta(assistantContent, prefix);
-        }
         const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true), options.voice ? VOICE_ANSWER_INSTRUCTIONS : ""].filter(Boolean).join("\n");
         const streamDocumentation = await this.retrieveDocumentationSafely(options.voice ? content : modelQuestion);
         const documentation = options.voice ? streamDocumentation.slice(0, 2).map(d => ({ ...d, text: d.text.slice(0, 600) })) : streamDocumentation;
@@ -2112,7 +2112,7 @@ export class IntuneChatService {
             break;
           }
           responseModel = chunk.model;
-          assistantContent = `${prefix}${chunk.accumulated}`;
+          assistantContent = chunk.accumulated;
           emitDelta(assistantContent, chunk.delta);
         }
         assistantContent = assistantContent.trim();
@@ -2330,6 +2330,7 @@ export class IntuneChatService {
       createdAt: new Date().toISOString(),
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
+      ...(engineNotice ? { engineNotice } : {}),
       sources,
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
@@ -2726,7 +2727,7 @@ function resolveAgenticCapability(input: {
     return {
       enabled: false,
       reason: "capability-fallback",
-      notice: `Deterministic retrieval - ${observedModel ?? input.providerId} did not hold the investigative format, so this answer skips it.`,
+      notice: `Deterministic retrieval: ${observedModel ?? input.providerId} did not hold the investigative format, so this answer skips it.`,
     };
   }
   if (input.provider?.isLocal === false) {
@@ -2737,7 +2738,7 @@ function resolveAgenticCapability(input: {
     return {
       enabled: false,
       reason: "capability-fallback",
-      notice: `Deterministic retrieval — ${model ?? input.provider?.name ?? input.providerId} doesn't support investigative mode.`,
+      notice: `Deterministic retrieval: ${model ?? input.provider?.name ?? input.providerId} does not support investigative mode.`,
     };
   }
   return { enabled: true, reason: "capable" };

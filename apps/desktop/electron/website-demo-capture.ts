@@ -122,7 +122,7 @@ export async function captureWebsiteDemo(
     },
     {
       id: "workspaces",
-      route: "/workspaces",
+      route: "/chat?panel=workspaces",
       label: "Workspaces",
       wait: ["Workspaces"],
     },
@@ -170,7 +170,7 @@ export async function captureWebsiteDemo(
     },
     {
       id: "workspace-add",
-      route: "/workspaces",
+      route: "/chat?panel=workspaces",
       label: "Create workspace",
       wait: ["Workspaces"],
       click: "Create workspace",
@@ -304,7 +304,7 @@ export async function captureWebsiteDemo(
       await new Promise((resolve) => setTimeout(resolve, 180));
       await navigate(screen.route, screen.wait, screen.prepare);
       const heading =
-        screen.route === "/workspaces"
+        screen.route === "/chat?panel=workspaces"
           ? "No workspace selected"
           : screen.route === "/agents/office"
             ? "Team office"
