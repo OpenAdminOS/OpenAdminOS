@@ -6,6 +6,17 @@
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
 
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-sm: 12px;
+  --text-sm--line-height: 18px;
+  --text-base: 13px;
+  --text-base--line-height: 20px;
+  --text-md: 15px;
+  --text-md--line-height: 22px;
+  --text-lg: 20px;
+  --text-lg--line-height: 28px;
+
   --color-bg: #17191d;
   --color-bg-elevated: #202329;
   --color-bg-raised: #292d34;
@@ -531,7 +542,8 @@ html[data-reduced-motion] *::after {
 /* Shared desktop rhythm: quiet surfaces, explicit boundaries, compact headers. */
 .app-page-header { padding: 24px 32px 20px; gap: 20px; align-items: center; }
 .app-page-body { padding: 24px 32px; }
-.app-sidebar { width: 232px; }
+.app-sidebar { width: 224px; }
+.app-sidebar[data-collapsed="true"] { width: 56px; }
 .app-titlebar { border-bottom: 1px solid var(--color-border-soft); }
 table { font-variant-numeric: tabular-nums; }
 input::placeholder, textarea::placeholder { color: var(--color-text-placeholder); }
@@ -540,7 +552,6 @@ select { color-scheme: inherit; }
 .companion-shell::before { display: none; }
 .companion-panel { background: var(--color-surface); border-color: var(--color-border); box-shadow: var(--shadow-soft); }
 @media (max-width: 1100px) {
-  .app-sidebar { width: 212px; }
   .app-page-header { padding: 20px 24px 16px; flex-wrap: wrap; gap: 12px; }
   .app-page-body { padding: 20px 24px; }
 }
