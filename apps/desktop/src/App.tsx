@@ -6,7 +6,7 @@ import { Card } from "./components/Card";
 
 const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
-const Activity = lazy(() => import("./pages/Activity"));
+const Runs = lazy(() => import("./pages/Runs"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
@@ -71,7 +71,7 @@ export default function App() {
           <Route path="/workspaces" element={<Workspaces />} />
           <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
           <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
-          <Route path="/runs" element={<Activity />} />
+          <Route path="/runs" element={<Runs />} />
           <Route path="/activity" element={<ActivityRedirect />} />
           <Route path="/runs/:id" element={<RunResult />} />
           <Route path="/settings/:section?" element={<Settings />} />

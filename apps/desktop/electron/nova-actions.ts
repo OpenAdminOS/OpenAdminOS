@@ -66,7 +66,7 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     return { preview: { id, title: `Run ${agent.name}`, target: state.tenants.find(t => t.id === tenantId)?.displayName || 'Selected tenant', body: `Run ${agent.name} against the selected tenant. Write plans require their normal review. Existing saved result-delivery routes may send notifications when the run finishes.`, kind: 'run' }, execute: async signal => {
       signal.throwIfAborted();
       const run = await host.startRun(agent.slug, { tenantId, providerId: state.activeProviderId });
-      return { text: `${agent.name} was queued. Follow its progress in Activity; any required approvals remain in the app.`, route: `/runs/${run.id}` };
+      return { text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`, route: `/runs/${run.id}` };
     } };
   }
   const connector = (await host.connectors()).find(c => c.descriptor.id === intent.connectorId);

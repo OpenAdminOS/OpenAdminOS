@@ -139,10 +139,24 @@ export function CommandPalette({
       },
       {
         id: "nav-runs",
-        label: "Go to Runs",
+        label: "Runs",
         group: "Navigate",
         icon: <IconActivity size={13} className="text-[var(--color-accent)]" />,
         action: go("/runs"),
+      },
+      {
+        id: "nav-runs-review",
+        label: "Runs: Needs review",
+        group: "Navigate",
+        icon: <IconActivity size={13} className="text-[var(--color-warning)]" />,
+        action: go("/runs?status=review#needs-review"),
+      },
+      {
+        id: "nav-runs-failed",
+        label: "Runs: Failed",
+        group: "Navigate",
+        icon: <IconActivity size={13} className="text-[var(--color-danger)]" />,
+        action: go("/runs?status=failed#history"),
       },
       {
         id: "nav-data",

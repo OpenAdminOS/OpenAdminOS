@@ -68,7 +68,9 @@ it("lists the shell destinations and every Settings section", async () => {
     "Go to Chat",
     "Agents",
     "Agents: Hub",
-    "Go to Runs",
+    "Runs",
+    "Runs: Needs review",
+    "Runs: Failed",
     "Go to Changes",
     "Open Settings",
     "Team office",
@@ -80,7 +82,10 @@ it("lists the shell destinations and every Settings section", async () => {
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     expect(
       screen.getByRole("option", {
-        name: label === "Agents" ? /^Agents$/ : new RegExp(`^${escapedLabel}`),
+        name:
+          label === "Agents" || label === "Runs"
+            ? new RegExp(`^${escapedLabel}$`)
+            : new RegExp(`^${escapedLabel}`),
       }),
     ).toBeInTheDocument();
   }

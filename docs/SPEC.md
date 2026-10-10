@@ -1848,6 +1848,12 @@ legacy `/cache` and `/connectors` URLs redirect to their Settings sections,
 including connector drawer deep links. `/fleet` redirects to the all-tenant
 Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
 
+Runs contains conditional Needs review and Running sections followed by a
+filterable History table. `/runs/:id` opens queued and running work in the live
+run modal, awaiting-confirmation work on a focused confirmation page, and
+terminal runs in a URL-addressable drawer. History links can prefilter by
+`?agent=<slug>`, `?status=failed|review`, and `?tenant=<id>`.
+
 Removed from navigation:
 - **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
 - **Report issue**: available in Settings → About and contextual failure recovery, not as permanent primary navigation.
@@ -1879,7 +1885,7 @@ North-star metric: time from install to first successful result, target under 5 
 |---|---|---|
 | Chat | Nav label (was "Intune Chat") | Plain-language tenant Q&A. Internal ids keep `intune-chat`. |
 | Agents | Nav label | Installed agents and the entry point for Hub, schedules, and Agent Team |
-| Runs | Nav label (replaces "Run history" and "Activity") | Active, reviewable, and completed runs |
+| Runs | Nav label (replaces "Run history" and "Activity") | Review inbox, active progress, and searchable run history |
 | Changes | Nav label | Tenant drift timeline, retained baselines, comparison, and an all-tenant scope (formerly Fleet) |
 | Settings | Nav label | Provider, tenant, data, connector, gateway, appearance, privacy, and application configuration |
 | Data | Settings section (replaces "Cache") | Cache freshness, preload coverage, refresh scheduling, and local retention |
