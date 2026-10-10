@@ -1835,11 +1835,13 @@ The sidebar contains exactly five destinations in this order:
 | Agents | `/agents` | Installed agents, Hub, schedules, and Agent Team |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant drift, baselines, compare, and Fleet |
-| Settings | `/settings` | Providers, tenants, data, connectors, gateway, appearance, privacy, and about |
+| Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, Appearance, Privacy, and About |
 
-Until their consolidation phases land, Agent Team, Workspaces, Connectors,
-Cache, and Fleet remain routable and reachable from the command palette. The
-legacy `/activity` route redirects to `/runs`.
+Until their remaining consolidation phases land, Agent Team, Workspaces, and
+Fleet remain routable and reachable from the command palette. Cache and
+Connectors now live in Settings; legacy `/cache` and `/connectors` URLs redirect
+to their Settings sections, including connector drawer deep links. The legacy
+`/activity` route redirects to `/runs`.
 
 Removed from navigation:
 - **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
@@ -1875,12 +1877,13 @@ North-star metric: time from install to first successful result, target under 5 
 | Runs | Nav label (replaces "Run history" and "Activity") | Active, reviewable, and completed runs |
 | Changes | Nav label | Tenant drift, retained baselines, comparison, and Fleet scope |
 | Settings | Nav label | Provider, tenant, data, connector, gateway, appearance, privacy, and application configuration |
+| Data | Settings section (replaces "Cache") | Cache freshness, preload coverage, refresh scheduling, and local retention |
 | Agent | Unchanged | Installable module with declared scopes and read/write mode |
 | Hub | Tab inside Agents (was "Agent Hub" nav item) | Community agent store |
 | Schedule | Tab inside Agents | Recurring agent runs |
 | Agent Team | Palette destination until Agents consolidation | Persistent personas, assignments, and evidence-linked briefings |
 | Workspace | Palette destination until Chat consolidation | Saved multi-tenant working set |
-| Connector | Palette destination until Settings consolidation | External integration (non-Graph) |
+| Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls |
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
 
@@ -1904,7 +1907,7 @@ North-star metric: time from install to first successful result, target under 5 
 
 ### Deliberately not done in v0.4
 
-- No merge of Workspaces/Connectors page code into Settings.tsx: they stay separate routes, only nav placement changes (cheap, reversible).
+- Workspace code remains a separate route until Chat consolidation. Connector setup stays componentized, but renders in the Settings section and URL-addressable drawer.
 - No LLM-driven agent suggestions in chat: matching is deterministic, local keyword/category matching against installed manifests.
 - No platform-specific screen-reader integration or release-evidence gate. Platform-neutral keyboard, focus, semantic, contrast, forced-colors, and reduced-motion support remains part of the production UI.
 - Usability validation with 3–5 external Intune admins is still owed; these decisions are the best pre-validation guess and should be revisited against real hesitation points.

@@ -45,6 +45,7 @@ import {
 } from "../components/icons";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import { Select } from "../components/Select";
+import { Badge, Button as UiButton, Drawer, Skeleton } from "../components/ui";
 
 type BrandIcon = (props: { size?: number }) => ReactElement;
 type WhatsAppTargetDraft = {
@@ -62,11 +63,35 @@ type TeamsDefaultDraft = {
 const notificationConnectorIds = ["outlook", "slack", "discord", "signal"] as const;
 
 export default function Connectors() {
+  return (
+    <>
+      <PageHeader title="Connectors" />
+      <PageBody>
+        <ConnectorsSettingsSection />
+      </PageBody>
+    </>
+  );
+}
+
+export function ConnectorsSettingsSection({
+  connectorId,
+  onConnectorChange,
+}: {
+  connectorId?: string | null;
+  onConnectorChange?: (connectorId: string | null) => void;
+}) {
   const [connectors, setConnectors] = useState<ConnectorSummary[] | undefined>(
     undefined,
   );
   const [error, setError] = useState<string | undefined>(undefined);
   const [testing, setTesting] = useState<string | undefined>(undefined);
+  const [openConnectorId, setOpenConnectorId] = useState<string | null>(
+    connectorId ?? null,
+  );
+
+  useEffect(() => {
+    setOpenConnectorId(connectorId ?? null);
+  }, [connectorId]);
 
   const refresh = useCallback(async () => {
     const api = window.openAdminOS;
@@ -101,119 +126,220 @@ export default function Connectors() {
     [refresh],
   );
 
-  const teamsSummary = connectors?.find(
-    (c) => c.descriptor.id === "teams",
+  const openConnector = connectors?.find(
+    (connector) => connector.descriptor.id === openConnectorId,
   );
-  const whatsappSummary = connectors?.find(
-    (c) => c.descriptor.id === "whatsapp-web",
-  );
-  const notificationSummaries = connectors
-    ? notificationConnectorIds
-        .map((id) => connectors.find((c) => c.descriptor.id === id))
-        .filter(isConnectorSummary)
-    : [];
+  const openRoadmapEntry = roadmap.find((entry) => entry.id === openConnectorId);
+
+  const setOpenConnector = (id: string | null) => {
+    setOpenConnectorId(id);
+    onConnectorChange?.(id);
+  };
+
+  const renderConnectorDetail = () => {
+    if (!openConnector) {
+      return openRoadmapEntry ? (
+        <div className="p-5">
+          <RoadmapCard entry={openRoadmapEntry} />
+        </div>
+      ) : null;
+    }
+    if (openConnector.descriptor.id === "teams") {
+      return (
+        <div className="p-5">
+          <FeaturedTeamsCard
+            summary={openConnector}
+            busy={testing === "teams"}
+            onTest={() => handleTest("teams")}
+          />
+        </div>
+      );
+    }
+    if (openConnector.descriptor.id === "whatsapp-web") {
+      return (
+        <div className="p-5">
+          <WhatsAppWebCard summary={openConnector} onRefresh={refresh} />
+        </div>
+      );
+    }
+    if (
+      notificationConnectorIds.includes(
+        openConnector.descriptor.id as NotificationConnectorId,
+      )
+    ) {
+      return (
+        <div className="p-5">
+          <NotificationConnectorCard
+            summary={openConnector}
+            busy={testing === openConnector.descriptor.id}
+            onRefresh={refresh}
+            onTest={() => handleTest(openConnector.descriptor.id)}
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="p-5 text-sm text-[var(--color-text-muted)]">
+        This connector has no configurable setup fields in this build.
+      </div>
+    );
+  };
 
   return (
-    <>
-      <PageHeader
-        eyebrow="Connectors"
-        title="Connector routing"
-        subtitle="Configure where terminal agent reports are posted. Saved delivery rules use these targets without another prompt, and every send is recorded in the run activity."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              trailingIcon={<IconExternal size={13} />}
-              onClick={() =>
-                void window.openAdminOS?.openExternal(
-                  "https://docs.openadminos.com/connectors",
-                )
-              }
-            >
-              Setup guide
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              leadingIcon={<IconRefresh size={13} />}
-              onClick={() => void refresh()}
-            >
-              Refresh
-            </Button>
-          </div>
-        }
-      />
-      <PageBody>
-        {error && (
-          <div className="mb-5">
-            <ConnectorNotice tone="danger" title="Connector refresh failed" body={error} />
-          </div>
-        )}
+    <div className="max-w-[1040px]">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <button
+          type="button"
+          className="text-sm text-[var(--color-text-muted)] underline decoration-dotted underline-offset-4 hover:text-[var(--color-text)]"
+          onClick={() =>
+            void window.openAdminOS?.openExternal(
+              "https://docs.openadminos.com/connectors",
+            )
+          }
+        >
+          Setup guide
+        </button>
+        <UiButton size="sm" variant="ghost" onClick={() => void refresh()}>
+          Refresh
+        </UiButton>
+      </div>
 
-        {!connectors ? (
-          <ConnectorLoadingState />
-        ) : (
-          <div className="space-y-6">
-            <ConnectorOperationsSummary connectors={connectors} />
+      {error ? (
+        <div className="mb-3">
+          <ConnectorNotice tone="danger" title="Connector refresh failed" body={error} />
+        </div>
+      ) : null}
 
-            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
-              <section className="space-y-4">
-                <SectionHeader title="Live connectors" compact />
-                {teamsSummary ? (
-                  <FeaturedTeamsCard
-                    summary={teamsSummary}
-                    busy={testing === "teams"}
-                    onTest={() => handleTest("teams")}
-                  />
-                ) : null}
-                {whatsappSummary ? (
-                  <WhatsAppWebCard summary={whatsappSummary} onRefresh={refresh} />
-                ) : null}
-                {notificationSummaries.length > 0 ? (
-                  <div className="grid gap-4 xl:grid-cols-2">
-                    {notificationSummaries.map((summary) => (
-                      <NotificationConnectorCard
-                        key={summary.descriptor.id}
-                        summary={summary}
-                        busy={testing === summary.descriptor.id}
-                        onRefresh={refresh}
-                        onTest={() => handleTest(summary.descriptor.id)}
-                      />
-                    ))}
-                  </div>
-                ) : null}
-              </section>
+      {!connectors ? (
+        <ConnectorLoadingState />
+      ) : (
+        <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+          {connectors.map((connector) => (
+            <ConnectorSettingsRow
+              key={connector.descriptor.id}
+              connector={connector}
+              onOpen={() => setOpenConnector(connector.descriptor.id)}
+            />
+          ))}
+          {roadmap.map((entry) => (
+            <ConnectorRoadmapRow
+              key={entry.id}
+              entry={entry}
+              onOpen={() => setOpenConnector(entry.id)}
+            />
+          ))}
+          <ConnectorRoutingSummary connectors={connectors} />
+        </div>
+      )}
 
-              <ConnectorPolicyPanel />
-            </div>
-
-            <section>
-              <ConnectorDetailsDisclosure
-                title="Connector backlog"
-                summary={`${roadmap.length} planned connector targets using the same delivery contract.`}
-              >
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {roadmap.map((c) => (
-                    <RoadmapCard key={c.id} entry={c} />
-                  ))}
-                </div>
-              </ConnectorDetailsDisclosure>
-            </section>
-
-            <ConnectorIdeaBar />
-          </div>
-        )}
-      </PageBody>
-    </>
+      <Drawer
+        open={Boolean(openConnectorId && (openConnector || openRoadmapEntry))}
+        title={openConnector?.descriptor.name ?? openRoadmapEntry?.name ?? "Connector"}
+        onClose={() => setOpenConnector(null)}
+      >
+        {renderConnectorDetail()}
+      </Drawer>
+    </div>
   );
+}
+
+function ConnectorSettingsRow({
+  connector,
+  onOpen,
+}: {
+  connector: ConnectorSummary;
+  onOpen: () => void;
+}) {
+  const status = connectorStatus(connector.status);
+  return (
+    <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
+      <div className="min-w-0 flex-1">
+        <div className="text-base font-medium text-[var(--color-text)]">
+          {connector.descriptor.name}
+        </div>
+        <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+          {connector.descriptor.capabilities.length} capabilities, {connector.descriptor.scopes.length} required permissions
+        </p>
+      </div>
+      <Badge tone={status.tone}>{status.label}</Badge>
+      <UiButton size="sm" variant="secondary" onClick={onOpen}>
+        {connector.status === "connected" ? "Manage" : "Set up"}
+      </UiButton>
+    </div>
+  );
+}
+
+function ConnectorRoadmapRow({
+  entry,
+  onOpen,
+}: {
+  entry: RoadmapEntry;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
+      <div className="min-w-0 flex-1">
+        <div className="text-base font-medium text-[var(--color-text)]">{entry.name}</div>
+        <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{entry.description}</p>
+      </div>
+      <Badge tone="neutral">{entry.status === "designed" ? "Designed" : entry.status === "planned" ? "Planned" : "Considering"}</Badge>
+      <UiButton size="sm" variant="ghost" onClick={onOpen}>View details</UiButton>
+    </div>
+  );
+}
+
+function ConnectorRoutingSummary({ connectors }: { connectors: ConnectorSummary[] }) {
+  const connected = connectors.filter((connector) => connector.status === "connected").length;
+  const capabilities = connectors.reduce(
+    (total, connector) => total + connector.descriptor.capabilities.length,
+    0,
+  );
+  return (
+    <details className="px-5 py-4">
+      <summary className="cursor-pointer text-base font-medium text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+        Routing defaults and flow
+      </summary>
+      <div className="mt-3 grid gap-3 text-sm text-[var(--color-text-muted)] sm:grid-cols-3">
+        <p><span className="font-medium text-[var(--color-text)]">{connected}/{connectors.length}</span> connectors connected</p>
+        <p><span className="font-medium text-[var(--color-text)]">{capabilities}</span> declared capabilities</p>
+        <p>Run report to local queue to connector send to activity log.</p>
+      </div>
+      <div className="mt-3 space-y-2 border-t border-[var(--color-border-soft)] pt-3 text-sm text-[var(--color-text-muted)]">
+        <p>Saved agent delivery rules post automatically to the default target configured in each connector.</p>
+        <p>Transient failures retry from local state. External egress remains labeled in run activity.</p>
+        <button
+          type="button"
+          className="text-[var(--color-text)] underline decoration-dotted underline-offset-4"
+          onClick={() => void window.openAdminOS?.openExternal("https://github.com/OpenAdminOS/OpenAdminOS/issues/new?labels=connector")}
+        >
+          Suggest connector
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function connectorStatus(status: ConnectorSummary["status"]): {
+  label: string;
+  tone: "neutral" | "success" | "warning" | "danger";
+} {
+  switch (status) {
+    case "connected":
+      return { label: "Connected", tone: "success" };
+    case "needs-setup":
+      return { label: "Needs setup", tone: "warning" };
+    case "needs-scope":
+      return { label: "Needs consent", tone: "warning" };
+    case "error":
+      return { label: "Error", tone: "danger" };
+    default:
+      return { label: "Untested", tone: "neutral" };
+  }
 }
 
 // ─── Page overview ────────────────────────────────────────────────────────
 
-function ConnectorOperationsSummary({
+export function ConnectorOperationsSummary({
   connectors,
 }: {
   connectors: ConnectorSummary[];
@@ -294,7 +420,7 @@ function ConnectorStat({
   );
 }
 
-function ConnectorPolicyPanel() {
+export function ConnectorPolicyPanel() {
   return (
     <aside className="rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)] 2xl:sticky 2xl:top-0">
       <div className="flex items-center gap-2">
@@ -368,13 +494,18 @@ function PolicyRow({
 
 function ConnectorLoadingState() {
   return (
-    <div className="grid gap-3 lg:grid-cols-3">
+    <div
+      role="status"
+      aria-label="Loading connectors"
+      className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]"
+    >
       {[0, 1, 2].map((item) => (
-        <div
-          key={item}
-          className="h-[86px] rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border-soft)]"
-        >
-          <div className="h-full animate-pulse rounded-xl bg-[var(--color-bg-raised)]/35" />
+        <div key={item} className="flex items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4 last:border-b-0">
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="w-36" />
+            <Skeleton className="w-64 max-w-full" />
+          </div>
+          <Skeleton className="w-20" />
         </div>
       ))}
     </div>
@@ -409,7 +540,7 @@ function ConnectorNotice({
   );
 }
 
-function ConnectorIdeaBar() {
+export function ConnectorIdeaBar() {
   return (
     <div className="flex flex-col gap-3 rounded-xl bg-[var(--color-surface)] px-5 py-4 ring-1 ring-[var(--color-border-soft)] sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -2324,7 +2455,7 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function SectionHeader({
+export function SectionHeader({
   title,
   tone = "default",
   compact = false,
@@ -2347,7 +2478,7 @@ function SectionHeader({
   );
 }
 
-function isConnectorSummary(
+export function isConnectorSummary(
   summary: ConnectorSummary | undefined,
 ): summary is ConnectorSummary {
   return summary !== undefined;

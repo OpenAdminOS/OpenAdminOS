@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
 import { AppShell, TitleBarInset } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
@@ -15,8 +15,6 @@ const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
 const Fleet = lazy(() => import("./pages/Fleet"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
-const Connectors = lazy(() => import("./pages/Connectors"));
-const Cache = lazy(() => import("./pages/Cache"));
 const Settings = lazy(() => import("./pages/Settings"));
 const RunResult = lazy(() => import("./pages/RunResult"));
 const Schedules = lazy(() => import("./pages/Schedules"));
@@ -72,12 +70,13 @@ export default function App() {
           <Route path="/agents/:slug" element={<AgentDetail />} />
           <Route path="/hub" element={<Navigate to="/agents/hub" replace />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
-          <Route path="/cache" element={<Cache />} />
+          <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
           <Route path="/office" element={<Office />} />
           <Route path="/changes" element={<Changes />} />
           <Route path="/fleet" element={<FleetRoute />} />
           <Route path="/workspaces" element={<Workspaces />} />
-          <Route path="/connectors" element={<Connectors />} />
+          <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
+          <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
           <Route path="/runs" element={<Activity />} />
           <Route path="/activity" element={<ActivityRedirect />} />
           <Route path="/runs/:id" element={<RunResult />} />
@@ -94,6 +93,33 @@ export function ActivityRedirect() {
   return (
     <Navigate
       to={{ pathname: "/runs", search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+export function LegacySettingsRedirect({ section }: { section: "data" | "connectors" }) {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: `/settings/${section}`, search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+export function LegacyConnectorRedirect() {
+  const location = useLocation();
+  const { connectorId } = useParams<{ connectorId: string }>();
+  const query = new URLSearchParams(location.search);
+  if (connectorId) query.set("connector", connectorId);
+  return (
+    <Navigate
+      to={{
+        pathname: "/settings/connectors",
+        search: query.toString() ? `?${query.toString()}` : "",
+        hash: location.hash,
+      }}
       replace
     />
   );

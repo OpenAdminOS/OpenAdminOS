@@ -72,12 +72,12 @@ export async function captureWebsiteDemo(
       prepare: "write-confirmation" as const,
     },
     { id: "fleet", route: "/fleet", label: "Fleet", wait: ["Fleet"] },
-    { id: "cache", route: "/cache", label: "Cache", wait: ["Cache"] },
+    { id: "cache", route: "/settings/data", label: "Data", wait: ["Tenant cache"] },
     {
       id: "settings",
       route: "/settings",
       label: "Provider settings",
-      wait: ["LLM Providers"],
+      wait: ["Providers"],
     },
     {
       id: "tenants",
@@ -89,31 +89,31 @@ export async function captureWebsiteDemo(
       id: "chat-settings",
       route: "/settings/chat",
       label: "Chat settings",
-      wait: ["Settings"],
+      wait: ["Chat investigation mode"],
     },
     {
       id: "gateway",
       route: "/settings/gateway",
       label: "Gateway settings",
-      wait: ["Settings"],
+      wait: ["Local MCP gateway"],
     },
     {
       id: "appearance",
-      route: "/settings/general",
-      label: "General and appearance",
+      route: "/settings/appearance",
+      label: "Appearance",
       wait: ["Graphite dark"],
     },
     {
       id: "privacy",
       route: "/settings/privacy",
       label: "Privacy settings",
-      wait: ["Settings"],
+      wait: ["Tenant telemetry"],
     },
     {
       id: "about",
       route: "/settings/about",
       label: "About OpenAdminOS",
-      wait: ["Settings"],
+      wait: ["Readiness diagnostics"],
     },
     {
       id: "workspaces",
@@ -123,7 +123,7 @@ export async function captureWebsiteDemo(
     },
     {
       id: "connectors",
-      route: "/connectors",
+      route: "/settings/connectors",
       label: "Connectors",
       wait: ["Connectors"],
     },
@@ -302,9 +302,7 @@ export async function captureWebsiteDemo(
       const heading =
         screen.route === "/workspaces"
           ? "No workspace selected"
-          : screen.route === "/connectors"
-            ? "Connector routing"
-            : screen.route.startsWith("/settings")
+          : screen.route.startsWith("/settings")
               ? "Settings"
               : screen.route.startsWith("/agents/hub") ||
                   screen.route === "/agents/schedules" ||

@@ -1,7 +1,7 @@
 import { useAppearance } from "../styles/appearance";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
-import { PageBody, PageHeader } from "../components/AppShell";
+import { PageHeader } from "../components/AppShell";
 import { Select } from "../components/Select";
 import { Card } from "../components/Card";
 import { Pill, StatusDot } from "../components/Pill";
@@ -12,14 +12,10 @@ import { useReportIssue } from "../components/ReportIssueModal";
 import {
   IconCheck,
   IconChat,
-  IconClock,
-  IconClose,
-  IconCloud,
   IconExternal,
   IconHardDrive,
   IconHash,
   IconLock,
-  IconPlus,
   IconRefresh,
   IconSearch,
   IconShield,
@@ -70,6 +66,17 @@ import {
   type SettingsItemId,
   type SettingsSectionId,
 } from "../copy";
+import { DataSettingsSection } from "./Cache";
+import { ConnectorsSettingsSection } from "./Connectors";
+import {
+  Badge,
+  Button as UiButton,
+  IconButton,
+  KeyValue,
+  Menu,
+  SegmentedControl,
+  Switch,
+} from "../components/ui";
 
 interface RunHistoryRetentionDraft {
   neverPrune: boolean;
@@ -87,8 +94,19 @@ interface DriftRetentionDraft {
 const OFFICIAL_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
+interface SettingsFilterValue {
+  query: string;
+  sectionMatch: boolean;
+}
+
+const SettingsFilterContext = createContext<SettingsFilterValue>({
+  query: "",
+  sectionMatch: false,
+});
+
 export default function Settings() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { section: sectionPath } = useParams<{ section?: string }>();
   const [searchParams] = useSearchParams();
   const legacySectionParam = searchParams.get("section");
@@ -100,6 +118,7 @@ export default function Settings() {
   const [settingsQuery, setSettingsQuery] = useState("");
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const settingsSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const scrollRootRef = useRef<HTMLDivElement | null>(null);
   const settingsResults = useMemo(() => searchSettings(settingsQuery), [settingsQuery]);
   const {
     state,
@@ -126,8 +145,42 @@ export default function Settings() {
   }, [navigate, sectionParam, sectionPath]);
 
   useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const root = scrollRootRef.current;
+    if (!root) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+        const id = visible[0]?.target.getAttribute("data-settings-section");
+        if (id && SETTINGS_SECTIONS.some((entry) => entry.id === id)) {
+          setSection(id as SettingsSectionId);
+        }
+      },
+      { root, rootMargin: "-10% 0px -70% 0px", threshold: [0, 0.1, 0.5] },
+    );
+    root
+      .querySelectorAll<HTMLElement>("[data-settings-section]")
+      .forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [settingsQuery]);
+
+  useEffect(() => {
     setActiveSearchIndex(0);
   }, [settingsQuery]);
+
+  useEffect(() => {
+    if (!SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const heading = document.getElementById(`settings-heading-${sectionParam}`);
+      if (!(heading instanceof HTMLElement)) return;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      heading.scrollIntoView({ block: "start", behavior: reducedMotion ? "auto" : "smooth" });
+      heading.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sectionParam]);
 
   useEffect(() => {
     const target = searchParams.get("target");
@@ -154,6 +207,22 @@ export default function Settings() {
         ? `/settings/${target.section}?target=${encodeURIComponent(target.id)}`
         : `/settings/${target.section}`,
     );
+  };
+
+  const visibleSectionIds = useMemo(() => {
+    if (!settingsQuery.trim()) {
+      return new Set<SettingsSectionId>(SETTINGS_SECTIONS.map((entry) => entry.id));
+    }
+    return new Set<SettingsSectionId>(settingsResults.map((result) => result.section));
+  }, [settingsQuery, settingsResults]);
+
+  const updateConnectorRoute = (connectorId: string | null) => {
+    const next = new URLSearchParams(location.search);
+    next.delete("target");
+    if (connectorId) next.set("connector", connectorId);
+    else next.delete("connector");
+    const query = next.toString();
+    navigate(`/settings/connectors${query ? `?${query}` : ""}`, { replace: true });
   };
 
   const onSettingsSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -185,9 +254,9 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="Search first. Detailed configuration stays out of the daily Chat surface." />
-      <div className="flex h-full min-h-0 flex-1">
-        <nav aria-label="Settings sections" className="relative flex w-[232px] shrink-0 flex-col gap-0.5 border-r border-[var(--color-border-soft)] px-3 py-6">
+      <PageHeader title="Settings" />
+      <div className="flex min-h-0 flex-1">
+        <nav aria-label="Settings sections" className="sticky top-0 flex w-[190px] shrink-0 self-start flex-col gap-0.5 border-r border-[var(--color-border-soft)] px-3 py-5 xl:w-[220px]">
           <div className="relative mb-3">
             <IconSearch
               size={13}
@@ -215,8 +284,8 @@ export default function Settings() {
               value={settingsQuery}
               onChange={(event) => setSettingsQuery(event.target.value)}
               onKeyDown={onSettingsSearchKeyDown}
-              placeholder="Search settings…"
-              className="h-8 w-full rounded-lg bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]"
+              placeholder="Search settings"
+              className="h-8 w-full rounded-lg bg-[var(--color-bg-raised)] pl-8 pr-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
             />
             {settingsQuery.trim() && (
               <div
@@ -226,8 +295,8 @@ export default function Settings() {
                 className="absolute inset-x-0 top-10 z-20 max-h-[320px] overscroll-contain overflow-y-auto rounded-lg bg-[var(--color-bg-elevated)] p-1 shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)]"
               >
                 {settingsResults.length === 0 ? (
-                  <div role="status" className="px-3 py-4 text-[12px] leading-5 text-[var(--color-text-muted)]">
-                    No matching setting. Try “provider”, “cache”, or “privacy”.
+                  <div role="status" className="px-3 py-4 text-sm leading-5 text-[var(--color-text-muted)]">
+                    No matching setting. Try provider, cache, or privacy.
                   </div>
                 ) : (
                   settingsResults.map((result, index) => (
@@ -252,10 +321,10 @@ export default function Settings() {
                           : "hover:bg-[var(--color-surface)]"
                       }`}
                     >
-                      <span className="block text-[12px] font-medium text-[var(--color-text)]">
+                      <span className="block text-sm font-medium text-[var(--color-text)]">
                         {result.title}
                       </span>
-                      <span className="mt-0.5 block line-clamp-2 text-[11px] leading-4 text-[var(--color-text-muted)]">
+                      <span className="mt-0.5 block line-clamp-2 text-xs leading-4 text-[var(--color-text-muted)]">
                         {result.description}
                       </span>
                     </button>
@@ -268,7 +337,8 @@ export default function Settings() {
             <button
               key={s.id}
               onClick={() => selectSettingsTarget({ section: s.id })}
-              className={`rounded-lg px-3 py-1.5 text-left text-[13px] font-medium transition-colors ${
+              aria-current={s.id === section ? "location" : undefined}
+              className={`rounded-lg px-3 py-1.5 text-left text-base font-medium transition-colors ${
                 s.id === section
                   ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
                   : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
@@ -277,77 +347,126 @@ export default function Settings() {
               {s.title}
             </button>
           ))}
-          <div className="mt-auto border-t border-[var(--color-border-soft)] pt-4">
-            <div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              More
-            </div>
-            <button
-              onClick={() => navigate("/workspaces")}
-              className="w-full rounded-lg px-3 py-2 text-left transition-colors text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-            >
-              <span className="block text-[13px] font-medium">Workspaces</span>
-              <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                Saved multi-tenant working sets
-              </span>
-            </button>
-            <button
-              onClick={() => navigate("/connectors")}
-              className="mt-1 w-full rounded-lg px-3 py-2 text-left transition-colors text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-            >
-              <span className="block text-[13px] font-medium">Connectors</span>
-              <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                External integrations
-              </span>
-            </button>
-          </div>
         </nav>
-        <PageBody>
-          {section === "providers" && (
-            <ProvidersSection
-              providers={state.providers}
-              activeProviderId={state.activeProviderId}
-              activeModelByProviderId={state.activeModelByProviderId}
-              onSetActiveProvider={setActiveProvider}
-              onSetActiveModel={setActiveModel}
-              onProviderConfigSaved={refresh}
-            />
-          )}
-          {section === "tenants" && (
-            <TenantsSection
-              tenants={state.tenants}
-              activeTenantId={state.activeTenantId}
-              busy={false}
-              error={null}
-              onConnect={async () => openSetup()}
-              onSetActive={setActiveTenant}
-              onDisconnect={disconnectTenant}
-            />
-          )}
-          {section === "chat" && <ChatSettingsSection />}
-          {section === "gateway" && (
-            <GatewaySection
-              tenants={state.tenants}
-              activeTenantId={state.activeTenantId}
-            />
-          )}
-          {section === "general" && <GeneralSection />}
-          {section === "privacy" && (
-            <PrivacySection
-              trust={state.trust}
-              registrySource={state.registrySource}
-              registryRefreshError={state.registryRefreshError}
-              lastRegistryRefresh={state.lastRegistryRefresh}
-              registryInstallCountsEnabled={state.registryInstallCountsEnabled}
-              usageTelemetryEnabled={state.usageTelemetryEnabled ?? false}
-              onSetRegistrySource={setRegistrySource}
-              onSetRegistryInstallCountsEnabled={setRegistryInstallCountsEnabled}
-              onSetUsageTelemetryEnabled={setUsageTelemetryEnabled}
-            />
-          )}
-          {section === "about" && <AboutSection />}
-        </PageBody>
+        <div ref={scrollRootRef} className="app-page-body min-w-0 flex-1 overflow-y-auto animate-fade-in">
+          {settingsQuery.trim() && visibleSectionIds.size === 0 ? (
+            <div role="status" className="rounded-[10px] bg-[var(--color-surface)] px-6 py-10 text-center text-base text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
+              No settings match this search. Try provider, cache, or privacy.
+            </div>
+          ) : null}
+          <div className="space-y-10 pb-16">
+            <SettingsPageSection
+              id="providers"
+              visible={visibleSectionIds.has("providers")}
+              query={settingsQuery}
+              action={<UiButton variant="ghost" size="sm" onClick={() => void refresh()}>Refresh providers</UiButton>}
+            >
+              <ProvidersSection
+                providers={state.providers}
+                activeProviderId={state.activeProviderId}
+                activeModelByProviderId={state.activeModelByProviderId}
+                onSetActiveProvider={setActiveProvider}
+                onSetActiveModel={setActiveModel}
+                onProviderConfigSaved={refresh}
+              />
+            </SettingsPageSection>
+            <SettingsPageSection
+              id="tenants"
+              visible={visibleSectionIds.has("tenants")}
+              query={settingsQuery}
+              action={<UiButton variant="primary" size="sm" onClick={() => openSetup()}>Connect tenant</UiButton>}
+            >
+              <TenantsSection
+                tenants={state.tenants}
+                activeTenantId={state.activeTenantId}
+                error={null}
+                onSetActive={setActiveTenant}
+                onDisconnect={disconnectTenant}
+              />
+            </SettingsPageSection>
+            <SettingsPageSection id="data" visible={visibleSectionIds.has("data")} query={settingsQuery}>
+              <DataSettingsSection />
+            </SettingsPageSection>
+            <SettingsPageSection id="chat" visible={visibleSectionIds.has("chat")} query={settingsQuery}>
+              <ChatSettingsSectionV2 />
+            </SettingsPageSection>
+            <SettingsPageSection id="connectors" visible={visibleSectionIds.has("connectors")} query={settingsQuery}>
+              <ConnectorsSettingsSection
+                connectorId={searchParams.get("connector")}
+                onConnectorChange={updateConnectorRoute}
+              />
+            </SettingsPageSection>
+            <SettingsPageSection id="gateway" visible={visibleSectionIds.has("gateway")} query={settingsQuery}>
+              <GatewaySection tenants={state.tenants} activeTenantId={state.activeTenantId} />
+            </SettingsPageSection>
+            <SettingsPageSection id="general" visible={visibleSectionIds.has("general")} query={settingsQuery}>
+              <GeneralSection />
+            </SettingsPageSection>
+            <SettingsPageSection id="appearance" visible={visibleSectionIds.has("appearance")} query={settingsQuery}>
+              <AppearanceSection />
+            </SettingsPageSection>
+            <SettingsPageSection id="privacy" visible={visibleSectionIds.has("privacy")} query={settingsQuery}>
+              <PrivacySection
+                trust={state.trust}
+                registrySource={state.registrySource}
+                registryRefreshError={state.registryRefreshError}
+                lastRegistryRefresh={state.lastRegistryRefresh}
+                registryInstallCountsEnabled={state.registryInstallCountsEnabled}
+                usageTelemetryEnabled={state.usageTelemetryEnabled ?? false}
+                onSetRegistrySource={setRegistrySource}
+                onSetRegistryInstallCountsEnabled={setRegistryInstallCountsEnabled}
+                onSetUsageTelemetryEnabled={setUsageTelemetryEnabled}
+              />
+            </SettingsPageSection>
+            <SettingsPageSection id="about" visible={visibleSectionIds.has("about")} query={settingsQuery}>
+              <AboutSection />
+            </SettingsPageSection>
+          </div>
+        </div>
       </div>
     </>
+  );
+}
+
+function SettingsPageSection({
+  id,
+  visible,
+  query,
+  action,
+  children,
+}: {
+  id: SettingsSectionId;
+  visible: boolean;
+  query: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const entry = SETTINGS_SECTIONS.find((candidate) => candidate.id === id)!;
+  const sectionMatch = searchSettings(query).some(
+    (result) => result.kind === "section" && result.section === id,
+  );
+  if (!visible) return null;
+  return (
+    <section
+      id={`settings-section-${id}`}
+      data-settings-section={id}
+      aria-labelledby={`settings-heading-${id}`}
+      className="scroll-mt-5"
+    >
+      <div className="mb-3 flex min-h-8 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] pb-2">
+        <h2
+          id={`settings-heading-${id}`}
+          tabIndex={-1}
+          className={`scroll-mt-5 text-md font-semibold text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${query.trim() ? "rounded bg-[var(--color-accent-soft)] px-1" : ""}`}
+        >
+          {entry.title}
+        </h2>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+      <SettingsFilterContext.Provider value={{ query, sectionMatch }}>
+        {children}
+      </SettingsFilterContext.Provider>
+    </section>
   );
 }
 
@@ -366,89 +485,22 @@ function ProvidersSection({
   onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
   onProviderConfigSaved: () => Promise<void>;
 }) {
-  const localProviders = providers.filter((p) => p.isLocal);
-  const cliHostedProviders = providers.filter(
-    (p) => !p.isLocal && p.id !== "azure-openai",
-  );
-  const azureOpenAIProvider = providers.find((p) => p.id === "azure-openai");
-
   return (
-    <div className="max-w-[820px]">
-      <SectionTitle
-        title="LLM Providers"
-        subtitle="Local providers keep tenant prompts on this device. Hosted providers send prompts to the selected service; CLI-backed providers use the vendor CLI, while Azure OpenAI stores one encrypted key locally."
-      />
-
-      <div className="mt-6 grid grid-cols-1 gap-3">
-        {localProviders.map((p) => (
+    <div className="max-w-[1040px]">
+      <fieldset className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+        <legend className="sr-only">Active provider</legend>
+        {providers.map((provider) => (
           <ProviderRow
-            key={p.id}
-            provider={p}
+            key={provider.id}
+            provider={provider}
             activeProviderId={activeProviderId}
-            activeModel={activeModelByProviderId?.[p.id]}
+            activeModel={activeModelByProviderId?.[provider.id]}
             onSetActiveProvider={onSetActiveProvider}
             onSetActiveModel={onSetActiveModel}
             onRefresh={onProviderConfigSaved}
           />
         ))}
-      </div>
-
-      <div className="mt-10 mb-3 flex items-center gap-3">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          Hosted via local CLI
-        </span>
-        <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
-      </div>
-      <p className="mb-4 max-w-[640px] text-[12px] text-[var(--color-text-muted)]">
-        These providers are accessed by invoking the vendor's locally-installed
-        CLI and its existing authentication. Account limits and organization policies apply.
-        No additional API key is stored in OpenAdminOS for these providers.
-      </p>
-      <div className="mb-3 flex justify-end">
-        <Button variant="secondary" size="sm" onClick={() => { void onProviderConfigSaved(); }}>
-          <IconRefresh size={12} /> Refresh providers
-        </Button>
-      </div>
-      <div className="grid grid-cols-1 gap-3">
-        {cliHostedProviders.map((p) => (
-          <ProviderRow
-            key={p.id}
-            provider={p}
-            activeProviderId={activeProviderId}
-            activeModel={activeModelByProviderId?.[p.id]}
-            onSetActiveProvider={onSetActiveProvider}
-            onSetActiveModel={onSetActiveModel}
-            onRefresh={onProviderConfigSaved}
-          />
-        ))}
-      </div>
-
-      {azureOpenAIProvider && (
-        <>
-          <div className="mt-10 mb-3 flex items-center gap-3">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Hosted via Azure API key
-            </span>
-            <span className="h-px flex-1 bg-[var(--color-border-soft)]" />
-          </div>
-          <p className="mb-4 max-w-[640px] text-[12px] text-[var(--color-text-muted)]">
-            Azure OpenAI uses your Azure resource endpoint and deployment. The
-            API key is encrypted with OS secure storage and is write-only in the
-            renderer.
-          </p>
-          <div className="grid grid-cols-1 gap-3">
-            <ProviderRow
-              provider={azureOpenAIProvider}
-              activeProviderId={activeProviderId}
-              activeModel={activeModelByProviderId?.[azureOpenAIProvider.id]}
-              onSetActiveProvider={onSetActiveProvider}
-              onSetActiveModel={onSetActiveModel}
-            onRefresh={onProviderConfigSaved}
-            />
-            <AzureOpenAIConfigForm onSaved={onProviderConfigSaved} />
-          </div>
-        </>
-      )}
+      </fieldset>
     </div>
   );
 }
@@ -473,12 +525,33 @@ function ProviderRow({
   const installedModels = provider.models ?? [];
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const effectiveModel = resolveProviderDefaultModel(
     provider,
     activeModel ? { [provider.id]: activeModel } : undefined,
   ).model;
   const canTest = implemented && provider.status !== "not-installed" && provider.cli?.state !== "unsupported-version";
+  const canActivate = implemented && (
+    provider.status === "connected" ||
+    (provider.status === "available" && !provider.cli)
+  );
   const cliLabel = provider.cli ? ({ ready: "Connected", "check-required": "Test required", "not-installed": "Not installed", "signed-out": "Signed out", "access-denied": "Access denied", "unsupported-version": "Update required", "request-failed": "Request failed" } as const)[provider.cli.state] : undefined;
+  const kind = provider.isLocal
+    ? "Local"
+    : provider.id === "azure-openai"
+      ? "Hosted API"
+      : "Hosted via CLI";
+  const status = testing
+    ? { label: "Checking", tone: "info" as const }
+    : !implemented
+      ? { label: "Coming soon", tone: "neutral" as const }
+      : provider.status === "connected"
+        ? { label: "Connected", tone: "success" as const }
+        : provider.status === "available"
+          ? { label: cliLabel ?? "Available", tone: "warning" as const }
+          : provider.status === "error"
+            ? { label: cliLabel ?? "Error", tone: "danger" as const }
+            : { label: "Not installed", tone: "neutral" as const };
 
   const handleTest = async () => {
     setTesting(true);
@@ -499,172 +572,77 @@ function ProviderRow({
   };
 
   return (
-    <Card className={implemented ? undefined : "opacity-60"}>
-      <div className="flex items-start gap-4 p-5">
-        <div
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ring-1 ${
-            provider.isLocal
-              ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/25"
-              : "bg-[var(--color-info-soft)] text-[var(--color-info)] ring-[var(--color-info)]/25"
-          }`}
-        >
-          {provider.isLocal ? <IconHardDrive size={20} /> : <IconCloud size={20} />}
+    <div className={`border-b border-[var(--color-border-soft)] last:border-b-0 ${implemented ? "" : "opacity-60"}`}>
+      <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+        <div className="min-w-[180px] flex-1">
+          <div className="text-base font-medium text-[var(--color-text)]">{provider.name}</div>
+          <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{kind}</p>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[14px] font-medium text-[var(--color-text)]">
-              {provider.name}
-            </span>
-            {!implemented ? (
-              <Pill>
-                <StatusDot tone="muted" /> Coming soon
-              </Pill>
-            ) : (
-              <>
-                {provider.status === "connected" && (
-                  <Pill tone="success">
-                    <StatusDot tone="success" /> Connected
-                  </Pill>
-                )}
-                {provider.status === "available" && (
-                  <Pill tone="warning">
-                    <StatusDot tone="warning" /> {cliLabel ?? "Available"}
-                  </Pill>
-                )}
-                {provider.status === "not-installed" && (
-                  <Pill>
-                    <StatusDot tone="muted" /> Not installed
-                  </Pill>
-                )}
-                {provider.status === "error" && (
-                  <Pill tone="danger">
-                    <StatusDot tone="danger" /> {cliLabel ?? "Error"}
-                  </Pill>
-                )}
-              </>
-            )}
-            {isActive && implemented && (
-              <Pill tone="accent">
-                <IconCheck size={10} /> Active
-              </Pill>
-            )}
-          </div>
-          <p className="mt-1 text-[13px] leading-relaxed text-[var(--color-text-soft)]">
-            {provider.description}
-          </p>
-          {provider.detail && (
-            <div className="mt-2 font-mono text-[11px] text-[var(--color-text-muted)]">
-              {provider.detail}
-            </div>
-          )}
-          {provider.cli && implemented && (
-            <dl className="mt-3 grid gap-3 rounded-md bg-[var(--color-bg-raised)] p-3 text-[11px] ring-1 ring-[var(--color-border-soft)] sm:grid-cols-2">
-              <div><dt className="text-[var(--color-text-muted)]">CLI version</dt><dd className="mt-1 font-mono">{provider.cli.version ?? "Not detected"}</dd></div>
-              <div><dt className="text-[var(--color-text-muted)]">Default model</dt><dd className="mt-1 font-mono">{effectiveModel ?? "CLI default"}</dd></div>
-              <div className="min-w-0 sm:col-span-2"><dt className="text-[var(--color-text-muted)]">Executable</dt><dd className="mt-1 break-all font-mono">{provider.cli.binaryPath ?? "Not detected"}</dd></div>
+        <Badge tone={status.tone}>{status.label}</Badge>
+        <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-soft)]">
+          <input
+            type="radio"
+            name="active-provider"
+            aria-label={`Set ${provider.name} active`}
+            checked={isActive}
+            disabled={!isActive && !canActivate}
+            onChange={(event) => {
+              if (event.target.checked && !isActive) void onSetActiveProvider(provider.id);
+            }}
+            className="h-4 w-4 accent-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          />
+          Active
+        </label>
+        {canTest ? (
+          <UiButton size="sm" variant="secondary" onClick={() => void handleTest()} disabled={testing}>Test</UiButton>
+        ) : null}
+        <UiButton
+          size="sm"
+          variant="ghost"
+          aria-label={`${expanded ? "Hide details" : "Show details"} for ${provider.name}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Hide details" : "Details"}
+        </UiButton>
+      </div>
+      {expanded ? (
+        <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)]/30 px-5 py-4">
+          <p className="max-w-[720px] text-sm leading-5 text-[var(--color-text-soft)]">{provider.description}</p>
+          {provider.cli && implemented ? (
+            <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+              <ProviderFact label="CLI version" value={provider.cli.version ?? "Not detected"} />
+              <ProviderFact label="Default model" value={effectiveModel ?? "CLI default"} />
+              <ProviderFact label="Executable" value={provider.cli.binaryPath ?? "Not detected"} />
             </dl>
-          )}
-          {implemented && installedModels.length > 0 && (
-            <div className="mt-3">
-              <div className="mb-1.5 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                <span>Models</span>
-                <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
-                  {installedModels.length} {provider.isLocal ? "installed" : "available"}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {installedModels.map((m) => {
-                  const selected = m === effectiveModel;
-                  const modelTitle = !isActive
-                    ? `Use ${m} and set ${provider.name} active for runs`
-                    : selected
-                      ? "Currently active model · click to revert to provider default"
-                      : `Use ${m} for runs against this provider`;
+          ) : null}
+          {implemented && installedModels.length > 0 ? (
+            <div className="mt-4">
+              <div className="text-sm font-medium text-[var(--color-text)]">Models</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {installedModels.map((model) => {
+                  const selected = model === effectiveModel;
                   return (
-                    <button
-                      key={m}
-                      onClick={() => {
-                        void (async () => {
-                          if (!isActive) {
-                            await onSetActiveProvider(provider.id);
-                          }
-                          await onSetActiveModel(
-                            provider.id,
-                            selected && isActive ? null : m,
-                          );
-                        })();
-                      }}
-                      title={modelTitle}
-                      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[10.5px] transition-colors ${
-                        selected
-                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
-                          : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-                      }`}
+                    <UiButton
+                      key={model}
+                      size="sm"
+                      variant={selected ? "secondary" : "ghost"}
+                      className="font-mono"
+                      onClick={() => void (async () => {
+                        if (!isActive) await onSetActiveProvider(provider.id);
+                        await onSetActiveModel(provider.id, selected && isActive ? null : model);
+                      })()}
                     >
-                      {selected && (
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                      )}
-                      {m}
-                    </button>
+                      {model}
+                    </UiButton>
                   );
                 })}
               </div>
             </div>
-          )}
-          {testResult && (
-            <div
-              className={`mt-3 rounded-md px-3 py-2 text-[11.5px] leading-relaxed ring-1 ${
-                testResult.ok
-                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/30"
-                  : "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
-              }`}
-            >
-              <div className="font-medium">
-                {testResult.ok ? "Provider test passed." : "Provider test failed."}
-              </div>
-              <div className="mt-0.5 text-[11px] opacity-90">
-                {testResult.message}
-                {testResult.model && (
-                  <>
-                    {" "}
-                    Model: <span className="font-mono">{testResult.model}</span>.
-                  </>
-                )}
-                {typeof testResult.durationMs === "number" && (
-                  <> Response time: {(testResult.durationMs / 1000).toFixed(1)}s.</>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          {canTest && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                void handleTest();
-              }}
-              disabled={testing}
-            >
-              {testing ? "Testing…" : "Test"}
-            </Button>
-          )}
-          {implemented &&
-            (provider.status === "connected" || (provider.status === "available" && !provider.cli)) &&
-            !isActive && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                void onSetActiveProvider(provider.id);
-              }}
-            >
-              Set active
-            </Button>
-          )}
-          {implemented && (provider.status === "not-installed" || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) && (
-            <Button
+          ) : null}
+          {implemented && (provider.status === "not-installed" || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) ? (
+            <UiButton
+              className="mt-4"
               variant="ghost"
               size="sm"
               onClick={() => {
@@ -673,11 +651,20 @@ function ProviderRow({
               }}
             >
               {provider.status === "not-installed" ? "Install guide" : "Setup guide"}
-            </Button>
-          )}
+            </UiButton>
+          ) : null}
+          {testResult ? (
+            <div role={testResult.ok ? "status" : "alert"} className={`mt-4 text-sm ${testResult.ok ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"}`}>
+              {testResult.message}
+              {testResult.model ? <> Model: <span className="font-mono">{testResult.model}</span>.</> : null}
+            </div>
+          ) : null}
+          {provider.id === "azure-openai" ? (
+            <div className="mt-4"><AzureOpenAIConfigForm onSaved={onRefresh} /></div>
+          ) : null}
         </div>
-      </div>
-    </Card>
+      ) : null}
+    </div>
   );
 }
 
@@ -811,20 +798,20 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
 
   if (loading) {
     return (
-      <Card>
+      <div className="border-t border-[var(--color-border-soft)]">
         <div
           role="status"
           aria-live="polite"
-          className="p-5 text-[12px] text-[var(--color-text-muted)]"
+          className="p-5 text-sm text-[var(--color-text-muted)]"
         >
           Loading Azure OpenAI settings.
         </div>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <Card>
+    <div className="border-t border-[var(--color-border-soft)]">
       <form onSubmit={(event) => void handleSubmit(event)} className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -839,10 +826,10 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
               this device except to call your Azure endpoint.
             </p>
           </div>
-          <Pill tone={hasStoredKey ? "success" : "warning"}>
+          <Badge tone={hasStoredKey ? "success" : "warning"}>
             <StatusDot tone={hasStoredKey ? "success" : "warning"} />
             {hasStoredKey ? "Key stored" : "Key required"}
-          </Pill>
+          </Badge>
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-4">
@@ -909,9 +896,9 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
               </div>
               {hasStoredKey && !replacingKey && (
                 <div className="flex items-center gap-2">
-                  <Pill tone="success">
+                  <Badge tone="success">
                     <IconCheck size={10} /> Key stored
-                  </Pill>
+                  </Badge>
                   <Button
                     type="button"
                     variant="secondary"
@@ -1006,7 +993,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
           </Button>
         </div>
       </form>
-    </Card>
+    </div>
   );
 }
 
@@ -1071,56 +1058,31 @@ function providerInstallGuideUrl(providerId: ProviderId): string | undefined {
 function TenantsSection({
   tenants,
   activeTenantId,
-  busy,
   error,
-  onConnect,
   onSetActive,
   onDisconnect,
 }: {
   tenants: TenantRecord[];
   activeTenantId?: string;
-  busy: boolean;
   error: string | null;
-  onConnect: () => Promise<void>;
   onSetActive: (id: string) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
   return (
-    <div className="max-w-[820px]">
-      <SectionTitle
-        title="Tenants"
-        subtitle="Connect Microsoft 365 tenants. Sign-in opens Microsoft in your system browser. Disconnecting the last tenant leaves the app available for browsing and drafting."
-      />
-
-      <div className="mt-6 flex items-center gap-3">
-        <Button
-          variant="primary"
-          leadingIcon={<IconPlus size={12} />}
-          onClick={() => void onConnect()}
-          disabled={busy}
-        >
-          {busy ? "Waiting for sign-in…" : "Connect tenant"}
-        </Button>
-        <span className="text-[11.5px] text-[var(--color-text-muted)]">
-          Consent is requested under "Microsoft Graph Command Line Tools".
-        </span>
-      </div>
-
+    <div className="max-w-[1040px]">
       {error && (
-        <div className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+        <div className="mb-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
           {userFacingErrorReason(error) ??
             "The tenant connection could not be updated. Review the sign-in state, then try again."}
         </div>
       )}
 
-      <div className="mt-6 flex flex-col gap-3">
+      <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         {tenants.length === 0 ? (
-          <Card>
-            <div className="p-5 text-[13px] text-[var(--color-text-muted)]">
+          <div className="p-5 text-base text-[var(--color-text-muted)]">
               No tenants connected. Use the button above to sign in with
               your Microsoft 365 admin account.
-            </div>
-          </Card>
+          </div>
         ) : (
           tenants.map((tenant) => (
             <TenantRow
@@ -1173,66 +1135,48 @@ function TenantRow({
     : skuLicenses;
   return (
     <>
-    <Card>
-      <div className="flex items-start gap-4 p-5">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
-          <IconCloud size={20} />
-        </div>
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4 last:border-b-0">
+        <div className="min-w-[220px] flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[14px] font-medium text-[var(--color-text)]">
+            <span className="text-base font-medium text-[var(--color-text)]">
               {tenant.displayName}
             </span>
-            {isActive && (
-              <Pill tone="accent">
-                <IconCheck size={10} /> Active
-              </Pill>
-            )}
+            {isActive ? <Badge tone="info">Active</Badge> : null}
           </div>
-          <div className="mt-1 text-[12.5px] text-[var(--color-text-soft)]">
+          <div className="mt-0.5 text-sm text-[var(--color-text-soft)]">
             {tenant.username}
           </div>
-          <div className="mt-1 font-mono text-[10.5px] text-[var(--color-text-muted)]">
-            tenant-id: {tenant.id}
+          <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">
+            {tenant.id}
           </div>
-          {licenses.length > 0 && (
-            <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
-              <div className="mb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                Licenses
-              </div>
-              <ul className="space-y-0.5 text-[12px] text-[var(--color-text-soft)]">
-                {licenses.map((license) => (
-                  <li key={license.skuPartNumber}>{license.displayName}</li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          {!isActive && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void onSetActive(tenant.id)}
-            >
-              Set active
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            leadingIcon={<IconClose size={11} />}
-            onClick={() => {
-              setDisconnectError(null);
-              setConfirmDisconnect(true);
-            }}
-          >
-            Disconnect
-          </Button>
+        <div className="min-w-[180px] flex-1 text-sm text-[var(--color-text-muted)]">
+          {licenses.length > 0
+            ? licenses.map((license) => license.displayName).join(", ")
+            : "No license details"}
         </div>
+        {!isActive ? (
+          <UiButton variant="secondary" size="sm" onClick={() => void onSetActive(tenant.id)}>
+            Set active
+          </UiButton>
+        ) : null}
+        <Menu
+          ariaLabel={`${tenant.displayName} actions`}
+          trigger={<IconButton label={`${tenant.displayName} actions`} icon={<span className="text-md">⋯</span>} size="sm" />}
+          items={[
+            {
+              id: "disconnect",
+              label: "Disconnect",
+              danger: true,
+              onSelect: () => {
+                setDisconnectError(null);
+                setConfirmDisconnect(true);
+              },
+            },
+          ]}
+        />
       </div>
-    </Card>
-    <Modal
+      <Modal
       open={confirmDisconnect}
       onClose={() => {
         if (!disconnecting) setConfirmDisconnect(false);
@@ -1242,7 +1186,7 @@ function TenantRow({
       <ModalHeader
         title={`Disconnect ${tenant.displayName}`}
         subtitle="Remove the connection and its local tenant data"
-        badge={<Pill tone="danger">Permanent local deletion</Pill>}
+        badge={<Badge tone="danger">Permanent local deletion</Badge>}
         onClose={() => {
           if (!disconnecting) setConfirmDisconnect(false);
         }}
@@ -1294,12 +1238,179 @@ function TenantRow({
           </Button>
         </div>
       </div>
-    </Modal>
+      </Modal>
     </>
   );
 }
 
-function ChatSettingsSection() {
+function ChatSettingsSectionV2() {
+  const { state } = useAppState();
+  const navigate = useNavigate();
+  const [learningSettings, setLearningSettings] =
+    useState<SelfTrainingSettings>({ enabled: false });
+  const [investigationSettings, setInvestigationSettings] =
+    useState<ChatInvestigationSettings>({ mode: "auto" });
+  const [suggestions, setSuggestions] = useState<SelfTrainingSuggestion[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    : undefined;
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    void Promise.all([
+      api.getSelfTrainingSettings(),
+      api.getChatInvestigationSettings(),
+      api.listSelfTrainingSuggestions(),
+    ])
+      .then(([learning, investigation, nextSuggestions]) => {
+        setLearningSettings(learning);
+        setInvestigationSettings(investigation);
+        setSuggestions(nextSuggestions);
+      })
+      .catch((caught) => setError(String(caught)));
+  }, [state.activeTenantId]);
+
+  const scopedSuggestions = suggestions.filter(
+    (suggestion) => !activeTenant || suggestion.tenantId === activeTenant.id,
+  );
+  const pendingSuggestions = scopedSuggestions.filter(
+    (suggestion) => suggestion.status === "pending",
+  );
+  const activeLearningAgents = Array.from(
+    scopedSuggestions
+      .filter((suggestion) => suggestion.status === "accepted")
+      .reduce((map, suggestion) => {
+        map.set(suggestion.agentSlug, (map.get(suggestion.agentSlug) ?? 0) + 1);
+        return map;
+      }, new Map<string, number>()),
+  );
+
+  const setInvestigationMode = async (mode: ChatInvestigationMode) => {
+    if (mode === investigationSettings.mode) return;
+    setError(null);
+    try {
+      const next = await window.openAdminOS?.setChatInvestigationMode(mode);
+      if (next) setInvestigationSettings(next);
+    } catch (caught) {
+      setError(String(caught));
+    }
+  };
+
+  const toggleLearning = async () => {
+    setError(null);
+    try {
+      const next = await window.openAdminOS?.setSelfTrainingEnabled(
+        !learningSettings.enabled,
+      );
+      if (next) setLearningSettings(next);
+    } catch (caught) {
+      setError(String(caught));
+    }
+  };
+
+  const decideSuggestion = async (
+    suggestion: SelfTrainingSuggestion,
+    decision: "accept" | "reject",
+  ) => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    setError(null);
+    try {
+      if (decision === "accept") await api.approveSelfTrainingSuggestion(suggestion.id);
+      else await api.rejectSelfTrainingSuggestion(suggestion.id);
+      setSuggestions(await api.listSelfTrainingSuggestions());
+    } catch (caught) {
+      setError(String(caught));
+    }
+  };
+
+  const resetLearning = async (agentSlug: string) => {
+    const api = window.openAdminOS;
+    if (!api || !activeTenant) return;
+    setError(null);
+    try {
+      await api.resetSelfTrainingSuggestions({ tenantId: activeTenant.id, agentSlug });
+      setSuggestions(await api.listSelfTrainingSuggestions());
+    } catch (caught) {
+      setError(String(caught));
+    }
+  };
+
+  return (
+    <div className="max-w-[1040px]">
+      <div className="mb-3 flex justify-end">
+        <UiButton size="sm" variant="ghost" onClick={() => navigate("/chat")}>Open chat</UiButton>
+      </div>
+      <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+        <SettingRow
+          id="chat-investigation-mode"
+          description="Choose how single-tenant Chat gathers read-only evidence. Multi-tenant Chat stays deterministic."
+          control={
+            <SegmentedControl
+              ariaLabel="Chat investigation mode"
+              value={investigationSettings.mode}
+              onValueChange={(value) => void setInvestigationMode(value as ChatInvestigationMode)}
+              options={[
+                { id: "auto", label: "Auto" },
+                { id: "always-agentic", label: "Investigative" },
+                { id: "always-deterministic", label: "Deterministic" },
+              ]}
+            />
+          }
+        />
+        <SettingRow
+          id="local-self-training"
+          description="Accepted suggestions write local agent overlay files. They cannot add scopes, change write mode, alter connector egress, or bypass confirmation."
+          control={
+            <Switch
+              className="w-auto gap-3"
+              checked={learningSettings.enabled}
+              onCheckedChange={() => void toggleLearning()}
+              label={learningSettings.enabled ? "Enabled" : "Disabled"}
+            />
+          }
+        />
+        <details className="px-5 py-4">
+          <summary className="cursor-pointer text-base font-medium text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+            Self-training suggestions ({pendingSuggestions.length} pending)
+          </summary>
+          <div className="mt-4 divide-y divide-[var(--color-border-soft)]">
+            {pendingSuggestions.length === 0 ? (
+              <p className="py-3 text-sm text-[var(--color-text-muted)]">No pending suggestions.</p>
+            ) : pendingSuggestions.map((suggestion) => (
+              <div key={suggestion.id} className="flex flex-wrap items-start gap-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-sm text-[var(--color-text)]">{suggestion.agentSlug}</div>
+                  <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">{suggestion.text}</p>
+                </div>
+                <UiButton size="sm" variant="secondary" onClick={() => void decideSuggestion(suggestion, "accept")}>Accept</UiButton>
+                <UiButton size="sm" variant="ghost" onClick={() => void decideSuggestion(suggestion, "reject")}>Reject</UiButton>
+              </div>
+            ))}
+            {activeLearningAgents.map(([agentSlug, count]) => (
+              <div key={agentSlug} className="flex items-center justify-between gap-4 py-3">
+                <div>
+                  <div className="font-mono text-sm text-[var(--color-text)]">{agentSlug}</div>
+                  <p className="text-xs text-[var(--color-text-muted)]">{count} approved {count === 1 ? "instruction" : "instructions"}</p>
+                </div>
+                <UiButton size="sm" variant="ghost" onClick={() => void resetLearning(agentSlug)}>Reset</UiButton>
+              </div>
+            ))}
+          </div>
+        </details>
+        {error ? (
+          <div role="alert" className="border-t border-[var(--color-border-soft)] px-5 py-4 text-sm text-[var(--color-danger)]">
+            {userFacingErrorReason(error) ?? "Chat settings could not be updated. Review the current values, then try again."}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function ChatSettingsSection() {
   const { state } = useAppState();
   const { requireTenant } = useSetupFlow();
   const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
@@ -1617,7 +1728,7 @@ function ChatSettingsSection() {
           }
         />
 
-        <Button variant="secondary" onClick={() => navigate("/cache")}>Open Cache · preload and inspect coverage</Button>
+        <Button variant="secondary" onClick={() => navigate("/settings/data")}>Open Data settings</Button>
 
         <SettingRow
           id="tenant-cache"
@@ -2077,8 +2188,8 @@ function GatewaySection({
     ? `http://127.0.0.1:${listeningPort}/`
     : undefined;
 
-  const enableGateway = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const enableGateway = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     const api = window.openAdminOS;
     if (!api?.enableGateway || busyAction) return;
     if (!selectedTenantId) {
@@ -2211,55 +2322,42 @@ function GatewaySection({
   const confirmationCopy = gatewayConfirmationCopy(pendingConfirmation);
 
   return (
-    <div className="max-w-[820px]">
-      <SectionTitle
-        title="Gateway"
-        subtitle="Pair local MCP clients with one tenant-scoped OpenAdminOS session."
-      />
-
-      <div className="mt-6 flex flex-col gap-4">
+    <div className="max-w-[1040px] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         {!gatewayAvailable ? (
-          <Card>
-            <div className="p-5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <div className="p-5 text-base leading-5 text-[var(--color-text-soft)]">
               Gateway controls are unavailable in this build. Open this section in
               the desktop app with gateway support enabled.
             </div>
-          </Card>
         ) : loading ? (
-          <Card>
-            <div role="status" className="p-5 text-[12.5px] text-[var(--color-text-muted)]">
+            <div role="status" className="p-5 text-base text-[var(--color-text-muted)]">
               Loading local gateway status…
             </div>
-          </Card>
         ) : gatewayStatus === null ? (
-          <Card>
-            <div className="p-5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <div className="p-5 text-base leading-5 text-[var(--color-text-soft)]">
               Gateway status is unavailable. Use the recovery below, then reload
               this section.
             </div>
-          </Card>
         ) : !gatewayStatus?.enabled ? (
-          <Card>
             <form onSubmit={(event) => void enableGateway(event)} className="p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="max-w-[620px]">
-                  <div className="text-[13px] font-medium text-[var(--color-text)]">
+                  <div className="text-base font-medium text-[var(--color-text)]">
                     Local MCP gateway
                   </div>
-                  <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                  <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
                     The gateway is a local, loopback-only MCP server. It lets
                     external AI clients read one bound tenant and propose changes
                     that you still confirm by hand.
                   </p>
                 </div>
-                <Pill>Off</Pill>
+                <Badge tone="neutral">Off</Badge>
               </div>
 
               <div className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_180px]">
                 <div>
                   <label
                     htmlFor="gateway-tenant"
-                    className="block text-[11px] font-medium text-[var(--color-text-soft)]"
+                    className="block text-sm font-medium text-[var(--color-text-soft)]"
                   >
                     Bound tenant
                   </label>
@@ -2270,7 +2368,7 @@ function GatewaySection({
                     value={selectedTenantId}
                     onChange={(event) => setSelectedTenantId(event.target.value)}
                     disabled={busyAction !== null || tenants.length === 0}
-                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {tenants.length === 0 ? (
                       <option value="">No connected tenant</option>
@@ -2286,7 +2384,7 @@ function GatewaySection({
                 <div>
                   <label
                     htmlFor="gateway-port"
-                    className="block text-[11px] font-medium text-[var(--color-text-soft)]"
+                    className="block text-sm font-medium text-[var(--color-text-soft)]"
                   >
                     Port (optional)
                   </label>
@@ -2303,46 +2401,54 @@ function GatewaySection({
                     onChange={(event) => setPortInput(event.target.value)}
                     placeholder={String(gatewayStatus?.port ?? 47_891)}
                     disabled={busyAction !== null}
-                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 font-mono text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 font-mono text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               </div>
 
-              <div className="mt-4 border-l-2 border-[var(--color-success)] bg-[var(--color-success-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+              <p className="mt-4 text-sm leading-5 text-[var(--color-text-muted)]">
                 Reads are scoped to the selected tenant. Every write is only a
                 proposal that requires typed confirmation in this app. Nothing an
                 external client sends can apply a change.
-              </div>
+              </p>
 
               <div className="mt-5 flex justify-end">
-                <Button
-                  type="submit"
-                  variant="primary"
+                <Switch
+                  className="w-auto gap-3"
+                  checked={false}
                   disabled={busyAction !== null || !selectedTenantId}
-                  leadingIcon={<IconLock size={12} />}
-                >
-                  {busyAction === "enable" ? "Enabling…" : "Enable gateway"}
-                </Button>
+                  onCheckedChange={(checked) => {
+                    if (checked) void enableGateway();
+                  }}
+                  label={busyAction === "enable" ? "Enabling" : "Enable gateway"}
+                />
               </div>
             </form>
-          </Card>
         ) : (
           <>
-            <Card>
               <div className="p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-[13px] font-medium text-[var(--color-text)]">
+                    <div className="text-base font-medium text-[var(--color-text)]">
                       Local gateway
                     </div>
-                    <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                    <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
                       The listener accepts paired clients on this device only.
                     </p>
                   </div>
-                  <Pill tone={gatewayStatus.running ? "success" : "warning"}>
+                  <Badge tone={gatewayStatus.running ? "success" : "warning"}>
                     <StatusDot tone={gatewayStatus.running ? "success" : "warning"} />
                     {gatewayStatus.running ? "Running" : "Listener stopped"}
-                  </Pill>
+                  </Badge>
+                  <Switch
+                    className="w-auto gap-3"
+                    checked
+                    disabled={busyAction !== null}
+                    onCheckedChange={(checked) => {
+                      if (!checked) setPendingConfirmation({ kind: "disable" });
+                    }}
+                    label="Gateway enabled"
+                  />
                 </div>
 
                 <dl className="mt-4 grid gap-3 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)] sm:grid-cols-3">
@@ -2367,11 +2473,11 @@ function GatewaySection({
 
                 {endpoint && (
                   <div className="mt-4">
-                    <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                       Loopback URL
                     </div>
                     <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-                      <code className="min-w-0 flex-1 break-all font-mono text-[12px] text-[var(--color-text)]">
+                      <code className="min-w-0 flex-1 break-all font-mono text-sm text-[var(--color-text)]">
                         {endpoint}
                       </code>
                       <Button
@@ -2387,28 +2493,26 @@ function GatewaySection({
                   </div>
                 )}
 
-                <div className="mt-4 border-l-2 border-[var(--color-success)] bg-[var(--color-success-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+                <p className="mt-4 text-sm leading-5 text-[var(--color-text-muted)]">
                   Reads are scoped to {boundTenant?.displayName ?? "the bound tenant"}.
                   Every write is only a proposal that requires typed confirmation
                   in this app. Nothing an external client sends can apply a change.
-                </div>
+                </p>
               </div>
-            </Card>
 
             {pairingToken && (
-              <Card>
-                <div className="p-5">
+                <div className="border-t border-[var(--color-border-soft)] p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                      <h3 className="text-base font-medium text-[var(--color-text)]">
                         Pairing token
                       </h3>
-                      <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                      <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
                         This token is shown once. Copy it now. You can regenerate a
                         replacement later.
                       </p>
                     </div>
-                    <Pill tone="warning">Shown once</Pill>
+                    <Badge tone="warning">Shown once</Badge>
                   </div>
                   <OutputJsonBlock
                     value={pairingToken}
@@ -2416,17 +2520,16 @@ function GatewaySection({
                     className="mt-4"
                   />
                 </div>
-              </Card>
             )}
 
-            <Card>
+            <div className="border-t border-[var(--color-border-soft)]">
               <div className="border-b border-[var(--color-border-soft)] px-5 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+                    <h3 className="text-base font-medium text-[var(--color-text)]">
                       Connected clients
                     </h3>
-                    <p className="mt-1 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+                    <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">
                       {gatewayStatus.clients.length.toLocaleString()} paired client
                       {gatewayStatus.clients.length === 1 ? "" : "s"} for this local gateway.
                     </p>
@@ -2442,7 +2545,7 @@ function GatewaySection({
                     >
                       {busyAction === "regenerate" ? "Regenerating…" : "Regenerate token"}
                     </Button>
-                    <p className="mt-1.5 text-[10.5px] leading-relaxed text-[var(--color-warning)]">
+                    <p className="mt-1.5 text-xs leading-4 text-[var(--color-warning)]">
                       Paired clients must re-pair after regeneration.
                     </p>
                   </div>
@@ -2450,7 +2553,7 @@ function GatewaySection({
               </div>
 
               {gatewayStatus.clients.length === 0 ? (
-                <div className="px-5 py-6 text-[12px] text-[var(--color-text-muted)]">
+                <div className="px-5 py-6 text-sm text-[var(--color-text-muted)]">
                   No clients are paired with this gateway.
                 </div>
               ) : (
@@ -2461,10 +2564,10 @@ function GatewaySection({
                       className="flex flex-wrap items-center justify-between gap-4 px-5 py-3.5"
                     >
                       <div className="min-w-0">
-                        <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+                        <div className="text-base font-medium text-[var(--color-text)]">
                           {client.name}
                         </div>
-                        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                        <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
                           Paired {formatDateTime(client.createdAt)}
                         </div>
                       </div>
@@ -2490,7 +2593,7 @@ function GatewaySection({
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--color-border-soft)] px-5 py-4">
-                <p className="max-w-[560px] text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+                <p className="max-w-[560px] text-sm leading-5 text-[var(--color-text-muted)]">
                   Disabling stops the loopback listener. Existing client records
                   remain available when the gateway is enabled again.
                 </p>
@@ -2504,20 +2607,18 @@ function GatewaySection({
                   {busyAction === "disable" ? "Disabling…" : "Disable gateway"}
                 </Button>
               </div>
-            </Card>
+            </div>
           </>
         )}
 
         {error && (
           <div
             role="alert"
-            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+            className="border-t border-[var(--color-border-soft)] bg-[var(--color-danger-soft)] px-5 py-4 text-sm leading-5 text-[var(--color-danger)]"
           >
             {error}
           </div>
         )}
-      </div>
-
       <Modal
         open={pendingConfirmation !== null}
         onClose={() => {
@@ -2629,7 +2730,6 @@ function gatewayConfirmationCopy(
 }
 
 function GeneralSection() {
-  const appearance = useAppearance();
   const { state, refresh } = useAppState();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
@@ -2908,11 +3008,7 @@ function GeneralSection() {
 
   return (
     <div className="max-w-[720px]">
-      <SectionTitle
-        title="General"
-        subtitle="Defaults that apply across the app."
-      />
-      <div className="mt-6 flex flex-col gap-3">
+      <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         <SettingRow
           id="menu-bar-companion"
           description={
@@ -2923,60 +3019,20 @@ function GeneralSection() {
               : (companionLaunch?.detail ?? "The menu bar companion is available on macOS only.")
           }
           control={
-            <button
-              onClick={() => void toggleCompanionLaunch()}
+            <Switch
+              className="w-auto gap-3"
+              checked={companionLaunch?.enabled ?? false}
               disabled={!companionLaunch?.supported || companionBusy}
-              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                companionLaunch?.enabled
-                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25"
-                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-              } ${!companionLaunch?.supported || companionBusy ? "cursor-not-allowed opacity-60" : "hover:bg-[var(--color-surface-hover)]"}`}
-              title={companionLaunch?.detail}
-            >
-              <IconShield size={10} />
-              {companionBusy
+              onCheckedChange={() => void toggleCompanionLaunch()}
+              label={companionBusy
                 ? "Saving..."
                 : companionLaunchLabel(companionLaunch)}
-            </button>
+            />
           }
         />
         {companionError && (
           <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {companionError}
-          </div>
-        )}
-        <SettingRow
-          id="experimental-sandboxed-code"
-          description={
-            sandboxSettings?.enabled
-              ? `${formatSandboxValue(sandboxSettings.diagnostics)}. Only code-backed preview agents use MXC; YAML agents keep using the manifest interpreter.`
-              : "Off by default. Enables MXC only for built-in code-backed preview agents such as Intune Device Posture Auditor."
-          }
-          control={
-            <button
-              onClick={() => void toggleSandboxedCode()}
-              disabled={sandboxBusy}
-              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                sandboxSettings?.enabled
-                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25"
-                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-              } ${sandboxBusy ? "cursor-not-allowed opacity-60" : "hover:bg-[var(--color-surface-hover)]"}`}
-              title={sandboxSettings?.diagnostics.detail}
-            >
-              <IconShield size={10} />
-              {sandboxBusy
-                ? "Saving..."
-                : sandboxSettings?.enabled
-                  ? sandboxSettings.diagnostics.status === "available"
-                    ? "Enabled"
-                    : "Enabled, unavailable"
-                  : "Disabled"}
-            </button>
-          }
-        />
-        {sandboxError && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-            {sandboxError}
           </div>
         )}
         <SettingRow
@@ -2989,25 +3045,19 @@ function GeneralSection() {
               : (schedulerLaunch?.detail ?? "Background launch support is unavailable on this platform.")
           }
           control={
-            <button
-              onClick={() => void toggleSchedulerLaunch()}
+            <Switch
+              className="w-auto gap-3"
+              checked={schedulerLaunch?.enabled ?? false}
               disabled={!schedulerLaunch?.supported || schedulerLaunch.requiresTenant || schedulerBusy}
-              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                schedulerLaunch?.enabled
-                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25"
-                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-              } ${!schedulerLaunch?.supported || schedulerLaunch.requiresTenant || schedulerBusy ? "cursor-not-allowed opacity-60" : "hover:bg-[var(--color-surface-hover)]"}`}
-              title={schedulerLaunch?.detail}
-            >
-              <IconClock size={10} />
-              {schedulerBusy
+              onCheckedChange={() => void toggleSchedulerLaunch()}
+              label={schedulerBusy
                 ? "Saving…"
                 : schedulerLaunch?.enabled
                   ? "OS scheduled"
                   : schedulerLaunch?.requiresTenant
                     ? "Tenant required"
                     : "Manual only"}
-            </button>
+            />
           }
         />
         {schedulerError && (
@@ -3016,13 +3066,13 @@ function GeneralSection() {
           </div>
         )}
         {schedulerLaunch?.supported && (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="grid grid-cols-2 gap-3 text-[11px] md:grid-cols-4">
-              <ProviderFact label="Last wake" value={schedulerLaunch.lastWakeAt ? formatRelative(schedulerLaunch.lastWakeAt) : "not yet"} />
-              <ProviderFact label="Last success" value={schedulerLaunch.lastSuccessAt ? formatRelative(schedulerLaunch.lastSuccessAt) : "not yet"} />
-              <ProviderFact label="Next due" value={schedulerLaunch.nextDueAt ? `${schedulerLaunch.nextDueAgentName ?? "Agent"} · ${formatFuture(schedulerLaunch.nextDueAt)}` : "none"} />
-              <ProviderFact label="Active" value={`${schedulerLaunch.activeScheduleCount ?? scheduledCount}`} />
-            </div>
+          <div className="border-b border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-5 py-3">
+            <dl className="grid gap-x-6 md:grid-cols-2">
+              <KeyValue label="Last wake" value={schedulerLaunch.lastWakeAt ? formatRelative(schedulerLaunch.lastWakeAt) : "Not yet"} />
+              <KeyValue label="Last success" value={schedulerLaunch.lastSuccessAt ? formatRelative(schedulerLaunch.lastSuccessAt) : "Not yet"} />
+              <KeyValue label="Next due" value={schedulerLaunch.nextDueAt ? `${schedulerLaunch.nextDueAgentName ?? "Agent"} · ${formatFuture(schedulerLaunch.nextDueAt)}` : "None"} />
+              <KeyValue label="Active schedules" value={`${schedulerLaunch.activeScheduleCount ?? scheduledCount}`} />
+            </dl>
             {schedulerLaunch.lastError && (
               <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
                 {schedulerLaunch.lastError}
@@ -3039,33 +3089,10 @@ function GeneralSection() {
           }
           control={
             activeTenant ? (
-              <Pill tone="success">{activeTenant.displayName}</Pill>
+              <Badge tone="success">{activeTenant.displayName}</Badge>
             ) : (
-              <Pill tone="warning">None</Pill>
+              <Badge tone="warning">None</Badge>
             )
-          }
-        />
-        <SettingRow
-          id="destructive-confirmation"
-          description="Always on. Cannot be disabled. See the spec for why."
-          control={
-            <Pill tone="success">
-              <IconLock size={10} /> Always on
-            </Pill>
-          }
-        />
-        <SettingRow
-          id="theme"
-          description={appearance.error ?? "Choose graphite dark or off-white light. Saved on this device and shared with the menu-bar companion."}
-          control={
-            <Select
-              aria-label="Color theme"
-              value={appearance.theme}
-              onChange={(event) => appearance.setAppearance(event.target.value === "light" ? "light" : "dark")}
-            >
-              <option value="dark">Graphite dark</option>
-              <option value="light">Off-white light</option>
-            </Select>
           }
         />
         <SettingRow
@@ -3082,6 +3109,43 @@ function GeneralSection() {
               onSave={() => void saveRunHistoryRetention()}
               onPruneNow={() => void pruneRunHistoryNow()}
             />
+          }
+        />
+        <SettingRow
+          id="experimental-sandboxed-code"
+          description={
+            sandboxSettings?.enabled
+              ? `${formatSandboxValue(sandboxSettings.diagnostics)}. Only code-backed preview agents use MXC; YAML agents keep using the manifest interpreter.`
+              : "Off by default. Enables MXC only for built-in code-backed preview agents such as Intune Device Posture Auditor."
+          }
+          control={
+            <Switch
+              className="w-auto gap-3"
+              checked={sandboxSettings?.enabled ?? false}
+              disabled={sandboxBusy}
+              onCheckedChange={() => void toggleSandboxedCode()}
+              label={sandboxBusy
+                ? "Saving…"
+                : sandboxSettings?.enabled
+                  ? sandboxSettings.diagnostics.status === "available"
+                    ? "Enabled"
+                    : "Enabled, unavailable"
+                  : "Disabled"}
+            />
+          }
+        />
+        {sandboxError && (
+          <div className="border-b border-[var(--color-border-soft)] bg-[var(--color-danger-soft)] px-5 py-3 text-sm text-[var(--color-danger)]">
+            {sandboxError}
+          </div>
+        )}
+        <SettingRow
+          id="destructive-confirmation"
+          description="Always on. Cannot be disabled. See the spec for why."
+          control={
+            <Badge tone="success">
+              <IconLock size={10} /> Always on
+            </Badge>
           }
         />
         <SettingRow
@@ -3155,9 +3219,9 @@ function RunHistoryRetentionControls({
   return (
     <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
       <div className="flex items-center justify-between gap-3">
-        <Pill tone={draft.neverPrune ? "warning" : "default"}>
+        <Badge tone={draft.neverPrune ? "warning" : "neutral"}>
           {draft.neverPrune ? "Never prune" : runHistoryRetentionSummary(saved)}
-        </Pill>
+        </Badge>
         <span className="text-[var(--color-text-muted)]">
           {runCount.toLocaleString()} records
         </span>
@@ -3350,9 +3414,9 @@ function DriftRetentionControls({
   return (
     <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
       <div className="flex items-center justify-between gap-3">
-        <Pill tone={draft.neverPrune ? "warning" : "default"}>
+        <Badge tone={draft.neverPrune ? "warning" : "neutral"}>
           {driftRetentionSummary(saved)}
-        </Pill>
+        </Badge>
         <span className="text-[var(--color-text-muted)]">local snapshots</span>
       </div>
 
@@ -3503,6 +3567,29 @@ function AuditLogExportControls({
           {busy ? "Exporting" : "Export audit log"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+function AppearanceSection() {
+  const appearance = useAppearance();
+  return (
+    <div className="max-w-[1040px] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+      <SettingRow
+        id="theme"
+        description={appearance.error ?? "Choose graphite dark or off-white light. The preference is stored on this device and shared with the menu bar companion."}
+        control={
+          <SegmentedControl
+            ariaLabel="Color theme"
+            value={appearance.theme}
+            onValueChange={(value) => appearance.setAppearance(value === "light" ? "light" : "dark")}
+            options={[
+              { id: "dark", label: "Graphite dark" },
+              { id: "light", label: "Off-white light" },
+            ]}
+          />
+        }
+      />
     </div>
   );
 }
@@ -3702,21 +3789,17 @@ function PrivacySection({
 
   return (
     <div className="max-w-[720px]">
-      <SectionTitle
-        title="Privacy"
-        subtitle="OpenAdminOS is local-first by design. Here's the truth about where your data goes."
-      />
-      <div className="mt-6 flex flex-col gap-3">
+      <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         <SettingRow
           id="tenant-telemetry"
           description="Tenant data, prompts, run results, and error-reporting data are never collected. Optional usage telemetry and aggregate registry install counts are controlled separately below. Crash logs stay on this device."
           control={
-            <Pill tone="success">
+            <Badge tone="success">
               <StatusDot tone="success" /> Not collected
-            </Pill>
+            </Badge>
           }
         />
-        <Card>
+        <div className="border-b border-[var(--color-border-soft)]">
           <section aria-labelledby="usage-telemetry-title">
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
               <div className="min-w-0 max-w-[520px]">
@@ -3737,27 +3820,21 @@ function PrivacySection({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-                  {usageTelemetryEnabled ? "On" : "Off"}
-                </span>
-                <SettingsSwitch
+                <Switch
+                  className="w-auto gap-3"
                   checked={usageTelemetryEnabled}
                   disabled={!telemetryToggleAvailable || telemetrySaving}
-                  label="Usage telemetry"
-                  describedBy="usage-telemetry-description"
-                  onClick={() => void toggleUsageTelemetry()}
+                  label={usageTelemetryEnabled ? "On" : "Off"}
+                  aria-label="Usage telemetry"
+                  aria-describedby="usage-telemetry-description"
+                  onCheckedChange={() => void toggleUsageTelemetry()}
                 />
               </div>
             </div>
-            <div className="px-5 py-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h4 className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-soft)]">
-                  Exactly what a ping contains
-                </h4>
-                <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
-                  counts and versions only
-                </span>
-              </div>
+            <details className="px-5 py-4">
+              <summary className="cursor-pointer text-sm font-medium text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+                Show exact ping JSON preview
+              </summary>
               <OutputJsonBlock
                 value={telemetryPreview?.payload ?? null}
                 copyLabel="Copy telemetry payload"
@@ -3812,29 +3889,25 @@ function PrivacySection({
                   {telemetryTestResult}
                 </p>
               )}
-            </div>
+            </details>
           </section>
-        </Card>
+        </div>
         <SettingRow
           id="registry-install-counts"
           description="When enabled, installing a public registry agent sends only agent slug, app version, platform, and a yearly per-agent hash for aggregate counts. No tenant data, prompts, run results, or Graph data are sent."
           control={
-            <button
-              onClick={() => void toggleRegistryInstallCounts()}
+            <Switch
+              className="w-auto gap-3"
+              checked={registryInstallCountsEnabled}
               disabled={savingInstallCounts}
-              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                registryInstallCountsEnabled
-                  ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25"
-                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-              } ${savingInstallCounts ? "cursor-not-allowed opacity-60" : "hover:bg-[var(--color-surface-hover)]"}`}
-            >
-              <StatusDot tone={registryInstallCountsEnabled ? "success" : "muted"} />
-              {savingInstallCounts
+              aria-label="Registry install counts"
+              onCheckedChange={() => void toggleRegistryInstallCounts()}
+              label={savingInstallCounts
                 ? "Saving..."
                 : registryInstallCountsEnabled
                   ? "Enabled"
                   : "Disabled"}
-            </button>
+            />
           }
         />
         {installCountsError && (
@@ -3853,10 +3926,10 @@ function PrivacySection({
           }
           control={
             <div className="flex items-center gap-2">
-              <Pill tone={isOfficialRegistry ? "success" : "warning"}>
+              <Badge tone={isOfficialRegistry ? "success" : "warning"}>
                 <StatusDot tone={isOfficialRegistry ? "success" : "warning"} />
                 {isOfficialRegistry ? "Official" : "Custom"}
-              </Pill>
+              </Badge>
               <Button
                 variant="secondary"
                 size="sm"
@@ -3872,7 +3945,7 @@ function PrivacySection({
             {registryRefreshError}
           </div>
         )}
-        <Card>
+        <div className="border-b border-[var(--color-border-soft)]">
           <section aria-labelledby="documentation-grounding-title" className="px-5 py-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0 max-w-[520px]">
@@ -3944,9 +4017,9 @@ function PrivacySection({
                 </div>
               ) : retrievalStatus?.available ? (
                 <div className="mt-4">
-                  <Pill tone="success">
+                  <Badge tone="success">
                     <StatusDot tone="success" /> Available
-                  </Pill>
+                  </Badge>
                   {retrievalStatus.updateAvailable ? (
                     <p className="mt-2 text-[12px] text-[var(--color-text-muted)]">
                       Version {retrievalStatus.updateAvailable} is available and
@@ -4025,32 +4098,32 @@ function PrivacySection({
               </div>
             )}
           </section>
-        </Card>
+        </div>
         <SettingRow
           id="crash-reporting"
           description="No crash reports are sent. Errors stay local."
           control={
-            <Pill tone="success">
+            <Badge tone="success">
               <StatusDot tone="success" /> Not collected
-            </Pill>
+            </Badge>
           }
         />
         <SettingRow
           id="tenant-data-residency"
-          description="Where the active provider sends prompts and tenant data."
+          description={trust.detail}
           control={
-            <Pill tone={trust.isLocal ? "success" : "warning"}>
+            <Badge tone={trust.isLocal ? "success" : "warning"}>
               <IconHardDrive size={10} /> {trust.label}
-            </Pill>
+            </Badge>
           }
         />
         <SettingRow
           id="graph-writes"
-          description="Write-mode agents always call Microsoft Graph for real when a tenant is connected. There is no global toggle — every write run pauses for a typed-phrase confirmation against the live diff, which is the only place to authorize a change."
+          description="Write-mode agents always call Microsoft Graph for real when a tenant is connected. There is no global toggle: every write run pauses for a typed-phrase confirmation against the live diff, which is the only place to authorize a change."
           control={
-            <Pill tone="warning">
+            <Badge tone="warning">
               <StatusDot tone="warning" /> Confirmed per run
-            </Pill>
+            </Badge>
           }
         />
         <SettingRow
@@ -4063,24 +4136,13 @@ function PrivacySection({
                 : "Stable-only, never pre-releases. Signed builds check the release channel on launch and every four hours, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit."
           }
           control={
-            <Pill tone="success">
+            <Badge tone="success">
               <StatusDot tone="success" /> Stable
-            </Pill>
+            </Badge>
           }
         />
       </div>
 
-      <div className="mt-8 rounded-xl bg-[var(--color-success-soft)] p-5 ring-1 ring-[var(--color-success)]/25">
-        <div className="flex items-center gap-2">
-          <IconShield size={14} className="text-[var(--color-success)]" />
-          <span className="text-[12px] font-medium text-[var(--color-success)]">
-            {trust.label}
-          </span>
-        </div>
-        <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-text-soft)]">
-          {trust.detail}
-        </p>
-      </div>
       <RegistrySourceModal
         open={registryModalOpen}
         currentSource={registrySource}
@@ -4088,46 +4150,6 @@ function PrivacySection({
         onSave={onSetRegistrySource}
       />
     </div>
-  );
-}
-
-function SettingsSwitch({
-  checked,
-  disabled,
-  label,
-  describedBy,
-  onClick,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-  label: string;
-  describedBy?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      aria-describedby={describedBy}
-      disabled={disabled}
-      onClick={onClick}
-      className={`relative h-6 w-10 rounded-full ring-1 transition-colors duration-150 enabled:hover:ring-[var(--color-accent)]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked
-          ? "bg-[var(--color-accent)] ring-[var(--color-accent)]"
-          : "bg-[var(--color-bg-raised)] ring-[var(--color-border-strong)]"
-      }`}
-    >
-      <span
-        aria-hidden="true"
-        className={`absolute left-1 top-1 h-4 w-4 rounded-full transition-transform duration-150 ${
-          checked
-            ? "translate-x-4 bg-[var(--color-on-accent)]"
-            : "translate-x-0 bg-[var(--color-text-muted)]"
-        }`}
-      />
-    </button>
   );
 }
 
@@ -4225,10 +4247,10 @@ function RegistrySourceModal({
         subtitle="Choose where OpenAdminOS reads agent metadata and updates."
         onClose={onClose}
         badge={
-          <Pill tone={customSource ? "warning" : "success"}>
+          <Badge tone={customSource ? "warning" : "success"}>
             <StatusDot tone={customSource ? "warning" : "success"} />
             {customSource ? "Custom source" : "Official source"}
-          </Pill>
+          </Badge>
         }
       />
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-5 p-6">
@@ -4386,15 +4408,14 @@ function AboutSection() {
   }, []);
 
   return (
-    <div className="max-w-[820px]">
-      <SectionTitle title="About" subtitle="OpenAdminOS is open-source and community-driven." />
-      <div className="mt-6 grid grid-cols-2 gap-3">
-        <Stat label="Version" value={__APP_VERSION__} mono />
-        <Stat label="License" value="MIT" />
-        <Stat label="Repo" value="OpenAdminOS/OpenAdminOS" mono />
-        <Stat label="Built by" value="OpenAdminOS" />
-      </div>
-      <div className="mt-6 flex flex-wrap items-center gap-2">
+    <div className="max-w-[1040px] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+      <dl className="divide-y divide-[var(--color-border-soft)] px-5">
+        <KeyValue label="Version" value={<span className="font-mono">{__APP_VERSION__}</span>} />
+        <KeyValue label="License" value="MIT" />
+        <KeyValue label="Repository" value={<span className="font-mono">OpenAdminOS/OpenAdminOS</span>} />
+        <KeyValue label="Built by" value="OpenAdminOS" />
+      </dl>
+      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border-soft)] px-5 py-4">
         <Button
           variant="secondary"
           size="sm"
@@ -4436,15 +4457,17 @@ function AboutSection() {
             })
           }
         >
-          Create issue
+          Report issue
         </Button>
       </div>
 
-      <div className="mt-8">
-        <SectionTitle
-          title="0.2 readiness"
-          subtitle="Local diagnostics for release checks and support. They only leave this device when included in a confirmed public issue."
-        />
+      <details className="border-t border-[var(--color-border-soft)] px-5 py-4">
+        <summary className="cursor-pointer text-base font-medium text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+          Readiness diagnostics
+        </summary>
+        <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+          Local release and support checks. They leave this device only when included in a confirmed public issue.
+        </p>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <ReadinessRow
             label="Build"
@@ -4537,7 +4560,7 @@ function AboutSection() {
             detail="Sends agent slug, app version, platform, and a yearly per-agent hash for aggregate public registry stats."
           />
         </div>
-      </div>
+      </details>
     </div>
   );
 }
@@ -4554,17 +4577,14 @@ function ReadinessRow({
   tone: "success" | "warning" | "danger";
 }) {
   return (
-    <div className="rounded-lg bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
+    <div className="border-t border-[var(--color-border-soft)] py-3 first:border-t-0">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+        <div className="text-sm font-medium text-[var(--color-text-muted)]">
           {label}
         </div>
-        <StatusDot tone={tone} />
+        <Badge tone={tone}>{value}</Badge>
       </div>
-      <div className="mt-1 truncate text-[13.5px] font-medium text-[var(--color-text)]">
-        {value}
-      </div>
-      <div className="mt-1 line-clamp-3 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+      <div className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">
         {detail}
       </div>
     </div>
@@ -4646,31 +4666,47 @@ function SettingRow({
   description?: string;
   control: React.ReactNode;
 }) {
+  const { query, sectionMatch } = useContext(SettingsFilterContext);
   const catalogEntry = id ? SETTINGS_ITEMS[id] : undefined;
   const renderedLabel = catalogEntry?.title ?? label;
   const renderedDescription = description ?? catalogEntry?.description;
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const searchTerms = normalizedQuery.split(/\s+/).filter(Boolean);
+  const rowHaystack = [
+    renderedLabel,
+    renderedDescription,
+    ...(catalogEntry?.keywords ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+  const matches =
+    !normalizedQuery ||
+    sectionMatch ||
+    searchTerms.every((term) => rowHaystack.includes(term));
+  if (!matches) return null;
   return (
-    <Card
+    <div
       id={id ? `setting-${id}` : undefined}
       tabIndex={id ? -1 : undefined}
-      className="setting-row scroll-mt-6 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+      className={`setting-row scroll-mt-6 border-b border-[var(--color-border-soft)] last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${normalizedQuery ? "bg-[var(--color-accent-soft)]/35" : ""}`}
     >
-      <div className="flex items-center justify-between gap-6 p-4 px-5">
+      <div className="grid items-center gap-4 px-5 py-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1fr)]">
         <div className="min-w-0">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
+          <div className="text-base font-medium text-[var(--color-text)]">
             {renderedLabel}
           </div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+          <div className="mt-0.5 text-sm leading-5 text-[var(--color-text-muted)]">
             {renderedDescription}
           </div>
         </div>
-        <div className="shrink-0">{control}</div>
+        <div className="min-w-0 justify-self-start lg:justify-self-end">{control}</div>
       </div>
-    </Card>
+    </div>
   );
 }
 
-function Stat({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+export function Stat({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="rounded-lg bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
       <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">

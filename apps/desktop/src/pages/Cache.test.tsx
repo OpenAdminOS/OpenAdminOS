@@ -28,8 +28,9 @@ it("selects all resources, keeps filtering separate, and sends a tenant-scoped p
   renderRoute(<Cache />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
   await screen.findByRole("button", { name: "Preload all 2 resources" });
+  await user.click(screen.getByText("Show 2 resources"));
   await user.type(
-    screen.getByRole("textbox", { name: "Find a resource" }),
+    screen.getByRole("searchbox", { name: "Find a resource" }),
     "Managed",
   );
   await user.click(

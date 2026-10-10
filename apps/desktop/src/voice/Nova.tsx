@@ -1158,7 +1158,7 @@ export function Nova({
                   variant="ghost"
                   onClick={() => {
                     setExpanded(false);
-                    navigate("/cache");
+                    navigate("/settings/data");
                   }}
                 >
                   Review cache

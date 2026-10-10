@@ -9,7 +9,6 @@ import {
   IconAgentTeam,
   IconChat,
   IconClock,
-  IconConnectors,
   IconHardDrive,
   IconHub,
   IconFleet,
@@ -135,11 +134,12 @@ export function CommandPalette({
         action: go("/runs"),
       },
       {
-        id: "nav-cache",
-        label: "Go to Cache",
+        id: "nav-data",
+        label: "Data",
+        hint: "Open cache freshness, preload, and retention settings",
         group: "Navigate",
         icon: <IconCache size={13} className="text-[var(--color-accent)]" />,
-        action: go("/cache"),
+        action: go("/settings/data"),
       },
       ...(state.tenants.length >= 2
         ? ([
@@ -158,13 +158,6 @@ export function CommandPalette({
         group: "Navigate",
         icon: <IconHardDrive size={13} className="text-[var(--color-accent)]" />,
         action: go("/workspaces"),
-      },
-      {
-        id: "nav-connectors",
-        label: "Go to Connectors",
-        group: "Navigate",
-        icon: <IconConnectors size={13} className="text-[var(--color-accent)]" />,
-        action: go("/connectors"),
       },
       {
         id: "nav-settings",

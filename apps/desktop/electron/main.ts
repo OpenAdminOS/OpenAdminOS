@@ -1048,21 +1048,21 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/settings",
       name: "settings",
       file: "app/settings.png",
-      waitFor: ["Settings", "LLM Providers"],
+      waitFor: ["Settings", "Providers"],
       heading: "Settings",
     },
   ];
 
   if (process.env.OPENADMINOS_BRAND_CAPTURE === "1") {
     const extraShots = [
-      { route: "/cache", name: "cache", waitFor: ["Cache"] },
+      { route: "/settings/data", name: "cache", waitFor: ["Data", "Tenant cache"] },
       { route: "/office", name: "agent-team", waitFor: ["Agent Team"] },
       { route: "/fleet", name: "fleet", waitFor: [] },
       { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
-      { route: "/connectors", name: "connectors", waitFor: ["Connectors"] },
+      { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
       { route: "/agents/schedules", name: "schedules", waitFor: ["Schedules"] },
-      { route: "/settings/general", name: "appearance", waitFor: ["Graphite dark"] },
+      { route: "/settings/appearance", name: "appearance", waitFor: ["Graphite dark"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
     for (const theme of ["dark", "light"]) {
@@ -1605,15 +1605,32 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   const sawDirectChatFrontDoor = location.hash === "#/chat";
 
-  location.hash = "/settings/chat";
+  location.hash = "/settings/data";
   await waitFor(
-    () => bodyText().includes("Settings") && bodyText().includes("Tenant cache"),
-    "Chat settings route",
+    () => bodyText().includes("Tenant cache") && bodyText().includes("Automatic refresh"),
+    "Data settings route",
   );
-  await clickButton("Enable");
-  await waitFor(() => bodyText().includes("Next cache refresh"), "periodic refresh enabled");
-  await clickButton("Enable");
+  const cacheFrequency = findSelectByAccessibleName("Cache refresh frequency");
+  if (!(cacheFrequency instanceof HTMLSelectElement)) {
+    throw new Error("Cache refresh frequency select was not found.");
+  }
+  const selectSetter = Object.getOwnPropertyDescriptor(
+    HTMLSelectElement.prototype,
+    "value",
+  )?.set;
+  selectSetter?.call(cacheFrequency, "360");
+  cacheFrequency.dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => cacheFrequency.value === "360", "periodic refresh enabled");
+  const sawScheduledRefresh = cacheFrequency.value === "360";
+
+  location.hash = "/settings/chat";
   await waitFor(() => bodyText().includes("Local self-training"), "self-training setting");
+  const learningSwitch = document.querySelector('#setting-local-self-training [role="switch"]');
+  if (!(learningSwitch instanceof HTMLButtonElement)) {
+    throw new Error("Local self-training switch was not found.");
+  }
+  learningSwitch.click();
+  await waitFor(() => learningSwitch.getAttribute("aria-checked") === "true", "self-training enabled");
 
   location.hash = "/chat";
   await waitFor(() => bodyText().includes("What do you want to inspect?"), "Intune Chat route");
@@ -1864,17 +1881,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     "self-training suggestion",
   );
   await clickButton("Accept");
-  await waitFor(() => bodyText().includes("Active overlays"), "accepted self-training overlay");
+  await waitFor(() => bodyText().includes("approved instruction"), "accepted self-training overlay");
+  const sawAcceptedLearning = bodyText().includes("approved instruction");
+  location.hash = "/settings/data";
   await waitFor(
     () =>
-      bodyText().includes("Local data") &&
-      bodyText().includes("SQLite store") &&
+      bodyText().includes("Local retention") &&
       bodyText().includes("Clear active tenant cache"),
     "local data controls",
   );
   const sawLocalDataControls =
-    bodyText().includes("Local data") &&
-    bodyText().includes("SQLite store") &&
+    bodyText().includes("Local retention") &&
     bodyText().includes("Clear chat history");
   await clickButton("Clear active tenant cache");
   await waitFor(
@@ -1902,8 +1919,8 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     hasWorkspaceContextAttachment: sawWorkspaceContextAttachment,
     hasPinnedCategory: sawPinnedCategory,
     hasContextMenuDelete: sawContextMenuDelete,
-    hasAcceptedLearning: bodyText().includes("Active overlays"),
-    hasScheduledRefresh: bodyText().includes("Enabled"),
+    hasAcceptedLearning: sawAcceptedLearning,
+    hasScheduledRefresh: sawScheduledRefresh,
     hasLocalDataControls: sawLocalDataControls,
     hasLocalDataClearModal: sawLocalDataClearModal,
     hasMultiTenantScopeReview: sawMultiTenantScopeReview,

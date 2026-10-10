@@ -42,7 +42,7 @@ describe("Command Palette", () => {
   });
 });
 
-it("lists the shell destinations and the demoted power-user surfaces", async () => {
+it("lists the shell destinations and every Settings section", async () => {
   renderRoute(<CommandPalette open onClose={vi.fn()} />, {
     path: "/",
     route: "/",
@@ -71,12 +71,32 @@ it("lists the shell destinations and the demoted power-user surfaces", async () 
     "Go to Changes",
     "Open Settings",
     "Go to Agent Team",
-    "Go to Cache",
     "Go to Fleet",
     "Go to Workspaces",
-    "Go to Connectors",
     "Open Voice",
   ]) {
     expect(screen.getByRole("option", { name: new RegExp(label) })).toBeInTheDocument();
   }
+
+  expect(screen.getByRole("option", { name: /^Data/ })).toBeInTheDocument();
+
+  for (const section of [
+    "Providers",
+    "Tenants",
+    "Data",
+    "Chat",
+    "Connectors",
+    "Gateway",
+    "General",
+    "Appearance",
+    "Privacy",
+    "About",
+  ]) {
+    expect(
+      screen.getByRole("option", { name: new RegExp(`Settings: ${section}`) }),
+    ).toBeInTheDocument();
+  }
+
+  expect(screen.queryByRole("option", { name: /Go to Cache/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Go to Connectors/ })).not.toBeInTheDocument();
 });
