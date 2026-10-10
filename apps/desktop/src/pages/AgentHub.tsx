@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Card } from "../components/Card";
-import { Pill } from "../components/Pill";
 import { Button } from "../components/Button";
+import { Select } from "../components/Select";
 import { Avatar } from "../components/Avatar";
 import { ManifestPreview } from "../components/ManifestPreview";
 import { Modal, ModalHeader } from "../components/Modal";
@@ -21,12 +21,13 @@ import type {
   RegistryAgentSummary,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
+import { Badge, SegmentedControl } from "../components/ui";
 
 type InstallFilter = "all" | "available" | "installed";
 type ModeFilter = "all" | "read" | "write";
 
 /**
- * Renders a small "Requires Entra ID P1/P2" pill when the agent
+ * Renders a small "Requires Entra ID P1/P2" badge when the agent
  * declares a non-free Entra tier. Tone:
  *   - `warning` when the active tenant's detected tier is known and
  *     falls short (the run will be blocked at preflight).
@@ -51,7 +52,7 @@ function EntraTierBadge({
     : `This agent reads Graph endpoints that require Entra ID ${required.toUpperCase()}.`;
   return (
     <span title={tooltip} className="inline-flex">
-      <Pill tone={shortfall ? "warning" : "default"}>{label}</Pill>
+      <Badge tone={shortfall ? "warning" : "neutral"}>{label}</Badge>
     </span>
   );
 }
@@ -65,9 +66,9 @@ function CompatibilityBadge({
 }) {
   if (!minAppVersion) return null;
   return (
-    <Pill tone={supported === false ? "warning" : "default"}>
+    <Badge tone={supported === false ? "warning" : "neutral"}>
       {supported === false ? `Needs OpenAdminOS ${minAppVersion}` : `OpenAdminOS ${minAppVersion}+`}
-    </Pill>
+    </Badge>
   );
 }
 
@@ -245,7 +246,7 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search agents, authors, scopes"
           autoComplete="off"
-          className="h-9 w-[300px] rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+          className="h-9 w-[300px] max-w-full rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
         />
       </div>
     </div>
@@ -259,46 +260,45 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
           <>
             <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
               <div>
-                <h3 className="text-[12px] font-medium uppercase tracking-wider text-[var(--color-text)]">
+                <h3 className="text-sm font-medium text-[var(--color-text)]">
                   Agents
                 </h3>
-                <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+                <p className="mt-1 text-sm text-[var(--color-text-muted)]">
                   {visible.length} shown · {installedCount} installed · write agents always require confirmation
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5 xl:justify-end">
-                <FilterButton active={installFilter === "all"} onClick={() => setInstallFilter("all")}>
-                  All
-                </FilterButton>
-                <FilterButton active={installFilter === "available"} onClick={() => setInstallFilter("available")}>
-                  Available
-                </FilterButton>
-                <FilterButton active={installFilter === "installed"} onClick={() => setInstallFilter("installed")}>
-                  Installed
-                </FilterButton>
-                <span className="mx-1 hidden h-5 w-px bg-[var(--color-border-soft)] md:block" />
-                <FilterButton active={modeFilter === "all"} onClick={() => setModeFilter("all")}>
-                  Read + write
-                </FilterButton>
-                <FilterButton active={modeFilter === "read"} onClick={() => setModeFilter("read")}>
-                  Read-only
-                </FilterButton>
-                <FilterButton active={modeFilter === "write"} onClick={() => setModeFilter("write")}>
-                  Write
-                </FilterButton>
-                <span className="mx-1 hidden h-5 w-px bg-[var(--color-border-soft)] md:block" />
-                <FilterButton active={category === "all"} onClick={() => setCategory("all")}>
-                  All categories
-                </FilterButton>
-                {categories.map((entry) => (
-                  <FilterButton
-                    key={entry}
-                    active={category === entry}
-                    onClick={() => setCategory(entry)}
-                  >
-                    {titleCase(entry)}
-                  </FilterButton>
-                ))}
+              <div className="flex max-w-full flex-wrap items-center gap-2 xl:justify-end">
+                <SegmentedControl
+                  ariaLabel="Installation filter"
+                  value={installFilter}
+                  onValueChange={(value) => setInstallFilter(value as InstallFilter)}
+                  options={[
+                    { id: "all", label: "All" },
+                    { id: "available", label: "Available" },
+                    { id: "installed", label: "Installed" },
+                  ]}
+                />
+                <SegmentedControl
+                  ariaLabel="Agent mode filter"
+                  value={modeFilter}
+                  onValueChange={(value) => setModeFilter(value as ModeFilter)}
+                  options={[
+                    { id: "all", label: "Read + write" },
+                    { id: "read", label: "Read-only" },
+                    { id: "write", label: "Write" },
+                  ]}
+                />
+                <Select
+                  aria-label="Category filter"
+                  value={category}
+                  onChange={(event) => setCategory(event.currentTarget.value)}
+                  className="w-40"
+                >
+                  <option value="all">All categories</option>
+                  {categories.map((entry) => (
+                    <option key={entry} value={entry}>{titleCase(entry)}</option>
+                  ))}
+                </Select>
               </div>
             </div>
 
@@ -383,10 +383,10 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
       <>
         <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h2 className="text-[13px] font-medium text-[var(--color-text)]">
+            <h2 className="text-base font-medium text-[var(--color-text)]">
               Agent Hub
             </h2>
-            <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
               {registryAgents.length} agents · {installedCount} installed
             </p>
           </div>
@@ -403,13 +403,6 @@ export default function AgentHub({ embedded = false }: { embedded?: boolean }) {
       <PageHeader
         eyebrow="Store"
         title="Agent Hub"
-        subtitle={
-          <span className="inline-flex items-center gap-2">
-            <span>
-              {registryAgents.length} agents · {installedCount} installed
-            </span>
-          </span>
-        }
         actions={hubActions}
       />
       <PageBody>{content}</PageBody>
@@ -456,10 +449,10 @@ export function AgentInstallDetails({
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <Pill tone={agent.mode === "write" ? "warning" : "default"}>
+            <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
               {agent.mode === "write" ? "Write" : "Read-only"}
-            </Pill>
-            <Pill className="capitalize">{agent.category}</Pill>
+            </Badge>
+            <Badge className="capitalize">{agent.category}</Badge>
             <EntraTierBadge
               required={agent.requiresEntraTier ?? "free"}
               tenantTier={tenantTier}
@@ -469,7 +462,7 @@ export function AgentInstallDetails({
               supported={agent.compatibility?.supported}
             />
           </div>
-          <p className="mt-4 text-[14px] leading-relaxed text-[var(--color-text)]">
+          <p className="mt-4 text-md leading-relaxed text-[var(--color-text)]">
             {agent.description}
           </p>
           <div className="mt-5 flex items-center gap-2">
@@ -492,20 +485,20 @@ export function AgentInstallDetails({
           </div>
         </div>
         <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="text-xs font-medium text-[var(--color-text-muted)]">
             Author
           </div>
-          <div className="mt-2 flex items-center gap-2 text-[13px] text-[var(--color-text)]">
+          <div className="mt-2 flex items-center gap-2 text-base text-[var(--color-text)]">
             <Avatar name={agent.author.name} size={20} />
             <span>{agent.author.name}</span>
             {agent.author.verified && (
               <IconBadgeCheck size={12} className="text-[var(--color-accent)]" />
             )}
           </div>
-          <div className="mt-4 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="mt-4 text-xs font-medium text-[var(--color-text-muted)]">
             Permissions
           </div>
-          <div className="mt-2 text-[12px] text-[var(--color-text-soft)]">
+          <div className="mt-2 text-sm text-[var(--color-text-soft)]">
             {agent.scopes.length} Graph scope{agent.scopes.length === 1 ? "" : "s"}
           </div>
         </div>
@@ -513,19 +506,19 @@ export function AgentInstallDetails({
 
       {!installed && confirmInstall && (
         <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-accent)]/35">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
+          <div className="text-base font-medium text-[var(--color-text)]">
             Confirm installation
           </div>
-          <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+          <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
             OpenAdminOS will pin this agent locally. It can request the Graph
             scopes listed below when you run it, and write-mode agents still
             pause for diff confirmation before tenant changes.
           </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {agent.scopes.map((scope) => (
-              <Pill key={scope}>
-                <span className="font-mono text-[10.5px]">{scope}</span>
-              </Pill>
+              <Badge key={scope}>
+                <span className="font-mono text-xs">{scope}</span>
+              </Badge>
             ))}
           </div>
           <div className="mt-4 flex justify-end gap-2">
@@ -541,10 +534,10 @@ export function AgentInstallDetails({
 
       {!installed && agent.compatibility?.supported === false && (
         <div className="rounded-lg bg-[var(--color-warning-soft)] p-4 ring-1 ring-[var(--color-warning)]/30">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
+          <div className="text-base font-medium text-[var(--color-text)]">
             Update OpenAdminOS
           </div>
-          <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+          <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
             This agent requires OpenAdminOS {agent.compatibility.minAppVersion} or newer.
             You are running {agent.compatibility.appVersion}. Install is blocked so the
             app does not attempt to run unsupported agent syntax.
@@ -585,14 +578,14 @@ export function AgentInstallDetails({
 
       {agent.scopes.length > 0 && (
         <div>
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="text-xs font-medium text-[var(--color-text-muted)]">
             Required scopes
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {agent.scopes.map((scope) => (
-              <Pill key={scope}>
-                <span className="font-mono text-[10.5px]">{scope}</span>
-              </Pill>
+              <Badge key={scope}>
+                <span className="font-mono text-xs">{scope}</span>
+              </Badge>
             ))}
           </div>
         </div>
@@ -601,10 +594,10 @@ export function AgentInstallDetails({
       {showRaw && (
         <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
           {manifestLoading && (
-            <div className="text-[13px] text-[var(--color-text-muted)]">Loading manifest…</div>
+            <div className="text-base text-[var(--color-text-muted)]">Loading manifest…</div>
           )}
           {manifestError && (
-            <div className="text-[13px] text-[var(--color-danger)]">
+            <div className="text-base text-[var(--color-danger)]">
               Couldn't load manifest: {manifestError}
             </div>
           )}
@@ -612,7 +605,7 @@ export function AgentInstallDetails({
             <ManifestPreview preview={manifestPreview} />
           )}
           {!manifestLoading && !manifestError && !manifestPreview && (
-            <div className="text-[13px] text-[var(--color-text-muted)]">
+            <div className="text-base text-[var(--color-text-muted)]">
               No manifest is available for this agent yet.
             </div>
           )}
@@ -633,39 +626,16 @@ function DecisionFact({
 }) {
   return (
     <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-1 text-[13px] font-medium text-[var(--color-text)]">
+      <div className="mt-1 text-base font-medium text-[var(--color-text)]">
         {value}
       </div>
-      <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+      <div className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
         {detail}
       </div>
     </div>
-  );
-}
-
-function FilterButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${
-        active
-          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
-          : "bg-transparent text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -701,10 +671,10 @@ function HubAgentCard({
               )}
             </div>
             <div className="min-w-0">
-              <div className="truncate text-[14px] font-medium text-[var(--color-text)]">
+              <div className="truncate text-md font-medium text-[var(--color-text)]">
                 {agent.name}
               </div>
-              <div className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
                 <Avatar name={agent.author.name} size={14} />
                 <span>{agent.author.name}</span>
                 {agent.author.verified && (
@@ -720,15 +690,15 @@ function HubAgentCard({
           </div>
         </div>
 
-        <p className="text-[13px] leading-relaxed text-[var(--color-text-soft)]">
+        <p className="text-base leading-relaxed text-[var(--color-text-soft)]">
           {agent.description}
         </p>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Pill tone={agent.mode === "write" ? "warning" : "default"}>
+          <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
             {agent.mode === "write" ? "Write" : "Read-only"}
-          </Pill>
-          <Pill className="capitalize">{agent.category}</Pill>
+          </Badge>
+          <Badge className="capitalize">{agent.category}</Badge>
           <EntraTierBadge
             required={agent.requiresEntraTier ?? "free"}
             tenantTier={tenantTier}
@@ -737,19 +707,19 @@ function HubAgentCard({
             minAppVersion={agent.compatibility?.minAppVersion ?? agent.minAppVersion}
             supported={agent.compatibility?.supported}
           />
-          <Pill>
+          <Badge>
             {agent.scopes.length} scope{agent.scopes.length === 1 ? "" : "s"}
-          </Pill>
+          </Badge>
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--color-border-soft)] pt-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+            <span className="font-mono text-xs text-[var(--color-text-muted)]">
               v{agent.version}
             </span>
             {typeof installs === "number" && (
               <>
-                <span className="text-[11px] text-[var(--color-text-muted)] opacity-50">·</span>
+                <span className="text-xs text-[var(--color-text-muted)] opacity-50">·</span>
                 <InstallCount count={installs} />
               </>
             )}
@@ -811,10 +781,10 @@ function EmptyRegistry() {
   return (
     <Card>
       <div className="flex flex-col items-center justify-center p-10 text-center">
-        <div className="text-[15px] font-medium text-[var(--color-text)]">
+        <div className="text-md font-medium text-[var(--color-text)]">
           No agents found
         </div>
-        <div className="mt-1 max-w-[440px] text-[13px] text-[var(--color-text-muted)]">
+        <div className="mt-1 max-w-[440px] text-base text-[var(--color-text-muted)]">
           Refresh the catalog or point Settings to a source with agent manifests.
         </div>
       </div>
@@ -833,8 +803,8 @@ interface LiveStatsFile {
 /**
  * Pulls the public stats file on Hub mount. Lives at a static URL on
  * the marketing site (synced from the canonical `stats/agents.json` at
- * deploy time). When the fetch fails — offline, DNS error, marketing
- * site down — we silently fall back to the bundled `agent.installs`
+ * deploy time). When the fetch fails (offline, DNS error, or marketing
+ * site down), we silently fall back to the bundled `agent.installs`
  * value baked into the desktop release. The Hub never shows a loading
  * spinner for stats; the bundled values are used until/unless the
  * fetch resolves, at which point counts swap in.
@@ -888,7 +858,7 @@ function resolveInstallCount(
 }
 
 /**
- * Compact install counter — `12 installs`, `1.2k installs`, etc.
+ * Compact install counter: `12 installs`, `1.2k installs`, etc.
  * Renders nothing when the stats file has no entry for this agent so
  * we don't surface a misleading "0 installs" before the counter is
  * actually wired up to the live aggregator.
@@ -904,8 +874,8 @@ function InstallCount({
   const iconSize = size === "md" ? 11 : 10;
   const textClass =
     size === "md"
-      ? "text-[11.5px] text-[var(--color-text-muted)]"
-      : "text-[10.5px] text-[var(--color-text-muted)]";
+      ? "text-sm text-[var(--color-text-muted)]"
+      : "text-xs text-[var(--color-text-muted)]";
   return (
     <span className={`inline-flex items-center gap-1 ${textClass}`}>
       <IconDownload size={iconSize} />
@@ -944,10 +914,10 @@ function HubFilterEmpty({
     <Card>
       <div className="flex flex-col items-center justify-center gap-3 p-10 text-center">
         <IconSearch size={24} className="text-[var(--color-text-muted)]" />
-        <div className="text-[15px] font-medium text-[var(--color-text)]">
+        <div className="text-md font-medium text-[var(--color-text)]">
           No agents match
         </div>
-        <div className="max-w-[440px] text-[13px] text-[var(--color-text-muted)]">
+        <div className="max-w-[440px] text-base text-[var(--color-text-muted)]">
           {hasQuery && hasFilter
             ? `Nothing matches "${query}" in the ${titleCase(category)} category.`
             : hasQuery

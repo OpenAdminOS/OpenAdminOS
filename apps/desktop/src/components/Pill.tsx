@@ -1,15 +1,22 @@
 import type { ReactNode } from "react";
+import {
+  Badge,
+  StatusDot as UiStatusDot,
+  type BadgeTone,
+  type StatusDotTone,
+} from "./ui";
 
 type Tone = "default" | "accent" | "success" | "warning" | "danger" | "info" | "think";
+type LegacyDotTone = "success" | "warning" | "danger" | "info" | "muted";
 
-const toneStyles: Record<Tone, string> = {
-  default: "bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]",
-  accent: "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25",
-  success: "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25",
-  warning: "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25",
-  danger: "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25",
-  info: "bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25",
-  think: "bg-[var(--color-think-soft)] text-[var(--color-think)] ring-1 ring-[var(--color-think)]/25",
+const toneMap: Record<Tone, BadgeTone> = {
+  default: "neutral",
+  accent: "info",
+  success: "success",
+  warning: "warning",
+  danger: "danger",
+  info: "info",
+  think: "think",
 };
 
 export function Pill({
@@ -21,33 +28,22 @@ export function Pill({
   tone?: Tone;
   className?: string;
 }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium leading-tight ${toneStyles[tone]} ${className}`}
-    >
-      {children}
-    </span>
-  );
+  return <Badge tone={toneMap[tone]} className={className}>{children}</Badge>;
 }
 
 export function StatusDot({
   tone = "success",
   className = "",
 }: {
-  tone?: "success" | "warning" | "danger" | "info" | "muted";
+  tone?: LegacyDotTone;
   className?: string;
 }) {
-  const colorMap = {
-    success: "bg-[var(--color-success)]",
-    warning: "bg-[var(--color-warning)]",
-    danger: "bg-[var(--color-danger)]",
-    info: "bg-[var(--color-info)]",
-    muted: "bg-[var(--color-text-faint)]",
-  } as const;
-  return (
-    <span
-      aria-hidden="true"
-      className={`inline-block h-1.5 w-1.5 rounded-full ${colorMap[tone]} ${className}`}
-    />
-  );
+  const dotToneMap: Record<LegacyDotTone, StatusDotTone> = {
+    success: "success",
+    warning: "warning",
+    danger: "danger",
+    info: "info",
+    muted: "neutral",
+  };
+  return <UiStatusDot tone={dotToneMap[tone]} className={className} />;
 }

@@ -43,19 +43,19 @@ export async function captureWebsiteDemo(
       id: "agents",
       route: "/agents",
       label: "Installed agents",
-      wait: ["Search installed agents"],
+      wait: ["Team", "Library"],
     },
     {
       id: "hub",
       route: "/agents?source=hub",
       label: "Agents: Hub",
-      wait: ["Search hub"],
+      wait: ["Library", "Agent hub"],
     },
     {
       id: "schedules",
       route: "/agents?filter=scheduled",
       label: "Scheduled agents",
-      wait: ["Scheduled only"],
+      wait: ["Team", "Library"],
     },
     {
       id: "agent-details",
@@ -166,7 +166,7 @@ export async function captureWebsiteDemo(
       id: "team-add",
       route: "/agents?add=teammate",
       label: "Add teammate",
-      wait: ["Add teammate"],
+      wait: ["Add a teammate"],
     },
     {
       id: "workspace-add",
@@ -236,7 +236,7 @@ export async function captureWebsiteDemo(
       route: "/chat",
       label: "Quick search",
       wait: ["Chat"],
-      click: "Quick search",
+      click: "Search",
     },
   ];
   await mkdir(outDir, { recursive: true });
@@ -302,7 +302,16 @@ export async function captureWebsiteDemo(
         `document.querySelector('.fixed button[aria-label="Close"]')?.click()`,
       );
       await new Promise((resolve) => setTimeout(resolve, 180));
-      await navigate(screen.route, screen.wait, screen.prepare);
+      await window.webContents.executeJavaScript(`(() => { if (window.__dbgErrs) return; window.__dbgErrs = []; window.addEventListener("error", (e) => window.__dbgErrs.push(String(e.message) + " | " + String(e.error && e.error.stack).slice(0, 1200))); })()`);
+      try {
+        await navigate(screen.route, screen.wait, screen.prepare);
+      } catch (dbg) {
+        const info = await window.webContents.executeJavaScript("JSON.stringify({errs: window.__dbgErrs || [], href: location.href, text: (document.getElementById('root')?.innerText || '').slice(0, 1200)})");
+        console.error("[dbg]", info);
+        const img = await window.webContents.capturePage();
+        await writeFile("/tmp/oaos-ui/dbg-fail.png", img.toPNG());
+        throw dbg;
+      }
       const heading =
         screen.route === "/chat?panel=workspaces"
           ? "No workspace selected"

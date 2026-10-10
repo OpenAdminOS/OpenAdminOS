@@ -55,6 +55,23 @@ import {
   type WhatsAppWebRecipientType,
 } from "../shared/openAdminOS";
 
+function scrollAgentSection(targetId: string) {
+  const target = document.getElementById(targetId);
+  const scrollRoot = target?.closest<HTMLElement>("[data-drawer-scroll-root]");
+  if (!(target instanceof HTMLElement) || !scrollRoot) return;
+  const rootRect = scrollRoot.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const top = Math.max(
+    0,
+    scrollRoot.scrollTop + targetRect.top - rootRect.top - 12,
+  );
+  if (typeof scrollRoot.scrollTo === "function") {
+    scrollRoot.scrollTo({ top, behavior: "auto" });
+  } else {
+    scrollRoot.scrollTop = top;
+  }
+}
+
 export default function AgentDetail({
   startRunOnOpen = false,
 }: {
@@ -367,7 +384,7 @@ export default function AgentDetail({
       clearAction();
     } else if (action === "schedule") {
       window.requestAnimationFrame(() => {
-        document.getElementById("agent-schedule")?.scrollIntoView?.({ block: "start" });
+        scrollAgentSection("agent-schedule");
       });
       clearAction();
     } else if (action === "share" && preview) {
@@ -473,7 +490,7 @@ export default function AgentDetail({
                   id: "schedule",
                   label: "Schedule",
                   icon: <IconClock size={13} />,
-                  onSelect: () => document.getElementById("agent-schedule")?.scrollIntoView?.({ block: "start" }),
+                  onSelect: () => scrollAgentSection("agent-schedule"),
                 },
                 {
                   id: "manifest",
@@ -832,7 +849,7 @@ export default function AgentDetail({
         />
         {updateReview && (
           <div className="space-y-3 overflow-y-auto p-6">
-            <div className="rounded-md bg-[var(--color-bg-subtle)] p-3 text-[12px] leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
+            <div className="rounded-md bg-[var(--color-bg-subtle)] p-3 text-sm leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
               Manifest SHA-256{" "}
               <span className="break-all font-mono text-[var(--color-text)]">
                 {updateReview.manifestSha256}
@@ -860,11 +877,11 @@ export default function AgentDetail({
                       {change.severity}
                     </Pill>
                   </div>
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--color-text-muted)]">
+                  <p className="mt-1 text-base leading-relaxed text-[var(--color-text-muted)]">
                     {change.detail}
                   </p>
                   {(change.before || change.after) && (
-                    <div className="mt-2 grid gap-2 text-[11.5px] sm:grid-cols-2">
+                    <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
                       <div>
                         <div className="mb-1 text-[var(--color-text-muted)]">
                           Before
@@ -1117,7 +1134,7 @@ function UninstallAgentModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           This removes the installed agent from this device.
           {userAuthored
             ? " The local user-authored manifest folder is deleted from disk."
@@ -1358,10 +1375,10 @@ function AgentTeamsDeliveryCard({
             className={enabled ? "text-[var(--color-success)]" : "text-[var(--color-text-soft)]"}
           />
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[var(--color-text)]">
+            <div className="text-base font-medium text-[var(--color-text)]">
               Microsoft Teams
             </div>
-            <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+            <div className="mt-0.5 text-xs leading-relaxed text-[var(--color-text-muted)]">
               Send terminal run reports to a Teams channel. Saved delivery
               rules post without another prompt.
             </div>
@@ -1369,7 +1386,7 @@ function AgentTeamsDeliveryCard({
         </div>
 
         {!connected && (
-          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             Connect and test Microsoft Teams before enabling delivery.
             <button
               type="button"
@@ -1417,7 +1434,7 @@ function AgentTeamsDeliveryCard({
                       setTeamId(event.target.value);
                       setChannelId("");
                     }}
-                    className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-[12px] text-[var(--color-text)]"
+                    className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-sm text-[var(--color-text)]"
                   >
                     <option value="">{loading ? "Loading teams…" : "Select team"}</option>
                     {teams.map((team) => (
@@ -1430,7 +1447,7 @@ function AgentTeamsDeliveryCard({
                     value={channelId}
                     disabled={!teamId}
                     onChange={(event) => setChannelId(event.target.value)}
-                    className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-[12px] text-[var(--color-text)] disabled:opacity-60"
+                    className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-sm text-[var(--color-text)] disabled:opacity-60"
                   >
                     <option value="">
                       {!teamId
@@ -1480,13 +1497,13 @@ function AgentTeamsDeliveryCard({
         </div>
 
         {enabled && useDefaultTarget && !hasDefaultTarget && (
-          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             Set a default Teams channel on the Connectors page, or choose a
             custom channel for this agent.
           </div>
         )}
         {error && (
-          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {error}
           </div>
         )}
@@ -1494,7 +1511,7 @@ function AgentTeamsDeliveryCard({
           <span
             role="status"
             aria-live="polite"
-            className="text-[11px] text-[var(--color-text-muted)]"
+            className="text-xs text-[var(--color-text-muted)]"
           >
             {deliveryStatus}
           </span>
@@ -1738,10 +1755,10 @@ function AgentWhatsAppWebDeliveryCard({
             className={enabled ? "text-[var(--color-success)]" : "text-[var(--color-text-soft)]"}
           />
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[var(--color-text)]">
+            <div className="text-base font-medium text-[var(--color-text)]">
               WhatsApp Web
             </div>
-            <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+            <div className="mt-0.5 text-xs leading-relaxed text-[var(--color-text-muted)]">
               Send terminal run reports through the linked local WhatsApp
               session. Saved delivery rules post without another prompt.
             </div>
@@ -1749,7 +1766,7 @@ function AgentWhatsAppWebDeliveryCard({
         </div>
 
         {!connected && (
-          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             Link WhatsApp Web before enabling delivery.
             <button
               type="button"
@@ -1836,7 +1853,7 @@ function AgentWhatsAppWebDeliveryCard({
                   </div>
 
                   {recipientType === "self" && (
-                    <div className="rounded-md bg-[var(--color-success-soft)]/15 px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-success-soft)]">
+                    <div className="rounded-md bg-[var(--color-success-soft)]/15 px-3 py-2 text-sm leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-success-soft)]">
                       Sends to the linked WhatsApp account. The account number is
                       resolved locally when the run report is sent.
                     </div>
@@ -1845,7 +1862,7 @@ function AgentWhatsAppWebDeliveryCard({
                   {recipientType === "group" && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11.5px] text-[var(--color-text-soft)]">
+                        <span className="text-sm text-[var(--color-text-soft)]">
                           WhatsApp group
                         </span>
                         <button
@@ -1854,7 +1871,7 @@ function AgentWhatsAppWebDeliveryCard({
                             void loadGroups();
                           }}
                           disabled={!connected || loadingGroups}
-                          className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface)] px-2 py-1 text-[11px] text-[var(--color-text-soft)] hover:bg-[var(--color-bg-raised)] disabled:opacity-50"
+                          className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface)] px-2 py-1 text-xs text-[var(--color-text-soft)] hover:bg-[var(--color-bg-raised)] disabled:opacity-50"
                         >
                           {loadingGroups ? "Loading…" : "Refresh groups"}
                         </button>
@@ -1869,7 +1886,7 @@ function AgentWhatsAppWebDeliveryCard({
                           setRecipient(event.target.value);
                           setRecipientLabel(group?.subject ?? "WhatsApp group");
                         }}
-                        className="w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-[12px] text-[var(--color-text)] disabled:opacity-60"
+                        className="w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-sm text-[var(--color-text)] disabled:opacity-60"
                       >
                         <option value="">
                           {!connected
@@ -1919,7 +1936,7 @@ function AgentWhatsAppWebDeliveryCard({
                         setRecipientLabel("WhatsApp recipient");
                       }}
                     >
-                      <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
+                      <label className="flex flex-col gap-1 text-sm text-[var(--color-text-soft)]">
                         <span>Number, wa.me link, or raw JID</span>
                         <input
                           value={recipient}
@@ -1929,7 +1946,7 @@ function AgentWhatsAppWebDeliveryCard({
                           }}
                           placeholder="+15551234567"
                           inputMode="tel"
-                          className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-[12px] text-[var(--color-text)]"
+                          className="rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-1.5 text-sm text-[var(--color-text)]"
                         />
                       </label>
                     </div>
@@ -1969,13 +1986,13 @@ function AgentWhatsAppWebDeliveryCard({
         </div>
 
         {enabled && useDefaultRecipient && !hasDefaultRecipient && (
-          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             Set a default WhatsApp target on the Connectors page, or choose a
             custom target for this agent.
           </div>
         )}
         {error && (
-          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {error}
           </div>
         )}
@@ -1983,7 +2000,7 @@ function AgentWhatsAppWebDeliveryCard({
           <span
             role="status"
             aria-live="polite"
-            className="text-[11px] text-[var(--color-text-muted)]"
+            className="text-xs text-[var(--color-text-muted)]"
           >
             {loading ? "Checking WhatsApp Web…" : deliveryStatus}
           </span>
@@ -2152,10 +2169,10 @@ function AgentDefaultConnectorDeliveryCard({
             className={enabled ? "text-[var(--color-success)]" : "text-[var(--color-text-soft)]"}
           />
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[var(--color-text)]">
+            <div className="text-base font-medium text-[var(--color-text)]">
               {connectorName}
             </div>
-            <div className="mt-0.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+            <div className="mt-0.5 text-xs leading-relaxed text-[var(--color-text-muted)]">
               Send terminal run reports through the connector default. Saved
               delivery rules post without another prompt.
             </div>
@@ -2163,7 +2180,7 @@ function AgentDefaultConnectorDeliveryCard({
         </div>
 
         {!ready && (
-          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             {defaultStatus.reason}
             <button
               type="button"
@@ -2185,7 +2202,7 @@ function AgentDefaultConnectorDeliveryCard({
 
           {enabled && (
             <>
-              <div className="rounded-md bg-[var(--color-bg-raised)] px-3 py-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+              <div className="rounded-md bg-[var(--color-bg-raised)] px-3 py-2 text-sm text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
                 Default target: {defaultStatus.label}
               </div>
               <div className="grid gap-2">
@@ -2220,7 +2237,7 @@ function AgentDefaultConnectorDeliveryCard({
         </div>
 
         {error && (
-          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {error}
           </div>
         )}
@@ -2228,7 +2245,7 @@ function AgentDefaultConnectorDeliveryCard({
           <span
             role="status"
             aria-live="polite"
-            className="text-[11px] text-[var(--color-text-muted)]"
+            className="text-xs text-[var(--color-text-muted)]"
           >
             {loading ? `Checking ${connectorName}…` : deliveryStatus}
           </span>
@@ -2429,7 +2446,7 @@ function ToggleRow({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 text-[12px] text-[var(--color-text-soft)]">
+    <label className="flex items-center justify-between gap-3 text-sm text-[var(--color-text-soft)]">
       <span>{label}</span>
       <input
         type="checkbox"
@@ -2463,8 +2480,8 @@ function ChoiceButton({
           : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)]"
       }`}
     >
-      <div className="text-[12px] font-medium">{label}</div>
-      <div className="mt-0.5 truncate text-[10.5px] opacity-75">{detail}</div>
+      <div className="text-sm font-medium">{label}</div>
+      <div className="mt-0.5 truncate text-xs opacity-75">{detail}</div>
     </button>
   );
 }
@@ -2504,25 +2521,25 @@ function RunPreflightModal({
       />
       <div className="space-y-4 p-6">
         {!activeTenantName && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             Connect or select a Microsoft 365 tenant before starting this run.
             OpenAdminOS never runs an agent without an active tenant scope.
           </div>
         )}
         {!providerIsLocal && (
-          <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             Hosted provider selected. Tenant prompts and agent context are sent
             through {providerName}'s local CLI and leave this device.
           </div>
         )}
         {mayNeedConsent && (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             This agent declares scopes that may require Microsoft incremental
             consent the first time it runs for this tenant.
           </div>
         )}
         {deliverySaving && (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             Saving connector delivery changes before the run starts.
           </div>
         )}
@@ -2539,10 +2556,10 @@ function RunPreflightModal({
           />
         </div>
         <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="text-xs font-medium text-[var(--color-text-muted)]">
             What happens
           </div>
-          <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+          <p className="mt-2 text-base leading-relaxed text-[var(--color-text-soft)]">
             OpenAdminOS runs this agent against the active tenant and saves the
             result to local run history. {agent.mode === "write"
               ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."
@@ -2551,13 +2568,13 @@ function RunPreflightModal({
         </div>
         {agent.scopes.length > 0 && (
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Graph scopes
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {agent.scopes.map((scope) => (
                 <Pill key={scope}>
-                  <span className="font-mono text-[10.5px]">
+                  <span className="font-mono text-xs">
                     {scopeLabel(scope, requestedScopes)}
                   </span>
                 </Pill>
@@ -2604,10 +2621,10 @@ const GRAPH_SCOPE_LABELS: Record<string, string> = {
 function PreflightFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-1 truncate text-[13px] text-[var(--color-text)]">
+      <div className="mt-1 truncate text-base text-[var(--color-text)]">
         {value}
       </div>
     </div>
@@ -2645,16 +2662,16 @@ function ModelCardBody({
   return (
     <>
       <div className="mt-3">
-        <div className="font-mono text-[13px] font-medium text-[var(--color-text)]">
+        <div className="font-mono text-base font-medium text-[var(--color-text)]">
           {resolved ?? "-"}
         </div>
-        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+        <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
           {source}
         </div>
       </div>
       {preferredButMissing && (
         <div className="mt-3 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 ring-1 ring-[var(--color-warning)]/30">
-          <div className="text-[11px] leading-relaxed text-[var(--color-text-soft)]">
+          <div className="text-xs leading-relaxed text-[var(--color-text-soft)]">
             <span className="font-medium text-[var(--color-text)]">
               {preferred}
             </span>{" "}
@@ -2708,7 +2725,7 @@ function FallbackScopesCard({ scopes }: { scopes: string[] }) {
 
 function SectionLabel({ children }: { children: string }) {
   return (
-    <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+    <div className="text-xs font-medium text-[var(--color-text-muted)]">
       {children}
     </div>
   );

@@ -57,6 +57,17 @@ describe("IntuneChat guest exploration", () => {
     );
   });
 
+  it("shows the new conversation title as text, not an empty rename field", async () => {
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState()),
+    });
+
+    expect(await screen.findByRole("button", { name: "New conversation" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Conversation title" })).not.toBeInTheDocument();
+  });
+
   it("sends exactly once after the user explicitly resumes completed setup", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });

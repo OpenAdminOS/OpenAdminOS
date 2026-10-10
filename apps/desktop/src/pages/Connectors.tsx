@@ -45,7 +45,14 @@ import {
 } from "../components/icons";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import { Select } from "../components/Select";
-import { Badge, Button as UiButton, Drawer, Skeleton } from "../components/ui";
+import {
+  Badge,
+  Button as UiButton,
+  Drawer,
+  Skeleton,
+  StatusDot,
+  type BadgeTone,
+} from "../components/ui";
 
 type BrandIcon = (props: { size?: number }) => ReactElement;
 type WhatsAppTargetDraft = {
@@ -371,10 +378,10 @@ export function ConnectorOperationsSummary({
       <div className="rounded-xl bg-[var(--color-surface)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Delivery model
             </div>
-            <p className="mt-1 text-[13px] text-[var(--color-text)]">
+            <p className="mt-1 text-base text-[var(--color-text)]">
               {"Terminal run report -> local queue -> connector send -> activity log"}
             </p>
           </div>
@@ -402,14 +409,14 @@ function ConnectorStat({
     <div className="rounded-xl bg-[var(--color-surface)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="text-xs font-medium text-[var(--color-text-muted)]">
             {label}
           </div>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-mono text-[18px] font-semibold text-[var(--color-text)]">
+            <span className="text-lg font-semibold tabular-nums text-[var(--color-text)]">
               {value}
             </span>
-            <span className="text-[12px] text-[var(--color-text-soft)]">{detail}</span>
+            <span className="text-sm text-[var(--color-text-soft)]">{detail}</span>
           </div>
         </div>
         <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
@@ -428,15 +435,15 @@ export function ConnectorPolicyPanel() {
           <IconShield size={15} />
         </span>
         <div>
-          <h2 className="text-[13px] font-semibold text-[var(--color-text)]">
+          <h2 className="text-base font-semibold text-[var(--color-text)]">
             Routing flow
           </h2>
-          <p className="text-[11.5px] text-[var(--color-text-muted)]">
+          <p className="text-sm text-[var(--color-text-muted)]">
             Defaults here, delivery rules on each agent.
           </p>
         </div>
       </div>
-      <p className="mt-3 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+      <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-soft)]">
         Use this page to connect services and set fallback targets. Pick success,
         failure, or all-run delivery on the agent page.
       </p>
@@ -483,8 +490,8 @@ function PolicyRow({
         {icon}
       </span>
       <div>
-        <p className="text-[12px] font-medium text-[var(--color-text)]">{title}</p>
-        <p className="mt-0.5 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+        <p className="text-sm font-medium text-[var(--color-text)]">{title}</p>
+        <p className="mt-0.5 text-sm leading-relaxed text-[var(--color-text-muted)]">
           {body}
         </p>
       </div>
@@ -533,8 +540,8 @@ function ConnectorNotice({
     >
       <IconWarning size={15} className="mt-0.5 shrink-0" />
       <div>
-        <p className="text-[12px] font-medium">{title}</p>
-        <p className="mt-0.5 text-[11.5px] leading-relaxed opacity-90">{body}</p>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-0.5 text-sm leading-relaxed opacity-90">{body}</p>
       </div>
     </div>
   );
@@ -544,10 +551,10 @@ export function ConnectorIdeaBar() {
   return (
     <div className="flex flex-col gap-3 rounded-xl bg-[var(--color-surface)] px-5 py-4 ring-1 ring-[var(--color-border-soft)] sm:flex-row sm:items-center sm:justify-between">
       <div>
-        <h3 className="text-[13px] font-semibold text-[var(--color-text)]">
+        <h3 className="text-base font-semibold text-[var(--color-text)]">
           Need another connector?
         </h3>
-        <p className="mt-0.5 text-[12px] text-[var(--color-text-soft)]">
+        <p className="mt-0.5 text-sm text-[var(--color-text-soft)]">
           Open a GitHub issue with the target system and the delivery use case.
         </p>
       </div>
@@ -592,15 +599,15 @@ function FeaturedTeamsCard({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[15px] font-semibold text-[var(--color-text)]">
+                <h2 className="text-md font-semibold text-[var(--color-text)]">
                   {descriptor.name}
                 </h2>
-                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
                   v{descriptor.version}
                 </span>
                 <Tag tone="neutral">Graph delegated</Tag>
               </div>
-              <p className="mt-1.5 max-w-[760px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              <p className="mt-1.5 max-w-[760px] text-base leading-relaxed text-[var(--color-text-soft)]">
                 Posts channel messages as the signed-in admin via Microsoft
                 Graph. Data stays inside the tenant boundary.
               </p>
@@ -622,12 +629,12 @@ function FeaturedTeamsCard({
                   </ul>
                 </ConnectorInfoBlock>
                 <ConnectorInfoBlock title="Required Graph scopes">
-                  <ul className="space-y-0.5 break-words font-mono text-[11px] text-[var(--color-text-soft)]">
+                  <ul className="space-y-0.5 break-words font-mono text-xs text-[var(--color-text-soft)]">
                     {descriptor.scopes.map((scope) => (
                       <li key={scope}>{scope}</li>
                     ))}
                   </ul>
-                  <p className="mt-2 text-[10.5px] text-[var(--color-text-muted)]">
+                  <p className="mt-2 text-xs text-[var(--color-text-muted)]">
                     Incremental consent. Admins who do not use Teams do not grant
                     these scopes.
                   </p>
@@ -641,7 +648,7 @@ function FeaturedTeamsCard({
           <div className="flex items-start justify-between gap-3">
             <div>
               <SectionLabel>Default channel</SectionLabel>
-              <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">
                 Used by agents that post to the connector default.
               </p>
             </div>
@@ -653,10 +660,10 @@ function FeaturedTeamsCard({
             <TeamsDefaultsPicker summary={summary} />
           ) : (
             <div className="mt-3 rounded-lg border border-dashed border-[var(--color-border-soft)] bg-[var(--color-surface)]/55 p-4">
-              <p className="text-[12.5px] text-[var(--color-text-soft)]">
+              <p className="text-base text-[var(--color-text-soft)]">
                 Test Microsoft Teams first, then pick the default team and channel.
               </p>
-              <p className="mt-1.5 text-[11.5px] text-[var(--color-text-muted)]">
+              <p className="mt-1.5 text-sm text-[var(--color-text-muted)]">
                 Agents that declare Teams fail preflight until the connector is
                 configured.
               </p>
@@ -664,7 +671,7 @@ function FeaturedTeamsCard({
           )}
 
           <div className="mt-4 flex flex-col gap-3 border-t border-[var(--color-border-soft)] pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0 text-[11.5px] text-[var(--color-text-muted)]">
+            <div className="min-w-0 text-sm text-[var(--color-text-muted)]">
               {summary.lastTestedAt ? (
                 <>
                   Last tested {formatRelative(summary.lastTestedAt)}
@@ -956,15 +963,15 @@ function WhatsAppWebCard({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[15px] font-semibold text-[var(--color-text)]">
+              <h2 className="text-md font-semibold text-[var(--color-text)]">
                 {descriptor.name}
               </h2>
-              <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+              <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
                 v{descriptor.version}
               </span>
               <Tag tone="neutral">External</Tag>
             </div>
-            <p className="mt-1.5 max-w-[820px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <p className="mt-1.5 max-w-[820px] text-base leading-relaxed text-[var(--color-text-soft)]">
               Sends outbound run notifications through a WhatsApp Web session
               linked on this device. OpenAdminOS stores the session locally and
               does not read incoming messages.
@@ -987,11 +994,11 @@ function WhatsAppWebCard({
                 </ul>
               </ConnectorInfoBlock>
               <ConnectorInfoBlock title="Trust boundary">
-                <p className="text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">
                   Message content leaves Microsoft 365 and is delivered by WhatsApp.
                   No Microsoft Graph scopes are requested.
                 </p>
-                <p className="mt-2 font-mono text-[11px] text-[var(--color-text-muted)]">
+                <p className="mt-2 font-mono text-xs text-[var(--color-text-muted)]">
                   auth: local WhatsApp Web QR
                 </p>
               </ConnectorInfoBlock>
@@ -1005,7 +1012,7 @@ function WhatsAppWebCard({
           <div className="flex items-start justify-between gap-3">
             <div>
               <SectionLabel>Local link</SectionLabel>
-              <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">
                 {connected
                   ? "Linked session used for outbound notifications."
                   : "Pair once with the phone that owns the WhatsApp account."}
@@ -1044,10 +1051,10 @@ function WhatsAppWebCard({
                   </div>
                 ) : (
                   <div className="rounded-lg border border-dashed border-[var(--color-border-soft)] bg-[var(--color-surface)]/55 p-4">
-                    <p className="text-[12.5px] text-[var(--color-text-soft)]">
+                    <p className="text-base text-[var(--color-text-soft)]">
                       {status?.message ?? "WhatsApp Web is not linked on this device."}
                     </p>
-                    <p className="mt-1.5 text-[11.5px] text-[var(--color-text-muted)]">
+                    <p className="mt-1.5 text-sm text-[var(--color-text-muted)]">
                       Start linking to show the QR code.
                     </p>
                   </div>
@@ -1081,7 +1088,7 @@ function WhatsAppWebCard({
 
               <div className="rounded-lg bg-[var(--color-surface)]/55 p-4 ring-1 ring-[var(--color-border-soft)]">
                 <SectionLabel>Phone steps</SectionLabel>
-                <ol className="mt-3 space-y-2 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+                <ol className="mt-3 space-y-2 text-sm leading-relaxed text-[var(--color-text-soft)]">
                   <li className="flex gap-2">
                     <StepNumber>1</StepNumber>
                     <span>Open WhatsApp on your phone.</span>
@@ -1112,9 +1119,9 @@ function WhatsAppWebCard({
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[var(--color-success)]">
                   <IconCheck size={14} />
-                  <p className="text-[12.5px] font-medium">Linked locally</p>
+                  <p className="text-base font-medium">Linked locally</p>
                 </div>
-                <p className="mt-1.5 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+                <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-muted)]">
                   Session is stored on this device.
                   {status?.lastConnectedAt
                     ? ` Last connected ${formatRelative(status.lastConnectedAt)}.`
@@ -1138,7 +1145,7 @@ function WhatsAppWebCard({
           <div className="flex items-start justify-between gap-3">
             <div>
               <SectionLabel>Default notification target</SectionLabel>
-              <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">
                 Used unless an agent overrides its WhatsApp target.
               </p>
             </div>
@@ -1173,10 +1180,10 @@ function WhatsAppWebCard({
 
           {targetType === "self" && (
             <div className="mt-3 rounded-lg bg-[var(--color-success-soft)]/15 px-3 py-2 ring-1 ring-[var(--color-success)]/20">
-              <p className="text-[12px] font-medium text-[var(--color-success)]">
+              <p className="text-sm font-medium text-[var(--color-success)]">
                 Send to My WhatsApp
               </p>
-              <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+              <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
                 The linked account is resolved locally when a message sends.
                 Your phone number is not shown in the app.
               </p>
@@ -1186,7 +1193,7 @@ function WhatsAppWebCard({
           {targetType === "group" && (
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11.5px] text-[var(--color-text-soft)]">
+                <span className="text-sm text-[var(--color-text-soft)]">
                   WhatsApp group
                 </span>
                 <Button
@@ -1210,7 +1217,7 @@ function WhatsAppWebCard({
                   setRecipient(event.target.value);
                   setRecipientLabel(group?.subject ?? "WhatsApp group");
                 }}
-                className="h-9 w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] disabled:opacity-60"
+                className="h-9 w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)] disabled:opacity-60"
               >
                 <option value="">
                   {!connected
@@ -1231,7 +1238,7 @@ function WhatsAppWebCard({
                   </option>
                 ))}
               </Select>
-              <p className="text-[11px] text-[var(--color-text-muted)]">
+              <p className="text-xs text-[var(--color-text-muted)]">
                 Group names are read from the linked local session.
               </p>
             </div>
@@ -1255,7 +1262,7 @@ function WhatsAppWebCard({
                 applyDroppedRecipient(event.dataTransfer.getData("text"));
               }}
             >
-              <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
+              <label className="flex flex-col gap-1 text-sm text-[var(--color-text-soft)]">
                 <span>Number, wa.me link, or raw JID</span>
                 <input
                   type="text"
@@ -1269,10 +1276,10 @@ function WhatsAppWebCard({
                   }}
                   placeholder="+15551234567…"
                   inputMode="tel"
-                  className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] focus:border-[var(--color-accent)]"
+                  className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)] focus:border-[var(--color-accent)]"
                 />
               </label>
-              <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+              <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
                 Paste or drop a phone number, wa.me link, contact text, or WhatsApp JID.
               </p>
             </div>
@@ -1282,7 +1289,7 @@ function WhatsAppWebCard({
             <span
               role="status"
               aria-live="polite"
-              className="flex min-w-0 items-center gap-2 text-[11px] text-[var(--color-text-muted)]"
+              className="flex min-w-0 items-center gap-2 text-xs text-[var(--color-text-muted)]"
             >
               <span
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${
@@ -1575,15 +1582,15 @@ function NotificationConnectorCard({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[15px] font-semibold text-[var(--color-text)]">
+                <h2 className="text-md font-semibold text-[var(--color-text)]">
                   {summary.descriptor.name}
                 </h2>
-                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
                   v{summary.descriptor.version}
                 </span>
                 <Tag tone="neutral">{spec.authLabel}</Tag>
               </div>
-              <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              <p className="mt-1.5 text-base leading-relaxed text-[var(--color-text-soft)]">
                 {spec.description}
               </p>
             </div>
@@ -1592,14 +1599,14 @@ function NotificationConnectorCard({
 
           <div className="mt-4">
             <SectionLabel>{spec.defaultLabel}</SectionLabel>
-            <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
               {spec.defaultHelp}
             </p>
           </div>
 
           <div className="mt-3 grid gap-3">
             {spec.secret ? (
-              <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
+              <label className="flex flex-col gap-1 text-sm text-[var(--color-text-soft)]">
                 <span>{spec.secret.label}</span>
                 <input
                   type="password"
@@ -1609,9 +1616,9 @@ function NotificationConnectorCard({
                   spellCheck={false}
                   onChange={(event) => setSecret(event.target.value)}
                   placeholder={spec.secret.placeholder}
-                  className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] focus:border-[var(--color-accent)]"
+                  className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)] focus:border-[var(--color-accent)]"
                 />
-                <span className="text-[10.5px] text-[var(--color-text-muted)]">
+                <span className="text-xs text-[var(--color-text-muted)]">
                   {spec.secret.help}
                 </span>
               </label>
@@ -1621,7 +1628,7 @@ function NotificationConnectorCard({
               {spec.fields.map((field) => (
                 <label
                   key={field.key}
-                  className={field.multiline ? "flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)] sm:col-span-2" : "flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]"}
+                  className={field.multiline ? "flex flex-col gap-1 text-sm text-[var(--color-text-soft)] sm:col-span-2" : "flex flex-col gap-1 text-sm text-[var(--color-text-soft)]"}
                 >
                   <span>{field.label}</span>
                   {field.multiline ? (
@@ -1637,7 +1644,7 @@ function NotificationConnectorCard({
                       }
                       placeholder={field.placeholder}
                       rows={3}
-                      className="min-h-[76px] rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-2 text-[12.5px] text-[var(--color-text)] focus:border-[var(--color-accent)]"
+                      className="min-h-[76px] rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 py-2 text-base text-[var(--color-text)] focus:border-[var(--color-accent)]"
                     />
                   ) : (
                     <input
@@ -1653,11 +1660,11 @@ function NotificationConnectorCard({
                         }))
                       }
                       placeholder={field.placeholder}
-                      className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] focus:border-[var(--color-accent)]"
+                      className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)] focus:border-[var(--color-accent)]"
                     />
                   )}
                   {field.help ? (
-                    <span className="text-[10.5px] text-[var(--color-text-muted)]">
+                    <span className="text-xs text-[var(--color-text-muted)]">
                       {field.help}
                     </span>
                   ) : null}
@@ -1680,13 +1687,13 @@ function NotificationConnectorCard({
               </ConnectorInfoBlock>
               <ConnectorInfoBlock title="Scopes">
                 {summary.descriptor.scopes.length > 0 ? (
-                  <ul className="space-y-0.5 break-words font-mono text-[11px] text-[var(--color-text-soft)]">
+                  <ul className="space-y-0.5 break-words font-mono text-xs text-[var(--color-text-soft)]">
                     {summary.descriptor.scopes.map((scope) => (
                       <li key={scope}>{scope}</li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-[11.5px] text-[var(--color-text-muted)]">
+                  <p className="text-sm text-[var(--color-text-muted)]">
                     No Microsoft Graph scopes.
                   </p>
                 )}
@@ -1706,7 +1713,7 @@ function NotificationConnectorCard({
             </div>
           ) : null}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span className="min-w-0 text-[11.5px] text-[var(--color-text-muted)]">
+            <span className="min-w-0 text-sm text-[var(--color-text-muted)]">
               {summary.lastTestedAt
                 ? `Last tested ${formatRelative(summary.lastTestedAt)}${summary.lastTestMessage ? ` - ${summary.lastTestMessage}` : ""}`
                 : savedAt
@@ -1837,18 +1844,18 @@ function RoadmapCard({ entry }: { entry: RoadmapEntry }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <h3 className="truncate text-[13.5px] font-semibold text-[var(--color-text-soft)]">
+            <h3 className="truncate text-base font-semibold text-[var(--color-text-soft)]">
               {entry.name}
             </h3>
             <Tag tone="muted">{entry.category}</Tag>
           </div>
-          <p className="mt-0.5 text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
             {authLabel[entry.authSource]}
           </p>
         </div>
         <Tag tone="warning">{statusLabel[entry.status]}</Tag>
       </div>
-      <p className="mt-3 text-[12.5px] leading-relaxed text-[var(--color-text-muted)]">
+      <p className="mt-3 text-base leading-relaxed text-[var(--color-text-muted)]">
         {entry.description}
       </p>
     </article>
@@ -2006,7 +2013,7 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
   return (
     <div className="mt-2 space-y-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
+        <label className="flex flex-col gap-1 text-sm text-[var(--color-text-soft)]">
           <span>Team</span>
           <Select
             name="teams-team"
@@ -2016,7 +2023,7 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
               setChannelId("");
             }}
             disabled={loadingTeams}
-            className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)]"
+            className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)]"
           >
             <option value="">
               {loadingTeams ? "Loading…" : "Select a team"}
@@ -2028,14 +2035,14 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
             ))}
           </Select>
         </label>
-        <label className="flex flex-col gap-1 text-[11.5px] text-[var(--color-text-soft)]">
+        <label className="flex flex-col gap-1 text-sm text-[var(--color-text-soft)]">
           <span>Channel</span>
           <Select
             name="teams-channel"
             value={channelId}
             onChange={(e) => setChannelId(e.target.value)}
             disabled={!teamId || loadingChannels}
-            className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] disabled:opacity-60"
+            className="h-9 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)] disabled:opacity-60"
           >
             <option value="">
               {!teamId
@@ -2056,13 +2063,13 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
         </label>
       </div>
       {error && (
-        <p className="text-[11.5px] text-[var(--color-danger)]">{error}</p>
+        <p className="text-sm text-[var(--color-danger)]">{error}</p>
       )}
       <div className="flex items-center justify-between">
         <span
           role="status"
           aria-live="polite"
-          className="text-[11px] text-[var(--color-text-muted)]"
+          className="text-xs text-[var(--color-text-muted)]"
         >
           {defaultStatusText}
         </span>
@@ -2175,11 +2182,11 @@ function WhatsAppQrStatus({
   return (
     <div className="mt-2 rounded-lg bg-[var(--color-bg-raised)]/55 p-2.5 ring-1 ring-[var(--color-border-soft)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[11px] text-[var(--color-text-soft)]">
+        <div className="flex items-center gap-2 text-xs text-[var(--color-text-soft)]">
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]" />
           <span>QR active</span>
         </div>
-        <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+        <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
           {refreshSeconds !== undefined
             ? `Refresh in ${refreshSeconds}s`
             : "Auto-refresh on"}
@@ -2191,7 +2198,7 @@ function WhatsAppQrStatus({
           style={{ width: `${progress ?? 0}%` }}
         />
       </div>
-      <p className="mt-2 text-[10.5px] leading-relaxed text-[var(--color-text-muted)]">
+      <p className="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
         If the phone rejects this code, wait for the next automatic refresh and
         scan again.
       </p>
@@ -2241,8 +2248,8 @@ function WhatsAppTargetButton({
           {icon}
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-[12px] font-medium">{label}</span>
-          <span className="mt-0.5 block truncate text-[10.5px] opacity-75">
+          <span className="block truncate text-sm font-medium">{label}</span>
+          <span className="mt-0.5 block truncate text-xs opacity-75">
             {detail}
           </span>
         </span>
@@ -2266,10 +2273,10 @@ function ConnectorDetailsDisclosure({
     <details className="group rounded-lg bg-[var(--color-bg-raised)]/25 ring-1 ring-[var(--color-border-soft)]">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 marker:content-none">
         <span className="min-w-0">
-          <span className="block text-[12px] font-medium text-[var(--color-text)]">
+          <span className="block text-sm font-medium text-[var(--color-text)]">
             {title}
           </span>
-          <span className="mt-0.5 block truncate text-[11px] text-[var(--color-text-muted)]">
+          <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
             {summary}
           </span>
         </span>
@@ -2301,7 +2308,7 @@ function ConnectorInfoBlock({
 
 function StepNumber({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--color-bg-raised)] font-mono text-[10px] font-medium text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[var(--color-bg-raised)] text-xs font-medium tabular-nums text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
       {children}
     </span>
   );
@@ -2309,32 +2316,19 @@ function StepNumber({ children }: { children: ReactNode }) {
 
 function StatusPill({ summary }: { summary: ConnectorSummary }) {
   const { status } = summary;
-  const map: Record<
-    ConnectorSummary["status"],
-    { label: string; tone: "ok" | "warn" | "err" | "neutral" }
-  > = {
-    connected: { label: "Connected", tone: "ok" },
-    "needs-setup": { label: "Needs setup", tone: "warn" },
-    "needs-scope": { label: "Needs consent", tone: "warn" },
-    error: { label: "Error", tone: "err" },
+  const map: Record<ConnectorSummary["status"], { label: string; tone: BadgeTone }> = {
+    connected: { label: "Connected", tone: "success" },
+    "needs-setup": { label: "Needs setup", tone: "warning" },
+    "needs-scope": { label: "Needs consent", tone: "warning" },
+    error: { label: "Error", tone: "danger" },
     unknown: { label: "Untested", tone: "neutral" },
   };
   const entry = map[status];
-  const classes =
-    entry.tone === "ok"
-      ? "bg-[var(--color-success-soft)] text-[var(--color-success)]"
-      : entry.tone === "warn"
-        ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
-        : entry.tone === "err"
-          ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
-          : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]";
   return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium ${classes}`}
-    >
-      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+    <Badge tone={entry.tone} className="shrink-0">
+      <StatusDot tone={entry.tone} />
       {entry.label}
-    </span>
+    </Badge>
   );
 }
 
@@ -2362,29 +2356,19 @@ function WhatsAppStatusPill({
                 : summary.status === "unknown"
                   ? "Untested"
                   : "Needs setup";
-  const tone =
+  const tone: BadgeTone =
     state === "connected"
-      ? "ok"
+      ? "success"
       : state === "error" || state === "logged-out"
-        ? "err"
+        ? "danger"
         : state === "qr" || state === "connecting" || state === "reconnecting"
-          ? "warn"
+          ? "warning"
           : "neutral";
-  const classes =
-    tone === "ok"
-      ? "bg-[var(--color-success-soft)] text-[var(--color-success)]"
-      : tone === "warn"
-        ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
-        : tone === "err"
-          ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
-          : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]";
   return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-medium ${classes}`}
-    >
-      <span className="inline-block h-1.5 w-1.5 rounded-full bg-current" />
+    <Badge tone={tone} className="shrink-0">
+      <StatusDot tone={tone} />
       {label}
-    </span>
+    </Badge>
   );
 }
 
@@ -2400,8 +2384,8 @@ function isWhatsAppPollingState(
 
 function CapabilityRow({ capability }: { capability: CapabilityDescriptor }) {
   return (
-    <li className="flex items-center justify-between gap-2 text-[12px]">
-      <span className="font-mono text-[11px] text-[var(--color-text)]">
+    <li className="flex items-center justify-between gap-2 text-sm">
+      <span className="font-mono text-xs text-[var(--color-text)]">
         {capability.id}@{capability.version}
       </span>
       <KindTag kind={capability.kind} />
@@ -2410,19 +2394,13 @@ function CapabilityRow({ capability }: { capability: CapabilityDescriptor }) {
 }
 
 function KindTag({ kind }: { kind: CapabilityKind }) {
-  const styles: Record<CapabilityKind, string> = {
-    read: "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]",
-    notify: "bg-[var(--color-accent-soft)] text-[var(--color-accent)]",
-    mutating: "bg-[var(--color-warning-soft)] text-[var(--color-warning)]",
-    destructive: "bg-[var(--color-danger-soft)] text-[var(--color-danger)]",
+  const tones: Record<CapabilityKind, BadgeTone> = {
+    read: "neutral",
+    notify: "info",
+    mutating: "warning",
+    destructive: "danger",
   };
-  return (
-    <span
-      className={`rounded px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider ${styles[kind]}`}
-    >
-      {kind}
-    </span>
-  );
+  return <Badge tone={tones[kind]}>{kind}</Badge>;
 }
 
 function Tag({
@@ -2432,24 +2410,18 @@ function Tag({
   children: ReactNode;
   tone: "neutral" | "muted" | "success" | "warning";
 }) {
-  const styles: Record<typeof tone, string> = {
-    neutral: "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)]",
-    muted: "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]",
-    success: "bg-[var(--color-success-soft)] text-[var(--color-success)]",
-    warning: "bg-[var(--color-warning-soft)] text-[var(--color-warning)]",
+  const tones: Record<typeof tone, BadgeTone> = {
+    neutral: "neutral",
+    muted: "neutral",
+    success: "success",
+    warning: "warning",
   };
-  return (
-    <span
-      className={`rounded px-1.5 py-0.5 text-[10.5px] font-medium ${styles[tone]}`}
-    >
-      {children}
-    </span>
-  );
+  return <Badge tone={tones[tone]}>{children}</Badge>;
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <h3 className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+    <h3 className="text-xs font-medium text-[var(--color-text-muted)]">
       {children}
     </h3>
   );
@@ -2467,7 +2439,7 @@ export function SectionHeader({
   return (
     <div className={`${compact ? "mt-1" : "mt-8"} mb-3 flex items-center gap-2`}>
       <h3
-        className={`text-[12px] font-medium uppercase tracking-wider ${
+        className={`text-sm font-medium ${
           tone === "muted" ? "text-[var(--color-text-soft)]" : "text-[var(--color-text)]"
         }`}
       >

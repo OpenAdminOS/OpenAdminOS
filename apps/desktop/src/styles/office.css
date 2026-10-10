@@ -1,3 +1,4 @@
+/* OfficeScene keeps a few 9px and 10px labels as illustration artwork. */
 .office-page {
   height: 100%;
   overflow: auto;
@@ -23,8 +24,8 @@
   color: var(--color-text-soft);
 }
 .office-eyebrow {
-  font: 10px var(--font-mono, monospace);
-  letter-spacing: 0.15em;
+  font: 500 11px/16px var(--font-sans, sans-serif);
+  letter-spacing: 0;
   color: var(--color-accent);
 }
 .office-toolbar {
@@ -112,6 +113,7 @@
   text-align: center;
 }
 .office-wall-sign small {
+  /* Bespoke type is part of the OfficeScene wall artwork. */
   font: 9px monospace;
   letter-spacing: 0.22em;
   color: #b4a798;
@@ -321,7 +323,7 @@
   gap: 8px;
   padding: 13px 18px;
   border-top: 1px solid var(--color-border);
-  font: 9px monospace;
+  font: 11px var(--font-sans, sans-serif);
   color: var(--color-text-muted);
   background: var(--color-bg-elevated);
 }
@@ -458,7 +460,7 @@
   width: 23px;
   height: 23px;
   border-radius: 50%;
-  font: 10px monospace;
+  font: 11px var(--font-sans, sans-serif);
   color: var(--color-accent);
   flex-shrink: 0;
 }
@@ -468,7 +470,7 @@
 }
 .office-work-order small {
   display: block;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-text-muted);
   margin-top: 3px;
 }
@@ -551,7 +553,7 @@
   font-weight: 500;
 }
 .office-briefing-title > span {
-  font: 10px monospace;
+  font: 11px var(--font-sans, sans-serif);
   color: var(--color-text-muted);
 }
 .office-briefing-empty {
@@ -582,11 +584,11 @@
   font-size: 13px;
 }
 .office-briefing-entry > div:first-child > span {
-  font: 10px monospace;
+  font: 11px var(--font-sans, sans-serif);
   color: var(--color-text-soft);
 }
 .office-briefing-entry > small {
-  font-size: 10px;
+  font-size: 11px;
   display: block;
   color: var(--color-text-muted);
   margin-top: 5px;
@@ -605,7 +607,7 @@
 .office-evidence span {
   display: block;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 11px;
   margin: 4px 0;
 }
 .office-evidence p {
@@ -669,7 +671,7 @@
   font: inherit;
 }
 .office-editor small {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-text-muted);
   line-height: 1.6;
 }
@@ -954,8 +956,8 @@
   padding: 13px 18px;
   background: var(--color-bg-elevated);
   border-bottom: 1px solid var(--color-border);
-  font: 10px var(--font-mono, monospace);
-  letter-spacing: 0.1em;
+  font: 500 11px/16px var(--font-sans, sans-serif);
+  letter-spacing: 0;
 }
 .scene-toolbar > span {
   display: flex;
@@ -976,7 +978,7 @@
 }
 .scene-floors button {
   cursor: pointer;
-  font: 10px var(--font-mono, monospace);
+  font: 500 11px/16px var(--font-sans, sans-serif);
   letter-spacing: 0;
   padding: 6px 9px;
   border: 1px solid var(--color-border-strong);
@@ -1052,6 +1054,7 @@
 }
 .scene-persona-label small {
   display: block;
+  /* Bespoke size is part of the compact OfficeScene illustration. */
   font: 8px var(--font-mono, monospace);
   color: var(--color-text-muted);
   margin-top: 2px;
@@ -1111,6 +1114,7 @@
 .scene-roster-persona small {
   display: block;
   color: var(--color-text-muted);
+  /* Bespoke size is part of the compact OfficeScene illustration. */
   font: 9px var(--font-mono, monospace);
   margin-top: 3px;
 }
@@ -1311,10 +1315,9 @@
   min-width: 0;
 }
 .team-tag {
-  font: 10px var(--font-mono);
+  font: 500 11px/16px var(--font-sans);
   color: var(--color-accent);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
 }
 .team-decision h3 {
   font-size: 13px;
@@ -1426,7 +1429,7 @@
   gap: 12px;
 }
 .team-nav-toggle {
-  font: 10px var(--font-mono);
+  font: 500 11px/16px var(--font-sans);
   color: var(--color-text-muted);
   padding: 5px 13px;
   cursor: pointer;
@@ -1523,7 +1526,7 @@
   padding: 8px 12px;
   background: var(--color-bg-elevated);
   color: var(--color-text);
-  font: 11px var(--font-mono);
+  font: 11px/16px var(--font-sans);
 }
 .scene-controls label {
   display: flex;
@@ -1647,7 +1650,7 @@ html[data-team-presentation]
   visibility: hidden;
 }
 .team-rehearsal-banner {
-  font: 11px var(--font-mono);
+  font: 500 11px/16px var(--font-sans);
   border: 1px solid var(--color-accent);
   color: var(--color-accent) !important;
   padding: 8px 12px;
@@ -1667,7 +1670,7 @@ html[data-team-presentation]
   }
 }
 .team-day-summary {
-  font: 11px var(--font-mono);
+  font: 11px/16px var(--font-sans);
   color: var(--color-text-muted);
   margin: 8px 0;
   line-height: 1.6;
@@ -2020,7 +2023,7 @@ html[data-team-presentation] .office-fullscreen .office-room {
   flex-shrink: 0;
   border: 1px solid var(--color-border);
   border-radius: 50%;
-  font: 11px var(--font-mono);
+  font: 500 11px/16px var(--font-sans);
 }
 .team-setup-progress li[aria-current="step"] {
   color: var(--color-accent);

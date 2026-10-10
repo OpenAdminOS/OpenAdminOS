@@ -141,7 +141,7 @@ export class RunService {
         run.status === "rejected" ||
         run.status === "cancelled"
       ) {
-        // Already terminal — nothing to cancel.
+        // Already terminal, nothing to cancel.
         return run;
       }
 
@@ -220,7 +220,7 @@ export class RunService {
       const providers = await this.host.listProviders();
       // Honor a per-run provider override if supplied; otherwise fall
       // back to the globally-active provider. Unknown ids are an error
-      // — silently dropping the override would be misleading.
+      // because silently dropping the override would be misleading.
       let selectedProvider: ProviderSummary | undefined;
       if (options.providerId !== undefined) {
         selectedProvider = providers.find((p) => p.id === options.providerId);
@@ -283,7 +283,7 @@ export class RunService {
       }
 
       // Resolve the effective tenant at queue time. Runs cannot proceed
-      // without a connected tenant — onboarding is the gate that gets a
+      // without a connected tenant. Onboarding is the gate that gets a
       // user here in the first place, but defend in depth.
       //   - explicit id  -> validate it exists and pin it
       //   - omitted      -> default to currently-active tenant
@@ -305,7 +305,7 @@ export class RunService {
       // Entra ID tier preflight: if the agent declares a required tier
       // and the tenant's detected tier is known to fall short, refuse
       // the run with a clear remediation message. `unknown` tier (not
-      // probed yet, or probe failed) is treated as informational —
+      // probed yet, or probe failed) is treated as informational :
       // runs proceed and the actual Graph call may fail with a real
       // 403, which still surfaces meaningfully via the runtime.
       const requiredTier = agent.requiresEntraTier ?? "free";
@@ -316,7 +316,7 @@ export class RunService {
           const detectedLabel = tenantRecord?.entraTier === "free" ? "Entra ID Free" : `Entra ID ${tenantRecord?.entraTier?.toUpperCase()}`;
           const requiredLabel = `Entra ID ${requiredTier.toUpperCase()}`;
           throw new Error(
-            `${agent.name} requires ${requiredLabel}. The active tenant (${tenantRecord?.displayName ?? pinnedTenantId}) is on ${detectedLabel}. Microsoft 365 Business Premium includes Entra ID P1 — check your tenant's subscription, or pick a free-tier agent.`,
+            `${agent.name} requires ${requiredLabel}. The active tenant (${tenantRecord?.displayName ?? pinnedTenantId}) is on ${detectedLabel}. Microsoft 365 Business Premium includes Entra ID P1. Check your tenant's subscription, or pick a free-tier agent.`,
           );
         }
       }

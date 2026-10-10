@@ -166,6 +166,7 @@ export function ManifestSections({
         }
 
         if (section === "result") {
+          if (!result) return null;
           return (
             <Section key={section} title="What the run produces">
               <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
@@ -221,17 +222,17 @@ function DescriptorCard({ manifest }: { manifest: AgentTemplate }) {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-[15px] font-semibold text-[var(--color-text)]">
+              <h3 className="text-md font-semibold text-[var(--color-text)]">
                 {descriptor.name}
               </h3>
               <Pill tone={modeTone}>{modeLabel}</Pill>
               <Pill tone="default">{descriptor.category}</Pill>
             </div>
-            <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <p className="mt-2 text-base leading-relaxed text-[var(--color-text-soft)]">
               {descriptor.description}
             </p>
           </div>
-          <div className="shrink-0 text-right font-mono text-[10.5px] leading-relaxed text-[var(--color-text-muted)]">
+          <div className="shrink-0 text-right font-mono text-xs leading-relaxed text-[var(--color-text-muted)]">
             <div>v{descriptor.version}</div>
             <div className="mt-0.5">{descriptor.id}</div>
           </div>
@@ -256,13 +257,13 @@ function ScopesCard({ scopes }: { scopes: string[] }) {
               className="flex items-center gap-2.5 rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
             >
               <IconLock size={13} className="text-[var(--color-text-muted)]" />
-              <span className="font-mono text-[12px] text-[var(--color-text)]">
+              <span className="font-mono text-sm text-[var(--color-text)]">
                 {scope}
               </span>
             </div>
           ))}
         </div>
-        <div className="mt-4 text-[12px] text-[var(--color-text-muted)]">
+        <div className="mt-4 text-sm text-[var(--color-text-muted)]">
           Approved at tenant sign-in. You can revoke these from the
           tenant's Enterprise applications view in the Microsoft Entra
           admin center at any time.
@@ -296,13 +297,13 @@ function PipelineCard({
             }}
           />
           <SectionLabel>Pipeline</SectionLabel>
-          <span className="ml-auto rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+          <span className="ml-auto rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 text-xs tabular-nums text-[var(--color-text-muted)]">
             {steps.length} step{steps.length === 1 ? "" : "s"}
           </span>
         </button>
         {open && (
           <>
-            <div className="mt-3 text-[12px] text-[var(--color-text-muted)]">
+            <div className="mt-3 text-sm text-[var(--color-text-muted)]">
               The agent runs these steps in order. Each step's output is
               named after its id and is available to later steps.
             </div>
@@ -325,23 +326,23 @@ function StepRow({ step, index }: { step: TemplateStep; index: number }) {
   return (
     <div className="min-w-0 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
       <div className="flex min-w-0 items-start gap-3">
-        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface)] font-mono text-[11px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface)] text-xs tabular-nums text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           {index + 1}
         </span>
         <div className="min-w-0 flex-1 overflow-hidden">
           <div className="flex items-center gap-2">
-            <span className="text-[13.5px] font-medium text-[var(--color-text)]">
+            <span className="text-base font-medium text-[var(--color-text)]">
               {step.label}
             </span>
             <Pill tone={tone}>
               <FormatIcon format={step.format} /> {formatLabel(step.format)}
             </Pill>
-            <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+            <span className="font-mono text-xs text-[var(--color-text-muted)]">
               id: {step.id}
             </span>
           </div>
           {step.detail && (
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <p className="mt-1.5 text-base leading-relaxed text-[var(--color-text-soft)]">
               {step.detail}
             </p>
           )}
@@ -373,11 +374,11 @@ function WriteDetail({ step }: { step: WriteStep }) {
   const { kind, source, confirmationPhrase, actionTemplate, scopes } = step.settings;
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]">
-        <span className="rounded bg-[var(--color-danger-soft)] px-1.5 py-0.5 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-danger)]">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-soft)]">
+        <span className="rounded bg-[var(--color-danger-soft)] px-1.5 py-0.5 font-mono text-xs font-semibold text-[var(--color-danger)]">
           {kind}
         </span>
-        <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+        <span className="font-mono text-xs text-[var(--color-text-muted)]">
           source: {source}
         </span>
       </div>
@@ -385,24 +386,24 @@ function WriteDetail({ step }: { step: WriteStep }) {
         <div className="flex items-start gap-2">
           <IconWarning size={12} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
           <div className="min-w-0">
-            <div className="text-[11.5px] font-medium text-[var(--color-text)]">
+            <div className="text-sm font-medium text-[var(--color-text)]">
               Typed confirmation required
             </div>
-            <div className="mt-0.5 text-[11px] text-[var(--color-text-soft)]">
+            <div className="mt-0.5 text-xs text-[var(--color-text-soft)]">
               The runtime pauses here and will not call Microsoft Graph until
               the user types the rendered phrase verbatim.
             </div>
-            <pre className="mt-2 overflow-x-auto rounded bg-[var(--color-surface)] px-2 py-1 font-mono text-[11px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
+            <pre className="mt-2 overflow-x-auto rounded bg-[var(--color-surface)] px-2 py-1 font-mono text-xs text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
               {confirmationPhrase}
             </pre>
           </div>
         </div>
       </div>
       <div className="rounded-md bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
-        <div className="text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+        <div className="text-xs text-[var(--color-text-muted)]">
           Action template (rendered once per source item)
         </div>
-        <div className="mt-2 flex flex-col gap-1.5 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)]">
+        <div className="mt-2 flex flex-col gap-1.5 font-mono text-xs leading-relaxed text-[var(--color-text-soft)]">
           <div>
             <span className="text-[var(--color-text-muted)]">label:</span>{" "}
             {actionTemplate.label}
@@ -418,7 +419,7 @@ function WriteDetail({ step }: { step: WriteStep }) {
             {actionTemplate.severity ?? "destructive"}
           </div>
           {actionTemplate.metadata && (
-            <pre className="mt-1 overflow-x-auto rounded bg-[var(--color-bg-raised)] p-2 text-[10.5px] ring-1 ring-[var(--color-border-soft)]">
+            <pre className="mt-1 overflow-x-auto rounded bg-[var(--color-bg-raised)] p-2 text-xs ring-1 ring-[var(--color-border-soft)]">
               {`metadata:\n${Object.entries(actionTemplate.metadata)
                 .map(([key, value]) => `  ${key}: ${String(value)}`)
                 .join("\n")}`}
@@ -428,11 +429,11 @@ function WriteDetail({ step }: { step: WriteStep }) {
       </div>
       {actionTemplate.request && (
         <div className="rounded-md bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
-          <div className="text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="text-xs text-[var(--color-text-muted)]">
             Request template (rendered per source item)
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11.5px]">
-            <span className="shrink-0 rounded bg-[var(--color-danger-soft)] px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-danger)]">
+          <div className="mt-2 flex flex-wrap items-center gap-2 font-mono text-sm">
+            <span className="shrink-0 rounded bg-[var(--color-danger-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-danger)]">
               {actionTemplate.request.method}
             </span>
             <span className="min-w-0 truncate text-[var(--color-text)]">
@@ -440,7 +441,7 @@ function WriteDetail({ step }: { step: WriteStep }) {
             </span>
           </div>
           {actionTemplate.request.body !== undefined && (
-            <pre className="mt-2 overflow-x-auto rounded bg-[var(--color-bg-raised)] p-2 font-mono text-[10.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            <pre className="mt-2 overflow-x-auto rounded bg-[var(--color-bg-raised)] p-2 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
               {(() => {
                 try {
                   return JSON.stringify(actionTemplate.request.body, null, 2);
@@ -453,7 +454,7 @@ function WriteDetail({ step }: { step: WriteStep }) {
         </div>
       )}
       {scopes && scopes.length > 0 && (
-        <div className="text-[11px] text-[var(--color-text-muted)]">
+        <div className="text-xs text-[var(--color-text-muted)]">
           Uses scope{scopes.length === 1 ? "" : "s"}:{" "}
           {scopes.map((scope, idx) => (
             <span key={scope}>
@@ -470,21 +471,21 @@ function WriteDetail({ step }: { step: WriteStep }) {
 function GraphDetail({ step }: { step: GraphStep }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex min-w-0 items-center gap-2 font-mono text-[11.5px]">
-        <span className="shrink-0 rounded bg-[var(--color-success-soft)] px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-success)]">
+      <div className="flex min-w-0 items-center gap-2 font-mono text-sm">
+        <span className="shrink-0 rounded bg-[var(--color-success-soft)] px-1.5 py-0.5 text-xs font-semibold text-[var(--color-success)]">
           {step.settings.method}
         </span>
         <span className="min-w-0 truncate text-[var(--color-text)]">{step.settings.path}</span>
       </div>
       {step.settings.select && step.settings.select.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <span className="text-xs text-[var(--color-text-muted)]">
             $select
           </span>
           {step.settings.select.map((field) => (
             <span
               key={field}
-              className="rounded-md bg-[var(--color-surface)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+              className="rounded-md bg-[var(--color-surface)] px-2 py-0.5 font-mono text-xs text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
             >
               {field}
             </span>
@@ -492,7 +493,7 @@ function GraphDetail({ step }: { step: GraphStep }) {
         </div>
       )}
       {step.settings.scopes && step.settings.scopes.length > 0 && (
-        <div className="text-[11px] text-[var(--color-text-muted)]">
+        <div className="text-xs text-[var(--color-text-muted)]">
           Uses scope{step.settings.scopes.length === 1 ? "" : "s"}:{" "}
           {step.settings.scopes.map((scope, idx) => (
             <span key={scope}>
@@ -514,18 +515,18 @@ function TransformDetail({ step }: { step: TransformStep }) {
   );
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]">
-        <span className="rounded bg-[var(--color-info-soft)] px-1.5 py-0.5 font-mono text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-info)]">
+      <div className="flex items-center gap-2 text-sm text-[var(--color-text-soft)]">
+        <span className="rounded bg-[var(--color-info-soft)] px-1.5 py-0.5 font-mono text-xs font-semibold text-[var(--color-info)]">
           {kind}
         </span>
         {typeof settings.source === "string" && (
-          <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+          <span className="font-mono text-xs text-[var(--color-text-muted)]">
             source: {settings.source}
           </span>
         )}
       </div>
       {summaryFields.length > 0 && (
-        <pre className="overflow-x-auto rounded-md bg-[var(--color-surface)] p-3 font-mono text-[10.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <pre className="overflow-x-auto rounded-md bg-[var(--color-surface)] p-3 font-mono text-xs text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           {summaryFields
             .map(([key, value]) => `${key}: ${stringify(value)}`)
             .join("\n")}
@@ -539,26 +540,26 @@ function LlmDetail({ step }: { step: LlmStep }) {
   const [promptOpen, setPromptOpen] = useState(false);
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]">
+      <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-soft)]">
         {step.when === "ctx.llm.available" && (
           <Pill tone="default">
             <IconShield size={9} /> Gated on LLM availability
           </Pill>
         )}
         {typeof step.settings.temperature === "number" && (
-          <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+          <span className="font-mono text-xs text-[var(--color-text-muted)]">
             temperature: {step.settings.temperature}
           </span>
         )}
         {typeof step.settings.maxTokens === "number" && (
-          <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+          <span className="font-mono text-xs text-[var(--color-text-muted)]">
             maxTokens: {step.settings.maxTokens}
           </span>
         )}
       </div>
       <button
         onClick={() => setPromptOpen((open) => !open)}
-        className="inline-flex w-fit items-center gap-1.5 text-[11.5px] font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)]"
+        className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)]"
       >
         <IconChevronDown
           size={11}
@@ -573,19 +574,19 @@ function LlmDetail({ step }: { step: LlmStep }) {
         <div className="flex flex-col gap-3 rounded-md bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
           {step.settings.system && (
             <div>
-              <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              <div className="mb-1 text-xs font-medium text-[var(--color-text-muted)]">
                 System
               </div>
-              <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)]">
+              <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-text-soft)]">
                 {step.settings.system}
               </pre>
             </div>
           )}
           <div>
-            <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="mb-1 text-xs font-medium text-[var(--color-text-muted)]">
               Prompt
             </div>
-            <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)]">
+            <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-[var(--color-text-soft)]">
               {step.settings.prompt}
             </pre>
           </div>
@@ -608,7 +609,7 @@ function SettingsCard({
     <Card>
       <div className="p-6">
         <SectionLabel>Configurable settings</SectionLabel>
-        <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
+        <div className="mt-1 text-sm text-[var(--color-text-muted)]">
           Use the "Configure" button at the top to override these per
           install. Manifest defaults are shown alongside any current value
           you've saved.
@@ -624,11 +625,11 @@ function SettingsCard({
                 className="flex items-center justify-between gap-4 rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
               >
                 <div className="min-w-0">
-                  <div className="text-[13px] font-medium text-[var(--color-text)]">
+                  <div className="text-base font-medium text-[var(--color-text)]">
                     {setting.label}
                   </div>
                   {setting.description && (
-                    <div className="mt-0.5 text-[11.5px] text-[var(--color-text-muted)]">
+                    <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
                       {setting.description}
                     </div>
                   )}
@@ -636,12 +637,12 @@ function SettingsCard({
                 <div className="flex shrink-0 items-center gap-2">
                   <Pill>{setting.type}</Pill>
                   {setting.default !== undefined && (
-                    <span className="rounded-md bg-[var(--color-surface)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+                    <span className="rounded-md bg-[var(--color-surface)] px-2 py-0.5 font-mono text-xs text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
                       default: {stringify(setting.default)}
                     </span>
                   )}
                   {overridden && (
-                    <span className="rounded-md bg-[var(--color-accent-soft)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25">
+                    <span className="rounded-md bg-[var(--color-accent-soft)] px-2 py-0.5 font-mono text-xs text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25">
                       current: {stringify(currentValue)}
                     </span>
                   )}
@@ -663,19 +664,19 @@ function ResultCard({ manifest }: { manifest: AgentTemplate }) {
       <div className="p-6">
         <SectionLabel>What the run produces</SectionLabel>
         <div className="mt-3">
-          <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="text-sm text-[var(--color-text-muted)]">
             Summary template
           </div>
-          <pre className="mt-1.5 whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          <pre className="mt-1.5 whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             {result.summary}
           </pre>
         </div>
         {result.data && (
           <div className="mt-4">
-            <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-sm text-[var(--color-text-muted)]">
               Result data shape
             </div>
-            <pre className="mt-1.5 overflow-x-auto rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            <pre className="mt-1.5 overflow-x-auto rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
               {stringify(result.data, 2)}
             </pre>
           </div>
@@ -715,21 +716,21 @@ function RawSourceCard({
             }}
           />
           <SectionLabel>{title}</SectionLabel>
-          <span className="ml-auto rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+          <span className="ml-auto rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
             .{languageHint}
           </span>
         </button>
         {registryPath && (
-          <div className="mt-2 font-mono text-[10.5px] text-[var(--color-text-muted)]">
+          <div className="mt-2 font-mono text-xs text-[var(--color-text-muted)]">
             {registryPath}
           </div>
         )}
         {open && (
           <>
-            <p className="mt-3 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+            <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-muted)]">
               {helperText}
             </p>
-            <pre className="mt-3 max-h-[480px] overflow-auto rounded-lg bg-[var(--color-bg-raised)] p-4 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            <pre className="mt-3 max-h-[480px] overflow-auto rounded-lg bg-[var(--color-bg-raised)] p-4 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
               {sourceText}
             </pre>
           </>
@@ -741,7 +742,7 @@ function RawSourceCard({
 
 function SectionLabel({ children }: { children: string }) {
   return (
-    <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+    <span className="text-xs font-medium text-[var(--color-text-muted)]">
       {children}
     </span>
   );

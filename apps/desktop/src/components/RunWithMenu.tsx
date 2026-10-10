@@ -3,6 +3,7 @@ import { Button } from "./Button";
 import { IconChevronDown, IconCloud, IconHardDrive, IconPlay } from "./icons";
 import { isProviderImplemented } from "../shared/providers";
 import type { ProviderId, ProviderSummary } from "../shared/openAdminOS";
+import { Badge } from "./ui";
 
 interface RunWithChoice {
   providerId?: ProviderId;
@@ -17,7 +18,7 @@ interface RunWithChoice {
  * a specific model within a provider.
  *
  * Hidden entirely when only one implemented provider with one (or
- * zero) installed model exists — there's nothing to pick.
+ * zero) installed model exists, because there's nothing to pick.
  */
 export function RunWithMenu({
   providers,
@@ -113,10 +114,10 @@ export function RunWithMenu({
               <IconPlay size={12} className="text-[var(--color-accent)]" />
             </span>
             <span className="min-w-0 flex-1 leading-tight">
-              <span className="block text-[12.5px] font-medium text-[var(--color-text)]">
+              <span className="block text-base font-medium text-[var(--color-text)]">
                 Run with current defaults
               </span>
-              <span className="mt-0.5 block truncate text-[11px] text-[var(--color-text-muted)]">
+              <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
                 Active provider · agent's preferred model when installed
               </span>
             </span>
@@ -134,7 +135,7 @@ export function RunWithMenu({
                   key={provider.id}
                   className="border-b border-[var(--color-border-soft)] last:border-b-0"
                 >
-                  <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                  <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-xs font-medium text-[var(--color-text-muted)]">
                     {provider.isLocal ? (
                       <IconHardDrive
                         size={11}
@@ -145,23 +146,19 @@ export function RunWithMenu({
                     )}
                     <span>{provider.name}</span>
                     {isActive && enabled && (
-                      <span className="rounded bg-[var(--color-accent-soft)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--color-accent)]">
-                        active
-                      </span>
+                      <Badge tone="info">Active</Badge>
                     )}
                     {!enabled && (
-                      <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--color-text-muted)]">
-                        soon
-                      </span>
+                      <Badge tone="neutral">Soon</Badge>
                     )}
                   </div>
 
                   {!enabled ? (
-                    <div className="px-3 pb-2 text-[11px] text-[var(--color-text-muted)]">
+                    <div className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">
                       Coming soon
                     </div>
                   ) : models.length === 0 ? (
-                    <div className="px-3 pb-2 text-[11px] text-[var(--color-text-muted)]">
+                    <div className="px-3 pb-2 text-xs text-[var(--color-text-muted)]">
                       No models installed
                     </div>
                   ) : (
@@ -184,13 +181,11 @@ export function RunWithMenu({
                                   : "bg-[var(--color-text-muted)]/40"
                               }`}
                             />
-                            <span className="min-w-0 flex-1 font-mono text-[11.5px] text-[var(--color-text-soft)]">
+                            <span title={model} className="min-w-0 flex-1 truncate font-mono text-sm text-[var(--color-text-soft)]">
                               {model}
                             </span>
                             {isPinned && (
-                              <span className="font-mono text-[9.5px] uppercase tracking-wider text-[var(--color-accent)]">
-                                default
-                              </span>
+                              <Badge tone="info">Default</Badge>
                             )}
                           </button>
                         );

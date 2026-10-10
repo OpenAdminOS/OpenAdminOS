@@ -28,7 +28,7 @@ export function TrustBanner({ variant, title, children }: TrustBannerProps) {
       <div className={`mt-0.5 ${iconClass}`}>
         {isLocal ? <IconShield size={16} /> : <IconCloud size={16} />}
       </div>
-      <div className="text-[12.5px] leading-relaxed text-[var(--color-text)]">
+      <div className="text-base leading-relaxed text-[var(--color-text)]">
         <strong className={`font-medium ${titleClass}`}>{title}</strong>{" "}
         {children}
       </div>

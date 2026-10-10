@@ -66,6 +66,37 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(heading).toHaveFocus());
   });
 
+  it("scrolls deep links inside the Settings content container", async () => {
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+
+    try {
+      renderRoute(<Settings />, {
+        path: "/settings/:section?",
+        route: "/settings/chat",
+        bridge: makeMockBridge(),
+      });
+
+      const heading = await screen.findByRole("heading", { name: "Chat" });
+      await waitFor(() => {
+        expect(heading).toHaveFocus();
+        expect(scrollTo).toHaveBeenCalledWith(
+          expect.objectContaining({ behavior: "auto" }),
+        );
+      });
+      expect(heading.closest(".app-page-body")).not.toBeNull();
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+        configurable: true,
+        value: originalScrollTo,
+      });
+    }
+  });
+
   it("opens and closes a connector drawer from its URL", async () => {
     const user = userEvent.setup();
     renderRoute(<Settings />, {
@@ -242,6 +273,23 @@ describe("Settings provider section", () => {
     await waitFor(() => {
       expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
     });
+  });
+
+  it("renders an available inactive provider with a neutral status", async () => {
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge(
+        {},
+        createMockAppState({
+          providers: [provider("ollama"), provider("apple-foundation")],
+        }),
+      ),
+    });
+
+    const available = await screen.findByText("Available");
+    expect(available).toHaveClass("text-[var(--color-text-soft)]");
+    expect(available).not.toHaveClass("text-[var(--color-warning)]");
   });
 
   it("saves Azure OpenAI settings without displaying the stored key", async () => {

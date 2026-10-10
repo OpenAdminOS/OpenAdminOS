@@ -8,7 +8,7 @@ import type {
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
-import { PageBody, PageHeader } from "../components/AppShell";
+import { PageHeader } from "../components/AppShell";
 import { IconButton, SegmentedControl } from "../components/ui";
 import { IconArrowLeft, IconRefresh } from "../components/icons";
 import { Modal, ModalHeader } from "../components/Modal";
@@ -156,7 +156,7 @@ export default function Office() {
         </Button>
       }
     />
-    <PageBody>
+    <div className="app-page-body min-w-0 flex-1 overflow-y-auto">
     <div
       className={`office-page ${focusedOffice ? "office-expanded" : ""} ${fullscreen.active ? "office-fullscreen" : ""}`}
     >
@@ -355,7 +355,7 @@ export default function Office() {
               <div className="office-empty-avatar">
                 <PersonaAvatar avatar="robot" color="amber" />
               </div>
-              <div className="office-eyebrow">A DESK IS WAITING</div>
+              <div className="office-eyebrow">A desk is waiting</div>
               <h2>Your first teammate starts here.</h2>
               <p>
                 Choose a responsibility, assign installed agents, and decide
@@ -443,7 +443,7 @@ export default function Office() {
                   color={selected.color}
                 />
                 <div>
-                  <div className="office-eyebrow">ASSIGNMENT</div>
+                  <div className="office-eyebrow">Assignment</div>
                   <h2>{selected.name}</h2>
                 </div>
               </div>
@@ -655,7 +655,7 @@ export default function Office() {
             </>
           ) : (
             <div className="office-panel-empty">
-              <div className="office-eyebrow">HOW IT WORKS</div>
+              <div className="office-eyebrow">How it works</div>
               <h2>A small team. Clear responsibilities.</h2>
               <ol>
                 <li>Choose a role for your first teammate.</li>
@@ -683,7 +683,7 @@ export default function Office() {
       <section className="office-briefing" aria-label="Team briefing">
         <div className="office-briefing-title">
           <div>
-            <div className="office-eyebrow">THE WORK, WITH EVIDENCE</div>
+            <div className="office-eyebrow">The work, with evidence</div>
             <h2>Assignment history</h2>
           </div>
           <label className="team-search">
@@ -815,7 +815,7 @@ export default function Office() {
         <div className="office-modal-content">
           <p>
             This removes its assignment and Team briefings. Agent run history
-            remains available in Activity.
+            remains available in Runs.
           </p>
           <div className="office-actions">
             <Button disabled={busy} onClick={() => setRemoveId(undefined)}>
@@ -837,7 +837,7 @@ export default function Office() {
         </div>
       </Modal>
     </div>
-    </PageBody>
+    </div>
     </>
   );
 }

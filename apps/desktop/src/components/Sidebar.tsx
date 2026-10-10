@@ -67,8 +67,8 @@ function NavRow({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
               tone="warning"
               className={
                 collapsed
-                  ? "absolute right-0.5 top-0.5 min-w-4 justify-center px-1 font-mono"
-                  : "shrink-0 font-mono tabular-nums"
+                  ? "absolute right-0.5 top-0.5 min-w-4 justify-center px-1 tabular-nums"
+                  : "shrink-0 tabular-nums"
               }
             >
               {item.badge}

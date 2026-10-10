@@ -105,13 +105,28 @@ export default function Runs() {
       return statusFilter !== "failed" || run.status === "failed";
     });
   }, [filteredRuns, statusFilter]);
+  const hasActiveHistoryFilters = Boolean(
+    query.trim() || statusFilter !== "all" || tenantFilter || agentFilter || triggerFilter,
+  );
 
   useEffect(() => {
     const anchor = location.hash.slice(1);
     if (!anchor) return;
     const frame = window.requestAnimationFrame(() => {
       const section = document.getElementById(anchor);
-      section?.scrollIntoView({ block: "start" });
+      const scrollRoot = section?.closest<HTMLElement>(".app-page-body");
+      if (!(section instanceof HTMLElement) || !scrollRoot) return;
+      const rootRect = scrollRoot.getBoundingClientRect();
+      const sectionRect = section.getBoundingClientRect();
+      const top = Math.max(
+        0,
+        scrollRoot.scrollTop + sectionRect.top - rootRect.top - 16,
+      );
+      if (typeof scrollRoot.scrollTo === "function") {
+        scrollRoot.scrollTo({ top, behavior: "auto" });
+      } else {
+        scrollRoot.scrollTop = top;
+      }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [history.length, location.hash, needsReview.length, running.length]);
@@ -406,11 +421,19 @@ export default function Runs() {
                 rowKey={(run) => run.id}
                 onRowClick={openRun}
                 initialSort={{ columnId: "started", direction: "descending" }}
-                emptyTitle={statusFilter === "review" ? "No runs awaiting review" : "No runs found"}
+                emptyTitle={
+                  statusFilter === "review"
+                    ? "No runs awaiting review"
+                    : hasActiveHistoryFilters
+                      ? "No runs found"
+                      : "No finished runs yet"
+                }
                 emptyDescription={
-                  state.runs.length === 0
-                    ? "Runs appear here after an agent starts."
-                    : "Change the search or filters to see more runs."
+                  hasActiveHistoryFilters
+                    ? "Change the search or filters to see more runs."
+                    : state.runs.length === 0
+                      ? "Runs appear here after an agent starts."
+                      : "Finished runs will appear here."
                 }
               />
             </div>

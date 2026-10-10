@@ -13,7 +13,7 @@ export function Skeleton({
     <div
       {...rest}
       aria-hidden="true"
-      className={`animate-pulse bg-[var(--color-bg-raised)] ${
+      className={`bg-[var(--color-bg-raised)] ${
         shape === "circle"
           ? "aspect-square rounded-full"
           : shape === "block"

@@ -914,7 +914,7 @@ export function Nova({
         >
           <div className="nova-header flex items-center justify-between">
             <strong>
-              Nova <span className="nova-eyebrow">VOICE</span>
+              Nova <span className="nova-eyebrow">Voice</span>
             </strong>
             <Button
               variant="ghost"
@@ -1246,7 +1246,7 @@ export function Nova({
                   Maximum recording: one minute.
                 </p>
               )}
-              <p className="text-[10px] text-[var(--color-text-muted)]">
+              <p className="text-xs text-[var(--color-text-muted)]">
                 Microphone starts only when clicked. “Hey Nova” works during an
                 active conversation; background wake-word detection is not
                 enabled. Writes require visual review.

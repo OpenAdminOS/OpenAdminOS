@@ -66,11 +66,11 @@ describe("Agents schedule actions", () => {
   });
 
   it("opens the URL-addressable agent drawer and targets its schedule section", async () => {
-    const scrollIntoView = vi.fn();
-    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
-    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,
-      value: scrollIntoView,
+      value: scrollTo,
     });
 
     try {
@@ -83,11 +83,11 @@ describe("Agents schedule actions", () => {
       expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
       const drawer = await screen.findByRole("dialog", { name: "Device Offboard" });
       expect(within(drawer).getByRole("heading", { name: "Schedule" })).toBeInTheDocument();
-      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled());
     } finally {
-      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", {
         configurable: true,
-        value: originalScrollIntoView,
+        value: originalScrollTo,
       });
     }
   });

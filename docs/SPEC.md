@@ -401,7 +401,7 @@ OpenAI instructions request speech interruption while the application separately
 playback and backend work. Local voice remains recording-based, rather than an always
 listening barge-in session.
 
-Cache is a dedicated sidebar page with all 45 supported read-resource types
+Data lives in **Settings > Data**, with all 45 supported read-resource types
 selected by default. Search and attention filters do not change the selected
 refresh scope. Manual preloads expose progress, cancellation and incomplete-result
 retry. Scheduled refresh uses the same complete collection path. It follows all
@@ -414,8 +414,7 @@ logs, not every Graph property, relationship or action. Device records include
 reported encryption; deterministic aggregates include OS versions and encryption
 with unknown values retained.
 
-Nova is available across app pages through the sidebar Voice item, the command
-palette, and Alt+V. Its compact
+Nova is available across app pages through the command palette and Alt+V. Its compact
 panel can fill the app window for presentations, covering the sidebar and page.
 During an active session, the centered orb is the only visible element after three
 seconds without interaction; pointer or keyboard activity reveals the controls.
@@ -571,7 +570,7 @@ Agents may declare optional or required `connectors:`: see Connector abstraction
 
 Agents bring data *in* from Graph. Connectors push results *out*: Teams channel, WhatsApp number, ServiceNow ticket, email, webhook. Without connectors an agent's findings stay on the admin's laptop; with them the right people see the right output where they already work. Connectors are the egress half of the agent contract.
 
-**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk`. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. Runtime injection, the Connectors sidebar entry, Microsoft Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal are implemented. The v0.2.4 connector expansion is intentionally notification-only: these connectors send terminal run reports and do not read inboxes, chats, channels, messages, reactions, or files.
+**Status:** the type contract (interfaces, error classes, registry-augmentation pattern, `defineConnector()`) ships in `@openadminos/agent-sdk`. MSAL interactive sign-in is already wired up (see `packages/runtime/src/msal.ts`), so `graph-delegated` connectors have everything they need from the auth layer. Runtime injection, the **Settings > Connectors** section, Microsoft Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal are implemented. The v0.2.4 connector expansion is intentionally notification-only: these connectors send terminal run reports and do not read inboxes, chats, channels, messages, reactions, or files.
 
 The design goal is to ship the contract once and never break it. Capability versioning, typed errors with explicit recovery semantics, runtime-supplied idempotency keys, and per-package plugin distribution are the four pillars that make that possible. Each one is non-negotiable before the first connector ships: retrofitting them after agents start consuming the API is what makes ecosystems brittle.
 
@@ -789,11 +788,11 @@ The host (in `packages/runtime`) discovers connectors via a static import map fo
 
 #### UI surface
 
-- New sidebar entry **Connectors** between Agent Hub and Activity.
-- Connectors page: operational summary first, then live connector configuration panels with status pill (`connected` / `needs setup` / `needs scope` / `error`) and task-first setup controls. Teams shows the default channel picker; WhatsApp Web shows QR linking only when setup is needed, hides phone steps after a session is linked, and keeps default target selection/test sending visible. Default connector targets autosave as soon as a valid target is selected; there is no separate save button. Capabilities, required scopes, trust-boundary text, routing-rule details, and future connector backlog entries live in compact disclosures so connected connectors stay visually lightweight. The public GitBook carries the full connector setup reference; the in-app page links to it and keeps routine setup fields compact.
+- **Settings > Connectors** contains connector setup and operational status.
+- The Connectors section shows an operational summary first, then live configuration panels with status badges (`connected` / `needs setup` / `needs scope` / `error`) and task-first setup controls. Teams shows the default channel picker; WhatsApp Web shows QR linking only when setup is needed, hides phone steps after a session is linked, and keeps default target selection/test sending visible. Default connector targets autosave as soon as a valid target is selected; there is no separate save button. Capabilities, required scopes, trust-boundary text, routing-rule details, and future connector backlog entries live in compact disclosures so connected connectors stay visually lightweight. The public GitBook carries the full connector setup reference; the in-app section links to it and keeps routine setup fields compact.
 - Per-agent install: when the manifest declares connectors, install adds a connector-setup step before the agent appears installed. The step itemizes egress targets and capability kinds so the user knows what they're authorizing.
 - Run status: when a run uses connectors, the status-strip trust cell expands to list each egress target. Capability invocations stream into the run timeline with the kind-appropriate confirmation modal.
-- Error states: every `ConnectorError` subclass has a designed remediation tile in §06: `auth expired → reauth`, `missing scope → re-consent`, `rate limited → retry in Xs`, `not configured → open Connectors page`.
+- Error states: every `ConnectorError` subclass has a designed remediation tile in §06: `auth expired → reauth`, `missing scope → re-consent`, `rate limited → retry in Xs`, `not configured → open Settings > Connectors`.
 
 #### Teams connector (first to ship)
 
@@ -1750,10 +1749,27 @@ explained in `apps/desktop/build/README.md`.
 ### Typography
 
 - **UI:** system UI stack (`ui-sans-serif`, `system-ui`, `-apple-system`, `Segoe UI`, sans-serif)
-- **Code, IDs, telemetry, run IDs, JSON:** system monospace stack (`ui-monospace`, `SF Mono`, `Menlo`, `Consolas`, monospace)
-- Shared type scale: 11/16px, 12/18px, 13/20px, 15/22px, and 20/28px
+- Five-step scale: `text-xs` 11/16px, `text-sm` 12/18px, `text-base`
+  13/20px, `text-md` 15/22px, and `text-lg` 20/28px. Arbitrary UI text
+  sizes are not used.
 - Base size: 13px, with 12px controls and 11px metadata for admin-focused density
+- Weights are limited to 400, 500, and 600.
+- Monospace is limited to identifiers, versions, model IDs, Graph scopes,
+  request or JSON previews, typed confirmation phrases, and the status strip.
+- Uppercase is limited to data-table column headers. Eyebrows and section labels
+  use sentence case without wide tracking.
 - Letter-spacing: 0
+
+### Interaction and information hierarchy
+
+- A view has at most one filled primary action. Secondary actions use neutral or
+  ghost buttons, icon buttons with tooltips, or an overflow menu.
+- Repeated collections of more than three similar records use `DataTable` or
+  divided row lists, not card grids.
+- URL-addressable record details open in the shared right-side `Drawer`. Active
+  runs may use the live-run modal, and write confirmation remains a focused page.
+- Sections use one surface with hairline dividers. Nested bordered or ringed cards
+  are avoided.
 
 ### Density principle
 
@@ -1766,17 +1782,19 @@ Closer to portal/IDE density than to consumer-app density. Compare to:
 These are visible in the mockups and need to be built as proper React components:
 
 - **Sidebar nav** with a collapsible icon rail
-- **Status strip** (3 cells: tenant, provider and data boundary, active runs): appears at the bottom of every main screen
-- **Agent card** with read/write tag, verified/community badge, recent run indicator
+- **Status strip** fixed at the bottom of every main screen, with three compact
+  cells for tenant, provider and data boundary, and active runs
+- **Data tables and divided row lists** for agent libraries, runs, changes, and other repeated records
+- **Drawer** for URL-addressable agent, run, connector, and change details
 - **Run timeline** (stepped pipeline visualization)
 - **Telemetry strip** (used in live run modal)
 - **Activity feed** with two modes: plain language / raw logs
 - **Reasoning block** (purple-accented, for streaming LLM thoughts)
 - **Tabs** (Activity / Logs / Reasoning pattern)
-- **Pills** (status indicators)
-- **Tags** (`tag-read`, `tag-write`, `tag-verified`, `tag-community`)
+- **Badge and StatusDot** for status, mode, and compatibility indicators
+- **SegmentedControl** for compact modes and filters; underline Tabs remain for in-page views
 - **Toggle switches**
-- **Modal overlay** (used for live run, diff confirmation, settings)
+- **Modal overlay** for focused transient tasks such as active runs and setup
 - **Mac-style traffic light titlebar** (Windows controls equivalent on Win)
 
 ### Trust messaging consistency
@@ -1849,6 +1867,17 @@ legacy `/cache` and `/connectors` URLs redirect to their Settings sections,
 including connector drawer deep links. `/fleet` redirects to the all-tenant
 Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
 
+| Legacy route | Current location |
+|---|---|
+| `/activity` | `/runs` |
+| `/office` | `/agents`, `/agents/team/:personaId`, or `/agents/office` depending on legacy state |
+| `/hub`, `/agents/hub` | `/agents?source=hub` |
+| `/agents/schedules` | `/agents?filter=scheduled` |
+| `/cache` | `/settings/data` |
+| `/connectors`, `/connectors/:connectorId` | `/settings/connectors`, with the connector drawer preserved |
+| `/fleet` | `/changes?scope=all` |
+| `/workspaces`, `/workspaces/:workspaceId` | Chat's Workspaces panel or `/chat/workspaces/:workspaceId` |
+
 Runs contains conditional Needs review and Running sections followed by a
 filterable History table. `/runs/:id` opens queued and running work in the live
 run modal, awaiting-confirmation work on a focused confirmation page, and
@@ -1885,17 +1914,17 @@ North-star metric: time from install to first successful result, target under 5 
 | Term | Status | Meaning |
 |---|---|---|
 | Chat | Nav label (was "Intune Chat") | Plain-language tenant Q&A. Internal ids keep `intune-chat`. |
-| Agents | Nav label | Installed agents and the entry point for Hub, schedules, and Agent Team |
+| Agents | Nav label | Installed agents and the entry point for Hub, Schedules, and Agent Team |
 | Runs | Nav label (replaces "Run history" and "Activity") | Review inbox, active progress, and searchable run history |
 | Changes | Nav label | Tenant drift timeline, retained baselines, comparison, and an all-tenant scope (formerly Fleet) |
 | Settings | Nav label | Provider, tenant, data, connector, gateway, appearance, privacy, and application configuration |
-| Data | Settings section (replaces "Cache") | Cache freshness, preload coverage, refresh scheduling, and local retention |
+| Data | Settings section (contains the former Cache page) | Cache freshness, preload coverage, refresh scheduling, and local retention |
 | Agent | Unchanged | Installable module with declared scopes and read/write mode |
-| Hub | Library source inside Agents (was "Agent Hub" nav item) | Community agent store |
-| Schedule | Library filter and agent drawer section | Recurring agent runs |
+| Hub | Library source inside Agents (was "Agent Hub" nav item) | Community agent store, selected as a Library mode |
+| Schedules | Filter and columns inside Agents, plus an agent drawer section | Recurring agent runs and their latest outcome |
 | Agent Team | Team section and full office inside Agents | Persistent personas, assignments, and evidence-linked briefings |
-| Workspace | Chat panel and palette destination | Tenant-scoped evidence, notes, linked chats, runs, and local instructions |
-| Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls |
+| Workspace | Chat panel and palette destination | Tenant-scoped evidence, notes, linked chats, runs, and local instructions; Workspaces live in Chat |
+| Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls; Connectors live in Settings |
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
 

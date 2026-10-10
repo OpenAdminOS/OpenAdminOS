@@ -118,12 +118,12 @@ describe("Runs", () => {
   it("scrolls an addressable section into view after its runs load", async () => {
     const original = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
-      "scrollIntoView",
+      "scrollTo",
     );
-    const scrollIntoView = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,
-      value: scrollIntoView,
+      value: scrollTo,
     });
     const run = createAwaitingConfirmationRun({ id: "review-anchor" });
     const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
@@ -136,15 +136,35 @@ describe("Runs", () => {
       });
 
       await waitFor(() =>
-        expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" }),
+        expect(scrollTo).toHaveBeenCalledWith(
+          expect.objectContaining({ behavior: "auto" }),
+        ),
       );
     } finally {
       if (original) {
-        Object.defineProperty(HTMLElement.prototype, "scrollIntoView", original);
+        Object.defineProperty(HTMLElement.prototype, "scrollTo", original);
       } else {
-        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+        delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
       }
     }
+  });
+
+  it("distinguishes an empty finished history from active filters", async () => {
+    const review = createAwaitingConfirmationRun({ id: "review-only" });
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [review] }));
+
+    const view = renderRoute(<Runs />, { path: "/runs", route: "/runs", bridge });
+    expect(await screen.findByText("No finished runs yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Change the search or filters/)).not.toBeInTheDocument();
+
+    view.unmount();
+    renderRoute(<Runs />, {
+      path: "/runs",
+      route: "/runs?status=failed",
+      bridge,
+    });
+    expect(await screen.findByText("No runs found")).toBeInTheDocument();
+    expect(screen.getByText(/Change the search or filters/)).toBeInTheDocument();
   });
 
   it("opens running rows and completed history rows at their run routes", async () => {

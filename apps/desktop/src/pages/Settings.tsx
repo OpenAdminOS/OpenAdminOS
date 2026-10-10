@@ -94,6 +94,24 @@ interface DriftRetentionDraft {
 const OFFICIAL_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
 
+function scrollWithinSettings(
+  root: HTMLElement,
+  target: HTMLElement,
+  block: "start" | "center" = "start",
+) {
+  const rootRect = root.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const centeredOffset = block === "center"
+    ? (root.clientHeight - targetRect.height) / 2
+    : 20;
+  const top = Math.max(
+    0,
+    root.scrollTop + targetRect.top - rootRect.top - centeredOffset,
+  );
+  if (typeof root.scrollTo === "function") root.scrollTo({ top, behavior: "auto" });
+  else root.scrollTop = top;
+}
+
 interface SettingsFilterValue {
   query: string;
   sectionMatch: boolean;
@@ -172,24 +190,48 @@ export default function Settings() {
 
   useEffect(() => {
     if (!SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)) return;
-    const frame = window.requestAnimationFrame(() => {
+    const root = scrollRootRef.current;
+    if (!root) return;
+    let frame = 0;
+    let focused = false;
+    const applyScroll = () => {
       const heading = document.getElementById(`settings-heading-${sectionParam}`);
       if (!(heading instanceof HTMLElement)) return;
-      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      heading.scrollIntoView({ block: "start", behavior: reducedMotion ? "auto" : "smooth" });
-      heading.focus({ preventScroll: true });
-    });
-    return () => window.cancelAnimationFrame(frame);
+      const sectionElement = heading.closest<HTMLElement>("[data-settings-section]") ?? heading;
+      scrollWithinSettings(root, sectionElement);
+      if (!focused) {
+        heading.focus({ preventScroll: true });
+        focused = true;
+      }
+    };
+    const scheduleScroll = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(applyScroll);
+    };
+    scheduleScroll();
+    const content = root.firstElementChild;
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" && content instanceof HTMLElement
+        ? new ResizeObserver(scheduleScroll)
+        : null;
+    resizeObserver?.observe(content as HTMLElement);
+    const stopObserving = window.setTimeout(() => resizeObserver?.disconnect(), 1_500);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(stopObserving);
+      resizeObserver?.disconnect();
+    };
   }, [sectionParam]);
 
   useEffect(() => {
     const target = searchParams.get("target");
     if (!target) return;
+    const root = scrollRootRef.current;
+    if (!root) return;
     const frame = window.requestAnimationFrame(() => {
       const row = document.getElementById(`setting-${target}`);
       if (!(row instanceof HTMLElement)) return;
-      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      row.scrollIntoView({ block: "center", behavior: reducedMotion ? "auto" : "smooth" });
+      scrollWithinSettings(root, row, "center");
       row.focus({ preventScroll: true });
       row.dataset.highlighted = "true";
       window.setTimeout(() => delete row.dataset.highlighted, 1800);
@@ -548,7 +590,9 @@ function ProviderRow({
       : provider.status === "connected"
         ? { label: "Connected", tone: "success" as const }
         : provider.status === "available"
-          ? { label: cliLabel ?? "Available", tone: "warning" as const }
+          ? provider.cli && provider.cli.state !== "ready"
+            ? { label: cliLabel ?? "Needs attention", tone: "warning" as const }
+            : { label: "Available", tone: "neutral" as const }
           : provider.status === "error"
             ? { label: cliLabel ?? "Error", tone: "danger" as const }
             : { label: "Not installed", tone: "neutral" as const };
@@ -627,13 +671,14 @@ function ProviderRow({
                       key={model}
                       size="sm"
                       variant={selected ? "secondary" : "ghost"}
-                      className="font-mono"
+                      className="max-w-full font-mono"
+                      title={model}
                       onClick={() => void (async () => {
                         if (!isActive) await onSetActiveProvider(provider.id);
                         await onSetActiveModel(provider.id, selected && isActive ? null : model);
                       })()}
                     >
-                      {model}
+                      <span className="min-w-0 truncate">{model}</span>
                     </UiButton>
                   );
                 })}
@@ -817,11 +862,11 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <IconLock size={13} className="text-[var(--color-text-muted)]" />
-              <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+              <h3 className="text-base font-medium text-[var(--color-text)]">
                 Azure OpenAI configuration
               </h3>
             </div>
-            <p className="mt-1 max-w-[620px] text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+            <p className="mt-1 max-w-[620px] text-sm leading-relaxed text-[var(--color-text-muted)]">
               Your key is encrypted with the OS secure storage and never leaves
               this device except to call your Azure endpoint.
             </p>
@@ -847,7 +892,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
               placeholder="https://contoso.openai.azure.com"
               autoComplete="off"
               spellCheck={false}
-              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
             />
           </AzureConfigField>
           <AzureConfigField label="Deployment name" htmlFor="azure-openai-deployment">
@@ -863,7 +908,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
               placeholder="gpt-4o-admin"
               autoComplete="off"
               spellCheck={false}
-              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
             />
           </AzureConfigField>
           <AzureConfigField label="API version" htmlFor="azure-openai-api-version">
@@ -879,17 +924,17 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
               placeholder={DEFAULT_AZURE_OPENAI_API_VERSION}
               autoComplete="off"
               spellCheck={false}
-              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+              className="w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
             />
           </AzureConfigField>
 
           <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                <div className="text-xs font-medium text-[var(--color-text-muted)]">
                   API key
                 </div>
-                <div className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                <div className="mt-1 text-sm leading-relaxed text-[var(--color-text-muted)]">
                   Stored keys are never displayed. Replace writes a new key over
                   the existing encrypted value.
                 </div>
@@ -941,7 +986,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
                     }
                     autoComplete="off"
                     spellCheck={false}
-                    className="min-w-0 flex-1 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
                   />
                   {hasStoredKey && (
                     <Button
@@ -967,7 +1012,7 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
         {error && (
           <div
             role="alert"
-            className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+            className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
           >
             {userFacingErrorReason(error) ??
               "Provider settings could not be updated. Review the provider connection, then try again."}
@@ -977,14 +1022,14 @@ function AzureOpenAIConfigForm({ onSaved }: { onSaved: () => Promise<void> }) {
           <div
             role="status"
             aria-live="polite"
-            className="mt-4 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30"
+            className="mt-4 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30"
           >
             {notice}
           </div>
         )}
 
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--color-border-soft)] pt-4">
-          <div className="text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+          <div className="text-sm leading-relaxed text-[var(--color-text-muted)]">
             Azure OpenAI is hosted. Tenant prompts are sent to the configured
             Azure endpoint when this provider is active.
           </div>
@@ -1010,7 +1055,7 @@ function AzureConfigField({
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[150px_1fr] sm:items-center">
       <label
         htmlFor={htmlFor}
-        className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+        className="text-xs font-medium text-[var(--color-text-muted)]"
       >
         {label}
       </label>
@@ -1022,10 +1067,10 @@ function AzureConfigField({
 function ProviderFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-text-soft)]">
+      <div title={value} className="mt-0.5 truncate font-mono text-xs text-[var(--color-text-soft)]">
         {value}
       </div>
     </div>
@@ -1138,7 +1183,7 @@ function TenantRow({
       <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4 last:border-b-0">
         <div className="min-w-[220px] flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-base font-medium text-[var(--color-text)]">
+            <span title={tenant.displayName} className="min-w-0 max-w-full flex-1 truncate text-base font-medium text-[var(--color-text)]">
               {tenant.displayName}
             </span>
             {isActive ? <Badge tone="info">Active</Badge> : null}
@@ -1192,19 +1237,19 @@ function TenantRow({
         }}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           This removes the Microsoft sign-in connection and permanently deletes this
           tenant&apos;s local Graph cache, change history, chats, workspaces, run history,
           learning records, and queued deliveries from this device.
         </div>
-        <p className="text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+        <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
           Microsoft 365 data in the tenant is not changed. Reconnecting later starts with
           an empty local cache.
         </p>
         {disconnectError && (
           <div
             role="alert"
-            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
           >
             {userFacingErrorReason(disconnectError) ??
               "The tenant could not be fully disconnected. Some local cleanup may already have completed. Restart OpenAdminOS, check that secure storage is available, then try again."}
@@ -1654,7 +1699,7 @@ export function ChatSettingsSection() {
       <div className="flex items-start justify-between gap-6">
         <SectionTitle
           title="Chat"
-          subtitle="Chat stays simple. Cache refresh, scheduled updates, and local self-training approvals live here."
+          subtitle="Configure data refresh, scheduled updates, and local self-training approvals."
         />
         <Button
           size="sm"
@@ -1667,7 +1712,7 @@ export function ChatSettingsSection() {
       </div>
 
       {error && (
-        <div className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+        <div className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
           {userFacingErrorReason(error) ??
             "Chat settings could not be updated. Review the current values, then try again."}
         </div>
@@ -1717,8 +1762,8 @@ export function ChatSettingsSection() {
                     }`}
                     aria-pressed={active}
                   >
-                    <span className="block text-[11.5px] font-medium">{option.label}</span>
-                    <span className="mt-0.5 block text-[10px] leading-4 text-[var(--color-text-muted)]">
+                    <span className="block text-sm font-medium">{option.label}</span>
+                    <span className="mt-0.5 block text-xs leading-4 text-[var(--color-text-muted)]">
                       {option.detail}
                     </span>
                   </button>
@@ -1754,10 +1799,10 @@ export function ChatSettingsSection() {
           <div className="p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <div className="text-[13px] font-medium text-[var(--color-text)]">
+                <div className="text-base font-medium text-[var(--color-text)]">
                   Cached resources
                 </div>
-                <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
+                <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
                   Row counts and last refresh state for the active tenant.
                 </div>
               </div>
@@ -1770,14 +1815,14 @@ export function ChatSettingsSection() {
                   className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate text-[12px] text-[var(--color-text)]">
+                    <span className="truncate text-sm text-[var(--color-text)]">
                       {resource.label}
                     </span>
-                    <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                    <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
                       {resource.rows}
                     </span>
                   </div>
-                  <div className="mt-1 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                  <div className="mt-1 truncate text-xs text-[var(--color-text-muted)]">
                     {resource.lastError
                       ? resource.lastError
                       : resource.refreshedAt
@@ -1794,10 +1839,10 @@ export function ChatSettingsSection() {
           <div className="p-5">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <div className="text-[13px] font-medium text-[var(--color-text)]">
+                <div className="text-base font-medium text-[var(--color-text)]">
                   Local data
                 </div>
-                <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
+                <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
                   Chat, cache, and learning records live in local SQLite. Run history lives in this profile's local state store.
                 </div>
               </div>
@@ -1827,7 +1872,7 @@ export function ChatSettingsSection() {
                 }
               />
             </div>
-            <div className="mt-3 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+            <div className="mt-3 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-xs leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
               {lastPruneLabel}
             </div>
 
@@ -1857,7 +1902,7 @@ export function ChatSettingsSection() {
                 Clear active tenant cache
               </Button>
             </div>
-            <div className="mt-3 text-[11px] leading-5 text-[var(--color-text-muted)]">
+            <div className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">
               Clearing data never disconnects tenants, removes provider settings, or changes agent run history.
             </div>
           </div>
@@ -1883,7 +1928,7 @@ export function ChatSettingsSection() {
                     void handleScheduleChange(true, next);
                   }
                 }}
-                className="h-7 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+                className="h-7 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
               >
                 <option value={60}>Every hour</option>
                 <option value={360}>Every 6 hours</option>
@@ -1908,12 +1953,12 @@ export function ChatSettingsSection() {
           }
         />
         {cacheStatus?.schedule?.nextRunAt && (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+          <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
             Next cache refresh {formatDateTime(cacheStatus.schedule.nextRunAt)}
           </div>
         )}
         {cacheStatus?.schedule?.lastError && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {cacheStatus.schedule.lastError}
           </div>
         )}
@@ -1937,10 +1982,10 @@ export function ChatSettingsSection() {
           <div className="p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <div className="text-[13px] font-medium text-[var(--color-text)]">
+                <div className="text-base font-medium text-[var(--color-text)]">
                   Self-training suggestions
                 </div>
-                <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
+                <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
                   Nothing becomes active until accepted here.
                 </div>
               </div>
@@ -1950,7 +1995,7 @@ export function ChatSettingsSection() {
             </div>
             <div className="flex flex-col gap-2">
               {pendingSuggestions.length === 0 ? (
-                <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+                <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
                   No pending suggestions.
                 </div>
               ) : (
@@ -1959,10 +2004,10 @@ export function ChatSettingsSection() {
                     key={suggestion.id}
                     className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]"
                   >
-                    <div className="text-[12px] font-medium text-[var(--color-text)]">
+                    <div className="text-sm font-medium text-[var(--color-text)]">
                       {suggestion.agentSlug}
                     </div>
-                    <div className="mt-1 text-[12px] leading-5 text-[var(--color-text-soft)]">
+                    <div className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
                       {suggestion.text}
                     </div>
                     <div className="mt-3 flex gap-2">
@@ -1988,7 +2033,7 @@ export function ChatSettingsSection() {
 
             {activeLearningAgents.length > 0 && (
               <div className="mt-5">
-                <div className="mb-2 text-[11px] font-medium uppercase text-[var(--color-text-muted)]">
+                <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
                   Active overlays
                 </div>
                 <div className="flex flex-col gap-2">
@@ -1998,10 +2043,10 @@ export function ChatSettingsSection() {
                       className="flex items-center justify-between gap-2 rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]"
                     >
                       <div className="min-w-0">
-                        <div className="truncate text-[12px] text-[var(--color-text)]">
+                        <div className="truncate text-sm text-[var(--color-text)]">
                           {agentSlug}
                         </div>
-                        <div className="text-[10.5px] text-[var(--color-text-muted)]">
+                        <div className="text-xs text-[var(--color-text-muted)]">
                           {count} approved {count === 1 ? "instruction" : "instructions"}
                         </div>
                       </div>
@@ -2020,14 +2065,14 @@ export function ChatSettingsSection() {
 
             {decidedSuggestions.length > 0 && (
               <div className="mt-5">
-                <div className="mb-2 text-[11px] font-medium uppercase text-[var(--color-text-muted)]">
+                <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">
                   Recent decisions
                 </div>
                 <div className="flex flex-col gap-1.5">
                   {decidedSuggestions.slice(0, 5).map((suggestion) => (
                     <div
                       key={suggestion.id}
-                      className="flex items-center justify-between gap-2 text-[11px]"
+                      className="flex items-center justify-between gap-2 text-xs"
                     >
                       <span className="truncate text-[var(--color-text-soft)]">
                         {suggestion.agentSlug}
@@ -2057,10 +2102,10 @@ export function ChatSettingsSection() {
 function LocalDataMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10.5px] font-medium uppercase text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-1 truncate text-[12px] text-[var(--color-text)]">
+      <div className="mt-1 truncate text-sm text-[var(--color-text)]">
         {value}
       </div>
     </div>
@@ -2096,7 +2141,7 @@ function ClearLocalDataModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           {detail}
         </div>
         <div className="flex justify-end gap-2 pt-1">
@@ -2401,7 +2446,7 @@ function GatewaySection({
                     onChange={(event) => setPortInput(event.target.value)}
                     placeholder={String(gatewayStatus?.port ?? 47_891)}
                     disabled={busyAction !== null}
-                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 font-mono text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-1.5 h-9 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-base tabular-nums text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -2473,7 +2518,7 @@ function GatewaySection({
 
                 {endpoint && (
                   <div className="mt-4">
-                    <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    <div className="text-xs font-medium text-[var(--color-text-muted)]">
                       Loopback URL
                     </div>
                     <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
@@ -2634,7 +2679,7 @@ function GatewaySection({
           }}
         />
         <div className="p-6">
-          <p className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+          <p className="text-base leading-relaxed text-[var(--color-text-soft)]">
             {confirmationCopy.detail}
           </p>
           <div className="mt-6 flex justify-end gap-2">
@@ -2672,11 +2717,11 @@ function GatewayFact({
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <dt className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </dt>
       <dd
-        className={`mt-1 truncate text-[12px] text-[var(--color-text)] ${mono ? "font-mono" : ""}`}
+        className={`mt-1 truncate text-sm text-[var(--color-text)] ${mono ? "font-mono" : ""}`}
         title={value}
       >
         {value}
@@ -3031,7 +3076,7 @@ function GeneralSection() {
           }
         />
         {companionError && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {companionError}
           </div>
         )}
@@ -3061,7 +3106,7 @@ function GeneralSection() {
           }
         />
         {schedulerError && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {schedulerError}
           </div>
         )}
@@ -3074,7 +3119,7 @@ function GeneralSection() {
               <KeyValue label="Active schedules" value={`${schedulerLaunch.activeScheduleCount ?? scheduledCount}`} />
             </dl>
             {schedulerLaunch.lastError && (
-              <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+              <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
                 {schedulerLaunch.lastError}
               </div>
             )}
@@ -3097,6 +3142,7 @@ function GeneralSection() {
         />
         <SettingRow
           id="run-history-retention"
+          stacked
           description="Pruning removes old run records from local history. Workspace-linked or workspace-pinned runs, queued/running runs, and runs awaiting confirmation are kept. The job runs at startup and on the scheduler tick."
           control={
             <RunHistoryRetentionControls
@@ -3179,7 +3225,7 @@ function GeneralSection() {
           <div
             role={runHistoryError || driftError ? "alert" : "status"}
             aria-live={runHistoryError || driftError ? "assertive" : "polite"}
-            className={`rounded-lg px-3 py-2 text-[12px] ring-1 ${
+            className={`rounded-lg px-3 py-2 text-sm ring-1 ${
               runHistoryError || driftError
                 ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
                 : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-[var(--color-border-soft)]"
@@ -3217,7 +3263,7 @@ function RunHistoryRetentionControls({
     draft.neverPrune || draft.keepLastRunsEnabled || draft.keepDaysEnabled;
 
   return (
-    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-xs">
       <div className="flex items-center justify-between gap-3">
         <Badge tone={draft.neverPrune ? "warning" : "neutral"}>
           {draft.neverPrune ? "Never prune" : runHistoryRetentionSummary(saved)}
@@ -3292,7 +3338,7 @@ function RunHistoryRetentionControls({
                 ),
               })
             }
-            className="mt-2 h-7 w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+            className="mt-2 h-7 w-full rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
           />
         </div>
 
@@ -3344,14 +3390,14 @@ function RunHistoryRetentionControls({
                   ),
                 })
               }
-              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
             />
             <span className="text-[var(--color-text-muted)]">days</span>
           </div>
         </div>
       </div>
 
-      <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+      <div className="text-xs leading-4 text-[var(--color-text-muted)]">
         Deletes only records outside every enabled rule. Keeps workspace evidence,
         queued/running runs, and write confirmations.
       </div>
@@ -3360,7 +3406,7 @@ function RunHistoryRetentionControls({
         <div
           role="status"
           aria-live="polite"
-          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-xs leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
         >
           {formatRunHistoryPruneResult(lastResult)}
         </div>
@@ -3412,7 +3458,7 @@ function DriftRetentionControls({
     : `Configuration change history is kept locally for ${draft.keepDays.toLocaleString()} days. Current object state is never deleted.`;
 
   return (
-    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-xs">
       <div className="flex items-center justify-between gap-3">
         <Badge tone={draft.neverPrune ? "warning" : "neutral"}>
           {driftRetentionSummary(saved)}
@@ -3469,13 +3515,13 @@ function DriftRetentionControls({
                 ),
               })
             }
-            className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+            className="h-7 min-w-0 flex-1 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] px-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
           />
           <span className="text-[var(--color-text-muted)]">days</span>
         </div>
       </div>
 
-      <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+      <div className="text-xs leading-4 text-[var(--color-text-muted)]">
         {retentionCopy}
       </div>
 
@@ -3483,7 +3529,7 @@ function DriftRetentionControls({
         <div
           role="status"
           aria-live="polite"
-          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+          className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-xs leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
         >
           {formatDriftPruneResult(lastResult)}
         </div>
@@ -3526,7 +3572,7 @@ function AuditLogExportControls({
   onExport: () => void;
 }) {
   return (
-    <div className="w-[430px] max-w-[52vw] space-y-2 text-[11px]">
+    <div className="w-[430px] max-w-[52vw] space-y-2 text-xs">
       <div
         role="group"
         aria-label="Audit log export format"
@@ -3541,7 +3587,7 @@ function AuditLogExportControls({
               aria-pressed={active}
               disabled={busy}
               onClick={() => onFormatChange(option)}
-              className={`h-7 rounded-md text-[11.5px] font-medium uppercase tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+              className={`h-7 rounded-md text-sm font-medium tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
                 active
                   ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
                   : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
@@ -3552,7 +3598,7 @@ function AuditLogExportControls({
           );
         })}
       </div>
-      <div className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[10.5px] leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+      <div className="rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-xs leading-4 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
         Saved through the local file dialog. Nothing is uploaded. CSV includes the
         per-entry hash; JSON includes the full hash-chain header.
       </div>
@@ -3805,13 +3851,13 @@ function PrivacySection({
               <div className="min-w-0 max-w-[520px]">
                 <h3
                   id="usage-telemetry-title"
-                  className="text-[13px] font-medium text-[var(--color-text)]"
+                  className="text-base font-medium text-[var(--color-text)]"
                 >
                   Usage telemetry
                 </h3>
                 <p
                   id="usage-telemetry-description"
-                  className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]"
+                  className="mt-1 text-sm leading-relaxed text-[var(--color-text-muted)]"
                 >
                   Tenant, agent, and run counts are converted to bucketed ranges on
                   this device. Tenant content, prompts, and results are never sent.
@@ -3843,13 +3889,13 @@ function PrivacySection({
               {telemetryPreviewLoading && (
                 <p
                   role="status"
-                  className="mt-2 text-[11px] text-[var(--color-text-muted)]"
+                  className="mt-2 text-xs text-[var(--color-text-muted)]"
                 >
                   Loading exact payload…
                 </p>
               )}
               {telemetryPreview && !telemetryPreview.endpointConfigured && (
-                <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
                   This build has no telemetry collector configured, so nothing is
                   sent even when this is on.
                 </p>
@@ -3857,13 +3903,13 @@ function PrivacySection({
               {telemetryError && (
                 <div
                   role="alert"
-                  className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+                  className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
                 >
                   {telemetryError}
                 </div>
               )}
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <p className="max-w-[420px] text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                <p className="max-w-[420px] text-xs leading-relaxed text-[var(--color-text-muted)]">
                   A test ping sends the preview once. It does not change this setting.
                 </p>
                 <Button
@@ -3884,7 +3930,7 @@ function PrivacySection({
                 <p
                   role="status"
                   aria-live="polite"
-                  className="mt-2 text-right text-[11px] text-[var(--color-text-soft)]"
+                  className="mt-2 text-right text-xs text-[var(--color-text-soft)]"
                 >
                   {telemetryTestResult}
                 </p>
@@ -3911,7 +3957,7 @@ function PrivacySection({
           }
         />
         {installCountsError && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {installCountsError}
           </div>
         )}
@@ -3941,7 +3987,7 @@ function PrivacySection({
           }
         />
         {registryRefreshError && (
-          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30">
+          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30">
             {registryRefreshError}
           </div>
         )}
@@ -3951,11 +3997,11 @@ function PrivacySection({
               <div className="min-w-0 max-w-[520px]">
                 <h3
                   id="documentation-grounding-title"
-                  className="text-[13px] font-medium text-[var(--color-text)]"
+                  className="text-base font-medium text-[var(--color-text)]"
                 >
                   Documentation grounding
                 </h3>
-                <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+                <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-muted)]">
                   Retrieval grounds answers in local Microsoft documentation. It runs
                   on this device and never sends the question to a remote service when
                   a local provider is selected.
@@ -4011,7 +4057,7 @@ function PrivacySection({
               {retrievalLoading ? (
                 <div
                   role="status"
-                  className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+                  className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
                 >
                   Checking the local documentation index…
                 </div>
@@ -4021,7 +4067,7 @@ function PrivacySection({
                     <StatusDot tone="success" /> Available
                   </Badge>
                   {retrievalStatus.updateAvailable ? (
-                    <p className="mt-2 text-[12px] text-[var(--color-text-muted)]">
+                    <p className="mt-2 text-sm text-[var(--color-text-muted)]">
                       Version {retrievalStatus.updateAvailable} is available and
                       installs automatically in the background.
                     </p>
@@ -4055,13 +4101,13 @@ function PrivacySection({
                     />
                   </dl>
                   {retrievalStatus.embeddingModelInstalled === false ? (
-                    <p className="mt-2 text-[12px] text-[var(--color-warning)]">
+                    <p className="mt-2 text-sm text-[var(--color-warning)]">
                       {retrievalStatus.ollamaReachable
                         ? "The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives."
                         : "Ollama isn't running, so the embedding model can't be fetched and questions can't be matched against the index. Start Ollama and it installs automatically."}
                     </p>
                   ) : null}
-                  <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
                     Built from Microsoft's published documentation for Intune,
                     Entra, and Defender, used under{" "}
                     <a
@@ -4077,10 +4123,10 @@ function PrivacySection({
                 </div>
               ) : (
                 <div className="mt-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
-                  <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-text-soft)]">
+                  <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-soft)]">
                     <StatusDot tone="muted" /> Not documentation-grounded yet
                   </div>
-                  <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
                     {retrievalStatus?.ollamaReachable === false
                       ? "Documentation grounding needs the local Ollama runtime, which isn't running. Once Ollama is available, the index and embedding model install automatically in the background."
                       : (retrievalStatus?.reason ??
@@ -4092,7 +4138,7 @@ function PrivacySection({
             {retrievalError && (
               <div
                 role="alert"
-                className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+                className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
               >
                 {retrievalError}
               </div>
@@ -4166,11 +4212,11 @@ function RetrievalDetail({
 }) {
   return (
     <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-      <dt className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <dt className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </dt>
       <dd
-        className={`mt-1 break-words text-[11px] text-[var(--color-text-soft)] ${mono ? "font-mono" : ""}`}
+        className={`mt-1 break-words text-xs text-[var(--color-text-soft)] ${mono ? "font-mono" : ""}`}
       >
         {dateTime ? <time dateTime={dateTime}>{value}</time> : value}
       </dd>
@@ -4257,7 +4303,7 @@ function RegistrySourceModal({
         <div>
           <label
             htmlFor="registry-source"
-            className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
+            className="text-xs font-medium text-[var(--color-text-muted)]"
           >
             Registry URL
           </label>
@@ -4271,10 +4317,10 @@ function RegistrySourceModal({
               setNotice(null);
             }}
             spellCheck={false}
-            className="mt-2 w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-[12px] text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+            className="mt-2 w-full rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 font-mono text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
             placeholder={OFFICIAL_REGISTRY_SOURCE}
           />
-          <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+          <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-muted)]">
             Point to the agent directory. The host app fetches `index.json` from this
             location after validation.
           </p>
@@ -4284,10 +4330,10 @@ function RegistrySourceModal({
           <div className="flex items-start gap-2">
             <IconShield size={14} className="mt-0.5 text-[var(--color-text-muted)]" />
             <div>
-              <div className="text-[12px] font-medium text-[var(--color-text)]">
+              <div className="text-sm font-medium text-[var(--color-text)]">
                 What changes when this changes
               </div>
-              <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+              <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-muted)]">
                 Tenant data does not go to the registry. The source controls which
                 agent manifests, versions, Graph scopes, and update metadata the app
                 shows to the admin.
@@ -4301,17 +4347,17 @@ function RegistrySourceModal({
             <div className="flex items-start gap-2">
               <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
               <div>
-                <div className="text-[12px] font-medium text-[var(--color-warning)]">
+                <div className="text-sm font-medium text-[var(--color-warning)]">
                   Review this source before using it
                 </div>
-                <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+                <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
                   Custom registries can advertise agents with different Graph scopes,
                   write actions, connector egress, and update requirements. Install
                   and update flows still run their normal trust review.
                 </p>
               </div>
             </div>
-            <label className="mt-3 flex cursor-pointer items-start gap-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+            <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm leading-relaxed text-[var(--color-text-soft)]">
               <input
                 type="checkbox"
                 checked={confirmed}
@@ -4326,20 +4372,20 @@ function RegistrySourceModal({
           </div>
         )}
 
-        <div className="rounded-lg bg-[var(--color-surface)] p-3 text-[12px] leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="rounded-lg bg-[var(--color-surface)] p-3 text-sm leading-relaxed text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           Host validation requires HTTPS, rejects credentials, query strings,
           fragments, and `index.json` paths, and only allows private or localhost
           sources when the explicit dev registry override is enabled.
         </div>
 
         {error && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {userFacingErrorReason(error) ??
               "Registry settings could not be updated. Review the source, then try again."}
           </div>
         )}
         {notice && (
-          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30">
+          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30">
             {notice}
           </div>
         )}
@@ -4645,10 +4691,10 @@ function formatSandboxDetail(
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div>
-      <h2 className="text-[18px] font-semibold tracking-tight text-[var(--color-text)]">
+      <h2 className="text-lg font-semibold tracking-tight text-[var(--color-text)]">
         {title}
       </h2>
-      <p className="mt-1 max-w-[640px] text-[13px] leading-relaxed text-[var(--color-text-soft)]">
+      <p className="mt-1 max-w-[640px] text-base leading-relaxed text-[var(--color-text-soft)]">
         {subtitle}
       </p>
     </div>
@@ -4660,11 +4706,14 @@ function SettingRow({
   label,
   description,
   control,
+  stacked = false,
 }: {
   id?: SettingsItemId;
   label?: string;
   description?: string;
   control: React.ReactNode;
+  /** Place a wide, multi-field control below the label instead of beside it. */
+  stacked?: boolean;
 }) {
   const { query, sectionMatch } = useContext(SettingsFilterContext);
   const catalogEntry = id ? SETTINGS_ITEMS[id] : undefined;
@@ -4691,7 +4740,9 @@ function SettingRow({
       tabIndex={id ? -1 : undefined}
       className={`setting-row scroll-mt-6 border-b border-[var(--color-border-soft)] last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${normalizedQuery ? "bg-[var(--color-accent-soft)]/35" : ""}`}
     >
-      <div className="grid items-center gap-4 px-5 py-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1fr)]">
+      <div
+        className={`grid items-center gap-4 px-5 py-4 ${stacked ? "" : "lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1fr)]"}`}
+      >
         <div className="min-w-0">
           <div className="text-base font-medium text-[var(--color-text)]">
             {renderedLabel}
@@ -4700,7 +4751,7 @@ function SettingRow({
             {renderedDescription}
           </div>
         </div>
-        <div className="min-w-0 justify-self-start lg:justify-self-end">{control}</div>
+        <div className={`min-w-0 ${stacked ? "w-full" : "justify-self-start lg:justify-self-end"}`}>{control}</div>
       </div>
     </div>
   );
@@ -4709,11 +4760,11 @@ function SettingRow({
 export function Stat({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="rounded-lg bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
       <div
-        className={`mt-1 text-[13.5px] text-[var(--color-text)] ${mono ? "font-mono" : ""}`}
+        className={`mt-1 text-base text-[var(--color-text)] ${mono ? "font-mono" : ""}`}
       >
         {value}
       </div>

@@ -5,7 +5,6 @@ export interface PageHeaderProps {
   breadcrumb?: ReactNode;
   actions?: ReactNode;
   eyebrow?: ReactNode;
-  subtitle?: ReactNode;
 }
 
 export function PageHeader({
@@ -13,9 +12,7 @@ export function PageHeader({
   breadcrumb,
   eyebrow,
   actions,
-  subtitle: _subtitle,
 }: PageHeaderProps) {
-  // Subtitle remains accepted while P2 through P6 remove legacy call-site copy. It is intentionally not rendered.
   const resolvedBreadcrumb = breadcrumb ?? eyebrow;
   return (
     <header className="app-page-header flex shrink-0 items-center justify-between border-b border-[var(--color-border)]">

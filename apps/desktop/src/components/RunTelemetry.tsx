@@ -139,7 +139,14 @@ export function CompactRunTelemetry({
         />
         <KeyValue
           label="Model"
-          value={<span className="font-mono text-sm">{run.model ?? "Not recorded"}</span>}
+          value={
+            <span
+              title={run.model ?? "Not recorded"}
+              className="block max-w-full truncate font-mono text-sm"
+            >
+              {run.model ?? "Not recorded"}
+            </span>
+          }
         />
         <KeyValue
           label="Cost"

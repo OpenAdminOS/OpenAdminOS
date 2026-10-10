@@ -122,7 +122,12 @@ export function Drawer({
               size="sm"
             />
           </header>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
+          <div
+            data-drawer-scroll-root
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          >
+            {children}
+          </div>
         </DrawerTitleContext.Provider>
       </aside>
     </div>,

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
-import { Pill, StatusDot } from "../components/Pill";
+import { Badge, StatusDot } from "../components/ui";
 import { ProviderNotReadyCard } from "../components/provider-setup/ProviderNotReadyCard";
 import { TrustBanner } from "../components/TrustBanner";
 import {
@@ -153,7 +153,7 @@ function PermissionsStep({
     <>
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-6">
         {pendingIntentCopy(intent, agentName) && (
-          <div className="mb-5 rounded-lg bg-[var(--color-accent-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text)] ring-1 ring-[var(--color-accent)]/25">
+          <div className="mb-5 rounded-lg bg-[var(--color-accent-soft)] px-4 py-3 text-sm leading-5 text-[var(--color-text)] ring-1 ring-[var(--color-accent)]/25">
             {pendingIntentCopy(intent, agentName)}
           </div>
         )}
@@ -163,13 +163,13 @@ function PermissionsStep({
             <IconShield size={17} />
           </div>
           <div className="min-w-0">
-            <h3 className="text-[13px] font-medium text-[var(--color-text)]">
+            <h3 className="text-base font-medium text-[var(--color-text)]">
               Sign in through your system browser
             </h3>
-            <p className="mt-1 text-[12px] leading-5 text-[var(--color-text-soft)]">
+            <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
               Use a Microsoft 365 admin account. Tokens are stored through the operating system’s protected credential store and are never sent to an OpenAdminOS server.
             </p>
-            <p className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+            <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
               Microsoft shows the app registration as Microsoft Graph Command Line Tools. Access can be revoked from Entra Enterprise applications.
             </p>
           </div>
@@ -178,15 +178,15 @@ function PermissionsStep({
         <div className="mt-6">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+              <div className="text-xs font-medium text-[var(--color-text-muted)]">
                 Read permissions
               </div>
-              <p className="mt-1 text-[12px] text-[var(--color-text-soft)]">
+              <p className="mt-1 text-sm text-[var(--color-text-soft)]">
                 Expand a group to review each exact Microsoft Graph scope and why it is needed.
               </p>
             </div>
             {scopes && (
-              <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+              <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
                 {scopes.length} scopes
               </span>
             )}
@@ -194,12 +194,12 @@ function PermissionsStep({
 
           <div className="mt-3 space-y-2">
             {scopes === null && !scopesError && (
-              <div role="status" className="rounded-xl bg-[var(--color-bg-raised)] px-4 py-5 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+              <div role="status" className="rounded-xl bg-[var(--color-bg-raised)] px-4 py-5 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
                 Loading requested permissions…
               </div>
             )}
             {scopesError && (
-              <div role="alert" className="rounded-xl bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+              <div role="alert" className="rounded-xl bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
                 {scopesError}
               </div>
             )}
@@ -209,67 +209,67 @@ function PermissionsStep({
           </div>
         </div>
 
-        <div className="mt-5 space-y-2 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-[11px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="mt-5 space-y-2 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-xs leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           <p>{SETUP_COPY.readOnlyNote}</p>
           <p>{SETUP_COPY.signInScopesNote}</p>
           <p>{SETUP_COPY.betaNote}</p>
         </div>
 
         <div className="mt-4 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="text-xs font-medium text-[var(--color-text-muted)]">
             {SETUP_COPY.appIdentityTitle}
           </div>
           {customOpen ? (
             <div className="mt-2 space-y-3">
-              <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+              <p className="text-sm leading-5 text-[var(--color-text-soft)]">
                 {SETUP_COPY.ownRegistrationBody}
               </p>
-              <p className="text-[11px] leading-5 text-[var(--color-text-muted)]">
+              <p className="text-xs leading-5 text-[var(--color-text-muted)]">
                 {SETUP_COPY.ownRegistrationNoSecret}
               </p>
-              <label className="block text-[12px] text-[var(--color-text-soft)]">
+              <label className="block text-sm text-[var(--color-text-soft)]">
                 {SETUP_COPY.clientIdLabel}
                 <input
                   value={clientId}
                   onChange={(event) => setClientId(event.target.value)}
                   placeholder="00000000-0000-0000-0000-000000000000"
                   spellCheck={false}
-                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
                 />
-                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
                   {SETUP_COPY.clientIdHint}
                 </span>
               </label>
-              <label className="block text-[12px] text-[var(--color-text-soft)]">
+              <label className="block text-sm text-[var(--color-text-soft)]">
                 {SETUP_COPY.directoryIdLabel}
                 <input
                   value={directoryTenantId}
                   onChange={(event) => setDirectoryTenantId(event.target.value)}
                   placeholder="contoso.onmicrosoft.com"
                   spellCheck={false}
-                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
                 />
-                <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
                   {SETUP_COPY.directoryIdHint}
                 </span>
               </label>
               <button
                 type="button"
                 onClick={() => setCustomOpen(false)}
-                className="text-[11px] text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
+                className="text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
               >
                 {SETUP_COPY.useDefaultRegistration}
               </button>
             </div>
           ) : (
             <div className="mt-2 space-y-2">
-              <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+              <p className="text-sm leading-5 text-[var(--color-text-soft)]">
                 {SETUP_COPY.appIdentityDefault}
               </p>
               <button
                 type="button"
                 onClick={() => setCustomOpen(true)}
-                className="text-[11px] text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
+                className="text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
               >
                 {SETUP_COPY.useOwnRegistration}
               </button>
@@ -329,10 +329,10 @@ function ScopeDisclosure({
         className="flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
       >
         <span className="min-w-0 flex-1">
-          <span className="block text-[12.5px] font-medium text-[var(--color-text)]">
+          <span className="block text-base font-medium text-[var(--color-text)]">
             {group.title} · {group.scopes.length} read scope{group.scopes.length === 1 ? "" : "s"}
           </span>
-          <span className="mt-0.5 block text-[11px] leading-5 text-[var(--color-text-muted)]">
+          <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">
             {group.summary}
           </span>
         </span>
@@ -350,12 +350,12 @@ function ScopeDisclosure({
           {group.scopes.map((scope) => (
             <div key={scope.name} className="border-b border-[var(--color-border-soft)] px-4 py-3 last:border-b-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="break-all font-mono text-[11px] text-[var(--color-text)]">
+                <span className="break-all font-mono text-xs text-[var(--color-text)]">
                   {scope.name}
                 </span>
-                <Pill tone="info"><StatusDot tone="info" /> Read</Pill>
+                <Badge tone="info"><StatusDot tone="info" /> Read</Badge>
               </div>
-              <p className="mt-1.5 text-[11.5px] leading-5 text-[var(--color-text-soft)]">
+              <p className="mt-1.5 text-sm leading-5 text-[var(--color-text-soft)]">
                 {scope.rationale}
               </p>
             </div>
@@ -372,8 +372,8 @@ function WaitingStep({ onCancel }: { onCancel: () => void }) {
         <span aria-hidden className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-info-soft)] text-[var(--color-info)]">
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none" />
         </span>
-        <h3 className="mt-5 text-[16px] font-semibold text-[var(--color-text)]">{SETUP_COPY.waitingTitle}</h3>
-        <p className="mt-2 max-w-[430px] text-[12.5px] leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.waitingBody}</p>
+        <h3 className="mt-5 text-md font-semibold text-[var(--color-text)]">{SETUP_COPY.waitingTitle}</h3>
+        <p className="mt-2 max-w-[430px] text-base leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.waitingBody}</p>
       </div>
       <DialogFooter>
         <Button data-autofocus variant="secondary" onClick={onCancel}>Cancel sign-in</Button>
@@ -397,8 +397,8 @@ function TimeoutStep({
         <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-warning-soft)] text-[var(--color-warning)]">
           <IconWarning size={20} />
         </span>
-        <h3 className="mt-5 text-[16px] font-semibold text-[var(--color-text)]">{SETUP_COPY.timeoutTitle}</h3>
-        <p className="mt-2 max-w-[460px] text-[12.5px] leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.timeoutBody}</p>
+        <h3 className="mt-5 text-md font-semibold text-[var(--color-text)]">{SETUP_COPY.timeoutTitle}</h3>
+        <p className="mt-2 max-w-[460px] text-base leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.timeoutBody}</p>
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
@@ -418,8 +418,8 @@ function ErrorStep({ error, onTryAgain, onCancel }: { error: string | null; onTr
         <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[var(--color-danger)]">
           <IconWarning size={20} />
         </span>
-        <h3 className="mt-5 text-[16px] font-semibold text-[var(--color-text)]">Microsoft sign-in did not complete</h3>
-        <p role="alert" className="mt-2 max-w-[480px] break-words text-[12.5px] leading-6 text-[var(--color-text-soft)]">
+        <h3 className="mt-5 text-md font-semibold text-[var(--color-text)]">Microsoft sign-in did not complete</h3>
+        <p role="alert" className="mt-2 max-w-[480px] break-words text-base leading-6 text-[var(--color-text-soft)]">
           {error ?? "Review the browser sign-in, then try again."}
         </p>
       </div>
@@ -453,14 +453,14 @@ function ProviderStep({
   return (
     <>
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-6">
-        <p className="text-[12.5px] leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.providerBody}</p>
+        <p className="text-base leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.providerBody}</p>
         {pendingRequired && (
-          <div className="mt-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          <div className="mt-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             {SETUP_COPY.providerRequired}
           </div>
         )}
         {error && (
-          <div role="alert" className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[11.5px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div role="alert" className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {error}
           </div>
         )}
@@ -483,9 +483,9 @@ function ProviderStep({
                   {provider.isLocal ? <IconHardDrive size={15} /> : <IconCloud size={15} />}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[12.5px] font-medium text-[var(--color-text)]">{provider.name}</span>
-                  <span className="mt-1 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
-                    <StatusDot tone={provider.status === "connected" ? "success" : provider.status === "error" ? "danger" : "muted"} />
+                  <span className="block text-base font-medium text-[var(--color-text)]">{provider.name}</span>
+                  <span className="mt-1 flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+                    <StatusDot tone={provider.status === "connected" ? "success" : provider.status === "error" ? "danger" : "neutral"} />
                     {provider.status === "connected" ? "Connected" : provider.status === "error" ? "Needs attention" : "Needs setup"}
                   </span>
                 </span>
@@ -540,13 +540,13 @@ function ReadyStep({
             {tenant ? <Avatar name={tenant.displayName} size={32} /> : <IconCheck size={18} className="text-[var(--color-success)]" />}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-[var(--color-text)]">{tenant?.displayName ?? SETUP_COPY.connectedTitle}</div>
-            {tenant?.username && <div className="mt-0.5 truncate text-[11.5px] text-[var(--color-text-soft)]">{tenant.username}</div>}
-            {tenant?.id && <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]">tenant-id: {tenant.id}</div>}
+            <div className="text-base font-medium text-[var(--color-text)]">{tenant?.displayName ?? SETUP_COPY.connectedTitle}</div>
+            {tenant?.username && <div className="mt-0.5 truncate text-sm text-[var(--color-text-soft)]">{tenant.username}</div>}
+            {tenant?.id && <div className="mt-1 truncate font-mono text-xs text-[var(--color-text-muted)]">tenant-id: {tenant.id}</div>}
           </div>
-          <Pill tone="success"><StatusDot tone="success" /> Active</Pill>
+          <Badge tone="success"><StatusDot tone="success" /> Active</Badge>
         </div>
-        <p className="mt-5 text-[12.5px] leading-6 text-[var(--color-text-soft)]">
+        <p className="mt-5 text-base leading-6 text-[var(--color-text-soft)]">
           {intent
             ? "Your original action is ready. Continuing sends it through the normal tenant, provider, and confirmation checks."
             : "The tenant is connected and active. You can keep exploring or start a tenant-backed action."}

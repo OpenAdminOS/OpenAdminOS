@@ -584,7 +584,7 @@ export default function AgentsHome() {
             className="py-6"
           />
         ) : (
-          <div className="grid grid-cols-1 gap-px overflow-hidden rounded-[10px] bg-[var(--color-border-soft)] ring-1 ring-[var(--color-border)] sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-px overflow-hidden rounded-[10px] bg-[var(--color-border-soft)] ring-1 ring-[var(--color-border)]">
             {office.personas.map((persona) => {
               const mission = office.missions.find((candidate) => candidate.personaId === persona.id);
               const personaStatus = getPersonaStatus(persona, mission, state.runs, office.findings);
@@ -608,9 +608,13 @@ export default function AgentsHome() {
                   </div>
                   <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--color-border-soft)] pt-2 text-xs text-[var(--color-text-muted)]">
                     <span className="truncate">
-                      {persona.nextRunAt ? `Next ${formatRelative(persona.nextRunAt, true)}` : persona.enabled ? "Manual" : "Paused"}
+                      {formatPersonaSchedule(persona)}
                     </span>
-                    {attention > 0 ? <Badge tone="warning">{attention} attention</Badge> : <span>Clear</span>}
+                    {attention > 0 ? (
+                      <Badge tone="warning">{attention} to review</Badge>
+                    ) : (
+                      <span>Nothing to review</span>
+                    )}
                   </div>
                 </button>
               );
@@ -909,7 +913,7 @@ function PersonaDrawer({
                 );
                 return (
                   <li key={slug} className="flex items-center gap-3 px-3 py-2.5">
-                    <span className="font-mono text-xs text-[var(--color-text-muted)]">{index + 1}</span>
+                    <span className="text-xs tabular-nums text-[var(--color-text-muted)]">{index + 1}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-base text-[var(--color-text)]">{agent?.name ?? slug}</span>
                       <span className="block text-xs text-[var(--color-text-muted)]">

@@ -383,7 +383,15 @@ export function CommandPalette({
   useEffect(() => {
     const activeId = flatList[activeIndex]?.id;
     if (!activeId) return;
-    document.getElementById(`command-option-${activeId}`)?.scrollIntoView({ block: "nearest" });
+    const option = document.getElementById(`command-option-${activeId}`);
+    const results = document.getElementById("command-palette-results");
+    if (!(option instanceof HTMLElement) || !(results instanceof HTMLElement)) return;
+    const optionTop = option.offsetTop;
+    const optionBottom = optionTop + option.offsetHeight;
+    if (optionTop < results.scrollTop) results.scrollTop = optionTop;
+    else if (optionBottom > results.scrollTop + results.clientHeight) {
+      results.scrollTop = optionBottom - results.clientHeight;
+    }
   }, [activeIndex, flatList]);
 
   if (!open) return null;
@@ -487,7 +495,7 @@ export function CommandPalette({
                       )}
                     </span>
                     {isActive && (
-                      <kbd className="rounded-md bg-[var(--color-accent-soft)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-accent)]">
+                      <kbd className="rounded-md bg-[var(--color-accent-soft)] px-1.5 py-0.5 text-xs text-[var(--color-accent)]">
                         ↵
                       </kbd>
                     )}
@@ -511,7 +519,7 @@ export function CommandPalette({
               <Kbd>esc</Kbd> Close
             </span>
           </div>
-          <span className="font-mono">{flatList.length} results</span>
+          <span className="tabular-nums">{flatList.length} results</span>
         </div>
       </div>
     </div>

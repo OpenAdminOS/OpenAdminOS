@@ -85,7 +85,7 @@ export function loadCatalog(): CatalogState {
     readFileSync(join(dir, "api-docs-index.json"), "utf-8"),
   ) as { endpoints: RawApiDocsEntry[] };
 
-  // First pass — index doc entries (these have the permission data) by
+  // First pass: index doc entries (these have the permission data) by
   // normalized key. The doc set is smaller (~6k) and is the source of
   // truth for scopes.
   const docsByKey = new Map<string, RawApiDocsEntry>();
@@ -94,7 +94,7 @@ export function loadCatalog(): CatalogState {
     docsByKey.set(key, entry);
   }
 
-  // Second pass — walk the full endpoint catalog (~28k) and produce
+  // Second pass: walk the full endpoint catalog (~28k) and produce
   // EndpointSummary entries, merging in permissions from the docs set
   // where available.
   const byKey = new Map<string, EndpointSummary>();
@@ -147,7 +147,7 @@ export function loadCatalog(): CatalogState {
 
 /**
  * Look up a specific (method, path) pair. Path may contain concrete IDs
- * — they're normalized to template placeholders before lookup so
+ * Concrete IDs are normalized to template placeholders before lookup so
  * `/users/abc` matches the same entry as `/users/{user-id}`.
  */
 export function lookupEndpoint(
@@ -162,7 +162,7 @@ export function lookupEndpoint(
  * Free-text search across path + summary + resource. Used to inject a
  * shortlist of candidate endpoints into the NL→agent drafting prompt.
  *
- * The scoring is intentionally simple — we want fast, predictable
+ * The scoring is intentionally simple: we want fast, predictable
  * results, not an actual search engine. Token overlap with the path
  * dominates; summary overlap is a tiebreaker.
  */
@@ -224,7 +224,7 @@ export function validatePath(
     return { ok: true, endpoint };
   }
 
-  // Missing scope declaration is a real problem — the runtime cannot
+  // Missing scope declaration is a real problem: the runtime cannot
   // request a token without scopes. Block this case.
   if (declaredScopes.length === 0) {
     return {
@@ -237,7 +237,7 @@ export function validatePath(
 
   // Scope-set mismatch is reported but not blocked. The merill catalogue
   // intentionally documents one "flavour" of permissions per endpoint
-  // and frequently misses synonyms — e.g. `PATCH /users/{user-id}`
+  // and frequently misses synonyms, e.g. `PATCH /users/{user-id}`
   // lists Intune-specific scopes but not `User.ReadWrite.All`, even
   // though the latter is the canonical scope. Hard-failing here
   // produces false negatives that block legitimate agents, so we
@@ -307,7 +307,7 @@ function scoreEndpoint(ep: EndpointSummary, tokens: string[]): number {
     if (summaryLower.includes(token)) score += 1;
   }
   // Prefer collection endpoints (shorter, no trailing template segments)
-  // for ambiguous queries — they're usually what an agent wants.
+  // for ambiguous queries because they're usually what an agent wants.
   if (score > 0 && !ep.path.includes("{")) score += 1;
   return score;
 }

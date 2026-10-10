@@ -275,7 +275,7 @@ interface PersistedState {
    * Stable per-installation UUID, generated on first agent install and
    * persisted thereafter. Sent to the stats aggregator alongside each
    * install event so the same machine never counts twice for the same
-   * agent. Carries no PII — it's a random v4 UUID, not derived from
+   * agent. Carries no PII. It's a random v4 UUID, not derived from
    * any hardware identifier.
    */
   installId?: string;
@@ -1139,7 +1139,7 @@ export class AppStateStore {
   private tenantConnectController: AbortController | undefined;
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
-  // Registry cache — populated by initRegistry(), falls back to
+  // Registry cache: populated by initRegistry(), falls back to
   // filesystem agents until the first successful HTTP fetch.
   private registryCacheEntries: RegistryAgentSummary[] | null = null;
   private lastRegistryRefresh: string | null = null;
@@ -1827,7 +1827,7 @@ export class AppStateStore {
    *   3. Filesystem scan of the bundled `agents/` directory (Electron
    *      extraResources in packaged builds, repo root in dev)
    *
-   * (3) is only reached when both (1) and (2) failed — in that case
+   * (3) is only reached when both (1) and (2) failed. In that case
    * we leave `registryCacheEntries` null so `listRegistryAgents()`
    * walks the filesystem. The bundled agents are the same set the
      * remote registry serves in public preview; this dual-source
@@ -1838,7 +1838,7 @@ export class AppStateStore {
    */
   async initRegistry(): Promise<{ error: string | null; fromCache: boolean; cachedAt: string | null }> {
     if (!this.userDataPath) {
-      // No userData path — fall back to filesystem only (tests / legacy ctor).
+      // No userData path, fall back to filesystem only (tests / legacy ctor).
       return { error: null, fromCache: false, cachedAt: null };
     }
     const persisted = await this.read().catch(() => defaultState);
@@ -3315,7 +3315,7 @@ export class AppStateStore {
   /**
    * Synchronous accessor for the most-recently-persisted connector
    * config snapshot. Used by the confirm-bridge when it needs to
-   * decorate a confirmation request with human-readable names — the
+   * decorate a confirmation request with human-readable names. The
    * bridge fires in-process during a run and can't afford the
    * file-read latency of `readConnectorConfigs`. Stays in sync via
    * `setConnectorConfig` (which updates the cache after every save).
@@ -3338,7 +3338,7 @@ export class AppStateStore {
    * Build the `connectorConfigs` map the runtime passes to
    * `ExecuteRunInput`. Reads from `PersistedState.connectors[id].config`
    * for every registered connector so a run picks up the latest
-   * defaults the user saved on the Connectors page — no agent
+   * defaults the user saved in Settings > Connectors. No agent
    * reinstall required when a connector default changes.
    */
   private async readConnectorConfigs(): Promise<
@@ -3446,7 +3446,7 @@ export class AppStateStore {
   /**
    * Build the named connector in a one-shot read mode, invoke the
    * supplied read-kind capability, dispose, and return the result.
-   * Shared by `listConnectorTeams` and `listConnectorChannels` —
+   * Shared by `listConnectorTeams` and `listConnectorChannels` :
    * neither needs the run-time confirmation wrapper because both
    * are `kind: read`.
    */
@@ -3884,7 +3884,7 @@ export class AppStateStore {
       const dueAtMs = lastFired + schedule.intervalSeconds * 1000;
       if (nowMs < dueAtMs) continue;
 
-      // Skip if there's already an in-flight run for this agent — we
+      // Skip if there's already an in-flight run for this agent because we
       // don't want a long-running agent to queue more copies of itself.
       const inFlight = persisted.runs.some(
         (run) =>
@@ -3962,7 +3962,7 @@ export class AppStateStore {
   }
 
   /**
-   * NL2Agent — draft a `manifest.yaml` from a plain-English description.
+   * NL2Agent: draft a `manifest.yaml` from a plain-English description.
    *
    * Builds a structured prompt that includes the canonical JSON Schema
    * inline, calls the active LLM provider for a one-shot completion,
@@ -3971,7 +3971,7 @@ export class AppStateStore {
    * the user exactly what came back) and the parsed manifest when
    * valid, or a list of structured validation errors when not.
    *
-   * Throws when no LLM provider is connected — the renderer surfaces
+   * Throws when no LLM provider is connected. The renderer surfaces
    * the message and points the user at the provider settings.
    */
   async draftAgentManifest(prompt: string): Promise<AgentDraft> {
@@ -4163,7 +4163,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   /**
    * Persist a user-authored agent under `userAgentsDir/<slug>/`. The
    * slug comes from the manifest's `descriptor.id`. Writes the
-   * `manifest.yaml` — the only file an agent needs to exist.
+   * `manifest.yaml`, the only file an agent needs to exist.
    *
    * Refuses to overwrite an existing user agent or to shadow a bundled
    * agent (the user gets a clear error and can rename their draft).
@@ -4556,7 +4556,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   /**
    * Attach `updateAvailable` to any installed agent whose registry version
    * is newer than what the user has. Pure function over the registry cache
-   * — no I/O, no persistence, recomputed on every `getAppState()`. When
+   * with no I/O or persistence, recomputed on every `getAppState()`. When
    * no match is found (e.g. an agent that was removed from the registry,
    * or a user-authored agent) the field is simply omitted.
    */
@@ -4677,7 +4677,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // Prune any settings whose keys the new manifest no longer declares.
       // When the new manifest declares zero settings (or all previous keys
       // were dropped), we explicitly clear `settings` rather than spreading
-      // it conditionally — otherwise `...previous` would leave the stale
+      // it conditionally because `...previous` would otherwise leave the stale
       // settings object behind. Removing the key entirely keeps the
       // persisted JSON tidy.
       const prunedSettings = previous.settings
@@ -4708,7 +4708,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           manifestSha256,
         }),
       };
-      // `updateAvailable` is derived state — never persist it.
+      // `updateAvailable` is derived state, never persist it.
       delete next.updateAvailable;
 
       const installedAgents = [...persisted.installedAgents];
@@ -4762,7 +4762,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       manifestText = await response.text();
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(`${context}: failed to fetch manifest — ${reason}`);
+      throw new Error(`${context}: failed to fetch manifest: ${reason}`);
     } finally {
       clearTimeout(timer);
     }
@@ -4773,7 +4773,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(
-        `${context}: fetched manifest for "${slug}" is invalid — ${reason}`,
+        `${context}: fetched manifest for "${slug}" is invalid: ${reason}`,
       );
     }
     if (parsedManifest.descriptor.id !== target.id) {
@@ -4873,12 +4873,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   /**
    * Fire-and-forget POST to the stats aggregator. Never blocks the
    * install, never throws, never surfaces UI errors. We don't even
-   * log non-2xx responses at info level — the desktop user has zero
+   * log non-2xx responses at info level. The desktop user has zero
    * leverage to act on them, and a 404 / 429 from this endpoint must
    * never feel like the install itself failed.
    *
    * User-authored agents (registry path outside the bundled tree)
-   * never report — they don't exist in the public registry, so the
+   * never report because they don't exist in the public registry, so the
    * aggregator would reject the slug anyway.
    */
   private reportInstall(slug: string, installId: string): void {
@@ -5137,7 +5137,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
 
     // Background probe: detect the tenant's Entra ID tier so Agent Hub
-    // can badge incompatible agents. Failure here is silent — `unknown`
+    // can badge incompatible agents. Failure here is silent. `unknown`
     // is treated as informational (badges shown, runs not blocked).
     void this.probeEntraTier(tenant).catch(() => undefined);
 
@@ -5153,7 +5153,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * Fetch `/subscribedSkus` for the given tenant and persist the
    * detected Entra ID tier on the tenant record. Skipped if the last
    * probe succeeded within the past 24 hours (license states change
-   * rarely). Best-effort — silent on failure.
+   * rarely). Best effort, silent on failure.
    */
   /**
    * Fire a tenant tier probe for every persisted tenant. Do not call
@@ -5499,7 +5499,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * Last successfully-parsed state, used as a safety net when a fresh
    * read fails to parse (e.g. the OS happened to schedule the read in
    * the middle of a partial `writeFile`). Without this cache, a parse
-   * error caused `read()` to silently return `defaultState` — whose
+   * error caused `read()` to silently return `defaultState`, whose
    * empty `tenants` array tripped the routing gate in App.tsx and
    * bounced the user to /onboarding. The atomic rename in `write()`
    * makes the race impossible going forward, but the cache keeps us
@@ -5571,7 +5571,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         installedAgents: Array.isArray(parsed.installedAgents)
           ? // 0.1.9: force-drop the legacy `retire-inactive-devices` slug.
             // The agent was renamed to `offboarding-agent`; we don't migrate
-            // settings — users reinstall the new one fresh from the registry.
+            // settings. Users reinstall the new one fresh from the registry.
             parsed.installedAgents.filter(
               (agent) =>
                 !(
@@ -5902,7 +5902,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * Atomic write: serialize the new state to a unique sibling temp file, then
    * `rename` it over `state.json`. Rename is atomic on every
    * filesystem we target (APFS, ext4, NTFS), so a concurrent reader
-   * either sees the previous file content or the new one — never a
+   * either sees the previous file content or the new one, never a
    * half-flushed JSON. Plain `writeFile` truncated first and was the
    * root cause of the "redirected to onboarding mid-action" bug.
    */

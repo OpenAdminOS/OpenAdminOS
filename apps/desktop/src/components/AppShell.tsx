@@ -78,7 +78,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <UpdateBanner />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
-          <main id="main-content" tabIndex={-1} className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+          <main id="main-content" tabIndex={-1} className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
             {children}
           </main>
         </div>

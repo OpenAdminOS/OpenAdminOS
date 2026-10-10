@@ -653,10 +653,16 @@ export default function IntuneChat() {
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    messagesEndRef.current?.scrollIntoView({
-      block: "end",
-      behavior: reducedMotion ? "auto" : "smooth",
-    });
+    const scrollRoot = messagesEndRef.current?.closest<HTMLElement>(".overflow-y-auto");
+    if (!scrollRoot) return;
+    if (typeof scrollRoot.scrollTo === "function") {
+      scrollRoot.scrollTo({
+        top: scrollRoot.scrollHeight,
+        behavior: reducedMotion ? "auto" : "smooth",
+      });
+    } else {
+      scrollRoot.scrollTop = scrollRoot.scrollHeight;
+    }
   }, [messages.length, sending, chatProgress?.message]);
 
   useEffect(
@@ -1738,7 +1744,7 @@ export default function IntuneChat() {
           : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
       }`}
     >
-      <div className="truncate text-[12.5px] font-medium">
+      <div className="truncate text-base font-medium">
         {conversation.pinnedAt && (
           <IconStar
             size={10}
@@ -1747,7 +1753,7 @@ export default function IntuneChat() {
         )}
         {conversation.title}
       </div>
-      <div className="mt-1 text-[10.5px] text-[var(--color-text-muted)]">
+      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
         {formatDateTime(conversation.updatedAt)}
       </div>
     </button>
@@ -1782,6 +1788,7 @@ export default function IntuneChat() {
           <div className="flex items-center justify-between gap-3">
             <SegmentedControl
               className="min-w-0 flex-1"
+              fullWidth
               ariaLabel="Chat panel"
               value={panelMode}
               options={[
@@ -2012,7 +2019,7 @@ export default function IntuneChat() {
               className="min-w-0"
               title={activeConversation ? `Updated ${formatDateTime(activeConversation.updatedAt)}` : undefined}
             >
-              {renameTarget?.id === activeConversation?.id ? (
+              {renameTarget && renameTarget.id === activeConversation?.id ? (
                 <input
                   ref={renameInputRef}
                   name="conversation-title"
@@ -2119,10 +2126,10 @@ export default function IntuneChat() {
                   <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
                     <IconChat size={18} />
                   </div>
-                  <h1 className="text-[17px] font-semibold text-[var(--color-text)]">
+                  <h1 className="text-md font-semibold text-[var(--color-text)]">
                     Conversation not found
                   </h1>
-                  <p className="mx-auto mt-2 max-w-[420px] text-[12.5px] leading-5 text-[var(--color-text-muted)]">
+                  <p className="mx-auto mt-2 max-w-[420px] text-base leading-5 text-[var(--color-text-muted)]">
                     It may have been deleted, or this link belongs to another local profile.
                     No tenant data was changed.
                   </p>
@@ -2259,7 +2266,7 @@ export default function IntuneChat() {
             {error && (
               <div
                 role="alert"
-                className="mb-3 flex items-start justify-between gap-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+                className="mb-3 flex items-start justify-between gap-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
               >
                 <div className="min-w-0">
                   <div className="font-medium">
@@ -2294,7 +2301,7 @@ export default function IntuneChat() {
             )}
             <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
               {!activeTenant && (
-                <div className="mx-1 mb-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                <div className="mx-1 mb-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                   {SETUP_COPY.guestChatHint}
                 </div>
               )}
@@ -2787,11 +2794,14 @@ function ScopeReviewCard({
     <div className="mx-auto w-full max-w-[920px] rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
       <div className="border-b border-[var(--color-border-soft)] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-[12px] font-semibold text-[var(--color-text)]">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-[var(--color-text)]">
               Review multi-tenant scope
             </div>
-            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            <div
+              title={`${preflight.providerName}${preflight.model ? ` · ${preflight.model}` : ""}`}
+              className="mt-1 max-w-full truncate text-xs text-[var(--color-text-muted)]"
+            >
               {preflight.resolvedTenantIds.length} tenant{preflight.resolvedTenantIds.length === 1 ? "" : "s"} · {preflight.providerName}
               {preflight.model ? ` · ${preflight.model}` : ""}
             </div>
@@ -2800,14 +2810,14 @@ function ScopeReviewCard({
             {preflight.providerIsLocal ? "Local provider" : "Hosted confirmation required"}
           </Badge>
         </div>
-        <div className="mt-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="mt-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           {preflight.prompt}
         </div>
       </div>
       <div className="grid gap-3 p-4 lg:grid-cols-[1fr_260px]">
         <div className="min-w-0 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
-          <table className="w-full table-fixed text-left text-[12px]">
-            <thead className="bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <table className="w-full table-fixed text-left text-sm">
+            <thead className="bg-[var(--color-bg)] text-xs text-[var(--color-text-muted)]">
               <tr>
                 <th className="px-3 py-2">Tenant</th>
                 <th className="w-28 px-3 py-2">Readiness</th>
@@ -2822,20 +2832,20 @@ function ScopeReviewCard({
                     <div className="truncate font-medium text-[var(--color-text)]" title={tenant.tenantName}>
                       {tenant.tenantName}
                     </div>
-                    <div className="truncate font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                    <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
                       {tenant.username ?? tenant.tenantId}
                     </div>
                   </td>
                   <td className="px-3 py-2">
                     <ReadinessBadge status={tenant.status} />
                   </td>
-                  <td className="px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+                  <td className="px-3 py-2 text-xs text-[var(--color-text-muted)]">
                     {tenant.cacheFreshness ? formatDateTime(tenant.cacheFreshness) : "No cache"}
                   </td>
-                  <td className="px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                  <td className="px-3 py-2 text-xs leading-5 text-[var(--color-text-muted)]">
                     {tenant.recovery}
                     {tenant.missingScopes.length > 0 && (
-                      <div className="mt-1 font-mono text-[10px] text-[var(--color-warning)]">
+                      <div className="mt-1 font-mono text-xs text-[var(--color-warning)]">
                         {tenant.missingScopes.slice(0, 2).join(", ")}
                       </div>
                     )}
@@ -2853,7 +2863,7 @@ function ScopeReviewCard({
               className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]"
             >
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                <div className="text-xs font-medium text-[var(--color-text-muted)]">
                   Run progress
                 </div>
                 <Badge tone={progressJob.status === "partial" ? "warning" : "info"}>
@@ -2864,12 +2874,12 @@ function ScopeReviewCard({
                 {progressJob.progress.map((entry) => (
                   <div
                     key={entry.tenantId}
-                    className="flex items-center justify-between gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[11px] ring-1 ring-[var(--color-border-soft)]"
+                    className="flex items-center justify-between gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-xs ring-1 ring-[var(--color-border-soft)]"
                   >
                     <span className="min-w-0 truncate text-[var(--color-text-soft)]">
                       {entry.tenantName}
                     </span>
-                    <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+                    <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
                       {entry.status}
                     </span>
                   </div>
@@ -2878,7 +2888,7 @@ function ScopeReviewCard({
             </div>
           )}
           <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Resources
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2888,7 +2898,7 @@ function ScopeReviewCard({
             </div>
           </div>
           <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Save group
             </div>
             <div className="mt-2 flex gap-2">
@@ -2902,7 +2912,7 @@ function ScopeReviewCard({
                 onChange={(event) => onGroupNameChange(event.target.value)}
                 placeholder="Tenant group name"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
               />
               <Button size="sm" variant="secondary" disabled={!groupName.trim()} onClick={onSaveGroup}>
                 Save
@@ -2910,7 +2920,7 @@ function ScopeReviewCard({
             </div>
           </div>
           <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Agent batch
             </div>
             <div className="mt-2 flex gap-2">
@@ -2918,7 +2928,7 @@ function ScopeReviewCard({
                 value={selectedBatchAgentSlug}
                 onChange={(event) => onSelectedBatchAgentSlugChange(event.target.value)}
                 disabled={running || installedAgents.length === 0}
-                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Agent to queue for selected tenants"
               >
                 <option value="">Select agent</option>
@@ -2937,20 +2947,20 @@ function ScopeReviewCard({
                 Queue
               </Button>
             </div>
-            <p className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+            <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
               Queues one tenant-pinned run per ready tenant.
               {selectedBatchAgent?.mode === "write"
                 ? " Write runs still pause for per-run typed confirmation."
                 : " Read runs start with the normal run history."}
             </p>
             {batchNotice && (
-              <div className="mt-2 rounded-md bg-[var(--color-success-soft)] px-2 py-1.5 text-[11px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+              <div className="mt-2 rounded-md bg-[var(--color-success-soft)] px-2 py-1.5 text-xs text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
                 {batchNotice}
               </div>
             )}
           </div>
           {blocked.length > 0 && (
-            <div className="rounded-lg bg-[var(--color-warning-soft)] p-3 text-[11.5px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+            <div className="rounded-lg bg-[var(--color-warning-soft)] p-3 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
               {blocked.length} tenant{blocked.length === 1 ? "" : "s"} will be skipped unless recovered.
             </div>
           )}
@@ -3050,7 +3060,7 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.windowsDevices,
       render: (tenant) => tenant.windowsDevices.toLocaleString(),
-      cellClassName: "font-mono tabular-nums",
+      cellClassName: "tabular-nums",
     },
     {
       id: "compliant",
@@ -3058,7 +3068,7 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.compliant,
       render: (tenant) => tenant.compliant.toLocaleString(),
-      cellClassName: "font-mono tabular-nums text-[var(--color-success)]",
+      cellClassName: "tabular-nums text-[var(--color-success)]",
     },
     {
       id: "nonCompliant",
@@ -3066,7 +3076,7 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.nonCompliant,
       render: (tenant) => tenant.nonCompliant.toLocaleString(),
-      cellClassName: "font-mono tabular-nums text-[var(--color-danger)]",
+      cellClassName: "tabular-nums text-[var(--color-danger)]",
     },
     {
       id: "unknown",
@@ -3074,21 +3084,22 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.unknown,
       render: (tenant) => tenant.unknown.toLocaleString(),
-      cellClassName: "font-mono tabular-nums",
+      cellClassName: "tabular-nums",
     },
     {
       id: "lastRefresh",
       header: "Last refresh",
       sortValue: (tenant) => tenant.lastRefresh ?? "",
       render: (tenant) => (tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "Unknown"),
-      cellClassName: "text-[11px] text-[var(--color-text-muted)]",
+      cellClassName: "text-xs text-[var(--color-text-muted)]",
     },
   ];
 
+  const resultSubtitle = `${job.providerName}${job.model ? ` · ${job.model}` : ""} · ${formatDateTime(job.updatedAt)}`;
   return (
     <OutputPane
       title="Multi-tenant result"
-      subtitle={`${job.providerName}${job.model ? ` · ${job.model}` : ""} · ${formatDateTime(job.updatedAt)}`}
+      subtitle={<span title={resultSubtitle} className="block max-w-full truncate">{resultSubtitle}</span>}
       className="relative left-1/2 w-[min(100%,calc(100vw-380px))] -translate-x-1/2"
       actions={
         <>
@@ -3126,11 +3137,11 @@ function MultiTenantResultArtifact({
                 className="flex min-w-0 items-start justify-between gap-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-[11.5px] font-medium text-[var(--color-text)]" title={entry.tenantName}>
+                  <div className="truncate text-sm font-medium text-[var(--color-text)]" title={entry.tenantName}>
                     {entry.tenantName}
                   </div>
                   {entry.detail && (
-                    <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]" title={entry.detail}>
+                    <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={entry.detail}>
                       {entry.detail}
                     </div>
                   )}
@@ -3200,7 +3211,7 @@ function MultiTenantResultArtifact({
         />
         <label
           htmlFor="multi-tenant-stale-only"
-          className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+          className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-sm text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
         >
           <input
             id="multi-tenant-stale-only"
@@ -3289,7 +3300,7 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+      <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
         No device rows match the current filters.
       </div>
     );
@@ -3302,10 +3313,10 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
         getRowId={(row) => `${row.tenantId}:${row.deviceId ?? row.deviceName}`}
         initialSort={{ columnId: "device", direction: "ascending" }}
         minWidthClassName="min-w-[920px]"
-        tableClassName="text-[11.5px]"
+        tableClassName="text-sm"
       />
       {rows.length > 250 && (
-        <div className="border-t border-[var(--color-border-soft)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+        <div className="border-t border-[var(--color-border-soft)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
           Showing first 250 matching rows. Export the dossier for the full local result.
         </div>
       )}
@@ -3331,7 +3342,7 @@ function HostedBatchConsentModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
           Retrieved context from {prompt?.preflight.resolvedTenantIds.length ?? 0} tenant
           {(prompt?.preflight.resolvedTenantIds.length ?? 0) === 1 ? "" : "s"} will be sent to {prompt?.preflight.providerName}.
         </div>
@@ -3339,10 +3350,10 @@ function HostedBatchConsentModal({
           {prompt?.preflight.tenants.map((tenant) => (
             <div key={tenant.tenantId} className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 last:border-b-0">
               <div className="min-w-0">
-                <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                <div className="truncate text-sm font-medium text-[var(--color-text)]">
                   {tenant.tenantName}
                 </div>
-                <div className="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
+                <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
                   {tenant.username ?? tenant.tenantId}
                 </div>
               </div>
@@ -3386,27 +3397,27 @@ function SplitToWorkspacesModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           This does not create a mixed-tenant workspace. Each row below becomes local evidence for that tenant only.
         </div>
         <div className="overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
           {tenants.map((tenant) => (
-            <div key={tenant.tenantId} className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 text-[12px] last:border-b-0">
+            <div key={tenant.tenantId} className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 text-sm last:border-b-0">
               <div className="min-w-0">
                 <div className="truncate font-medium text-[var(--color-text)]">{tenant.tenantName}</div>
-                <div className="text-[10.5px] text-[var(--color-text-muted)]">
+                <div className="text-xs text-[var(--color-text-muted)]">
                   New workspace evidence · {tenant.windowsDevices} Windows devices
                 </div>
               </div>
               <ReadinessBadge status={tenant.status} />
-              <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+              <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
                 {tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "no cache"}
               </span>
             </div>
           ))}
         </div>
         {result && (
-          <div className="rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+          <div className="rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
             Created {result.evidence.length} evidence entr{result.evidence.length === 1 ? "y" : "ies"} across {result.workspaces.length} workspace{result.workspaces.length === 1 ? "" : "s"}.
           </div>
         )}
@@ -3447,11 +3458,11 @@ function PinMessageToWorkspaceModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           This stores the answer and visible sources in the selected workspace. Multi-tenant answers must be split into tenant-specific workspace evidence first.
         </div>
         <label htmlFor="pin-answer-workspace" className="block">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <span className="text-xs font-medium text-[var(--color-text-muted)]">
             Workspace
           </span>
           <Select
@@ -3459,7 +3470,7 @@ function PinMessageToWorkspaceModal({
             name="pin-answer-workspace"
             value={selectedWorkspaceId}
             onChange={(event) => onWorkspaceChange(event.target.value)}
-            className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+            className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
           >
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
@@ -3469,7 +3480,7 @@ function PinMessageToWorkspaceModal({
           </Select>
         </label>
         {message && (
-          <div className="max-h-36 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 text-[12px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+          <div className="max-h-36 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 text-sm leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
             {message.content.slice(0, 600)}
             {message.content.length > 600 ? "..." : ""}
           </div>
@@ -3530,7 +3541,7 @@ function HostedChatConsentModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
           {trustCopy.confirmBody}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
@@ -3551,10 +3562,10 @@ function HostedChatConsentModal({
               <IconCloud size={16} />
             </div>
             <div className="min-w-0">
-              <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+              <div className="text-base font-medium text-[var(--color-text)]">
                 What leaves this device
               </div>
-              <p className="mt-1 text-[12px] leading-5 text-[var(--color-text-soft)]">
+              <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
                 The prompt text, selected cached Graph evidence, source freshness,
                 and answer instructions are sent to the hosted provider for this
                 response. Raw cache tables, chat history storage, and self-training
@@ -3568,7 +3579,7 @@ function HostedChatConsentModal({
         </div>
         <label
           htmlFor="remember-hosted-provider-confirmation"
-          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
         >
           <input
             id="remember-hosted-provider-confirmation"
@@ -3598,10 +3609,10 @@ function HostedChatConsentModal({
 function ConsentFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-1 truncate text-[12.5px] text-[var(--color-text)]">
+      <div className="mt-1 truncate text-base text-[var(--color-text)]">
         {value}
       </div>
     </div>
@@ -3626,7 +3637,7 @@ function DeleteConversationModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           This removes the conversation, messages, and chat tool-call records
           from the local SQLite store. It does not disconnect the tenant or
           clear the Graph cache.
@@ -3663,10 +3674,10 @@ function ConversationContextMenu({
       role="menu"
     >
       <div className="border-b border-[var(--color-border-soft)] px-3 py-2">
-        <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+        <div className="truncate text-sm font-medium text-[var(--color-text)]">
           {conversation.title}
         </div>
-        <div className="mt-0.5 text-[10.5px] text-[var(--color-text-muted)]">
+        <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
           Local conversation
         </div>
       </div>
@@ -3674,7 +3685,7 @@ function ConversationContextMenu({
         type="button"
         role="menuitem"
         onClick={onDelete}
-        className={`flex w-full items-center justify-between px-3 py-2 text-left text-[12.5px] text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-soft)] ${focusRingClass}`}
+        className={`flex w-full items-center justify-between px-3 py-2 text-left text-base text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-soft)] ${focusRingClass}`}
       >
         Delete conversation
       </button>
@@ -3858,10 +3869,10 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
         className="w-full max-w-[560px] rounded-xl bg-[var(--color-bg-raised)] px-3.5 py-3 ring-1 ring-[var(--color-border-soft)]"
       >
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-text)]">
+          <div className="min-w-0 truncate text-base font-medium text-[var(--color-text)]">
             {progress.message}
           </div>
-          <div className="shrink-0 font-mono text-[10.5px] text-[var(--color-text-muted)]">
+          <div className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
             {completedCount}/{progress.steps.length}
           </div>
         </div>
@@ -3890,7 +3901,7 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
               <ProgressStepGlyph status={step.status} />
               <div className="min-w-0 flex-1">
                 <div
-                  className={`truncate text-[12px] ${
+                  className={`truncate text-sm ${
                     step.status === "pending"
                       ? "text-[var(--color-text-muted)]"
                       : "text-[var(--color-text-soft)]"
@@ -3899,12 +3910,12 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
                   {step.label}
                 </div>
                 {step.detail && (
-                  <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
                     {step.detail}
                   </div>
                 )}
               </div>
-              <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+              <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
                 {statusLabel(step.status)}
               </span>
             </div>
@@ -3931,7 +3942,7 @@ function ProgressStepGlyph({
     return (
       <span
         aria-hidden="true"
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[10px] font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-xs font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35"
       >
         !
       </span>
@@ -4236,10 +4247,10 @@ function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="font-mono text-[11px] text-[var(--color-text)]">
+                  <div className="font-mono text-xs text-[var(--color-text)]">
                     {index + 1}. {entry.tool}
                   </div>
-                  <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
                     {summarizeToolParams(entry.params)}
                   </div>
                 </div>
@@ -4247,11 +4258,11 @@ function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
                   {entry.durationMs} ms
                 </Badge>
               </div>
-              <div className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+              <div className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
                 {entry.resultSummary}
               </div>
               {entry.error && (
-                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-[11px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-xs leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                   {entry.error}
                 </div>
               )}

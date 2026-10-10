@@ -127,7 +127,7 @@ export async function runOfficeVisualChecks(
     if(document.querySelectorAll('.scene-roster button').length!==6)throw new Error('Visible floor lost roster access at 200%');
   })()`);
   await evaluate(
-    `document.querySelector('.scene-roster').scrollIntoView({block:'center'})`,
+    `(()=>{const roster=document.querySelector('.scene-roster');roster?.scrollTo({top:roster.scrollHeight,behavior:'auto'});})()`,
   );
   await capture("office-fullscreen-roster-200");
   window.webContents.setZoomFactor(1);

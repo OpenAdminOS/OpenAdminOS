@@ -12,6 +12,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Polish the desktop redesign with a consistent five-step type scale, shared status and filter controls, URL-aware section scrolling, responsive page containment, and updated screenshot coverage.
 - Consolidate conversations and Workspaces in Chat, with an integrated scope composer, compact suggested agents, inline answer details, and addressable Workspace views.
 - Consolidate run review, live progress, and searchable history in Runs, with focused write confirmation and URL-addressable run details.
 - Consolidate Agent Team, installed agents, Hub browsing, schedules, and agent details into one Agents surface with URL-addressable drawers and a full office view.

@@ -124,7 +124,7 @@ export function AgentScheduleCard({
               value={customValue}
               disabled={busy}
               onChange={(event) => setCustomValue(event.target.value)}
-              className="h-9 w-24 rounded-md bg-[var(--color-surface)] px-3 font-mono text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+              className="h-9 w-24 rounded-md bg-[var(--color-surface)] px-3 text-base tabular-nums text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
             />
           </label>
           <label className="grid gap-1 text-sm text-[var(--color-text-muted)]">

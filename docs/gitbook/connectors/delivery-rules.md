@@ -7,7 +7,7 @@ description: "How per-agent connector delivery rules work in OpenAdminOS."
 
 Connector setup is global. Delivery rules are per agent.
 
-Use the **Connectors** page to connect services and set fallback targets. Use an agent's detail page to decide when that agent posts reports and where those reports go.
+Use **Settings > Connectors** to connect services and set fallback targets. Use an agent's detail drawer to decide when that agent posts reports and where those reports go.
 
 ## What A Rule Controls
 
@@ -40,7 +40,7 @@ Transient connector failures are queued locally and retried. Configuration failu
 | Failure | Recovery |
 | --- | --- |
 | Missing Microsoft scope | Re-consent through Microsoft sign-in |
-| Missing Slack token | Save a bot token on the Connectors page |
+| Missing Slack token | Save a bot token in Settings > Connectors |
 | Missing Discord webhook | Save a channel webhook URL |
 | Signal CLI unavailable | Install or configure `signal-cli`, or point to a local REST bridge |
 | WhatsApp session expired | Relink the local WhatsApp Web session |

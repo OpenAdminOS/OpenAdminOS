@@ -124,7 +124,7 @@ import { electronAccelerator } from "../src/shared/shortcuts.js";
 // the Keychain service name ("<name> Safe Storage"). In a signed
 // production build that name comes from CFBundleName ("OpenAdminOS")
 // via Info.plist, but in dev (`npm run dev`, unpackaged Electron) it
-// falls back to package.json's `name` field — which is the npm
+// falls back to package.json's `name` field, which is the npm
 // package id "@openadminos/desktop" and ends up as the user-visible
 // string in Keychain prompts. Pinning it explicitly here keeps the
 // two paths consistent and gives users a single "OpenAdminOS Safe
@@ -273,7 +273,7 @@ const activeNotifications = new Set<Notification>();
 // Wall-clock timestamp of the most recent background registry refresh
 // attempt. Used to rate-limit focus-triggered refreshes so alt-tabbing
 // doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
-// this — the user explicitly asked for a fresh fetch.
+// this because the user explicitly asked for a fresh fetch.
 let lastBackgroundRefreshAt = 0;
 
 function debugStartupLog(message: string, detail?: unknown): void {
@@ -608,7 +608,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         tenants: [
           {
             id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
-            displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo — European Endpoint Administration and Security",
+            displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo: European Endpoint Administration and Security",
             username: isWebsiteCapture ? "admin@contoso.invalid" : "admin@contoso-demo.invalid",
             homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
@@ -1000,15 +1000,22 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/agents",
       name: "agents-home",
       file: "app/agents-home.png",
-      waitFor: ["Team", "Library", "Search installed agents"],
+      waitFor: ["Team", "Library"],
       heading: "Agents",
     },
     {
       route: "/agents?source=hub",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Hub", "Search hub"],
+      waitFor: ["Library", "Agent hub"],
       heading: "Agents",
+    },
+    {
+      route: "/agents/find-inactive-devices",
+      name: "agent-drawer",
+      file: "app/agent-drawer.png",
+      waitFor: ["Find inactive devices", "About"],
+      selector: '[role="dialog"]',
     },
     {
       route: "/chat",
@@ -1034,6 +1041,13 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Changes",
     },
     {
+      route: "/runs",
+      name: "runs",
+      file: "app/runs.png",
+      waitFor: ["Runs", "History"],
+      heading: "Runs",
+    },
+    {
       route: "/runs/screenshot-write-run",
       name: "write-confirmation",
       file: "app/write-confirmation.png",
@@ -1045,11 +1059,18 @@ async function runScreenshotCapture(): Promise<void> {
       prepare: "write-confirmation",
     },
     {
-      route: "/settings",
+      route: "/settings/providers",
       name: "settings",
       file: "app/settings.png",
       waitFor: ["Settings", "Providers"],
       heading: "Settings",
+    },
+    {
+      route: "/settings/connectors",
+      name: "settings-connectors",
+      file: "app/settings-connectors.png",
+      waitFor: ["Settings", "Connectors"],
+      heading: "Connectors",
     },
   ];
 
@@ -1057,11 +1078,11 @@ async function runScreenshotCapture(): Promise<void> {
     const extraShots = [
       { route: "/settings/data", name: "cache", waitFor: ["Data", "Tenant cache"] },
       { route: "/agents/office", name: "agent-team", waitFor: ["Team office"] },
-      { route: "/changes?scope=all", name: "fleet", waitFor: [] },
+      { route: "/changes?scope=all", name: "fleet", waitFor: ["Changes"] },
       { route: "/chat?panel=workspaces", name: "workspaces", waitFor: ["Workspaces"] },
       { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
-      { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Scheduled only"] },
+      { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Team", "Library"] },
       { route: "/settings/appearance", name: "appearance", waitFor: ["Graphite dark"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
@@ -1282,6 +1303,8 @@ async function screenshotCaptureStepScript(
         button.textContent?.trim() === label ||
         button.getAttribute("aria-label") === label,
     );
+  const findNewChatButton = () =>
+    findButton("New chat") ?? findButton("New") ?? findButton("New conversation");
   const setTextarea = (value: string) => {
     const textarea = document.querySelector("textarea");
     if (!(textarea instanceof HTMLTextAreaElement)) {
@@ -1303,7 +1326,8 @@ async function screenshotCaptureStepScript(
 
   await closeModal();
   await navigateHash(step.route);
-  resetScroll();
+  // Settings section routes scroll their own container to the section.
+  if (!/^\/settings\/[a-z]+/.test(step.route)) resetScroll();
 
   if (step.kind === "route") {
     await waitFor(
@@ -1317,24 +1341,22 @@ async function screenshotCaptureStepScript(
       `${step.route} route content`,
     );
     if (step.prepare === "chat-empty") {
+      // The New chat control lives in the history panel, which is a closed
+      // overlay at narrow widths; Mod+N's event covers that case.
       await waitFor(
-        () =>
-          Boolean(
-            (findButton("New") ?? findButton("New conversation")) &&
-              !(findButton("New") ?? findButton("New conversation"))?.disabled,
-          ),
-        "enabled New conversation action",
+        () => Boolean(document.querySelector("#intune-chat-composer")),
+        "Chat composer",
       );
-      const newConversation = findButton("New") ?? findButton("New conversation");
-      newConversation?.click();
+      const newConversation = findNewChatButton();
+      if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
         () => bodyText().includes("What do you want to inspect?"),
         "empty Chat state",
       );
     } else if (step.prepare === "chat-transcript") {
-      const newConversation = findButton("New") ?? findButton("New conversation");
-      newConversation?.click();
+      const newConversation = findNewChatButton();
+      if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
         () => bodyText().includes("What do you want to inspect?"),
@@ -1368,9 +1390,21 @@ async function screenshotCaptureStepScript(
         () => Boolean(document.querySelector('input[placeholder="Type here to enable Apply"]')),
         "write confirmation phrase input",
       );
-      document
-        .querySelector('input[placeholder="Type here to enable Apply"]')
-        ?.scrollIntoView({ block: "center", behavior: "auto" });
+      const confirmationInput = document.querySelector<HTMLElement>(
+        'input[placeholder="Type here to enable Apply"]',
+      );
+      const scrollRoot = confirmationInput?.closest<HTMLElement>(
+        "[data-drawer-scroll-root], .app-page-body",
+      );
+      if (confirmationInput && scrollRoot) {
+        scrollRoot.scrollTo({
+          top: Math.max(
+            0,
+            confirmationInput.offsetTop - scrollRoot.clientHeight / 2,
+          ),
+          behavior: "auto",
+        });
+      }
       await delay(150);
     }
     await delay(250);
@@ -1388,6 +1422,11 @@ async function screenshotCaptureStepScript(
     if (document.documentElement.scrollWidth > document.documentElement.clientWidth) {
       throw new Error(
         `Horizontal overflow at ${step.route}: ${document.documentElement.scrollWidth}px > ${document.documentElement.clientWidth}px.`,
+      );
+    }
+    if (document.documentElement.scrollHeight > document.documentElement.clientHeight) {
+      throw new Error(
+        `Document-level vertical overflow at ${step.route}: ${document.documentElement.scrollHeight}px > ${document.documentElement.clientHeight}px.`,
       );
     }
     return location.hash;
@@ -2886,7 +2925,7 @@ function showRunNotification(run: RunRecord): void {
     return;
   }
 
-  // Skip notifications if the user is already focused on the app — they
+  // Skip notifications if the user is already focused on the app because they
   // will see the result without being interrupted. Scheduled runs are
   // the exception: they are ambient background work, so completion/failure
   // should still surface.
@@ -2972,7 +3011,7 @@ function notificationBodyForRun(run: RunRecord): string {
  * 6h interval, or window focus). On a successful fetch with a newly
  * stamped timestamp, push `openadminos:registry-refreshed` to the
  * renderer so the Agent Hub state can swap in the new list without
- * the user clicking refresh. Failures are silent — the user only
+ * the user clicking refresh. Failures are silent. The user only
  * sees an error when they manually click refresh.
  */
 async function refreshRegistryInBackground(
@@ -6357,7 +6396,7 @@ if (!gotLock) {
       try {
         app.dock.setIcon(join(currentDir, "../../build/icon.png"));
       } catch {
-        // Non-fatal — dock icon is cosmetic in dev.
+        // Non-fatal: dock icon is cosmetic in dev.
       }
     }
 
@@ -6525,7 +6564,7 @@ if (!gotLock) {
 
     // Periodic registry refresh: every 6 hours, silently re-fetch the
     // remote index so users sitting on the app for days stay current.
-    // Failures are silent — the user only sees errors when they
+    // Failures are silent. The user only sees errors when they
     // explicitly click the Refresh button in Agent Hub.
     const REGISTRY_TICK_MS = 6 * 60 * 60 * 1000;
     setInterval(() => {

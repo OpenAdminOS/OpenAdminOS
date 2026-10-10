@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useToast } from "./Toast";
-import { Tabs } from "./ui";
+import { Badge, Button, Tabs, type BadgeTone } from "./ui";
 import { copyTextToClipboard } from "../shared/clipboard";
 import {
   IconCheck,
@@ -153,7 +153,7 @@ function ThinkingBlock({
         <span className="text-xs font-medium text-[var(--color-think)]">
           Reasoning
         </span>
-        <span className="font-mono text-xs text-[var(--color-text-muted)]">
+        <span title={thinking.model} className="min-w-0 truncate font-mono text-xs text-[var(--color-text-muted)]">
           {thinking.model}
         </span>
         {thinking.streaming && (
@@ -231,22 +231,19 @@ function LogsView({ logs }: { logs: RunLogRecord[] }) {
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         {LOG_LEVELS.map((level) => (
-          <button
+          <Button
             key={level}
             type="button"
+            size="sm"
+            variant={enabled.has(level) ? "secondary" : "ghost"}
             aria-pressed={enabled.has(level)}
             onClick={() => toggle(level)}
-            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-              enabled.has(level)
-                ? logLevelChipClass(level)
-                : "bg-[var(--color-surface)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-            }`}
           >
             <span>{level}</span>
             <span className="text-xs tabular-nums opacity-70">
               {counts[level]}
             </span>
-          </button>
+          </Button>
         ))}
       </div>
       {visible.length === 0 ? (
@@ -264,16 +261,16 @@ function LogsView({ logs }: { logs: RunLogRecord[] }) {
   );
 }
 
-function logLevelChipClass(level: RunLogLevel): string {
+function logLevelTone(level: RunLogLevel): BadgeTone {
   switch (level) {
     case "error":
-      return "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30";
+      return "danger";
     case "warn":
-      return "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30";
+      return "warning";
     case "info":
-      return "bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/30";
+      return "info";
     case "debug":
-      return "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]";
+      return "neutral";
   }
 }
 
@@ -292,11 +289,9 @@ function LogRow({ log }: { log: RunLogRecord }) {
         <span className="text-xs text-[var(--color-text-muted)] tabular-nums">
           {formatLogTime(log.timestamp)}
         </span>
-        <span
-          className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 text-xs ${logLevelChipClass(log.level)}`}
-        >
+        <Badge tone={logLevelTone(log.level)} className="justify-center">
           {log.level}
-        </span>
+        </Badge>
         <span className="text-sm leading-relaxed text-[var(--color-text-soft)]">
           {log.message}
         </span>
@@ -590,7 +585,7 @@ function ReasoningView({ steps }: { steps: RunStepRecord[] }) {
             {step.thinking && (
               <>
                 <span className="opacity-50">·</span>
-                <span className="font-mono">{step.thinking.model}</span>
+                <span title={step.thinking.model} className="min-w-0 truncate font-mono">{step.thinking.model}</span>
               </>
             )}
           </div>

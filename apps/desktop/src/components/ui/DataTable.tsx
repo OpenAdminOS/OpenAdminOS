@@ -138,7 +138,7 @@ export function DataTable<Row>({
                       }
                     >
                       {column.header}
-                      <span aria-hidden="true" className="font-mono text-xs">
+                      <span aria-hidden="true" className="text-xs">
                         {activeSort === "ascending"
                           ? "↑"
                           : activeSort === "descending"

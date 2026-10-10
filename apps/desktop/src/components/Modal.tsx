@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useId, useRef } from "react";
 import { COMMON_COPY } from "../copy";
 import { registerOverlay } from "../shared/overlay-stack";
 import { IconClose } from "./icons";
+import { IconButton } from "./ui/IconButton";
 
 const ModalHeadingContext = createContext<string | undefined>(undefined);
 
@@ -130,25 +131,22 @@ export function ModalHeader({
     <div className="flex shrink-0 items-start justify-between border-b border-[var(--color-border-soft)] px-6 py-4">
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
-          <h2 id={headingId} className="text-pretty text-[15px] font-semibold tracking-tight text-[var(--color-text)]">
+          <h2 id={headingId} className="text-pretty text-md font-semibold tracking-tight text-[var(--color-text)]">
             {title}
           </h2>
           {badge}
         </div>
         {subtitle && (
-          <div className="mt-0.5 text-[12px] text-[var(--color-text-muted)]">
+          <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
             {subtitle}
           </div>
         )}
       </div>
-      <button
-        type="button"
+      <IconButton
         onClick={onClose}
-        className="rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
-        aria-label={COMMON_COPY.actions.close}
-      >
-        <IconClose size={16} />
-      </button>
+        label={COMMON_COPY.actions.close}
+        icon={<IconClose size={16} />}
+      />
     </div>
   );
 }

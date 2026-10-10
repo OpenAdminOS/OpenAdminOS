@@ -351,7 +351,7 @@ export function DataSettingsSection() {
                         ? "Refresh cancelled"
                         : "Refresh finished with incomplete coverage"}
                 </span>
-                <span className="font-mono text-xs">{job.completed}/{job.total}</span>
+                <span className="text-xs tabular-nums">{job.completed}/{job.total}</span>
               </div>
               <progress
                 className="w-full accent-[var(--color-accent)]"
