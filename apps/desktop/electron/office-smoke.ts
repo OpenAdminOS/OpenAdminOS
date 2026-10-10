@@ -109,14 +109,16 @@ export async function runOfficeSmoke(
   await reload();
   await wait(`document.querySelectorAll('.scene-persona').length === 3`);
   await evaluate(`(() => {
-    const links = Array.from(document.querySelectorAll('.team-nav-persona'));
-    if (links.length !== 3 || links.some(link => !link.querySelector('svg'))) throw new Error('Missing sidebar persona icons.');
-    links.find(link => link.textContent.includes('Policy Watcher')).click();
+    const personas = Array.from(document.querySelectorAll('.scene-persona'));
+    if (personas.length !== 3 || personas.some(persona => !persona.querySelector('svg'))) throw new Error('Missing office persona avatars.');
+    personas.find(persona => persona.getAttribute('aria-label').startsWith('Policy Watcher')).click();
   })()`);
   await wait(
     `document.querySelector('.office-persona-heading h2')?.textContent === 'Policy Watcher'`,
   );
-  await evaluate(`document.querySelector('.team-nav-persona').click()`);
+  await evaluate(
+    `Array.from(document.querySelectorAll('.scene-persona')).find(persona => persona.getAttribute('aria-label').startsWith('Chief of Staff')).click()`,
+  );
   await wait(
     `document.querySelector('.office-persona-heading h2')?.textContent === 'Chief of Staff'`,
   );
@@ -151,7 +153,7 @@ export async function runOfficeSmoke(
   );
   window.setContentSize(1440, 1000);
   await evaluate(
-    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'List').click()`,
+    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'List view').click()`,
   );
   await wait(`Boolean(document.querySelector('.office-list'))`);
   await writeFile(join(outputDir, "office-list.png"), await capture());

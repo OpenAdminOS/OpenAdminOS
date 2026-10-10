@@ -1542,21 +1542,6 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       .find((candidate) => candidate.textContent?.trim().includes(label))
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   };
-  const setModalInput = async (value: string) => {
-    await waitFor(() => Boolean(document.querySelector(".fixed input")), "modal input");
-    const input = document.querySelector(".fixed input");
-    if (!(input instanceof HTMLInputElement)) {
-      throw new Error("Modal input was not found.");
-    }
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )?.set;
-    setter?.call(input, value);
-    input.focus();
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await waitFor(() => input.value === value, "modal input value");
-  };
   const setTextarea = async (value: string) => {
     await waitFor(() => Boolean(document.querySelector("textarea")), "chat input");
     const textarea = document.querySelector("textarea");
@@ -1880,15 +1865,38 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     return textarea instanceof HTMLTextAreaElement &&
       textarea.value.includes("Use the attached workspace context");
   }, "edit prompt loaded into composer");
-  await clickButton("Pin");
+  const findMenuItem = (label: string): HTMLButtonElement | undefined =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.trim() === label && !item.disabled,
+    );
+  await clickNamedButton("Conversation actions");
+  await waitFor(() => Boolean(findMenuItem("Pin")), "conversation actions menu");
+  findMenuItem("Pin")?.click();
+  await waitFor(() => bodyText().includes("Pinned"), "pinned conversation section");
+  await clickNamedButton("Conversation actions");
+  await waitFor(() => Boolean(findMenuItem("Unpin")), "unpin action after pinning");
+  const sawUnpinAction = Boolean(findMenuItem("Unpin"));
+  await clickNamedButton("Conversation actions");
+  await waitFor(() => !findMenuItem("Unpin"), "conversation actions menu closed");
   await waitFor(
-    () => bodyText().includes("Unpin") && bodyText().includes("Pinned"),
-    "pinned conversation action",
+    () => Boolean(document.querySelector('header [title^="Updated"] button')),
+    "conversation title button",
   );
-  await clickButton("Rename");
-  await waitFor(() => bodyText().includes("Rename conversation"), "rename conversation modal");
-  await setModalInput("Smoke lifecycle review");
-  await clickModalButton("Rename");
+  (document.querySelector('header [title^="Updated"] button') as HTMLButtonElement).click();
+  await waitFor(
+    () => Boolean(document.querySelector('input[aria-label="Conversation title"]')),
+    "inline conversation rename",
+  );
+  {
+    const input = document.querySelector('input[aria-label="Conversation title"]') as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+      input,
+      "Smoke lifecycle review",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => input.value === "Smoke lifecycle review", "rename input value");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  }
   await waitFor(() => bodyText().includes("Smoke lifecycle review"), "renamed conversation");
   const sawPinnedCategory = bodyText().includes("Pinned");
   await rightClickConversation("Smoke lifecycle review");
@@ -1909,7 +1917,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => bodyText().includes("Copied"), "copied response feedback");
   const sawAnswer = bodyText().includes("WIN-01 is stale");
   const sawConversationLifecycle =
-    bodyText().includes("Smoke lifecycle review") && bodyText().includes("Unpin");
+    bodyText().includes("Smoke lifecycle review") && sawUnpinAction;
   const sawSourceDetails = bodyText().includes("/deviceManagement/managedDevices");
   const sawEditResend = (() => {
     const textarea = document.querySelector("textarea");
@@ -2056,10 +2064,10 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(
     () =>
       bodyText().includes("Settings") &&
-      bodyText().includes("OpenAdminOS is open-source and community-driven."),
+      bodyText().includes("Readiness diagnostics"),
     "About settings",
   );
-  await clickButton("Create issue");
+  await clickButton("Report issue");
   await waitFor(
     () =>
       bodyText().includes("Submit a public GitHub issue") &&

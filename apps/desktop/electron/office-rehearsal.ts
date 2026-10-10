@@ -142,7 +142,7 @@ export async function runOfficeRehearsal(
   await evaluate(
     `(async()=>{const s=await window.openAdminOS.getAppState();const p=s.office.personas[0];for(let i=s.office.personas.length;i<24;i++)await window.openAdminOS.saveOfficePersona({...p,id:undefined,name:'Rehearsal teammate '+String(i+1).padStart(2,'0'),avatar:['robot','cat','fox','owl'][i%4],color:['amber','sage','blue','lilac'][i%4],agentSlugs:['compliance-overview'],intervalMinutes:null,watch:undefined,enabled:true});})()`,
   );
-  await wait(`document.querySelectorAll('.team-nav-persona').length===24`);
+  await wait(`(async()=>(await window.openAdminOS.getAppState()).office.personas.length===24)()`);
   await evaluate(
     `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('Floor 4')).click();[...document.querySelectorAll('button')].find(b=>b.textContent==='Team roster').click();})()`,
   );
