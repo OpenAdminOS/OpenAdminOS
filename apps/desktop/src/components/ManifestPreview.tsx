@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
+import { Badge, Section } from "./ui";
 import {
   IconBolt,
   IconChevronDown,
@@ -43,7 +44,7 @@ export function ManifestPreview({
   /**
    * When true, render a descriptor card (name, description, mode,
    * category, version) above the manifest sections. Off by default
-   * because most callers already show this in their page chrome —
+   * because most callers already show this in their page chrome.
    * NewAgentModal sets it on so users can see what the LLM proposed.
    */
   showDescriptor?: boolean;
@@ -72,9 +73,140 @@ export function ManifestPreview({
           registryPath={registryPath}
           languageHint="yaml"
           title="Raw manifest"
-          helperText="This is the exact YAML the runtime loaded. The pipeline above is derived from it — there is no hidden code path."
+          helperText="This is the exact YAML the runtime loaded. The pipeline above is derived from it, with no hidden code path."
         />
       )}
+    </div>
+  );
+}
+
+export type ManifestSectionId =
+  | "permissions"
+  | "settings"
+  | "result"
+  | "pipeline";
+
+/** Compact manifest sections for the URL-addressable agent drawer. */
+export function ManifestSections({
+  preview,
+  settingsOverrides,
+  sections = ["permissions", "settings", "result", "pipeline"],
+}: {
+  preview: AgentManifestPreview;
+  settingsOverrides?: Record<string, unknown>;
+  sections?: ManifestSectionId[];
+}) {
+  const { manifest } = preview;
+  const scopes = collectScopesFromManifest(manifest);
+  const settings = manifest.definition.settings ?? [];
+  const result = manifest.definition.result;
+
+  return (
+    <div className="space-y-6">
+      {sections.map((section) => {
+        if (section === "permissions") {
+          return (
+            <Section key={section} title="Permissions">
+              {scopes.length > 0 ? (
+                <div className="divide-y divide-[var(--color-border-soft)]">
+                  {scopes.map((scope) => (
+                    <div key={scope} className="break-all py-2 font-mono text-sm text-[var(--color-text)]">
+                      {scope}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>
+              )}
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+                Missing consent is requested before the first run.
+              </p>
+            </Section>
+          );
+        }
+
+        if (section === "settings") {
+          return (
+            <Section key={section} title="Settings">
+              {settings.length === 0 ? (
+                <p className="text-sm text-[var(--color-text-muted)]">This agent has no configurable values.</p>
+              ) : (
+                <div className="divide-y divide-[var(--color-border-soft)]">
+                  {settings.map((setting) => {
+                    const overridden = Boolean(
+                      settingsOverrides &&
+                        Object.prototype.hasOwnProperty.call(settingsOverrides, setting.id),
+                    );
+                    const value = overridden
+                      ? settingsOverrides?.[setting.id]
+                      : setting.default;
+                    return (
+                      <div key={setting.id} className="flex items-start justify-between gap-4 py-2.5">
+                        <span className="min-w-0">
+                          <span className="block font-medium text-[var(--color-text)]">{setting.label}</span>
+                          {setting.description ? (
+                            <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
+                              {setting.description}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <Badge tone="neutral">{setting.type}</Badge>
+                          <span className="font-mono text-xs text-[var(--color-text-soft)]">
+                            {overridden ? "Current" : "Default"}: {stringify(value)}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Section>
+          );
+        }
+
+        if (section === "result") {
+          return (
+            <Section key={section} title="What the run produces">
+              <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+                <div className="text-xs font-medium text-[var(--color-text-muted)]">Summary template</div>
+                <pre className="mt-1.5 whitespace-pre-wrap font-mono text-sm leading-relaxed text-[var(--color-text-soft)]">
+                  {result.summary}
+                </pre>
+              </div>
+              {result.data ? (
+                <div className="mt-3 rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+                  <div className="text-xs font-medium text-[var(--color-text-muted)]">Result data shape</div>
+                  <pre className="mt-1.5 overflow-x-auto font-mono text-sm leading-relaxed text-[var(--color-text-soft)]">
+                    {stringify(result.data, 2)}
+                  </pre>
+                </div>
+              ) : null}
+            </Section>
+          );
+        }
+
+        return (
+          <Section
+            key={section}
+            title="Pipeline"
+            action={<Badge tone="neutral">{manifest.skills.length} steps</Badge>}
+          >
+            <details>
+              <summary className="cursor-pointer rounded-md text-sm text-[var(--color-text-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+                Show execution steps
+              </summary>
+              <ol className="mt-3 space-y-3">
+                {manifest.skills.map((step, index) => (
+                  <li key={step.id}>
+                    <StepRow step={step} index={index} />
+                  </li>
+                ))}
+              </ol>
+            </details>
+          </Section>
+        );
+      })}
     </div>
   );
 }

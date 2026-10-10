@@ -133,7 +133,7 @@ describe("Office scene", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: "Reduced motion" }),
+      screen.getByRole("button", { name: "Reduced motion is active" }),
     ).toBeDisabled();
     expect(container.querySelector(".team-office")).toHaveAttribute(
       "data-motion",

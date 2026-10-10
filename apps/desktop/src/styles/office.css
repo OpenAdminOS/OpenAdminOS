@@ -36,25 +36,23 @@
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
 }
-.office-toolbar span {
+.office-toolbar > div:first-child > span {
   margin: 0 8px;
   color: var(--color-text-muted);
 }
 .office-view {
   display: flex;
-  gap: 2px;
-  border: 1px solid var(--color-border);
-  padding: 3px;
-  border-radius: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
-.office-view button,
 .office-presets button {
   padding: 5px 12px;
   border-radius: 5px;
   font-size: 12px;
   cursor: pointer;
 }
-.office-view button[aria-pressed="true"],
 .office-presets button[aria-pressed="true"] {
   background: var(--color-surface-hover);
   color: var(--color-text);
@@ -976,7 +974,6 @@
   letter-spacing: 0;
   margin-left: 8px;
 }
-.scene-toolbar button,
 .scene-floors button {
   cursor: pointer;
   font: 10px var(--font-mono, monospace);
@@ -986,14 +983,9 @@
   border-radius: 5px;
   white-space: nowrap;
 }
-.scene-toolbar button:hover,
 .scene-floors button:hover,
 .scene-floors button[aria-pressed="true"] {
   background: var(--color-surface-hover);
-}
-.scene-toolbar button:disabled {
-  cursor: default;
-  opacity: 0.7;
 }
 .office-stage {
   position: relative;
@@ -1552,7 +1544,6 @@
   align-items: center;
   gap: 8px;
 }
-.scene-controls button,
 .scene-search-results button {
   padding: 5px 8px;
   border: 1px solid var(--color-border-strong);
@@ -1622,7 +1613,6 @@ html[data-team-presentation] .office-page {
 }
 @media (forced-colors: active) {
   .team-decision,
-  .scene-controls button,
   .scene-event {
     border: 1px solid ButtonText;
   }

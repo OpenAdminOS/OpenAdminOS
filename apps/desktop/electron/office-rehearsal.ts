@@ -53,7 +53,7 @@ export async function runOfficeRehearsal(
     );
   };
   window.setContentSize(1440, 1000);
-  await evaluate(`location.hash='/office'`);
+  await evaluate(`location.hash='/agents/office'`);
   await wait(`Boolean(document.querySelector('.team-office'))`);
   const ids = await evaluate<{
     source: string;
@@ -70,12 +70,12 @@ export async function runOfficeRehearsal(
    return {source:source.id,research:research.id,chief:chief.id};
  })()`);
   const select = async (id: string) => {
-    await evaluate(`location.hash='/office?persona=${id}'`);
+    await evaluate(`location.hash='/agents/office?persona=${id}'`);
     await sleep(200);
   };
   await select(ids.source);
   await evaluate(
-    `(()=>{const button=[...document.querySelectorAll('button')].find(b=>b.textContent==='Expand office');if(button.getAttribute('aria-pressed')!=='true')button.click();const banner=document.createElement('p');banner.className='team-rehearsal-banner';banner.textContent='REHEARSAL DATA · Local fixtures · No live tenant writes';document.querySelector('.office-header').append(banner);document.querySelector('.office-page').scrollTop=0;})()`,
+    `(()=>{const button=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Expand office'||b.getAttribute('aria-label')==='Restore layout');if(button.getAttribute('aria-pressed')!=='true')button.click();const banner=document.createElement('p');banner.className='team-rehearsal-banner';banner.textContent='REHEARSAL DATA · Local fixtures · No live tenant writes';document.querySelector('.app-page-header').append(banner);document.querySelector('.office-page').scrollTop=0;})()`,
   );
   let recording = true,
     recordError: unknown,

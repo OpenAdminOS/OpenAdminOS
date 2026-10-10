@@ -6,16 +6,12 @@ import { Card } from "./components/Card";
 
 const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
-const AgentsHome = lazy(() => import("./pages/AgentsHome"));
-const AgentDetail = lazy(() => import("./pages/AgentDetail"));
-const AgentHub = lazy(() => import("./pages/AgentHub"));
 const Activity = lazy(() => import("./pages/Activity"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Settings = lazy(() => import("./pages/Settings"));
 const RunResult = lazy(() => import("./pages/RunResult"));
-const Schedules = lazy(() => import("./pages/Schedules"));
 const MenuBarCompanion = lazy(() => import("./pages/MenuBarCompanion"));
 
 export default function App() {
@@ -59,17 +55,17 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/chat" replace />} />
           <Route path="/onboarding" element={<Navigate to="/chat" replace />} />
-          <Route path="/agents" element={<Agents />}>
-            <Route index element={<AgentsHome />} />
-            <Route path="hub" element={<AgentHub embedded />} />
-            <Route path="schedules" element={<Schedules embedded />} />
-          </Route>
-          <Route path="/agents/:slug/confirm" element={<AgentDetail startRunOnOpen />} />
-          <Route path="/agents/:slug" element={<AgentDetail />} />
-          <Route path="/hub" element={<Navigate to="/agents/hub" replace />} />
+          <Route path="/agents" element={<Agents />} />
+          <Route path="/agents/office" element={<Office />} />
+          <Route path="/agents/team/:personaId" element={<Agents />} />
+          <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
+          <Route path="/agents/schedules" element={<AgentsQueryRedirect filter="scheduled" />} />
+          <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
+          <Route path="/agents/:slug" element={<Agents />} />
+          <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
           <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
-          <Route path="/office" element={<Office />} />
+          <Route path="/office" element={<OfficeRedirect />} />
           <Route path="/changes" element={<Changes />} />
           <Route path="/fleet" element={<FleetRedirect />} />
           <Route path="/workspaces" element={<Workspaces />} />
@@ -91,6 +87,59 @@ export function ActivityRedirect() {
   return (
     <Navigate
       to={{ pathname: "/runs", search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+export function AgentsQueryRedirect({
+  source,
+  filter,
+}: {
+  source?: "hub";
+  filter?: "scheduled";
+}) {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  if (source) search.set("source", source);
+  if (filter) search.set("filter", filter);
+  return (
+    <Navigate
+      to={{
+        pathname: "/agents",
+        search: search.toString() ? `?${search.toString()}` : "",
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function OfficeRedirect() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  const personaId = search.get("persona");
+  if (personaId) {
+    search.delete("persona");
+    return (
+      <Navigate
+        to={{
+          pathname: `/agents/team/${encodeURIComponent(personaId)}`,
+          search: search.toString() ? `?${search.toString()}` : "",
+          hash: location.hash,
+        }}
+        replace
+      />
+    );
+  }
+  const hasOfficeState = search.has("view") || search.has("assignment") || search.has("inbox");
+  return (
+    <Navigate
+      to={{
+        pathname: hasOfficeState ? "/agents/office" : "/agents",
+        search: hasOfficeState && search.toString() ? `?${search.toString()}` : "",
+        hash: location.hash,
+      }}
       replace
     />
   );

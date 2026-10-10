@@ -8,7 +8,6 @@ import {
   IconChanges,
   IconAgentTeam,
   IconChat,
-  IconClock,
   IconHardDrive,
   IconHub,
   IconPlay,
@@ -44,7 +43,7 @@ export function CommandPalette({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const { state, registryAgents, startRun } = useAppState();
+  const { state, startRun } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -76,13 +75,34 @@ export function CommandPalette({
         shortcut: "↵ Open",
         action: go(`/agents/${a.slug}`),
       })),
-      ...registryAgents.map((a) => ({
-        id: `hub-${a.id}`,
-        label: formatAgentDisplayName(a),
-        hint: `Hub · ${a.author.name}`,
-        group: "Hub" as const,
-        icon: <IconHub size={13} className="text-[var(--color-text-soft)]" />,
-        action: go("/agents/hub"),
+      ...state.installedAgents.map((agent) => ({
+        id: `run-agent-${agent.id}`,
+        label: `Run ${formatAgentDisplayName(agent)}`,
+        hint: agent.mode === "write" ? "Review required before changes" : "Run with current tenant and provider",
+        group: "Actions" as const,
+        icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
+        action: async () => {
+          if (
+            !requireTenantAndProvider(
+              createPendingIntent({
+                kind: "agent-run",
+                slug: agent.slug,
+                returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
+              }),
+            )
+          ) {
+            onClose();
+            return;
+          }
+          if (agent.mode === "write") {
+            navigate(`/agents/${encodeURIComponent(agent.slug)}/confirm`);
+            onClose();
+            return;
+          }
+          const run = await startRun(agent.slug);
+          navigate(`/runs/${run.id}`);
+          onClose();
+        },
       })),
       {
         id: "nav-chat",
@@ -93,30 +113,22 @@ export function CommandPalette({
       },
       {
         id: "nav-agents",
-        label: "Go to Agents",
+        label: "Agents",
         group: "Navigate",
         icon: <IconAgents size={13} className="text-[var(--color-accent)]" />,
         action: go("/agents"),
       },
       {
         id: "nav-hub",
-        label: "Go to Hub",
+        label: "Agents: Hub",
         group: "Navigate",
         icon: <IconHub size={13} className="text-[var(--color-accent)]" />,
-        action: go("/agents/hub"),
+        action: go("/agents?source=hub"),
       },
       {
-        id: "nav-schedules",
-        label: "Go to Schedules",
-        hint: "Review active agent schedules",
-        group: "Navigate",
-        icon: <IconClock size={13} className="text-[var(--color-accent)]" />,
-        action: go("/agents/schedules"),
-      },
-      {
-        id: "nav-office", label: "Go to Agent Team", group: "Navigate",
+        id: "nav-office", label: "Team office", group: "Navigate",
         icon: <IconAgentTeam size={13} className="text-[var(--color-accent)]" />,
-        action: go("/office"),
+        action: go("/agents/office"),
       },
       {
         id: "nav-changes",
@@ -166,6 +178,14 @@ export function CommandPalette({
         action: go("/settings"),
       },
       {
+        id: "act-add-teammate",
+        label: "Add teammate",
+        hint: "Create a persistent assignment",
+        group: "Actions",
+        icon: <IconAgentTeam size={13} className="text-[var(--color-accent)]" />,
+        action: go("/agents?add=teammate"),
+      },
+      {
         id: "act-voice",
         label: "Open Voice",
         hint: "Nova voice assistant · Alt+V",
@@ -192,49 +212,20 @@ export function CommandPalette({
         icon: <IconSettings size={13} className="text-[var(--color-text-soft)]" />,
         action: go(`/settings/${entry.section}?target=${id}`),
       })),
-      ...(state.installedAgents.length > 0
+      ...(state.installedAgents.length === 0
         ? ([
-            {
-              id: "act-run-first",
-              label: `Run ${state.installedAgents[0]!.name}`,
-              hint:
-                state.installedAgents.length === 1
-                  ? "Queue your installed agent"
-                  : `Run the first of ${state.installedAgents.length} installed agents`,
-              group: "Actions",
-              icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
-              action: async () => {
-                const agent = state.installedAgents[0]!;
-                if (
-                  !requireTenantAndProvider(
-                    createPendingIntent({
-                      kind: "agent-run",
-                      slug: agent.slug,
-                      returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
-                    }),
-                  )
-                ) {
-                  onClose();
-                  return;
-                }
-                const run = await startRun(agent.slug);
-                navigate(`/runs/${run.id}`);
-                onClose();
-              },
-            },
-          ] as PaletteItem[])
-        : ([
             {
               id: "act-browse-hub",
               label: "Browse agents to install",
               hint: "Install an agent before running",
               group: "Actions",
               icon: <IconHub size={13} className="text-[var(--color-accent)]" />,
-              action: go("/agents/hub"),
+              action: go("/agents?source=hub"),
             },
-          ] as PaletteItem[])),
+          ] as PaletteItem[])
+        : []),
     ];
-  }, [navigate, onClose, registryAgents, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length]);
+  }, [navigate, onClose, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;

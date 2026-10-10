@@ -3,9 +3,11 @@ import { Route, Routes, useLocation } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
   ActivityRedirect,
+  AgentsQueryRedirect,
   FleetRedirect,
   LegacyConnectorRedirect,
   LegacySettingsRedirect,
+  OfficeRedirect,
 } from "./App";
 import { renderWithAppState } from "./test/test-utils";
 
@@ -21,6 +23,85 @@ describe("legacy activity route", () => {
 
     expect(await screen.findByTestId("location")).toHaveTextContent(
       "/runs?filter=needs-review&tenant=contoso",
+    );
+  });
+});
+
+describe("legacy Agents routes", () => {
+  it("redirects Hub and Schedules into Agents filters while preserving state", async () => {
+    const { unmount } = renderWithAppState(
+      <Routes>
+        <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
+        <Route path="/agents" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/agents/hub?category=devices#catalog" },
+    );
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/agents?category=devices&source=hub#catalog",
+    );
+    unmount();
+
+    renderWithAppState(
+      <Routes>
+        <Route path="/agents/schedules" element={<AgentsQueryRedirect filter="scheduled" />} />
+        <Route path="/agents" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/agents/schedules?mode=read" },
+    );
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/agents?mode=read&filter=scheduled",
+    );
+  });
+
+  it("redirects the root Hub alias to the Hub library source", async () => {
+    renderWithAppState(
+      <Routes>
+        <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
+        <Route path="/agents" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/hub?category=identity" },
+    );
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/agents?category=identity&source=hub",
+    );
+  });
+
+  it("redirects Office landing and persona links to their consolidated locations", async () => {
+    const { unmount } = renderWithAppState(
+      <Routes>
+        <Route path="/office" element={<OfficeRedirect />} />
+        <Route path="/agents" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/office" },
+    );
+    expect(await screen.findByTestId("location")).toHaveTextContent("/agents");
+    unmount();
+
+    renderWithAppState(
+      <Routes>
+        <Route path="/office" element={<OfficeRedirect />} />
+        <Route path="/agents/team/:personaId" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/office?persona=policy-watcher&view=list#assignment" },
+    );
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/agents/team/policy-watcher?view=list#assignment",
+    );
+  });
+
+  it("keeps assignment Office links in the full office view", async () => {
+    renderWithAppState(
+      <Routes>
+        <Route path="/office" element={<OfficeRedirect />} />
+        <Route path="/agents/office" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/office?assignment=mission-42&inbox=1" },
+    );
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/agents/office?assignment=mission-42&inbox=1",
     );
   });
 });

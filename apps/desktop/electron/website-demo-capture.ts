@@ -32,12 +32,12 @@ export async function captureWebsiteDemo(
       prepare: "chat-empty" as const,
       click: "Devices",
     },
-    { id: "team", route: "/office", label: "Agent Team", wait: ["Agent Team"] },
+    { id: "team", route: "/agents/office", label: "Team office", wait: ["Team office"] },
     {
       id: "team-paused",
-      route: "/office",
-      label: "Agent Team, motion paused",
-      wait: ["Agent Team"],
+      route: "/agents/office",
+      label: "Team office, motion paused",
+      wait: ["Team office"],
     },
     {
       id: "agents",
@@ -47,15 +47,15 @@ export async function captureWebsiteDemo(
     },
     {
       id: "hub",
-      route: "/agents/hub",
-      label: "Agent Hub",
-      wait: ["Search agents"],
+      route: "/agents?source=hub",
+      label: "Agents: Hub",
+      wait: ["Search hub"],
     },
     {
       id: "schedules",
-      route: "/agents/schedules",
-      label: "Schedules",
-      wait: ["Schedules"],
+      route: "/agents?filter=scheduled",
+      label: "Scheduled agents",
+      wait: ["Scheduled only"],
     },
     {
       id: "agent-details",
@@ -164,10 +164,9 @@ export async function captureWebsiteDemo(
     },
     {
       id: "team-add",
-      route: "/office",
+      route: "/agents?add=teammate",
       label: "Add teammate",
-      wait: ["Agent Team"],
-      click: "Add teammate",
+      wait: ["Add teammate"],
     },
     {
       id: "workspace-add",
@@ -307,11 +306,11 @@ export async function captureWebsiteDemo(
       const heading =
         screen.route === "/workspaces"
           ? "No workspace selected"
+          : screen.route === "/agents/office"
+            ? "Team office"
           : screen.route.startsWith("/settings")
               ? "Settings"
-              : screen.route.startsWith("/agents/hub") ||
-                  screen.route === "/agents/schedules" ||
-                  screen.route === "/agents"
+              : screen.route.startsWith("/agents")
                 ? "Agents"
                 : screen.route.startsWith("/runs/")
                   ? "Offboarding agent"
@@ -334,9 +333,9 @@ export async function captureWebsiteDemo(
       if (screen.id === "team" || screen.id === "team-paused") {
         await window.webContents.executeJavaScript(`(() => {
           document.documentElement.removeAttribute('data-reduced-motion');
-          const expand = [...document.querySelectorAll('button')].find(b => b.textContent === 'Expand office');
+          const expand = [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Expand office');
           expand?.click();
-          [...document.querySelectorAll('button')].find(b => b.textContent === 'Resume motion')?.click();
+          [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Resume motion')?.click();
         })()`);
         await new Promise((resolve) => setTimeout(resolve, 700));
         const count = await window.webContents.executeJavaScript(
@@ -344,7 +343,7 @@ export async function captureWebsiteDemo(
         );
         if (screen.id === "team-paused") {
           await window.webContents.executeJavaScript(
-            `[...document.querySelectorAll('button')].find(b => b.textContent === 'Pause motion')?.click()`,
+            `[...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Pause motion')?.click()`,
           );
           await new Promise((resolve) => setTimeout(resolve, 150));
         }

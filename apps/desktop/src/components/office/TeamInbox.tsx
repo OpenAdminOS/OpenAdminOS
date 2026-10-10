@@ -133,7 +133,7 @@ export function TeamInbox({
               <span className="team-tag">Operational issue</span>
               <h3>{p.name}</h3>
               <p>{p.lastError}</p>
-              <Link to={`/office?persona=${encodeURIComponent(p.id)}`}>
+              <Link to={`/agents/team/${encodeURIComponent(p.id)}`}>
                 Open assignment →
               </Link>
             </article>
@@ -283,7 +283,7 @@ export function PersonaConversation({
             <p key={h.id}>
               {h.reason}{" "}
               <Link
-                to={`/office?persona=${encodeURIComponent(h.targetPersonaId)}`}
+                to={`/agents/team/${encodeURIComponent(h.targetPersonaId)}`}
               >
                 Open specialist →
               </Link>

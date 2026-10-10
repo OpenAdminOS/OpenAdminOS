@@ -1832,17 +1832,21 @@ The sidebar contains exactly five destinations in this order:
 | Nav item | Route | Contains |
 |---|---|---|
 | Chat | `/chat` | Tenant Q&A and, after consolidation, Workspaces |
-| Agents | `/agents` | Installed agents, Hub, schedules, and Agent Team |
+| Agents | `/agents` | Team roster, installed and Hub libraries, schedules, and agent details |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
 | Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, Appearance, Privacy, and About |
 
-Until their remaining consolidation phases land, Agent Team and Workspaces
-remain routable and reachable from the command palette. Cache and Connectors
-now live in Settings; legacy `/cache` and `/connectors` URLs redirect to their
-Settings sections, including connector drawer deep links. `/fleet` redirects
-to the all-tenant Changes scope at `/changes?scope=all`, and `/activity`
-redirects to `/runs`.
+Workspaces remain separately routable and reachable from the command palette
+until Chat consolidation lands. Agent Team now renders at the top of Agents,
+with the full office at `/agents/office` and persona details at
+`/agents/team/:personaId`. Installed agents and Hub share the Library section;
+schedule filtering and controls live there and in each agent drawer. Legacy
+`/office`, `/hub`, `/agents/hub`, and `/agents/schedules` URLs redirect into
+these routes and query filters. Cache and Connectors now live in Settings;
+legacy `/cache` and `/connectors` URLs redirect to their Settings sections,
+including connector drawer deep links. `/fleet` redirects to the all-tenant
+Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
 
 Removed from navigation:
 - **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
@@ -1880,9 +1884,9 @@ North-star metric: time from install to first successful result, target under 5 
 | Settings | Nav label | Provider, tenant, data, connector, gateway, appearance, privacy, and application configuration |
 | Data | Settings section (replaces "Cache") | Cache freshness, preload coverage, refresh scheduling, and local retention |
 | Agent | Unchanged | Installable module with declared scopes and read/write mode |
-| Hub | Tab inside Agents (was "Agent Hub" nav item) | Community agent store |
-| Schedule | Tab inside Agents | Recurring agent runs |
-| Agent Team | Palette destination until Agents consolidation | Persistent personas, assignments, and evidence-linked briefings |
+| Hub | Library source inside Agents (was "Agent Hub" nav item) | Community agent store |
+| Schedule | Library filter and agent drawer section | Recurring agent runs |
+| Agent Team | Team section and full office inside Agents | Persistent personas, assignments, and evidence-linked briefings |
 | Workspace | Palette destination until Chat consolidation | Saved multi-tenant working set |
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls |
 | Tenant | Unchanged | The Microsoft 365 tenant |
@@ -1917,7 +1921,9 @@ North-star metric: time from install to first successful result, target under 5 
 
 ### Agent Team and persistent teammates (approved 2026-09-10; expanded 2026-09-11)
 
-Agent Team is a single-user desktop surface at `/office`, directly below Chat.
+Agent Team is part of the Agents surface. Its compact roster is at `/agents`,
+persona details open at `/agents/team/:personaId`, and the full room is at
+`/agents/office`.
 Teammate shortcuts use original robot, cat, fox, and owl icons, live attention badges,
 search, and a collapsible group. Selection and room/list view are addressable in the
 route query. Human invitations, shared credentials, cloud coordination, and floating

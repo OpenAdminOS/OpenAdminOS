@@ -6,6 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 import type { OfficePersona } from "../../shared/openAdminOS";
+import { Button, IconButton } from "../ui";
 
 export function PersonaAvatar({
   avatar,
@@ -751,10 +752,12 @@ export function OfficeScene({
     >
       <div className="scene-toolbar">
         <span>
-          <i /> TEAM OFFICE <small>Live assignments, a little downtime</small>
+          <i /> Team office <small>Live assignments, a little downtime</small>
         </span>
-        <button
-          aria-pressed={paused}
+        <IconButton
+          label={reduced ? "Reduced motion is active" : paused ? "Resume motion" : "Pause motion"}
+          icon={paused ? <PlayMotionIcon /> : <PauseMotionIcon />}
+          aria-pressed={paused || reduced}
           disabled={reduced}
           onClick={() =>
             setPaused((p) => {
@@ -762,13 +765,8 @@ export function OfficeScene({
               return !p;
             })
           }
-        >
-          {reduced
-            ? "Reduced motion"
-            : paused
-              ? "Resume motion"
-              : "Pause motion"}
-        </button>
+          size="sm"
+        />
       </div>
       <div className="scene-controls">
         <label>
@@ -781,29 +779,31 @@ export function OfficeScene({
           />
         </label>
         <div>
-          <button
-            aria-label="Zoom out office"
+          <IconButton
+            label="Zoom out office"
+            icon={<MinusIcon />}
             disabled={zoom <= 1}
             onClick={() => setZoom((z) => Math.max(1, z - 0.25))}
-          >
-            −
-          </button>
+            size="sm"
+          />
           <span>{Math.round(zoom * 100)}%</span>
-          <button
-            aria-label="Zoom in office"
+          <IconButton
+            label="Zoom in office"
+            icon={<PlusIcon />}
             disabled={zoom >= 1.75}
             onClick={() => setZoom((z) => Math.min(1.75, z + 0.25))}
-          >
-            +
-          </button>
-          <button onClick={() => setZoom(1)}>Fit</button>
-          <button
+            size="sm"
+          />
+          <IconButton label="Fit office" icon={<FitIcon />} onClick={() => setZoom(1)} size="sm" />
+          <Button
+            size="sm"
+            variant="ghost"
             aria-expanded={rosterOpen}
             aria-controls="office-roster"
             onClick={() => setRosterOpen((v) => !v)}
           >
             {rosterOpen ? "Hide roster" : "Team roster"}
-          </button>
+          </Button>
         </div>
       </div>
       {query && (
@@ -857,7 +857,7 @@ export function OfficeScene({
             href={
               latestEvent[1].runId
                 ? `#/runs/${latestEvent[1].runId}`
-                : `#/office?persona=${encodeURIComponent(latestEvent[0])}`
+                : `#/agents/team/${encodeURIComponent(latestEvent[0])}`
             }
           >
             Open evidence →
@@ -913,4 +913,24 @@ export function OfficeScene({
       )}
     </div>
   );
+}
+
+function PauseMotionIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z" /></svg>;
+}
+
+function PlayMotionIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 4 13 8-13 8z" /></svg>;
+}
+
+function MinusIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M5 12h14" /></svg>;
+}
+
+function PlusIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>;
+}
+
+function FitIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4" /></svg>;
 }

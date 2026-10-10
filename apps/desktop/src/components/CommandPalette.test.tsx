@@ -66,17 +66,28 @@ it("lists the shell destinations and every Settings section", async () => {
 
   for (const label of [
     "Go to Chat",
-    "Go to Agents",
+    "Agents",
+    "Agents: Hub",
     "Go to Runs",
     "Go to Changes",
     "Open Settings",
-    "Go to Agent Team",
+    "Team office",
+    "Add teammate",
     "Changes: All tenants",
     "Go to Workspaces",
     "Open Voice",
   ]) {
-    expect(screen.getByRole("option", { name: new RegExp(label) })).toBeInTheDocument();
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(
+      screen.getByRole("option", {
+        name: label === "Agents" ? /^Agents$/ : new RegExp(`^${escapedLabel}`),
+      }),
+    ).toBeInTheDocument();
   }
+
+  expect(screen.getByRole("option", { name: /^Device Offboard/ })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /^Run Device Offboard/ })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Schedules/ })).not.toBeInTheDocument();
 
   expect(screen.getByRole("option", { name: /^Data/ })).toBeInTheDocument();
 

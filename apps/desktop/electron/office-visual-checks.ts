@@ -38,7 +38,7 @@ export async function runOfficeVisualChecks(
   };
   const click = async (text: string) => {
     await evaluate(
-      `(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)});if(!b)throw new Error('Missing visual control: '+${JSON.stringify(text)});b.click();})()`,
+      `(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)}||b.getAttribute('aria-label')===${JSON.stringify(text)});if(!b)throw new Error('Missing visual control: '+${JSON.stringify(text)});b.click();})()`,
     );
     await sleep(200);
   };
@@ -91,7 +91,7 @@ export async function runOfficeVisualChecks(
     await evaluate(`(()=>{
     const stage=document.querySelector('.office-stage').getBoundingClientRect();
     const scope=document.querySelector('footer[aria-label="Current tenant, provider, and data boundary"]');
-    const exit=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Exit full screen').getBoundingClientRect();
+    const exit=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Exit full screen').getBoundingClientRect();
     if(stage.top<0||stage.bottom>innerHeight||stage.right>innerWidth)throw new Error('Fullscreen room is clipped');
     if(getComputedStyle(scope).visibility==='hidden'||getComputedStyle(scope).display==='none')throw new Error('Fullscreen concealed the tenant boundary');
     if(exit.bottom>innerHeight)throw new Error('Fullscreen exit is clipped');
@@ -151,7 +151,7 @@ export async function runOfficeVisualChecks(
   await sleep(500);
   if (window.isFullScreen())
     throw new Error("Route exit did not restore the window.");
-  await evaluate(`location.hash='/office'`);
+  await evaluate(`location.hash='/agents/office'`);
   await wait(`Boolean(document.querySelector('.scene-persona'))`);
   window.setBounds(bounds);
   window.setMinimumSize(minimum[0], minimum[1]);

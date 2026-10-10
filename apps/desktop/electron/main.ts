@@ -1000,15 +1000,15 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/agents",
       name: "agents-home",
       file: "app/agents-home.png",
-      waitFor: ["Installed", "Schedules", "Search installed agents"],
+      waitFor: ["Team", "Library", "Search installed agents"],
       heading: "Agents",
     },
     {
-      route: "/agents/hub",
+      route: "/agents?source=hub",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Hub", `${entries.length} shown`],
-      heading: "Agent Hub",
+      waitFor: ["Hub", "Search hub"],
+      heading: "Agents",
     },
     {
       route: "/chat",
@@ -1056,12 +1056,12 @@ async function runScreenshotCapture(): Promise<void> {
   if (process.env.OPENADMINOS_BRAND_CAPTURE === "1") {
     const extraShots = [
       { route: "/settings/data", name: "cache", waitFor: ["Data", "Tenant cache"] },
-      { route: "/office", name: "agent-team", waitFor: ["Agent Team"] },
+      { route: "/agents/office", name: "agent-team", waitFor: ["Team office"] },
       { route: "/changes?scope=all", name: "fleet", waitFor: [] },
       { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
       { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
-      { route: "/agents/schedules", name: "schedules", waitFor: ["Schedules"] },
+      { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Scheduled only"] },
       { route: "/settings/appearance", name: "appearance", waitFor: ["Graphite dark"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
@@ -1158,7 +1158,7 @@ async function runScreenshotCapture(): Promise<void> {
       try {
         await runScreenshotCaptureStep(window, {
           kind: "hub-detail",
-          route: "/agents/hub",
+          route: "/agents?source=hub",
           slug: entry.slug,
           name: entry.name,
           expectedCount: entries.length,
@@ -1395,19 +1395,19 @@ async function screenshotCaptureStepScript(
 
   await waitFor(
     () =>
-      bodyText().includes(`${step.expectedCount} shown`) &&
+      bodyText().includes(`${step.expectedCount} of ${step.expectedCount} hub agents`) &&
       bodyText().includes(step.name),
     `Hub grid for ${step.slug}`,
   );
-  await navigateHash(`${step.route}?agent=${encodeURIComponent(step.slug)}`);
+  await navigateHash(`/agents/${encodeURIComponent(step.slug)}?source=hub`);
   await waitFor(
     () => {
       const modal = document.querySelector(".fixed");
       const text = modal?.textContent ?? "";
       return (
         text.includes(step.name) &&
-        text.includes("Tenant impact") &&
-        text.includes("Required scopes")
+        text.includes("About") &&
+        text.includes("Permissions")
       );
     },
     `Hub detail modal for ${step.slug}`,
@@ -5010,7 +5010,7 @@ function createMenuBarCompanion(): void {
         {
           label: "Schedules",
           click: () => {
-            void openMainWindow("/agents/schedules");
+            void openMainWindow("/agents?filter=scheduled");
           },
         },
         {

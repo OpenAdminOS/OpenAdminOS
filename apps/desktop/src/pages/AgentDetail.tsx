@@ -1,31 +1,34 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Select } from "../components/Select";
-import { useLocation, useNavigate, useParams } from "react-router";
-import { PageBody, PageHeader } from "../components/AppShell";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
-import { Button } from "../components/Button";
-import { Avatar } from "../components/Avatar";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
-import { ManifestPreview } from "../components/ManifestPreview";
+import { ManifestPreview, ManifestSections } from "../components/ManifestPreview";
 import { stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { Modal, ModalHeader } from "../components/Modal";
 import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
 import { RunWithMenu } from "../components/RunWithMenu";
-import { ShareMenu } from "../components/ShareMenu";
 import { useToast } from "../components/Toast";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { CommunityShareModal } from "../components/CommunityShareModal";
 import {
-  IconArrowLeft,
   IconBadgeCheck,
-  IconBolt,
+  IconChevronDown,
   IconClock,
   IconConnectors,
-  IconExternal,
   IconShare,
-  IconShield,
 } from "../components/icons";
+import {
+  Badge,
+  Button,
+  Drawer,
+  IconButton,
+  KeyValue,
+  Menu,
+  Section,
+  Skeleton,
+} from "../components/ui";
 import { useAppState } from "../state";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -46,6 +49,7 @@ import {
   type ProviderId,
   type ProviderSummary,
   type RequestedScope,
+  type RegistryAgentSummary,
   type RunRecord,
   type WhatsAppWebGroupRef,
   type WhatsAppWebRecipientType,
@@ -59,9 +63,12 @@ export default function AgentDetail({
   const { slug } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { requireTenantAndProvider } = useSetupFlow();
   const {
     state,
+    registryAgents,
+    installAgent,
     startRun,
     updateAgentSettings,
     uninstallAgent,
@@ -78,13 +85,20 @@ export default function AgentDetail({
   } = useAppState();
   const toast = useToast();
   const agent = state.installedAgents.find((a) => a.slug === slug);
-  const recentRuns = state.runs.filter((run) => run.agentSlug === slug).slice(0, 3);
+  const registryAgent = registryAgents.find((candidate) => candidate.slug === slug);
+  const recentRuns = state.runs
+    .filter((run) => run.agentSlug === slug)
+    .sort((left, right) => Date.parse(right.queuedAt) - Date.parse(left.queuedAt))
+    .slice(0, 5);
   const [preview, setPreview] = useState<AgentManifestPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(true);
   const [configureOpen, setConfigureOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [communityShareOpen, setCommunityShareOpen] = useState(false);
+  const [manifestOpen, setManifestOpen] = useState(false);
+  const [hubInstallConfirm, setHubInstallConfirm] = useState(false);
+  const [hubInstalling, setHubInstalling] = useState(false);
   const [updateReview, setUpdateReview] = useState<AgentUpdateReview | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -101,6 +115,9 @@ export default function AgentDetail({
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
+  const licenseMissing = agent
+    ? hasLicenseShortfall(agent.requiresEntraTier, activeTenant?.entraTier)
+    : false;
   const pendingTenant = pendingRunChoice?.tenantId
     ? state.tenants.find((tenant) => tenant.id === pendingRunChoice.tenantId)
     : activeTenant;
@@ -304,7 +321,7 @@ export default function AgentDetail({
     return () => {
       cancelled = true;
     };
-  }, [slug, agent?.version]);
+  }, [slug, agent?.version, registryAgent?.version]);
 
   useEffect(() => {
     window.openAdminOS
@@ -313,164 +330,106 @@ export default function AgentDetail({
       .catch(() => setRequestedScopes([]));
   }, []);
 
+  const closeDrawer = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("action");
+    next.delete("install");
+    next.delete("add");
+    navigate({
+      pathname: "/agents",
+      search: next.toString() ? `?${next.toString()}` : "",
+    });
+  };
+
+  const clearAction = useCallback(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("action");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    const action = searchParams.get("action");
+    if (!slug) return;
+    if (!agent) {
+      if (action === "install") setHubInstallConfirm(true);
+      return;
+    }
+    if (action === "configure") {
+      setConfigureOpen(true);
+      clearAction();
+    } else if (action === "uninstall") {
+      setUninstallOpen(true);
+      clearAction();
+    } else if (action === "manifest") {
+      setManifestOpen(true);
+      clearAction();
+    } else if (action === "schedule") {
+      window.requestAnimationFrame(() => {
+        document.getElementById("agent-schedule")?.scrollIntoView?.({ block: "start" });
+      });
+      clearAction();
+    } else if (action === "share" && preview) {
+      if (preview.isUserAuthored) {
+        setCommunityShareOpen(true);
+      } else {
+        void window.openAdminOS?.openExternal(
+          `https://github.com/OpenAdminOS/OpenAdminOS/tree/main/agents/${agent.slug}`,
+        );
+      }
+      clearAction();
+    }
+  }, [agent, clearAction, preview, searchParams, slug]);
+
+  if (!slug) return null;
+
   if (!agent) {
-    return (
-      <PageBody>
-        <div className="text-center text-[var(--color-text-muted)]">
-          Agent not found.{" "}
-          <button
-            className="text-[var(--color-accent)] underline"
-            onClick={() => navigate("/agents")}
-          >
-            Back to agents
-          </button>
+    return registryAgent ? (
+      <HubAgentDrawer
+        agent={registryAgent}
+        preview={preview}
+        previewLoading={previewLoading}
+        previewError={previewError}
+        installConfirm={hubInstallConfirm}
+        installing={hubInstalling}
+        onClose={closeDrawer}
+        onRequestInstall={() => setHubInstallConfirm(true)}
+        onCancelInstall={() => setHubInstallConfirm(false)}
+        onInstall={() => {
+          setHubInstalling(true);
+          void installAgent(registryAgent.registryId)
+            .then(() => {
+              toast.success(`${registryAgent.name} installed.`);
+              setHubInstallConfirm(false);
+            })
+            .catch((caught) => {
+              toast.error(caught instanceof Error ? caught.message : String(caught));
+            })
+            .finally(() => setHubInstalling(false));
+        }}
+        onViewManifest={() => setManifestOpen(true)}
+        manifestOpen={manifestOpen}
+        onCloseManifest={() => setManifestOpen(false)}
+        tenantTier={activeTenant?.entraTier}
+      />
+    ) : (
+      <Drawer open title="Agent not found" onClose={closeDrawer}>
+        <div className="p-5 text-sm text-[var(--color-text-muted)]">
+          This agent is not installed and is not present in the current hub catalog.
         </div>
-      </PageBody>
+      </Drawer>
     );
   }
 
   return (
     <>
-      <PageHeader
-        eyebrow={
-          <button
-            onClick={() => navigate("/agents")}
-            className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-          >
-            <IconArrowLeft size={12} /> Agents
-          </button>
-        }
+      <Drawer
+        open
         title={agent.name}
-        subtitle={
-          <span className="inline-flex items-center gap-2">
-            <Avatar name={agent.author.name} size={16} />
-            <span>{agent.author.name}</span>
-            {agent.author.verified && (
-              <IconBadgeCheck size={12} className="text-[var(--color-accent)]" />
-            )}
-            <span className="opacity-50">·</span>
-            <span className="font-mono">v{agent.version}</span>
-            <span className="opacity-50">·</span>
-            <span className="capitalize">{agent.category}</span>
-            {preview && (
-              <>
-                <span className="opacity-50">·</span>
-                <Pill tone="accent">YAML template</Pill>
-              </>
-            )}
-            {agent.communitySubmission && (
-              <>
-                <span className="opacity-50">·</span>
-                <Pill tone="success">Submitted for review</Pill>
-              </>
-            )}
-            {agent.compatibility?.supported === false && (
-              <>
-                <span className="opacity-50">·</span>
-                <Pill tone="warning">
-                  Needs OpenAdminOS {agent.compatibility.minAppVersion}
-                </Pill>
-              </>
-            )}
-          </span>
-        }
+        onClose={closeDrawer}
         actions={
           <>
-            <ShareMenu
-              contextLabel="agent"
-              onOpenInBrowser={() => {
-                void window.openAdminOS?.openExternal(
-                  `https://github.com/OpenAdminOS/OpenAdminOS/tree/main/agents/${agent.slug}`,
-                );
-              }}
-              openInBrowserHint={`github.com/OpenAdminOS/OpenAdminOS · agents/${agent.slug}`}
-            />
-            {preview?.isUserAuthored && (
-              <>
-                {agent.communitySubmission && (
-                  <Button
-                    variant="secondary"
-                    leadingIcon={<IconExternal size={12} />}
-                    onClick={() => {
-                      void window.openAdminOS?.openExternal(
-                        agent.communitySubmission!.issueUrl,
-                      );
-                    }}
-                  >
-                    Open issue
-                  </Button>
-                )}
-                <Button
-                  variant="secondary"
-                  leadingIcon={<IconShare size={12} />}
-                  onClick={() => setCommunityShareOpen(true)}
-                >
-                  Share with community
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setEditOpen(true)}
-                >
-                  Edit
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    void exportAgentDraftBundle(preview.sourceText)
-                      .then((path) => {
-                        if (path) toast.success(`Exported to ${path}.`);
-                      })
-                      .catch((error) => {
-                        toast.error(error instanceof Error ? error.message : String(error));
-                      });
-                  }}
-                >
-                  Export bundle
-                </Button>
-              </>
-            )}
-            <Button
-              variant="secondary"
-              leadingIcon={<IconClock size={12} />}
-              onClick={() =>
-                document
-                  .getElementById("agent-schedule")
-                  ?.scrollIntoView({
-                    block: "center",
-                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                      ? "auto"
-                      : "smooth",
-                  })
-              }
-            >
-              Schedule
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={
-                previewLoading ||
-                !preview ||
-                (preview.manifest.definition.settings ?? []).length === 0
-              }
-              onClick={() => setConfigureOpen(true)}
-              title={
-                previewLoading
-                  ? "Loading manifest…"
-                  : !preview
-                    ? "Manifest unavailable"
-                    : (preview.manifest.definition.settings ?? []).length === 0
-                      ? "This agent declares no configurable settings"
-                      : "Edit per-install settings"
-              }
-            >
-              {previewLoading ? "Loading…" : "Configure"}
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => setUninstallOpen(true)}
-            >
-              Uninstall
-            </Button>
             <RunWithMenu
               providers={state.providers}
               activeProviderId={state.activeProviderId}
@@ -480,16 +439,96 @@ export default function AgentDetail({
                 queueRunPreflight(choice);
               }}
             />
+            <Menu
+              ariaLabel={`${agent.name} actions`}
+              trigger={
+                <IconButton
+                  label={`${agent.name} actions`}
+                  icon={<IconChevronDown size={13} />}
+                  size="sm"
+                />
+              }
+              items={[
+                {
+                  id: "configure",
+                  label: "Configure",
+                  disabled:
+                    previewLoading ||
+                    !preview ||
+                    (preview.manifest.definition.settings ?? []).length === 0,
+                  onSelect: () => setConfigureOpen(true),
+                },
+                {
+                  id: "share",
+                  label: "Share",
+                  icon: <IconShare size={13} />,
+                  onSelect: () => {
+                    if (preview?.isUserAuthored) setCommunityShareOpen(true);
+                    else void window.openAdminOS?.openExternal(
+                      `https://github.com/OpenAdminOS/OpenAdminOS/tree/main/agents/${agent.slug}`,
+                    );
+                  },
+                },
+                {
+                  id: "schedule",
+                  label: "Schedule",
+                  icon: <IconClock size={13} />,
+                  onSelect: () => document.getElementById("agent-schedule")?.scrollIntoView?.({ block: "start" }),
+                },
+                {
+                  id: "manifest",
+                  label: "View manifest",
+                  onSelect: () => setManifestOpen(true),
+                },
+                ...(preview?.isUserAuthored
+                  ? [
+                      { id: "edit", label: "Edit", onSelect: () => setEditOpen(true) },
+                      {
+                        id: "export",
+                        label: "Export bundle",
+                        onSelect: () => {
+                          void exportAgentDraftBundle(preview.sourceText)
+                            .then((path) => {
+                              if (path) toast.success("Agent bundle exported.");
+                            })
+                            .catch((caught) => toast.error(caught instanceof Error ? caught.message : String(caught)));
+                        },
+                      },
+                    ]
+                  : []),
+                { id: "separator", type: "separator" as const },
+                {
+                  id: "uninstall",
+                  label: "Uninstall",
+                  danger: true,
+                  onSelect: () => setUninstallOpen(true),
+                },
+              ]}
+            />
           </>
         }
-      />
-      <PageBody>
+      >
+      <div className="space-y-4 p-5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-soft)] pb-4">
+          <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
+            {agent.mode === "write" ? "Write" : "Read"}
+          </Badge>
+          <span className="font-mono text-sm text-[var(--color-text-soft)]">v{agent.version}</span>
+          <span className="text-sm text-[var(--color-text-muted)]">{agent.author.name}</span>
+          {agent.author.verified ? (
+            <IconBadgeCheck aria-label="Verified publisher" size={13} className="text-[var(--color-info)]" />
+          ) : null}
+          {agent.compatibility?.supported === false ? (
+            <Badge tone="warning">Incompatible</Badge>
+          ) : null}
+          {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
+        </div>
         {agent.compatibility?.supported === false && (
           <div className="mb-4 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/30">
-            <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+            <div className="text-sm font-medium text-[var(--color-text)]">
               Update OpenAdminOS before running this agent.
             </div>
-            <div className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+            <div className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
               {agent.name} requires OpenAdminOS {agent.compatibility.minAppVersion} or newer.
               You are running {agent.compatibility.appVersion}.
             </div>
@@ -501,7 +540,7 @@ export default function AgentDetail({
               ? "bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/30"
               : "bg-[var(--color-accent-soft)] ring-[var(--color-accent)]/30"
           }`}>
-            <div className="text-[12.5px] leading-relaxed text-[var(--color-text)]">
+            <div className="text-sm leading-relaxed text-[var(--color-text)]">
               <span className="font-medium">
                 {updateRequiresNewerApp(agent) ? "App update required." : "Update available."}
               </span>{" "}
@@ -511,8 +550,8 @@ export default function AgentDetail({
               <span className="opacity-70">
                 {" "}
                 {updateRequiresNewerApp(agent)
-                  ? `— this agent update requires OpenAdminOS ${agent.updateAvailable.minAppVersion}. Update the app before applying it.`
-                  : "— fetches the new manifest from GitHub and replaces this agent's local copy. Your settings and schedule are preserved."}
+                  ? `, this agent update requires OpenAdminOS ${agent.updateAvailable.minAppVersion}. Update the app before applying it.`
+                  : ", this fetches the new manifest from GitHub and replaces the local copy. Settings and schedule are preserved."}
               </span>
             </div>
             <Button
@@ -528,7 +567,7 @@ export default function AgentDetail({
         )}
         {runError && (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 ring-1 ring-[var(--color-danger)]/30">
-            <div className="text-[12.5px] leading-relaxed text-[var(--color-danger)]">
+            <div className="text-sm leading-relaxed text-[var(--color-danger)]">
               {runError}
             </div>
             <button
@@ -540,90 +579,33 @@ export default function AgentDetail({
             </button>
           </div>
         )}
-        <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="flex min-w-0 flex-col gap-6">
-            <Card>
-              <div className="p-6">
-                <SectionLabel>About</SectionLabel>
-                <p className="mt-3 text-[14px] leading-relaxed text-[var(--color-text-soft)]">
-                  {agent.description}
-                </p>
-                <p className="mt-3 text-[14px] leading-relaxed text-[var(--color-text-soft)]">
-                  This agent runs against your active tenant scope and
-                  produces a structured report. The result is saved to your
-                  local run history and never transmitted off-device when a
-                  local LLM provider is selected.
-                </p>
-              </div>
-            </Card>
+        <div className="space-y-6">
+          <Section title="About">
+            <p className="text-base leading-relaxed text-[var(--color-text-soft)]">
+              {agent.description}
+            </p>
+          </Section>
 
-            {previewLoading && (
-              <Card>
-                <div className="p-6 text-[13px] text-[var(--color-text-muted)]">
-                  Loading manifest…
-                </div>
-              </Card>
-            )}
+          {previewLoading ? (
+            <div className="space-y-3" role="status" aria-label="Loading agent details">
+              <Skeleton className="w-2/3" />
+              <Skeleton className="w-full" />
+            </div>
+          ) : null}
 
-            {previewError && (
-              <Card>
-                <div className="p-6 text-[13px] text-[var(--color-danger)]">
-                  Couldn't load manifest: {previewError}
-                </div>
-              </Card>
-            )}
+          {previewError ? (
+            <p role="alert" className="text-sm text-[var(--color-danger)]">
+              The manifest could not be loaded: {previewError} Refresh the agent and try again.
+            </p>
+          ) : null}
 
-            {!previewLoading && !previewError && preview && (
-              <ManifestPreview
-                preview={preview}
-                settingsOverrides={agent.settings}
-              />
-            )}
+          {!previewLoading && !previewError && preview ? (
+            <ManifestSections preview={preview} sections={["permissions"]} />
+          ) : null}
 
-            {!previewLoading && !preview && (
-              <FallbackScopesCard scopes={agent.scopes} />
-            )}
+          {!previewLoading && !preview ? <FallbackScopesCard scopes={agent.scopes} /> : null}
 
-            <Card>
-              <div className="p-6">
-                <SectionLabel>Recent runs</SectionLabel>
-                <div className="mt-3 divide-y divide-[var(--color-border-soft)]">
-                  {recentRuns.length === 0 ? (
-                    <div className="py-3 text-[12px] text-[var(--color-text-muted)]">
-                      No runs recorded for this agent yet.
-                    </div>
-                  ) : (
-                    recentRuns.map((run) => (
-                      <div
-                        key={run.id}
-                        className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
-                      >
-                        <div>
-                          <div className="text-[13px] text-[var(--color-text)] line-clamp-2">
-                            {run.summary ? stripMarkdownToPlainText(run.summary) : run.status}
-                          </div>
-                          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                            {formatDate(run.queuedAt)} · {formatDuration(run)}
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => navigate(`/runs/${run.id}`)}
-                        >
-                          View
-                        </Button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Sidebar column */}
-          <div className="flex flex-col gap-6">
-            <div id="agent-schedule" />
+          <Section id="agent-schedule" title="Schedule" className="scroll-mt-4">
             <AgentScheduleCard
               schedule={agent.schedule}
               onChange={async (next) => {
@@ -631,17 +613,18 @@ export default function AgentDetail({
                 toast.success(
                   next === null
                     ? "Schedule disabled."
-                    : `Schedule saved · every ${Math.round(next.intervalSeconds / 60)}m.`,
+                    : `Schedule saved, every ${Math.round(next.intervalSeconds / 60)}m.`,
                 );
               }}
             />
+          </Section>
 
-            <DeliveryDisclosure
-              configured={Boolean(
-                agent.delivery &&
-                  Object.values(agent.delivery).some((entry) => entry != null),
-              )}
-            >
+          <DeliveryDisclosure
+            configured={Boolean(
+              agent.delivery &&
+                Object.values(agent.delivery).some((entry) => entry != null),
+            )}
+          >
             <AgentTeamsDeliveryCard
               delivery={agent.delivery?.teams}
               onOpenConnectors={() => navigate("/settings/connectors")}
@@ -723,51 +706,88 @@ export default function AgentDetail({
                 );
               }}
             />
-            </DeliveryDisclosure>
+          </DeliveryDisclosure>
 
-            <Card>
-              <div className="p-5">
-                <SectionLabel>Mode</SectionLabel>
-                <div className="mt-3 flex items-center gap-3 rounded-md bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-                  {agent.mode === "write" ? (
-                    <IconBolt
-                      size={18}
-                      className="text-[var(--color-warning)]"
-                    />
-                  ) : (
-                    <IconShield
-                      size={18}
-                      className="text-[var(--color-text-soft)]"
-                    />
-                  )}
-                  <div>
-                    <div className="text-[13px] font-medium text-[var(--color-text)]">
-                      {agent.mode === "write" ? "Write" : "Read-only"}
-                    </div>
-                    <div className="text-[11px] text-[var(--color-text-muted)]">
-                      {agent.mode === "write"
-                        ? "Pauses for diff confirmation before any change."
-                        : "Cannot mutate tenant state."}
-                    </div>
-                  </div>
+          {preview ? (
+            <ManifestSections
+              preview={preview}
+              settingsOverrides={agent.settings}
+              sections={["settings", "result"]}
+            />
+          ) : null}
+
+          <Section
+            title="Recent runs"
+            action={
+              <Link
+                to={`/runs?agent=${encodeURIComponent(agent.slug)}`}
+                className="rounded-md text-sm text-[var(--color-text-soft)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              >
+                View all
+              </Link>
+            }
+          >
+            <div className="divide-y divide-[var(--color-border-soft)]">
+              {recentRuns.length === 0 ? (
+                <div className="py-2 text-sm text-[var(--color-text-muted)]">
+                  No runs recorded for this agent.
                 </div>
-              </div>
-            </Card>
+              ) : (
+                recentRuns.map((run) => (
+                  <div key={run.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div className="min-w-0">
+                      <div className="line-clamp-2 text-base text-[var(--color-text)]">
+                        {run.summary ? stripMarkdownToPlainText(run.summary) : run.status}
+                      </div>
+                      <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                        {formatDate(run.queuedAt)} · {formatDuration(run)}
+                      </div>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => navigate(`/runs/${run.id}`)}>
+                      View
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </Section>
 
-            <Card>
-              <div className="p-5">
-                <SectionLabel>Model</SectionLabel>
-                <ModelCardBody
-                  agent={agent}
-                  providers={state.providers}
-                  activeProviderId={state.activeProviderId}
-                  activeModelByProviderId={state.activeModelByProviderId}
-                />
-              </div>
-            </Card>
-          </div>
+          {preview ? <ManifestSections preview={preview} sections={["pipeline"]} /> : null}
+
+          <Section title="Model">
+            <ModelCardBody
+              agent={agent}
+              providers={state.providers}
+              activeProviderId={state.activeProviderId}
+              activeModelByProviderId={state.activeModelByProviderId}
+            />
+          </Section>
         </div>
-      </PageBody>
+      </div>
+      </Drawer>
+      <Modal open={manifestOpen} onClose={() => setManifestOpen(false)} size="lg">
+        <ModalHeader
+          title={`${agent.name} manifest`}
+          onClose={() => setManifestOpen(false)}
+        />
+        <div className="overflow-y-auto p-5">
+          {previewLoading ? (
+            <div className="space-y-3" role="status" aria-label="Loading manifest">
+              <Skeleton className="w-2/3" />
+              <Skeleton className="w-full" />
+              <Skeleton className="w-5/6" />
+            </div>
+          ) : previewError ? (
+            <p role="alert" className="text-sm text-[var(--color-danger)]">
+              The manifest could not be loaded: {previewError} Refresh the agent and try again.
+            </p>
+          ) : preview ? (
+            <ManifestPreview preview={preview} settingsOverrides={agent.settings} />
+          ) : (
+            <p className="text-sm text-[var(--color-text-muted)]">No manifest is available.</p>
+          )}
+        </div>
+      </Modal>
       {preview && (
         <ConfigureAgentModal
           open={configureOpen}
@@ -907,6 +927,168 @@ export default function AgentDetail({
           }}
         />
       )}
+    </>
+  );
+}
+
+function HubAgentDrawer({
+  agent,
+  preview,
+  previewLoading,
+  previewError,
+  installConfirm,
+  installing,
+  manifestOpen,
+  tenantTier,
+  onClose,
+  onRequestInstall,
+  onCancelInstall,
+  onInstall,
+  onViewManifest,
+  onCloseManifest,
+}: {
+  agent: RegistryAgentSummary;
+  preview: AgentManifestPreview | null;
+  previewLoading: boolean;
+  previewError: string | null;
+  installConfirm: boolean;
+  installing: boolean;
+  manifestOpen: boolean;
+  tenantTier?: "free" | "p1" | "p2" | "unknown";
+  onClose: () => void;
+  onRequestInstall: () => void;
+  onCancelInstall: () => void;
+  onInstall: () => void;
+  onViewManifest: () => void;
+  onCloseManifest: () => void;
+}) {
+  const licenseMissing = hasLicenseShortfall(agent.requiresEntraTier, tenantTier);
+  return (
+    <>
+      <Drawer
+        open
+        title={agent.name}
+        onClose={onClose}
+        actions={
+          <>
+            {!installConfirm ? (
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={agent.compatibility?.supported === false}
+                onClick={onRequestInstall}
+              >
+                Install
+              </Button>
+            ) : null}
+            <Menu
+              ariaLabel={`${agent.name} actions`}
+              trigger={
+                <IconButton
+                  label={`${agent.name} actions`}
+                  icon={<IconChevronDown size={13} />}
+                  size="sm"
+                />
+              }
+              items={[
+                { id: "manifest", label: "View manifest", onSelect: onViewManifest },
+              ]}
+            />
+          </>
+        }
+      >
+        <div className="space-y-6 p-5">
+          <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-soft)] pb-4">
+            <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
+              {agent.mode === "write" ? "Write" : "Read"}
+            </Badge>
+            <span className="font-mono text-sm text-[var(--color-text-soft)]">v{agent.version}</span>
+            <span className="text-sm text-[var(--color-text-muted)]">{agent.author.name}</span>
+            {agent.author.verified ? (
+              <IconBadgeCheck aria-label="Verified publisher" size={13} className="text-[var(--color-info)]" />
+            ) : null}
+            {agent.compatibility?.supported === false ? (
+              <Badge tone="warning">Incompatible</Badge>
+            ) : null}
+            {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
+          </div>
+
+          {installConfirm ? (
+            <div className="space-y-3 rounded-lg bg-[var(--color-warning-soft)] p-4 ring-1 ring-[var(--color-warning)]/30">
+              <div>
+                <div className="font-medium text-[var(--color-text)]">Review permissions</div>
+                <p className="mt-1 text-sm text-[var(--color-text-soft)]">
+                  OpenAdminOS will pin this manifest locally. Write agents still pause for review before tenant changes.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                {agent.scopes.map((scope) => (
+                  <div key={scope} className="break-all font-mono text-xs text-[var(--color-text)]">
+                    {scope}
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" disabled={installing} onClick={onCancelInstall}>
+                  Cancel
+                </Button>
+                <Button size="sm" variant="primary" disabled={installing} onClick={onInstall}>
+                  {installing ? "Installing" : "Confirm install"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <Section title="About">
+            <p className="text-base leading-relaxed text-[var(--color-text-soft)]">{agent.description}</p>
+            <dl className="mt-3 divide-y divide-[var(--color-border-soft)]">
+              <KeyValue label="Category" value={<span className="capitalize">{agent.category}</span>} />
+              <KeyValue label="Minimum app" value={<span className="font-mono">{agent.minAppVersion ?? "0.1.0"}</span>} />
+              <KeyValue
+                label="License"
+                value={agent.requiresEntraTier === "free" ? "No premium tier declared" : `Entra ID ${agent.requiresEntraTier.toUpperCase()}`}
+              />
+              {typeof agent.installs === "number" ? (
+                <KeyValue label="Installs" value={new Intl.NumberFormat().format(agent.installs)} />
+              ) : null}
+            </dl>
+          </Section>
+
+          <Section title="Permissions">
+            <div className="space-y-1.5">
+              {agent.scopes.length > 0 ? agent.scopes.map((scope) => (
+                <div key={scope} className="break-all font-mono text-xs text-[var(--color-text)]">{scope}</div>
+              )) : <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>}
+            </div>
+            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+              Missing consent is requested before the first run.
+            </p>
+          </Section>
+
+          {previewLoading ? (
+            <div className="space-y-3" role="status" aria-label="Loading agent details">
+              <Skeleton className="w-2/3" />
+              <Skeleton className="w-full" />
+            </div>
+          ) : previewError ? (
+            <p role="alert" className="text-sm text-[var(--color-danger)]">
+              The manifest could not be loaded: {previewError} Refresh the hub and try again.
+            </p>
+          ) : preview ? (
+            <ManifestSections preview={preview} sections={["settings", "result", "pipeline"]} />
+          ) : null}
+        </div>
+      </Drawer>
+      <Modal open={manifestOpen} onClose={onCloseManifest} size="lg">
+        <ModalHeader title={`${agent.name} manifest`} onClose={onCloseManifest} />
+        <div className="overflow-y-auto p-5">
+          {preview ? (
+            <ManifestPreview preview={preview} />
+          ) : (
+            <p className="text-sm text-[var(--color-text-muted)]">No manifest is available.</p>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
@@ -2464,7 +2646,7 @@ function ModelCardBody({
     <>
       <div className="mt-3">
         <div className="font-mono text-[13px] font-medium text-[var(--color-text)]">
-          {resolved ?? "—"}
+          {resolved ?? "-"}
         </div>
         <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
           {source}
@@ -2504,20 +2686,23 @@ function modelSourceLabel(
 }
 
 function FallbackScopesCard({ scopes }: { scopes: string[] }) {
-  if (scopes.length === 0) return null;
   return (
-    <Card>
-      <div className="p-6">
-        <SectionLabel>Required Graph scopes</SectionLabel>
-        <div className="mt-3 flex flex-wrap gap-1.5">
+    <Section title="Permissions">
+      {scopes.length > 0 ? (
+        <div className="divide-y divide-[var(--color-border-soft)]">
           {scopes.map((scope) => (
-            <Pill key={scope}>
-              <span className="font-mono text-[11px]">{scope}</span>
-            </Pill>
+            <div key={scope} className="break-all py-2 font-mono text-sm text-[var(--color-text)]">
+              {scope}
+            </div>
           ))}
         </div>
-      </div>
-    </Card>
+      ) : (
+        <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>
+      )}
+      <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+        Missing consent is requested before the first run.
+      </p>
+    </Section>
   );
 }
 
@@ -2571,6 +2756,15 @@ function updateRequiresNewerApp(agent: {
   return compareSemver(current, min) < 0;
 }
 
+function hasLicenseShortfall(
+  required: "free" | "p1" | "p2",
+  actual: "free" | "p1" | "p2" | "unknown" | undefined,
+) {
+  if (!actual || actual === "unknown") return false;
+  const rank = { free: 0, p1: 1, p2: 2 } as const;
+  return rank[actual] < rank[required];
+}
+
 function compareSemver(left: string, right: string): number {
   const l = left.split(".").map((part) => Number.parseInt(part, 10) || 0);
   const r = right.split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -2599,25 +2793,25 @@ function DeliveryDisclosure({
   const [open, setOpen] = useState(configured);
   if (open) {
     return (
-      <div className="flex flex-col gap-6">
+      <Section title="Delivery">
+      <div className="flex flex-col gap-4">
         {children}
         {!configured && (
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="self-start text-[11px] text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
+            className="self-start text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
           >
             Hide delivery options
           </button>
         )}
       </div>
+      </Section>
     );
   }
   return (
-    <Card>
-      <div className="p-5">
-        <SectionLabel>Delivery</SectionLabel>
-        <p className="mt-2 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+    <Section title="Delivery">
+        <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">
           Run reports stay in local history. You can also send them to Teams,
           WhatsApp, Outlook, Slack, Discord, or Signal once a connector is set up.
         </p>
@@ -2629,7 +2823,6 @@ function DeliveryDisclosure({
         >
           Set up run delivery
         </Button>
-      </div>
-    </Card>
+    </Section>
   );
 }

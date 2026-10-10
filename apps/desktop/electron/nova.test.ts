@@ -154,7 +154,7 @@ it("greetings and navigation are bounded and do not invoke tenant tools", async 
       sessionId: sessionId!,
       text: "Open Agent Team",
     }),
-    { text: "Opening agent team.", route: "/office" },
+    { text: "Opening agent team.", route: "/agents/office" },
   );
   assert.equal(chats.length, 0);
 });

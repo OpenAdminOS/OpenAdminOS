@@ -252,12 +252,12 @@ export default function MenuBarCompanion() {
       const result = await api.runDueReadSchedules();
       setNotice(`${result.queued} read schedule${result.queued === 1 ? "" : "s"} queued.`);
       if (result.errors.length > 0) {
-        await openMain("/agents/schedules");
+        await openMain("/agents?filter=scheduled");
       }
       await loadSnapshot();
     } catch {
       setNotice("Open Schedules in the full app for queue details.");
-      await openMain("/agents/schedules");
+      await openMain("/agents?filter=scheduled");
     } finally {
       setBusyAction(null);
     }
@@ -560,7 +560,7 @@ function SchedulesSection({
         icon={<IconClock size={13} />}
         title="Next schedules"
         action="Open"
-        onAction={() => onOpen("/agents/schedules")}
+        onAction={() => onOpen("/agents?filter=scheduled")}
       />
       <div className="mt-2 grid gap-1.5">
         {snapshot.upcomingSchedules.length === 0 ? (
