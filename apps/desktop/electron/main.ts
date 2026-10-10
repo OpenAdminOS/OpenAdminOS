@@ -1057,7 +1057,7 @@ async function runScreenshotCapture(): Promise<void> {
     const extraShots = [
       { route: "/settings/data", name: "cache", waitFor: ["Data", "Tenant cache"] },
       { route: "/office", name: "agent-team", waitFor: ["Agent Team"] },
-      { route: "/fleet", name: "fleet", waitFor: [] },
+      { route: "/changes?scope=all", name: "fleet", waitFor: [] },
       { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
       { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },

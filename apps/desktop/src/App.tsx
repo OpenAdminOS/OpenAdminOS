@@ -3,7 +3,6 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "re
 import { AppShell, TitleBarInset } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
-import { useAppState } from "./state";
 
 const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
@@ -13,7 +12,6 @@ const AgentHub = lazy(() => import("./pages/AgentHub"));
 const Activity = lazy(() => import("./pages/Activity"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
-const Fleet = lazy(() => import("./pages/Fleet"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Settings = lazy(() => import("./pages/Settings"));
 const RunResult = lazy(() => import("./pages/RunResult"));
@@ -73,7 +71,7 @@ export default function App() {
           <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
           <Route path="/office" element={<Office />} />
           <Route path="/changes" element={<Changes />} />
-          <Route path="/fleet" element={<FleetRoute />} />
+          <Route path="/fleet" element={<FleetRedirect />} />
           <Route path="/workspaces" element={<Workspaces />} />
           <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
           <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
@@ -125,13 +123,20 @@ export function LegacyConnectorRedirect() {
   );
 }
 
-function FleetRoute() {
-  const { state, loading } = useAppState();
-
-  if (loading) return <RouteFallback />;
-  if (state.tenants.length < 2) return <Navigate to="/chat" replace />;
-
-  return <Fleet />;
+export function FleetRedirect() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  search.set("scope", "all");
+  return (
+    <Navigate
+      to={{
+        pathname: "/changes",
+        search: `?${search.toString()}`,
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
 }
 
 function NotFound() {

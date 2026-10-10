@@ -71,7 +71,12 @@ export async function captureWebsiteDemo(
       wait: ["Write operation paused for confirmation"],
       prepare: "write-confirmation" as const,
     },
-    { id: "fleet", route: "/fleet", label: "Fleet", wait: ["Fleet"] },
+    {
+      id: "fleet",
+      route: "/changes?scope=all",
+      label: "Changes: All tenants",
+      wait: ["Changes"],
+    },
     { id: "cache", route: "/settings/data", label: "Data", wait: ["Tenant cache"] },
     {
       id: "settings",

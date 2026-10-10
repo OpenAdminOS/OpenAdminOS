@@ -1834,14 +1834,15 @@ The sidebar contains exactly five destinations in this order:
 | Chat | `/chat` | Tenant Q&A and, after consolidation, Workspaces |
 | Agents | `/agents` | Installed agents, Hub, schedules, and Agent Team |
 | Runs | `/runs` | Run history, approvals, and external proposals |
-| Changes | `/changes` | Tenant drift, baselines, compare, and Fleet |
+| Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
 | Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, Appearance, Privacy, and About |
 
-Until their remaining consolidation phases land, Agent Team, Workspaces, and
-Fleet remain routable and reachable from the command palette. Cache and
-Connectors now live in Settings; legacy `/cache` and `/connectors` URLs redirect
-to their Settings sections, including connector drawer deep links. The legacy
-`/activity` route redirects to `/runs`.
+Until their remaining consolidation phases land, Agent Team and Workspaces
+remain routable and reachable from the command palette. Cache and Connectors
+now live in Settings; legacy `/cache` and `/connectors` URLs redirect to their
+Settings sections, including connector drawer deep links. `/fleet` redirects
+to the all-tenant Changes scope at `/changes?scope=all`, and `/activity`
+redirects to `/runs`.
 
 Removed from navigation:
 - **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
@@ -1875,7 +1876,7 @@ North-star metric: time from install to first successful result, target under 5 
 | Chat | Nav label (was "Intune Chat") | Plain-language tenant Q&A. Internal ids keep `intune-chat`. |
 | Agents | Nav label | Installed agents and the entry point for Hub, schedules, and Agent Team |
 | Runs | Nav label (replaces "Run history" and "Activity") | Active, reviewable, and completed runs |
-| Changes | Nav label | Tenant drift, retained baselines, comparison, and Fleet scope |
+| Changes | Nav label | Tenant drift timeline, retained baselines, comparison, and an all-tenant scope (formerly Fleet) |
 | Settings | Nav label | Provider, tenant, data, connector, gateway, appearance, privacy, and application configuration |
 | Data | Settings section (replaces "Cache") | Cache freshness, preload coverage, refresh scheduling, and local retention |
 | Agent | Unchanged | Installable module with declared scopes and read/write mode |

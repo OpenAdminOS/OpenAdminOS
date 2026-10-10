@@ -3,6 +3,7 @@ import { Route, Routes, useLocation } from "react-router";
 import { describe, expect, it } from "vitest";
 import {
   ActivityRedirect,
+  FleetRedirect,
   LegacyConnectorRedirect,
   LegacySettingsRedirect,
 } from "./App";
@@ -51,6 +52,25 @@ describe("legacy Settings routes", () => {
     expect(await screen.findByTestId("location")).toHaveTextContent(
       "/settings/connectors?from=agent&connector=slack#permissions",
     );
+  });
+});
+
+describe("legacy fleet route", () => {
+  it("redirects to the all-tenant Changes scope and preserves query and hash", async () => {
+    renderWithAppState(
+      <Routes>
+        <Route path="/fleet" element={<FleetRedirect />} />
+        <Route path="/changes" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/fleet?group=eu&view=compare#recent" },
+    );
+
+    const location = await screen.findByTestId("location");
+    expect(location).toHaveTextContent("/changes?");
+    expect(location).toHaveTextContent("group=eu");
+    expect(location).toHaveTextContent("view=compare");
+    expect(location).toHaveTextContent("scope=all");
+    expect(location).toHaveTextContent("#recent");
   });
 });
 

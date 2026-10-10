@@ -11,7 +11,6 @@ import {
   IconClock,
   IconHardDrive,
   IconHub,
-  IconFleet,
   IconPlay,
   IconSearch,
   IconSettings,
@@ -145,10 +144,10 @@ export function CommandPalette({
         ? ([
             {
               id: "nav-fleet",
-              label: "Go to Fleet",
+              label: "Changes: All tenants",
               group: "Navigate",
-              icon: <IconFleet size={13} className="text-[var(--color-accent)]" />,
-              action: go("/fleet"),
+              icon: <IconChanges size={13} className="text-[var(--color-accent)]" />,
+              action: go("/changes?scope=all"),
             },
           ] as PaletteItem[])
         : []),

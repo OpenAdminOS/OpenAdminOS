@@ -13,6 +13,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Changed
 
 - Consolidate provider, tenant, data, chat, connector, gateway, general, appearance, privacy, and about controls into one searchable Settings page with section links and connector drawers.
+- Consolidate tenant timelines, baselines, comparison, all-tenant drift status, and cache freshness controls in Changes.
 
 - Establish the enterprise desktop shell with a five-item collapsible sidebar, compact status strip, Runs routing, sidebar Voice access, and accessible shared UI primitives.
 

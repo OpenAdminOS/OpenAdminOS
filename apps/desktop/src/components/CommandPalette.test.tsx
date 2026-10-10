@@ -62,7 +62,7 @@ it("lists the shell destinations and every Settings section", async () => {
     ),
   });
 
-  await screen.findByRole("option", { name: /Go to Fleet/ });
+  await screen.findByRole("option", { name: /Changes: All tenants/ });
 
   for (const label of [
     "Go to Chat",
@@ -71,7 +71,7 @@ it("lists the shell destinations and every Settings section", async () => {
     "Go to Changes",
     "Open Settings",
     "Go to Agent Team",
-    "Go to Fleet",
+    "Changes: All tenants",
     "Go to Workspaces",
     "Open Voice",
   ]) {
