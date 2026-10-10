@@ -8,19 +8,6 @@
   align-items: flex-end;
   gap: 10px;
 }
-.nova-launch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--color-bg-raised);
-  border: 1px solid var(--color-accent);
-  border-radius: 24px;
-  padding: 10px 14px;
-  color: var(--color-text);
-  font-size: 12px;
-  box-shadow: 0 5px 20px #0003;
-}
-.nova-launch kbd,
 .nova-eyebrow {
   font-size: 9px;
   color: var(--color-text-muted);
@@ -29,12 +16,6 @@
 .nova-eyebrow {
   margin-left: 8px;
   font-weight: normal;
-}
-.nova-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--color-accent);
 }
 .nova-panel {
   order: -1;
@@ -139,8 +120,7 @@
   cursor: not-allowed;
 }
 .nova-orb:focus-visible,
-.nova-tools button:focus-visible,
-.nova-launch:focus-visible {
+.nova-tools button:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 5px;
 }
@@ -266,9 +246,6 @@
 .nova-root-fullscreen {
   inset: 0;
   z-index: 1000;
-}
-.nova-root-fullscreen > .nova-launch {
-  display: none;
 }
 .nova-root-fullscreen .nova-panel-expanded {
   position: absolute;

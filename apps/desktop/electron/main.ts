@@ -1060,7 +1060,7 @@ async function runScreenshotCapture(): Promise<void> {
       { route: "/fleet", name: "fleet", waitFor: [] },
       { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
       { route: "/connectors", name: "connectors", waitFor: ["Connectors"] },
-      { route: "/activity", name: "activity", waitFor: ["Run history"] },
+      { route: "/runs", name: "runs", waitFor: ["Runs"] },
       { route: "/agents/schedules", name: "schedules", waitFor: ["Schedules"] },
       { route: "/settings/general", name: "appearance", waitFor: ["Graphite dark"] },
     ];

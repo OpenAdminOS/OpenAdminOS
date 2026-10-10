@@ -78,13 +78,24 @@ export default function App() {
           <Route path="/fleet" element={<FleetRoute />} />
           <Route path="/workspaces" element={<Workspaces />} />
           <Route path="/connectors" element={<Connectors />} />
-          <Route path="/activity" element={<Activity />} />
+          <Route path="/runs" element={<Activity />} />
+          <Route path="/activity" element={<ActivityRedirect />} />
           <Route path="/runs/:id" element={<RunResult />} />
           <Route path="/settings/:section?" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
     </AppShell>
+  );
+}
+
+export function ActivityRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: "/runs", search: location.search, hash: location.hash }}
+      replace
+    />
   );
 }
 

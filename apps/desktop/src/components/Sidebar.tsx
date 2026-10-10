@@ -1,352 +1,214 @@
-import { Link, NavLink, useLocation } from "react-router";
 import {
+  useEffect,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
+import { NavLink } from "react-router";
 import {
+  IconActivity,
   IconAgents,
-  IconAgentTeam,
   IconChanges,
-  IconConnectors,
-  IconHardDrive,
   IconChat,
-  IconFleet,
-  IconSettings,
-  IconCache,
-  IconLogo,
+  IconChevronRight,
   IconCommand,
+  IconSettings,
+  IconSparkle,
 } from "./icons";
-import { PersonaAvatar } from "./office/OfficeScene";
-import "../styles/office.css";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { useAppState } from "../state";
 import { shortcutLabel } from "../shared/shortcuts";
+import { openNovaPanel } from "../shared/nova-panel";
+import { Badge, Kbd, Tooltip } from "./ui";
+
+export const SIDEBAR_COLLAPSED_KEY = "openadminos:sidebar-collapsed:v1";
 
 interface NavItem {
   to: string;
   label: string;
   icon: ReactNode;
-  end?: boolean;
-  badge?: string | number;
-  badgeTone?: "default" | "warning";
-  indent?: boolean;
+  badge?: number;
 }
 
-function NavRow({ item }: { item: NavItem }) {
-  return (
+function NavRow({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
+  const link = (
     <NavLink
       to={item.to}
-      end={item.end}
+      aria-label={collapsed ? item.label : undefined}
       className={({ isActive }) =>
-        `group relative flex items-center gap-2.5 rounded-lg py-1.5 text-[13px] font-medium transition-colors duration-150 ${
+        `group relative flex h-9 items-center rounded-lg text-base font-medium transition-colors duration-150 ${
+          collapsed ? "justify-center px-2" : "gap-2.5 px-2.5"
+        } ${
           isActive
-            ? "bg-[var(--color-bg-raised)] text-[var(--color-text)] ring-1 ring-inset ring-[var(--color-border)]"
+            ? "bg-[var(--color-bg-raised)] text-[var(--color-text)]"
             : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-        } ${item.indent ? "ml-5 px-2" : "px-2.5"}`
+        }`
       }
     >
       {({ isActive }) => (
         <>
-          {isActive && (
+          {isActive ? (
             <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r bg-[var(--color-accent)]" />
-          )}
+          ) : null}
           <span
-            className={
+            className={`inline-flex shrink-0 ${
               isActive
                 ? "text-[var(--color-accent)]"
                 : "text-[var(--color-text-muted)] group-hover:text-[var(--color-text-soft)]"
-            }
+            }`}
           >
             {item.icon}
           </span>
-          <span className="flex-1">{item.label}</span>
-          {item.badge !== undefined && (
-            <span
-              className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] tabular-nums ${
-                item.badgeTone === "warning"
-                  ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
-                  : isActive
-                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-                    : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]"
-              }`}
+          <span className={collapsed ? "sr-only" : "min-w-0 flex-1 truncate"}>
+            {item.label}
+          </span>
+          {item.badge && item.badge > 0 ? (
+            <Badge
+              tone="warning"
+              className={
+                collapsed
+                  ? "absolute right-0.5 top-0.5 min-w-4 justify-center px-1 font-mono"
+                  : "shrink-0 font-mono tabular-nums"
+              }
             >
-              {item.badgeTone === "warning" && (
-                <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current" />
-              )}
               {item.badge}
-            </span>
-          )}
+            </Badge>
+          ) : null}
         </>
       )}
     </NavLink>
   );
+
+  return (
+    <Tooltip content={item.label} side="right" disabled={!collapsed} className="block w-full">
+      {link}
+    </Tooltip>
+  );
+}
+
+function readInitialCollapsed() {
+  const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return window.innerWidth < 1000;
 }
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const { state } = useAppState();
-  const location = useLocation();
-  const personas = state.office?.personas ?? [];
-  const [teamCollapsed, setTeamCollapsed] = useState(
-    () => localStorage.getItem("team-sidebar-collapsed") === "true",
-  );
-  const [teamQuery, setTeamQuery] = useState("");
-  const selectedPersona = new URLSearchParams(location.search).get("persona");
-  const attention = personas.filter(
-    (p) =>
-      p.lastError ||
-      state.office?.findings?.some(
-        (f) => f.personaId === p.id && f.state === "open",
-      ) ||
-      state.runs.some(
-        (r) =>
-          r.office?.personaId === p.id && r.status === "awaiting-confirmation",
-      ),
+  const [collapsed, setCollapsed] = useState(readInitialCollapsed);
+  const reviewCount = state.runs.filter(
+    (run) => run.status === "awaiting-confirmation",
   ).length;
-  const active = state.providers.find((p) => p.id === state.activeProviderId);
-  const mainNav: NavItem[] = [
-    {
-      to: "/chat",
-      label: "Chat",
-      icon: <IconChat size={16} />,
-    },
-    {
-      to: "/office",
-      label: "Agent Team",
-      icon: <IconAgentTeam size={18} />,
-      badge: attention || undefined,
-      badgeTone: "warning",
-    },
-    {
-      to: "/agents",
-      label: "Agents",
-      icon: <IconAgents size={16} />,
-      badge: state.installedAgents.length,
-    },
-    { to: "/changes", label: "Changes", icon: <IconChanges size={16} /> },
-    ...(state.tenants.length >= 2
-      ? [
-          {
-            to: "/fleet",
-            label: "Fleet",
-            icon: <IconFleet size={16} />,
-            // No badge: a bare tenant count reads like an alert count.
-            // The number worth surfacing here is tenants with drift, and
-            // that needs a fleet evaluation the sidebar should not run.
-          },
-        ]
-      : []),
-    { to: "/cache", label: "Cache", icon: <IconCache size={16} /> },
-    { to: "/settings", label: "Settings", icon: <IconSettings size={16} /> },
-  ];
 
-  // Kept out of the primary list on purpose: these are power-user
-  // surfaces, and v0.4 cut the nav from ten items to four by demoting
-  // them. They earn a place here as a visually subordinate group so they
-  // are discoverable without competing with the daily destinations.
-  const secondaryNav: NavItem[] = [
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+  }, [collapsed]);
+
+  const items: NavItem[] = [
+    { to: "/chat", label: "Chat", icon: <IconChat size={17} /> },
+    { to: "/agents", label: "Agents", icon: <IconAgents size={17} /> },
     {
-      to: "/workspaces",
-      label: "Workspaces",
-      icon: <IconHardDrive size={16} />,
+      to: "/runs",
+      label: "Runs",
+      icon: <IconActivity size={17} />,
+      badge: reviewCount || undefined,
     },
-    {
-      to: "/connectors",
-      label: "Connectors",
-      icon: <IconConnectors size={16} />,
-    },
+    { to: "/changes", label: "Changes", icon: <IconChanges size={17} /> },
+    { to: "/settings", label: "Settings", icon: <IconSettings size={17} /> },
   ];
 
   const focusAdjacentNav = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const links = Array.from(
+    const controls = Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>(
         "a[href], button:not([disabled])",
       ),
     );
-    const index = links.indexOf(document.activeElement as HTMLElement);
-    if (index < 0 || links.length === 0) return;
+    const index = controls.indexOf(document.activeElement as HTMLElement);
+    if (index < 0 || controls.length === 0) return;
     event.preventDefault();
     const next =
       event.key === "Home"
         ? 0
         : event.key === "End"
-          ? links.length - 1
+          ? controls.length - 1
           : event.key === "ArrowDown"
-            ? (index + 1) % links.length
-            : (index - 1 + links.length) % links.length;
-    links[next]?.focus();
+            ? (index + 1) % controls.length
+            : (index - 1 + controls.length) % controls.length;
+    controls[next]?.focus();
   };
 
   return (
     <aside
       aria-label="Application navigation"
-      className="app-sidebar flex h-full overflow-y-auto shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
+      data-collapsed={collapsed}
+      className="app-sidebar flex h-full shrink-0 flex-col overflow-visible border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)] transition-[width] duration-150 motion-reduce:transition-none"
       onKeyDown={focusAdjacentNav}
     >
-      {/* Brand row — small */}
-      <div className="flex h-16 items-center gap-2.5 px-3.5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)]">
-          <IconLogo size={25} />
-        </div>
-        <div className="flex items-center gap-1.5 leading-none">
-          <span className="text-[13px] font-semibold tracking-tight text-[var(--color-text)]">
-            OpenAdminOS
-          </span>
-          <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[9.5px] text-[var(--color-text-muted)]">
-            v{__APP_VERSION__}
-          </span>
-        </div>
-        <span
-          title={
-            active?.status === "connected"
-              ? `${active.name} reachable`
-              : "LLM provider not reachable"
-          }
-          className={`ml-auto inline-flex h-1.5 w-1.5 animate-pulse-soft rounded-full ${
-            active?.status === "connected"
-              ? "bg-[var(--color-success)]"
-              : "bg-[var(--color-warning)]"
-          }`}
-        />
+      <div className="pt-2">
+        <TenantSwitcher collapsed={collapsed} />
       </div>
 
-      {/* Tenant switcher */}
-      <TenantSwitcher />
-
-      {/* Command palette */}
-      <button
-        onClick={onOpenPalette}
-        className="mx-2.5 mt-2 flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-2.5 py-1.5 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text-soft)]"
-      >
-        <IconCommand size={12} />
-        <span className="flex-1 text-left">Quick search</span>
-        <kbd className="font-mono text-[10px]">
-          {shortcutLabel("commandPalette")}
-        </kbd>
-      </button>
-
-      <div className="mx-3 mb-2 mt-3 h-px bg-[var(--color-border-soft)]" />
-
-      {/* Main nav */}
-      <nav aria-label="Primary" className="flex flex-col gap-0.5 px-2">
-        <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          Workspace
-        </div>
-        {mainNav.map((item) => (
-          <div
-            key={item.to}
-            className={item.to === "/office" ? "team-nav-group" : undefined}
+      <div className={collapsed ? "mx-2 mt-3" : "mx-2.5 mt-3"}>
+        <Tooltip content="Search" side="right" disabled={!collapsed} className="block w-full">
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            aria-label="Search"
+            className={`flex h-9 w-full items-center rounded-lg bg-[var(--color-bg-raised)] text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${
+              collapsed ? "justify-center px-2" : "gap-2 px-2.5"
+            }`}
           >
-            <NavRow item={item} />
-            {item.to === "/office" && personas.length > 0 && (
-              <div className="team-nav-children">
-                <button
-                  className="team-nav-toggle"
-                  aria-expanded={!teamCollapsed}
-                  onClick={() =>
-                    setTeamCollapsed((v) => {
-                      localStorage.setItem(
-                        "team-sidebar-collapsed",
-                        String(!v),
-                      );
-                      return !v;
-                    })
-                  }
-                >
-                  {teamCollapsed ? "▸" : "▾"} {personas.length} teammates
-                </button>
-                {!teamCollapsed && (
-                  <>
-                    <label className="team-nav-search">
-                      <span className="sr-only">Search sidebar teammates</span>
-                      <input
-                        placeholder="Find teammate…"
-                        value={teamQuery}
-                        onChange={(e) => setTeamQuery(e.target.value)}
-                      />
-                    </label>
-                    <ul
-                      className="team-nav-personas"
-                      aria-label="Team personas"
-                    >
-                      {personas
-                        .filter((p) =>
-                          p.name
-                            .toLowerCase()
-                            .includes(teamQuery.toLowerCase()),
-                        )
-                        .map((persona) => {
-                          const needsAttention =
-                            Boolean(persona.lastError) ||
-                            state.office?.findings?.some(
-                              (f) =>
-                                f.personaId === persona.id &&
-                                f.state === "open",
-                            ) ||
-                            state.runs.some(
-                              (r) =>
-                                r.office?.personaId === persona.id &&
-                                r.status === "awaiting-confirmation",
-                            );
-                          const working = state.runs.some(
-                            (r) =>
-                              r.office?.personaId === persona.id &&
-                              r.status === "running",
-                          );
-                          const selected =
-                            location.pathname === "/office" &&
-                            (selectedPersona === persona.id ||
-                              (!selectedPersona &&
-                                personas[0]?.id === persona.id));
-                          return (
-                            <li key={persona.id}>
-                              <Link
-                                to={`/office?persona=${encodeURIComponent(persona.id)}`}
-                                aria-current={selected ? "page" : undefined}
-                                className="team-nav-persona"
-                                title={`${persona.name}${needsAttention ? " · Needs attention" : working ? " · Working" : ""}`}
-                              >
-                                <PersonaAvatar
-                                  avatar={persona.avatar}
-                                  color={persona.color}
-                                />
-                                <span className="flex-1">{persona.name}</span>
-                                {(needsAttention || working) && (
-                                  <span
-                                    className={`team-nav-dot ${needsAttention ? "attention" : ""}`}
-                                    role="img"
-                                    aria-label={
-                                      needsAttention
-                                        ? "Needs attention"
-                                        : "Working"
-                                    }
-                                  />
-                                )}
-                              </Link>
-                            </li>
-                          );
-                        })}
-                    </ul>
-                  </>
-                )}{" "}
-              </div>
-            )}
-          </div>
+            <IconCommand size={14} />
+            <span className={collapsed ? "sr-only" : "flex-1 text-left"}>Search</span>
+            {!collapsed ? <Kbd>{shortcutLabel("commandPalette")}</Kbd> : null}
+          </button>
+        </Tooltip>
+      </div>
+
+      <nav aria-label="Primary" className="mt-3 flex flex-col gap-1 px-2">
+        {items.map((item) => (
+          <NavRow key={item.to} item={item} collapsed={collapsed} />
         ))}
       </nav>
 
-      <nav aria-label="More" className="mt-3 flex flex-col gap-0.5 px-2">
-        <div className="px-2.5 pb-1.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          More
-        </div>
-        {secondaryNav.map((item) => (
-          <NavRow key={item.to} item={item} />
-        ))}
-      </nav>
+      <div className="mt-auto space-y-1 border-t border-[var(--color-border-soft)] p-2">
+        <Tooltip content="Voice" side="right" disabled={!collapsed} className="block w-full">
+          <button
+            type="button"
+            onClick={openNovaPanel}
+            aria-label="Voice"
+            className={`flex h-9 w-full items-center rounded-lg text-base font-medium text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${
+              collapsed ? "justify-center px-2" : "gap-2.5 px-2.5"
+            }`}
+          >
+            <IconSparkle size={17} />
+            <span className={collapsed ? "sr-only" : "flex-1 text-left"}>Voice</span>
+            {!collapsed ? <Kbd>Alt+V</Kbd> : null}
+          </button>
+        </Tooltip>
 
-      <div className="mt-auto px-4 pb-4 pt-6 font-mono text-[10px] leading-4 text-[var(--color-text-muted)]">
-        Local desktop workspace
+        <Tooltip
+          content={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          side="right"
+          disabled={!collapsed}
+          className="block w-full"
+        >
+          <button
+            type="button"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={`flex h-8 w-full items-center rounded-md text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${
+              collapsed ? "justify-center" : "justify-end gap-2 px-2.5"
+            }`}
+          >
+            {!collapsed ? <span>Collapse</span> : null}
+            <IconChevronRight
+              size={14}
+              className={collapsed ? "" : "rotate-180"}
+            />
+          </button>
+        </Tooltip>
       </div>
     </aside>
   );

@@ -10,6 +10,8 @@ import { ReportIssueProvider } from "./ReportIssueModal";
 import { matchesShortcut, OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { overlayStackSize } from "../shared/overlay-stack";
 
+export { PageHeader } from "./ui/PageHeader";
+
 // Reserve space at the top of the window for the macOS traffic-light buttons
 // (titleBarStyle: "hiddenInset" leaves them floating over the renderer) and
 // make that strip draggable so users can move the window from the top edge.
@@ -68,7 +70,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
         <a
           href="#main-content"
-          className="fixed left-3 top-3 z-[200] -translate-y-24 rounded-md bg-[var(--color-accent)] px-3 py-2 text-[12px] font-semibold text-[var(--color-on-accent)] transition-transform focus:translate-y-0"
+          className="fixed left-3 top-3 z-[200] -translate-y-24 rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-transform focus:translate-y-0"
         >
           Skip to main content
         </a>
@@ -89,39 +91,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         <ConnectorConfirmModal />
       </div>
     </ReportIssueProvider>
-  );
-}
-
-export function PageHeader({
-  eyebrow,
-  title,
-  subtitle,
-  actions,
-}: {
-  eyebrow?: ReactNode;
-  title: string;
-  subtitle?: ReactNode;
-  actions?: ReactNode;
-}) {
-  return (
-    <header className="app-page-header flex shrink-0 justify-between border-b border-[var(--color-border)]">
-      <div className="min-w-0">
-        {eyebrow && (
-          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            {eyebrow}
-          </div>
-        )}
-        <h1 className="text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
-          {title}
-        </h1>
-        {subtitle && (
-          <div className="mt-1 text-[13px] text-[var(--color-text-soft)]">
-            {subtitle}
-          </div>
-        )}
-      </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-    </header>
   );
 }
 

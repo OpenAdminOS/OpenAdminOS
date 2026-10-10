@@ -103,10 +103,10 @@ export default function RunResult() {
           eyebrow={
             <button
               type="button"
-              onClick={() => navigate("/activity")}
+              onClick={() => navigate("/runs")}
               className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
             >
-              <IconArrowLeft size={12} aria-hidden="true" /> Run history
+              <IconArrowLeft size={12} aria-hidden="true" /> Runs
             </button>
           }
           title="Run not found"
@@ -169,10 +169,10 @@ export default function RunResult() {
         eyebrow={
           <button
             type="button"
-            onClick={() => navigate("/activity")}
+            onClick={() => navigate("/runs")}
             className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
           >
-            <IconArrowLeft size={12} aria-hidden="true" /> Run history
+            <IconArrowLeft size={12} aria-hidden="true" /> Runs
           </button>
         }
         title={
@@ -335,6 +335,17 @@ export default function RunResult() {
         }
       />
       <PageBody>
+        {isExternalProposal ? (
+          <div className="flex items-center gap-1.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+            <IconLock size={12} aria-hidden="true" />
+            <span className="break-words">
+              Required scopes: {run.external?.requiredScopes.length
+                ? run.external.requiredScopes.join(", ")
+                : "none declared"}
+            </span>
+          </div>
+        ) : null}
+
         {!isSystemRun ? (
           <TenantDriftNote
             runTenantId={run.tenantId}

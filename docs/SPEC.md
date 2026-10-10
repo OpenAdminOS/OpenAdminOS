@@ -414,7 +414,8 @@ logs, not every Graph property, relationship or action. Device records include
 reported encryption; deterministic aggregates include OS versions and encryption
 with unknown values retained.
 
-Nova is available across app pages through Talk to Nova and Alt+V. Its compact
+Nova is available across app pages through the sidebar Voice item, the command
+palette, and Alt+V. Its compact
 panel can fill the app window for presentations, covering the sidebar and page.
 During an active session, the centered orb is the only visible element after three
 seconds without interaction; pointer or keyboard activity reveals the controls.
@@ -1739,8 +1740,8 @@ neutral, while activity and attention indicators retain semantic color.
 - Body, metadata, placeholder, and semantic text meet 4.5:1 contrast against
   their supported surfaces in both themes, verified by automated tests.
 - Cards use a 10px radius; status badges use a compact 6px radius.
-- The sidebar is 232px wide (212px below 1100px); shared page padding is 24px
-  vertically and 32px horizontally.
+- The sidebar is 224px wide and collapses to a 56px icon rail; shared page
+  padding is 24px vertically and 32px horizontally.
 
 Regenerate raster brand assets with `node scripts/generate-brand-assets.mjs`.
 The macOS multi-resolution installer TIFF additionally uses `tiffutil`, as
@@ -1750,8 +1751,8 @@ explained in `apps/desktop/build/README.md`.
 
 - **UI:** system UI stack (`ui-sans-serif`, `system-ui`, `-apple-system`, `Segoe UI`, sans-serif)
 - **Code, IDs, telemetry, run IDs, JSON:** system monospace stack (`ui-monospace`, `SF Mono`, `Menlo`, `Consolas`, monospace)
-- Base size: 14px, with 12–13px controls and 11px metadata for admin-focused density
-- Line-height: 1.55
+- Shared type scale: 11/16px, 12/18px, 13/20px, 15/22px, and 20/28px
+- Base size: 13px, with 12px controls and 11px metadata for admin-focused density
 - Letter-spacing: 0
 
 ### Density principle
@@ -1764,8 +1765,8 @@ Closer to portal/IDE density than to consumer-app density. Compare to:
 
 These are visible in the mockups and need to be built as proper React components:
 
-- **Sidebar nav** with collapsible sections
-- **Status strip** (4 cells: tenant, LLM, active runs, data residency): appears at top of every main screen
+- **Sidebar nav** with a collapsible icon rail
+- **Status strip** (3 cells: tenant, provider and data boundary, active runs): appears at the bottom of every main screen
 - **Agent card** with read/write tag, verified/community badge, recent run indicator
 - **Run timeline** (stepped pipeline visualization)
 - **Telemetry strip** (used in live run modal)
@@ -1824,24 +1825,21 @@ tokens/bigrams or one strong name/category/synonym-domain hit. Hints render only
 after the assistant message completes, can be dismissed, never persist to chat
 messages, and never suggest the same agent twice in one conversation.
 
-### Navigation (locked for v0.4)
+### Navigation (locked for the enterprise redesign)
 
-Agent Team adds a fourth workspace destination to the v0.4 navigation (approved 2026-09-10); Fleet remains conditional on multiple connected tenants. The primary order stays fixed across routes, and Settings stays in the same navigation group rather than floating at the bottom of the window:
+The sidebar contains exactly five destinations in this order:
 
 | Nav item | Route | Contains |
 |---|---|---|
-| Chat | `/chat` | Tenant Q&A (formerly "Intune Chat" in nav; covers Intune + Entra) |
-| Agent Team | `/office` | Persistent personas, ordered assignments, schedules, and evidence-linked briefings |
-| Agents | `/agents` | Tabs: Installed · Hub · Schedules |
-| Changes | `/changes` | Tenant drift timeline |
-| Settings | `/settings` | Providers, tenants, workspaces, connectors, general, privacy |
-| Workspaces | `/workspaces` | Saved multi-tenant working sets (More group) |
-| Connectors | `/connectors` | External integrations (More group) |
+| Chat | `/chat` | Tenant Q&A and, after consolidation, Workspaces |
+| Agents | `/agents` | Installed agents, Hub, schedules, and Agent Team |
+| Runs | `/runs` | Run history, approvals, and external proposals |
+| Changes | `/changes` | Tenant drift, baselines, compare, and Fleet |
+| Settings | `/settings` | Providers, tenants, data, connectors, gateway, appearance, privacy, and about |
 
-Demoted from top-level nav (routes remain, reachable via Settings and the command palette):
-- **Workspaces** and **Connectors** were originally demoted as power-user surfaces. Revised 2026-08-31: they return to the sidebar in a visually subordinate "More" group below Settings, because they are among the most distinctive things the product does and being reachable only through Settings hid them. Agent Team is now an additional daily destination; Workspaces and Connectors remain subordinate. A renderer test asserts both facts.
-- **Activity**: run history remains available through search, run links, and agent surfaces without adding another daily destination.
-- **Agent Hub**: a tab inside Agents, not a sibling of it.
+Until their consolidation phases land, Agent Team, Workspaces, Connectors,
+Cache, and Fleet remain routable and reachable from the command palette. The
+legacy `/activity` route redirects to `/runs`.
 
 Removed from navigation:
 - **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
@@ -1873,12 +1871,16 @@ North-star metric: time from install to first successful result, target under 5 
 | Term | Status | Meaning |
 |---|---|---|
 | Chat | Nav label (was "Intune Chat") | Plain-language tenant Q&A. Internal ids keep `intune-chat`. |
+| Agents | Nav label | Installed agents and the entry point for Hub, schedules, and Agent Team |
+| Runs | Nav label (replaces "Run history" and "Activity") | Active, reviewable, and completed runs |
+| Changes | Nav label | Tenant drift, retained baselines, comparison, and Fleet scope |
+| Settings | Nav label | Provider, tenant, data, connector, gateway, appearance, privacy, and application configuration |
 | Agent | Unchanged | Installable module with declared scopes and read/write mode |
 | Hub | Tab inside Agents (was "Agent Hub" nav item) | Community agent store |
 | Schedule | Tab inside Agents | Recurring agent runs |
-| Workspace | Demoted to Settings | Saved multi-tenant working set |
-| Connector | Demoted to Settings | External integration (non-Graph) |
-| Run history | Replaces "Activity" as user-facing term | Past and active runs |
+| Agent Team | Palette destination until Agents consolidation | Persistent personas, assignments, and evidence-linked briefings |
+| Workspace | Palette destination until Chat consolidation | Saved multi-tenant working set |
+| Connector | Palette destination until Settings consolidation | External integration (non-Graph) |
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
 

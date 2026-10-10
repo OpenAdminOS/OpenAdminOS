@@ -1,6 +1,5 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-
 import { StatusStrip } from "./StatusStrip";
 import {
   createAwaitingConfirmationRun,
@@ -9,26 +8,56 @@ import {
   renderWithAppState,
 } from "../test/test-utils";
 
-describe("StatusStrip external proposals", () => {
-  it("links to a pending external proposal from the persistent status surface", async () => {
-    const run = createAwaitingConfirmationRun({
-      id: "run-external-1",
-      agentSlug: "external-proposal",
-      origin: "external-proposal",
-      external: {
-        clientName: "Claude Code",
-        requiredScopes: ["Policy.ReadWrite.ConditionalAccess"],
-      },
-    });
+describe("StatusStrip", () => {
+  it("renders the three compact cells and links a running count to Runs", async () => {
     const bridge = makeMockBridge(
       {},
-      createMockAppState({ installedAgents: [], runs: [run] }),
+      createMockAppState({
+        runs: [
+          createAwaitingConfirmationRun({
+            id: "run-active",
+            status: "running",
+            origin: undefined,
+            external: undefined,
+          }),
+        ],
+      }),
     );
-
     renderWithAppState(<StatusStrip />, { bridge });
 
+    const strip = screen.getByRole("contentinfo", {
+      name: "Current tenant, provider, and data boundary",
+    });
+    expect(strip).toHaveClass("h-7", "whitespace-nowrap", "overflow-hidden");
+    expect(await screen.findByText("Contoso IT")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Ollama.*llama3.1.*local-only/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "1 running" })).toHaveAttribute(
+      "href",
+      "/runs",
+    );
+    expect(screen.queryByText(/external proposal/)).not.toBeInTheDocument();
+  });
+
+  it("hides the running cell at zero and derives the hosted destination", async () => {
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ activeProviderId: "openai" }),
+    );
+    renderWithAppState(<StatusStrip />, { bridge });
+
+    expect(screen.queryByRole("link", { name: /running/ })).not.toBeInTheDocument();
     expect(
-      await screen.findByRole("link", { name: "1 external proposal" }),
-    ).toHaveAttribute("href", "/runs/run-external-1");
+      await screen.findByLabelText(/hosted.*tenant context sent to OpenAI/),
+    ).toBeInTheDocument();
+  });
+
+  it("states that hosted Nova voice sends audio to OpenAI", async () => {
+    renderWithAppState(<StatusStrip voiceHosted />, {
+      bridge: makeMockBridge({}, createMockAppState()),
+    });
+
+    expect(
+      await screen.findByLabelText(/Nova voice.*audio and shared context sent to OpenAI/),
+    ).toBeInTheDocument();
   });
 });

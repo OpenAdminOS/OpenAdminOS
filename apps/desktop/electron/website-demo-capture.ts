@@ -129,9 +129,9 @@ export async function captureWebsiteDemo(
     },
     {
       id: "history",
-      route: "/activity",
-      label: "Run history",
-      wait: ["Run history"],
+      route: "/runs",
+      label: "Runs",
+      wait: ["Runs"],
     },
     {
       id: "compliance-details",

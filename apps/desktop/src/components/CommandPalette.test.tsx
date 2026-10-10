@@ -2,7 +2,12 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
-import { makeMockBridge, renderRoute } from "../test/test-utils";
+import {
+  createMockAppState,
+  makeMockBridge,
+  mockTenant,
+  renderRoute,
+} from "../test/test-utils";
 
 describe("Command Palette", () => {
   it("uses complete combobox semantics and opens catalog-backed Settings results", async () => {
@@ -35,4 +40,43 @@ describe("Command Palette", () => {
     await user.keyboard("{Enter}");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+});
+
+it("lists the shell destinations and the demoted power-user surfaces", async () => {
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge(
+      {},
+      createMockAppState({
+        tenants: [
+          mockTenant,
+          {
+            ...mockTenant,
+            id: "tenant-2",
+            displayName: "Fabrikam",
+            homeAccountId: "home-account-2",
+          },
+        ],
+      }),
+    ),
+  });
+
+  await screen.findByRole("option", { name: /Go to Fleet/ });
+
+  for (const label of [
+    "Go to Chat",
+    "Go to Agents",
+    "Go to Runs",
+    "Go to Changes",
+    "Open Settings",
+    "Go to Agent Team",
+    "Go to Cache",
+    "Go to Fleet",
+    "Go to Workspaces",
+    "Go to Connectors",
+    "Open Voice",
+  ]) {
+    expect(screen.getByRole("option", { name: new RegExp(label) })).toBeInTheDocument();
+  }
 });

@@ -4,6 +4,7 @@ import {
   IconActivity,
   IconAgents,
   IconBolt,
+  IconCache,
   IconChanges,
   IconAgentTeam,
   IconChat,
@@ -11,10 +12,12 @@ import {
   IconConnectors,
   IconHardDrive,
   IconHub,
+  IconFleet,
   IconPlay,
   IconSearch,
   IconSettings,
   IconShield,
+  IconSparkle,
 } from "./icons";
 import { useAppState } from "../state";
 import { SETTINGS_ITEMS, SETTINGS_SECTIONS } from "../copy";
@@ -22,6 +25,8 @@ import { formatAgentDisplayName } from "../shared/agent-display";
 import { registerOverlay } from "../shared/overlay-stack";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import { openNovaPanel } from "../shared/nova-panel";
+import { Kbd } from "./ui";
 
 interface PaletteItem {
   id: string;
@@ -123,12 +128,30 @@ export function CommandPalette({
         action: go("/changes"),
       },
       {
-        id: "nav-activity",
-        label: "Go to Run history",
+        id: "nav-runs",
+        label: "Go to Runs",
         group: "Navigate",
         icon: <IconActivity size={13} className="text-[var(--color-accent)]" />,
-        action: go("/activity"),
+        action: go("/runs"),
       },
+      {
+        id: "nav-cache",
+        label: "Go to Cache",
+        group: "Navigate",
+        icon: <IconCache size={13} className="text-[var(--color-accent)]" />,
+        action: go("/cache"),
+      },
+      ...(state.tenants.length >= 2
+        ? ([
+            {
+              id: "nav-fleet",
+              label: "Go to Fleet",
+              group: "Navigate",
+              icon: <IconFleet size={13} className="text-[var(--color-accent)]" />,
+              action: go("/fleet"),
+            },
+          ] as PaletteItem[])
+        : []),
       {
         id: "nav-workspaces",
         label: "Go to Workspaces",
@@ -149,6 +172,17 @@ export function CommandPalette({
         group: "Navigate",
         icon: <IconSettings size={13} className="text-[var(--color-accent)]" />,
         action: go("/settings"),
+      },
+      {
+        id: "act-voice",
+        label: "Open Voice",
+        hint: "Nova voice assistant · Alt+V",
+        group: "Actions",
+        icon: <IconSparkle size={13} className="text-[var(--color-accent)]" />,
+        action: () => {
+          onClose();
+          openNovaPanel();
+        },
       },
       ...SETTINGS_SECTIONS.map((entry) => ({
         id: `settings-section-${entry.id}`,
@@ -208,7 +242,7 @@ export function CommandPalette({
             },
           ] as PaletteItem[])),
     ];
-  }, [navigate, onClose, registryAgents, requireTenantAndProvider, startRun, state.installedAgents]);
+  }, [navigate, onClose, registryAgents, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
@@ -350,17 +384,15 @@ export function CommandPalette({
             aria-activedescendant={
               flatList[activeIndex] ? `command-option-${flatList[activeIndex]!.id}` : undefined
             }
-            className="flex-1 bg-transparent text-[14px] text-[var(--color-text)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none"
+            className="flex-1 bg-transparent text-md text-[var(--color-text)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none"
           />
-          <kbd className="rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-            esc
-          </kbd>
+          <Kbd>esc</Kbd>
         </div>
 
         {actionError && (
           <div
             role="alert"
-            className="mx-3 mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+            className="mx-3 mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
           >
             {actionError}
           </div>
@@ -373,13 +405,13 @@ export function CommandPalette({
           className="max-h-[440px] overscroll-contain overflow-y-auto py-1"
         >
           {grouped.length === 0 && (
-            <div role="status" className="px-4 py-8 text-center text-[13px] text-[var(--color-text-muted)]">
+            <div role="status" className="px-4 py-8 text-center text-base text-[var(--color-text-muted)]">
               No matches for “{query}”. Try a page, setting, or agent name.
             </div>
           )}
           {grouped.map((g) => (
             <div key={g.group} className="px-1.5 py-1">
-              <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--color-text-muted)]">
                 {g.group}
               </div>
               {g.items.map((it) => {
@@ -404,17 +436,17 @@ export function CommandPalette({
                       {it.icon}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] text-[var(--color-text)]">
+                      <span className="block truncate text-base text-[var(--color-text)]">
                         {it.label}
                       </span>
                       {it.hint && (
-                        <span className="block truncate text-[11px] text-[var(--color-text-muted)]">
+                        <span className="block truncate text-xs text-[var(--color-text-muted)]">
                           {it.hint}
                         </span>
                       )}
                     </span>
                     {isActive && (
-                      <kbd className="rounded-md bg-[var(--color-accent-soft)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-accent)]">
+                      <kbd className="rounded-md bg-[var(--color-accent-soft)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-accent)]">
                         ↵
                       </kbd>
                     )}
@@ -425,7 +457,7 @@ export function CommandPalette({
           ))}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--color-border-soft)] bg-[var(--color-surface)] px-4 py-2.5 text-[10.5px] text-[var(--color-text-muted)]">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--color-border-soft)] bg-[var(--color-surface)] px-4 py-2.5 text-xs text-[var(--color-text-muted)]">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1">
               <Kbd>↑</Kbd>
@@ -442,13 +474,5 @@ export function CommandPalette({
         </div>
       </div>
     </div>
-  );
-}
-
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="rounded bg-[var(--color-bg-raised)] px-1.5 py-px font-mono text-[10px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
-      {children}
-    </kbd>
   );
 }

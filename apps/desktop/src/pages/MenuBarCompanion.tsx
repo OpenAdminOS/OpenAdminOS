@@ -609,7 +609,7 @@ function ActivitySection({
         icon={<IconActivity size={13} />}
         title="Recent"
         action="History"
-        onAction={() => onOpen("/activity")}
+        onAction={() => onOpen("/runs")}
       />
       <div className="mt-2 grid gap-1.5">
         {snapshot.inFlight.slice(0, 2).map((item) => (

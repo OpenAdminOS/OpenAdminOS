@@ -12,6 +12,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Establish the enterprise desktop shell with a five-item collapsible sidebar, compact status strip, Runs routing, sidebar Voice access, and accessible shared UI primitives.
+
 - Cycle idle teammates through workstations, sofa seats, and the game station in the desktop office and website recording, while preserving real task and approval states.
 
 - Show the full three-teammate office in the website preview, using the built app’s real movement with pause and reduced-motion support.
