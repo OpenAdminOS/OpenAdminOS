@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { IconCheck, IconClose, IconWarning } from "./icons";
+import { IconButton } from "./ui";
 
 type ToastTone = "success" | "error" | "info";
 
@@ -118,7 +119,7 @@ function ToastRow({
 
   return (
     <div
-      role="status"
+      role={toast.tone === "error" ? "alert" : "status"}
       className={`pointer-events-auto flex min-w-[280px] max-w-[480px] items-start gap-2.5 rounded-lg px-3.5 py-2.5 shadow-[var(--shadow-modal)] ring-1 animate-fade-in-scale ${palette}`}
     >
       <span className="mt-0.5 shrink-0">
@@ -130,16 +131,16 @@ function ToastRow({
           <span className="inline-block h-2 w-2 rounded-full bg-[var(--color-info)]" />
         )}
       </span>
-      <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-[var(--color-text)]">
+      <span className="min-w-0 flex-1 text-base leading-relaxed text-[var(--color-text)]">
         {toast.message}
       </span>
-      <button
+      <IconButton
         onClick={() => onDismiss(toast.id)}
-        aria-label="Dismiss"
-        className="rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-      >
-        <IconClose size={11} />
-      </button>
+        label="Dismiss notification"
+        size="sm"
+        icon={<IconClose size={11} />}
+        className="-mr-1 -mt-1"
+      />
     </div>
   );
 }

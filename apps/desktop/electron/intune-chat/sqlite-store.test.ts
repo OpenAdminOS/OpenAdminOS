@@ -91,6 +91,7 @@ describe("Intune Chat SQLite store", () => {
         role: "user",
         content: "Which Windows devices are stale?",
         status: "completed",
+        engineNotice: "Deterministic retrieval: test metadata.",
         createdAt: now,
       });
       store.insertToolCall({
@@ -132,6 +133,10 @@ describe("Intune Chat SQLite store", () => {
 
       assert.equal(store.listConversations().length, 1);
       assert.equal(store.listMessages(conversation.id)[0]?.content, "Which Windows devices are stale?");
+      assert.equal(
+        store.listMessages(conversation.id)[0]?.engineNotice,
+        "Deterministic retrieval: test metadata.",
+      );
       assert.equal(store.searchConversations("Windows")[0]?.id, conversation.id);
       const renamed = store.renameConversation(
         conversation.id,

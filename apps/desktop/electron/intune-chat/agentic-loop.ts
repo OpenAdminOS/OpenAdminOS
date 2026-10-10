@@ -119,7 +119,7 @@ export async function runAgenticChat(
       ok: false,
       reason: "provider-unavailable",
       fallbackNotice:
-        "Deterministic retrieval — the selected model is not available for investigative mode.",
+        "Deterministic retrieval: the selected model is not available for investigative mode.",
       toolTrace: [],
       iterations: 0,
     };

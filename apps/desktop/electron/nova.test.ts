@@ -154,7 +154,7 @@ it("greetings and navigation are bounded and do not invoke tenant tools", async 
       sessionId: sessionId!,
       text: "Open Agent Team",
     }),
-    { text: "Opening agent team.", route: "/office" },
+    { text: "Opening agent team.", route: "/agents/office" },
   );
   assert.equal(chats.length, 0);
 });
@@ -551,7 +551,7 @@ it('opens connector setup directly from voice without invoking reasoning', async
   const f = fixture();
   const { sessionId } = await f.nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
   const result = await f.nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Open connectors' });
-  assert.equal(result.route, '/connectors'); assert.equal(f.chats.length, 0);
+  assert.equal(result.route, '/settings/connectors'); assert.equal(f.chats.length, 0);
 });
 
 it('retrieves a fresh report and requires a single visual decision for every connector', async () => {

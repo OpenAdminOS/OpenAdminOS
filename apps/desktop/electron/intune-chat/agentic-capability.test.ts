@@ -54,6 +54,20 @@ describe("agentic capability routing", () => {
     );
   });
 
+  it("uses plain runtime copy for models that cannot use investigative mode", () => {
+    const decision = resolveAgenticCapabilityForTest({
+      mode: "auto",
+      provider,
+      providerId: "ollama",
+      model: "tiny-2b",
+    });
+
+    assert.equal(
+      decision.notice,
+      "Deterministic retrieval: tiny-2b does not support investigative mode.",
+    );
+  });
+
   it("never overrides an explicit user setting", () => {
     const model = "always-failing-model";
     recordAgenticOutcome("ollama", model, false);

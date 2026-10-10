@@ -404,9 +404,12 @@ describe("Intune Chat host service", () => {
       );
 
       assert.equal(result.assistantMessage.status, "completed");
-      assert.match(result.assistantMessage.content, /malformed tool JSON/i);
-      assert.match(result.assistantMessage.content, /Deterministic answer/);
+      assert.equal(result.assistantMessage.content, "Deterministic answer.");
+      assert.match(result.assistantMessage.engineNotice ?? "", /malformed tool JSON/i);
       assert.equal(result.assistantMessage.toolTrace?.length ?? 0, 0);
+      const saved = await store.getIntuneChatMessages(result.conversation.id);
+      assert.equal(saved[1]?.content, "Deterministic answer.");
+      assert.match(saved[1]?.engineNotice ?? "", /malformed tool JSON/i);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });

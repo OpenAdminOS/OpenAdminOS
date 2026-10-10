@@ -81,8 +81,8 @@ let pollTimer: NodeJS.Timeout | undefined;
  * Wire `electron-updater` against the GitHub Releases publish channel.
  *
  * Skipped when:
- *   - The app is unpackaged (`npm run dev`) — no autoUpdater target.
- *   - Running on Windows as a Microsoft Store-installed AppX — the
+ *   - The app is unpackaged (`npm run dev`): no autoUpdater target.
+ *   - Running on Windows as a Microsoft Store-installed AppX: the
  *     Store handles updates itself; calling out to GitHub would let the
  *     two update channels race and break Store reputation. Detected
  *     via Electron's `process.windowsStore` flag.

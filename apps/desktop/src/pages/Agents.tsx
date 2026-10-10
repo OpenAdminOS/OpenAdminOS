@@ -1,40 +1,58 @@
-import { NavLink, Outlet } from "react-router";
+import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
+import { IconAgentTeam, IconChevronDown, IconHub, IconPlus } from "../components/icons";
+import { Button, Menu } from "../components/ui";
+import AgentDetail from "./AgentDetail";
+import AgentsHome from "./AgentsHome";
 
-const tabs = [
-  { to: "/agents", label: "Installed", end: true },
-  { to: "/agents/hub", label: "Hub", end: false },
-  { to: "/agents/schedules", label: "Schedules", end: false },
-] as const;
+export default function Agents({ startRunOnOpen = false }: { startRunOnOpen?: boolean }) {
+  const navigate = useNavigate();
 
-export default function Agents() {
   return (
     <>
       <PageHeader
         title="Agents"
-        subtitle="Installed agents, the community hub, and recurring schedules."
+        actions={
+          <Menu
+            align="end"
+            ariaLabel="Add agent or teammate"
+            trigger={
+              <Button
+                variant="primary"
+                size="sm"
+                leadingIcon={<IconPlus size={14} />}
+                trailingIcon={<IconChevronDown size={13} />}
+              >
+                Add
+              </Button>
+            }
+            items={[
+              {
+                id: "add-teammate",
+                label: "Add teammate",
+                icon: <IconAgentTeam size={14} />,
+                onSelect: () => navigate("/agents?add=teammate"),
+              },
+              {
+                id: "install-hub",
+                label: "Install from hub",
+                icon: <IconHub size={14} />,
+                onSelect: () => navigate("/agents?source=hub"),
+              },
+              {
+                id: "build-agent",
+                label: "Build your own agent",
+                icon: <IconPlus size={14} />,
+                onSelect: () => navigate("/agents?add=agent"),
+              },
+            ]}
+          />
+        }
       />
       <PageBody>
-        <div className="mb-6 flex flex-wrap items-center gap-1.5">
-          {tabs.map((tab) => (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              end={tab.end}
-              className={({ isActive }) =>
-                `rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${
-                  isActive
-                    ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
-                    : "bg-transparent text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                }`
-              }
-            >
-              {tab.label}
-            </NavLink>
-          ))}
-        </div>
-        <Outlet />
+        <AgentsHome />
       </PageBody>
+      <AgentDetail startRunOnOpen={startRunOnOpen} />
     </>
   );
 }

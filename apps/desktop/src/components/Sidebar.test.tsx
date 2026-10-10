@@ -1,17 +1,26 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-
-import { Sidebar } from "./Sidebar";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it } from "vitest";
+import { Nova } from "../voice/Nova";
+import { Sidebar, SIDEBAR_COLLAPSED_KEY } from "./Sidebar";
 import {
+  createAwaitingConfirmationRun,
   createMockAppState,
   makeMockBridge,
-  mockTenant,
   renderRoute,
 } from "../test/test-utils";
-import type { TenantRecord } from "../shared/openAdminOS";
+
+beforeEach(() => {
+  localStorage.clear();
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: 1200,
+  });
+});
 
 describe("Sidebar", () => {
-  it("keeps one compact primary navigation group", () => {
+  it("renders exactly five primary destinations in the locked order", () => {
     renderRoute(<Sidebar />, {
       path: "*",
       route: "/chat",
@@ -22,107 +31,101 @@ describe("Sidebar", () => {
     expect(
       within(primary)
         .getAllByRole("link")
-        .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
-    ).toEqual(["Chat", "Agent Team", "Agents", "Changes", "Cache", "Settings"]);
-    expect(
-      screen.queryByRole("link", { name: "Home" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Report issue/ }),
-    ).not.toBeInTheDocument();
+        .map((link) => link.textContent?.trim()),
+    ).toEqual(["Chat", "Agents", "Runs", "Changes", "Settings"]);
+    expect(screen.queryByRole("navigation", { name: "More" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Agent Team/ })).not.toBeInTheDocument();
   });
 
-  it("keeps Workspaces and Connectors out of the primary group but reachable", () => {
-    renderRoute(<Sidebar />, {
+  it("shows the Runs review badge only when a run awaits confirmation", async () => {
+    const empty = renderRoute(<Sidebar />, {
       path: "*",
       route: "/chat",
       bridge: makeMockBridge(),
     });
+    expect(screen.getByRole("link", { name: "Runs" })).not.toHaveTextContent(/\d/);
+    empty.unmount();
 
-    // The primary group stays the daily destinations only: v0.4 cut the
-    // nav to four items and these two are power-user surfaces.
-    const primary = screen.getByRole("navigation", { name: "Primary" });
-    expect(
-      within(primary).queryByRole("link", { name: /Workspaces/ }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(primary).queryByRole("link", { name: /Connectors/ }),
-    ).not.toBeInTheDocument();
-
-    const more = screen.getByRole("navigation", { name: "More" });
-    expect(
-      within(more)
-        .getAllByRole("link")
-        .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
-    ).toEqual(["Workspaces", "Connectors"]);
-  });
-
-  it("shows persona icons and selects only the linked persona", async () => {
-    const personas = ["Chief of Staff", "Research Bot"].map((name, i) => ({
-      id: `persona-${i}`,
-      name,
-      responsibility: "Review settings",
-      avatar: "robot" as const,
-      color: "sage" as const,
-      tenantId: "tenant-1",
-      providerId: "ollama" as const,
-      agentSlugs: ["compliance-overview"],
-      intervalMinutes: null,
-      maxMinutes: 30,
-      enabled: true,
-      createdAt: "2026-09-10T10:00:00Z",
-      updatedAt: "2026-09-10T10:00:00Z",
-      lastError: i === 1 ? "Review provider settings" : undefined,
-    }));
-    renderRoute(<Sidebar />, {
-      path: "*",
-      route: "/office?persona=persona-1",
-      bridge: makeMockBridge(
-        {},
-        createMockAppState({ office: { personas, missions: [] } }),
-      ),
-    });
-    const research = await screen.findByRole("link", { name: /Research Bot/ });
-    expect(research).toHaveAttribute("href", "/office?persona=persona-1");
-    expect(research).toHaveAttribute("aria-current", "page");
-    expect(research.querySelector("svg")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Chief of Staff" }),
-    ).not.toHaveAttribute("aria-current");
-    expect(
-      within(research).getByRole("img", { name: "Needs attention" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Agent Team/ })).toHaveTextContent(
-      "1",
+    const runs = [
+      createAwaitingConfirmationRun({ id: "run-standard" }),
+      createAwaitingConfirmationRun({
+        id: "run-team",
+        office: { missionId: "mission-1", personaId: "persona-1", step: 1 },
+      }),
+      createAwaitingConfirmationRun({
+        id: "run-external",
+        origin: "external-proposal",
+        external: {
+          clientName: "Gateway client",
+          requiredScopes: ["Policy.ReadWrite.ConditionalAccess"],
+        },
+      }),
+    ];
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ runs }),
     );
-  });
-
-  it("shows Fleet only when at least two tenants are connected", async () => {
-    const secondTenant: TenantRecord = {
-      id: "tenant-2",
-      displayName: "Fabrikam Europe",
-      username: "admin@fabrikam.example",
-      homeAccountId: "home-account-2",
-      addedAt: "2026-08-01T08:00:00.000Z",
-    };
-    const appState = createMockAppState({
-      tenants: [mockTenant, secondTenant],
-    });
 
     renderRoute(<Sidebar />, {
       path: "*",
       route: "/chat",
-      bridge: makeMockBridge({}, appState),
+      bridge,
     });
+    expect(await screen.findByText("3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Runs/ })).toHaveTextContent("3");
+  });
 
-    const primary = screen.getByRole("navigation", { name: "Primary" });
+  it("persists the collapsed rail and defaults to it below 1000px", async () => {
+    const user = userEvent.setup();
+    const first = renderRoute(<Sidebar />, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+    await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.getByRole("complementary", { name: "Application navigation" })).toHaveAttribute(
+      "data-collapsed",
+      "true",
+    );
+    expect(localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBe("true");
+    first.unmount();
+
+    const restored = renderRoute(<Sidebar />, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+    restored.unmount();
+
+    localStorage.clear();
+    window.innerWidth = 900;
+    renderRoute(<Sidebar />, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+  });
+
+  it("opens Nova from the Voice footer without a floating launcher", async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <>
+        <Sidebar />
+        <Nova />
+      </>,
+      {
+        path: "*",
+        route: "/chat",
+        bridge: makeMockBridge(),
+      },
+    );
+
+    expect(screen.queryByRole("button", { name: /Talk to Nova/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Voice" }));
     expect(
-      await within(primary).findByRole("link", { name: /Fleet/ }),
-    ).toBeInTheDocument();
-    expect(
-      within(primary)
-        .getAllByRole("link")
-        .map((link) => link.querySelector(".flex-1")?.textContent?.trim()),
-    ).toEqual(["Chat", "Agent Team", "Agents", "Changes", "Fleet", "Cache", "Settings"]);
+      await screen.findByRole("region", { name: "Nova voice assistant" }),
+    ).toBeVisible();
   });
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { Select } from "./Select";
 
 import { Button } from "./Button";
@@ -12,6 +12,7 @@ import type {
   AgentCommunitySubmissionReview,
   AgentManifestPreview,
 } from "../shared/openAdminOS";
+import { Badge } from "./ui";
 
 const categories: AgentCategory[] = [
   "devices",
@@ -144,7 +145,7 @@ export function CommunityShareModal({
               onChange={(value) => updateMetadata("description", value)}
             />
             <label className="block">
-              <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+              <span className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
                 Category
               </span>
               <Select
@@ -152,7 +153,7 @@ export function CommunityShareModal({
                 onChange={(event) =>
                   updateMetadata("category", event.target.value as AgentCategory)
                 }
-                className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+                className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-base text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
               >
                 {categories.map((category) => (
                   <option key={category} value={category}>
@@ -184,7 +185,7 @@ export function CommunityShareModal({
               value={metadata.changelog}
               onChange={(value) => updateMetadata("changelog", value)}
             />
-            <label className="flex items-start gap-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface)] p-3 text-[12px] text-[var(--color-text-soft)]">
+            <label className="flex items-start gap-2 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface)] p-3 text-sm text-[var(--color-text-soft)]">
               <input
                 type="checkbox"
                 checked={metadata.licenseConfirmed}
@@ -205,10 +206,10 @@ export function CommunityShareModal({
           <div className="border-b border-[var(--color-border-soft)] p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-[13px] font-semibold text-[var(--color-text)]">
+                <div className="text-base font-semibold text-[var(--color-text)]">
                   QA gate
                 </div>
-                <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
+                <div className="mt-1 text-sm text-[var(--color-text-muted)]">
                   Blocking failures must be fixed before OpenAdminOS creates the public
                   review issue.
                 </div>
@@ -224,12 +225,12 @@ export function CommunityShareModal({
               </Button>
             </div>
             {review && (
-              <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <Badge tone="success">{passCount} passed</Badge>
-                <Badge tone={warningCount > 0 ? "warning" : "muted"}>
+                <Badge tone={warningCount > 0 ? "warning" : "neutral"}>
                   {warningCount} review flags
                 </Badge>
-                <Badge tone={failureCount > 0 ? "danger" : "muted"}>
+                <Badge tone={failureCount > 0 ? "danger" : "neutral"}>
                   {failureCount} failed
                 </Badge>
               </div>
@@ -238,7 +239,7 @@ export function CommunityShareModal({
 
           <div className="min-h-0 flex-1 overflow-y-auto p-5">
             {!review ? (
-              <div className="rounded-lg border border-dashed border-[var(--color-border)] p-6 text-center text-[12px] text-[var(--color-text-muted)]">
+              <div className="rounded-lg border border-dashed border-[var(--color-border)] p-6 text-center text-sm text-[var(--color-text-muted)]">
                 Run QA to generate the submission package and review checks.
               </div>
             ) : (
@@ -248,14 +249,14 @@ export function CommunityShareModal({
                 ))}
                 {packagePreview && (
                   <div className="mt-5 rounded-lg border border-[var(--color-border-soft)] bg-[var(--color-surface)] p-4">
-                    <div className="text-[12px] font-semibold text-[var(--color-text)]">
+                    <div className="text-sm font-semibold text-[var(--color-text)]">
                       Package preview
                     </div>
                     <div className="mt-2 space-y-1">
                       {packagePreview.map(([name, size]) => (
                         <div
                           key={name}
-                          className="flex items-center justify-between text-[12px]"
+                          className="flex items-center justify-between text-sm"
                         >
                           <span className="font-mono text-[var(--color-text)]">
                             {name}
@@ -264,7 +265,7 @@ export function CommunityShareModal({
                         </div>
                       ))}
                     </div>
-                    <div className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                    <div className="mt-3 text-xs leading-relaxed text-[var(--color-text-muted)]">
                       Tenant data, prompts, run history, provider settings, tokens, and
                       secrets are excluded.
                     </div>
@@ -274,13 +275,13 @@ export function CommunityShareModal({
             )}
 
             {error && (
-              <div className="mt-4 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)]">
+              <div className="mt-4 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">
                 {error}
               </div>
             )}
 
             {issueUrl && (
-              <div className="mt-4 rounded-md border border-[var(--color-success)]/30 bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)]">
+              <div className="mt-4 rounded-md border border-[var(--color-success)]/30 bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)]">
                 Submitted for maintainer review.{" "}
                 <button
                   onClick={() => void window.openAdminOS?.openExternal(issueUrl)}
@@ -293,7 +294,7 @@ export function CommunityShareModal({
           </div>
 
           <div className="flex shrink-0 items-center justify-between border-t border-[var(--color-border-soft)] px-5 py-4">
-            <div className="max-w-[420px] text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+            <div className="max-w-[420px] text-xs leading-relaxed text-[var(--color-text-muted)]">
               This creates a public GitHub issue. Maintainers decide whether it becomes an
               Agent Hub entry.
             </div>
@@ -316,7 +317,6 @@ export function CommunityShareModal({
     </Modal>
   );
 }
-
 function QaRow({ check }: { check: AgentCommunitySubmissionCheck }) {
   const isFail = check.status === "fail";
   const isWarn = check.status === "warn";
@@ -341,14 +341,14 @@ function QaRow({ check }: { check: AgentCommunitySubmissionCheck }) {
           )}
         </div>
         <div className="min-w-0">
-          <div className="text-[12px] font-semibold text-[var(--color-text)]">
+          <div className="text-sm font-semibold text-[var(--color-text)]">
             {check.label}
           </div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-[var(--color-text-muted)]">
+          <div className="mt-0.5 text-sm leading-relaxed text-[var(--color-text-muted)]">
             {check.detail}
           </div>
           {check.status === "fail" && check.fix && (
-            <div className="mt-2 rounded-md bg-[var(--color-bg)] px-2.5 py-2 text-[11px] leading-relaxed text-[var(--color-text-soft)]">
+            <div className="mt-2 rounded-md bg-[var(--color-bg)] px-2.5 py-2 text-xs leading-relaxed text-[var(--color-text-soft)]">
               Fix: {check.fix}
             </div>
           )}
@@ -371,19 +371,18 @@ function TextField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+      <span className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </span>
       <input
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
+        className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-base text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
       />
     </label>
   );
 }
-
 function TextArea({
   label,
   value,
@@ -397,37 +396,15 @@ function TextArea({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+      <span className="mb-1 block text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </span>
       <textarea
         rows={rows}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full resize-none rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] leading-relaxed text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+        className="w-full resize-none rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-base leading-relaxed text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
       />
     </label>
-  );
-}
-
-function Badge({
-  tone,
-  children,
-}: {
-  tone: "success" | "warning" | "danger" | "muted";
-  children: ReactNode;
-}) {
-  const toneClass =
-    tone === "success"
-      ? "border-[var(--color-success)]/30 bg-[var(--color-success-soft)] text-[var(--color-success)]"
-      : tone === "warning"
-        ? "border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
-        : tone === "danger"
-          ? "border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
-          : "border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)]";
-  return (
-    <span className={`rounded-full border px-2 py-1 ${toneClass}`}>
-      {children}
-    </span>
   );
 }

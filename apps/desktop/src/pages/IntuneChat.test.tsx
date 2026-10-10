@@ -16,6 +16,7 @@ import type {
   IntuneChatMessage,
   OpenAdminOSApi,
   SendIntuneChatMessageResult,
+  WorkspaceDetail,
 } from "../shared/openAdminOS";
 import { CHAT_COPY, deriveTrustCopy } from "../copy";
 
@@ -54,6 +55,17 @@ describe("IntuneChat guest exploration", () => {
     expect(composer).toHaveValue(
       "Which managed devices have not synced in the last 7 days?",
     );
+  });
+
+  it("shows the new conversation title as text, not an empty rename field", async () => {
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState()),
+    });
+
+    expect(await screen.findByRole("button", { name: "New conversation" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Conversation title" })).not.toBeInTheDocument();
   });
 
   it("sends exactly once after the user explicitly resumes completed setup", async () => {
@@ -178,7 +190,14 @@ describe("IntuneChat hosted-provider consent", () => {
     });
 
     const composer = await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
-    await screen.findByText("Retrieved tenant context is sent to the selected hosted provider.");
+    expect(document.querySelector("header")).not.toHaveTextContent("OpenAI");
+    await screen.findByText(
+      deriveTrustCopy({
+        provider: { name: "OpenAI", isLocal: false },
+        model: "gpt-5",
+        scope: { tenantNames: ["Contoso IT"] },
+      }).boundary!,
+    );
 
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -258,6 +277,50 @@ describe("IntuneChat hosted-provider consent", () => {
   });
 });
 
+describe("IntuneChat trust presentation", () => {
+  it("does not repeat local provider or boundary status in the Chat header and composer", async () => {
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+
+    await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
+    expect(document.querySelector("header")).not.toHaveTextContent("Ollama");
+    expect(screen.queryByText("Local provider")).not.toBeInTheDocument();
+    expect(screen.queryByText(CHAT_COPY.localBoundary)).not.toBeInTheDocument();
+    expect(screen.queryByText("Ollama")).not.toBeInTheDocument();
+  });
+
+  it.each([900, 1100])("keeps Send in the normal composer flow at %dpx", async (width) => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    const matchMedia = vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) =>
+        ({
+          matches: query.includes("max-width: 1100px"),
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(() => false),
+        }) as MediaQueryList,
+    );
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+
+    const send = await screen.findByRole("button", { name: "Send" });
+    expect(send.closest(".intune-chat-composer")).toBeInTheDocument();
+    expect(send.closest(".fixed")).toBeNull();
+    matchMedia.mockRestore();
+  });
+});
+
 describe("IntuneChat related agent hint", () => {
   it("shows a dismissible related-agent hint after the assistant answer completes", async () => {
     const user = userEvent.setup();
@@ -308,7 +371,7 @@ describe("IntuneChat related agent hint", () => {
         const streamingAssistantMessage: IntuneChatMessage = {
           id: "message-assistant-1",
           conversationId: conversation.id,
-          role: "assistant",
+          role: "assistant" as const,
           content: "",
           createdAt,
           status: "streaming",
@@ -318,7 +381,17 @@ describe("IntuneChat related agent hint", () => {
         const assistantMessage: IntuneChatMessage = {
           ...streamingAssistantMessage,
           content: "Mock answer about stale device sync.",
-          status: "completed",
+          status: "completed" as const,
+          agentSuggestions: [
+            {
+              agentSlug: inactiveDevicesAgent.slug,
+              agentName: inactiveDevicesAgent.name,
+              reason: inactiveDevicesAgent.description,
+              confidence: 0.92,
+              mode: inactiveDevicesAgent.mode,
+              scopes: inactiveDevicesAgent.scopes,
+            },
+          ],
         };
         const result: SendIntuneChatMessageResult = {
           conversation,
@@ -350,22 +423,22 @@ describe("IntuneChat related agent hint", () => {
     await user.type(composer, "Which managed devices have not synced in 45 days?");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(await screen.findByText("Related agent · Find inactive devices")).toBeInTheDocument();
-    expect(screen.getByText("Read-only")).toBeInTheDocument();
+    expect(await screen.findByText("Suggested agents")).toBeInTheDocument();
+    expect(screen.getAllByText("Find inactive devices")).toHaveLength(1);
+    expect(screen.getByText("Read")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open agent →" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("button", { name: "Open agent" })).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Dismiss related agent Find inactive devices",
-      }),
+      screen.getByRole("button", { name: "Dismiss suggested agents" }),
     );
 
-    expect(screen.queryByText("Related agent · Find inactive devices")).not.toBeInTheDocument();
+    expect(screen.queryByText("Suggested agents")).not.toBeInTheDocument();
   });
 });
 
@@ -403,7 +476,7 @@ describe("IntuneChat conversation routes", () => {
       bridge,
     });
 
-    const historyButton = await screen.findByRole("button", { name: "Show chat history" });
+    const historyButton = await screen.findByRole("button", { name: "Show chat panel" });
     expect(screen.queryByRole("searchbox", { name: "Search conversations" })).not.toBeInTheDocument();
     expect(screen.queryByText("01")).not.toBeInTheDocument();
 
@@ -414,7 +487,7 @@ describe("IntuneChat conversation routes", () => {
 
     await user.keyboard("{Escape}");
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Show chat history" })).toHaveFocus(),
+      expect(screen.getByRole("button", { name: "Show chat panel" })).toHaveFocus(),
     );
     expect(screen.queryByRole("searchbox", { name: "Search conversations" })).not.toBeInTheDocument();
     matchMedia.mockRestore();
@@ -496,6 +569,8 @@ describe("IntuneChat conversation routes", () => {
       bridge,
     });
 
+    const showPanel = screen.queryByRole("button", { name: "Show chat panel" });
+    if (showPanel) await user.click(showPanel);
     const search = await screen.findByRole("searchbox", { name: "Search conversations" });
     await user.type(search, "other");
     await waitFor(() => {
@@ -503,5 +578,114 @@ describe("IntuneChat conversation routes", () => {
     });
     expect(screen.getAllByText("Active device review").length).toBeGreaterThan(0);
     expect(bridge.getIntuneChatMessages).not.toHaveBeenCalledWith("conversation-match");
+  });
+
+  it("renames the open conversation inline with F2 and Enter", async () => {
+    const user = userEvent.setup();
+    let conversation: IntuneChatConversation = {
+      id: "conversation-rename",
+      title: "Original title",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge();
+    bridge.listIntuneChatConversations = vi.fn(async () => [conversation]);
+    bridge.getIntuneChatMessages = vi.fn(async () => []);
+    bridge.renameIntuneChatConversation = vi.fn(async (_id, title) => {
+      conversation = { ...conversation, title };
+      return conversation;
+    });
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId",
+      route: "/chat/conversation-rename",
+      bridge,
+    });
+
+    await screen.findAllByText("Original title");
+    await user.keyboard("{F2}");
+    const titleInput = screen.getByRole("textbox", { name: "Conversation title" });
+    await user.clear(titleInput);
+    await user.type(titleInput, "Renamed title{Enter}");
+    await waitFor(() =>
+      expect(bridge.renameIntuneChatConversation).toHaveBeenCalledWith(
+        "conversation-rename",
+        "Renamed title",
+      ),
+    );
+  });
+
+  it("renders an addressable Workspace detail inside Chat", async () => {
+    const workspace: WorkspaceDetail = {
+      id: "workspace-1",
+      tenantId: "tenant-1",
+      tenantName: "Contoso IT",
+      title: "Stale device review",
+      status: "active",
+      evidenceCount: 0,
+      conversationCount: 0,
+      runCount: 0,
+      noteCount: 0,
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      evidence: [],
+      notes: [],
+      links: [],
+      instructions: "Keep device evidence tenant-scoped.",
+    };
+    const bridge = makeMockBridge({
+      listWorkspaces: vi.fn(async () => [workspace]),
+      getWorkspace: vi.fn(async () => workspace),
+    });
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/workspaces/:workspaceId",
+      route: "/chat/workspaces/workspace-1",
+      bridge,
+    });
+
+    expect(await screen.findByText("Pinned evidence")).toBeInTheDocument();
+    expect(screen.getAllByText("Stale device review").length).toBeGreaterThan(0);
+    expect(screen.getByRole("radio", { name: "Workspaces" })).toBeChecked();
+  });
+
+  it("keeps an engine notice out of the answer until details are expanded", async () => {
+    const conversation: IntuneChatConversation = {
+      id: "conversation-notice",
+      title: "Review devices",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const notice = "Deterministic retrieval: tiny-2b does not support investigative mode.";
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async () => [
+        {
+          id: "answer-1",
+          conversationId: conversation.id,
+          role: "assistant" as const,
+          content: "Two devices need review.",
+          status: "completed" as const,
+          createdAt: conversation.updatedAt,
+          engineNotice: notice,
+        },
+      ]),
+    });
+    const user = userEvent.setup();
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId",
+      route: "/chat/conversation-notice",
+      bridge,
+    });
+
+    expect(await screen.findByText("Two devices need review.")).toBeInTheDocument();
+    expect(screen.queryByText(notice)).not.toBeVisible();
+    await user.click(screen.getByText("How this was answered"));
+    expect(screen.getByText(notice)).toBeVisible();
   });
 });

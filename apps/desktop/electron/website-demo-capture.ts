@@ -32,30 +32,30 @@ export async function captureWebsiteDemo(
       prepare: "chat-empty" as const,
       click: "Devices",
     },
-    { id: "team", route: "/office", label: "Agent Team", wait: ["Agent Team"] },
+    { id: "team", route: "/agents/office", label: "Team office", wait: ["Team office"] },
     {
       id: "team-paused",
-      route: "/office",
-      label: "Agent Team, motion paused",
-      wait: ["Agent Team"],
+      route: "/agents/office",
+      label: "Team office, motion paused",
+      wait: ["Team office"],
     },
     {
       id: "agents",
       route: "/agents",
       label: "Installed agents",
-      wait: ["Search installed agents"],
+      wait: ["Team", "Library"],
     },
     {
       id: "hub",
-      route: "/agents/hub",
-      label: "Agent Hub",
-      wait: ["Search agents"],
+      route: "/agents?source=hub",
+      label: "Agents: Hub",
+      wait: ["Library", "Agent hub"],
     },
     {
       id: "schedules",
-      route: "/agents/schedules",
-      label: "Schedules",
-      wait: ["Schedules"],
+      route: "/agents?filter=scheduled",
+      label: "Scheduled agents",
+      wait: ["Team", "Library"],
     },
     {
       id: "agent-details",
@@ -71,13 +71,18 @@ export async function captureWebsiteDemo(
       wait: ["Write operation paused for confirmation"],
       prepare: "write-confirmation" as const,
     },
-    { id: "fleet", route: "/fleet", label: "Fleet", wait: ["Fleet"] },
-    { id: "cache", route: "/cache", label: "Cache", wait: ["Cache"] },
+    {
+      id: "fleet",
+      route: "/changes?scope=all",
+      label: "Changes: All tenants",
+      wait: ["Changes"],
+    },
+    { id: "cache", route: "/settings/data", label: "Data", wait: ["Tenant cache"] },
     {
       id: "settings",
       route: "/settings",
       label: "Provider settings",
-      wait: ["LLM Providers"],
+      wait: ["Providers"],
     },
     {
       id: "tenants",
@@ -89,49 +94,49 @@ export async function captureWebsiteDemo(
       id: "chat-settings",
       route: "/settings/chat",
       label: "Chat settings",
-      wait: ["Settings"],
+      wait: ["Chat investigation mode"],
     },
     {
       id: "gateway",
       route: "/settings/gateway",
       label: "Gateway settings",
-      wait: ["Settings"],
+      wait: ["Local MCP gateway"],
     },
     {
       id: "appearance",
-      route: "/settings/general",
-      label: "General and appearance",
+      route: "/settings/appearance",
+      label: "Appearance",
       wait: ["Graphite dark"],
     },
     {
       id: "privacy",
       route: "/settings/privacy",
       label: "Privacy settings",
-      wait: ["Settings"],
+      wait: ["Tenant telemetry"],
     },
     {
       id: "about",
       route: "/settings/about",
       label: "About OpenAdminOS",
-      wait: ["Settings"],
+      wait: ["Readiness diagnostics"],
     },
     {
       id: "workspaces",
-      route: "/workspaces",
+      route: "/chat?panel=workspaces",
       label: "Workspaces",
       wait: ["Workspaces"],
     },
     {
       id: "connectors",
-      route: "/connectors",
+      route: "/settings/connectors",
       label: "Connectors",
       wait: ["Connectors"],
     },
     {
       id: "history",
-      route: "/activity",
-      label: "Run history",
-      wait: ["Run history"],
+      route: "/runs",
+      label: "Runs",
+      wait: ["Runs"],
     },
     {
       id: "compliance-details",
@@ -159,14 +164,13 @@ export async function captureWebsiteDemo(
     },
     {
       id: "team-add",
-      route: "/office",
+      route: "/agents?add=teammate",
       label: "Add teammate",
-      wait: ["Agent Team"],
-      click: "Add teammate",
+      wait: ["Add a teammate"],
     },
     {
       id: "workspace-add",
-      route: "/workspaces",
+      route: "/chat?panel=workspaces",
       label: "Create workspace",
       wait: ["Workspaces"],
       click: "Create workspace",
@@ -232,7 +236,7 @@ export async function captureWebsiteDemo(
       route: "/chat",
       label: "Quick search",
       wait: ["Chat"],
-      click: "Quick search",
+      click: "Search",
     },
   ];
   await mkdir(outDir, { recursive: true });
@@ -298,17 +302,24 @@ export async function captureWebsiteDemo(
         `document.querySelector('.fixed button[aria-label="Close"]')?.click()`,
       );
       await new Promise((resolve) => setTimeout(resolve, 180));
-      await navigate(screen.route, screen.wait, screen.prepare);
+      await window.webContents.executeJavaScript(`(() => { if (window.__dbgErrs) return; window.__dbgErrs = []; window.addEventListener("error", (e) => window.__dbgErrs.push(String(e.message) + " | " + String(e.error && e.error.stack).slice(0, 1200))); })()`);
+      try {
+        await navigate(screen.route, screen.wait, screen.prepare);
+      } catch (dbg) {
+        const info = await window.webContents.executeJavaScript("JSON.stringify({errs: window.__dbgErrs || [], href: location.href, text: (document.getElementById('root')?.innerText || '').slice(0, 1200)})");
+        console.error("[dbg]", info);
+        const img = await window.webContents.capturePage();
+        await writeFile("/tmp/oaos-ui/dbg-fail.png", img.toPNG());
+        throw dbg;
+      }
       const heading =
-        screen.route === "/workspaces"
+        screen.route === "/chat?panel=workspaces"
           ? "No workspace selected"
-          : screen.route === "/connectors"
-            ? "Connector routing"
-            : screen.route.startsWith("/settings")
+          : screen.route === "/agents/office"
+            ? "Team office"
+          : screen.route.startsWith("/settings")
               ? "Settings"
-              : screen.route.startsWith("/agents/hub") ||
-                  screen.route === "/agents/schedules" ||
-                  screen.route === "/agents"
+              : screen.route.startsWith("/agents")
                 ? "Agents"
                 : screen.route.startsWith("/runs/")
                   ? "Offboarding agent"
@@ -331,9 +342,9 @@ export async function captureWebsiteDemo(
       if (screen.id === "team" || screen.id === "team-paused") {
         await window.webContents.executeJavaScript(`(() => {
           document.documentElement.removeAttribute('data-reduced-motion');
-          const expand = [...document.querySelectorAll('button')].find(b => b.textContent === 'Expand office');
+          const expand = [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Expand office');
           expand?.click();
-          [...document.querySelectorAll('button')].find(b => b.textContent === 'Resume motion')?.click();
+          [...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Resume motion')?.click();
         })()`);
         await new Promise((resolve) => setTimeout(resolve, 700));
         const count = await window.webContents.executeJavaScript(
@@ -341,7 +352,7 @@ export async function captureWebsiteDemo(
         );
         if (screen.id === "team-paused") {
           await window.webContents.executeJavaScript(
-            `[...document.querySelectorAll('button')].find(b => b.textContent === 'Pause motion')?.click()`,
+            `[...document.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Pause motion')?.click()`,
           );
           await new Promise((resolve) => setTimeout(resolve, 150));
         }

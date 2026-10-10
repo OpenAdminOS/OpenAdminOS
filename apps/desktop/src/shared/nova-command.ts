@@ -1,7 +1,7 @@
 import { isNovaIntroduction } from "./nova-conversation.js";
 import { conversationalText, requestText, novaActionIntent, novaConnectorQuestion, type NovaActionIntent } from './nova-action-intent.js';
 
-export const novaPages = { cache: '/cache', chat: '/chat', agents: '/agents', 'agent team': '/office', office: '/office', changes: '/changes', settings: '/settings', connectors: '/connectors' } as const;
+export const novaPages = { cache: '/settings/data', chat: '/chat', agents: '/agents', 'agent team': '/agents/office', office: '/agents/office', changes: '/changes', settings: '/settings', connectors: '/settings/connectors' } as const;
 export type NovaCommand =
   | NovaActionIntent
   | { kind: 'navigate'; page: keyof typeof novaPages }

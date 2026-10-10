@@ -145,3 +145,18 @@ describe.each(["dark", "light"])("%s accessibility design tokens", (theme) => {
     expect(fullStylesheet).toContain("@media (forced-colors: active)");
   });
 });
+
+describe("desktop type scale", () => {
+  it("exposes the locked sizes and line heights as Tailwind theme tokens", () => {
+    for (const [name, size, lineHeight] of [
+      ["xs", "11px", "16px"],
+      ["sm", "12px", "18px"],
+      ["base", "13px", "20px"],
+      ["md", "15px", "22px"],
+      ["lg", "20px", "28px"],
+    ]) {
+      expect(fullStylesheet).toContain(`--text-${name}: ${size};`);
+      expect(fullStylesheet).toContain(`--text-${name}--line-height: ${lineHeight};`);
+    }
+  });
+});

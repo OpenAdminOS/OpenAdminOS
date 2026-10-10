@@ -1,5 +1,5 @@
 /**
- * Registry client — fetches and caches the agent index from the configured
+ * Registry client: fetches and caches the agent index from the configured
  * registry source. The app binary ships with zero bundled agents; everything
  * is fetched at runtime and cached to userData.
  *

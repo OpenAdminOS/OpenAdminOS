@@ -1,8 +1,9 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import Schedules from "./Schedules";
+import Agents from "./Agents";
+import type { OfficePersona } from "../shared/openAdminOS";
 import {
   createMockAgent,
   createMockAppState,
@@ -10,7 +11,7 @@ import {
   renderRoute,
 } from "../test/test-utils";
 
-describe("scheduled batch contextual setup", () => {
+describe("Agents schedule actions", () => {
   it("resumes a due batch only after the final explicit setup action", async () => {
     const user = userEvent.setup();
     const scheduledAgent = createMockAgent({
@@ -31,13 +32,14 @@ describe("scheduled batch contextual setup", () => {
       emptyState,
     );
 
-    renderRoute(<Schedules />, {
-      path: "/agents/schedules",
-      route: "/agents/schedules",
+    renderRoute(<Agents />, {
+      path: "/agents",
+      route: "/agents?filter=scheduled",
       bridge,
     });
 
-    await user.click(await screen.findByRole("button", { name: "Run due (1)" }));
+    await user.click(await screen.findByRole("button", { name: "Schedule actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Run due now (1)" }));
     await user.click(
       await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
     );
@@ -48,5 +50,89 @@ describe("scheduled batch contextual setup", () => {
 
     await user.click(screen.getByRole("button", { name: "Run due schedules" }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
+  });
+
+  it("uses query-addressable Installed, Hub, and scheduled filters without a Schedules tab", async () => {
+    renderRoute(<Agents />, {
+      path: "/agents",
+      route: "/agents?source=hub&filter=scheduled",
+      bridge: makeMockBridge(),
+    });
+
+    expect(await screen.findByRole("radio", { name: "Hub" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByPlaceholderText("Search hub…")).toBeInTheDocument();
+    expect(screen.getByText("Scheduled only")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Schedules" })).not.toBeInTheDocument();
+  });
+
+  it("opens the URL-addressable agent drawer and targets its schedule section", async () => {
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+
+    try {
+      renderRoute(<Agents />, {
+        path: "/agents/:slug",
+        route: "/agents/device-offboard?action=schedule",
+        bridge: makeMockBridge(),
+      });
+
+      expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
+      const drawer = await screen.findByRole("dialog", { name: "Device Offboard" });
+      expect(within(drawer).getByRole("heading", { name: "Schedule" })).toBeInTheDocument();
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+        configurable: true,
+        value: originalScrollTo,
+      });
+    }
+  });
+
+  it("keeps the confirmation route on Agents and starts the existing preflight", async () => {
+    renderRoute(<Agents startRunOnOpen />, {
+      path: "/agents/:slug/confirm",
+      route: "/agents/device-offboard/confirm",
+      bridge: makeMockBridge(),
+    });
+
+    expect(await screen.findByRole("heading", { name: "Agents" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Review run" })).toBeInTheDocument();
+    expect(screen.getAllByText("Device Offboard").length).toBeGreaterThan(0);
+  });
+
+  it("opens a persona drawer from its consolidated Team URL", async () => {
+    const persona: OfficePersona = {
+      id: "policy-watcher",
+      name: "Policy Watcher",
+      responsibility: "Review policy changes",
+      avatar: "robot",
+      color: "amber",
+      tenantId: "tenant-1",
+      providerId: "ollama",
+      agentSlugs: ["device-offboard"],
+      intervalMinutes: null,
+      maxMinutes: 30,
+      enabled: true,
+      createdAt: "2026-09-10T10:00:00Z",
+      updatedAt: "2026-09-10T10:00:00Z",
+    };
+    const state = createMockAppState({
+      office: { personas: [persona], missions: [] },
+    });
+
+    renderRoute(<Agents />, {
+      path: "/agents/team/:personaId",
+      route: "/agents/team/policy-watcher",
+      bridge: makeMockBridge({}, state),
+    });
+
+    const drawer = await screen.findByRole("dialog", { name: "Policy Watcher" });
+    expect(within(drawer).getByRole("heading", { name: "Assignment" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("heading", { name: "Work order" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "Run first assignment" })).toBeInTheDocument();
   });
 });

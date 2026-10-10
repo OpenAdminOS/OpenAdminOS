@@ -15,6 +15,7 @@ import {
   type NovaActivity,
   type NovaActionPreview,
 } from "@openadminos/agent-sdk";
+import { OPEN_NOVA_EVENT } from "../shared/nova-panel";
 import "./nova.css";
 
 export function Nova({
@@ -299,10 +300,11 @@ export function Nova({
     }
   }
   useEffect(() => {
+    const openPanel = () => setOpen(true);
     const keydown = (e: KeyboardEvent) => {
       if (e.altKey && e.code === "KeyV") {
         e.preventDefault();
-        setOpen(true);
+        openPanel();
       }
       if (e.key === "Escape") stop();
     };
@@ -310,10 +312,12 @@ export function Nova({
       if (document.hidden) stop();
     };
     window.addEventListener("keydown", keydown);
+    window.addEventListener(OPEN_NOVA_EVENT, openPanel);
     document.addEventListener("visibilitychange", hidden);
     window.addEventListener("pagehide", stop);
     return () => {
       window.removeEventListener("keydown", keydown);
+      window.removeEventListener(OPEN_NOVA_EVENT, openPanel);
       document.removeEventListener("visibilitychange", hidden);
       window.removeEventListener("pagehide", stop);
       stop();
@@ -824,8 +828,6 @@ export function Nova({
         element.inert = previousInert[index];
       });
       if (previousFocus?.isConnected) previousFocus.focus();
-      else
-        root.current?.querySelector<HTMLButtonElement>(".nova-launch")?.focus();
     };
   }, [open, expanded, revealControls]);
   useEffect(() => {
@@ -863,18 +865,6 @@ export function Nova({
       ref={root}
       className={`nova-root${open && expanded ? " nova-root-fullscreen" : ""}`}
     >
-      <button
-        className="nova-launch"
-        onClick={() => {
-          if (open) stop();
-          setOpen((o) => !o);
-        }}
-        aria-expanded={open}
-        aria-controls="nova-panel"
-      >
-        <span className="nova-dot" />
-        Talk to Nova <kbd>Alt V</kbd>
-      </button>
       {open && (
         <section
           id="nova-panel"
@@ -924,7 +914,7 @@ export function Nova({
         >
           <div className="nova-header flex items-center justify-between">
             <strong>
-              Nova <span className="nova-eyebrow">VOICE</span>
+              Nova <span className="nova-eyebrow">Voice</span>
             </strong>
             <Button
               variant="ghost"
@@ -1168,7 +1158,7 @@ export function Nova({
                   variant="ghost"
                   onClick={() => {
                     setExpanded(false);
-                    navigate("/cache");
+                    navigate("/settings/data");
                   }}
                 >
                   Review cache
@@ -1256,7 +1246,7 @@ export function Nova({
                   Maximum recording: one minute.
                 </p>
               )}
-              <p className="text-[10px] text-[var(--color-text-muted)]">
+              <p className="text-xs text-[var(--color-text-muted)]">
                 Microphone starts only when clicked. “Hey Nova” works during an
                 active conversation; background wake-word detection is not
                 enabled. Writes require visual review.

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /**
- * Renders a constrained subset of Markdown as React nodes — same
+ * Renders a constrained subset of Markdown as React nodes, using the same
  * syntax surface as the Teams connector's `renderMarkdownForTeams`
  * server-side renderer, so the modal preview matches what will land
  * in the destination system.
@@ -11,7 +11,7 @@ import type { ReactNode } from "react";
  *   - Avoids any `innerHTML` injection surface for agent-authored
  *     (often LLM-generated) content. Even with the connector's
  *     `escapeHtml` step, a React tree is structurally safer.
- *   - Stays in the React rendering model — easier to style, animate,
+ *   - Stays in the React rendering model, making it easier to style, animate,
  *     and embed inside existing components.
  *
  * Supported syntax:
@@ -46,7 +46,7 @@ export function MarkdownPreview({
 }
 
 /**
- * Strip markdown markers and collapse to a single-line plain string —
+ * Strip markdown markers and collapse to a single-line plain string :
  * for use in dense list rows (Activity feed, AgentDetail run list)
  * where the cell is truncated and rendering as paragraphs would break
  * the layout. Same syntax surface as `MarkdownPreview`, but the output
@@ -186,12 +186,12 @@ function renderBlock(block: Block, index: number): ReactNode {
   switch (block.kind) {
     case "heading": {
       const headingClasses: Record<number, string> = {
-        1: "mt-4 text-[15px] font-semibold first:mt-0",
-        2: "mt-4 text-[14px] font-semibold first:mt-0",
-        3: "mt-3.5 text-[13px] font-semibold first:mt-0",
-        4: "mt-2 text-[13px] font-semibold first:mt-0",
-        5: "mt-2 text-[12.5px] font-semibold uppercase tracking-wider first:mt-0",
-        6: "mt-2 text-[11.5px] font-semibold uppercase tracking-wider first:mt-0",
+        1: "mt-4 text-md font-semibold first:mt-0",
+        2: "mt-4 text-md font-semibold first:mt-0",
+        3: "mt-3.5 text-base font-semibold first:mt-0",
+        4: "mt-2 text-base font-semibold first:mt-0",
+        5: "mt-2 text-base font-semibold first:mt-0",
+        6: "mt-2 text-sm font-semibold first:mt-0",
       };
       const className = headingClasses[block.level] ?? headingClasses[6];
       const children = renderInline(block.text);
@@ -271,7 +271,7 @@ function renderBlock(block: Block, index: number): ReactNode {
       return (
         <pre
           key={index}
-          className="mt-2 overflow-auto rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] p-2 font-mono text-[11.5px] leading-relaxed first:mt-0"
+          className="mt-2 overflow-auto rounded-md border border-[var(--color-border-soft)] bg-[var(--color-bg)] p-2 font-mono text-sm leading-relaxed first:mt-0"
         >
           <code>{block.content}</code>
         </pre>
@@ -301,7 +301,7 @@ function renderInline(input: string): ReactNode[] {
         return (
           <code
             key={index}
-            className="rounded bg-[var(--color-bg)] px-1 py-0.5 font-mono text-[11.5px]"
+            className="rounded bg-[var(--color-bg)] px-1 py-0.5 font-mono text-sm"
           >
             {token.text}
           </code>

@@ -6,6 +6,7 @@ import type {
   OfficePersona,
 } from "../../shared/openAdminOS";
 import { Button } from "../Button";
+import { Badge } from "../ui";
 
 type Act = (action: () => Promise<unknown>) => Promise<unknown>;
 export function TeamInbox({
@@ -52,7 +53,7 @@ export function TeamInbox({
     <section className="team-inbox" aria-label="Team action inbox">
       <header>
         <div>
-          <div className="office-eyebrow">YOUR NEXT DECISION</div>
+          <div className="office-eyebrow">Your next decision</div>
           <h2>Team briefing</h2>
         </div>
         <div className="office-view">
@@ -114,7 +115,7 @@ export function TeamInbox({
           (kind === "all" || kind === "approvals") &&
           approvals.map((r) => (
             <article key={r.id} className="team-decision">
-              <span className="team-tag">Approval required</span>
+              <Badge tone="warning">Approval required</Badge>
               <h3>
                 {office.personas.find((p) => p.id === r.office?.personaId)
                   ?.name ?? r.agentSlug}
@@ -130,19 +131,19 @@ export function TeamInbox({
           (kind === "all" || kind === "failures") &&
           failures.map((p) => (
             <article key={p.id} className="team-decision">
-              <span className="team-tag">Operational issue</span>
+              <Badge tone="danger">Operational issue</Badge>
               <h3>{p.name}</h3>
               <p>{p.lastError}</p>
-              <Link to={`/office?persona=${encodeURIComponent(p.id)}`}>
+              <Link to={`/agents/team/${encodeURIComponent(p.id)}`}>
                 Open assignment →
               </Link>
             </article>
           ))}
         {visible.slice(0, 50).map((f) => (
           <article key={f.id} className="team-decision">
-            <span className="team-tag">
+            <Badge tone={f.severity === "warning" ? "warning" : "info"}>
               {f.state} · {f.severity} · revision {f.revision}
-            </span>
+            </Badge>
             <h3>{f.title}</h3>
             <p className="team-summary">{f.summary}</p>
             <details>
@@ -283,7 +284,7 @@ export function PersonaConversation({
             <p key={h.id}>
               {h.reason}{" "}
               <Link
-                to={`/office?persona=${encodeURIComponent(h.targetPersonaId)}`}
+                to={`/agents/team/${encodeURIComponent(h.targetPersonaId)}`}
               >
                 Open specialist →
               </Link>

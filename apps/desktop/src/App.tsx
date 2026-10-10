@@ -1,25 +1,17 @@
 import { lazy, Suspense, useEffect } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
 import { AppShell, TitleBarInset } from "./components/AppShell";
 import { Button } from "./components/Button";
-import { Card } from "./components/Card";
-import { useAppState } from "./state";
+import { IconChat, IconWarning } from "./components/icons";
+import { EmptyState } from "./components/ui";
 
 const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
-const AgentsHome = lazy(() => import("./pages/AgentsHome"));
-const AgentDetail = lazy(() => import("./pages/AgentDetail"));
-const AgentHub = lazy(() => import("./pages/AgentHub"));
-const Activity = lazy(() => import("./pages/Activity"));
+const Runs = lazy(() => import("./pages/Runs"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
-const Fleet = lazy(() => import("./pages/Fleet"));
-const Workspaces = lazy(() => import("./pages/Workspaces"));
-const Connectors = lazy(() => import("./pages/Connectors"));
-const Cache = lazy(() => import("./pages/Cache"));
 const Settings = lazy(() => import("./pages/Settings"));
 const RunResult = lazy(() => import("./pages/RunResult"));
-const Schedules = lazy(() => import("./pages/Schedules"));
 const MenuBarCompanion = lazy(() => import("./pages/MenuBarCompanion"));
 
 export default function App() {
@@ -63,22 +55,26 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/chat" replace />} />
           <Route path="/onboarding" element={<Navigate to="/chat" replace />} />
-          <Route path="/agents" element={<Agents />}>
-            <Route index element={<AgentsHome />} />
-            <Route path="hub" element={<AgentHub embedded />} />
-            <Route path="schedules" element={<Schedules embedded />} />
-          </Route>
-          <Route path="/agents/:slug/confirm" element={<AgentDetail startRunOnOpen />} />
-          <Route path="/agents/:slug" element={<AgentDetail />} />
-          <Route path="/hub" element={<Navigate to="/agents/hub" replace />} />
+          <Route path="/agents" element={<Agents />} />
+          <Route path="/agents/office" element={<Office />} />
+          <Route path="/agents/team/:personaId" element={<Agents />} />
+          <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
+          <Route path="/agents/schedules" element={<AgentsQueryRedirect filter="scheduled" />} />
+          <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
+          <Route path="/agents/:slug" element={<Agents />} />
+          <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
+          <Route path="/chat/workspaces/:workspaceId" element={<IntuneChat />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
-          <Route path="/cache" element={<Cache />} />
-          <Route path="/office" element={<Office />} />
+          <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
+          <Route path="/office" element={<OfficeRedirect />} />
           <Route path="/changes" element={<Changes />} />
-          <Route path="/fleet" element={<FleetRoute />} />
-          <Route path="/workspaces" element={<Workspaces />} />
-          <Route path="/connectors" element={<Connectors />} />
-          <Route path="/activity" element={<Activity />} />
+          <Route path="/fleet" element={<FleetRedirect />} />
+          <Route path="/workspaces" element={<WorkspacesRedirect />} />
+          <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailRedirect />} />
+          <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
+          <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
+          <Route path="/runs" element={<Runs />} />
+          <Route path="/activity" element={<ActivityRedirect />} />
           <Route path="/runs/:id" element={<RunResult />} />
           <Route path="/settings/:section?" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
@@ -88,35 +84,159 @@ export default function App() {
   );
 }
 
-function FleetRoute() {
-  const { state, loading } = useAppState();
+export function ActivityRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: "/runs", search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
 
-  if (loading) return <RouteFallback />;
-  if (state.tenants.length < 2) return <Navigate to="/chat" replace />;
+export function WorkspacesRedirect() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  search.set("panel", "workspaces");
+  return (
+    <Navigate
+      to={{
+        pathname: "/chat",
+        search: `?${search.toString()}`,
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
 
-  return <Fleet />;
+export function WorkspaceDetailRedirect() {
+  const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId: string }>();
+  return (
+    <Navigate
+      to={{
+        pathname: workspaceId
+          ? `/chat/workspaces/${encodeURIComponent(workspaceId)}`
+          : "/chat",
+        search: location.search,
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function AgentsQueryRedirect({
+  source,
+  filter,
+}: {
+  source?: "hub";
+  filter?: "scheduled";
+}) {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  if (source) search.set("source", source);
+  if (filter) search.set("filter", filter);
+  return (
+    <Navigate
+      to={{
+        pathname: "/agents",
+        search: search.toString() ? `?${search.toString()}` : "",
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function OfficeRedirect() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  const personaId = search.get("persona");
+  if (personaId) {
+    search.delete("persona");
+    return (
+      <Navigate
+        to={{
+          pathname: `/agents/team/${encodeURIComponent(personaId)}`,
+          search: search.toString() ? `?${search.toString()}` : "",
+          hash: location.hash,
+        }}
+        replace
+      />
+    );
+  }
+  const hasOfficeState = search.has("view") || search.has("assignment") || search.has("inbox");
+  return (
+    <Navigate
+      to={{
+        pathname: hasOfficeState ? "/agents/office" : "/agents",
+        search: hasOfficeState && search.toString() ? `?${search.toString()}` : "",
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function LegacySettingsRedirect({ section }: { section: "data" | "connectors" }) {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={{ pathname: `/settings/${section}`, search: location.search, hash: location.hash }}
+      replace
+    />
+  );
+}
+
+export function LegacyConnectorRedirect() {
+  const location = useLocation();
+  const { connectorId } = useParams<{ connectorId: string }>();
+  const query = new URLSearchParams(location.search);
+  if (connectorId) query.set("connector", connectorId);
+  return (
+    <Navigate
+      to={{
+        pathname: "/settings/connectors",
+        search: query.toString() ? `?${query.toString()}` : "",
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function FleetRedirect() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  search.set("scope", "all");
+  return (
+    <Navigate
+      to={{
+        pathname: "/changes",
+        search: `?${search.toString()}`,
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
 }
 
 function NotFound() {
   const navigate = useNavigate();
   return (
     <div className="flex h-full items-center justify-center px-6">
-      <Card className="w-full max-w-[480px]">
-        <div className="p-6">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            Route not found
-          </div>
-          <h1 className="mt-2 text-[20px] font-semibold tracking-tight text-[var(--color-text)]">
-            This page is not available
-          </h1>
-          <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-text-soft)]">
-            The link may be outdated. Return to Chat to continue in the active tenant.
-          </p>
-          <Button className="mt-5" variant="primary" onClick={() => navigate("/chat")}>
+      <EmptyState
+        icon={<IconChat size={18} />}
+        title="This page is not available"
+        description="The link may be outdated. Return to Chat to continue in the active tenant."
+        action={
+          <Button variant="primary" onClick={() => navigate("/chat")}>
             Return to Chat
           </Button>
-        </div>
-      </Card>
+        }
+      />
     </div>
   );
 }
@@ -124,7 +244,7 @@ function NotFound() {
 function RouteFallback({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex h-full w-full items-center justify-center bg-[var(--color-bg)] text-[var(--color-text-muted)]">
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-xs">
         <span className="h-3 w-3 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-info)]" />
         <span>{compact ? "Opening" : "Loading"}</span>
       </div>
@@ -141,21 +261,12 @@ function DesktopBridgeUnavailable({
     <div className="flex h-full w-full flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
       <TitleBarInset />
       <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-        <Card className="w-full max-w-[560px]">
-          <div className="p-6">
-            <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Renderer-only development
-            </div>
-            <h1 className="mt-2 text-[20px] font-semibold tracking-tight text-[var(--color-text)]">
-              Desktop bridge unavailable
-            </h1>
-            <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-text-soft)]">
-              This browser tab can render the UI, but it cannot access the Electron
-              desktop bridge for tenant auth, local SQLite, Graph cache, clipboard,
-              or agent runs. Use the Electron window started by `npm run dev` for
-              tenant-connected testing.
-            </p>
-            <div className="mt-5 flex flex-wrap gap-2">
+        <EmptyState
+          icon={<IconWarning size={18} />}
+          title="Desktop bridge unavailable"
+          description="This browser tab cannot access tenant authentication, local data, clipboard, or agent runs. Open the Electron window for tenant-connected testing."
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
               <Button variant="primary" onClick={() => window.location.reload()}>
                 Reload
               </Button>
@@ -163,8 +274,8 @@ function DesktopBridgeUnavailable({
                 View Chat
               </Button>
             </div>
-          </div>
-        </Card>
+          }
+        />
       </div>
     </div>
   );

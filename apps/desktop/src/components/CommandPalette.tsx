@@ -4,17 +4,17 @@ import {
   IconActivity,
   IconAgents,
   IconBolt,
+  IconCache,
   IconChanges,
   IconAgentTeam,
   IconChat,
-  IconClock,
-  IconConnectors,
   IconHardDrive,
   IconHub,
   IconPlay,
   IconSearch,
   IconSettings,
   IconShield,
+  IconSparkle,
 } from "./icons";
 import { useAppState } from "../state";
 import { SETTINGS_ITEMS, SETTINGS_SECTIONS } from "../copy";
@@ -22,12 +22,15 @@ import { formatAgentDisplayName } from "../shared/agent-display";
 import { registerOverlay } from "../shared/overlay-stack";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import { openNovaPanel } from "../shared/nova-panel";
+import { Kbd } from "./ui";
+import type { IntuneChatConversation, WorkspaceSummary } from "../shared/openAdminOS";
 
 interface PaletteItem {
   id: string;
   label: string;
   hint?: string;
-  group: "Agents" | "Hub" | "Navigate" | "Actions";
+  group: "Agents" | "Hub" | "Navigate" | "Actions" | "Chats" | "Workspaces";
   icon: React.ReactNode;
   shortcut?: string;
   action: () => void | Promise<void>;
@@ -41,11 +44,13 @@ export function CommandPalette({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const { state, registryAgents, startRun } = useAppState();
+  const { state, startRun } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [recentConversations, setRecentConversations] = useState<IntuneChatConversation[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -73,13 +78,58 @@ export function CommandPalette({
         shortcut: "↵ Open",
         action: go(`/agents/${a.slug}`),
       })),
-      ...registryAgents.map((a) => ({
-        id: `hub-${a.id}`,
-        label: formatAgentDisplayName(a),
-        hint: `Hub · ${a.author.name}`,
-        group: "Hub" as const,
-        icon: <IconHub size={13} className="text-[var(--color-text-soft)]" />,
-        action: go("/agents/hub"),
+      ...state.installedAgents.map((agent) => ({
+        id: `run-agent-${agent.id}`,
+        label: `Run ${formatAgentDisplayName(agent)}`,
+        hint: agent.mode === "write" ? "Review required before changes" : "Run with current tenant and provider",
+        group: "Actions" as const,
+        icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
+        action: async () => {
+          if (
+            !requireTenantAndProvider(
+              createPendingIntent({
+                kind: "agent-run",
+                slug: agent.slug,
+                returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
+              }),
+            )
+          ) {
+            onClose();
+            return;
+          }
+          if (agent.mode === "write") {
+            navigate(`/agents/${encodeURIComponent(agent.slug)}/confirm`);
+            onClose();
+            return;
+          }
+          const run = await startRun(agent.slug);
+          navigate(`/runs/${run.id}`);
+          onClose();
+        },
+      })),
+      {
+        id: "act-new-chat",
+        label: "New chat",
+        hint: "Start a local conversation",
+        group: "Actions",
+        icon: <IconChat size={13} className="text-[var(--color-accent)]" />,
+        action: go("/chat?new=1"),
+      },
+      ...recentConversations.map((conversation) => ({
+        id: `chat-${conversation.id}`,
+        label: conversation.title,
+        hint: "Recent conversation",
+        group: "Chats" as const,
+        icon: <IconChat size={13} className="text-[var(--color-text-soft)]" />,
+        action: go(`/chat/${encodeURIComponent(conversation.id)}`),
+      })),
+      ...workspaces.map((workspace) => ({
+        id: `workspace-${workspace.id}`,
+        label: workspace.title,
+        hint: workspace.tenantName ?? "Workspace",
+        group: "Workspaces" as const,
+        icon: <IconHardDrive size={13} className="text-[var(--color-text-soft)]" />,
+        action: go(`/chat/workspaces/${encodeURIComponent(workspace.id)}`),
       })),
       {
         id: "nav-chat",
@@ -90,30 +140,22 @@ export function CommandPalette({
       },
       {
         id: "nav-agents",
-        label: "Go to Agents",
+        label: "Agents",
         group: "Navigate",
         icon: <IconAgents size={13} className="text-[var(--color-accent)]" />,
         action: go("/agents"),
       },
       {
         id: "nav-hub",
-        label: "Go to Hub",
+        label: "Agents: Hub",
         group: "Navigate",
         icon: <IconHub size={13} className="text-[var(--color-accent)]" />,
-        action: go("/agents/hub"),
+        action: go("/agents?source=hub"),
       },
       {
-        id: "nav-schedules",
-        label: "Go to Schedules",
-        hint: "Review active agent schedules",
-        group: "Navigate",
-        icon: <IconClock size={13} className="text-[var(--color-accent)]" />,
-        action: go("/agents/schedules"),
-      },
-      {
-        id: "nav-office", label: "Go to Agent Team", group: "Navigate",
+        id: "nav-office", label: "Team office", group: "Navigate",
         icon: <IconAgentTeam size={13} className="text-[var(--color-accent)]" />,
-        action: go("/office"),
+        action: go("/agents/office"),
       },
       {
         id: "nav-changes",
@@ -123,25 +165,51 @@ export function CommandPalette({
         action: go("/changes"),
       },
       {
-        id: "nav-activity",
-        label: "Go to Run history",
+        id: "nav-runs",
+        label: "Runs",
         group: "Navigate",
         icon: <IconActivity size={13} className="text-[var(--color-accent)]" />,
-        action: go("/activity"),
+        action: go("/runs"),
       },
+      {
+        id: "nav-runs-review",
+        label: "Runs: Needs review",
+        group: "Navigate",
+        icon: <IconActivity size={13} className="text-[var(--color-warning)]" />,
+        action: go("/runs?status=review#needs-review"),
+      },
+      {
+        id: "nav-runs-failed",
+        label: "Runs: Failed",
+        group: "Navigate",
+        icon: <IconActivity size={13} className="text-[var(--color-danger)]" />,
+        action: go("/runs?status=failed#history"),
+      },
+      {
+        id: "nav-data",
+        label: "Data",
+        hint: "Open cache freshness, preload, and retention settings",
+        group: "Navigate",
+        icon: <IconCache size={13} className="text-[var(--color-accent)]" />,
+        action: go("/settings/data"),
+      },
+      ...(state.tenants.length >= 2
+        ? ([
+            {
+              id: "nav-fleet",
+              label: "Changes: All tenants",
+              group: "Navigate",
+              icon: <IconChanges size={13} className="text-[var(--color-accent)]" />,
+              action: go("/changes?scope=all"),
+            },
+          ] as PaletteItem[])
+        : []),
       {
         id: "nav-workspaces",
-        label: "Go to Workspaces",
+        label: "Workspaces",
         group: "Navigate",
         icon: <IconHardDrive size={13} className="text-[var(--color-accent)]" />,
-        action: go("/workspaces"),
-      },
-      {
-        id: "nav-connectors",
-        label: "Go to Connectors",
-        group: "Navigate",
-        icon: <IconConnectors size={13} className="text-[var(--color-accent)]" />,
-        action: go("/connectors"),
+        action: go("/chat?panel=workspaces"),
       },
       {
         id: "nav-settings",
@@ -149,6 +217,25 @@ export function CommandPalette({
         group: "Navigate",
         icon: <IconSettings size={13} className="text-[var(--color-accent)]" />,
         action: go("/settings"),
+      },
+      {
+        id: "act-add-teammate",
+        label: "Add teammate",
+        hint: "Create a persistent assignment",
+        group: "Actions",
+        icon: <IconAgentTeam size={13} className="text-[var(--color-accent)]" />,
+        action: go("/agents?add=teammate"),
+      },
+      {
+        id: "act-voice",
+        label: "Open Voice",
+        hint: "Nova voice assistant · Alt+V",
+        group: "Actions",
+        icon: <IconSparkle size={13} className="text-[var(--color-accent)]" />,
+        action: () => {
+          onClose();
+          openNovaPanel();
+        },
       },
       ...SETTINGS_SECTIONS.map((entry) => ({
         id: `settings-section-${entry.id}`,
@@ -166,49 +253,20 @@ export function CommandPalette({
         icon: <IconSettings size={13} className="text-[var(--color-text-soft)]" />,
         action: go(`/settings/${entry.section}?target=${id}`),
       })),
-      ...(state.installedAgents.length > 0
+      ...(state.installedAgents.length === 0
         ? ([
-            {
-              id: "act-run-first",
-              label: `Run ${state.installedAgents[0]!.name}`,
-              hint:
-                state.installedAgents.length === 1
-                  ? "Queue your installed agent"
-                  : `Run the first of ${state.installedAgents.length} installed agents`,
-              group: "Actions",
-              icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
-              action: async () => {
-                const agent = state.installedAgents[0]!;
-                if (
-                  !requireTenantAndProvider(
-                    createPendingIntent({
-                      kind: "agent-run",
-                      slug: agent.slug,
-                      returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
-                    }),
-                  )
-                ) {
-                  onClose();
-                  return;
-                }
-                const run = await startRun(agent.slug);
-                navigate(`/runs/${run.id}`);
-                onClose();
-              },
-            },
-          ] as PaletteItem[])
-        : ([
             {
               id: "act-browse-hub",
               label: "Browse agents to install",
               hint: "Install an agent before running",
               group: "Actions",
               icon: <IconHub size={13} className="text-[var(--color-accent)]" />,
-              action: go("/agents/hub"),
+              action: go("/agents?source=hub"),
             },
-          ] as PaletteItem[])),
+          ] as PaletteItem[])
+        : []),
     ];
-  }, [navigate, onClose, registryAgents, requireTenantAndProvider, startRun, state.installedAgents]);
+  }, [navigate, onClose, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
@@ -222,7 +280,7 @@ export function CommandPalette({
   }, [items, query]);
 
   const grouped = useMemo(() => {
-    const order: PaletteItem["group"][] = ["Actions", "Navigate", "Agents", "Hub"];
+    const order: PaletteItem["group"][] = ["Actions", "Chats", "Workspaces", "Navigate", "Agents", "Hub"];
     const map: Record<string, PaletteItem[]> = {};
     for (const i of filtered) {
       if (!map[i.group]) map[i.group] = [];
@@ -252,6 +310,23 @@ export function CommandPalette({
       };
     }
     return undefined;
+  }, [open]);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!open || !api) return;
+    void Promise.all([
+      api.listIntuneChatConversations(),
+      api.listWorkspaces(),
+    ])
+      .then(([nextConversations, nextWorkspaces]) => {
+        setRecentConversations(nextConversations);
+        setWorkspaces(nextWorkspaces);
+      })
+      .catch(() => {
+        setRecentConversations([]);
+        setWorkspaces([]);
+      });
   }, [open]);
 
   useEffect(() => {
@@ -308,7 +383,15 @@ export function CommandPalette({
   useEffect(() => {
     const activeId = flatList[activeIndex]?.id;
     if (!activeId) return;
-    document.getElementById(`command-option-${activeId}`)?.scrollIntoView({ block: "nearest" });
+    const option = document.getElementById(`command-option-${activeId}`);
+    const results = document.getElementById("command-palette-results");
+    if (!(option instanceof HTMLElement) || !(results instanceof HTMLElement)) return;
+    const optionTop = option.offsetTop;
+    const optionBottom = optionTop + option.offsetHeight;
+    if (optionTop < results.scrollTop) results.scrollTop = optionTop;
+    else if (optionBottom > results.scrollTop + results.clientHeight) {
+      results.scrollTop = optionBottom - results.clientHeight;
+    }
   }, [activeIndex, flatList]);
 
   if (!open) return null;
@@ -350,17 +433,15 @@ export function CommandPalette({
             aria-activedescendant={
               flatList[activeIndex] ? `command-option-${flatList[activeIndex]!.id}` : undefined
             }
-            className="flex-1 bg-transparent text-[14px] text-[var(--color-text)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none"
+            className="flex-1 bg-transparent text-md text-[var(--color-text)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none"
           />
-          <kbd className="rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-            esc
-          </kbd>
+          <Kbd>esc</Kbd>
         </div>
 
         {actionError && (
           <div
             role="alert"
-            className="mx-3 mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+            className="mx-3 mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
           >
             {actionError}
           </div>
@@ -373,13 +454,13 @@ export function CommandPalette({
           className="max-h-[440px] overscroll-contain overflow-y-auto py-1"
         >
           {grouped.length === 0 && (
-            <div role="status" className="px-4 py-8 text-center text-[13px] text-[var(--color-text-muted)]">
+            <div role="status" className="px-4 py-8 text-center text-base text-[var(--color-text-muted)]">
               No matches for “{query}”. Try a page, setting, or agent name.
             </div>
           )}
           {grouped.map((g) => (
             <div key={g.group} className="px-1.5 py-1">
-              <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--color-text-muted)]">
                 {g.group}
               </div>
               {g.items.map((it) => {
@@ -404,17 +485,17 @@ export function CommandPalette({
                       {it.icon}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] text-[var(--color-text)]">
+                      <span className="block truncate text-base text-[var(--color-text)]">
                         {it.label}
                       </span>
                       {it.hint && (
-                        <span className="block truncate text-[11px] text-[var(--color-text-muted)]">
+                        <span className="block truncate text-xs text-[var(--color-text-muted)]">
                           {it.hint}
                         </span>
                       )}
                     </span>
                     {isActive && (
-                      <kbd className="rounded-md bg-[var(--color-accent-soft)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-accent)]">
+                      <kbd className="rounded-md bg-[var(--color-accent-soft)] px-1.5 py-0.5 text-xs text-[var(--color-accent)]">
                         ↵
                       </kbd>
                     )}
@@ -425,7 +506,7 @@ export function CommandPalette({
           ))}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--color-border-soft)] bg-[var(--color-surface)] px-4 py-2.5 text-[10.5px] text-[var(--color-text-muted)]">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--color-border-soft)] bg-[var(--color-surface)] px-4 py-2.5 text-xs text-[var(--color-text-muted)]">
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1">
               <Kbd>↑</Kbd>
@@ -438,17 +519,9 @@ export function CommandPalette({
               <Kbd>esc</Kbd> Close
             </span>
           </div>
-          <span className="font-mono">{flatList.length} results</span>
+          <span className="tabular-nums">{flatList.length} results</span>
         </div>
       </div>
     </div>
-  );
-}
-
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="rounded bg-[var(--color-bg-raised)] px-1.5 py-px font-mono text-[10px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
-      {children}
-    </kbd>
   );
 }

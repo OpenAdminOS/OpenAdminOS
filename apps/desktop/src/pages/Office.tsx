@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import type {
   OfficeMission,
   OfficeFinding,
@@ -8,6 +8,9 @@ import type {
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/AppShell";
+import { IconButton, SegmentedControl } from "../components/ui";
+import { IconArrowLeft, IconRefresh } from "../components/icons";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
@@ -50,10 +53,11 @@ function status(
   return p.nextRunAt ? "Scheduled" : "Ready";
 }
 export default function Office() {
+  const navigate = useNavigate();
   const { state, refresh, loading, error: stateError } = useAppState();
   const [params, setParams] = useSearchParams();
   const fullscreen = useOfficeFullscreen();
-  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(() => params.get("inbox") === "1");
   const selectedId = params.get("persona");
   const view =
     !fullscreen.active && params.get("view") === "list" ? "list" : "room";
@@ -125,31 +129,41 @@ export default function Office() {
   if (loading && !state.office)
     return (
       <div className="office-loading" role="status">
-        Opening your team…
+        Opening your team
       </div>
     );
   return (
-    <div
-      className={`office-page ${focusedOffice ? "office-expanded" : ""} ${fullscreen.active ? "office-fullscreen" : ""}`}
-    >
-      <header className="office-header">
-        <div>
-          <div className="office-eyebrow">YOUR LOCAL TEAM</div>
-          <h1>Agent Team</h1>
-          <p>Give your agents a place, a purpose, and a schedule.</p>
-        </div>
+    <>
+    <PageHeader
+      breadcrumb={
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          onClick={() => navigate("/agents")}
+        >
+          <IconArrowLeft size={12} /> Agents
+        </button>
+      }
+      title="Team office"
+      actions={
         <Button
-          variant="primary"
+          variant="secondary"
+          size="sm"
           disabled={busy || !api?.saveOfficePersona}
           onClick={() => setEditing("new")}
         >
           Add teammate
         </Button>
-      </header>
+      }
+    />
+    <div className="app-page-body min-w-0 flex-1 overflow-y-auto">
+    <div
+      className={`office-page ${focusedOffice ? "office-expanded" : ""} ${fullscreen.active ? "office-fullscreen" : ""}`}
+    >
       {(error || stateError || office.error || fullscreen.error) && (
         <div className="office-error" role="alert">
           {error || stateError?.message || office.error || fullscreen.error}
-          <Button size="sm" onClick={() => void act(refresh)}>
+          <Button size="sm" variant="secondary" onClick={() => void act(refresh)}>
             Refresh team
           </Button>
         </div>
@@ -187,58 +201,52 @@ export default function Office() {
           <strong>{running}</strong> assignments in progress <span>·</span>{" "}
           <strong>{attention}</strong> need attention
         </div>
-        <div className="office-view" aria-label="Team view">
+        <div className="office-view" aria-label="Team office controls">
           {fullscreen.active && !presentation && (
-            <button onClick={() => setInboxOpen(true)}>Review inbox</button>
+            <Button size="sm" variant="ghost" onClick={() => setInboxOpen(true)}>Review inbox</Button>
           )}
-          <button
+          <SegmentedControl
+            ariaLabel="Team view"
+            value={view}
+            onValueChange={setView}
+            options={[
+              { id: "room", label: "Office" },
+              { id: "list", label: "List view", disabled: presentation || fullscreen.active },
+            ]}
+          />
+          <IconButton
+            label={expanded ? "Restore layout" : "Expand office"}
+            icon={<IconRefresh size={14} />}
             aria-pressed={expanded}
             disabled={fullscreen.active}
             onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? "Restore layout" : "Expand office"}
-          </button>
+          />
           {focusedOffice && !presentation && (
-            <button
-              aria-pressed={showDetails}
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => setShowDetails((v) => !v)}
             >
               {showDetails ? "Close assignment" : "Assignment details"}
-            </button>
+            </Button>
           )}
-          <button
-            disabled={fullscreen.pending}
+          <IconButton
+            label={fullscreen.active ? "Exit full screen" : "Full screen"}
+            icon={<FullScreenIcon />}
             aria-pressed={fullscreen.active}
+            disabled={fullscreen.pending}
             onClick={() => void fullscreen.change(!fullscreen.active)}
-          >
-            {fullscreen.pending
-              ? "Changing view…"
-              : fullscreen.active
-                ? "Exit full screen"
-                : "Full screen"}
-          </button>
-          <button
-            aria-pressed={presentation}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={() => {
               setPresentation((v) => !v);
               setView("room");
             }}
           >
             {presentation ? "Show details" : "Hide details"}
-          </button>
-          <button
-            aria-pressed={view === "room"}
-            onClick={() => setView("room")}
-          >
-            Office
-          </button>
-          <button
-            aria-pressed={view === "list"}
-            disabled={presentation || fullscreen.active}
-            onClick={() => setView("list")}
-          >
-            List
-          </button>
+          </Button>
         </div>
       </div>
       <div className="office-layout">
@@ -347,7 +355,7 @@ export default function Office() {
               <div className="office-empty-avatar">
                 <PersonaAvatar avatar="robot" color="amber" />
               </div>
-              <div className="office-eyebrow">A DESK IS WAITING</div>
+              <div className="office-eyebrow">A desk is waiting</div>
               <h2>Your first teammate starts here.</h2>
               <p>
                 Choose a responsibility, assign installed agents, and decide
@@ -435,7 +443,7 @@ export default function Office() {
                   color={selected.color}
                 />
                 <div>
-                  <div className="office-eyebrow">ASSIGNMENT</div>
+                  <div className="office-eyebrow">Assignment</div>
                   <h2>{selected.name}</h2>
                 </div>
               </div>
@@ -531,7 +539,7 @@ export default function Office() {
                   ? ` ${selected.calendar.time} · ${selected.calendar.timeZone}.`
                   : ""}
                 {selected.quietHours
-                  ? ` Quiet hours ${selected.quietHours.start}:00–${selected.quietHours.end}:00 (${selected.quietHours.timeZone}).`
+                  ? ` Quiet hours ${selected.quietHours.start}:00 to ${selected.quietHours.end}:00 (${selected.quietHours.timeZone}).`
                   : ""}{" "}
                 Missed checks run once after wake, outside quiet hours. Token
                 usage is available in source runs; monetary cost is unavailable.
@@ -647,7 +655,7 @@ export default function Office() {
             </>
           ) : (
             <div className="office-panel-empty">
-              <div className="office-eyebrow">HOW IT WORKS</div>
+              <div className="office-eyebrow">How it works</div>
               <h2>A small team. Clear responsibilities.</h2>
               <ol>
                 <li>Choose a role for your first teammate.</li>
@@ -675,7 +683,7 @@ export default function Office() {
       <section className="office-briefing" aria-label="Team briefing">
         <div className="office-briefing-title">
           <div>
-            <div className="office-eyebrow">THE WORK, WITH EVIDENCE</div>
+            <div className="office-eyebrow">The work, with evidence</div>
             <h2>Assignment history</h2>
           </div>
           <label className="team-search">
@@ -807,7 +815,7 @@ export default function Office() {
         <div className="office-modal-content">
           <p>
             This removes its assignment and Team briefings. Agent run history
-            remains available in Activity.
+            remains available in Runs.
           </p>
           <div className="office-actions">
             <Button disabled={busy} onClick={() => setRemoveId(undefined)}>
@@ -829,5 +837,15 @@ export default function Office() {
         </div>
       </Modal>
     </div>
+    </div>
+    </>
+  );
+}
+
+function FullScreenIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+    </svg>
   );
 }

@@ -43,7 +43,7 @@ export async function runOfficeSmoke(
   await evaluate(
     `window.openAdminOS.setActiveModel("ollama", "test-smoke-local-model")`,
   );
-  await evaluate(`location.hash = '/office'`);
+  await evaluate(`location.hash = '/agents/office'`);
   await wait(`Boolean(document.querySelector('.office-empty'))`);
   await evaluate(
     `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Add teammate').click()`,
@@ -109,14 +109,16 @@ export async function runOfficeSmoke(
   await reload();
   await wait(`document.querySelectorAll('.scene-persona').length === 3`);
   await evaluate(`(() => {
-    const links = Array.from(document.querySelectorAll('.team-nav-persona'));
-    if (links.length !== 3 || links.some(link => !link.querySelector('svg'))) throw new Error('Missing sidebar persona icons.');
-    links.find(link => link.textContent.includes('Policy Watcher')).click();
+    const personas = Array.from(document.querySelectorAll('.scene-persona'));
+    if (personas.length !== 3 || personas.some(persona => !persona.querySelector('svg'))) throw new Error('Missing office persona avatars.');
+    personas.find(persona => persona.getAttribute('aria-label').startsWith('Policy Watcher')).click();
   })()`);
   await wait(
     `document.querySelector('.office-persona-heading h2')?.textContent === 'Policy Watcher'`,
   );
-  await evaluate(`document.querySelector('.team-nav-persona').click()`);
+  await evaluate(
+    `Array.from(document.querySelectorAll('.scene-persona')).find(persona => persona.getAttribute('aria-label').startsWith('Chief of Staff')).click()`,
+  );
   await wait(
     `document.querySelector('.office-persona-heading h2')?.textContent === 'Chief of Staff'`,
   );
@@ -124,14 +126,14 @@ export async function runOfficeSmoke(
     if (!document.querySelector('.office-interior') || !document.querySelector('.scene-ball')) throw new Error('Office furnishings are missing.');
     const animated = document.querySelector('.scene-ball').getAnimations();
     if (!animated.some(a => a.playState === 'running' && a.effect.getTiming().iterations === Infinity)) throw new Error('Office game animation is not running.');
-    Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Pause motion').click();
+    Array.from(document.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Pause motion').click();
   })()`);
   await wait(
     `document.querySelector('.team-office')?.dataset.motion === 'off'`,
   );
   await evaluate(`(() => {
     if (document.querySelector('.scene-ball').getAnimations().some(a => a.playState === 'running')) throw new Error('Pause motion did not pause animation.');
-    Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Resume motion').click();
+    Array.from(document.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === 'Resume motion').click();
   })()`);
   await wait(`document.querySelector('.team-office')?.dataset.motion === 'on'`);
   for (const width of [1440, 1100, 900]) {
@@ -151,7 +153,7 @@ export async function runOfficeSmoke(
   );
   window.setContentSize(1440, 1000);
   await evaluate(
-    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'List').click()`,
+    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'List view').click()`,
   );
   await wait(`Boolean(document.querySelector('.office-list'))`);
   await writeFile(join(outputDir, "office-list.png"), await capture());

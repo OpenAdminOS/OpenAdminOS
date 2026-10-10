@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -46,9 +46,10 @@ describe("Settings provider section", () => {
     }));
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge });
     expect(await screen.findByText("Test required")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show details for Google Gemini" }));
     expect(screen.getByText("/example/bin/gemini")).toBeInTheDocument();
     expect(screen.getByText("0.59.0")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Set active" })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Set Google Gemini active" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Test" }));
     await waitFor(() => expect(bridge.testProvider).toHaveBeenCalledWith("gemini", undefined));
     expect(await screen.findByText("Sign in with Gemini CLI, then test again.")).toBeInTheDocument();
@@ -61,7 +62,54 @@ describe("Settings provider section", () => {
       bridge: makeMockBridge(),
     });
 
-    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeInTheDocument();
+    const heading = await screen.findByRole("heading", { name: "Privacy" });
+    await waitFor(() => expect(heading).toHaveFocus());
+  });
+
+  it("scrolls deep links inside the Settings content container", async () => {
+    const scrollTo = vi.fn();
+    const originalScrollTo = HTMLElement.prototype.scrollTo;
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+
+    try {
+      renderRoute(<Settings />, {
+        path: "/settings/:section?",
+        route: "/settings/chat",
+        bridge: makeMockBridge(),
+      });
+
+      const heading = await screen.findByRole("heading", { name: "Chat" });
+      await waitFor(() => {
+        expect(heading).toHaveFocus();
+        expect(scrollTo).toHaveBeenCalledWith(
+          expect.objectContaining({ behavior: "auto" }),
+        );
+      });
+      expect(heading.closest(".app-page-body")).not.toBeNull();
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+        configurable: true,
+        value: originalScrollTo,
+      });
+    }
+  });
+
+  it("opens and closes a connector drawer from its URL", async () => {
+    const user = userEvent.setup();
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/connectors?connector=jira",
+      bridge: makeMockBridge(),
+    });
+
+    expect(await screen.findByRole("dialog", { name: "Jira" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close drawer" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Jira" })).not.toBeInTheDocument();
+    });
   });
 
   it("enables the gateway, shows its one-time token, revokes a client, and disables it", async () => {
@@ -114,7 +162,7 @@ describe("Settings provider section", () => {
       bridge,
     });
 
-    await user.click(await screen.findByRole("button", { name: "Enable gateway" }));
+    await user.click(await screen.findByRole("switch", { name: "Enable gateway" }));
 
     await waitFor(() => {
       expect(enableGateway).toHaveBeenCalledWith({ boundTenantId: "tenant-1" });
@@ -164,7 +212,7 @@ describe("Settings provider section", () => {
 
     renderRoute(<Settings />, {
       path: "/settings/:section?",
-      route: "/settings/chat",
+      route: "/settings/data",
       bridge,
     });
 
@@ -207,21 +255,41 @@ describe("Settings provider section", () => {
       bridge,
     });
 
-    expect(await screen.findByRole("heading", { name: "LLM Providers" })).toBeInTheDocument();
-    expect(screen.getByText("Ollama")).toBeInTheDocument();
-    expect(screen.getByText("OpenAI")).toBeInTheDocument();
-    expect(screen.getAllByText("Connected")).toHaveLength(2);
-    expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.getAllByText("Not installed")).toHaveLength(3);
-    expect(screen.queryByText("Coming soon")).not.toBeInTheDocument();
-    expect(screen.getByText("Hosted via local CLI")).toBeInTheDocument();
-    expect(screen.getByText("Hosted via Azure API key")).toBeInTheDocument();
+    const providersHeading = await screen.findByRole("heading", { name: "Providers" });
+    const providersSection = providersHeading.closest("section");
+    expect(providersSection).not.toBeNull();
+    const providerView = within(providersSection as HTMLElement);
+    expect(providerView.getByText("Ollama")).toBeInTheDocument();
+    expect(providerView.getByText("OpenAI")).toBeInTheDocument();
+    expect(providerView.getAllByText("Connected")).toHaveLength(2);
+    expect(providerView.getAllByText("Active")).toHaveLength(5);
+    expect(providerView.getAllByText("Not installed")).toHaveLength(3);
+    expect(providerView.queryByText("Coming soon")).not.toBeInTheDocument();
+    expect(providerView.getAllByText("Hosted via CLI").length).toBeGreaterThan(0);
+    expect(providerView.getByText("Hosted API")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Set active" }));
+    await user.click(providerView.getByRole("radio", { name: "Set OpenAI active" }));
 
     await waitFor(() => {
       expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
     });
+  });
+
+  it("renders an available inactive provider with a neutral status", async () => {
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge(
+        {},
+        createMockAppState({
+          providers: [provider("ollama"), provider("apple-foundation")],
+        }),
+      ),
+    });
+
+    const available = await screen.findByText("Available");
+    expect(available).toHaveClass("text-[var(--color-text-soft)]");
+    expect(available).not.toHaveClass("text-[var(--color-warning)]");
   });
 
   it("saves Azure OpenAI settings without displaying the stored key", async () => {
@@ -254,6 +322,9 @@ describe("Settings provider section", () => {
       bridge,
     });
 
+    await user.click(
+      await screen.findByRole("button", { name: "Show details for Azure OpenAI" }),
+    );
     expect(
       await screen.findByRole("heading", { name: "Azure OpenAI configuration" }),
     ).toBeInTheDocument();
@@ -434,6 +505,7 @@ describe("Settings provider section", () => {
       name: "Usage telemetry",
     });
     expect(telemetrySwitch).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByText("Show exact ping JSON preview"));
     expect(await screen.findByText(/openadminos-usage-1/)).toBeInTheDocument();
 
     await user.click(telemetrySwitch);
@@ -448,7 +520,7 @@ describe("Settings provider section", () => {
     await waitFor(() => {
       expect(bridge.sendUsageTelemetryTest).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByRole("status")).toHaveTextContent("Test ping sent.");
+    expect(screen.getByText("Test ping sent.")).toBeInTheDocument();
   });
 
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {
@@ -495,7 +567,8 @@ describe("Settings provider section", () => {
       bridge,
     });
 
-    await user.click(await screen.findByRole("button", { name: "Disconnect" }));
+    await user.click(await screen.findByRole("button", { name: "Contoso IT actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Disconnect" }));
     await user.click(
       screen.getByRole("button", { name: "Disconnect and delete local data" }),
     );

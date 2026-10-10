@@ -1,13 +1,11 @@
 import { PublicWebSources } from "../components/PublicWebSources";
-import { useEffect, useId, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
-import { Pill, StatusDot } from "../components/Pill";
 import {
-  IconBolt,
   IconCloud,
   IconCopy,
   IconArrowLeft,
@@ -66,6 +64,8 @@ import { formatAgentDisplayName } from "../shared/agent-display";
 import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
+import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
+import Workspaces from "./Workspaces";
 
 const promptGroups = [
   {
@@ -159,6 +159,17 @@ type RelatedAgentState = {
   suggestedSlugsByConversationId: Record<string, string[]>;
 };
 
+type UnifiedAgentSuggestion = {
+  slug: string;
+  name: string;
+  mode: "read" | "write";
+  reason: string;
+  scopes: string[];
+  matchedTerms?: string[];
+  matchedConcepts?: string[];
+  matchedResources?: GraphCacheResourceKind[];
+};
+
 type HostedChatConsentPrompt = {
   content: string;
   conversationId?: string | null;
@@ -209,7 +220,10 @@ const focusRingClass =
 export default function IntuneChat() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { conversationId: routeConversationId } = useParams<{ conversationId?: string }>();
+  const {
+    conversationId: routeConversationId,
+    workspaceId: routeWorkspaceId,
+  } = useParams<{ conversationId?: string; workspaceId?: string }>();
   const { state, startRun, refresh, loading } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
@@ -225,12 +239,20 @@ export default function IntuneChat() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     routeConversationId ?? null,
   );
+  const lastConversationIdRef = useRef<string | null>(routeConversationId ?? null);
   const [shellLoaded, setShellLoaded] = useState(false);
   const [messages, setMessages] = useState<IntuneChatMessage[]>([]);
   const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [conversationSearch, setConversationSearch] = useState("");
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
+  const [panelMode, setPanelMode] = useState<"chats" | "workspaces">(
+    routeWorkspaceId || new URLSearchParams(location.search).get("panel") === "workspaces"
+      ? "workspaces"
+      : "chats",
+  );
+  const [workspaceCreateRequest, setWorkspaceCreateRequest] = useState(0);
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [sendState, dispatchSend] = useReducer(chatSendReducer, initialChatSendState);
@@ -246,7 +268,6 @@ export default function IntuneChat() {
   });
   const [historyOpen, setHistoryOpen] = useState(true);
   const [historyIsOverlay, setHistoryIsOverlay] = useState(false);
-  const historyToggleRef = useRef<HTMLButtonElement | null>(null);
   const historySearchRef = useRef<HTMLInputElement | null>(null);
   const [pinnedSectionOpen, setPinnedSectionOpen] = useState(true);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -276,6 +297,7 @@ export default function IntuneChat() {
   const [splitResult, setSplitResult] =
     useState<ImportMultiTenantResultToWorkspacesResult | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [allWorkspaces, setAllWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [attachedWorkspaceId, setAttachedWorkspaceId] = useState("");
   const [attachedWorkspace, setAttachedWorkspace] = useState<WorkspaceDetail | null>(null);
   const [selectedWorkspaceEvidenceIds, setSelectedWorkspaceEvidenceIds] = useState<string[]>([]);
@@ -303,6 +325,14 @@ export default function IntuneChat() {
   const copiedClearTimerRef = useRef<number | null>(null);
   const draftConversationRef = useRef<string | null | undefined>(undefined);
   const skipDraftWriteRef = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const [dismissedSuggestionMessageIds, setDismissedSuggestionMessageIds] = useState<string[]>([]);
+
+  const focusPanelToggle = () => {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>('[aria-label="Show chat panel"]')?.focus();
+    });
+  };
 
   /**
    * Put a conversation into the sidebar list immediately.
@@ -327,7 +357,9 @@ export default function IntuneChat() {
     conversationId: string | null,
     options: { replace?: boolean } = {},
   ) => {
+    setPanelMode("chats");
     setActiveConversationId(conversationId);
+    lastConversationIdRef.current = conversationId;
     const destination = conversationId
       ? `/chat/${encodeURIComponent(conversationId)}`
       : "/chat";
@@ -406,7 +438,7 @@ export default function IntuneChat() {
       if (event.key !== "Escape") return;
       event.preventDefault();
       setHistoryOpen(false);
-      window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+      focusPanelToggle();
     };
     window.addEventListener("keydown", onHistoryKeyDown);
     return () => window.removeEventListener("keydown", onHistoryKeyDown);
@@ -414,18 +446,25 @@ export default function IntuneChat() {
 
   useEffect(() => {
     const api = window.openAdminOS;
-    if (!api || !state.activeTenantId) {
+    if (!api) {
       setWorkspaces([]);
+      setAllWorkspaces([]);
       setAttachedWorkspaceId("");
       setAttachedWorkspace(null);
       return;
     }
     void api
-      .listWorkspaces(state.activeTenantId)
+      .listWorkspaces()
       .then((nextWorkspaces) => {
-        setWorkspaces(nextWorkspaces);
+        setAllWorkspaces(nextWorkspaces);
+        const tenantWorkspaces = state.activeTenantId
+          ? nextWorkspaces.filter(
+              (workspace) => workspace.tenantId === state.activeTenantId,
+            )
+          : [];
+        setWorkspaces(tenantWorkspaces);
         setAttachedWorkspaceId((current) =>
-          current && nextWorkspaces.some((workspace) => workspace.id === current)
+          current && tenantWorkspaces.some((workspace) => workspace.id === current)
             ? current
             : "",
         );
@@ -482,9 +521,27 @@ export default function IntuneChat() {
   }, []);
 
   useEffect(() => {
-    const nextConversationId = routeConversationId ?? null;
-    setActiveConversationId(nextConversationId);
-  }, [routeConversationId]);
+    if (routeConversationId) {
+      setActiveConversationId(routeConversationId);
+      lastConversationIdRef.current = routeConversationId;
+      return;
+    }
+    const showingWorkspaces =
+      Boolean(routeWorkspaceId) ||
+      new URLSearchParams(location.search).get("panel") === "workspaces";
+    if (!showingWorkspaces) {
+      setActiveConversationId(null);
+      lastConversationIdRef.current = null;
+    }
+  }, [location.search, routeConversationId, routeWorkspaceId]);
+
+  useEffect(() => {
+    const nextPanelMode =
+      routeWorkspaceId || new URLSearchParams(location.search).get("panel") === "workspaces"
+        ? "workspaces"
+        : "chats";
+    setPanelMode(nextPanelMode);
+  }, [location.search, routeWorkspaceId]);
 
   const loadShell = async (
     preferredActiveConversationId?: string | null,
@@ -596,10 +653,16 @@ export default function IntuneChat() {
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    messagesEndRef.current?.scrollIntoView({
-      block: "end",
-      behavior: reducedMotion ? "auto" : "smooth",
-    });
+    const scrollRoot = messagesEndRef.current?.closest<HTMLElement>(".overflow-y-auto");
+    if (!scrollRoot) return;
+    if (typeof scrollRoot.scrollTo === "function") {
+      scrollRoot.scrollTo({
+        top: scrollRoot.scrollHeight,
+        behavior: reducedMotion ? "auto" : "smooth",
+      });
+    } else {
+      scrollRoot.scrollTop = scrollRoot.scrollHeight;
+    }
   }, [messages.length, sending, chatProgress?.message]);
 
   useEffect(
@@ -1479,7 +1542,11 @@ export default function IntuneChat() {
       });
       setNotice(`Created workspace ${workspace.title} and linked this conversation.`);
       if (activeTenant) {
-        setWorkspaces(await api.listWorkspaces(activeTenant.id));
+        const nextWorkspaces = await api.listWorkspaces();
+        setAllWorkspaces(nextWorkspaces);
+        setWorkspaces(
+          nextWorkspaces.filter((entry) => entry.tenantId === activeTenant.id),
+        );
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -1544,7 +1611,11 @@ export default function IntuneChat() {
       );
       setPinTarget(null);
       setPinWorkspaceId("");
-      setWorkspaces(await api.listWorkspaces(activeTenant.id));
+      const nextWorkspaces = await api.listWorkspaces();
+      setAllWorkspaces(nextWorkspaces);
+      setWorkspaces(
+        nextWorkspaces.filter((entry) => entry.tenantId === activeTenant.id),
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -1569,6 +1640,44 @@ export default function IntuneChat() {
     (pendingConversation && pendingConversation.id === activeConversationId
       ? pendingConversation
       : undefined);
+  const workspaceView = panelMode === "workspaces";
+  const filteredPanelWorkspaces = useMemo(() => {
+    const needle = workspaceSearch.trim().toLowerCase();
+    if (!needle) return allWorkspaces;
+    return allWorkspaces.filter((workspace) =>
+      `${workspace.title} ${workspace.tenantName ?? ""}`.toLowerCase().includes(needle),
+    );
+  }, [allWorkspaces, workspaceSearch]);
+  const scopedTenantNames = useMemo(() => {
+    if (scopeMode === "all") return state.tenants.map((tenant) => tenant.displayName);
+    if (scopeMode === "selected") {
+      return state.tenants
+        .filter((tenant) => selectedTenantIds.includes(tenant.id))
+        .map((tenant) => tenant.displayName);
+    }
+    return activeTenant ? [activeTenant.displayName] : [];
+  }, [activeTenant, scopeMode, selectedTenantIds, state.tenants]);
+  const scopeLabel =
+    scopeMode === "all"
+      ? "All connected tenants"
+      : scopeMode === "selected"
+        ? `${selectedTenantIds.length} selected tenant${selectedTenantIds.length === 1 ? "" : "s"}`
+        : activeTenant?.displayName ?? "No active tenant";
+  const composerTrustCopy = deriveTrustCopy({
+    provider,
+    ...(activeModel ? { model: activeModel } : {}),
+    scope: { tenantNames: scopedTenantNames },
+    ...(workspaceContextSummary
+      ? {
+          attachments: {
+            workspaceTitle: workspaceContextSummary.workspaceTitle,
+            evidenceCount: workspaceContextSummary.evidenceCount,
+            noteCount: workspaceContextSummary.noteCount,
+            includesInstructions: workspaceContextSummary.includesInstructions,
+          },
+        }
+      : {}),
+  });
   const unknownConversation = Boolean(
     shellLoaded &&
       routeConversationId &&
@@ -1587,6 +1696,18 @@ export default function IntuneChat() {
   const draftConversationActive =
     activeConversationId === null ||
     (sending && optimisticDraft !== null && !activeConversationInRail);
+
+  useEffect(() => {
+    const onRenameShortcut = (event: KeyboardEvent) => {
+      if (event.key !== "F2" || !activeConversation || workspaceView || sending) return;
+      event.preventDefault();
+      setRenameTarget(activeConversation);
+      setRenameTitle(activeConversation.title);
+      window.requestAnimationFrame(() => renameInputRef.current?.select());
+    };
+    window.addEventListener("keydown", onRenameShortcut);
+    return () => window.removeEventListener("keydown", onRenameShortcut);
+  }, [activeConversation, sending, workspaceView]);
   const displayedMessages = mergeOptimisticMessages(messages, optimisticDraft);
   const progressMessageVisible =
     progressAssistantMessageId !== null &&
@@ -1613,7 +1734,7 @@ export default function IntuneChat() {
         openConversation(conversation.id);
         if (historyIsOverlay) {
           setHistoryOpen(false);
-          window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+          focusPanelToggle();
         }
       }}
       onContextMenu={(event) => openConversationContextMenu(event, conversation)}
@@ -1623,7 +1744,7 @@ export default function IntuneChat() {
           : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
       }`}
     >
-      <div className="truncate text-[12.5px] font-medium">
+      <div className="truncate text-base font-medium">
         {conversation.pinnedAt && (
           <IconStar
             size={10}
@@ -1632,7 +1753,7 @@ export default function IntuneChat() {
         )}
         {conversation.title}
       </div>
-      <div className="mt-1 text-[10.5px] text-[var(--color-text-muted)]">
+      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
         {formatDateTime(conversation.updatedAt)}
       </div>
     </button>
@@ -1646,58 +1767,72 @@ export default function IntuneChat() {
           aria-label="Close chat history"
           onClick={() => {
             setHistoryOpen(false);
-            window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+            focusPanelToggle();
           }}
           className="absolute inset-0 z-20 border-0 bg-black/55"
         />
       )}
       <aside
-        aria-label="Chat history"
+        aria-label="Chat navigation"
         aria-hidden={!historyOpen}
         inert={!historyOpen}
         className={`flex min-h-0 flex-col bg-[var(--color-sidebar-solid)] transition-[transform,width] duration-150 ${
           historyIsOverlay
-            ? `absolute inset-y-0 left-0 z-30 w-[284px] border-r border-[var(--color-border-soft)] ${historyOpen ? "translate-x-0 shadow-[18px_0_48px_rgba(0,0,0,0.25)]" : "-translate-x-full"}`
+            ? `absolute inset-y-0 left-0 z-30 w-[260px] border-r border-[var(--color-border-soft)] ${historyOpen ? "translate-x-0 shadow-[18px_0_48px_rgba(0,0,0,0.25)]" : "-translate-x-full"}`
             : historyOpen
-              ? "relative w-[284px] shrink-0 border-r border-[var(--color-border-soft)]"
+              ? "relative w-[260px] shrink-0 border-r border-[var(--color-border-soft)]"
               : "relative w-0 shrink-0 overflow-hidden border-r-0"
         }`}
       >
-        <div className="px-4 pb-3 pt-5">
+        <div className="border-b border-[var(--color-border-soft)] px-3 pb-3 pt-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                Conversations
-              </div>
-              <div className="mt-1 truncate text-[13px] text-[var(--color-text-soft)]">
-                {activeTenant?.displayName ?? "No tenant"}
-              </div>
-            </div>
+            <SegmentedControl
+              className="min-w-0 flex-1"
+              fullWidth
+              ariaLabel="Chat panel"
+              value={panelMode}
+              options={[
+                { id: "chats", label: "Chats" },
+                { id: "workspaces", label: "Workspaces" },
+              ]}
+              onValueChange={(value) => {
+                const nextMode = value === "workspaces" ? "workspaces" : "chats";
+                setPanelMode(nextMode);
+                navigate(
+                  nextMode === "workspaces"
+                    ? "/chat?panel=workspaces"
+                    : (activeConversationId ?? lastConversationIdRef.current)
+                      ? `/chat/${encodeURIComponent((activeConversationId ?? lastConversationIdRef.current)!)}`
+                      : "/chat",
+                );
+              }}
+            />
             <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                title="Hide chat history"
-                aria-label="Hide chat history"
+              <IconButton
+                size="sm"
+                label="Collapse chat panel"
+                tooltip="Collapse panel"
+                icon={<IconArrowLeft size={13} />}
                 onClick={() => {
                   setHistoryOpen(false);
-                  window.requestAnimationFrame(() => historyToggleRef.current?.focus());
+                  focusPanelToggle();
                 }}
-                className={`flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
-              >
-                <IconArrowLeft size={13} />
-              </button>
-              <Button
+              />
+              <IconButton
                 size="sm"
-                variant="secondary"
-                leadingIcon={<IconPlus size={12} />}
+                label={panelMode === "chats" ? "New chat" : "New workspace"}
+                tooltip={panelMode === "chats" ? "New chat (Mod+N)" : "New workspace"}
+                icon={<IconPlus size={13} />}
                 disabled={sending}
                 onClick={() => {
-                  startNewConversation();
+                  if (panelMode === "chats") {
+                    startNewConversation();
+                  } else {
+                    setWorkspaceCreateRequest((value) => value + 1);
+                  }
                   if (historyIsOverlay) setHistoryOpen(false);
                 }}
-              >
-                New
-              </Button>
+              />
             </div>
           </div>
         </div>
@@ -1710,60 +1845,95 @@ export default function IntuneChat() {
                 aria-hidden="true"
                 className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
               />
-              <label htmlFor="conversation-search" className="sr-only">
-                Search conversations
+              <label htmlFor="chat-panel-search" className="sr-only">
+                {panelMode === "chats" ? "Search conversations" : "Search workspaces"}
               </label>
               <input
-                id="conversation-search"
+                id="chat-panel-search"
                 ref={historySearchRef}
-                name="conversation-search"
+                name="chat-panel-search"
                 type="search"
-                value={conversationSearch}
-                onChange={(event) => setConversationSearch(event.target.value)}
-                placeholder="Search conversations"
+                value={panelMode === "chats" ? conversationSearch : workspaceSearch}
+                onChange={(event) => {
+                  if (panelMode === "chats") setConversationSearch(event.target.value);
+                  else setWorkspaceSearch(event.target.value);
+                }}
+                placeholder={panelMode === "chats" ? "Search conversations" : "Search workspaces"}
                 autoComplete="off"
-                className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
+                className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
               />
             </div>
           </div>
-          {draftConversationActive && (
-            <button
-              type="button"
-              disabled={sending}
-              onClick={() => {
-                startNewConversation();
-                if (historyIsOverlay) setHistoryOpen(false);
-              }}
-              className="mb-1 w-full rounded-lg bg-[var(--color-surface-hover)] px-3 py-2.5 text-left text-[var(--color-text)] transition-colors disabled:cursor-not-allowed"
-            >
-              <div className="truncate text-[12.5px] font-medium">
-                New conversation
+          {panelMode === "workspaces" ? (
+            filteredPanelWorkspaces.length === 0 ? (
+              <div className="rounded-lg px-3 py-4 text-sm leading-5 text-[var(--color-text-muted)]">
+                {workspaceSearch.trim() ? "No matching workspaces." : "No workspaces yet."}
               </div>
-              <div className="mt-1 text-[10.5px] text-[var(--color-text-muted)]">
-                {sending ? "Thinking" : input.trim() ? "Draft" : "Ready"}
-              </div>
-            </button>
-          )}
-          {conversations.length === 0 ? (
-            <div className="rounded-lg px-3 py-4 text-[12px] leading-5 text-[var(--color-text-muted)]">
-              {conversationSearch.trim()
-                ? "No matching conversations."
-                : "Chat history will appear here."}
-            </div>
+            ) : (
+              filteredPanelWorkspaces.map((workspace) => (
+                <button
+                  key={workspace.id}
+                  type="button"
+                  title={workspace.title}
+                  onClick={() => {
+                    navigate(`/chat/workspaces/${encodeURIComponent(workspace.id)}`);
+                    if (historyIsOverlay) setHistoryOpen(false);
+                  }}
+                  className={`mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors ${focusRingClass} ${
+                    routeWorkspaceId === workspace.id
+                      ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
+                      : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <IconHardDrive size={13} className="text-[var(--color-accent)]" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {workspace.title}
+                    </span>
+                  </div>
+                  <div className="mt-1 truncate text-xs text-[var(--color-text-muted)]">
+                    {workspace.tenantName ?? workspace.tenantId}
+                  </div>
+                </button>
+              ))
+            )
           ) : (
             <>
+              {draftConversationActive && (
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={() => {
+                    startNewConversation();
+                    if (historyIsOverlay) setHistoryOpen(false);
+                  }}
+                  className="mb-1 w-full rounded-lg bg-[var(--color-surface-hover)] px-3 py-2.5 text-left text-[var(--color-text)] transition-colors disabled:cursor-not-allowed"
+                >
+                  <div className="truncate text-sm font-medium">New conversation</div>
+                  <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                    {sending ? "Thinking" : input.trim() ? "Draft" : "Ready"}
+                  </div>
+                </button>
+              )}
+              {conversations.length === 0 && (
+                <div className="rounded-lg px-3 py-4 text-sm leading-5 text-[var(--color-text-muted)]">
+                  {conversationSearch.trim()
+                    ? "No matching conversations."
+                    : "Chat history will appear here."}
+                </div>
+              )}
               {pinnedConversations.length > 0 && (
                 <div className="mb-2">
                   <button
                     type="button"
                     onClick={() => setPinnedSectionOpen((open) => !open)}
-                    className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                    className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
                     aria-expanded={pinnedSectionOpen}
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <IconStar size={10} className="text-[var(--color-text-muted)]" />
                       Pinned
-                      <span className="font-mono text-[10px] tabular-nums opacity-70">
+                      <span className="text-xs tabular-nums opacity-70">
                         {pinnedConversations.length}
                       </span>
                     </span>
@@ -1779,7 +1949,7 @@ export default function IntuneChat() {
               {recentConversations.length > 0 && (
                 <div>
                   {pinnedConversations.length > 0 && (
-                    <div className="mb-1 px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    <div className="mb-1 px-2 py-1 text-xs font-medium text-[var(--color-text-muted)]">
                       Recent
                     </div>
                   )}
@@ -1791,42 +1961,100 @@ export default function IntuneChat() {
         </div>
       </aside>
 
+      {workspaceView ? (
+        <Workspaces
+          embedded
+          selectedWorkspaceId={routeWorkspaceId ?? null}
+          createRequest={workspaceCreateRequest}
+          leadingAction={
+            !historyOpen ? (
+              <IconButton
+                label="Show chat panel"
+                tooltip="Show chat panel"
+                icon={<IconChevronRight size={13} />}
+                onClick={() => {
+                  setHistoryOpen(true);
+                  window.requestAnimationFrame(() => historySearchRef.current?.focus());
+                }}
+              />
+            ) : undefined
+          }
+          onWorkspaceSelected={(workspaceId) =>
+            navigate(
+              workspaceId
+                ? `/chat/workspaces/${encodeURIComponent(workspaceId)}`
+                : "/chat?panel=workspaces",
+            )
+          }
+          onWorkspacesChange={(nextWorkspaces) => {
+            setAllWorkspaces(nextWorkspaces);
+            setWorkspaces(
+              activeTenant
+                ? nextWorkspaces.filter(
+                    (workspace) => workspace.tenantId === activeTenant.id,
+                  )
+                : [],
+            );
+          }}
+        />
+      ) : (
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] px-6">
           <div className="flex min-w-0 items-center gap-3">
             {!historyOpen && (
-              <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  type="button"
-                  ref={historyToggleRef}
-                  title="Show chat history"
-                  aria-label="Show chat history"
+              <IconButton
+                  label="Show chat panel"
+                  tooltip="Show chat panel"
+                  icon={<IconChevronRight size={13} />}
                   onClick={() => {
                     setHistoryOpen(true);
                     window.requestAnimationFrame(() => historySearchRef.current?.focus());
                   }}
-                  className={`flex h-8 items-center gap-1.5 rounded-lg bg-[var(--color-bg-raised)] px-2.5 text-[11px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
-                >
-                  <IconChevronRight size={13} />
-                  History
-                </button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label="New conversation"
-                  leadingIcon={<IconPlus size={12} />}
-                  disabled={sending}
-                  onClick={() => startNewConversation()}
-                >
-                  New
-                </Button>
-              </div>
+              />
             )}
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
               <IconChat size={16} />
             </div>
-            <div className="min-w-0">
-              <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
+            <div
+              className="min-w-0"
+              title={activeConversation ? `Updated ${formatDateTime(activeConversation.updatedAt)}` : undefined}
+            >
+              {renameTarget && renameTarget.id === activeConversation?.id ? (
+                <input
+                  ref={renameInputRef}
+                  name="conversation-title"
+                  value={renameTitle}
+                  autoFocus
+                  autoComplete="off"
+                  aria-label="Conversation title"
+                  onChange={(event) => setRenameTitle(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleRenameConversation();
+                    } else if (event.key === "Escape") {
+                      setRenameTarget(null);
+                      setRenameTitle("");
+                    }
+                  }}
+                  onBlur={() => {
+                    setRenameTarget(null);
+                    setRenameTitle("");
+                  }}
+                  className="h-8 min-w-0 max-w-96 rounded-md bg-[var(--color-bg-raised)] px-2 text-base font-medium text-[var(--color-text)] outline-none ring-1 ring-[var(--color-accent)]"
+                />
+              ) : (
+              <button
+                type="button"
+                disabled={!activeConversation || sending}
+                onClick={() => {
+                  if (!activeConversation) return;
+                  setRenameTarget(activeConversation);
+                  setRenameTitle(activeConversation.title);
+                  window.requestAnimationFrame(() => renameInputRef.current?.select());
+                }}
+                className={`block max-w-full truncate text-left text-base font-medium text-[var(--color-text)] disabled:cursor-default ${focusRingClass}`}
+              >
                 {activeConversation?.pinnedAt && (
                   <IconStar
                     size={11}
@@ -1836,75 +2064,54 @@ export default function IntuneChat() {
                 {unknownConversation
                   ? "Conversation not found"
                   : activeConversation?.title ?? "New conversation"}
-              </div>
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-                <StatusDot tone={provider?.isLocal ? "success" : "warning"} />
-                <span className="truncate">
-                  {provider?.isLocal
-                    ? "Local provider"
-                    : "Hosted provider"}
-                  {" · "}
-                  {cacheSummary}
-                </span>
-              </div>
+              </button>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {activeConversation && (
-              <>
-                {activeConversation.scopeKind !== "multi-tenant" && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    leadingIcon={<IconHardDrive size={12} />}
-                    disabled={sending}
-                    onClick={() => void handleCreateWorkspaceFromConversation()}
-                  >
-                    Workspace
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  leadingIcon={<IconDownload size={12} />}
-                  disabled={sending || messages.length === 0}
-                  onClick={() => void handleExportConversation()}
-                >
-                  Export
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  leadingIcon={<IconStar size={12} />}
-                  disabled={sending}
-                  onClick={() => void handleTogglePinnedConversation(activeConversation)}
-                >
-                  {activeConversation.pinnedAt ? "Unpin" : "Pin"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={sending}
-                  onClick={() => {
-                    setRenameTarget(activeConversation);
-                    setRenameTitle(activeConversation.title);
-                  }}
-                >
-                  Rename
-                </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  disabled={sending}
-                  onClick={() => setDeleteTarget(activeConversation)}
-                >
-                  Delete
-                </Button>
-              </>
+              <Menu
+                ariaLabel="Conversation actions"
+                trigger={
+                  <IconButton
+                    label="Conversation actions"
+                    tooltip="Conversation actions"
+                    icon={<IconChevronDown size={14} />}
+                  />
+                }
+                items={[
+                  {
+                    id: "pin",
+                    label: activeConversation.pinnedAt ? "Unpin" : "Pin",
+                    icon: <IconStar size={12} />,
+                    disabled: sending,
+                    onSelect: () => void handleTogglePinnedConversation(activeConversation),
+                  },
+                  {
+                    id: "export",
+                    label: "Export",
+                    icon: <IconDownload size={12} />,
+                    disabled: sending || messages.length === 0,
+                    onSelect: () => void handleExportConversation(),
+                  },
+                  {
+                    id: "workspace",
+                    label: "Move to workspace",
+                    icon: <IconHardDrive size={12} />,
+                    disabled: sending || activeConversation.scopeKind === "multi-tenant",
+                    onSelect: () => void handleCreateWorkspaceFromConversation(),
+                  },
+                  { type: "separator", id: "delete-separator" },
+                  {
+                    id: "delete",
+                    label: "Delete",
+                    danger: true,
+                    disabled: sending,
+                    onSelect: () => setDeleteTarget(activeConversation),
+                  },
+                ]}
+              />
             )}
-            <Pill tone={provider?.isLocal ? "success" : "warning"}>
-              {provider?.name ?? state.activeProviderId}
-            </Pill>
           </div>
         </header>
 
@@ -1919,10 +2126,10 @@ export default function IntuneChat() {
                   <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
                     <IconChat size={18} />
                   </div>
-                  <h1 className="text-[17px] font-semibold text-[var(--color-text)]">
+                  <h1 className="text-md font-semibold text-[var(--color-text)]">
                     Conversation not found
                   </h1>
-                  <p className="mx-auto mt-2 max-w-[420px] text-[12.5px] leading-5 text-[var(--color-text-muted)]">
+                  <p className="mx-auto mt-2 max-w-[420px] text-base leading-5 text-[var(--color-text-muted)]">
                     It may have been deleted, or this link belongs to another local profile.
                     No tenant data was changed.
                   </p>
@@ -1965,14 +2172,7 @@ export default function IntuneChat() {
                   <ChatProgressCard progress={chatProgress} />
                 </div>
               ) : (
-              <EmptyChat
-                disabled={sending}
-                onPrompt={(prompt) => {
-                  setInput(prompt);
-                  writeChatDraft(activeConversationId, prompt);
-                  window.requestAnimationFrame(() => composerRef.current?.focus());
-                }}
-              />
+                <div className="flex-1" />
               )
             ) : (
               <div className="flex flex-1 flex-col gap-6">
@@ -1983,13 +2183,16 @@ export default function IntuneChat() {
                     message.status === "completed"
                       ? relatedAgentState.suggestionsByMessageId[message.id]
                       : undefined;
+                  const suggestedAgents = mergeSuggestedAgents(
+                    message.agentSuggestions,
+                    relatedAgentSuggestion,
+                  );
                   return (
                     <div key={message.id} className="space-y-4">
                       <ChatMessageBubble
                         message={message}
                         progress={message.id === progressAssistantMessageId ? chatProgress : null}
                         copied={message.id === copiedMessageId}
-                        runningAgentSlug={runningAgentSlug}
                         regenerateDisabled={
                           sending ||
                           !previousUserPromptForMessage(displayedMessages, message)
@@ -1997,7 +2200,6 @@ export default function IntuneChat() {
                         onCopy={() => void handleCopyMessage(message)}
                         onEditPrompt={() => handleEditPrompt(message)}
                         onRegenerate={() => void handleRegenerateResponse(message)}
-                        onRunAgent={handleRunAgent}
                         pinDisabled={
                           !activeTenant ||
                           activeConversation?.scopeKind === "multi-tenant" ||
@@ -2009,11 +2211,22 @@ export default function IntuneChat() {
                           setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
                         }}
                       />
-                      {relatedAgentSuggestion && (
-                        <RelatedAgentHint
-                          suggestion={relatedAgentSuggestion}
-                          onOpen={() => navigate(`/agents/${relatedAgentSuggestion.agent.slug}`)}
-                          onDismiss={() => dismissRelatedAgentSuggestion(message.id)}
+                      {message.role === "assistant" &&
+                        suggestedAgents.length > 0 &&
+                        !dismissedSuggestionMessageIds.includes(message.id) && (
+                        <SuggestedAgentsBlock
+                          suggestions={suggestedAgents}
+                          runningAgentSlug={runningAgentSlug}
+                          onOpen={(slug) => navigate(`/agents/${slug}`)}
+                          onRun={(slug) =>
+                            void handleRunAgent(slug, message.conversationId, message.id)
+                          }
+                          onDismiss={() => {
+                            dismissRelatedAgentSuggestion(message.id);
+                            setDismissedSuggestionMessageIds((current) => [
+                              ...new Set([...current, message.id]),
+                            ]);
+                          }}
                         />
                       )}
                       {message.role === "assistant" && job && (
@@ -2053,7 +2266,7 @@ export default function IntuneChat() {
             {error && (
               <div
                 role="alert"
-                className="mb-3 flex items-start justify-between gap-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
+                className="mb-3 flex items-start justify-between gap-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
               >
                 <div className="min-w-0">
                   <div className="font-medium">
@@ -2072,53 +2285,23 @@ export default function IntuneChat() {
               </div>
             )}
             {notice && (
-              <div className="mb-3 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+              <div className="mb-3 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
                 {notice}
               </div>
             )}
-            <MultiTenantComposerControls
-              scopeMode={scopeMode}
-              onScopeModeChange={setScopeMode}
-              tenants={state.tenants}
-              activeTenantId={state.activeTenantId}
-              selectedTenantIds={selectedTenantIds}
-              onToggleTenant={toggleTenantSelection}
-              tenantGroups={tenantGroups}
-              selectedGroupIds={selectedGroupIds}
-              onToggleGroup={toggleGroupSelection}
-              savedQueries={savedQueries}
-              selectedSavedQueryId={selectedSavedQueryId}
-              onSavedQuery={applySavedQuery}
-              disabled={unknownConversation || sending || runningMultiTenant}
-            />
-            <WorkspaceContextControls
-              workspaces={workspaces}
-              workspace={attachedWorkspace}
-              attachedWorkspaceId={attachedWorkspaceId}
-              onWorkspaceChange={setAttachedWorkspaceId}
-              selectedEvidenceIds={selectedWorkspaceEvidenceIds}
-              onToggleEvidence={(id) =>
-                setSelectedWorkspaceEvidenceIds((current) =>
-                  current.includes(id)
-                    ? current.filter((entry) => entry !== id)
-                    : [...current, id],
-                )
-              }
-              selectedNoteIds={selectedWorkspaceNoteIds}
-              onToggleNote={(id) =>
-                setSelectedWorkspaceNoteIds((current) =>
-                  current.includes(id)
-                    ? current.filter((entry) => entry !== id)
-                    : [...current, id],
-                )
-              }
-              includeInstructions={includeWorkspaceInstructions}
-              onIncludeInstructionsChange={setIncludeWorkspaceInstructions}
-              disabled={unknownConversation || sending || runningMultiTenant}
-            />
+            {displayedMessages.length === 0 && !chatProgress && !multiTenantPreflight && !unknownConversation && (
+              <EmptyChat
+                disabled={sending}
+                onPrompt={(prompt) => {
+                  setInput(prompt);
+                  writeChatDraft(activeConversationId, prompt);
+                  window.requestAnimationFrame(() => composerRef.current?.focus());
+                }}
+              />
+            )}
             <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
               {!activeTenant && (
-                <div className="mx-1 mb-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                <div className="mx-1 mb-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                   {SETUP_COPY.guestChatHint}
                 </div>
               )}
@@ -2139,15 +2322,75 @@ export default function IntuneChat() {
                   }
                 }}
                 placeholder={activeTenant ? CHAT_COPY.composerPlaceholder : SETUP_COPY.guestComposerPlaceholder}
-                className="max-h-[180px] min-h-[72px] w-full resize-none bg-transparent px-2 py-2 text-[13.5px] leading-6 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
+                className="max-h-[180px] min-h-[72px] w-full resize-none bg-transparent px-2 py-2 text-base leading-6 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
               />
               <div className="flex items-center justify-between gap-3 px-1 pb-1">
-                <div className="truncate text-[11px] text-[var(--color-text-muted)]">
-                  {workspaceContextSummary
-                    ? `Workspace context selected: ${workspaceContextSummary.evidenceCount} evidence, ${workspaceContextSummary.noteCount} notes.`
-                    : provider?.isLocal
-                      ? CHAT_COPY.localBoundary
-                      : CHAT_COPY.hostedBoundary}
+                <div className="flex min-w-0 items-center gap-1">
+                  <ComposerScopePopover
+                    label={scopeLabel}
+                    scopeMode={scopeMode}
+                    onScopeModeChange={setScopeMode}
+                    tenants={state.tenants}
+                    activeTenantId={state.activeTenantId}
+                    selectedTenantIds={selectedTenantIds}
+                    onToggleTenant={toggleTenantSelection}
+                    tenantGroups={tenantGroups}
+                    selectedGroupIds={selectedGroupIds}
+                    onToggleGroup={toggleGroupSelection}
+                    workspaces={workspaces}
+                    workspace={attachedWorkspace}
+                    attachedWorkspaceId={attachedWorkspaceId}
+                    onWorkspaceChange={setAttachedWorkspaceId}
+                    selectedEvidenceIds={selectedWorkspaceEvidenceIds}
+                    onToggleEvidence={(id) =>
+                      setSelectedWorkspaceEvidenceIds((current) =>
+                        current.includes(id)
+                          ? current.filter((entry) => entry !== id)
+                          : [...current, id],
+                      )
+                    }
+                    selectedNoteIds={selectedWorkspaceNoteIds}
+                    onToggleNote={(id) =>
+                      setSelectedWorkspaceNoteIds((current) =>
+                        current.includes(id)
+                          ? current.filter((entry) => entry !== id)
+                          : [...current, id],
+                      )
+                    }
+                    includeInstructions={includeWorkspaceInstructions}
+                    onIncludeInstructionsChange={setIncludeWorkspaceInstructions}
+                    disabled={unknownConversation || sending || runningMultiTenant}
+                  />
+                  <Menu
+                    align="start"
+                    ariaLabel="Saved queries"
+                    className="[&_[role=menu]]:bottom-[calc(100%+6px)] [&_[role=menu]]:top-auto"
+                    trigger={
+                      <IconButton
+                        size="sm"
+                        label="Saved queries"
+                        tooltip="Saved queries"
+                        icon={<IconStar size={12} />}
+                        disabled={unknownConversation || sending || runningMultiTenant}
+                      />
+                    }
+                    items={
+                      savedQueries.length > 0
+                        ? savedQueries.map((query) => ({
+                            id: query.id,
+                            label: query.title,
+                            onSelect: () => applySavedQuery(query),
+                          }))
+                        : [
+                            {
+                              id: "empty",
+                              label: "No saved queries",
+                              disabled: true,
+                              onSelect: () => undefined,
+                            },
+                          ]
+                    }
+                  />
                 </div>
                 {sending ? (
                   <Button
@@ -2171,6 +2414,11 @@ export default function IntuneChat() {
                 )}
               </div>
             </div>
+            {!composerTrustCopy.isLocal && composerTrustCopy.boundary && (
+              <div className="mt-2 text-xs text-[var(--color-warning)]" role="note">
+                {composerTrustCopy.boundary}
+              </div>
+            )}
             <div
               aria-live="polite"
               aria-atomic="true"
@@ -2181,6 +2429,7 @@ export default function IntuneChat() {
           </div>
         </div>
       </section>
+      )}
       <HostedChatConsentModal
         prompt={hostedConsentPrompt}
         remember={rememberHostedConsent}
@@ -2212,16 +2461,6 @@ export default function IntuneChat() {
           setPinWorkspaceId("");
         }}
         onConfirm={() => void handlePinMessageToWorkspace()}
-      />
-      <RenameConversationModal
-        conversation={renameTarget}
-        title={renameTitle}
-        onTitleChange={setRenameTitle}
-        onClose={() => {
-          setRenameTarget(null);
-          setRenameTitle("");
-        }}
-        onConfirm={() => void handleRenameConversation()}
       />
       <DeleteConversationModal
         conversation={deleteTarget}
@@ -2288,7 +2527,8 @@ function previousUserPromptForMessage(
   return null;
 }
 
-function MultiTenantComposerControls({
+function ComposerScopePopover({
+  label,
   scopeMode,
   onScopeModeChange,
   tenants,
@@ -2298,141 +2538,6 @@ function MultiTenantComposerControls({
   tenantGroups,
   selectedGroupIds,
   onToggleGroup,
-  savedQueries,
-  selectedSavedQueryId,
-  onSavedQuery,
-  disabled,
-}: {
-  scopeMode: MultiTenantScopeMode;
-  onScopeModeChange: (mode: MultiTenantScopeMode) => void;
-  tenants: TenantRecord[];
-  activeTenantId?: string;
-  selectedTenantIds: string[];
-  onToggleTenant: (tenantId: string) => void;
-  tenantGroups: TenantGroup[];
-  selectedGroupIds: string[];
-  onToggleGroup: (groupId: string) => void;
-  savedQueries: SavedMultiTenantQuery[];
-  selectedSavedQueryId: string;
-  onSavedQuery: (query: SavedMultiTenantQuery) => void;
-  disabled: boolean;
-}) {
-  const savedQuerySelectId = useId();
-
-  return (
-    <div className="mb-3 rounded-xl bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div
-        role="group"
-        aria-label="Tenant scope"
-        className="flex flex-wrap items-center gap-2"
-      >
-        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          Scope
-        </span>
-        {(["active", "selected", "all"] as const).map((mode) => (
-          <button
-            key={mode}
-            type="button"
-            disabled={disabled}
-            onClick={() => onScopeModeChange(mode)}
-            className={`h-7 rounded-md px-2.5 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${focusRingClass} ${
-              scopeMode === mode
-                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
-                : "bg-[var(--color-bg)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            {mode === "active"
-              ? "Active tenant"
-              : mode === "selected"
-                ? "Selected tenants"
-                : "All connected tenants"}
-          </button>
-        ))}
-        <div className="ml-auto min-w-[180px]">
-          <label htmlFor={savedQuerySelectId} className="sr-only">
-            Saved multi-tenant query
-          </label>
-          <Select
-            id={savedQuerySelectId}
-            name="saved-multi-tenant-query"
-            value={selectedSavedQueryId}
-            disabled={disabled}
-            onChange={(event) => {
-              const query = savedQueries.find((entry) => entry.id === event.target.value);
-              if (query) onSavedQuery(query);
-            }}
-            className="h-7 w-full rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
-          >
-            <option value="">Saved queries</option>
-            {savedQueries.map((query) => (
-              <option key={query.id} value={query.id}>
-                {query.title}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
-      {scopeMode === "selected" && (
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
-          <div>
-            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Tenants
-            </div>
-            <div className="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto pr-1">
-              {tenants.map((tenant) => (
-                <button
-                  key={tenant.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => onToggleTenant(tenant.id)}
-                  className={`rounded-md px-2 py-1 text-[11px] transition-colors ${focusRingClass} ${
-                    selectedTenantIds.includes(tenant.id)
-                      ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-                      : tenant.id === activeTenantId
-                        ? "bg-[var(--color-surface)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-                        : "bg-[var(--color-bg)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-                  } disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {tenant.displayName}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Groups
-            </div>
-            <div className="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto pr-1">
-              {tenantGroups.length === 0 ? (
-                <span className="text-[11px] text-[var(--color-text-muted)]">
-                  Groups can be saved during scope review.
-                </span>
-              ) : (
-                tenantGroups.map((group) => (
-                  <button
-                    key={group.id}
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => onToggleGroup(group.id)}
-                    className={`rounded-md px-2 py-1 text-[11px] transition-colors ${focusRingClass} ${
-                      selectedGroupIds.includes(group.id)
-                        ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-                        : "bg-[var(--color-bg)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-                    } disabled:cursor-not-allowed disabled:opacity-50`}
-                  >
-                    {group.name}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function WorkspaceContextControls({
   workspaces,
   workspace,
   attachedWorkspaceId,
@@ -2445,6 +2550,16 @@ function WorkspaceContextControls({
   onIncludeInstructionsChange,
   disabled,
 }: {
+  label: string;
+  scopeMode: MultiTenantScopeMode;
+  onScopeModeChange: (mode: MultiTenantScopeMode) => void;
+  tenants: TenantRecord[];
+  activeTenantId?: string;
+  selectedTenantIds: string[];
+  onToggleTenant: (tenantId: string) => void;
+  tenantGroups: TenantGroup[];
+  selectedGroupIds: string[];
+  onToggleGroup: (groupId: string) => void;
   workspaces: WorkspaceSummary[];
   workspace: WorkspaceDetail | null;
   attachedWorkspaceId: string;
@@ -2457,134 +2572,186 @@ function WorkspaceContextControls({
   onIncludeInstructionsChange: (include: boolean) => void;
   disabled: boolean;
 }) {
-  const workspaceSelectId = useId();
-  if (workspaces.length === 0) return null;
-  const hasAttachment =
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const hasMultipleTenants = tenants.length >= 2;
+  const hasWorkspaceContext =
     Boolean(workspace) &&
     (selectedEvidenceIds.length > 0 ||
       selectedNoteIds.length > 0 ||
       (includeInstructions && Boolean(workspace?.instructions?.trim())));
+
+  useEffect(() => {
+    const closeFromOutside = (event: globalThis.MouseEvent) => {
+      const details = detailsRef.current;
+      if (details?.open && !details.contains(event.target as Node)) details.open = false;
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      const details = detailsRef.current;
+      if (event.key !== "Escape" || !details?.open) return;
+      event.preventDefault();
+      details.open = false;
+      details.querySelector<HTMLElement>("summary")?.focus();
+    };
+    window.addEventListener("mousedown", closeFromOutside);
+    window.addEventListener("keydown", closeFromEscape);
+    return () => {
+      window.removeEventListener("mousedown", closeFromOutside);
+      window.removeEventListener("keydown", closeFromEscape);
+    };
+  }, []);
+
   return (
-    <div className="mb-3 rounded-xl bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          Workspace context
-        </span>
-        <label htmlFor={workspaceSelectId} className="sr-only">
-          Attach workspace context
-        </label>
-        <Select
-          id={workspaceSelectId}
-          name="attached-workspace-context"
-          value={attachedWorkspaceId}
-          disabled={disabled}
-          onChange={(event) => onWorkspaceChange(event.target.value)}
-          className="h-7 min-w-[220px] rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <option value="">No workspace attached</option>
-          {workspaces.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.title}
-            </option>
-          ))}
-        </Select>
-        {hasAttachment && <Pill tone="accent">Attached</Pill>}
-        {!attachedWorkspaceId && (
-          <div className="flex flex-wrap gap-1.5">
-            {workspaces.slice(0, 3).map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                disabled={disabled}
-                onClick={() => onWorkspaceChange(entry.id)}
-                className="rounded-md bg-[var(--color-bg)] px-2 py-1 text-[11px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+    <details ref={detailsRef} className="group relative">
+      <summary
+        aria-label={`Scope: ${label}`}
+        aria-disabled={disabled}
+        onClick={(event) => {
+          if (disabled) event.preventDefault();
+        }}
+        onKeyDown={(event) => {
+          if (disabled && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+          }
+        }}
+        className={`flex h-7 cursor-pointer list-none items-center gap-1.5 rounded-md bg-[var(--color-surface)] px-2.5 text-sm font-medium text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] [&::-webkit-details-marker]:hidden ${focusRingClass} ${
+          disabled ? "pointer-events-none opacity-50" : ""
+        }`}
+      >
+        <span className="max-w-52 truncate">{label}</span>
+        {hasWorkspaceContext && <Badge tone="info">Context</Badge>}
+        <IconChevronDown size={11} />
+      </summary>
+      <div className="absolute bottom-[calc(100%+8px)] left-0 z-[70] w-[min(440px,calc(100vw-64px))] rounded-lg bg-[var(--color-bg-elevated)] p-3 shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)]">
+        <div className="text-sm font-medium text-[var(--color-text)]">Tenant scope</div>
+        {hasMultipleTenants ? (
+          <SegmentedControl
+            className="mt-2"
+            ariaLabel="Tenant scope"
+            value={scopeMode}
+            options={[
+              { id: "active", label: "Active tenant" },
+              { id: "selected", label: "Selected tenants" },
+              { id: "all", label: "All connected tenants" },
+            ]}
+            onValueChange={(value) => onScopeModeChange(value as MultiTenantScopeMode)}
+          />
+        ) : (
+          <div className="mt-2 text-sm text-[var(--color-text-muted)]">
+            Active tenant: {tenants.find((tenant) => tenant.id === activeTenantId)?.displayName ?? "Not connected"}
+          </div>
+        )}
+
+        {hasMultipleTenants && scopeMode === "selected" && (
+          <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">Tenants</div>
+            <div className="mt-2 grid max-h-28 gap-1 overflow-y-auto sm:grid-cols-2">
+              {tenants.map((tenant) => (
+                <label
+                  key={tenant.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-soft)] hover:bg-[var(--color-surface)]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedTenantIds.includes(tenant.id)}
+                    onChange={() => onToggleTenant(tenant.id)}
+                    className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                  />
+                  <span className="truncate">{tenant.displayName}</span>
+                </label>
+              ))}
+            </div>
+            {tenantGroups.length > 0 && (
+              <div className="mt-3">
+                <div className="text-xs font-medium text-[var(--color-text-muted)]">Tenant groups</div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {tenantGroups.map((group) => (
+                    <button
+                      key={group.id}
+                      type="button"
+                      onClick={() => onToggleGroup(group.id)}
+                      className={`rounded-md px-2 py-1 text-xs ${focusRingClass} ${
+                        selectedGroupIds.includes(group.id)
+                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
+                          : "bg-[var(--color-surface)] text-[var(--color-text-muted)]"
+                      }`}
+                    >
+                      {group.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {workspaces.length > 0 && (
+          <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3">
+            <label className="block text-xs font-medium text-[var(--color-text-muted)]">
+              Workspace context
+              <Select
+                aria-label="Workspace context"
+                value={attachedWorkspaceId}
+                onChange={(event) => onWorkspaceChange(event.target.value)}
+                className="mt-2 h-8 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
               >
-                {entry.title}
-              </button>
-            ))}
+                <option value="">No workspace attached</option>
+                {workspaces.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.title}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            {workspace && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                <label className="flex items-start gap-2 text-xs text-[var(--color-text-soft)]">
+                  <input
+                    type="checkbox"
+                    checked={includeInstructions && Boolean(workspace.instructions?.trim())}
+                    disabled={!workspace.instructions?.trim()}
+                    onChange={(event) => onIncludeInstructionsChange(event.target.checked)}
+                    className="mt-0.5 h-3.5 w-3.5 accent-[var(--color-accent)]"
+                  />
+                  Instructions
+                </label>
+                <div>
+                  <div className="text-xs font-medium text-[var(--color-text-muted)]">Evidence</div>
+                  <div className="mt-1 max-h-20 space-y-1 overflow-y-auto">
+                    {workspace.evidence.slice(0, 12).map((entry) => (
+                      <label key={entry.id} className="flex items-center gap-2 text-xs text-[var(--color-text-soft)]">
+                        <input
+                          type="checkbox"
+                          checked={selectedEvidenceIds.includes(entry.id)}
+                          onChange={() => onToggleEvidence(entry.id)}
+                          className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                        />
+                        <span className="truncate">{entry.title}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-[var(--color-text-muted)]">Notes</div>
+                  <div className="mt-1 max-h-20 space-y-1 overflow-y-auto">
+                    {workspace.notes.slice(0, 12).map((note) => (
+                      <label key={note.id} className="flex items-center gap-2 text-xs text-[var(--color-text-soft)]">
+                        <input
+                          type="checkbox"
+                          checked={selectedNoteIds.includes(note.id)}
+                          onChange={() => onToggleNote(note.id)}
+                          className="h-3.5 w-3.5 accent-[var(--color-accent)]"
+                        />
+                        <span className="truncate">{note.content}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
-      {workspace && (
-        <div className="mt-3 grid gap-3 lg:grid-cols-3">
-          <div className="rounded-lg bg-[var(--color-bg)] p-2 ring-1 ring-[var(--color-border-soft)]">
-            <label className="flex cursor-pointer items-start gap-2 text-[11.5px] leading-5 text-[var(--color-text-soft)]">
-              <input
-                type="checkbox"
-                checked={includeInstructions && Boolean(workspace.instructions?.trim())}
-                disabled={disabled || !workspace.instructions?.trim()}
-                onChange={(event) => onIncludeInstructionsChange(event.target.checked)}
-                className="mt-1 h-3.5 w-3.5 accent-[var(--color-accent)]"
-              />
-              <span>
-                Instructions
-                <span className="block text-[10.5px] text-[var(--color-text-muted)]">
-                  {workspace.instructions?.trim()
-                    ? "Include workspace instructions"
-                    : "No instructions saved"}
-                </span>
-              </span>
-            </label>
-          </div>
-          <div className="rounded-lg bg-[var(--color-bg)] p-2 ring-1 ring-[var(--color-border-soft)]">
-            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Evidence
-            </div>
-            <div className="max-h-20 space-y-1 overflow-y-auto pr-1">
-              {workspace.evidence.length === 0 ? (
-                <span className="text-[11px] text-[var(--color-text-muted)]">
-                  No evidence pinned
-                </span>
-              ) : (
-                workspace.evidence.slice(0, 12).map((entry) => (
-                  <label
-                    key={entry.id}
-                    className="flex cursor-pointer items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedEvidenceIds.includes(entry.id)}
-                      disabled={disabled}
-                      onChange={() => onToggleEvidence(entry.id)}
-                      className="h-3.5 w-3.5 accent-[var(--color-accent)]"
-                    />
-                    <span className="min-w-0 truncate">{entry.title}</span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-          <div className="rounded-lg bg-[var(--color-bg)] p-2 ring-1 ring-[var(--color-border-soft)]">
-            <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Notes
-            </div>
-            <div className="max-h-20 space-y-1 overflow-y-auto pr-1">
-              {workspace.notes.length === 0 ? (
-                <span className="text-[11px] text-[var(--color-text-muted)]">
-                  No notes saved
-                </span>
-              ) : (
-                workspace.notes.slice(0, 12).map((note) => (
-                  <label
-                    key={note.id}
-                    className="flex cursor-pointer items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedNoteIds.includes(note.id)}
-                      disabled={disabled}
-                      onChange={() => onToggleNote(note.id)}
-                      className="h-3.5 w-3.5 accent-[var(--color-accent)]"
-                    />
-                    <span className="min-w-0 truncate">{note.content}</span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </details>
   );
 }
 
@@ -2627,27 +2794,30 @@ function ScopeReviewCard({
     <div className="mx-auto w-full max-w-[920px] rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
       <div className="border-b border-[var(--color-border-soft)] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="text-[12px] font-semibold text-[var(--color-text)]">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-[var(--color-text)]">
               Review multi-tenant scope
             </div>
-            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            <div
+              title={`${preflight.providerName}${preflight.model ? ` · ${preflight.model}` : ""}`}
+              className="mt-1 max-w-full truncate text-xs text-[var(--color-text-muted)]"
+            >
               {preflight.resolvedTenantIds.length} tenant{preflight.resolvedTenantIds.length === 1 ? "" : "s"} · {preflight.providerName}
               {preflight.model ? ` · ${preflight.model}` : ""}
             </div>
           </div>
-          <Pill tone={preflight.providerIsLocal ? "success" : "warning"}>
+          <Badge tone={preflight.providerIsLocal ? "success" : "warning"}>
             {preflight.providerIsLocal ? "Local provider" : "Hosted confirmation required"}
-          </Pill>
+          </Badge>
         </div>
-        <div className="mt-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="mt-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           {preflight.prompt}
         </div>
       </div>
       <div className="grid gap-3 p-4 lg:grid-cols-[1fr_260px]">
         <div className="min-w-0 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
-          <table className="w-full table-fixed text-left text-[12px]">
-            <thead className="bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <table className="w-full table-fixed text-left text-sm">
+            <thead className="bg-[var(--color-bg)] text-xs text-[var(--color-text-muted)]">
               <tr>
                 <th className="px-3 py-2">Tenant</th>
                 <th className="w-28 px-3 py-2">Readiness</th>
@@ -2662,20 +2832,20 @@ function ScopeReviewCard({
                     <div className="truncate font-medium text-[var(--color-text)]" title={tenant.tenantName}>
                       {tenant.tenantName}
                     </div>
-                    <div className="truncate font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                    <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
                       {tenant.username ?? tenant.tenantId}
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <ReadinessPill status={tenant.status} />
+                    <ReadinessBadge status={tenant.status} />
                   </td>
-                  <td className="px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+                  <td className="px-3 py-2 text-xs text-[var(--color-text-muted)]">
                     {tenant.cacheFreshness ? formatDateTime(tenant.cacheFreshness) : "No cache"}
                   </td>
-                  <td className="px-3 py-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                  <td className="px-3 py-2 text-xs leading-5 text-[var(--color-text-muted)]">
                     {tenant.recovery}
                     {tenant.missingScopes.length > 0 && (
-                      <div className="mt-1 font-mono text-[10px] text-[var(--color-warning)]">
+                      <div className="mt-1 font-mono text-xs text-[var(--color-warning)]">
                         {tenant.missingScopes.slice(0, 2).join(", ")}
                       </div>
                     )}
@@ -2693,23 +2863,23 @@ function ScopeReviewCard({
               className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]"
             >
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                <div className="text-xs font-medium text-[var(--color-text-muted)]">
                   Run progress
                 </div>
-                <Pill tone={progressJob.status === "partial" ? "warning" : "accent"}>
+                <Badge tone={progressJob.status === "partial" ? "warning" : "info"}>
                   {progressJob.status}
-                </Pill>
+                </Badge>
               </div>
               <div className="space-y-1.5">
                 {progressJob.progress.map((entry) => (
                   <div
                     key={entry.tenantId}
-                    className="flex items-center justify-between gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-[11px] ring-1 ring-[var(--color-border-soft)]"
+                    className="flex items-center justify-between gap-2 rounded-md bg-[var(--color-bg-raised)] px-2 py-1.5 text-xs ring-1 ring-[var(--color-border-soft)]"
                   >
                     <span className="min-w-0 truncate text-[var(--color-text-soft)]">
                       {entry.tenantName}
                     </span>
-                    <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+                    <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
                       {entry.status}
                     </span>
                   </div>
@@ -2718,17 +2888,17 @@ function ScopeReviewCard({
             </div>
           )}
           <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Resources
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {preflight.resources.map((resource) => (
-                <Pill key={resource}>{chatResourceLabel(resource)}</Pill>
+                <Badge key={resource}>{chatResourceLabel(resource)}</Badge>
               ))}
             </div>
           </div>
           <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Save group
             </div>
             <div className="mt-2 flex gap-2">
@@ -2742,7 +2912,7 @@ function ScopeReviewCard({
                 onChange={(event) => onGroupNameChange(event.target.value)}
                 placeholder="Tenant group name"
                 autoComplete="off"
-                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
               />
               <Button size="sm" variant="secondary" disabled={!groupName.trim()} onClick={onSaveGroup}>
                 Save
@@ -2750,7 +2920,7 @@ function ScopeReviewCard({
             </div>
           </div>
           <div className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Agent batch
             </div>
             <div className="mt-2 flex gap-2">
@@ -2758,7 +2928,7 @@ function ScopeReviewCard({
                 value={selectedBatchAgentSlug}
                 onChange={(event) => onSelectedBatchAgentSlugChange(event.target.value)}
                 disabled={running || installedAgents.length === 0}
-                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Agent to queue for selected tenants"
               >
                 <option value="">Select agent</option>
@@ -2777,20 +2947,20 @@ function ScopeReviewCard({
                 Queue
               </Button>
             </div>
-            <p className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+            <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
               Queues one tenant-pinned run per ready tenant.
               {selectedBatchAgent?.mode === "write"
                 ? " Write runs still pause for per-run typed confirmation."
                 : " Read runs start with the normal run history."}
             </p>
             {batchNotice && (
-              <div className="mt-2 rounded-md bg-[var(--color-success-soft)] px-2 py-1.5 text-[11px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+              <div className="mt-2 rounded-md bg-[var(--color-success-soft)] px-2 py-1.5 text-xs text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
                 {batchNotice}
               </div>
             )}
           </div>
           {blocked.length > 0 && (
-            <div className="rounded-lg bg-[var(--color-warning-soft)] p-3 text-[11.5px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+            <div className="rounded-lg bg-[var(--color-warning-soft)] p-3 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
               {blocked.length} tenant{blocked.length === 1 ? "" : "s"} will be skipped unless recovered.
             </div>
           )}
@@ -2808,16 +2978,16 @@ function ScopeReviewCard({
   );
 }
 
-function ReadinessPill({ status }: { status: string }) {
+function ReadinessBadge({ status }: { status: string }) {
   const tone =
     status === "ready"
       ? "success"
       : status === "stale"
         ? "warning"
         : status === "skipped"
-          ? "default"
+          ? "neutral"
           : "danger";
-  return <Pill tone={tone}>{statusLabel(status)}</Pill>;
+  return <Badge tone={tone}>{statusLabel(status)}</Badge>;
 }
 
 function MultiTenantResultArtifact({
@@ -2882,7 +3052,7 @@ function MultiTenantResultArtifact({
       id: "status",
       header: "Status",
       sortValue: (tenant) => tenant.status,
-      render: (tenant) => <ReadinessPill status={tenant.status} />,
+      render: (tenant) => <ReadinessBadge status={tenant.status} />,
     },
     {
       id: "windows",
@@ -2890,7 +3060,7 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.windowsDevices,
       render: (tenant) => tenant.windowsDevices.toLocaleString(),
-      cellClassName: "font-mono tabular-nums",
+      cellClassName: "tabular-nums",
     },
     {
       id: "compliant",
@@ -2898,7 +3068,7 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.compliant,
       render: (tenant) => tenant.compliant.toLocaleString(),
-      cellClassName: "font-mono tabular-nums text-[var(--color-success)]",
+      cellClassName: "tabular-nums text-[var(--color-success)]",
     },
     {
       id: "nonCompliant",
@@ -2906,7 +3076,7 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.nonCompliant,
       render: (tenant) => tenant.nonCompliant.toLocaleString(),
-      cellClassName: "font-mono tabular-nums text-[var(--color-danger)]",
+      cellClassName: "tabular-nums text-[var(--color-danger)]",
     },
     {
       id: "unknown",
@@ -2914,21 +3084,22 @@ function MultiTenantResultArtifact({
       align: "right",
       sortValue: (tenant) => tenant.unknown,
       render: (tenant) => tenant.unknown.toLocaleString(),
-      cellClassName: "font-mono tabular-nums",
+      cellClassName: "tabular-nums",
     },
     {
       id: "lastRefresh",
       header: "Last refresh",
       sortValue: (tenant) => tenant.lastRefresh ?? "",
       render: (tenant) => (tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "Unknown"),
-      cellClassName: "text-[11px] text-[var(--color-text-muted)]",
+      cellClassName: "text-xs text-[var(--color-text-muted)]",
     },
   ];
 
+  const resultSubtitle = `${job.providerName}${job.model ? ` · ${job.model}` : ""} · ${formatDateTime(job.updatedAt)}`;
   return (
     <OutputPane
       title="Multi-tenant result"
-      subtitle={`${job.providerName}${job.model ? ` · ${job.model}` : ""} · ${formatDateTime(job.updatedAt)}`}
+      subtitle={<span title={resultSubtitle} className="block max-w-full truncate">{resultSubtitle}</span>}
       className="relative left-1/2 w-[min(100%,calc(100vw-380px))] -translate-x-1/2"
       actions={
         <>
@@ -2966,28 +3137,28 @@ function MultiTenantResultArtifact({
                 className="flex min-w-0 items-start justify-between gap-3 rounded-lg bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-[11.5px] font-medium text-[var(--color-text)]" title={entry.tenantName}>
+                  <div className="truncate text-sm font-medium text-[var(--color-text)]" title={entry.tenantName}>
                     {entry.tenantName}
                   </div>
                   {entry.detail && (
-                    <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]" title={entry.detail}>
+                    <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={entry.detail}>
                       {entry.detail}
                     </div>
                   )}
                 </div>
-                <Pill
+                <Badge
                   tone={
                     entry.status === "ready"
                       ? "success"
                       : entry.status === "failed"
                         ? "danger"
                         : entry.status === "skipped"
-                          ? "default"
+                          ? "neutral"
                           : "warning"
                   }
                 >
                   {statusLabel(entry.status)}
-                </Pill>
+                </Badge>
               </div>
             ))}
           </div>
@@ -3040,7 +3211,7 @@ function MultiTenantResultArtifact({
         />
         <label
           htmlFor="multi-tenant-stale-only"
-          className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+          className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-sm text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
         >
           <input
             id="multi-tenant-stale-only"
@@ -3084,9 +3255,9 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
       header: "Compliance",
       sortValue: (row) => normalizeComplianceLabel(row.complianceState),
       render: (row) => (
-        <Pill tone={complianceTone(row.complianceState)}>
+        <Badge tone={complianceTone(row.complianceState)}>
           {normalizeComplianceLabel(row.complianceState)}
-        </Pill>
+        </Badge>
       ),
     },
     {
@@ -3129,7 +3300,7 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+      <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
         No device rows match the current filters.
       </div>
     );
@@ -3142,10 +3313,10 @@ function DeviceRowsTable({ rows }: { rows: MultiTenantChatJob["deviceRows"] }) {
         getRowId={(row) => `${row.tenantId}:${row.deviceId ?? row.deviceName}`}
         initialSort={{ columnId: "device", direction: "ascending" }}
         minWidthClassName="min-w-[920px]"
-        tableClassName="text-[11.5px]"
+        tableClassName="text-sm"
       />
       {rows.length > 250 && (
-        <div className="border-t border-[var(--color-border-soft)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+        <div className="border-t border-[var(--color-border-soft)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
           Showing first 250 matching rows. Export the dossier for the full local result.
         </div>
       )}
@@ -3167,11 +3338,11 @@ function HostedBatchConsentModal({
       <ModalHeader
         title="Send multi-tenant context to hosted provider"
         subtitle={prompt?.preflight.providerName ?? "Hosted provider"}
-        badge={<Pill tone="warning">Hosted batch</Pill>}
+        badge={<Badge tone="warning">Hosted batch</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
           Retrieved context from {prompt?.preflight.resolvedTenantIds.length ?? 0} tenant
           {(prompt?.preflight.resolvedTenantIds.length ?? 0) === 1 ? "" : "s"} will be sent to {prompt?.preflight.providerName}.
         </div>
@@ -3179,14 +3350,14 @@ function HostedBatchConsentModal({
           {prompt?.preflight.tenants.map((tenant) => (
             <div key={tenant.tenantId} className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 last:border-b-0">
               <div className="min-w-0">
-                <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                <div className="truncate text-sm font-medium text-[var(--color-text)]">
                   {tenant.tenantName}
                 </div>
-                <div className="truncate font-mono text-[10px] text-[var(--color-text-muted)]">
+                <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
                   {tenant.username ?? tenant.tenantId}
                 </div>
               </div>
-              <ReadinessPill status={tenant.status} />
+              <ReadinessBadge status={tenant.status} />
             </div>
           ))}
         </div>
@@ -3222,31 +3393,31 @@ function SplitToWorkspacesModal({
       <ModalHeader
         title="Split result to Workspaces"
         subtitle="One tenant-specific evidence entry per workspace"
-        badge={<Pill tone="accent">Single-tenant evidence</Pill>}
+        badge={<Badge tone="info">Single-tenant evidence</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           This does not create a mixed-tenant workspace. Each row below becomes local evidence for that tenant only.
         </div>
         <div className="overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
           {tenants.map((tenant) => (
-            <div key={tenant.tenantId} className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 text-[12px] last:border-b-0">
+            <div key={tenant.tenantId} className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-[var(--color-border-soft)] px-3 py-2 text-sm last:border-b-0">
               <div className="min-w-0">
                 <div className="truncate font-medium text-[var(--color-text)]">{tenant.tenantName}</div>
-                <div className="text-[10.5px] text-[var(--color-text-muted)]">
+                <div className="text-xs text-[var(--color-text-muted)]">
                   New workspace evidence · {tenant.windowsDevices} Windows devices
                 </div>
               </div>
-              <ReadinessPill status={tenant.status} />
-              <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+              <ReadinessBadge status={tenant.status} />
+              <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
                 {tenant.lastRefresh ? formatDateTime(tenant.lastRefresh) : "no cache"}
               </span>
             </div>
           ))}
         </div>
         {result && (
-          <div className="rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+          <div className="rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
             Created {result.evidence.length} evidence entr{result.evidence.length === 1 ? "y" : "ies"} across {result.workspaces.length} workspace{result.workspaces.length === 1 ? "" : "s"}.
           </div>
         )}
@@ -3283,15 +3454,15 @@ function PinMessageToWorkspaceModal({
       <ModalHeader
         title="Pin answer to workspace"
         subtitle="Creates tenant-scoped evidence from this chat answer"
-        badge={<Pill tone="accent">Workspace evidence</Pill>}
+        badge={<Badge tone="info">Workspace evidence</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
           This stores the answer and visible sources in the selected workspace. Multi-tenant answers must be split into tenant-specific workspace evidence first.
         </div>
         <label htmlFor="pin-answer-workspace" className="block">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <span className="text-xs font-medium text-[var(--color-text-muted)]">
             Workspace
           </span>
           <Select
@@ -3299,7 +3470,7 @@ function PinMessageToWorkspaceModal({
             name="pin-answer-workspace"
             value={selectedWorkspaceId}
             onChange={(event) => onWorkspaceChange(event.target.value)}
-            className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+            className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-base text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
           >
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
@@ -3309,7 +3480,7 @@ function PinMessageToWorkspaceModal({
           </Select>
         </label>
         {message && (
-          <div className="max-h-36 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 text-[12px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+          <div className="max-h-36 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 text-sm leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
             {message.content.slice(0, 600)}
             {message.content.length > 600 ? "..." : ""}
           </div>
@@ -3366,11 +3537,11 @@ function HostedChatConsentModal({
       <ModalHeader
         title={trustCopy.confirmTitle}
         subtitle={prompt?.providerName ?? "Hosted provider"}
-        badge={<Pill tone="warning">Hosted</Pill>}
+        badge={<Badge tone="warning">Hosted</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
           {trustCopy.confirmBody}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
@@ -3391,10 +3562,10 @@ function HostedChatConsentModal({
               <IconCloud size={16} />
             </div>
             <div className="min-w-0">
-              <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+              <div className="text-base font-medium text-[var(--color-text)]">
                 What leaves this device
               </div>
-              <p className="mt-1 text-[12px] leading-5 text-[var(--color-text-soft)]">
+              <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
                 The prompt text, selected cached Graph evidence, source freshness,
                 and answer instructions are sent to the hosted provider for this
                 response. Raw cache tables, chat history storage, and self-training
@@ -3408,7 +3579,7 @@ function HostedChatConsentModal({
         </div>
         <label
           htmlFor="remember-hosted-provider-confirmation"
-          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
         >
           <input
             id="remember-hosted-provider-confirmation"
@@ -3438,69 +3609,13 @@ function HostedChatConsentModal({
 function ConsentFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-1 truncate text-[12.5px] text-[var(--color-text)]">
+      <div className="mt-1 truncate text-base text-[var(--color-text)]">
         {value}
       </div>
     </div>
-  );
-}
-
-function RenameConversationModal({
-  conversation,
-  title,
-  onTitleChange,
-  onClose,
-  onConfirm,
-}: {
-  conversation: IntuneChatConversation | null;
-  title: string;
-  onTitleChange: (title: string) => void;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  const trimmed = title.trim();
-  return (
-    <Modal open={Boolean(conversation)} onClose={onClose} size="md">
-      <ModalHeader
-        title="Rename conversation"
-        subtitle={conversation?.title}
-        onClose={onClose}
-      />
-      <div className="space-y-4 p-6">
-        <label htmlFor="conversation-title" className="block">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            Conversation title
-          </span>
-          <input
-            id="conversation-title"
-            name="conversation-title"
-            value={title}
-            onChange={(event) => onTitleChange(event.target.value)}
-            autoFocus
-            className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
-          />
-        </label>
-        <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
-          Renaming changes the local conversation title only. It does not
-          change prompts, cached Graph data, or agent run history.
-        </p>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={onConfirm}
-            disabled={trimmed.length === 0}
-          >
-            Rename
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 }
 
@@ -3518,11 +3633,11 @@ function DeleteConversationModal({
       <ModalHeader
         title="Delete conversation"
         subtitle={conversation?.title}
-        badge={<Pill tone="danger">Local deletion</Pill>}
+        badge={<Badge tone="danger">Local deletion</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           This removes the conversation, messages, and chat tool-call records
           from the local SQLite store. It does not disconnect the tenant or
           clear the Graph cache.
@@ -3559,10 +3674,10 @@ function ConversationContextMenu({
       role="menu"
     >
       <div className="border-b border-[var(--color-border-soft)] px-3 py-2">
-        <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+        <div className="truncate text-sm font-medium text-[var(--color-text)]">
           {conversation.title}
         </div>
-        <div className="mt-0.5 text-[10.5px] text-[var(--color-text-muted)]">
+        <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
           Local conversation
         </div>
       </div>
@@ -3570,7 +3685,7 @@ function ConversationContextMenu({
         type="button"
         role="menuitem"
         onClick={onDelete}
-        className={`flex w-full items-center justify-between px-3 py-2 text-left text-[12.5px] text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-soft)] ${focusRingClass}`}
+        className={`flex w-full items-center justify-between px-3 py-2 text-left text-base text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-soft)] ${focusRingClass}`}
       >
         Delete conversation
       </button>
@@ -3754,10 +3869,10 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
         className="w-full max-w-[560px] rounded-xl bg-[var(--color-bg-raised)] px-3.5 py-3 ring-1 ring-[var(--color-border-soft)]"
       >
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-text)]">
+          <div className="min-w-0 truncate text-base font-medium text-[var(--color-text)]">
             {progress.message}
           </div>
-          <div className="shrink-0 font-mono text-[10.5px] text-[var(--color-text-muted)]">
+          <div className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
             {completedCount}/{progress.steps.length}
           </div>
         </div>
@@ -3786,7 +3901,7 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
               <ProgressStepGlyph status={step.status} />
               <div className="min-w-0 flex-1">
                 <div
-                  className={`truncate text-[12px] ${
+                  className={`truncate text-sm ${
                     step.status === "pending"
                       ? "text-[var(--color-text-muted)]"
                       : "text-[var(--color-text-soft)]"
@@ -3795,12 +3910,12 @@ function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
                   {step.label}
                 </div>
                 {step.detail && (
-                  <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
                     {step.detail}
                   </div>
                 )}
               </div>
-              <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">
+              <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
                 {statusLabel(step.status)}
               </span>
             </div>
@@ -3827,7 +3942,7 @@ function ProgressStepGlyph({
     return (
       <span
         aria-hidden="true"
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-[10px] font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-xs font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35"
       >
         !
       </span>
@@ -3867,40 +3982,28 @@ function EmptyChat({
     [];
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-end px-6 pb-8 pt-12">
+    <div className="mb-5 flex flex-col items-center justify-end px-4 pt-2">
       <div className="w-full max-w-[680px] text-center">
-        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-          <IconChat size={21} />
-        </div>
-        <h1 className="mt-5 text-pretty text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
+        <h1 className="text-pretty text-lg font-semibold text-[var(--color-text)]">
           {CHAT_COPY.emptyTitle}
         </h1>
-        <p className="mx-auto mt-2 max-w-[520px] text-[13px] leading-6 text-[var(--color-text-soft)]">
+        <p className="mx-auto mt-1 max-w-[520px] text-base leading-5 text-[var(--color-text-soft)]">
           {CHAT_COPY.emptySubtitle}
         </p>
-        <div className="mt-7 flex flex-wrap justify-center gap-1.5">
-          {promptGroups.map((group) => (
-            <button
-              key={group.label}
-              type="button"
-              onClick={() => setActiveGroup(group.label)}
-              className={`rounded-lg px-3 py-1.5 text-[11.5px] transition-colors ${focusRingClass} ${
-                activeGroup === group.label
-                  ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-                  : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:text-[var(--color-text)]"
-              }`}
-            >
-              {group.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          className="mt-4 max-w-full overflow-x-auto"
+          ariaLabel="Suggestion category"
+          value={activeGroup}
+          options={promptGroups.map((group) => ({ id: group.label, label: group.label }))}
+          onValueChange={setActiveGroup}
+        />
         <div className="mt-3 grid gap-2 text-left sm:grid-cols-2">
           {prompts.map((prompt) => (
             <button
               key={prompt}
               disabled={disabled}
               onClick={() => onPrompt(prompt)}
-              className={`rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-[13px] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50 ${focusRingClass}`}
+              className={`rounded-lg bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50 ${focusRingClass}`}
             >
               {prompt}
             </button>
@@ -3915,28 +4018,20 @@ function ChatMessageBubble({
   message,
   progress,
   copied,
-  runningAgentSlug,
   regenerateDisabled,
   onCopy,
   onEditPrompt,
   onRegenerate,
-  onRunAgent,
   pinDisabled,
   onPin,
 }: {
   message: IntuneChatMessage;
   progress: ChatProgressState | null;
   copied: boolean;
-  runningAgentSlug: string | null;
   regenerateDisabled: boolean;
   onCopy: () => void;
   onEditPrompt: () => void;
   onRegenerate: () => void;
-  onRunAgent: (
-    slug: string,
-    conversationId: string,
-    messageId: string,
-  ) => Promise<void>;
   pinDisabled: boolean;
   onPin: () => void;
 }) {
@@ -3944,13 +4039,13 @@ function ChatMessageBubble({
   const hasWebSources = message.toolTrace?.some(t => t.webSources?.length);
   const displayContent = hasWebSources ? message.content.split("\n\nPublic web sources:")[0] : message.content;
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={isUser ? "max-w-[76%]" : "w-full max-w-[760px]"}>
         <div
           className={
             isUser
-              ? "rounded-2xl border border-[var(--color-border)] border-r-2 border-r-[var(--color-accent)] bg-[var(--color-bg-raised)] px-4 py-2.5 text-[13.5px] leading-6 text-[var(--color-text)]"
-              : "text-[13.5px] leading-6 text-[var(--color-text)]"
+              ? "rounded-2xl border border-[var(--color-border)] border-r-2 border-r-[var(--color-accent)] bg-[var(--color-bg-raised)] px-4 py-2.5 text-base leading-6 text-[var(--color-text)]"
+              : "text-base leading-6 text-[var(--color-text)]"
           }
         >
           {!isUser && progress ? (
@@ -3968,47 +4063,28 @@ function ChatMessageBubble({
         </div>
         {!isUser && <PublicWebSources trace={message.toolTrace} />}
         {!isUser && message.sources && message.sources.length > 0 && (
-          <>
-            <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-[var(--color-text-muted)]">
-              <span className="mr-0.5">Sources</span>
+            <div className="mt-3 flex flex-wrap gap-1.5 text-xs text-[var(--color-text-muted)]">
               {message.sources.slice(0, 4).map((source) => (
-                <Pill
+                <Badge
                   key={source.resource}
-                  tone={source.error ? "warning" : source.source === "live" ? "success" : "default"}
+                  tone={source.error ? "warning" : source.source === "live" ? "success" : "neutral"}
                 >
                   {source.label}
-                </Pill>
+                </Badge>
               ))}
               {message.sources.length > 4 && (
-                <Pill>{message.sources.length - 4} more</Pill>
+                <Badge>{message.sources.length - 4} more</Badge>
               )}
             </div>
-            <SourceDetails sources={message.sources} />
-          </>
+        )}
+        {!isUser && (message.engineNotice || (message.sources?.length ?? 0) > 0) && (
+          <AnswerDetails notice={message.engineNotice} sources={message.sources ?? []} />
         )}
         {!isUser && message.toolTrace && message.toolTrace.length > 0 && (
           <ToolTraceDetails trace={message.toolTrace} />
         )}
-        {!isUser && message.agentSuggestions && message.agentSuggestions.length > 0 && (
-          <div className="mt-4 flex flex-col gap-2">
-            {message.agentSuggestions.map((suggestion) => (
-              <AgentSuggestionCard
-                key={suggestion.agentSlug}
-                suggestion={suggestion}
-                running={runningAgentSlug === suggestion.agentSlug}
-                onRun={() =>
-                  void onRunAgent(
-                    suggestion.agentSlug,
-                    message.conversationId,
-                    message.id,
-                  )
-                }
-              />
-            ))}
-          </div>
-        )}
         <div
-          className={`mt-2 flex items-center gap-2 text-[10.5px] text-[var(--color-text-muted)] ${
+          className={`mt-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${
             isUser ? "justify-end text-right" : "justify-start"
           }`}
         >
@@ -4065,13 +4141,34 @@ function ChatMessageBubble({
   );
 }
 
-function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
+function AnswerDetails({
+  notice,
+  sources,
+}: {
+  notice?: string;
+  sources: IntuneChatSource[];
+}) {
   return (
     <details className="mt-2 rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
-      <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-[var(--color-text-soft)] transition-colors hover:text-[var(--color-text)]">
-        Source details
+      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-[var(--color-text-soft)] transition-colors hover:text-[var(--color-text)]">
+        How this was answered
       </summary>
-      <div className="border-t border-[var(--color-border-soft)] px-3 py-2">
+      <div className="space-y-3 border-t border-[var(--color-border-soft)] px-3 py-3">
+        {notice && (
+          <div className="rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
+            {notice}
+          </div>
+        )}
+        {sources.length > 0 && <SourceDetails sources={sources} />}
+      </div>
+    </details>
+  );
+}
+
+function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
+  return (
+      <div>
+        <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">Sources</div>
         <div className="grid gap-2">
           {sources.map((source) => (
             <div
@@ -4080,18 +4177,18 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-[12px] font-medium text-[var(--color-text)]">
+                  <div className="truncate text-sm font-medium text-[var(--color-text)]">
                     {source.label}
                   </div>
-                  <div className="mt-0.5 font-mono text-[10.5px] text-[var(--color-text-muted)]">
+                  <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">
                     {source.path ?? source.resource}
                   </div>
                 </div>
-                <Pill tone={source.error ? "warning" : source.source === "live" ? "success" : "default"}>
+                <Badge tone={source.error ? "warning" : source.source === "live" ? "success" : "neutral"}>
                   {sourceCoverageLabel(source)}
-                </Pill>
+                </Badge>
               </div>
-              <div className="mt-2 grid gap-1.5 text-[11px] leading-5 text-[var(--color-text-muted)] sm:grid-cols-2">
+              <div className="mt-2 grid gap-1.5 text-xs leading-5 text-[var(--color-text-muted)] sm:grid-cols-2">
                 <SourceFact label="Rows" value={String(source.rows)} />
                 <SourceFact
                   label="Freshness"
@@ -4107,7 +4204,7 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
                 />
               </div>
               {source.select && source.select.length > 0 && (
-                <div className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                <div className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
                   <span className="font-medium text-[var(--color-text-soft)]">Select</span>{" "}
                   <span className="font-mono">
                     {source.select.slice(0, 10).join(", ")}
@@ -4116,13 +4213,13 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
                 </div>
               )}
               {source.query && Object.keys(source.query).length > 0 && (
-                <div className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+                <div className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
                   <span className="font-medium text-[var(--color-text-soft)]">Query</span>{" "}
                   <span className="font-mono">{formatSourceQuery(source.query)}</span>
                 </div>
               )}
               {source.error && (
-                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-[11px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-xs leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                   {source.error}
                 </div>
               )}
@@ -4130,7 +4227,6 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
           ))}
         </div>
       </div>
-    </details>
   );
 }
 
@@ -4151,22 +4247,22 @@ function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="font-mono text-[11px] text-[var(--color-text)]">
+                  <div className="font-mono text-xs text-[var(--color-text)]">
                     {index + 1}. {entry.tool}
                   </div>
-                  <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
                     {summarizeToolParams(entry.params)}
                   </div>
                 </div>
-                <Pill tone={entry.error ? "warning" : "success"}>
+                <Badge tone={entry.error ? "warning" : "success"}>
                   {entry.durationMs} ms
-                </Pill>
+                </Badge>
               </div>
-              <div className="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
+              <div className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
                 {entry.resultSummary}
               </div>
               {entry.error && (
-                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-[11px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-xs leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                   {entry.error}
                 </div>
               )}
@@ -4429,173 +4525,148 @@ function safeFileName(value: string): string {
   return cleaned || "intune-chat-conversation";
 }
 
-function RelatedAgentHint({
-  suggestion,
-  onOpen,
-  onDismiss,
-}: {
-  suggestion: RelatedAgentSuggestion;
-  onOpen: () => void;
-  onDismiss: () => void;
-}) {
-  const modeLabel = suggestion.agent.mode === "write" ? "Write" : "Read-only";
-  return (
-    <div className="flex justify-start">
-      <div className="w-full max-w-[760px] rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="truncate text-[12px] font-medium text-[var(--color-text)]">
-                Related agent · {formatAgentDisplayName(suggestion.agent)}
-              </span>
-              <Pill tone={suggestion.agent.mode === "write" ? "warning" : "success"}>
-                {modeLabel}
-              </Pill>
-              <span className="text-[11px] text-[var(--color-text-muted)]">
-                covers this as a repeatable run.
-              </span>
-            </div>
-            <div
-              className="mt-1 truncate text-[11.5px] text-[var(--color-text-muted)]"
-              title={suggestion.agent.description}
-            >
-              {suggestion.agent.description}
-            </div>
-            <button
-              type="button"
-              onClick={onOpen}
-              className={`mt-2 inline-flex h-6 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-soft)] ${focusRingClass}`}
-            >
-              Open agent →
-            </button>
-          </div>
-          <button
-            type="button"
-            title="Dismiss related agent"
-            aria-label={`Dismiss related agent ${formatAgentDisplayName(suggestion.agent)}`}
-            onClick={onDismiss}
-            className={`grid h-6 w-6 shrink-0 place-items-center rounded-md text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
-          >
-            <IconClose size={12} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function mergeSuggestedAgents(
+  matched: IntuneChatAgentSuggestion[] | undefined,
+  related: RelatedAgentSuggestion | undefined,
+): UnifiedAgentSuggestion[] {
+  const suggestions = new Map<string, UnifiedAgentSuggestion>();
+  for (const suggestion of matched ?? []) {
+    suggestions.set(suggestion.agentSlug, {
+      slug: suggestion.agentSlug,
+      name: suggestion.agentName,
+      mode: suggestion.mode,
+      reason: suggestion.reason,
+      scopes: suggestion.scopes,
+      matchedTerms: suggestion.matchedTerms,
+      matchedConcepts: suggestion.matchedConcepts,
+      matchedResources: suggestion.matchedResources,
+    });
+  }
+  if (related && !suggestions.has(related.agent.slug)) {
+    suggestions.set(related.agent.slug, {
+      slug: related.agent.slug,
+      name: formatAgentDisplayName(related.agent),
+      mode: related.agent.mode,
+      reason: related.agent.description,
+      scopes: related.agent.scopes,
+    });
+  }
+  return [...suggestions.values()];
 }
 
-function AgentSuggestionCard({
-  suggestion,
-  running,
+function SuggestedAgentsBlock({
+  suggestions,
+  runningAgentSlug,
+  onOpen,
   onRun,
+  onDismiss,
 }: {
-  suggestion: IntuneChatAgentSuggestion;
-  running: boolean;
-  onRun: () => void;
+  suggestions: UnifiedAgentSuggestion[];
+  runningAgentSlug: string | null;
+  onOpen: (slug: string) => void;
+  onRun: (slug: string) => void;
+  onDismiss: () => void;
 }) {
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const detailsId = useId();
-  const visibleScopes = suggestion.scopes.slice(0, 3);
-  const hiddenScopeCount = Math.max(0, suggestion.scopes.length - visibleScopes.length);
-  const matchedTerms = suggestion.matchedTerms ?? [];
-  const matchedConcepts = suggestion.matchedConcepts ?? [];
-  const matchedResources = suggestion.matchedResources ?? [];
-
+  const [detailsSlug, setDetailsSlug] = useState<string | null>(null);
   return (
-    <div className="rounded-xl bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
-              {suggestion.agentName}
-            </span>
-            <Pill tone={suggestion.mode === "write" ? "warning" : "success"}>
-              {suggestion.mode === "write" ? "Write agent" : "Read agent"}
-            </Pill>
-          </div>
-          <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-            {Math.round(suggestion.confidence * 100)}% match · existing agent workflow
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setDetailsOpen((current) => !current)}
-            aria-expanded={detailsOpen}
-            aria-controls={detailsId}
-          >
-            {detailsOpen ? "Hide details" : "Details"}
-          </Button>
-          <Button
-            size="sm"
-            variant={suggestion.mode === "write" ? "danger" : "secondary"}
-            leadingIcon={suggestion.mode === "write" ? <IconBolt size={12} /> : <IconPlay size={12} />}
-            disabled={running}
-            onClick={onRun}
-          >
-            {running ? "Starting" : suggestion.mode === "write" ? "Review" : "Run"}
-          </Button>
-        </div>
+    <div className="w-full max-w-[760px] rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
+      <div className="flex items-center justify-between border-b border-[var(--color-border-soft)] px-3 py-2">
+        <div className="text-sm font-medium text-[var(--color-text)]">Suggested agents</div>
+        <IconButton
+          size="sm"
+          label="Dismiss suggested agents"
+          tooltip="Dismiss"
+          icon={<IconClose size={12} />}
+          onClick={onDismiss}
+        />
       </div>
-      {detailsOpen && (
-        <div
-          id={detailsId}
-          className="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-[11px] leading-5 text-[var(--color-text-muted)]"
-        >
-          <div>{suggestion.reason}</div>
-          {(matchedTerms.length > 0 ||
-            matchedConcepts.length > 0 ||
-            matchedResources.length > 0) && (
-            <div className="mt-3 rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-              <div className="mb-2 text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                Why suggested
+      <div className="divide-y divide-[var(--color-border-soft)]">
+        {suggestions.map((suggestion) => {
+          const detailsOpen = detailsSlug === suggestion.slug;
+          return (
+            <div key={suggestion.slug} className="px-3 py-2.5">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-[var(--color-text)]">
+                      {suggestion.name}
+                    </span>
+                    <Badge tone={suggestion.mode === "write" ? "warning" : "success"}>
+                      {suggestion.mode === "write" ? "Write" : "Read"}
+                    </Badge>
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={suggestion.reason}>
+                    {suggestion.reason}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-expanded={detailsOpen}
+                  onClick={() => setDetailsSlug(detailsOpen ? null : suggestion.slug)}
+                >
+                  Details
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  leadingIcon={<IconPlay size={12} />}
+                  disabled={runningAgentSlug === suggestion.slug}
+                  onClick={() => onRun(suggestion.slug)}
+                >
+                  {runningAgentSlug === suggestion.slug ? "Starting" : "Run"}
+                </Button>
               </div>
-              {matchedConcepts.length > 0 && (
-                <ul className="space-y-1 text-[11px] text-[var(--color-text-soft)]">
-                  {matchedConcepts.map((concept) => (
-                    <li key={concept} className="flex gap-2">
-                      <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-[var(--color-text-faint)]" />
-                      <span>{concept}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {matchedTerms.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span>Matched terms</span>
-                  {matchedTerms.map((term) => (
-                    <Pill key={term}>{term}</Pill>
-                  ))}
-                </div>
-              )}
-              {matchedResources.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span>Planned sources</span>
-                  {matchedResources.slice(0, 4).map((resource) => (
-                    <Pill key={resource}>{chatResourceLabel(resource)}</Pill>
-                  ))}
-                  {matchedResources.length > 4 && (
-                    <Pill>{matchedResources.length - 4} more</Pill>
+              {detailsOpen && (
+                <div className="mt-2 border-t border-[var(--color-border-soft)] pt-2 text-xs leading-5 text-[var(--color-text-muted)]">
+                  <div className="font-medium text-[var(--color-text-soft)]">Why suggested</div>
+                  <div>{suggestion.reason}</div>
+                  {(suggestion.matchedConcepts?.length ?? 0) > 0 && (
+                    <ul className="mt-2 space-y-1 text-[var(--color-text-soft)]">
+                      {suggestion.matchedConcepts?.map((concept) => (
+                        <li key={concept}>{concept}</li>
+                      ))}
+                    </ul>
                   )}
+                  {(suggestion.matchedTerms?.length ?? 0) > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {suggestion.matchedTerms?.map((term) => (
+                        <Badge key={term}>{term}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  {(suggestion.matchedResources?.length ?? 0) > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {suggestion.matchedResources?.map((resource) => (
+                        <Badge key={resource}>{chatResourceLabel(resource)}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  {suggestion.scopes.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span>Required scopes</span>
+                      {suggestion.scopes.slice(0, 4).map((scope) => (
+                        <Badge key={scope}>{scope}</Badge>
+                      ))}
+                      {suggestion.scopes.length > 4 && (
+                        <Badge>{suggestion.scopes.length - 4} more</Badge>
+                      )}
+                    </div>
+                  )}
+                  {suggestion.mode === "write" && (
+                    <div className="mt-2 text-[var(--color-warning)]">
+                      Write actions still use the normal plan and confirmation flow.
+                    </div>
+                  )}
+                  <Button className="mt-2" size="sm" variant="ghost" onClick={() => onOpen(suggestion.slug)}>
+                    Open agent
+                  </Button>
                 </div>
               )}
             </div>
-          )}
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span>Required scopes</span>
-            {visibleScopes.map((scope) => (
-              <Pill key={scope}>{scope}</Pill>
-            ))}
-            {hiddenScopeCount > 0 && <Pill>{hiddenScopeCount} more</Pill>}
-          </div>
-          {suggestion.mode === "write" && (
-            <div className="mt-2 text-[var(--color-warning)]">
-              Write actions still use the normal plan and confirmation flow.
-            </div>
-          )}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 }

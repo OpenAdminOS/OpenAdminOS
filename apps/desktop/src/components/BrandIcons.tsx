@@ -169,7 +169,7 @@ export function OutlookLogo({ size = 28, ...p }: Props) {
 }
 
 export function SharePointLogo({ size = 28, ...p }: Props) {
-  // The streamline outline is monochrome — we tint it with the
+  // The streamline outline is monochrome, so we tint it with the
   // SharePoint brand teal so it's recognizable even at the small size
   // the roadmap card uses.
   return (

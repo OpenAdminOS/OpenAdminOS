@@ -124,7 +124,7 @@ import { electronAccelerator } from "../src/shared/shortcuts.js";
 // the Keychain service name ("<name> Safe Storage"). In a signed
 // production build that name comes from CFBundleName ("OpenAdminOS")
 // via Info.plist, but in dev (`npm run dev`, unpackaged Electron) it
-// falls back to package.json's `name` field — which is the npm
+// falls back to package.json's `name` field, which is the npm
 // package id "@openadminos/desktop" and ends up as the user-visible
 // string in Keychain prompts. Pinning it explicitly here keeps the
 // two paths consistent and gives users a single "OpenAdminOS Safe
@@ -273,7 +273,7 @@ const activeNotifications = new Set<Notification>();
 // Wall-clock timestamp of the most recent background registry refresh
 // attempt. Used to rate-limit focus-triggered refreshes so alt-tabbing
 // doesn't hammer GitHub. Manual refreshes from Agent Hub don't update
-// this — the user explicitly asked for a fresh fetch.
+// this because the user explicitly asked for a fresh fetch.
 let lastBackgroundRefreshAt = 0;
 
 function debugStartupLog(message: string, detail?: unknown): void {
@@ -608,7 +608,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         tenants: [
           {
             id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
-            displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo — European Endpoint Administration and Security",
+            displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo: European Endpoint Administration and Security",
             username: isWebsiteCapture ? "admin@contoso.invalid" : "admin@contoso-demo.invalid",
             homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
@@ -1000,15 +1000,22 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/agents",
       name: "agents-home",
       file: "app/agents-home.png",
-      waitFor: ["Installed", "Schedules", "Search installed agents"],
+      waitFor: ["Team", "Library"],
       heading: "Agents",
     },
     {
-      route: "/agents/hub",
+      route: "/agents?source=hub",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Hub", `${entries.length} shown`],
-      heading: "Agent Hub",
+      waitFor: ["Library", "Agent hub"],
+      heading: "Agents",
+    },
+    {
+      route: "/agents/find-inactive-devices",
+      name: "agent-drawer",
+      file: "app/agent-drawer.png",
+      waitFor: ["Find inactive devices", "About"],
+      selector: '[role="dialog"]',
     },
     {
       route: "/chat",
@@ -1034,6 +1041,13 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Changes",
     },
     {
+      route: "/runs",
+      name: "runs",
+      file: "app/runs.png",
+      waitFor: ["Runs", "History"],
+      heading: "Runs",
+    },
+    {
       route: "/runs/screenshot-write-run",
       name: "write-confirmation",
       file: "app/write-confirmation.png",
@@ -1045,24 +1059,31 @@ async function runScreenshotCapture(): Promise<void> {
       prepare: "write-confirmation",
     },
     {
-      route: "/settings",
+      route: "/settings/providers",
       name: "settings",
       file: "app/settings.png",
-      waitFor: ["Settings", "LLM Providers"],
+      waitFor: ["Settings", "Providers"],
       heading: "Settings",
+    },
+    {
+      route: "/settings/connectors",
+      name: "settings-connectors",
+      file: "app/settings-connectors.png",
+      waitFor: ["Settings", "Connectors"],
+      heading: "Connectors",
     },
   ];
 
   if (process.env.OPENADMINOS_BRAND_CAPTURE === "1") {
     const extraShots = [
-      { route: "/cache", name: "cache", waitFor: ["Cache"] },
-      { route: "/office", name: "agent-team", waitFor: ["Agent Team"] },
-      { route: "/fleet", name: "fleet", waitFor: [] },
-      { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
-      { route: "/connectors", name: "connectors", waitFor: ["Connectors"] },
-      { route: "/activity", name: "activity", waitFor: ["Run history"] },
-      { route: "/agents/schedules", name: "schedules", waitFor: ["Schedules"] },
-      { route: "/settings/general", name: "appearance", waitFor: ["Graphite dark"] },
+      { route: "/settings/data", name: "cache", waitFor: ["Data", "Tenant cache"] },
+      { route: "/agents/office", name: "agent-team", waitFor: ["Team office"] },
+      { route: "/changes?scope=all", name: "fleet", waitFor: ["Changes"] },
+      { route: "/chat?panel=workspaces", name: "workspaces", waitFor: ["Workspaces"] },
+      { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
+      { route: "/runs", name: "runs", waitFor: ["Runs"] },
+      { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Team", "Library"] },
+      { route: "/settings/appearance", name: "appearance", waitFor: ["Graphite dark"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
     for (const theme of ["dark", "light"]) {
@@ -1158,7 +1179,7 @@ async function runScreenshotCapture(): Promise<void> {
       try {
         await runScreenshotCaptureStep(window, {
           kind: "hub-detail",
-          route: "/agents/hub",
+          route: "/agents?source=hub",
           slug: entry.slug,
           name: entry.name,
           expectedCount: entries.length,
@@ -1282,6 +1303,8 @@ async function screenshotCaptureStepScript(
         button.textContent?.trim() === label ||
         button.getAttribute("aria-label") === label,
     );
+  const findNewChatButton = () =>
+    findButton("New chat") ?? findButton("New") ?? findButton("New conversation");
   const setTextarea = (value: string) => {
     const textarea = document.querySelector("textarea");
     if (!(textarea instanceof HTMLTextAreaElement)) {
@@ -1303,7 +1326,8 @@ async function screenshotCaptureStepScript(
 
   await closeModal();
   await navigateHash(step.route);
-  resetScroll();
+  // Settings section routes scroll their own container to the section.
+  if (!/^\/settings\/[a-z]+/.test(step.route)) resetScroll();
 
   if (step.kind === "route") {
     await waitFor(
@@ -1317,24 +1341,22 @@ async function screenshotCaptureStepScript(
       `${step.route} route content`,
     );
     if (step.prepare === "chat-empty") {
+      // The New chat control lives in the history panel, which is a closed
+      // overlay at narrow widths; Mod+N's event covers that case.
       await waitFor(
-        () =>
-          Boolean(
-            (findButton("New") ?? findButton("New conversation")) &&
-              !(findButton("New") ?? findButton("New conversation"))?.disabled,
-          ),
-        "enabled New conversation action",
+        () => Boolean(document.querySelector("#intune-chat-composer")),
+        "Chat composer",
       );
-      const newConversation = findButton("New") ?? findButton("New conversation");
-      newConversation?.click();
+      const newConversation = findNewChatButton();
+      if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
         () => bodyText().includes("What do you want to inspect?"),
         "empty Chat state",
       );
     } else if (step.prepare === "chat-transcript") {
-      const newConversation = findButton("New") ?? findButton("New conversation");
-      newConversation?.click();
+      const newConversation = findNewChatButton();
+      if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
         () => bodyText().includes("What do you want to inspect?"),
@@ -1368,9 +1390,21 @@ async function screenshotCaptureStepScript(
         () => Boolean(document.querySelector('input[placeholder="Type here to enable Apply"]')),
         "write confirmation phrase input",
       );
-      document
-        .querySelector('input[placeholder="Type here to enable Apply"]')
-        ?.scrollIntoView({ block: "center", behavior: "auto" });
+      const confirmationInput = document.querySelector<HTMLElement>(
+        'input[placeholder="Type here to enable Apply"]',
+      );
+      const scrollRoot = confirmationInput?.closest<HTMLElement>(
+        "[data-drawer-scroll-root], .app-page-body",
+      );
+      if (confirmationInput && scrollRoot) {
+        scrollRoot.scrollTo({
+          top: Math.max(
+            0,
+            confirmationInput.offsetTop - scrollRoot.clientHeight / 2,
+          ),
+          behavior: "auto",
+        });
+      }
       await delay(150);
     }
     await delay(250);
@@ -1390,24 +1424,29 @@ async function screenshotCaptureStepScript(
         `Horizontal overflow at ${step.route}: ${document.documentElement.scrollWidth}px > ${document.documentElement.clientWidth}px.`,
       );
     }
+    if (document.documentElement.scrollHeight > document.documentElement.clientHeight) {
+      throw new Error(
+        `Document-level vertical overflow at ${step.route}: ${document.documentElement.scrollHeight}px > ${document.documentElement.clientHeight}px.`,
+      );
+    }
     return location.hash;
   }
 
   await waitFor(
     () =>
-      bodyText().includes(`${step.expectedCount} shown`) &&
+      bodyText().includes(`${step.expectedCount} of ${step.expectedCount} hub agents`) &&
       bodyText().includes(step.name),
     `Hub grid for ${step.slug}`,
   );
-  await navigateHash(`${step.route}?agent=${encodeURIComponent(step.slug)}`);
+  await navigateHash(`/agents/${encodeURIComponent(step.slug)}?source=hub`);
   await waitFor(
     () => {
       const modal = document.querySelector(".fixed");
       const text = modal?.textContent ?? "";
       return (
         text.includes(step.name) &&
-        text.includes("Tenant impact") &&
-        text.includes("Required scopes")
+        text.includes("About") &&
+        text.includes("Permissions")
       );
     },
     `Hub detail modal for ${step.slug}`,
@@ -1503,21 +1542,6 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       .find((candidate) => candidate.textContent?.trim().includes(label))
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   };
-  const setModalInput = async (value: string) => {
-    await waitFor(() => Boolean(document.querySelector(".fixed input")), "modal input");
-    const input = document.querySelector(".fixed input");
-    if (!(input instanceof HTMLInputElement)) {
-      throw new Error("Modal input was not found.");
-    }
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )?.set;
-    setter?.call(input, value);
-    input.focus();
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await waitFor(() => input.value === value, "modal input value");
-  };
   const setTextarea = async (value: string) => {
     await waitFor(() => Boolean(document.querySelector("textarea")), "chat input");
     const textarea = document.querySelector("textarea");
@@ -1605,15 +1629,32 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   const sawDirectChatFrontDoor = location.hash === "#/chat";
 
-  location.hash = "/settings/chat";
+  location.hash = "/settings/data";
   await waitFor(
-    () => bodyText().includes("Settings") && bodyText().includes("Tenant cache"),
-    "Chat settings route",
+    () => bodyText().includes("Tenant cache") && bodyText().includes("Automatic refresh"),
+    "Data settings route",
   );
-  await clickButton("Enable");
-  await waitFor(() => bodyText().includes("Next cache refresh"), "periodic refresh enabled");
-  await clickButton("Enable");
+  const cacheFrequency = findSelectByAccessibleName("Cache refresh frequency");
+  if (!(cacheFrequency instanceof HTMLSelectElement)) {
+    throw new Error("Cache refresh frequency select was not found.");
+  }
+  const selectSetter = Object.getOwnPropertyDescriptor(
+    HTMLSelectElement.prototype,
+    "value",
+  )?.set;
+  selectSetter?.call(cacheFrequency, "360");
+  cacheFrequency.dispatchEvent(new Event("change", { bubbles: true }));
+  await waitFor(() => cacheFrequency.value === "360", "periodic refresh enabled");
+  const sawScheduledRefresh = cacheFrequency.value === "360";
+
+  location.hash = "/settings/chat";
   await waitFor(() => bodyText().includes("Local self-training"), "self-training setting");
+  const learningSwitch = document.querySelector('#setting-local-self-training [role="switch"]');
+  if (!(learningSwitch instanceof HTMLButtonElement)) {
+    throw new Error("Local self-training switch was not found.");
+  }
+  learningSwitch.click();
+  await waitFor(() => learningSwitch.getAttribute("aria-checked") === "true", "self-training enabled");
 
   location.hash = "/chat";
   await waitFor(() => bodyText().includes("What do you want to inspect?"), "Intune Chat route");
@@ -1621,16 +1662,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     () => bodyText().includes("Smoke Tenant") && bodyText().includes("New conversation"),
     "tenant-connected chat shell",
   );
-  await clickNamedButton("Hide chat history");
-  await waitFor(() => Boolean(findNamedButton("Show chat history")), "collapsed chat history");
+  await clickNamedButton("Collapse chat panel");
+  await waitFor(() => Boolean(findNamedButton("Show chat panel")), "collapsed chat panel");
   await waitFor(
-    () => Boolean(findNamedButton("New conversation")),
-    "collapsed new conversation action",
+    () => Boolean(findNamedButton("Show chat panel")),
+    "collapsed panel action",
   );
-  await clickNamedButton("Show chat history");
-  await waitFor(() => bodyText().includes("Smoke Tenant"), "expanded chat history");
+  await clickNamedButton("Show chat panel");
+  await waitFor(() => bodyText().includes("Chats"), "expanded chat panel");
 
-  await selectFirstOption("Saved multi-tenant query");
+  await clickNamedButton("Saved queries");
+  await clickButton("Windows compliance by tenant");
   await waitFor(() => {
     const textarea = document.querySelector("textarea");
     return textarea instanceof HTMLTextAreaElement &&
@@ -1650,7 +1692,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => bodyText().includes("Created") && bodyText().includes("evidence"), "split workspace evidence");
   const sawSplitToWorkspaces = bodyText().includes("workspace evidence");
   await clickModalButton("Close");
-  await clickButton("New");
+  await clickNamedButton("New chat");
   await waitFor(
     () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
     "new conversation after multi-tenant result",
@@ -1666,7 +1708,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   await waitFor(() => !bodyText().includes("Thinking"), "stopped chat send settled");
   const sawStopGeneration = bodyText().includes("Response stopped by user");
-  await clickButton("New");
+  await clickNamedButton("New chat");
   await waitFor(
     () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
     "new conversation after stopped response",
@@ -1692,7 +1734,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const writeBlockedAnswer = "I cannot perform tenant changes directly from chat.";
   for (const [index, prompt] of testPrompts.entries()) {
     if (index === 1) {
-      await clickButton("New");
+      await clickNamedButton("New chat");
       await waitFor(
         () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
         "visible new conversation draft",
@@ -1742,7 +1784,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     responseCount = expectedResponseCount;
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
-  await clickSummary("Source details");
+  await clickSummary("How this was answered");
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
@@ -1769,7 +1811,8 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     () => bodyText().includes(smokeAnswer),
     "read conversation transcript restored",
   );
-  await clickButton("Workspace");
+  await clickNamedButton("Conversation actions");
+  await clickButton("Move to workspace");
   await waitFor(
     () => bodyText().includes("Created workspace") && bodyText().includes("linked this conversation"),
     "workspace created from conversation",
@@ -1779,16 +1822,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await clickModalButton("Pin answer");
   await waitFor(() => bodyText().includes("Pinned evidence to"), "pinned answer evidence");
   const sawWorkspacePin = bodyText().includes("Pinned evidence to");
-  await clickButton("New");
+  await clickNamedButton("New chat");
   await waitFor(
     () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
     "new conversation for workspace context",
   );
-  await selectFirstOption("Attach workspace context");
+  await clickSummary("Smoke Tenant");
+  await selectFirstOption("Workspace context");
   await waitFor(() => bodyText().includes("Chat answer"), "workspace evidence option");
   await clickFirstEnabledCheckbox("workspace context evidence");
   await waitFor(
-    () => bodyText().includes("Workspace context selected: 1 evidence"),
+    () => bodyText().includes("Context"),
     "workspace context attached",
   );
   await setTextarea("Use the attached workspace context to summarize the device evidence.");
@@ -1799,7 +1843,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   const workspaceResponseCount = textOccurrenceCount(smokeAnswer);
   const sawWorkspaceContextAttachment =
-    bodyText().includes("Workspace context selected: 1 evidence") ||
+    bodyText().includes("Context") ||
     bodyText().includes("Use the attached workspace context");
   await clickButton("Regenerate");
   await waitFor(
@@ -1821,15 +1865,38 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     return textarea instanceof HTMLTextAreaElement &&
       textarea.value.includes("Use the attached workspace context");
   }, "edit prompt loaded into composer");
-  await clickButton("Pin");
+  const findMenuItem = (label: string): HTMLButtonElement | undefined =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(
+      (item) => item.textContent?.trim() === label && !item.disabled,
+    );
+  await clickNamedButton("Conversation actions");
+  await waitFor(() => Boolean(findMenuItem("Pin")), "conversation actions menu");
+  findMenuItem("Pin")?.click();
+  await waitFor(() => bodyText().includes("Pinned"), "pinned conversation section");
+  await clickNamedButton("Conversation actions");
+  await waitFor(() => Boolean(findMenuItem("Unpin")), "unpin action after pinning");
+  const sawUnpinAction = Boolean(findMenuItem("Unpin"));
+  await clickNamedButton("Conversation actions");
+  await waitFor(() => !findMenuItem("Unpin"), "conversation actions menu closed");
   await waitFor(
-    () => bodyText().includes("Unpin") && bodyText().includes("Pinned"),
-    "pinned conversation action",
+    () => Boolean(document.querySelector('header [title^="Updated"] button')),
+    "conversation title button",
   );
-  await clickButton("Rename");
-  await waitFor(() => bodyText().includes("Rename conversation"), "rename conversation modal");
-  await setModalInput("Smoke lifecycle review");
-  await clickModalButton("Rename");
+  (document.querySelector('header [title^="Updated"] button') as HTMLButtonElement).click();
+  await waitFor(
+    () => Boolean(document.querySelector('input[aria-label="Conversation title"]')),
+    "inline conversation rename",
+  );
+  {
+    const input = document.querySelector('input[aria-label="Conversation title"]') as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+      input,
+      "Smoke lifecycle review",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => input.value === "Smoke lifecycle review", "rename input value");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  }
   await waitFor(() => bodyText().includes("Smoke lifecycle review"), "renamed conversation");
   const sawPinnedCategory = bodyText().includes("Pinned");
   await rightClickConversation("Smoke lifecycle review");
@@ -1850,7 +1917,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => bodyText().includes("Copied"), "copied response feedback");
   const sawAnswer = bodyText().includes("WIN-01 is stale");
   const sawConversationLifecycle =
-    bodyText().includes("Smoke lifecycle review") && bodyText().includes("Unpin");
+    bodyText().includes("Smoke lifecycle review") && sawUnpinAction;
   const sawSourceDetails = bodyText().includes("/deviceManagement/managedDevices");
   const sawEditResend = (() => {
     const textarea = document.querySelector("textarea");
@@ -1864,17 +1931,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     "self-training suggestion",
   );
   await clickButton("Accept");
-  await waitFor(() => bodyText().includes("Active overlays"), "accepted self-training overlay");
+  await waitFor(() => bodyText().includes("approved instruction"), "accepted self-training overlay");
+  const sawAcceptedLearning = bodyText().includes("approved instruction");
+  location.hash = "/settings/data";
   await waitFor(
     () =>
-      bodyText().includes("Local data") &&
-      bodyText().includes("SQLite store") &&
+      bodyText().includes("Local retention") &&
       bodyText().includes("Clear active tenant cache"),
     "local data controls",
   );
   const sawLocalDataControls =
-    bodyText().includes("Local data") &&
-    bodyText().includes("SQLite store") &&
+    bodyText().includes("Local retention") &&
     bodyText().includes("Clear chat history");
   await clickButton("Clear active tenant cache");
   await waitFor(
@@ -1902,8 +1969,8 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     hasWorkspaceContextAttachment: sawWorkspaceContextAttachment,
     hasPinnedCategory: sawPinnedCategory,
     hasContextMenuDelete: sawContextMenuDelete,
-    hasAcceptedLearning: bodyText().includes("Active overlays"),
-    hasScheduledRefresh: bodyText().includes("Enabled"),
+    hasAcceptedLearning: sawAcceptedLearning,
+    hasScheduledRefresh: sawScheduledRefresh,
     hasLocalDataControls: sawLocalDataControls,
     hasLocalDataClearModal: sawLocalDataClearModal,
     hasMultiTenantScopeReview: sawMultiTenantScopeReview,
@@ -1997,10 +2064,10 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(
     () =>
       bodyText().includes("Settings") &&
-      bodyText().includes("OpenAdminOS is open-source and community-driven."),
+      bodyText().includes("Readiness diagnostics"),
     "About settings",
   );
-  await clickButton("Create issue");
+  await clickButton("Report issue");
   await waitFor(
     () =>
       bodyText().includes("Submit a public GitHub issue") &&
@@ -2866,7 +2933,7 @@ function showRunNotification(run: RunRecord): void {
     return;
   }
 
-  // Skip notifications if the user is already focused on the app — they
+  // Skip notifications if the user is already focused on the app because they
   // will see the result without being interrupted. Scheduled runs are
   // the exception: they are ambient background work, so completion/failure
   // should still surface.
@@ -2952,7 +3019,7 @@ function notificationBodyForRun(run: RunRecord): string {
  * 6h interval, or window focus). On a successful fetch with a newly
  * stamped timestamp, push `openadminos:registry-refreshed` to the
  * renderer so the Agent Hub state can swap in the new list without
- * the user clicking refresh. Failures are silent — the user only
+ * the user clicking refresh. Failures are silent. The user only
  * sees an error when they manually click refresh.
  */
 async function refreshRegistryInBackground(
@@ -4993,7 +5060,7 @@ function createMenuBarCompanion(): void {
         {
           label: "Schedules",
           click: () => {
-            void openMainWindow("/agents/schedules");
+            void openMainWindow("/agents?filter=scheduled");
           },
         },
         {
@@ -6337,7 +6404,7 @@ if (!gotLock) {
       try {
         app.dock.setIcon(join(currentDir, "../../build/icon.png"));
       } catch {
-        // Non-fatal — dock icon is cosmetic in dev.
+        // Non-fatal: dock icon is cosmetic in dev.
       }
     }
 
@@ -6505,7 +6572,7 @@ if (!gotLock) {
 
     // Periodic registry refresh: every 6 hours, silently re-fetch the
     // remote index so users sitting on the app for days stay current.
-    // Failures are silent — the user only sees errors when they
+    // Failures are silent. The user only sees errors when they
     // explicitly click the Refresh button in Agent Hub.
     const REGISTRY_TICK_MS = 6 * 60 * 60 * 1000;
     setInterval(() => {

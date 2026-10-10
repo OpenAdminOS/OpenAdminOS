@@ -2,7 +2,12 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
-import { makeMockBridge, renderRoute } from "../test/test-utils";
+import {
+  createMockAppState,
+  makeMockBridge,
+  mockTenant,
+  renderRoute,
+} from "../test/test-utils";
 
 describe("Command Palette", () => {
   it("uses complete combobox semantics and opens catalog-backed Settings results", async () => {
@@ -35,4 +40,123 @@ describe("Command Palette", () => {
     await user.keyboard("{Enter}");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+});
+
+it("lists the shell destinations and every Settings section", async () => {
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge(
+      {},
+      createMockAppState({
+        tenants: [
+          mockTenant,
+          {
+            ...mockTenant,
+            id: "tenant-2",
+            displayName: "Fabrikam",
+            homeAccountId: "home-account-2",
+          },
+        ],
+      }),
+    ),
+  });
+
+  await screen.findByRole("option", { name: /Changes: All tenants/ });
+
+  for (const label of [
+    "Go to Chat",
+    "Agents",
+    "Agents: Hub",
+    "Runs",
+    "Runs: Needs review",
+    "Runs: Failed",
+    "Go to Changes",
+    "Open Settings",
+    "Team office",
+    "Add teammate",
+    "Changes: All tenants",
+    "New chat",
+    "Workspaces",
+    "Open Voice",
+  ]) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(
+      screen.getByRole("option", {
+        name:
+          label === "Agents" || label === "Runs"
+            ? new RegExp(`^${escapedLabel}$`)
+            : new RegExp(`^${escapedLabel}`),
+      }),
+    ).toBeInTheDocument();
+  }
+
+  expect(screen.getByRole("option", { name: /^Device Offboard/ })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /^Run Device Offboard/ })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Schedules/ })).not.toBeInTheDocument();
+
+  expect(screen.getByRole("option", { name: /^Data/ })).toBeInTheDocument();
+
+  for (const section of [
+    "Providers",
+    "Tenants",
+    "Data",
+    "Chat",
+    "Connectors",
+    "Gateway",
+    "General",
+    "Appearance",
+    "Privacy",
+    "About",
+  ]) {
+    expect(
+      screen.getByRole("option", { name: new RegExp(`Settings: ${section}`) }),
+    ).toBeInTheDocument();
+  }
+
+  expect(screen.queryByRole("option", { name: /Go to Cache/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Go to Connectors/ })).not.toBeInTheDocument();
+});
+
+it("lists recent conversations and Workspaces with their Chat routes", async () => {
+  const bridge = makeMockBridge({
+    listIntuneChatConversations: vi.fn(async () => [
+      {
+        id: "conversation-1",
+        title: "Review stale devices",
+        createdAt: "2026-10-10T08:00:00.000Z",
+        updatedAt: "2026-10-10T09:00:00.000Z",
+        tenantId: "tenant-1",
+        scopeKind: "single-tenant" as const,
+      },
+    ]),
+    listWorkspaces: vi.fn(async () => [
+      {
+        id: "workspace-1",
+        tenantId: "tenant-1",
+        tenantName: "Contoso IT",
+        title: "Device investigation",
+        status: "active" as const,
+        evidenceCount: 1,
+        conversationCount: 1,
+        runCount: 0,
+        noteCount: 0,
+        createdAt: "2026-10-10T08:00:00.000Z",
+        updatedAt: "2026-10-10T09:00:00.000Z",
+      },
+    ]),
+  });
+
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge,
+  });
+
+  expect(
+    await screen.findByRole("option", { name: /Review stale devices/ }),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByRole("option", { name: /Device investigation/ }),
+  ).toBeInTheDocument();
 });

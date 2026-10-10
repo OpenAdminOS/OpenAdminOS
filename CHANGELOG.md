@@ -12,6 +12,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Polish the desktop redesign with a consistent five-step type scale, shared status and filter controls, URL-aware section scrolling, responsive page containment, and updated screenshot coverage.
+- Consolidate conversations and Workspaces in Chat, with an integrated scope composer, compact suggested agents, inline answer details, and addressable Workspace views.
+- Consolidate run review, live progress, and searchable history in Runs, with focused write confirmation and URL-addressable run details.
+- Consolidate Agent Team, installed agents, Hub browsing, schedules, and agent details into one Agents surface with URL-addressable drawers and a full office view.
+- Consolidate provider, tenant, data, chat, connector, gateway, general, appearance, privacy, and about controls into one searchable Settings page with section links and connector drawers.
+- Consolidate tenant timelines, baselines, comparison, all-tenant drift status, and cache freshness controls in Changes.
+
+- Establish the enterprise desktop shell with a five-item collapsible sidebar, compact status strip, Runs routing, sidebar Voice access, and accessible shared UI primitives.
+
 - Cycle idle teammates through workstations, sofa seats, and the game station in the desktop office and website recording, while preserving real task and approval states.
 
 - Show the full three-teammate office in the website preview, using the built app’s real movement with pause and reduced-motion support.

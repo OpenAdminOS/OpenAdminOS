@@ -53,7 +53,7 @@ export async function runOfficeRehearsal(
     );
   };
   window.setContentSize(1440, 1000);
-  await evaluate(`location.hash='/office'`);
+  await evaluate(`location.hash='/agents/office'`);
   await wait(`Boolean(document.querySelector('.team-office'))`);
   const ids = await evaluate<{
     source: string;
@@ -70,12 +70,12 @@ export async function runOfficeRehearsal(
    return {source:source.id,research:research.id,chief:chief.id};
  })()`);
   const select = async (id: string) => {
-    await evaluate(`location.hash='/office?persona=${id}'`);
+    await evaluate(`location.hash='/agents/office?persona=${id}'`);
     await sleep(200);
   };
   await select(ids.source);
   await evaluate(
-    `(()=>{const button=[...document.querySelectorAll('button')].find(b=>b.textContent==='Expand office');if(button.getAttribute('aria-pressed')!=='true')button.click();const banner=document.createElement('p');banner.className='team-rehearsal-banner';banner.textContent='REHEARSAL DATA · Local fixtures · No live tenant writes';document.querySelector('.office-header').append(banner);document.querySelector('.office-page').scrollTop=0;})()`,
+    `(()=>{const button=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Expand office'||b.getAttribute('aria-label')==='Restore layout');if(button.getAttribute('aria-pressed')!=='true')button.click();const banner=document.createElement('p');banner.className='team-rehearsal-banner';banner.textContent='REHEARSAL DATA · Local fixtures · No live tenant writes';document.querySelector('.app-page-header').append(banner);document.querySelector('.office-page').scrollTop=0;})()`,
   );
   let recording = true,
     recordError: unknown,
@@ -142,7 +142,7 @@ export async function runOfficeRehearsal(
   await evaluate(
     `(async()=>{const s=await window.openAdminOS.getAppState();const p=s.office.personas[0];for(let i=s.office.personas.length;i<24;i++)await window.openAdminOS.saveOfficePersona({...p,id:undefined,name:'Rehearsal teammate '+String(i+1).padStart(2,'0'),avatar:['robot','cat','fox','owl'][i%4],color:['amber','sage','blue','lilac'][i%4],agentSlugs:['compliance-overview'],intervalMinutes:null,watch:undefined,enabled:true});})()`,
   );
-  await wait(`document.querySelectorAll('.team-nav-persona').length===24`);
+  await wait(`(async()=>(await window.openAdminOS.getAppState()).office.personas.length===24)()`);
   await evaluate(
     `(()=>{[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('Floor 4')).click();[...document.querySelectorAll('button')].find(b=>b.textContent==='Team roster').click();})()`,
   );
