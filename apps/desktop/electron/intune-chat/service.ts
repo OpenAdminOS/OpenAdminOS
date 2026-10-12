@@ -1628,10 +1628,7 @@ export class IntuneChatService {
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
         });
-        let content = completion.text.trim();
-        if (agentSuggestions.length > 0) {
-          content = `${content}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
-        }
+        const content = completion.text.trim();
         return {
           content,
           model: completion.model,
@@ -1672,9 +1669,6 @@ export class IntuneChatService {
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
             if (agentic.ok) {
               assistantContent = agentic.answer;
-              if (agentSuggestions.length > 0) {
-                assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
-              }
             } else {
               const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
               assistantContent = deterministic.content;
@@ -2116,9 +2110,6 @@ export class IntuneChatService {
           emitDelta(assistantContent, chunk.delta);
         }
         assistantContent = assistantContent.trim();
-        if (!options.voice && agentSuggestions.length > 0) {
-          assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
-        }
         emitDelta(assistantContent, "");
       };
 
@@ -2232,9 +2223,6 @@ export class IntuneChatService {
                 },
               });
               assistantContent = agentic.answer.trim();
-              if (!options.voice && agentSuggestions.length > 0) {
-                assistantContent = `${assistantContent}\n\nDetected matching agent: ${agentSuggestions[0]?.agentName}.`;
-              }
               emitDelta(assistantContent);
             } else {
               sendProgress({

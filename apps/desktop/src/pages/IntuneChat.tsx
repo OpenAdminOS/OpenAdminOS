@@ -4037,7 +4037,10 @@ function ChatMessageBubble({
 }) {
   const isUser = message.role === "user";
   const hasWebSources = message.toolTrace?.some(t => t.webSources?.length);
-  const displayContent = hasWebSources ? message.content.split("\n\nPublic web sources:")[0] : message.content;
+  // Older stored answers carry the suggested agent as a trailing sentence;
+  // the Suggested agents block now shows it, so drop the duplicate line.
+  const bodyContent = message.content.replace(/\n\nDetected matching agent: [^\n]*$/, "");
+  const displayContent = hasWebSources ? bodyContent.split("\n\nPublic web sources:")[0] : bodyContent;
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={isUser ? "max-w-[76%]" : "w-full max-w-[760px]"}>

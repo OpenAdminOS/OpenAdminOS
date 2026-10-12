@@ -520,6 +520,38 @@ describe("IntuneChat conversation routes", () => {
     });
   });
 
+  it("hides the legacy trailing agent sentence in stored answers", async () => {
+    const conversation: IntuneChatConversation = {
+      id: "conversation-legacy-1",
+      title: "Stale devices",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge();
+    bridge.listIntuneChatConversations = vi.fn(async () => [conversation]);
+    bridge.getIntuneChatMessages = vi.fn(async () => [
+      {
+        id: "legacy-assistant-1",
+        conversationId: conversation.id,
+        role: "assistant" as const,
+        content: "WIN-01 has not synced in 40 days.\n\nDetected matching agent: Find inactive devices.",
+        createdAt: "2026-08-06T10:01:00.000Z",
+        status: "completed" as const,
+      },
+    ]);
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId",
+      route: "/chat/conversation-legacy-1",
+      bridge,
+    });
+
+    expect(await screen.findByText(/WIN-01 has not synced in 40 days/)).toBeInTheDocument();
+    expect(screen.queryByText(/Detected matching agent/)).not.toBeInTheDocument();
+  });
+
   it("shows a recovery state for a deleted or unknown conversation URL", async () => {
     const bridge = makeMockBridge();
     bridge.listIntuneChatConversations = vi.fn(async () => []);
