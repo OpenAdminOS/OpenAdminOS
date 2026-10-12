@@ -8,6 +8,9 @@ import type {
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
+import { PageHeader } from "../components/AppShell";
+import { IconButton, SegmentedControl } from "../components/ui";
+import { IconRefresh } from "../components/icons";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
@@ -53,7 +56,7 @@ export default function Office() {
   const { state, refresh, loading, error: stateError } = useAppState();
   const [params, setParams] = useSearchParams();
   const fullscreen = useOfficeFullscreen();
-  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(() => params.get("inbox") === "1");
   const selectedId = params.get("persona");
   const view =
     !fullscreen.active && params.get("view") === "list" ? "list" : "room";
@@ -68,13 +71,20 @@ export default function Office() {
     );
   const setSelectedId = (id: string) => setParam("persona", id);
   const setView = (view: string) => setParam("view", view);
-  const [editing, setEditing] = useState<OfficePersona | "new">();
+  const [editing, setEditing] = useState<OfficePersona | "new" | undefined>(() =>
+    params.get("add") === "teammate" ? "new" : undefined,
+  );
   const [removeId, setRemoveId] = useState<string>();
   const [historyQuery, setHistoryQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const focusedOffice = expanded || fullscreen.active;
   const [presentation, setPresentation] = useState(false);
+  useEffect(() => {
+    if (params.get("add") === "teammate") {
+      setEditing((current) => current ?? "new");
+    }
+  }, [params]);
   useEffect(() => {
     document.documentElement.toggleAttribute(
       "data-team-presentation",
@@ -125,45 +135,34 @@ export default function Office() {
   if (loading && !state.office)
     return (
       <div className="office-loading" role="status">
-        Opening your team…
+        Opening your team
       </div>
     );
   return (
-    <div
-      className={`office-page ${focusedOffice ? "office-expanded" : ""} ${fullscreen.active ? "office-fullscreen" : ""}`}
-    >
-      <header className="office-header">
-        <div>
-          <div className="office-eyebrow">YOUR LOCAL TEAM</div>
-          <h1>Agent Team</h1>
-          <p>Give your agents a place, a purpose, and a schedule.</p>
-        </div>
+    <>
+    <PageHeader
+      title="Agent Team"
+      actions={
         <Button
           variant="primary"
+          size="sm"
           disabled={busy || !api?.saveOfficePersona}
           onClick={() => setEditing("new")}
         >
           Add teammate
         </Button>
-      </header>
+      }
+    />
+    <div className="app-page-body min-w-0 flex-1 overflow-y-auto">
+    <div
+      className={`office-page ${focusedOffice ? "office-expanded" : ""} ${fullscreen.active ? "office-fullscreen" : ""}`}
+    >
       {(error || stateError || office.error || fullscreen.error) && (
         <div className="office-error" role="alert">
           {error || stateError?.message || office.error || fullscreen.error}
-          <Button size="sm" onClick={() => void act(refresh)}>
+          <Button size="sm" variant="secondary" onClick={() => void act(refresh)}>
             Refresh team
           </Button>
-        </div>
-      )}
-      {!fullscreen.active && (
-        <div className="team-attention-summary">
-          <span>
-            <strong>{attention}</strong>{" "}
-            {attention === 1 ? "teammate needs" : "teammates need"} attention ·{" "}
-            <strong>{running}</strong> assignments in progress
-          </span>
-          <button type="button" onClick={() => setInboxOpen(true)}>
-            Review inbox
-          </button>
         </div>
       )}
       <Modal
@@ -183,62 +182,58 @@ export default function Office() {
       </Modal>
       <div className="office-toolbar">
         <div>
-          <strong>{office.personas.length}</strong> teammates <span>·</span>{" "}
-          <strong>{running}</strong> assignments in progress <span>·</span>{" "}
-          <strong>{attention}</strong> need attention
+          <strong>{office.personas.length}</strong>{" "}
+          {office.personas.length === 1 ? "teammate" : "teammates"} <span>·</span>{" "}
+          <strong>{running}</strong> in progress <span>·</span>{" "}
+          <strong>{attention}</strong>{" "}
+          {attention === 1 ? "needs attention" : "need attention"}
         </div>
-        <div className="office-view" aria-label="Team view">
-          {fullscreen.active && !presentation && (
-            <button onClick={() => setInboxOpen(true)}>Review inbox</button>
+        <div className="office-view" aria-label="Agent Team controls">
+          {!presentation && (
+            <Button size="sm" variant="ghost" onClick={() => setInboxOpen(true)}>Review inbox</Button>
           )}
-          <button
+          <SegmentedControl
+            ariaLabel="Team view"
+            value={view}
+            onValueChange={setView}
+            options={[
+              { id: "room", label: "Office" },
+              { id: "list", label: "List view", disabled: presentation || fullscreen.active },
+            ]}
+          />
+          <IconButton
+            label={expanded ? "Restore layout" : "Expand office"}
+            icon={<IconRefresh size={14} />}
             aria-pressed={expanded}
             disabled={fullscreen.active}
             onClick={() => setExpanded((v) => !v)}
-          >
-            {expanded ? "Restore layout" : "Expand office"}
-          </button>
+          />
           {focusedOffice && !presentation && (
-            <button
-              aria-pressed={showDetails}
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => setShowDetails((v) => !v)}
             >
               {showDetails ? "Close assignment" : "Assignment details"}
-            </button>
+            </Button>
           )}
-          <button
-            disabled={fullscreen.pending}
+          <IconButton
+            label={fullscreen.active ? "Exit full screen" : "Full screen"}
+            icon={<FullScreenIcon />}
             aria-pressed={fullscreen.active}
+            disabled={fullscreen.pending}
             onClick={() => void fullscreen.change(!fullscreen.active)}
-          >
-            {fullscreen.pending
-              ? "Changing view…"
-              : fullscreen.active
-                ? "Exit full screen"
-                : "Full screen"}
-          </button>
-          <button
-            aria-pressed={presentation}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={() => {
               setPresentation((v) => !v);
               setView("room");
             }}
           >
             {presentation ? "Show details" : "Hide details"}
-          </button>
-          <button
-            aria-pressed={view === "room"}
-            onClick={() => setView("room")}
-          >
-            Office
-          </button>
-          <button
-            aria-pressed={view === "list"}
-            disabled={presentation || fullscreen.active}
-            onClick={() => setView("list")}
-          >
-            List
-          </button>
+          </Button>
         </div>
       </div>
       <div className="office-layout">
@@ -347,13 +342,13 @@ export default function Office() {
               <div className="office-empty-avatar">
                 <PersonaAvatar avatar="robot" color="amber" />
               </div>
-              <div className="office-eyebrow">A DESK IS WAITING</div>
+              <div className="office-eyebrow">A desk is waiting</div>
               <h2>Your first teammate starts here.</h2>
               <p>
                 Choose a responsibility, assign installed agents, and decide
                 when the work should run.
               </p>
-              <Button variant="primary" onClick={() => setEditing("new")}>
+              <Button variant="secondary" onClick={() => setEditing("new")}>
                 Add your first teammate
               </Button>
               <ol className="team-empty-steps">
@@ -435,7 +430,7 @@ export default function Office() {
                   color={selected.color}
                 />
                 <div>
-                  <div className="office-eyebrow">ASSIGNMENT</div>
+                  <div className="office-eyebrow">Assignment</div>
                   <h2>{selected.name}</h2>
                 </div>
               </div>
@@ -531,14 +526,14 @@ export default function Office() {
                   ? ` ${selected.calendar.time} · ${selected.calendar.timeZone}.`
                   : ""}
                 {selected.quietHours
-                  ? ` Quiet hours ${selected.quietHours.start}:00–${selected.quietHours.end}:00 (${selected.quietHours.timeZone}).`
+                  ? ` Quiet hours ${selected.quietHours.start}:00 to ${selected.quietHours.end}:00 (${selected.quietHours.timeZone}).`
                   : ""}{" "}
                 Missed checks run once after wake, outside quiet hours. Token
                 usage is available in source runs; monetary cost is unavailable.
               </p>
               <div className="office-actions">
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   disabled={
                     busy ||
                     !selected.enabled ||
@@ -647,7 +642,7 @@ export default function Office() {
             </>
           ) : (
             <div className="office-panel-empty">
-              <div className="office-eyebrow">HOW IT WORKS</div>
+              <div className="office-eyebrow">How it works</div>
               <h2>A small team. Clear responsibilities.</h2>
               <ol>
                 <li>Choose a role for your first teammate.</li>
@@ -675,7 +670,7 @@ export default function Office() {
       <section className="office-briefing" aria-label="Team briefing">
         <div className="office-briefing-title">
           <div>
-            <div className="office-eyebrow">THE WORK, WITH EVIDENCE</div>
+            <div className="office-eyebrow">The work, with evidence</div>
             <h2>Assignment history</h2>
           </div>
           <label className="team-search">
@@ -771,6 +766,14 @@ export default function Office() {
             if (!busy) {
               setEditing(undefined);
               setError("");
+              setParams(
+                (previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.delete("add");
+                  return next;
+                },
+                { replace: true },
+              );
             }
           }}
           onSave={async (input) => {
@@ -784,7 +787,15 @@ export default function Office() {
                 )?.id;
               })
             ) {
-              if (savedId) setSelectedId(savedId);
+              setParams(
+                (previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.delete("add");
+                  if (savedId) next.set("persona", savedId);
+                  return next;
+                },
+                { replace: true },
+              );
               setShowDetails(true);
               setEditing(undefined);
             }
@@ -807,7 +818,7 @@ export default function Office() {
         <div className="office-modal-content">
           <p>
             This removes its assignment and Team briefings. Agent run history
-            remains available in Activity.
+            remains available in Runs.
           </p>
           <div className="office-actions">
             <Button disabled={busy} onClick={() => setRemoveId(undefined)}>
@@ -829,5 +840,15 @@ export default function Office() {
         </div>
       </Modal>
     </div>
+    </div>
+    </>
+  );
+}
+
+function FullScreenIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+    </svg>
   );
 }

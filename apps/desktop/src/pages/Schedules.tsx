@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
-import { Pill } from "../components/Pill";
 import { useToast } from "../components/Toast";
 import {
   IconCheck,
@@ -20,6 +19,7 @@ import type {
 } from "../shared/openAdminOS";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import { Badge, Switch } from "../components/ui";
 
 const QUICK_INTERVALS: { label: string; seconds: number }[] = [
   { label: "15m", seconds: 15 * 60 },
@@ -179,10 +179,10 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
                 <IconClock size={18} />
               </div>
-              <h2 className="mt-4 text-[15px] font-medium text-[var(--color-text)]">
+              <h2 className="mt-4 text-md font-medium text-[var(--color-text)]">
                 No schedules configured
               </h2>
-              <p className="mt-2 max-w-[460px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+              <p className="mt-2 max-w-[460px] text-base leading-relaxed text-[var(--color-text-soft)]">
                 Create a schedule here or open an installed agent and choose an
                 interval from its Schedule card. Scheduled runs use the active
                 tenant pinned at queue time.
@@ -242,14 +242,14 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
             <div className="p-5">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-[13px] font-medium text-[var(--color-text)]">
+                  <h2 className="text-base font-medium text-[var(--color-text)]">
                     Add schedule
                   </h2>
-                  <p className="mt-1 text-[12px] text-[var(--color-text-soft)]">
+                  <p className="mt-1 text-sm text-[var(--color-text-soft)]">
                     Choose an interval for an installed agent.
                   </p>
                 </div>
-                <span className="font-mono text-[11px] text-[var(--color-text-muted)]">
+                <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
                   {unscheduledAgents.length} manual
                 </span>
               </div>
@@ -287,10 +287,10 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
       <>
         <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h2 className="text-[13px] font-medium text-[var(--color-text)]">
+            <h2 className="text-base font-medium text-[var(--color-text)]">
               Schedules
             </h2>
-            <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
               {scheduledAgents.length} active {scheduledAgents.length === 1 ? "schedule" : "schedules"}
             </p>
           </div>
@@ -306,11 +306,6 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
       <PageHeader
         eyebrow="Agents"
         title="Schedules"
-        subtitle={
-          <span>
-            {scheduledAgents.length} active {scheduledAgents.length === 1 ? "schedule" : "schedules"}
-          </span>
-        }
         actions={scheduleActions}
       />
       <PageBody>{content}</PageBody>
@@ -352,21 +347,21 @@ function ScheduleRow({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-[14px] font-medium text-[var(--color-text)]">
+              <h2 className="truncate text-md font-medium text-[var(--color-text)]">
                 {agent.name}
               </h2>
-              <Pill tone={agent.mode === "write" ? "warning" : "default"}>
+              <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
                 {agent.mode === "write" ? "Write" : "Read"}
-              </Pill>
-              <Pill tone="success">Every {formatInterval(intervalSeconds)}</Pill>
+              </Badge>
+              <Badge tone="success">Every {formatInterval(intervalSeconds)}</Badge>
               {latestScheduledRun?.changeState && (
-                <Pill tone={latestScheduledRun.changeState === "unchanged" ? "default" : "warning"}>
+                <Badge tone={latestScheduledRun.changeState === "unchanged" ? "neutral" : "warning"}>
                   {changeLabel(latestScheduledRun.changeState)}
-                </Pill>
+                </Badge>
               )}
               {latestScheduledRun && <ScheduleOutcomePill run={latestScheduledRun} />}
             </div>
-            <p className="mt-2 line-clamp-2 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <p className="mt-2 line-clamp-2 text-base leading-relaxed text-[var(--color-text-soft)]">
               {agent.description}
             </p>
           </div>
@@ -389,7 +384,7 @@ function ScheduleRow({
         </div>
 
         {agent.mode === "write" && (
-          <div className="mt-3 flex items-start gap-2 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          <div className="mt-3 flex items-start gap-2 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             <IconWarning size={12} className="mt-0.5 shrink-0" />
             <span>Scheduled write runs still pause for confirmation before changes.</span>
           </div>
@@ -398,10 +393,10 @@ function ScheduleRow({
         {schedule && (
           <div className="mt-3 rounded-md bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              <span className="text-xs font-medium text-[var(--color-text-muted)]">
                 Notifications
               </span>
-              <span className="text-[10.5px] text-[var(--color-text-muted)]">
+              <span className="text-xs text-[var(--color-text-muted)]">
                 OS notification
               </span>
             </div>
@@ -459,14 +454,14 @@ function ScheduleRow({
 function ScheduleOutcomePill({ run }: { run: RunRecord }) {
   if (run.status === "completed") {
     return (
-      <Pill tone="success">
+      <Badge tone="success">
         <IconCheck size={10} /> Success
-      </Pill>
+      </Badge>
     );
   }
-  if (run.status === "failed") return <Pill tone="danger">Failed</Pill>;
-  if (run.status === "awaiting-confirmation") return <Pill tone="warning">Needs confirmation</Pill>;
-  return <Pill>{run.status}</Pill>;
+  if (run.status === "failed") return <Badge tone="danger">Failed</Badge>;
+  if (run.status === "awaiting-confirmation") return <Badge tone="warning">Needs confirmation</Badge>;
+  return <Badge>{run.status}</Badge>;
 }
 
 function SchedulePreferenceToggle({
@@ -479,16 +474,12 @@ function SchedulePreferenceToggle({
   onClick: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center justify-center rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-        active
-          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/25"
-          : "bg-[var(--color-surface)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:text-[var(--color-text)]"
-      }`}
-    >
-      {label}
-    </button>
+    <Switch
+      checked={active}
+      onCheckedChange={onClick}
+      label={label}
+      className="px-2"
+    />
   );
 }
 
@@ -506,7 +497,7 @@ function ScheduleNotice({
       ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
       : "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/25";
   return (
-    <div className={`flex items-start gap-3 rounded-lg px-4 py-3 text-[12px] ring-1 ${toneClass}`}>
+    <div className={`flex items-start gap-3 rounded-lg px-4 py-3 text-sm ring-1 ${toneClass}`}>
       <IconWarning size={14} className="mt-0.5 shrink-0" />
       <div className="min-w-0">
         <div className="font-medium">{title}</div>
@@ -533,10 +524,10 @@ function ScheduleActivityTimeline({
     <Card>
       <div className="p-5">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-[13px] font-medium text-[var(--color-text)]">
+          <h2 className="text-base font-medium text-[var(--color-text)]">
             Schedule activity
           </h2>
-          <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+          <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
             latest {scheduledRuns.length}
           </span>
         </div>
@@ -548,21 +539,21 @@ function ScheduleActivityTimeline({
               className="grid w-full grid-cols-[1fr_auto_auto] items-center gap-3 py-3 text-left first:pt-0 last:pb-0 hover:text-[var(--color-accent)]"
             >
               <div className="min-w-0">
-                <div className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
+                <div className="truncate text-base font-medium text-[var(--color-text)]">
                   {agents.find((agent) => agent.slug === run.agentSlug)?.name ?? run.agentSlug}
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
+                <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
                   {run.summary ?? run.error ?? run.id}
                 </div>
               </div>
               {run.changeState && (
-                <Pill tone={run.changeState === "unchanged" ? "default" : "warning"}>
+                <Badge tone={run.changeState === "unchanged" ? "neutral" : "warning"}>
                   {changeLabel(run.changeState)}
-                </Pill>
+                </Badge>
               )}
-              <Pill tone={run.status === "completed" ? "success" : run.status === "failed" ? "danger" : "warning"}>
+              <Badge tone={run.status === "completed" ? "success" : run.status === "failed" ? "danger" : "warning"}>
                 {run.status}
-              </Pill>
+              </Badge>
             </button>
           ))}
         </div>
@@ -586,25 +577,27 @@ function UnscheduledRow({
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={onOpen}
-            className="truncate text-left text-[13px] font-medium text-[var(--color-text)] hover:text-[var(--color-accent)]"
+            className="truncate text-left text-base font-medium text-[var(--color-text)] hover:text-[var(--color-accent)]"
           >
             {agent.name}
           </button>
-          <Pill tone={agent.mode === "write" ? "warning" : "default"}>
+          <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
             {agent.mode === "write" ? "Write" : "Read"}
-          </Pill>
-          <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
+          </Badge>
+          <span className="text-xs text-[var(--color-text-muted)]">
             {agent.category}
           </span>
         </div>
-        <p className="mt-1 line-clamp-1 text-[12px] text-[var(--color-text-muted)]">
+        <p className="mt-1 line-clamp-1 text-sm text-[var(--color-text-muted)]">
           {agent.description}
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
         {QUICK_INTERVALS.map((interval) => (
-          <button
+          <Button
             key={interval.seconds}
+            size="sm"
+            variant="secondary"
             onClick={() =>
               void onSchedule({
                 enabled: true,
@@ -614,10 +607,9 @@ function UnscheduledRow({
                 notifyOnChangeOnly: false,
               })
             }
-            className="rounded-full bg-[var(--color-surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent)] hover:ring-[var(--color-accent)]/30"
           >
             {interval.label}
-          </button>
+          </Button>
         ))}
       </div>
     </div>
@@ -635,10 +627,10 @@ function ScheduleMetric({
 }) {
   return (
     <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-1 flex min-h-4 items-center gap-1.5 font-mono text-[11.5px] text-[var(--color-text-soft)]">
+      <div className="mt-1 flex min-h-4 items-center gap-1.5 text-sm tabular-nums text-[var(--color-text-soft)]">
         {state === "running" && (
           <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-info)]" />
         )}

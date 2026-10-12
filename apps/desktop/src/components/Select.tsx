@@ -19,7 +19,7 @@ export function Select({
     <div className={`relative inline-flex min-w-0 ${className}`}>
       <select
         {...props}
-        className="h-9 w-full min-w-0 appearance-none rounded-lg bg-[var(--color-surface)] py-0 pl-3 pr-8 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border)] transition-colors duration-150 hover:bg-[var(--color-surface-hover)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-9 w-full min-w-0 appearance-none rounded-lg bg-[var(--color-surface)] py-0 pl-3 pr-8 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border)] transition-colors duration-150 hover:bg-[var(--color-surface-hover)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/70 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {children}
       </select>

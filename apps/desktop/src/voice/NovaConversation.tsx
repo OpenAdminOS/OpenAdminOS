@@ -28,7 +28,7 @@ export function NovaConversation({ items, onClose, onEvidence }: {
   }, []);
   return <aside id="nova-conversation" className="nova-conversation" aria-label="Conversation">
     <div className="nova-conversation-header">
-      <div><span className="nova-conversation-eyebrow">NOVA</span><h2>Conversation</h2></div>
+      <div><span className="nova-conversation-eyebrow">Nova</span><h2>Conversation</h2></div>
       <button type="button" onClick={onClose} aria-label="Hide conversation" title="Hide conversation"><svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg></button>
     </div>
     <div ref={scroll} className="nova-conversation-log" role="log" aria-label="Voice conversation and activity" aria-live="off" tabIndex={0}
@@ -37,7 +37,7 @@ export function NovaConversation({ items, onClose, onEvidence }: {
       {items.map(item => item.kind === "speech"
         ? <div key={item.id} className={`nova-message nova-message-${item.role}`}><span className="nova-message-author">{item.role === "user" ? "You" : "Nova"}</span><MarkdownPreview source={item.text} numberedSections={false} className="nova-message-body nova-markdown" /></div>
         : <div key={item.id} className="nova-activity-card" data-status={item.status}>
-            <div className="nova-activity-heading"><span className="nova-activity-mark" aria-hidden="true">{item.status === "completed" ? "✓" : item.status === "failed" ? "!" : ""}</span><strong>{item.status === "completed" ? "Result retrieved" : item.status === "failed" ? "Needs attention" : item.status === "stopped" ? "Request stopped" : item.status === "replaced" ? "Question replaced" : "Working on your request"}</strong><span className="nova-activity-label">ACTIVITY</span></div>
+            <div className="nova-activity-heading"><span className="nova-activity-mark" aria-hidden="true">{item.status === "completed" ? "✓" : item.status === "failed" ? "!" : ""}</span><strong>{item.status === "completed" ? "Result retrieved" : item.status === "failed" ? "Needs attention" : item.status === "stopped" ? "Request stopped" : item.status === "replaced" ? "Question replaced" : "Working on your request"}</strong><span className="nova-activity-label">Activity</span></div>
             <ol>{item.steps.slice(-4).map((step, index) => <li key={`${index}-${step.message}`} data-status={step.status}>{step.message}</li>)}</ol>
             {item.result && <details><summary>View result</summary><MarkdownPreview source={item.result} numberedSections={false} className="nova-activity-result nova-markdown" /></details>}
           </div>)}

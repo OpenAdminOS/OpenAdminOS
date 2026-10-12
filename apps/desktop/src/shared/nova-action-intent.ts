@@ -13,7 +13,7 @@ export function conversationalText(text: string) {
 
 export function requestText(text: string) {
   return conversationalText(text).replace(/^(?:what I want you to do is|I want you to|I would like you to)\s+/i, '').replace(/^(?:please\s+|(?:can|could|would) you\s+|are you able to\s+)+/i, '')
-    .replace(/^(?:also\s+)+/i, '').replace(/^(send|share|post)\s+(?:it|this|that)\s*[-–—,]\s*(?=\1\b)/i, '')
+    .replace(/^(?:also\s+)+/i, '').replace(/^(send|share|post)\s+(?:it|this|that)\s*[-–:,]\s*(?=\1\b)/i, '')
     .replace(/\bMicrosoft Teams\b/ig, 'Teams').replace(/\bWhatsApp Web\b/ig, 'WhatsApp').replace(/\be-mail\b/ig, 'email')
     .replace(/\bExchange Online\b/ig, 'Exchange').replace(/\bOutlook email\b/ig, 'email')
     .replace(/\bvia email with (?:the )?Outlook connector\b/ig, 'via email').replace(/\s+connector[?.!]*$/i, '')

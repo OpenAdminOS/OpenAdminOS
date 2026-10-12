@@ -1,120 +1,72 @@
-import { useNavigate } from "react-router";
 import type { AgentDisplay } from "../shared/agent-display";
 import { formatAgentDisplayName } from "../shared/agent-display";
-import { Card } from "./Card";
-import { Pill } from "./Pill";
-import { Button } from "./Button";
+import { Badge, IconButton } from "./ui";
 import {
+  IconBadgeCheck,
+  IconBolt,
   IconPlay,
   IconShield,
-  IconBolt,
-  IconBadgeCheck,
 } from "./icons";
 
-function timeSince(iso?: string): string {
-  if (!iso) return "Never run";
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(ms / 60000);
-  if (m < 60) return `Ran ${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `Ran ${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `Ran ${d}d ago`;
+export function AgentIdentity({ agent }: { agent: AgentDisplay }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
+        {agent.mode === "write" ? <IconBolt size={15} /> : <IconShield size={15} />}
+      </span>
+      <span className="min-w-0">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium text-[var(--color-text)]">
+            {formatAgentDisplayName(agent)}
+          </span>
+          {agent.compatibility?.supported === false ? (
+            <Badge tone="warning">Incompatible</Badge>
+          ) : null}
+        </span>
+        <span className="mt-0.5 flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+          <span className="truncate">{agent.author.name}</span>
+          {agent.author.verified ? (
+            <IconBadgeCheck
+              aria-label="Verified publisher"
+              size={12}
+              className="shrink-0 text-[var(--color-info)]"
+            />
+          ) : null}
+        </span>
+      </span>
+    </div>
+  );
 }
 
-
+/** Compact compatibility row for callers outside the consolidated library. */
 export function AgentCard({
   agent,
+  onOpen,
   onRun,
 }: {
   agent: AgentDisplay;
+  onOpen?: (agent: AgentDisplay) => void;
   onRun?: (agent: AgentDisplay) => void;
 }) {
-  const navigate = useNavigate();
-
   return (
-    <Card className="transition-colors duration-150 hover:bg-[var(--color-surface-hover)] hover:ring-[var(--color-border-strong)]">
-      <div className="flex flex-col gap-4 p-5">
-        <div className="flex items-start gap-3">
-          <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]"
-          >
-            {agent.mode === "write" ? (
-              <IconBolt size={18} className="text-[var(--color-warning)]" />
-            ) : (
-              <IconShield size={18} className="text-[var(--color-text-soft)]" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="min-w-0 truncate text-[14px] font-medium text-[var(--color-text)]">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/agents/${agent.slug}`)}
-                  className="max-w-full truncate rounded text-left transition-colors hover:text-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
-                >
-                  {formatAgentDisplayName(agent)}
-                </button>
-              </h3>
-            </div>
-            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
-              <span>{agent.author.name}</span>
-              {agent.author.verified && (
-                <IconBadgeCheck size={11} className="text-[var(--color-accent)]" />
-              )}
-              <span className="opacity-50">·</span>
-              <span className="font-mono">{agent.version}</span>
-            </div>
-          </div>
-        </div>
-
-        <p className="line-clamp-2 text-[13px] leading-relaxed text-[var(--color-text-soft)]">
-          {agent.description}
-        </p>
-
-        <div className="flex items-center gap-2">
-          <Pill tone={agent.mode === "write" ? "warning" : "default"}>
-            {agent.mode === "write" ? "Write" : "Read-only"}
-          </Pill>
-          <Pill>
-            {agent.scopes.length} scope{agent.scopes.length === 1 ? "" : "s"}
-          </Pill>
-          {"updateAvailable" in agent && agent.updateAvailable && (
-            <Pill tone="accent">
-              Update → v{agent.updateAvailable.version}
-            </Pill>
-          )}
-          {agent.compatibility?.supported === false && (
-            <Pill tone="warning">
-              Needs OpenAdminOS {agent.compatibility.minAppVersion}
-            </Pill>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-[var(--color-border-soft)] pt-3">
-          <span className="text-[11px] text-[var(--color-text-muted)]">
-            {timeSince(agent.lastRunAt)}
-          </span>
-          <Button
-            size="sm"
-            variant={agent.compatibility?.supported === false ? "secondary" : "primary"}
-            leadingIcon={<IconPlay size={11} />}
-            disabled={agent.compatibility?.supported === false}
-            title={
-              agent.compatibility?.supported === false
-                ? `Update OpenAdminOS to ${agent.compatibility.minAppVersion} before running this agent.`
-                : undefined
-            }
-            onClick={(e) => {
-              e.stopPropagation();
-              if (agent.compatibility?.supported === false) return;
-              onRun?.(agent);
-            }}
-          >
-            {agent.compatibility?.supported === false ? "Update app" : "Run"}
-          </Button>
-        </div>
-      </div>
-    </Card>
+    <div className="flex items-center gap-3 border-b border-[var(--color-border-soft)] px-3 py-2.5 last:border-b-0">
+      <button
+        type="button"
+        className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        onClick={() => onOpen?.(agent)}
+      >
+        <AgentIdentity agent={agent} />
+      </button>
+      <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
+        {agent.mode === "write" ? "Write" : "Read"}
+      </Badge>
+      <IconButton
+        label={`Run ${formatAgentDisplayName(agent)}`}
+        icon={<IconPlay size={13} />}
+        disabled={agent.compatibility?.supported === false}
+        onClick={() => onRun?.(agent)}
+        size="sm"
+      />
+    </div>
   );
 }

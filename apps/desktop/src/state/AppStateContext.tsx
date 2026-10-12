@@ -981,7 +981,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, [refresh]);
 
   // Silent swap-in when the main process completes a background
-  // registry refresh (6h interval / focus-triggered). No toast — the
+  // registry refresh (6h interval / focus-triggered). No toast. The
   // user discovers the new state when they next look at Agent Hub.
   useEffect(() => {
     const api = getOpenAdminOSApi();

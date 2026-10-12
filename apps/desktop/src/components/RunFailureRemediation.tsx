@@ -1,4 +1,3 @@
-import { Card } from "./Card";
 import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
@@ -59,22 +58,22 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const matched = SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
 
   return (
-    <Card className="mb-6 ring-[var(--color-danger)]/35">
-      <div className="border-b border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-6 py-3">
-        <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-[var(--color-danger)]">
+    <section className="border-l-2 border-[var(--color-danger)] bg-[var(--color-danger-soft)]">
+      <div className="border-b border-[var(--color-danger)]/30 px-4 py-3">
+        <div className="flex items-center gap-2.5 text-sm font-medium text-[var(--color-danger)]">
           <IconWarning size={14} />
           <span>Run failed</span>
           <span className="opacity-50">·</span>
-          <span className="font-mono text-[11.5px]">{truncate(run.error, 120)}</span>
+          <span className="text-sm">{truncate(run.error, 120)}</span>
         </div>
       </div>
-      <div className="p-6">
+      <div className="p-4">
         {matched.length === 0 ? (
           <div>
-            <div className="text-[13px] font-medium text-[var(--color-text)]">
+            <div className="text-base font-medium text-[var(--color-text)]">
               No matching playbook
             </div>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-text-soft)]">
               Inspect the Logs tab locally. If this is reproducible, use Report
               this failure to submit a public GitHub issue after reviewing what
               is safe to make public.
@@ -82,22 +81,21 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+            <div className="text-xs font-medium text-[var(--color-text-muted)]">
               Likely causes
             </div>
-            {matched.map((suggestion) => (
-              <div
-                key={suggestion.title}
-                className="rounded-md bg-[var(--color-bg-raised)] p-3.5 ring-1 ring-[var(--color-border-soft)]"
-              >
-                <div className="text-[13px] font-medium text-[var(--color-text)]">
-                  {suggestion.title}
+            <div className="divide-y divide-[var(--color-danger)]/20 border-y border-[var(--color-danger)]/20">
+              {matched.map((suggestion) => (
+                <div key={suggestion.title} className="py-3">
+                  <div className="text-base font-medium text-[var(--color-text)]">
+                    {suggestion.title}
+                  </div>
+                  <p className="mt-1 text-sm leading-relaxed text-[var(--color-text-soft)]">
+                    {suggestion.body}
+                  </p>
                 </div>
-                <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
-                  {suggestion.body}
-                </p>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
         <div className="mt-5 flex justify-end border-t border-[var(--color-border-soft)] pt-4">
@@ -122,7 +120,7 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
           </Button>
         </div>
       </div>
-    </Card>
+    </section>
   );
 }
 

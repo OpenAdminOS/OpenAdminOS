@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import { IconCheck, IconClose, IconRefresh, IconWarning } from "./icons";
 import type { UpdateState } from "../shared/openAdminOS";
+import { IconButton } from "./ui";
 
 export function UpdateBanner() {
   const [state, setState] = useState<UpdateState>({ status: "idle" });
@@ -50,7 +51,7 @@ export function UpdateBanner() {
           : "border-[var(--color-accent)]/25 bg-[var(--color-accent-soft)]"
       }`}
     >
-      <div className="flex items-center gap-2 text-[12.5px] text-[var(--color-text)]">
+      <div className="flex items-center gap-2 text-base text-[var(--color-text)]">
         {isError ? (
           <IconWarning size={12} className="text-[var(--color-danger)]" />
         ) : (
@@ -93,13 +94,12 @@ export function UpdateBanner() {
             Restart now
           </Button>
         )}
-        <button
+        <IconButton
           onClick={() => setDismissed(true)}
-          aria-label="Dismiss update notice"
-          className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-        >
-          <IconClose size={12} />
-        </button>
+          label="Dismiss update notice"
+          size="sm"
+          icon={<IconClose size={12} />}
+        />
       </div>
     </div>
   );

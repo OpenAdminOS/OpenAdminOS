@@ -71,10 +71,10 @@ export function ProviderNotReadyCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
+          <div className="text-base font-medium text-[var(--color-text)]">
             {warn ? `${provider.name} is not reachable.` : `${provider.name} needs setup.`}
           </div>
-          <p className="mt-1 break-words text-[12px] leading-5 text-[var(--color-text-soft)]">
+          <p className="mt-1 break-words text-sm leading-5 text-[var(--color-text-soft)]">
             {provider.detail ?? "Install or configure the provider, then recheck."}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -136,10 +136,10 @@ export function OllamaInstallGuide({
           {warn ? <IconWarning size={15} /> : <IconHardDrive size={15} />}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
+          <div className="text-base font-medium text-[var(--color-text)]">
             {warn ? "Ollama is not running on this device." : "Set up Ollama locally"}
           </div>
-          <p className="mt-1 text-[12px] leading-5 text-[var(--color-text-soft)]">
+          <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
             Ollama runs the model on this device. Install it, start it, then recheck the connection.
           </p>
         </div>
@@ -154,11 +154,11 @@ export function OllamaInstallGuide({
         </InstallStep>
         <InstallStep number={2} title="Start Ollama">
           {platform === "macos" ? (
-            <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+            <p className="text-sm leading-5 text-[var(--color-text-soft)]">
               Open the Ollama app. It stays available from the menu bar.
             </p>
           ) : platform === "windows" ? (
-            <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+            <p className="text-sm leading-5 text-[var(--color-text-soft)]">
               Open Ollama. It stays available from the system tray.
             </p>
           ) : (
@@ -166,7 +166,7 @@ export function OllamaInstallGuide({
           )}
         </InstallStep>
         <InstallStep number={3} title="Recheck the connection">
-          <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+          <p className="text-sm leading-5 text-[var(--color-text-soft)]">
             OpenAdminOS detects Ollama without an app restart.
           </p>
           <Button
@@ -188,11 +188,11 @@ export function OllamaInstallGuide({
 function InstallStep({ number, title, children }: { number: number; title: string; children: ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-warning-soft)] text-[11px] font-medium text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/40">
+      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-warning-soft)] text-xs font-medium text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/40">
         {number}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-[12px] font-medium text-[var(--color-text)]">{title}</div>
+        <div className="text-sm font-medium text-[var(--color-text)]">{title}</div>
         <div className="mt-1.5">{children}</div>
       </div>
     </div>
@@ -204,7 +204,7 @@ function CommandRow({ command }: { command: string }) {
   const toast = useToast();
   return (
     <div className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-      <span className="break-all font-mono text-[12px] text-[var(--color-text)]">{command}</span>
+      <span className="break-all font-mono text-sm text-[var(--color-text)]">{command}</span>
       <button
         type="button"
         onClick={() => {
@@ -215,7 +215,7 @@ function CommandRow({ command }: { command: string }) {
             })
             .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
         }}
-        className="ml-auto inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+        className="ml-auto inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
       >
         {copied ? <IconCheck size={10} /> : <IconCopy size={10} />}
         {copied ? "Copied" : "Copy"}
@@ -227,7 +227,7 @@ function CommandRow({ command }: { command: string }) {
 function MacInstallStep({ openExternal }: { openExternal: (url: string) => void }) {
   return (
     <div className="space-y-3">
-      <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+      <p className="text-sm leading-5 text-[var(--color-text-soft)]">
         Download the macOS app and move it to Applications, or install it with Homebrew.
       </p>
       <Button
@@ -247,7 +247,7 @@ function MacInstallStep({ openExternal }: { openExternal: (url: string) => void 
 function WindowsInstallStep({ openExternal }: { openExternal: (url: string) => void }) {
   return (
     <div className="space-y-3">
-      <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+      <p className="text-sm leading-5 text-[var(--color-text-soft)]">
         Download and run the Windows installer.
       </p>
       <Button
@@ -266,7 +266,7 @@ function WindowsInstallStep({ openExternal }: { openExternal: (url: string) => v
 function LinuxInstallStep() {
   return (
     <div className="space-y-2">
-      <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+      <p className="text-sm leading-5 text-[var(--color-text-soft)]">
         Run the official install command in a terminal.
       </p>
       <CommandRow command="curl -fsSL https://ollama.com/install.sh | sh" />
@@ -277,7 +277,7 @@ function LinuxInstallStep() {
 function UnknownPlatformInstallStep({ openExternal }: { openExternal: (url: string) => void }) {
   return (
     <div className="space-y-3">
-      <p className="text-[12px] leading-5 text-[var(--color-text-soft)]">
+      <p className="text-sm leading-5 text-[var(--color-text-soft)]">
         Open the Ollama download page and choose the build for this device.
       </p>
       <Button

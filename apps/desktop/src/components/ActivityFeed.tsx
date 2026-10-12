@@ -1,14 +1,11 @@
 import { useMemo, useState } from "react";
-import { Card } from "./Card";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { useToast } from "./Toast";
+import { Badge, Button, Tabs, type BadgeTone } from "./ui";
 import { copyTextToClipboard } from "../shared/clipboard";
 import {
-  IconActivity,
-  IconBolt,
   IconCheck,
   IconCopy,
-  IconSparkle,
   IconWarning,
 } from "./icons";
 import type {
@@ -28,89 +25,34 @@ export function ActivityFeed({ run }: { run: RunRecord }) {
 
   const [tab, setTab] = useState<Tab>("pipeline");
 
+  const panelId = `run-${tab}-panel`;
   return (
-    <Card className="mb-6">
-      <div className="flex items-center gap-1 border-b border-[var(--color-border-soft)] px-3 py-1">
-        <TabButton
-          active={tab === "pipeline"}
-          onClick={() => setTab("pipeline")}
-          label="Pipeline"
-          count={run.steps.length}
-          icon={<IconActivity size={12} />}
-        />
-        <TabButton
-          active={tab === "logs"}
-          onClick={() => setTab("logs")}
-          label="Logs"
-          count={run.logs.length}
-          icon={<IconBolt size={12} />}
-        />
-        <TabButton
-          active={tab === "reasoning"}
-          onClick={() => setTab("reasoning")}
-          label="Reasoning"
-          count={reasoningSteps.length}
-          icon={<IconSparkle size={12} />}
-        />
+    <section aria-label="Run details">
+      <Tabs
+        ariaLabel="Run detail views"
+        value={tab}
+        onValueChange={(value) => setTab(value as Tab)}
+        tabs={[
+          { id: "pipeline", label: "Pipeline", panelId: "run-pipeline-panel" },
+          { id: "logs", label: "Logs", panelId: "run-logs-panel" },
+          { id: "reasoning", label: "Reasoning", panelId: "run-reasoning-panel" },
+        ]}
+      />
+      <div id={panelId} role="tabpanel" className="pt-4">
+        {tab === "pipeline" ? <PipelineView steps={run.steps} /> : null}
+        {tab === "logs" ? <LogsView logs={run.logs} /> : null}
+        {tab === "reasoning" ? <ReasoningView steps={reasoningSteps} /> : null}
       </div>
-      <div className="p-6">
-        {tab === "pipeline" && <PipelineView steps={run.steps} />}
-        {tab === "logs" && <LogsView logs={run.logs} />}
-        {tab === "reasoning" && <ReasoningView steps={reasoningSteps} />}
-      </div>
-    </Card>
+    </section>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  label,
-  count,
-  icon,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-  icon: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
-        active
-          ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-          : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-      }`}
-    >
-      <span
-        className={
-          active ? "text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"
-        }
-      >
-        {icon}
-      </span>
-      <span>{label}</span>
-      <span
-        className={`rounded-md px-1.5 py-0.5 font-mono text-[10px] tabular-nums ${
-          active
-            ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-            : "bg-[var(--color-bg-raised)] text-[var(--color-text-muted)]"
-        }`}
-      >
-        {count}
-      </span>
-    </button>
-  );
-}
-
-// ─── Pipeline tab ────────────────────────────────────────────────────────
+// Pipeline tab
 
 function PipelineView({ steps }: { steps: RunStepRecord[] }) {
   if (steps.length === 0) {
     return (
-      <div className="py-6 text-center text-[12.5px] text-[var(--color-text-muted)]">
+      <div className="py-6 text-center text-sm text-[var(--color-text-muted)]">
         No steps recorded yet.
       </div>
     );
@@ -171,7 +113,7 @@ function PipelineRow({ step, isLast }: { step: RunStepRecord; isLast: boolean })
 
       <div className="min-w-0">
         <div
-          className={`text-[13.5px] font-medium ${
+          className={`text-base font-medium ${
             isRunning
               ? "text-[var(--color-warning)]"
               : isFailed
@@ -184,7 +126,7 @@ function PipelineRow({ step, isLast }: { step: RunStepRecord; isLast: boolean })
           {step.label}
         </div>
         {step.detail && (
-          <div className="mt-0.5 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+          <div className="mt-0.5 text-sm leading-relaxed text-[var(--color-text-muted)]">
             {step.detail}
           </div>
         )}
@@ -193,8 +135,8 @@ function PipelineRow({ step, isLast }: { step: RunStepRecord; isLast: boolean })
         )}
       </div>
 
-      <div className="shrink-0 self-start text-right font-mono text-[10.5px] text-[var(--color-text-muted)] tabular-nums">
-        {duration ?? "—"}
+      <div className="shrink-0 self-start text-right text-xs text-[var(--color-text-muted)] tabular-nums">
+        {duration ?? "Not started"}
       </div>
     </li>
   );
@@ -208,14 +150,14 @@ function ThinkingBlock({
   return (
     <div className="mt-3 rounded-md bg-[var(--color-think-soft)] p-3 ring-1 ring-[var(--color-think)]/25">
       <div className="mb-1.5 flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-think)]">
+        <span className="text-xs font-medium text-[var(--color-think)]">
           Reasoning
         </span>
-        <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+        <span title={thinking.model} className="min-w-0 truncate font-mono text-xs text-[var(--color-text-muted)]">
           {thinking.model}
         </span>
         {thinking.streaming && (
-          <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]">
+          <span className="ml-auto inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
             <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-think)]" />
             streaming
           </span>
@@ -225,14 +167,14 @@ function ThinkingBlock({
         // Mid-stream, partial markdown like "**Clus" would render
         // half-formatted; show raw text with a blinking caret instead
         // and let the markdown renderer take over once streaming ends.
-        <div className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
+        <div className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-text-soft)]">
           {thinking.text}
           <span className="ml-1 inline-block h-3.5 w-1.5 -translate-y-px animate-pulse-soft bg-[var(--color-think)]" />
         </div>
       ) : (
         <MarkdownPreview
           source={thinking.text}
-          className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]"
+          className="text-sm leading-relaxed text-[var(--color-text-soft)]"
         />
       )}
     </div>
@@ -250,7 +192,7 @@ function stepDuration(step: RunStepRecord): string | undefined {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-// ─── Logs tab ────────────────────────────────────────────────────────────
+// Logs tab
 
 const LOG_LEVELS: RunLogLevel[] = ["error", "warn", "info", "debug"];
 
@@ -269,7 +211,7 @@ function LogsView({ logs }: { logs: RunLogRecord[] }) {
 
   if (logs.length === 0) {
     return (
-      <div className="py-6 text-center text-[12.5px] text-[var(--color-text-muted)]">
+      <div className="py-6 text-center text-sm text-[var(--color-text-muted)]">
         No logs recorded yet.
       </div>
     );
@@ -289,24 +231,23 @@ function LogsView({ logs }: { logs: RunLogRecord[] }) {
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         {LOG_LEVELS.map((level) => (
-          <button
+          <Button
             key={level}
+            type="button"
+            size="sm"
+            variant={enabled.has(level) ? "secondary" : "ghost"}
+            aria-pressed={enabled.has(level)}
             onClick={() => toggle(level)}
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              enabled.has(level)
-                ? logLevelChipClass(level)
-                : "bg-[var(--color-surface)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-            }`}
           >
             <span>{level}</span>
-            <span className="font-mono text-[10px] tabular-nums opacity-70">
+            <span className="text-xs tabular-nums opacity-70">
               {counts[level]}
             </span>
-          </button>
+          </Button>
         ))}
       </div>
       {visible.length === 0 ? (
-        <div className="py-4 text-center text-[12.5px] text-[var(--color-text-muted)]">
+        <div className="py-4 text-center text-sm text-[var(--color-text-muted)]">
           No logs match the selected levels.
         </div>
       ) : (
@@ -320,16 +261,16 @@ function LogsView({ logs }: { logs: RunLogRecord[] }) {
   );
 }
 
-function logLevelChipClass(level: RunLogLevel): string {
+function logLevelTone(level: RunLogLevel): BadgeTone {
   switch (level) {
     case "error":
-      return "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30";
+      return "danger";
     case "warn":
-      return "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/30";
+      return "warning";
     case "info":
-      return "bg-[var(--color-info-soft)] text-[var(--color-info)] ring-1 ring-[var(--color-info)]/30";
+      return "info";
     case "debug":
-      return "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]";
+      return "neutral";
   }
 }
 
@@ -345,25 +286,24 @@ function LogRow({ log }: { log: RunLogRecord }) {
   return (
     <div className="group rounded-md bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
       <div className="relative grid grid-cols-[68px_50px_1fr_auto] items-start gap-3 px-3 py-2">
-        <span className="font-mono text-[10.5px] text-[var(--color-text-muted)] tabular-nums">
+        <span className="text-xs text-[var(--color-text-muted)] tabular-nums">
           {formatLogTime(log.timestamp)}
         </span>
-        <span
-          className={`inline-flex items-center justify-center rounded px-1.5 py-0.5 font-mono text-[9.5px] uppercase ${logLevelChipClass(log.level)}`}
-        >
+        <Badge tone={logLevelTone(log.level)} className="justify-center">
           {log.level}
-        </span>
-        <span className="font-mono text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+        </Badge>
+        <span className="text-sm leading-relaxed text-[var(--color-text-soft)]">
           {log.message}
         </span>
         <div className="flex items-center gap-1">
           {hasExpandableDetail && (
             <button
+              type="button"
               onClick={() => setExpanded((current) => !current)}
               title={expanded ? "Hide details" : "Show details"}
               aria-label={expanded ? "Hide log details" : "Show log details"}
               aria-expanded={expanded}
-              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+              className="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
             >
               <span
                 className={`inline-block transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -373,9 +313,10 @@ function LogRow({ log }: { log: RunLogRecord }) {
             </button>
           )}
           <button
+            type="button"
             onClick={() => {
               void copyTextToClipboard(
-                `${log.timestamp} ${log.level.toUpperCase()} ${log.message}`,
+                `${log.timestamp} ${log.level} ${log.message}`,
               )
                 .then(() => {
                   setCopied(true);
@@ -387,7 +328,7 @@ function LogRow({ log }: { log: RunLogRecord }) {
             }}
             title={copied ? "Copied log line" : "Copy log line"}
             aria-label={copied ? "Copied log line" : "Copy log line"}
-            className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] group-hover:opacity-100"
+            className="rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] group-hover:opacity-100"
           >
             {copied ? <IconCheck size={11} /> : <IconCopy size={11} />}
           </button>
@@ -398,7 +339,7 @@ function LogRow({ log }: { log: RunLogRecord }) {
           {graphCall ? (
             <GraphCallDetails call={graphCall} />
           ) : (
-            <pre className="overflow-auto rounded bg-[var(--color-surface)] p-2 font-mono text-[10.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            <pre className="overflow-auto rounded bg-[var(--color-surface)] p-2 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
               {safeJson(log.metadata)}
             </pre>
           )}
@@ -452,29 +393,29 @@ function extractGraphCall(
 function GraphCallDetails({ call }: { call: GraphCallMetadata }) {
   const queryEntries = call.query ? Object.entries(call.query) : [];
   return (
-    <div className="flex flex-col gap-2.5 text-[11px] text-[var(--color-text-soft)]">
+    <div className="flex flex-col gap-2.5 text-xs text-[var(--color-text-soft)]">
       <div className="flex flex-wrap items-center gap-1.5">
         {call.method && (
           <span
-            className={`inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[9.5px] font-medium uppercase ring-1 ${methodChipClass(call.method)}`}
+            className={`inline-flex items-center rounded px-1.5 py-0.5 font-mono text-xs font-medium ring-1 ${methodChipClass(call.method)}`}
           >
             {call.method}
           </span>
         )}
         {call.path && (
-          <span className="font-mono text-[11px] text-[var(--color-text)]">
+          <span className="font-mono text-xs text-[var(--color-text)]">
             {call.path}
           </span>
         )}
         {call.status !== undefined && (
           <span
-            className={`ml-auto inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[9.5px] ring-1 ${statusChipClass(call.ok, call.status)}`}
+            className={`ml-auto inline-flex items-center rounded px-1.5 py-0.5 font-mono text-xs ring-1 ${statusChipClass(call.ok, call.status)}`}
           >
             {String(call.status)}
           </span>
         )}
       </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[10.5px] text-[var(--color-text-muted)]">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
         {call.durationMs !== undefined && (
           <>
             <dt>duration</dt>
@@ -521,46 +462,46 @@ function GraphCallDetails({ call }: { call: GraphCallMetadata }) {
       </dl>
       {call.shape && (
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="mb-1 text-xs font-medium text-[var(--color-text-muted)]">
             shape
           </div>
-          <pre className="overflow-auto rounded bg-[var(--color-surface)] p-2 font-mono text-[10.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          <pre className="overflow-auto rounded bg-[var(--color-surface)] p-2 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             {call.shape}
           </pre>
         </div>
       )}
       {call.sample !== undefined && (
         <div>
-          <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="mb-1 flex items-center justify-between text-xs font-medium text-[var(--color-text-muted)]">
             <span>response sample</span>
             {(call.sampleTruncated ||
               (typeof call.itemCount === "number" &&
                 Array.isArray(call.sample) &&
                 call.itemCount > call.sample.length)) && (
-              <span className="font-mono normal-case tracking-normal text-[var(--color-text-muted)]">
+              <span className="text-[var(--color-text-muted)]">
                 {Array.isArray(call.sample) && typeof call.itemCount === "number"
                   ? `showing ${call.sample.length} of ${call.itemCount}`
                   : "truncated"}
               </span>
             )}
           </div>
-          <pre className="max-h-[260px] overflow-auto rounded bg-[var(--color-surface)] p-2 font-mono text-[10.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          <pre className="max-h-[260px] overflow-auto rounded bg-[var(--color-surface)] p-2 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             {safeJson(call.sample)}
           </pre>
         </div>
       )}
       {call.errorBody && (
         <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-[var(--color-danger)]">
+          <div className="mb-1 text-xs font-medium text-[var(--color-danger)]">
             error response
           </div>
-          <pre className="overflow-auto rounded bg-[var(--color-danger-soft)] p-2 font-mono text-[10.5px] leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <pre className="overflow-auto rounded bg-[var(--color-danger-soft)] p-2 font-mono text-xs leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {call.errorBody}
           </pre>
         </div>
       )}
       {call.error && !call.errorBody && (
-        <div className="rounded bg-[var(--color-danger-soft)] p-2 font-mono text-[10.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+        <div className="rounded bg-[var(--color-danger-soft)] p-2 text-xs text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
           {call.error}
         </div>
       )}
@@ -623,12 +564,12 @@ function formatLogTime(value: string): string {
   });
 }
 
-// ─── Reasoning tab ───────────────────────────────────────────────────────
+// Reasoning tab
 
 function ReasoningView({ steps }: { steps: RunStepRecord[] }) {
   if (steps.length === 0) {
     return (
-      <div className="py-6 text-center text-[12.5px] text-[var(--color-text-muted)]">
+      <div className="py-6 text-center text-sm text-[var(--color-text-muted)]">
         No LLM reasoning recorded for this run.
       </div>
     );
@@ -637,14 +578,14 @@ function ReasoningView({ steps }: { steps: RunStepRecord[] }) {
     <div className="flex flex-col gap-4">
       {steps.map((step) => (
         <div key={step.id}>
-          <div className="mb-2 flex items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
+          <div className="mb-2 flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             <span className="font-medium text-[var(--color-text-soft)]">
               {step.label}
             </span>
             {step.thinking && (
               <>
                 <span className="opacity-50">·</span>
-                <span className="font-mono">{step.thinking.model}</span>
+                <span title={step.thinking.model} className="min-w-0 truncate font-mono">{step.thinking.model}</span>
               </>
             )}
           </div>

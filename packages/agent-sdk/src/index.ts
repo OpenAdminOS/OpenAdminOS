@@ -965,6 +965,8 @@ export interface IntuneChatMessage {
   status: IntuneChatMessageStatus;
   providerId?: ProviderId;
   model?: string;
+  /** Runtime explanation shown with source details, separate from answer text. */
+  engineNotice?: string;
   sources?: IntuneChatSource[];
   toolTrace?: IntuneChatToolTraceEntry[];
   agentSuggestions?: IntuneChatAgentSuggestion[];
@@ -2671,7 +2673,9 @@ export interface OpenAdminOSApi {
    */
   setActiveModel(providerId: ProviderId, model: string | null): Promise<AppState>;
   /** Update native window chrome to match the device-local renderer theme. */
-  setAppearance?(theme: "dark" | "light"): Promise<void>;
+  setAppearance?(
+    theme: "graphite" | "midnight" | "off-white" | "sand" | "dark" | "light",
+  ): Promise<void>;
   setOfficeFullscreen?(active: boolean): Promise<boolean>;
   onOfficeFullscreenChanged?(listener: (active: boolean) => void): () => void;
   saveOfficePersona?(input: OfficePersonaInput): Promise<OfficeState>;

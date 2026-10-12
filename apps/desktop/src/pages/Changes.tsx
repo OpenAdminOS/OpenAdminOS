@@ -1,57 +1,86 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router";
-import { PageBody, PageHeader } from "../components/AppShell";
-import { Button } from "../components/Button";
-import { Select } from "../components/Select";
-import { Card } from "../components/Card";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router";
+
+import { PageBody } from "../components/AppShell";
 import { Modal, ModalHeader } from "../components/Modal";
-import { OutputPane, OutputPaneSection } from "../components/OutputPane";
-import { Pill, StatusDot } from "../components/Pill";
+import { Select } from "../components/Select";
+import {
+  Badge,
+  Button,
+  DataTable,
+  Drawer,
+  EmptyState,
+  IconButton,
+  KeyValue,
+  Menu,
+  PageHeader,
+  Section,
+  SegmentedControl,
+  StatusDot,
+  Tabs,
+  Toolbar,
+  type BadgeTone,
+  type DataTableColumn,
+} from "../components/ui";
 import {
   IconChanges,
   IconChevronDown,
   IconClock,
-  IconClose,
   IconCopy,
   IconHardDrive,
-  IconPlus,
   IconRefresh,
   IconSearch,
   IconWarning,
 } from "../components/icons";
 import { copyTextToClipboard } from "../shared/clipboard";
+import { userFacingErrorReason } from "../copy/errors";
 import type {
   DriftAttribution,
   DriftBaseline,
   DriftBaselineDriftEntry,
   DriftBaselineDriftResult,
+  DriftBaselineResourceDrift,
   DriftEntryDetail,
   DriftFieldChange,
   DriftObjectHistoryResult,
   DriftResourceStatus,
   DriftTenantCompareEntry,
+  DriftTenantCompareResourceCounts,
   DriftTenantCompareResult,
   DriftTimeCompareResult,
   DriftTimelineChangeKind,
   DriftTimelineEntry,
   DriftTimelineResult,
   GraphCacheResourceKind,
+  GraphCacheStatus,
   WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
-import { createPendingIntent } from "../setup/pending-intent";
+import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import FleetScope from "./Fleet";
 
 type DateRangeValue = "24h" | "7d" | "30d" | "all";
-type ChangesSegment = "timeline" | "baselines" | "compare";
+type ChangesView = "timeline" | "baselines" | "compare";
 type CompareMode = "time" | "tenant";
 type BaselineNameMode = "create" | "rename";
 
-const DATE_RANGES: {
+const DATE_RANGES: Array<{
   value: DateRangeValue;
   label: string;
   ms?: number;
-}[] = [
+}> = [
   { value: "24h", label: "Last 24h", ms: 24 * 60 * 60 * 1000 },
   { value: "7d", label: "Last 7d", ms: 7 * 24 * 60 * 60 * 1000 },
   { value: "30d", label: "Last 30d", ms: 30 * 24 * 60 * 60 * 1000 },
@@ -60,26 +89,45 @@ const DATE_RANGES: {
 
 const INITIAL_LIMIT = 100;
 const LOAD_MORE_STEP = 100;
-const focusRingClass =
-  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
 
 export default function Changes() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { requireTenant } = useSetupFlow();
   const { state } = useAppState();
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
-    : state.tenants[0];
+    : undefined;
   const baselinesAvailable = Boolean(window.openAdminOS?.listDriftBaselines);
   const compareAvailable = Boolean(window.openAdminOS?.getDriftTimeCompare);
   const baselineRollbackAvailable = Boolean(
     window.openAdminOS?.startBaselineRollback,
   );
+  const requestedView = searchParams.get("view");
+  const view: ChangesView =
+    requestedView === "baselines" && baselinesAvailable
+      ? "baselines"
+      : requestedView === "compare" && compareAvailable
+        ? "compare"
+        : "timeline";
+  const allTenantScope =
+    searchParams.get("scope") === "all" && state.tenants.length >= 2;
   const otherTenants = useMemo(
     () => state.tenants.filter((tenant) => tenant.id !== activeTenant?.id),
     [activeTenant?.id, state.tenants],
   );
-  const [segment, setSegment] = useState<ChangesSegment>("timeline");
+
+  const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
+  const [cacheError, setCacheError] = useState<string | null>(null);
+  const [refreshStarting, setRefreshStarting] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const resumedIntentRef = useRef<string | null>(null);
+  const previousPreloadRef = useRef<{
+    tenantId?: string;
+    status?: NonNullable<GraphCacheStatus["preload"]>["status"];
+  }>({});
+
   const [status, setStatus] = useState<DriftTimelineStatus | null>(null);
   const [timeline, setTimeline] = useState<DriftTimelineResult | null>(null);
   const [selectedResource, setSelectedResource] = useState<
@@ -104,17 +152,17 @@ export default function Changes() {
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [pinOpen, setPinOpen] = useState(false);
   const [pinWorkspaceId, setPinWorkspaceId] = useState("");
+
   const [baselines, setBaselines] = useState<DriftBaseline[] | null>(null);
   const [baselineDrift, setBaselineDrift] =
     useState<DriftBaselineDriftResult | null>(null);
   const [baselineLoading, setBaselineLoading] = useState(false);
-  const [baselineLoadAnnouncement, setBaselineLoadAnnouncement] = useState("");
+  const [baselineAnnouncement, setBaselineAnnouncement] = useState("");
   const [baselineError, setBaselineError] = useState<string | null>(null);
   const [baselineNoActive, setBaselineNoActive] = useState(false);
   const [baselineReloadNonce, setBaselineReloadNonce] = useState(0);
-  const [expandedBaselineEntry, setExpandedBaselineEntry] = useState<
-    string | null
-  >(null);
+  const [selectedBaselineDrift, setSelectedBaselineDrift] =
+    useState<DriftBaselineDriftEntry | null>(null);
   const [baselineNameMode, setBaselineNameMode] =
     useState<BaselineNameMode | null>(null);
   const [baselineName, setBaselineName] = useState("");
@@ -132,6 +180,10 @@ export default function Changes() {
     string | null
   >(null);
   const [baselineRollbackBusy, setBaselineRollbackBusy] = useState(false);
+  const [rollbackSelection, setRollbackSelection] = useState<ReadonlySet<string>>(
+    new Set<string>(),
+  );
+
   const [compareMode, setCompareMode] = useState<CompareMode>("time");
   const [timeCompareFrom, setTimeCompareFrom] = useState(() =>
     defaultCompareDateValue(-7),
@@ -145,10 +197,9 @@ export default function Changes() {
   const [timeCompareLoading, setTimeCompareLoading] = useState(false);
   const [timeCompareAnnouncement, setTimeCompareAnnouncement] = useState("");
   const [timeCompareError, setTimeCompareError] = useState<string | null>(null);
+  const [selectedTimeCompareEntry, setSelectedTimeCompareEntry] =
+    useState<DriftBaselineDriftEntry | null>(null);
   const timeCompareRequestId = useRef(0);
-  const [expandedTimeCompareEntry, setExpandedTimeCompareEntry] = useState<
-    string | null
-  >(null);
   const [tenantCompareId, setTenantCompareId] = useState("");
   const [includeAssignments, setIncludeAssignments] = useState(false);
   const [tenantCompare, setTenantCompare] =
@@ -159,10 +210,39 @@ export default function Changes() {
   const [tenantCompareError, setTenantCompareError] = useState<string | null>(
     null,
   );
-  const [tenantCompareReloadNonce, setTenantCompareReloadNonce] = useState(0);
-  const [expandedTenantCompareEntry, setExpandedTenantCompareEntry] = useState<
-    string | null
-  >(null);
+  const [selectedTenantCompareEntry, setSelectedTenantCompareEntry] =
+    useState<DriftTenantCompareEntry | null>(null);
+
+  const replaceSearchParams = useCallback(
+    (changes: Record<string, string | null>, replace = false) => {
+      const next = new URLSearchParams(searchParams);
+      for (const [key, value] of Object.entries(changes)) {
+        if (value === null) next.delete(key);
+        else next.set(key, value);
+      }
+      setSearchParams(next, { replace });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const handleViewChange = (nextView: string) => {
+    const resolved = nextView as ChangesView;
+    replaceSearchParams({
+      view: resolved === "timeline" ? null : resolved,
+      scope: resolved === "timeline" ? searchParams.get("scope") : null,
+      change: null,
+    });
+    setSelectedEntry(null);
+  };
+
+  const handleScopeChange = (nextScope: string) => {
+    replaceSearchParams({
+      scope: nextScope === "all" ? "all" : null,
+      view: nextScope === "all" ? null : searchParams.get("view"),
+      change: null,
+    });
+    setSelectedEntry(null);
+  };
 
   useEffect(() => {
     const normalized = query.trim();
@@ -175,36 +255,141 @@ export default function Changes() {
   }, [query]);
 
   useEffect(() => {
-    if (
-      (segment === "baselines" && !baselinesAvailable) ||
-      (segment === "compare" && !compareAvailable)
-    ) {
-      setSegment("timeline");
+    if (!activeTenant) {
+      setCacheStatus(null);
+      return;
     }
-  }, [baselinesAvailable, compareAvailable, segment]);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const load = async () => {
+      try {
+        const next = await window.openAdminOS?.getGraphCacheStatus(
+          activeTenant.id,
+        );
+        if (cancelled || !next) return;
+        setCacheStatus(next);
+        setCacheError(null);
+      } catch (caught) {
+        if (!cancelled) {
+          setCacheError(caught instanceof Error ? caught.message : String(caught));
+        }
+      }
+      if (!cancelled) timer = setTimeout(() => void load(), 1000);
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeTenant]);
 
   useEffect(() => {
-    timeCompareRequestId.current += 1;
-    setTimeCompare(null);
-    setTimeCompareError(null);
-    setTimeCompareLoading(false);
-    setExpandedTimeCompareEntry(null);
-    setTenantCompare(null);
-    setTenantCompareError(null);
-    setExpandedTenantCompareEntry(null);
-  }, [activeTenant?.id]);
+    const tenantId = activeTenant?.id;
+    if (!tenantId) {
+      previousPreloadRef.current = {};
+      return;
+    }
+    if (cacheStatus?.tenantId && cacheStatus.tenantId !== tenantId) return;
+    const status = cacheStatus?.preload?.status;
+    const previous = previousPreloadRef.current;
+    if (
+      previous.tenantId === tenantId &&
+      previous.status === "running" &&
+      status &&
+      status !== "running"
+    ) {
+      setReloadNonce((value) => value + 1);
+      setBaselineReloadNonce((value) => value + 1);
+      setRefreshToken((value) => value + 1);
+    }
+    previousPreloadRef.current = { tenantId, status };
+  }, [activeTenant?.id, cacheStatus?.preload?.status, cacheStatus?.tenantId]);
+
+  const handleRefreshCache = useCallback(async () => {
+    const api = window.openAdminOS;
+    if (!api || refreshStarting) return;
+    if (
+      !requireTenant(
+        createPendingIntent({
+          kind: "refresh-cache",
+          returnTo: `${location.pathname}${location.search}`,
+        }),
+      )
+    ) {
+      return;
+    }
+    if (!activeTenant) return;
+
+    setRefreshStarting(true);
+    setCacheError(null);
+    try {
+      const resources = cacheStatus?.resources.map((resource) => resource.resource);
+      await api.startGraphCachePreload({
+        tenantId: activeTenant.id,
+        ...(resources?.length ? { resources } : {}),
+      });
+      const nextStatus = await api.getGraphCacheStatus(activeTenant.id);
+      setCacheStatus(nextStatus);
+      if (nextStatus.preload?.status !== "running") {
+        setReloadNonce((value) => value + 1);
+        setBaselineReloadNonce((value) => value + 1);
+        setRefreshToken((value) => value + 1);
+      }
+    } catch (caught) {
+      setCacheError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setRefreshStarting(false);
+    }
+  }, [
+    activeTenant,
+    cacheStatus?.resources,
+    location.pathname,
+    location.search,
+    refreshStarting,
+    requireTenant,
+  ]);
+
+  const handleCancelRefresh = async () => {
+    if (!activeTenant || !window.openAdminOS) return;
+    setCacheError(null);
+    try {
+      await window.openAdminOS.cancelGraphCachePreload(activeTenant.id);
+      setCacheStatus(
+        await window.openAdminOS.getGraphCacheStatus(activeTenant.id),
+      );
+    } catch (caught) {
+      setCacheError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
 
   useEffect(() => {
-    setTenantCompareId((current) =>
-      current && otherTenants.some((tenant) => tenant.id === current)
-        ? current
-        : (otherTenants[0]?.id ?? ""),
-    );
-  }, [otherTenants]);
+    const routeState = location.state as {
+      resumePendingIntent?: PendingIntent;
+    } | null;
+    const resumed = routeState?.resumePendingIntent;
+    if (
+      resumed?.kind !== "refresh-cache" ||
+      resumedIntentRef.current === resumed.createdAt
+    ) {
+      return;
+    }
+    resumedIntentRef.current = resumed.createdAt;
+    navigate(`${location.pathname}${location.search}`, {
+      replace: true,
+      state: null,
+    });
+    void handleRefreshCache();
+  }, [
+    handleRefreshCache,
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+  ]);
 
   useEffect(() => {
     const api = window.openAdminOS;
-    if (segment !== "timeline") {
+    if (allTenantScope || view !== "timeline") {
       setLoading(false);
       return;
     }
@@ -216,10 +401,8 @@ export default function Changes() {
     }
     if (!api?.getDriftStatus || !api.getDriftTimeline) {
       setError(
-        "Change history is unavailable in this build. The desktop bridge does not expose the drift timeline methods.",
+        "Change history is unavailable in this build. Update OpenAdminOS and try again.",
       );
-      setStatus(null);
-      setTimeline(null);
       setLoading(false);
       return;
     }
@@ -227,8 +410,7 @@ export default function Changes() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setLoadAnnouncement("Loading change history.");
-
+    setLoadAnnouncement("Loading change history…");
     const bounds = dateRangeBounds(dateRange);
     const resources =
       selectedResource === "all" ? undefined : [selectedResource];
@@ -268,29 +450,24 @@ export default function Changes() {
     };
   }, [
     activeTenant,
+    allTenantScope,
     dateRange,
     debouncedQuery,
     limit,
     reloadNonce,
-    segment,
     selectedResource,
+    view,
   ]);
 
   useEffect(() => {
     const api = window.openAdminOS;
-    if (segment !== "baselines" || !baselinesAvailable) {
+    if (allTenantScope || view !== "baselines" || !baselinesAvailable) {
       setBaselineLoading(false);
       return;
     }
-    if (!activeTenant) {
+    if (!activeTenant || !api?.listDriftBaselines) {
       setBaselines(null);
       setBaselineDrift(null);
-      setBaselineError(null);
-      setBaselineNoActive(false);
-      setBaselineLoading(false);
-      return;
-    }
-    if (!api?.listDriftBaselines) {
       setBaselineLoading(false);
       return;
     }
@@ -299,7 +476,7 @@ export default function Changes() {
     let cancelled = false;
     setBaselineLoading(true);
     setBaselineError(null);
-    setBaselineLoadAnnouncement("Loading baselines…");
+    setBaselineAnnouncement("Loading baselines…");
 
     void (async () => {
       try {
@@ -308,23 +485,20 @@ export default function Changes() {
         });
         if (cancelled) return;
         setBaselines(nextBaselines);
-
         const nextActive = nextBaselines.find(
           (baseline) => baseline.status === "active",
         );
         if (!nextActive) {
           setBaselineDrift(null);
           setBaselineNoActive(true);
-          setExpandedBaselineEntry(null);
-          setBaselineLoadAnnouncement("No active baseline.");
+          setBaselineAnnouncement("No active baseline.");
           return;
         }
         if (!api.getDriftBaselineDrift) {
           throw new Error(
-            "Baseline drift is unavailable in this build. The desktop bridge does not expose the drift evaluation method.",
+            "Baseline drift is unavailable in this build. Update OpenAdminOS and try again.",
           );
         }
-
         try {
           const nextDrift = await api.getDriftBaselineDrift({
             tenantId: activeTenant.id,
@@ -333,7 +507,7 @@ export default function Changes() {
           if (cancelled) return;
           setBaselineDrift(nextDrift);
           setBaselineNoActive(false);
-          setBaselineLoadAnnouncement(
+          setBaselineAnnouncement(
             nextDrift.entries.length === 1
               ? "Showing 1 baseline drift entry."
               : `Showing ${nextDrift.entries.length} baseline drift entries.`,
@@ -343,18 +517,18 @@ export default function Changes() {
           if (isNoActiveBaselineError(caught)) {
             setBaselineDrift(null);
             setBaselineNoActive(true);
-            setExpandedBaselineEntry(null);
-            setBaselineLoadAnnouncement("No active baseline.");
+            setBaselineAnnouncement("No active baseline.");
             return;
           }
           throw caught;
         }
       } catch (caught) {
-        if (cancelled) return;
-        setBaselineError(
-          caught instanceof Error ? caught.message : String(caught),
-        );
-        setBaselineLoadAnnouncement("Baselines could not be loaded.");
+        if (!cancelled) {
+          setBaselineError(
+            caught instanceof Error ? caught.message : String(caught),
+          );
+          setBaselineAnnouncement("Baselines could not be loaded.");
+        }
       } finally {
         if (!cancelled) setBaselineLoading(false);
       }
@@ -363,79 +537,12 @@ export default function Changes() {
     return () => {
       cancelled = true;
     };
-  }, [activeTenant, baselineReloadNonce, baselinesAvailable, segment]);
-
-  useEffect(() => {
-    const api = window.openAdminOS;
-    if (
-      segment !== "compare" ||
-      compareMode !== "tenant" ||
-      !compareAvailable
-    ) {
-      setTenantCompareLoading(false);
-      return;
-    }
-    if (!activeTenant || !tenantCompareId) {
-      setTenantCompare(null);
-      setTenantCompareError(null);
-      setTenantCompareLoading(false);
-      return;
-    }
-    if (!api?.getDriftTenantCompare) {
-      setTenantCompare(null);
-      setTenantCompareError(
-        "Tenant comparison is unavailable in this build. The desktop bridge does not expose the tenant comparison method.",
-      );
-      setTenantCompareAnnouncement("Tenant comparison could not be loaded.");
-      setTenantCompareLoading(false);
-      return;
-    }
-    const getDriftTenantCompare = api.getDriftTenantCompare;
-
-    let cancelled = false;
-    setTenantCompareLoading(true);
-    setTenantCompareError(null);
-    setTenantCompare(null);
-    setExpandedTenantCompareEntry(null);
-    setTenantCompareAnnouncement("Comparing tenant configuration.");
-
-    void getDriftTenantCompare({
-      tenantIdA: activeTenant.id,
-      tenantIdB: tenantCompareId,
-      limit: INITIAL_LIMIT,
-      includeAssignments,
-    })
-      .then((result) => {
-        if (cancelled) return;
-        setTenantCompare(result);
-        setTenantCompareAnnouncement(
-          result.entries.length === 1
-            ? "Showing 1 tenant comparison entry."
-            : `Showing ${result.entries.length} tenant comparison entries.`,
-        );
-      })
-      .catch((caught) => {
-        if (cancelled) return;
-        setTenantCompareError(
-          caught instanceof Error ? caught.message : String(caught),
-        );
-        setTenantCompareAnnouncement("Tenant comparison could not be loaded.");
-      })
-      .finally(() => {
-        if (!cancelled) setTenantCompareLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     activeTenant,
-    compareAvailable,
-    compareMode,
-    includeAssignments,
-    segment,
-    tenantCompareId,
-    tenantCompareReloadNonce,
+    allTenantScope,
+    baselineReloadNonce,
+    baselinesAvailable,
+    view,
   ]);
 
   useEffect(() => {
@@ -451,8 +558,7 @@ export default function Changes() {
         if (cancelled) return;
         setWorkspaces(nextWorkspaces);
         setPinWorkspaceId((current) =>
-          current &&
-          nextWorkspaces.some((workspace) => workspace.id === current)
+          current && nextWorkspaces.some((workspace) => workspace.id === current)
             ? current
             : (nextWorkspaces[0]?.id ?? ""),
         );
@@ -464,6 +570,26 @@ export default function Changes() {
       cancelled = true;
     };
   }, [activeTenant]);
+
+  useEffect(() => {
+    setTenantCompareId((current) =>
+      current && otherTenants.some((tenant) => tenant.id === current)
+        ? current
+        : (otherTenants[0]?.id ?? ""),
+    );
+  }, [otherTenants]);
+
+  useEffect(() => {
+    timeCompareRequestId.current += 1;
+    setTimeCompare(null);
+    setTimeCompareError(null);
+    setTimeCompareLoading(false);
+    setSelectedTimeCompareEntry(null);
+    setTenantCompare(null);
+    setTenantCompareError(null);
+    setSelectedTenantCompareEntry(null);
+    setRollbackSelection(new Set());
+  }, [activeTenant?.id]);
 
   useEffect(() => {
     if (
@@ -478,14 +604,11 @@ export default function Changes() {
   }, [selectedResource, status]);
 
   useEffect(() => {
-    if (
-      selectedEntry &&
-      timeline &&
-      !timeline.entries.some((entry) => entry.id === selectedEntry.id)
-    ) {
-      setSelectedEntry(null);
-    }
-  }, [selectedEntry, timeline]);
+    const entryId = searchParams.get("change");
+    if (!entryId || !timeline) return;
+    const next = timeline.entries.find((entry) => entry.id === entryId);
+    if (next && next.id !== selectedEntry?.id) setSelectedEntry(next);
+  }, [searchParams, selectedEntry?.id, timeline]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -509,7 +632,6 @@ export default function Changes() {
     setDetailError(null);
     setDetail(null);
     setHistory(null);
-
     void Promise.all([
       api.getDriftEntryDetail({
         tenantId: activeTenant.id,
@@ -552,21 +674,7 @@ export default function Changes() {
       (resource) => resource.resource === selectedResource,
     );
   }, [selectedResource, status]);
-
-  const visibleEntries = useMemo(() => {
-    const entries = timeline?.entries ?? [];
-    return entries.filter((entry) => {
-      if (selectedResource !== "all" && entry.resource !== selectedResource) {
-        return false;
-      }
-      return true;
-    });
-  }, [selectedResource, timeline]);
-
-  const groupedEntries = useMemo(
-    () => groupEntriesByDay(visibleEntries),
-    [visibleEntries],
-  );
+  const visibleEntries = timeline?.entries ?? [];
   const noBaselineYet =
     Boolean(status) &&
     (selectedStatusResources.length === 0 ||
@@ -598,9 +706,6 @@ export default function Changes() {
     ? undefined
     : (tenantBaselineDrift?.baseline ??
       tenantBaselines.find((baseline) => baseline.status === "active"));
-  const retiredBaselines = tenantBaselines.filter(
-    (baseline) => baseline.status === "retired",
-  );
   const selectedCompareTenant = otherTenants.find(
     (tenant) => tenant.id === tenantCompareId,
   );
@@ -608,38 +713,57 @@ export default function Changes() {
     timeCompareFrom,
     timeCompareTo,
   );
+  const latestRefresh = cacheStatus?.resources
+    .map((resource) => resource.refreshedAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+  const refreshJob = cacheStatus?.preload;
+  const refreshing = refreshStarting || refreshJob?.status === "running";
+  const freshnessLabel = refreshJob?.status === "running"
+    ? `Refreshing ${refreshJob.completed} of ${refreshJob.total}`
+    : latestRefresh
+      ? `Updated ${formatRelativeTime(latestRefresh)}`
+      : "Not refreshed yet";
 
   const handleResourceChange = (value: string) => {
     setSelectedResource(
       value === "all" ? "all" : (value as GraphCacheResourceKind),
     );
     setLimit(INITIAL_LIMIT);
-    setSelectedEntry(null);
+    closeChangeDrawer(true);
   };
 
   const handleDateRangeChange = (value: string) => {
     setDateRange(value as DateRangeValue);
     setLimit(INITIAL_LIMIT);
-    setSelectedEntry(null);
+    closeChangeDrawer(true);
   };
+
+  function openChangeDrawer(entry: DriftTimelineEntry) {
+    setSelectedEntry(entry);
+    replaceSearchParams({ change: entry.id });
+  }
+
+  function closeChangeDrawer(replace = false) {
+    setSelectedEntry(null);
+    setDetail(null);
+    setHistory(null);
+    replaceSearchParams({ change: null }, replace);
+  }
 
   const handleTimeCompare = async () => {
     const api = window.openAdminOS;
-    if (!activeTenant || timeCompareValidation) return;
-    if (!api?.getDriftTimeCompare) {
-      setTimeCompareError(
-        "Time comparison is unavailable in this build. The desktop bridge does not expose the time comparison method.",
-      );
+    if (!activeTenant || timeCompareValidation || !api?.getDriftTimeCompare) {
       return;
     }
-
     const requestId = timeCompareRequestId.current + 1;
     timeCompareRequestId.current = requestId;
     setTimeCompareLoading(true);
     setTimeCompareError(null);
     setTimeCompare(null);
-    setExpandedTimeCompareEntry(null);
-    setTimeCompareAnnouncement("Comparing configuration over time.");
+    setSelectedTimeCompareEntry(null);
+    setTimeCompareAnnouncement("Comparing configuration over time…");
     try {
       const result = await api.getDriftTimeCompare({
         tenantId: activeTenant.id,
@@ -667,13 +791,35 @@ export default function Changes() {
     }
   };
 
-  const handleTimeCompareDateChange = (field: "from" | "to", value: string) => {
-    if (field === "from") setTimeCompareFrom(value);
-    else setTimeCompareTo(value);
-    setTimeCompare(null);
-    setTimeCompareError(null);
-    setExpandedTimeCompareEntry(null);
-    setTimeCompareAnnouncement("");
+  const handleTenantCompare = async () => {
+    const api = window.openAdminOS;
+    if (!activeTenant || !tenantCompareId || !api?.getDriftTenantCompare) return;
+    setTenantCompareLoading(true);
+    setTenantCompareError(null);
+    setTenantCompare(null);
+    setSelectedTenantCompareEntry(null);
+    setTenantCompareAnnouncement("Comparing tenant configuration…");
+    try {
+      const result = await api.getDriftTenantCompare({
+        tenantIdA: activeTenant.id,
+        tenantIdB: tenantCompareId,
+        limit: INITIAL_LIMIT,
+        includeAssignments,
+      });
+      setTenantCompare(result);
+      setTenantCompareAnnouncement(
+        result.entries.length === 1
+          ? "Showing 1 tenant comparison entry."
+          : `Showing ${result.entries.length} tenant comparison entries.`,
+      );
+    } catch (caught) {
+      setTenantCompareError(
+        caught instanceof Error ? caught.message : String(caught),
+      );
+      setTenantCompareAnnouncement("Tenant comparison could not be loaded.");
+    } finally {
+      setTenantCompareLoading(false);
+    }
   };
 
   const handleCopy = async () => {
@@ -764,9 +910,7 @@ export default function Changes() {
     try {
       if (baselineNameMode === "create") {
         if (!api?.createDriftBaseline) {
-          throw new Error(
-            "Baseline creation is unavailable in this build. The desktop bridge does not expose the create method.",
-          );
+          throw new Error("Baseline creation is unavailable in this build.");
         }
         const created = await api.createDriftBaseline({
           tenantId: activeTenant.id,
@@ -776,63 +920,20 @@ export default function Changes() {
           created,
           ...(current ?? []).filter((baseline) => baseline.id !== created.id),
         ]);
-        setBaselineDrift(null);
         setBaselineNoActive(false);
-        setBaselineError(null);
-        setExpandedBaselineEntry(null);
         setBaselineNameMode(null);
-        setBaselineLoading(true);
-        setBaselineLoadAnnouncement("Evaluating the new baseline…");
-
-        if (!api.getDriftBaselineDrift) {
-          setBaselineError(
-            "Baseline drift is unavailable in this build. The desktop bridge does not expose the drift evaluation method.",
-          );
-          setBaselineLoading(false);
-          return;
-        }
-        try {
+        if (api.getDriftBaselineDrift) {
           const nextDrift = await api.getDriftBaselineDrift({
             tenantId: activeTenant.id,
             baselineId: created.id,
           });
           setBaselineDrift(nextDrift);
-          setBaselines((current) =>
-            (current ?? []).map((baseline) =>
-              baseline.id === nextDrift.baseline.id
-                ? nextDrift.baseline
-                : baseline,
-            ),
-          );
-          setBaselineLoadAnnouncement(
-            nextDrift.entries.length === 1
-              ? "Showing 1 baseline drift entry."
-              : `Showing ${nextDrift.entries.length} baseline drift entries.`,
-          );
-        } catch (caught) {
-          if (isNoActiveBaselineError(caught)) {
-            setBaselineDrift(null);
-            setBaselineNoActive(true);
-            setBaselineLoadAnnouncement("No active baseline.");
-          } else {
-            setBaselineError(
-              caught instanceof Error ? caught.message : String(caught),
-            );
-            setBaselineLoadAnnouncement("Baseline drift could not be loaded.");
-          }
-        } finally {
-          setBaselineLoading(false);
         }
         return;
       }
 
-      if (!activeBaseline) {
+      if (!activeBaseline || !api?.renameDriftBaseline) {
         throw new Error("No active baseline exists to rename.");
-      }
-      if (!api?.renameDriftBaseline) {
-        throw new Error(
-          "Baseline rename is unavailable in this build. The desktop bridge does not expose the rename method.",
-        );
       }
       const renamed = await api.renameDriftBaseline({
         tenantId: activeTenant.id,
@@ -859,12 +960,6 @@ export default function Changes() {
     }
   };
 
-  const closeRetireBaselineModal = () => {
-    if (retireBaselineBusy) return;
-    setRetireBaselineOpen(false);
-    setRetireBaselineError(null);
-  };
-
   const handleRetireBaseline = async () => {
     const api = window.openAdminOS;
     if (!activeTenant || !activeBaseline) return;
@@ -872,9 +967,7 @@ export default function Changes() {
     setRetireBaselineError(null);
     try {
       if (!api?.retireDriftBaseline) {
-        throw new Error(
-          "Baseline retirement is unavailable in this build. The desktop bridge does not expose the retire method.",
-        );
+        throw new Error("Baseline retirement is unavailable in this build.");
       }
       const retired = await api.retireDriftBaseline({
         tenantId: activeTenant.id,
@@ -890,8 +983,7 @@ export default function Changes() {
       });
       setBaselineDrift(null);
       setBaselineNoActive(true);
-      setExpandedBaselineEntry(null);
-      setBaselineLoadAnnouncement("No active baseline.");
+      setRollbackSelection(new Set());
       setRetireBaselineOpen(false);
     } catch (caught) {
       setRetireBaselineError(
@@ -902,11 +994,6 @@ export default function Changes() {
     }
   };
 
-  // Empty selection means "roll back everything currently drifted",
-  // which keeps the default one click.
-  const [rollbackSelection, setRollbackSelection] = useState<ReadonlySet<string>>(
-    new Set<string>(),
-  );
   const toggleRollbackSelection = (entry: DriftBaselineDriftEntry) => {
     const key = baselineDriftEntryKey(entry);
     setRollbackSelection((current) => {
@@ -917,30 +1004,21 @@ export default function Changes() {
     });
   };
 
-  const closeBaselineRollbackModal = () => {
-    if (baselineRollbackBusy) return;
-    setBaselineRollbackOpen(false);
-    setBaselineRollbackError(null);
-  };
-
   const handleBaselineRollback = async () => {
     const startBaselineRollback = window.openAdminOS?.startBaselineRollback;
     if (!activeTenant) return;
-
     setBaselineRollbackBusy(true);
     setBaselineRollbackError(null);
     try {
       if (!startBaselineRollback) {
-        throw new Error(
-          "Baseline rollback is unavailable in this build. The desktop bridge does not expose the rollback method.",
-        );
+        throw new Error("Baseline rollback is unavailable in this build.");
       }
       const picked = baselineDrift?.entries.filter((entry) =>
         rollbackSelection.has(baselineDriftEntryKey(entry)),
       );
       const run = await startBaselineRollback({
         tenantId: activeTenant.id,
-        ...(picked && picked.length > 0
+        ...(picked?.length
           ? {
               selections: picked.map((entry) => ({
                 resource: entry.resource,
@@ -960,221 +1038,271 @@ export default function Changes() {
     }
   };
 
+  const viewTabs = [
+    { id: "timeline", label: "Timeline", panelId: "changes-panel" },
+    ...(baselinesAvailable
+      ? [{ id: "baselines", label: "Baselines", panelId: "changes-panel" }]
+      : []),
+    ...(compareAvailable
+      ? [{ id: "compare", label: "Compare", panelId: "changes-panel" }]
+      : []),
+  ];
+
   return (
     <>
       <PageHeader
         title="Changes"
-        subtitle={
-          activeTenant
-            ? segment === "baselines" && baselinesAvailable
-              ? `Named configuration baselines for ${activeTenant.displayName}. Drift is evaluated from local tracked versions.`
-              : segment === "compare" && compareAvailable
-                ? `Compare retained configuration for ${activeTenant.displayName}. Results use local tracked versions.`
-                : `Tenant drift timeline for ${activeTenant.displayName}. Entries are computed from local cache snapshots.`
-            : "Connect a Microsoft 365 tenant before reviewing change history."
+        actions={
+          <>
+            <span
+              aria-live="polite"
+              className="text-sm text-[var(--color-text-muted)]"
+            >
+              {freshnessLabel}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<IconRefresh size={13} className={refreshing ? "animate-spin" : ""} />}
+              onClick={() =>
+                refreshing ? void handleCancelRefresh() : void handleRefreshCache()
+              }
+            >
+              {refreshing ? "Cancel" : "Refresh"}
+            </Button>
+          </>
         }
       />
       <PageBody>
         <div role="status" aria-live="polite" className="sr-only">
-          {segment === "baselines" && baselinesAvailable
-            ? baselineLoading
-              ? "Loading baselines…"
-              : baselineLoadAnnouncement
-            : segment === "compare" && compareAvailable
-              ? compareMode === "time"
-                ? timeCompareLoading
-                  ? "Comparing configuration over time."
-                  : timeCompareAnnouncement
-                : tenantCompareLoading
-                  ? "Comparing tenant configuration."
-                  : tenantCompareAnnouncement
-              : loading
-                ? "Loading change history."
-                : loadAnnouncement}
+          {allTenantScope
+            ? "Showing all-tenant change status."
+            : view === "baselines"
+              ? baselineLoading
+                ? "Loading baselines…"
+                : baselineAnnouncement
+              : view === "compare"
+                ? compareMode === "time"
+                  ? timeCompareLoading
+                    ? "Comparing configuration over time…"
+                    : timeCompareAnnouncement
+                  : tenantCompareLoading
+                    ? "Comparing tenant configuration…"
+                    : tenantCompareAnnouncement
+                : loading
+                  ? "Loading change history…"
+                  : loadAnnouncement}
         </div>
 
-        <ChangesSegmentControl
-          segment={segment}
-          showBaselines={baselinesAvailable}
-          showCompare={compareAvailable}
-          onChange={setSegment}
+        <Toolbar
+          className="mb-5 border-b border-[var(--color-border-soft)] pb-3"
+          search={
+            <Tabs
+              ariaLabel="Changes views"
+              tabs={viewTabs}
+              value={allTenantScope ? "timeline" : view}
+              onValueChange={handleViewChange}
+            />
+          }
+          filters={
+            <>
+              {state.tenants.length >= 2 ? (
+                <SegmentedControl
+                  ariaLabel="Tenant scope"
+                  value={allTenantScope ? "all" : "tenant"}
+                  onValueChange={handleScopeChange}
+                  options={[
+                    { id: "tenant", label: "This tenant" },
+                    { id: "all", label: "All tenants" },
+                  ]}
+                />
+              ) : null}
+              {!allTenantScope && view === "timeline" ? (
+                <TimelineFilters
+                  resources={status?.resources ?? []}
+                  selectedResource={selectedResource}
+                  onResourceChange={handleResourceChange}
+                  dateRange={dateRange}
+                  onDateRangeChange={handleDateRangeChange}
+                  query={query}
+                  onQueryChange={setQuery}
+                  disabled={loading && !timeline}
+                />
+              ) : null}
+            </>
+          }
         />
 
-        {!activeTenant ? (
-          <NoTenantState
-            onConnect={() =>
-              requireTenant(
-                createPendingIntent({
-                  kind: "view-changes",
-                  returnTo: "/changes",
-                }),
-              )
-            }
-          />
-        ) : segment === "baselines" && baselinesAvailable ? (
-          <BaselinesSegment
-            rollbackSelection={rollbackSelection}
-            onToggleRollbackSelection={toggleRollbackSelection}
-            loading={baselineLoading}
-            error={baselineError}
-            activeBaseline={activeBaseline}
-            drift={tenantBaselineDrift}
-            retiredBaselines={retiredBaselines}
-            expandedEntry={expandedBaselineEntry}
-            onToggleEntry={(entry) => {
-              const key = baselineDriftEntryKey(entry);
-              setExpandedBaselineEntry((current) =>
-                current === key ? null : key,
-              );
-            }}
-            onCreate={openCreateBaseline}
-            onRename={openRenameBaseline}
-            onRetire={() => {
-              setRetireBaselineError(null);
-              setRetireBaselineOpen(true);
-            }}
-            onRollback={
-              baselineRollbackAvailable
-                ? () => {
-                    setBaselineRollbackError(null);
-                    setBaselineRollbackOpen(true);
-                  }
-                : undefined
-            }
-            onRetry={() => {
-              setBaselineError(null);
-              setBaselineReloadNonce((current) => current + 1);
-            }}
-          />
-        ) : segment === "compare" && compareAvailable ? (
-          <CompareSegment
-            mode={compareMode}
-            onModeChange={setCompareMode}
-            timeFrom={timeCompareFrom}
-            timeTo={timeCompareTo}
-            timeValidation={timeCompareValidation}
-            timeLoading={timeCompareLoading}
-            timeError={timeCompareError}
-            timeResult={timeCompare}
-            expandedTimeEntry={expandedTimeCompareEntry}
-            onTimeFromChange={(value) =>
-              handleTimeCompareDateChange("from", value)
-            }
-            onTimeToChange={(value) => handleTimeCompareDateChange("to", value)}
-            onRunTimeCompare={() => void handleTimeCompare()}
-            onToggleTimeEntry={(entry) => {
-              const key = baselineDriftEntryKey(entry);
-              setExpandedTimeCompareEntry((current) =>
-                current === key ? null : key,
-              );
-            }}
-            tenants={otherTenants}
-            activeTenant={activeTenant}
-            selectedTenant={selectedCompareTenant}
-            selectedTenantId={tenantCompareId}
-            includeAssignments={includeAssignments}
-            tenantLoading={tenantCompareLoading}
-            tenantError={tenantCompareError}
-            tenantResult={tenantCompare}
-            expandedTenantEntry={expandedTenantCompareEntry}
-            onTenantChange={setTenantCompareId}
-            onIncludeAssignmentsChange={setIncludeAssignments}
-            onToggleTenantEntry={(entry, index) => {
-              const key = tenantCompareEntryKey(entry, index);
-              setExpandedTenantCompareEntry((current) =>
-                current === key ? null : key,
-              );
-            }}
-            onRetryTenant={() =>
-              setTenantCompareReloadNonce((current) => current + 1)
-            }
-          />
-        ) : (
-          <div className="space-y-4">
-            {error ? (
-              <InlineState
-                tone="danger"
-                title="Change history unavailable"
-                message={`${error} Try again after the desktop bridge and local cache are ready.`}
-                action={
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    leadingIcon={<IconRefresh size={12} />}
-                    onClick={() => {
-                      setError(null);
-                      setReloadNonce((current) => current + 1);
-                    }}
-                  >
-                    Retry
-                  </Button>
-                }
-              />
-            ) : null}
-            {notice ? (
-              <InlineState tone="success" title="Done" message={notice} />
-            ) : null}
-            {status?.resources.some((resource) => resource.pageLimitReached) ? (
-              <InlineState
-                tone="info"
-                title="Change coverage is capped"
-                message="At least one Graph collection exceeded the local 1,000-row cache limit. Objects outside the cached window are not inferred as removed."
-              />
-            ) : null}
-            {timeline?.historyTruncated ? (
-              <InlineState
-                tone="info"
-                title="Older history is not included"
-                message="This view searched the newest 5,000 snapshots per resource. Narrow the resource or date range to search older retained history."
-              />
-            ) : null}
-
-            <FiltersRow
-              resources={status?.resources ?? []}
-              selectedResource={selectedResource}
-              onResourceChange={handleResourceChange}
-              dateRange={dateRange}
-              onDateRangeChange={handleDateRangeChange}
-              query={query}
-              onQueryChange={setQuery}
-              disabled={loading && !timeline}
+        {cacheError ? (
+          <CompactNotice tone="danger">
+            Cache refresh status could not be updated.{" "}
+            {userFacingErrorReason(cacheError) ?? "Check the tenant connection, then refresh again."}
+          </CompactNotice>
+        ) : null}
+        {refreshJob?.status === "running" ? (
+          <div className="mb-4 flex items-center gap-3 text-sm text-[var(--color-text-muted)]">
+            <progress
+              className="h-1.5 min-w-32 flex-1 accent-[var(--color-accent)]"
+              aria-label="Cache refresh progress"
+              max={refreshJob.total || 1}
+              value={refreshJob.completed}
             />
-
-            {noBaselineYet ? (
-              <NoBaselineState onOpenSettings={() => navigate("/settings")} />
-            ) : baselineOnly ? (
-              <BaselineOnlyState baselineDate={baselineDate} />
-            ) : (
-              <div className="grid min-h-[520px] gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-                <TimelinePanel
-                  loading={loading}
-                  groups={groupedEntries}
-                  hasAnyEntries={(timeline?.entries.length ?? 0) > 0}
-                  hasMore={Boolean(timeline?.hasMore)}
-                  selectedEntry={selectedEntry}
-                  onSelectEntry={setSelectedEntry}
-                  onLoadMore={() => {
-                    setLoadAnnouncement("Loading more change history entries.");
-                    setLimit((current) => current + LOAD_MORE_STEP);
-                  }}
-                />
-                <DetailPane
-                  entry={selectedEntry}
-                  detail={detail}
-                  history={history}
-                  loading={detailLoading}
-                  error={detailError}
-                  markdown={selectedMarkdown}
-                  workspaces={workspaces}
-                  onCopy={() => void handleCopy()}
-                  onOpenPin={() => setPinOpen(true)}
-                />
-              </div>
-            )}
+            <span className="shrink-0">
+              {refreshJob.completed.toLocaleString()} of {refreshJob.total.toLocaleString()}
+            </span>
           </div>
-        )}
+        ) : null}
+
+        <div id="changes-panel" role="tabpanel">
+          {allTenantScope ? (
+            <FleetScope reloadToken={refreshToken} />
+          ) : !activeTenant ? (
+            <EmptyState
+              icon={<IconWarning size={18} />}
+              title="No active tenant"
+              description="Connect a Microsoft 365 tenant before reviewing tenant changes."
+              action={
+                <Button
+                  variant="primary"
+                  onClick={() =>
+                    requireTenant(
+                      createPendingIntent({
+                        kind: "view-changes",
+                        returnTo: "/changes",
+                      }),
+                    )
+                  }
+                >
+                  Connect tenant
+                </Button>
+              }
+            />
+          ) : view === "baselines" ? (
+            <BaselinesView
+              loading={baselineLoading}
+              error={baselineError}
+              baselines={tenantBaselines}
+              activeBaseline={activeBaseline}
+              drift={tenantBaselineDrift}
+              rollbackSelection={rollbackSelection}
+              rollbackAvailable={baselineRollbackAvailable}
+              selectedDriftEntry={selectedBaselineDrift}
+              onSelectDriftEntry={setSelectedBaselineDrift}
+              onToggleRollbackSelection={toggleRollbackSelection}
+              onCreate={openCreateBaseline}
+              onRename={openRenameBaseline}
+              onRetire={() => {
+                setRetireBaselineError(null);
+                setRetireBaselineOpen(true);
+              }}
+              onRollback={() => {
+                setBaselineRollbackError(null);
+                setBaselineRollbackOpen(true);
+              }}
+              onRetry={() => setBaselineReloadNonce((value) => value + 1)}
+            />
+          ) : view === "compare" ? (
+            <CompareView
+              mode={compareMode}
+              onModeChange={(mode) => {
+                setCompareMode(mode);
+                setTimeCompareError(null);
+                setTenantCompareError(null);
+              }}
+              timeFrom={timeCompareFrom}
+              timeTo={timeCompareTo}
+              timeValidation={timeCompareValidation}
+              timeLoading={timeCompareLoading}
+              timeError={timeCompareError}
+              timeResult={timeCompare}
+              selectedTimeEntry={selectedTimeCompareEntry}
+              onTimeFromChange={(value) => {
+                setTimeCompareFrom(value);
+                setTimeCompare(null);
+              }}
+              onTimeToChange={(value) => {
+                setTimeCompareTo(value);
+                setTimeCompare(null);
+              }}
+              onRunTimeCompare={() => void handleTimeCompare()}
+              onSelectTimeEntry={setSelectedTimeCompareEntry}
+              tenants={otherTenants}
+              activeTenant={activeTenant}
+              selectedTenant={selectedCompareTenant}
+              selectedTenantId={tenantCompareId}
+              includeAssignments={includeAssignments}
+              tenantLoading={tenantCompareLoading}
+              tenantError={tenantCompareError}
+              tenantResult={tenantCompare}
+              selectedTenantEntry={selectedTenantCompareEntry}
+              onTenantChange={(tenantId) => {
+                setTenantCompareId(tenantId);
+                setTenantCompare(null);
+              }}
+              onIncludeAssignmentsChange={(include) => {
+                setIncludeAssignments(include);
+                setTenantCompare(null);
+              }}
+              onRunTenantCompare={() => void handleTenantCompare()}
+              onSelectTenantEntry={setSelectedTenantCompareEntry}
+              onOpenTenantSettings={() => navigate("/settings/tenants")}
+            />
+          ) : error ? (
+            <EmptyState
+              icon={<IconWarning size={18} />}
+              title="Change history unavailable"
+              description={error}
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={() => setReloadNonce((value) => value + 1)}
+                >
+                  Try again
+                </Button>
+              }
+            />
+          ) : (
+            <TimelineView
+              loading={loading}
+              entries={visibleEntries}
+              hasMore={Boolean(timeline?.hasMore)}
+              historyTruncated={Boolean(timeline?.historyTruncated)}
+              coverageCapped={Boolean(
+                status?.resources.some((resource) => resource.pageLimitReached),
+              )}
+              noBaselineYet={noBaselineYet}
+              baselineOnly={baselineOnly}
+              baselineDate={baselineDate}
+              notice={notice}
+              filtersActive={
+                selectedResource !== "all" ||
+                dateRange !== "all" ||
+                query.trim().length > 0
+              }
+              onSelectEntry={openChangeDrawer}
+              onLoadMore={() => setLimit((value) => value + LOAD_MORE_STEP)}
+              onClearFilters={() => {
+                setSelectedResource("all");
+                setDateRange("all");
+                setQuery("");
+                setLimit(INITIAL_LIMIT);
+              }}
+              onRefresh={() => void handleRefreshCache()}
+            />
+          )}
+        </div>
       </PageBody>
 
+      <ChangeDetailDrawer
+        entry={selectedEntry}
+        detail={detail}
+        history={history}
+        loading={detailLoading}
+        error={detailError}
+        onClose={() => closeChangeDrawer()}
+        onCopy={() => void handleCopy()}
+        onPin={() => setPinOpen(true)}
+      />
       <PinChangeToWorkspaceModal
         open={pinOpen}
         workspaces={workspaces}
@@ -1199,7 +1327,9 @@ export default function Changes() {
         baseline={activeBaseline}
         error={retireBaselineError}
         busy={retireBaselineBusy}
-        onClose={closeRetireBaselineModal}
+        onClose={() => {
+          if (!retireBaselineBusy) setRetireBaselineOpen(false);
+        }}
         onConfirm={() => void handleRetireBaseline()}
       />
       <BaselineRollbackModal
@@ -1212,7 +1342,9 @@ export default function Changes() {
         selectionActive={rollbackSelection.size > 0}
         error={baselineRollbackError}
         busy={baselineRollbackBusy}
-        onClose={closeBaselineRollbackModal}
+        onClose={() => {
+          if (!baselineRollbackBusy) setBaselineRollbackOpen(false);
+        }}
         onConfirm={() => void handleBaselineRollback()}
       />
     </>
@@ -1224,56 +1356,789 @@ type DriftTimelineStatus = {
   resources: DriftResourceStatus[];
 };
 
-function ChangesSegmentControl({
-  segment,
-  showBaselines,
-  showCompare,
-  onChange,
+function TimelineFilters({
+  resources,
+  selectedResource,
+  onResourceChange,
+  dateRange,
+  onDateRangeChange,
+  query,
+  onQueryChange,
+  disabled,
 }: {
-  segment: ChangesSegment;
-  showBaselines: boolean;
-  showCompare: boolean;
-  onChange: (segment: ChangesSegment) => void;
+  resources: DriftResourceStatus[];
+  selectedResource: "all" | GraphCacheResourceKind;
+  onResourceChange: (value: string) => void;
+  dateRange: DateRangeValue;
+  onDateRangeChange: (value: string) => void;
+  query: string;
+  onQueryChange: (value: string) => void;
+  disabled: boolean;
 }) {
-  if (!showBaselines && !showCompare) return null;
-  const segments: ChangesSegment[] = [
-    "timeline",
-    ...(showBaselines ? (["baselines"] as const) : []),
-    ...(showCompare ? (["compare"] as const) : []),
-  ];
   return (
-    <div
-      role="group"
-      aria-label="Changes view"
-      className="mb-6 flex flex-wrap items-center gap-1.5"
-    >
-      {segments.map((value) => {
-        const active = segment === value;
-        return (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(value)}
-            className={`rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors ${focusRingClass} ${
-              active
-                ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30"
-                : "bg-transparent text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            {value === "timeline"
-              ? "Timeline"
-              : value === "baselines"
-                ? "Baselines"
-                : "Compare"}
-          </button>
-        );
-      })}
+    <>
+      <label htmlFor="changes-resource-filter" className="sr-only">
+        Resource
+      </label>
+      <Select
+        id="changes-resource-filter"
+        name="changes-resource-filter"
+        aria-label="Resource"
+        value={selectedResource}
+        disabled={disabled}
+        onChange={(event) => onResourceChange(event.target.value)}
+        className="h-7 min-w-44"
+      >
+        <option value="all">All resources</option>
+        {resources.map((resource) => (
+          <option key={resource.resource} value={resource.resource}>
+            {resource.resourceLabel}
+          </option>
+        ))}
+      </Select>
+      <label htmlFor="changes-date-range" className="sr-only">
+        Date range
+      </label>
+      <Select
+        id="changes-date-range"
+        name="changes-date-range"
+        aria-label="Date range"
+        value={dateRange}
+        disabled={disabled}
+        onChange={(event) => onDateRangeChange(event.target.value)}
+        className="h-7 min-w-28"
+      >
+        {DATE_RANGES.map((range) => (
+          <option key={range.value} value={range.value}>
+            {range.label}
+          </option>
+        ))}
+      </Select>
+      <div className="relative min-w-48 flex-1">
+        <IconSearch
+          size={13}
+          aria-hidden="true"
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+        />
+        <label htmlFor="changes-display-name-filter" className="sr-only">
+          Search changes
+        </label>
+        <input
+          id="changes-display-name-filter"
+          name="changes-display-name-filter"
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Search changes…"
+          autoComplete="off"
+          className="h-7 w-full rounded-md bg-[var(--color-surface)] pl-8 pr-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+        />
+      </div>
+    </>
+  );
+}
+
+function TimelineView({
+  loading,
+  entries,
+  hasMore,
+  historyTruncated,
+  coverageCapped,
+  noBaselineYet,
+  baselineOnly,
+  baselineDate,
+  notice,
+  filtersActive,
+  onSelectEntry,
+  onLoadMore,
+  onClearFilters,
+  onRefresh,
+}: {
+  loading: boolean;
+  entries: DriftTimelineEntry[];
+  hasMore: boolean;
+  historyTruncated: boolean;
+  coverageCapped: boolean;
+  noBaselineYet: boolean;
+  baselineOnly: boolean;
+  baselineDate?: string;
+  notice: string | null;
+  filtersActive: boolean;
+  onSelectEntry: (entry: DriftTimelineEntry) => void;
+  onLoadMore: () => void;
+  onClearFilters: () => void;
+  onRefresh: () => void;
+}) {
+  const columns = useMemo<DataTableColumn<DriftTimelineEntry>[]>(
+    () => [
+      {
+        id: "day",
+        header: "Day",
+        sortValue: (entry) => entry.capturedAt,
+        sortable: true,
+        render: (entry) => formatDay(entry.capturedAt),
+      },
+      {
+        id: "object",
+        header: "Object",
+        sortValue: displayNameForEntry,
+        sortable: true,
+        render: (entry) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--color-text)]">
+              {displayNameForEntry(entry)}
+            </div>
+            {entry.graphId ? (
+              <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
+                {entry.graphId}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "resource",
+        header: "Resource type",
+        accessor: "resourceLabel",
+        sortable: true,
+      },
+      {
+        id: "kind",
+        header: "Change kind",
+        accessor: "changeKind",
+        sortable: true,
+        render: (entry) => <ChangeKindBadge kind={entry.changeKind} />,
+      },
+      {
+        id: "time",
+        header: "Time",
+        sortValue: (entry) => entry.capturedAt,
+        sortable: true,
+        render: (entry) => (
+          <time dateTime={entry.capturedAt} title={formatDateTime(entry.capturedAt)}>
+            {formatTime(entry.capturedAt)}
+          </time>
+        ),
+      },
+      {
+        id: "actor",
+        header: "Actor or source",
+        sortValue: (entry) => attributionSummary(entry.attribution),
+        sortable: true,
+        render: (entry) => <AttributionCell attribution={entry.attribution} />,
+      },
+    ],
+    [],
+  );
+
+  if (noBaselineYet) {
+    return (
+      <EmptyState
+        icon={<IconClock size={18} />}
+        title="No change history yet"
+        description="Refresh the tenant cache to capture a baseline, then refresh again to detect changes."
+        action={
+          <Button variant="primary" onClick={onRefresh}>
+            Refresh data
+          </Button>
+        }
+      />
+    );
+  }
+  if (baselineOnly) {
+    return (
+      <EmptyState
+        icon={<StatusDot tone="success" size="md" />}
+        title="Baseline captured"
+        description={`No configuration changes detected${
+          baselineDate ? ` since ${formatDateTime(baselineDate)}` : ""
+        }.`}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {notice ? <CompactNotice tone="success">{notice}</CompactNotice> : null}
+      {coverageCapped ? (
+        <CompactNotice tone="info">
+          At least one collection exceeded the local 1,000-row cache limit. Unseen objects are not inferred as removed.
+        </CompactNotice>
+      ) : null}
+      {historyTruncated ? (
+        <CompactNotice tone="info">
+          Search covered the newest 5,000 snapshots per resource. Narrow the filters to inspect older retained history.
+        </CompactNotice>
+      ) : null}
+      {loading && entries.length === 0 ? (
+        <DataTable
+          caption="Tenant change timeline"
+          columns={columns}
+          rows={[]}
+          rowKey={(entry) => entry.id}
+          loading
+        />
+      ) : entries.length === 0 ? (
+        <EmptyState
+          icon={<IconSearch size={18} />}
+          title="No changes match these filters"
+          description="Widen the date range, choose another resource, or clear the search."
+          action={
+            filtersActive ? (
+              <Button variant="secondary" onClick={onClearFilters}>
+                Clear filters
+              </Button>
+            ) : undefined
+          }
+        />
+      ) : (
+        <DataTable
+          caption="Tenant change timeline"
+          columns={columns}
+          rows={entries}
+          rowKey={(entry) => entry.id}
+          onRowClick={onSelectEntry}
+          initialSort={{ columnId: "time", direction: "descending" }}
+        />
+      )}
+      {hasMore ? (
+        <div className="flex items-center justify-between gap-3 text-sm text-[var(--color-text-muted)]">
+          <span>More retained changes match this filter.</span>
+          <Button size="sm" variant="secondary" onClick={onLoadMore}>
+            Load more
+          </Button>
+        </div>
+      ) : entries.length > 0 ? (
+        <div className="text-sm text-[var(--color-text-muted)]">
+          End of local change history for this filter.
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function CompareSegment({
+function ChangeDetailDrawer({
+  entry,
+  detail,
+  history,
+  loading,
+  error,
+  onClose,
+  onCopy,
+  onPin,
+}: {
+  entry: DriftTimelineEntry | null;
+  detail: DriftEntryDetail | null;
+  history: DriftObjectHistoryResult | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onCopy: () => void;
+  onPin: () => void;
+}) {
+  const canUseDetail = entry?.changeKind === "baseline" || Boolean(detail);
+  return (
+    <Drawer
+      open={Boolean(entry)}
+      title={entry ? displayNameForEntry(entry) : "Change detail"}
+      onClose={onClose}
+      actions={
+        entry ? (
+          <>
+            <IconButton
+              label="Copy change as Markdown"
+              icon={<IconCopy size={14} />}
+              disabled={!canUseDetail}
+              onClick={onCopy}
+            />
+            <IconButton
+              label="Pin change to workspace"
+              icon={<IconHardDrive size={14} />}
+              disabled={!canUseDetail}
+              onClick={onPin}
+            />
+          </>
+        ) : null
+      }
+    >
+      {entry ? (
+        <div className="space-y-6 p-5">
+          <dl className="divide-y divide-[var(--color-border-soft)]">
+            <KeyValue label="Resource" value={entry.resourceLabel} />
+            <KeyValue
+              label="Change kind"
+              value={<ChangeKindBadge kind={entry.changeKind} />}
+            />
+            <KeyValue label="Captured" value={formatDateTime(entry.capturedAt)} />
+            {entry.graphId ? (
+              <KeyValue
+                label="Graph object"
+                value={<span className="break-all font-mono">{entry.graphId}</span>}
+              />
+            ) : null}
+          </dl>
+
+          {entry.changeKind === "baseline" ? (
+            <CompactNotice tone="info">
+              {(entry.rowCount ?? 0).toLocaleString()} objects were captured as the local reference point for later drift detection.
+            </CompactNotice>
+          ) : loading ? (
+            <div role="status" className="text-sm text-[var(--color-text-muted)]">
+              Loading change detail…
+            </div>
+          ) : error ? (
+            <CompactNotice tone="danger">{error}</CompactNotice>
+          ) : detail ? (
+            <>
+              <AttributionDetails attribution={detail.attribution ?? entry.attribution} />
+              {detail.truncated ? (
+                <CompactNotice tone="warning">
+                  Raw before and after bodies exceeded the local display cap. The field list is complete.
+                </CompactNotice>
+              ) : null}
+              <FieldChangesTable changes={detail.changes} />
+              {history && history.versions.length > 1 ? (
+                <Section title={`History (${history.versions.length})`}>
+                  <ul className="divide-y divide-[var(--color-border-soft)] border-y border-[var(--color-border-soft)]">
+                    {history.versions.map((version) => (
+                      <li
+                        key={`${version.snapshotId}:${version.version}`}
+                        className="grid gap-1 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3"
+                      >
+                        <span className="font-mono text-sm text-[var(--color-text)]">
+                          v{version.version}
+                        </span>
+                        <span className="truncate font-mono text-xs text-[var(--color-text-muted)]">
+                          {version.contentHash}
+                        </span>
+                        <time className="text-sm text-[var(--color-text-muted)]">
+                          {formatDateTime(version.capturedAt)}
+                        </time>
+                      </li>
+                    ))}
+                  </ul>
+                </Section>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </Drawer>
+  );
+}
+
+function AttributionCell({ attribution }: { attribution?: DriftAttribution }) {
+  if (attribution?.status === "matched") {
+    return (
+      <div className="min-w-0">
+        <div className="truncate text-[var(--color-text-soft)]">
+          {actorLabel(attribution)}
+        </div>
+        <div className="truncate text-xs text-[var(--color-text-muted)]">
+          {sourceLabel(attribution.source)}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="text-[var(--color-text-muted)]">Actor unknown</div>
+      {attribution?.reason === "audit-cache-stale" ? (
+        <div className="text-xs text-[var(--color-text-muted)]">
+          Refresh audit data to attribute
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AttributionDetails({ attribution }: { attribution?: DriftAttribution }) {
+  return (
+    <Section title="Attribution">
+      <dl className="divide-y divide-[var(--color-border-soft)]">
+        <KeyValue
+          label="Actor"
+          value={
+            attribution?.status === "matched"
+              ? actorLabel(attribution)
+              : "Actor unknown"
+          }
+        />
+        <KeyValue
+          label="Activity"
+          value={attribution?.activity ?? "No audit activity attached"}
+        />
+        <KeyValue label="Source" value={sourceLabel(attribution?.source)} />
+        <KeyValue
+          label="When"
+          value={
+            attribution?.activityDateTime
+              ? formatDateTime(attribution.activityDateTime)
+              : "No audit timestamp"
+          }
+        />
+      </dl>
+      {attribution?.reason === "audit-cache-stale" ? (
+        <div className="mt-2 text-sm text-[var(--color-text-muted)]">
+          Refresh audit data to attribute this change.
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
+function BaselinesView({
+  loading,
+  error,
+  baselines,
+  activeBaseline,
+  drift,
+  rollbackSelection,
+  rollbackAvailable,
+  selectedDriftEntry,
+  onSelectDriftEntry,
+  onToggleRollbackSelection,
+  onCreate,
+  onRename,
+  onRetire,
+  onRollback,
+  onRetry,
+}: {
+  loading: boolean;
+  error: string | null;
+  baselines: DriftBaseline[];
+  activeBaseline?: DriftBaseline;
+  drift: DriftBaselineDriftResult | null;
+  rollbackSelection: ReadonlySet<string>;
+  rollbackAvailable: boolean;
+  selectedDriftEntry: DriftBaselineDriftEntry | null;
+  onSelectDriftEntry: (entry: DriftBaselineDriftEntry | null) => void;
+  onToggleRollbackSelection: (entry: DriftBaselineDriftEntry) => void;
+  onCreate: () => void;
+  onRename: () => void;
+  onRetire: () => void;
+  onRollback: () => void;
+  onRetry: () => void;
+}) {
+  const columns = useMemo<DataTableColumn<DriftBaseline>[]>(
+    () => [
+      {
+        id: "name",
+        header: "Baseline",
+        accessor: "name",
+        sortable: true,
+        render: (baseline) => (
+          <span className="font-medium text-[var(--color-text)]">{baseline.name}</span>
+        ),
+      },
+      {
+        id: "status",
+        header: "Status",
+        accessor: "status",
+        sortable: true,
+        render: (baseline) => (
+          <Badge tone={baseline.status === "active" ? "success" : "neutral"}>
+            <StatusDot tone={baseline.status === "active" ? "success" : "neutral"} />
+            {baseline.status === "active" ? "Active" : "Retired"}
+          </Badge>
+        ),
+      },
+      {
+        id: "created",
+        header: "Created",
+        accessor: "createdAt",
+        sortable: true,
+        render: (baseline) => (
+          <div>
+            <div>{formatDateTime(baseline.createdAt)}</div>
+            {baseline.retiredAt ? (
+              <div className="text-xs text-[var(--color-text-muted)]">
+                Retired {formatDateTime(baseline.retiredAt)}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        id: "objects",
+        header: "Objects",
+        accessor: "pinnedObjectCount",
+        sortable: true,
+        align: "right",
+        render: (baseline) => baseline.pinnedObjectCount.toLocaleString(),
+      },
+      {
+        id: "resources",
+        header: "Resources",
+        sortValue: (baseline) => baseline.resources.length,
+        sortable: true,
+        align: "right",
+        render: (baseline) => baseline.resources.length.toLocaleString(),
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        align: "right",
+        render: (baseline) =>
+          baseline.status === "active" ? (
+            <Menu
+              ariaLabel={`Actions for ${baseline.name}`}
+              trigger={
+                <IconButton
+                  label={`Actions for ${baseline.name}`}
+                  icon={<IconChevronDown size={14} />}
+                />
+              }
+              items={[
+                { id: "rename", label: "Rename", onSelect: onRename },
+                ...(rollbackAvailable && (drift?.entries.length ?? 0) > 0
+                  ? [
+                      {
+                        id: "rollback",
+                        label:
+                          rollbackSelection.size > 0
+                            ? `Roll back ${rollbackSelection.size} selected`
+                            : "Roll back drift",
+                        onSelect: onRollback,
+                      },
+                    ]
+                  : []),
+                { id: "separator", type: "separator" as const },
+                {
+                  id: "retire",
+                  label: "Retire",
+                  danger: true,
+                  onSelect: onRetire,
+                },
+              ]}
+            />
+          ) : (
+            <span className="text-[var(--color-text-muted)]">None</span>
+          ),
+      },
+    ],
+    [
+      drift?.entries.length,
+      onRename,
+      onRetire,
+      onRollback,
+      rollbackAvailable,
+      rollbackSelection.size,
+    ],
+  );
+
+  if (error) {
+    return (
+      <EmptyState
+        icon={<IconWarning size={18} />}
+        title="Baselines unavailable"
+        description={error}
+        action={
+          <Button variant="secondary" onClick={onRetry}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {!activeBaseline ? (
+        <EmptyState
+          icon={<IconClock size={18} />}
+          title="No active baseline"
+          description="Create a baseline to pin the tenant's current tracked configuration."
+          action={
+            <Button variant="primary" onClick={onCreate}>
+              Create baseline
+            </Button>
+          }
+        />
+      ) : null}
+
+      <Section title="Baselines">
+        {loading && baselines.length === 0 ? (
+          <DataTable
+            caption="Tenant baselines"
+            columns={columns}
+            rows={[]}
+            rowKey={(baseline) => baseline.id}
+            loading
+          />
+        ) : baselines.length > 0 ? (
+          <DataTable
+            caption="Tenant baselines"
+            columns={columns}
+            rows={baselines}
+            rowKey={(baseline) => baseline.id}
+            initialSort={{ columnId: "created", direction: "descending" }}
+          />
+        ) : null}
+      </Section>
+
+      {activeBaseline && drift ? (
+        <BaselineDriftSection
+          drift={drift}
+          selected={rollbackSelection}
+          onToggleSelected={onToggleRollbackSelection}
+          onSelectEntry={onSelectDriftEntry}
+          onRollback={rollbackAvailable ? onRollback : undefined}
+        />
+      ) : null}
+
+      <ComparisonDiffDrawer
+        open={Boolean(selectedDriftEntry)}
+        title={
+          selectedDriftEntry
+            ? selectedDriftEntry.displayName ?? selectedDriftEntry.graphId
+            : "Baseline drift"
+        }
+        entry={selectedDriftEntry}
+        onClose={() => onSelectDriftEntry(null)}
+      />
+    </div>
+  );
+}
+
+function BaselineDriftSection({
+  drift,
+  selected,
+  onToggleSelected,
+  onSelectEntry,
+  onRollback,
+}: {
+  drift: DriftBaselineDriftResult;
+  selected: ReadonlySet<string>;
+  onToggleSelected: (entry: DriftBaselineDriftEntry) => void;
+  onSelectEntry: (entry: DriftBaselineDriftEntry) => void;
+  onRollback?: () => void;
+}) {
+  const summaryColumns = useMemo<DataTableColumn<DriftBaselineResourceDrift>[]>(
+    () => [
+      {
+        id: "resource",
+        header: "Resource",
+        accessor: "resourceLabel",
+        sortable: true,
+      },
+      { id: "added", header: "Added", accessor: "added", sortable: true, align: "right" },
+      { id: "removed", header: "Removed", accessor: "removed", sortable: true, align: "right" },
+      { id: "modified", header: "Modified", accessor: "modified", sortable: true, align: "right" },
+    ],
+    [],
+  );
+  const entryColumns = useMemo<DataTableColumn<DriftBaselineDriftEntry>[]>(
+    () => [
+      {
+        id: "select",
+        header: "Select",
+        render: (entry) => (
+          <input
+            type="checkbox"
+            checked={selected.has(baselineDriftEntryKey(entry))}
+            onClick={(event) => event.stopPropagation()}
+            onChange={() => onToggleSelected(entry)}
+            aria-label={`Select ${entry.displayName ?? entry.graphId} for rollback`}
+            className="h-4 w-4 accent-[var(--color-accent)]"
+          />
+        ),
+      },
+      {
+        id: "object",
+        header: "Object",
+        sortValue: (entry) => entry.displayName ?? entry.graphId,
+        sortable: true,
+        render: (entry) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--color-text)]">
+              {entry.displayName ?? entry.graphId}
+            </div>
+            <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
+              {entry.graphId}
+            </div>
+          </div>
+        ),
+      },
+      {
+        id: "resource",
+        header: "Resource",
+        accessor: "resourceLabel",
+        sortable: true,
+      },
+      {
+        id: "kind",
+        header: "Change kind",
+        accessor: "changeKind",
+        sortable: true,
+        render: (entry) => <ChangeKindBadge kind={entry.changeKind} />,
+      },
+      {
+        id: "fields",
+        header: "Fields",
+        accessor: "fieldChangeCount",
+        sortable: true,
+        align: "right",
+      },
+    ],
+    [onToggleSelected, selected],
+  );
+
+  return (
+    <div className="space-y-6">
+      <Section
+        title="Drift by resource"
+        action={
+          <span className="text-xs text-[var(--color-text-muted)]">
+            Evaluated {formatDateTime(drift.evaluatedAt)}
+          </span>
+        }
+      >
+        <DataTable
+          caption="Baseline drift by resource"
+          columns={summaryColumns}
+          rows={drift.resources}
+          rowKey={(resource) => resource.resource}
+        />
+      </Section>
+      <Section
+        title="Drift entries"
+        action={
+          onRollback && drift.entries.length > 0 ? (
+            <Button variant="secondary" onClick={onRollback}>
+              {selected.size > 0
+                ? `Roll back ${selected.size} selected`
+                : "Roll back drift"}
+            </Button>
+          ) : null
+        }
+      >
+        {drift.entries.length === 0 ? (
+          <EmptyState
+            icon={<StatusDot tone="success" size="md" />}
+            title="No baseline drift"
+            description="The latest tracked configuration matches this baseline."
+          />
+        ) : (
+          <DataTable
+            caption="Baseline drift entries"
+            columns={entryColumns}
+            rows={drift.entries}
+            rowKey={baselineDriftEntryKey}
+            onRowClick={onSelectEntry}
+          />
+        )}
+        {drift.hasMore ? (
+          <div className="mt-3 text-sm text-[var(--color-text-muted)]">
+            This evaluation contains more entries than the local display limit.
+          </div>
+        ) : null}
+      </Section>
+    </div>
+  );
+}
+
+function CompareView({
   mode,
   onModeChange,
   timeFrom,
@@ -1282,11 +2147,11 @@ function CompareSegment({
   timeLoading,
   timeError,
   timeResult,
-  expandedTimeEntry,
+  selectedTimeEntry,
   onTimeFromChange,
   onTimeToChange,
   onRunTimeCompare,
-  onToggleTimeEntry,
+  onSelectTimeEntry,
   tenants,
   activeTenant,
   selectedTenant,
@@ -1295,11 +2160,12 @@ function CompareSegment({
   tenantLoading,
   tenantError,
   tenantResult,
-  expandedTenantEntry,
+  selectedTenantEntry,
   onTenantChange,
   onIncludeAssignmentsChange,
-  onToggleTenantEntry,
-  onRetryTenant,
+  onRunTenantCompare,
+  onSelectTenantEntry,
+  onOpenTenantSettings,
 }: {
   mode: CompareMode;
   onModeChange: (mode: CompareMode) => void;
@@ -1309,12 +2175,12 @@ function CompareSegment({
   timeLoading: boolean;
   timeError: string | null;
   timeResult: DriftTimeCompareResult | null;
-  expandedTimeEntry: string | null;
+  selectedTimeEntry: DriftBaselineDriftEntry | null;
   onTimeFromChange: (value: string) => void;
   onTimeToChange: (value: string) => void;
   onRunTimeCompare: () => void;
-  onToggleTimeEntry: (entry: DriftBaselineDriftEntry) => void;
-  tenants: { id: string; displayName: string }[];
+  onSelectTimeEntry: (entry: DriftBaselineDriftEntry | null) => void;
+  tenants: Array<{ id: string; displayName: string }>;
   activeTenant: { id: string; displayName: string };
   selectedTenant?: { id: string; displayName: string };
   selectedTenantId: string;
@@ -1322,52 +2188,27 @@ function CompareSegment({
   tenantLoading: boolean;
   tenantError: string | null;
   tenantResult: DriftTenantCompareResult | null;
-  expandedTenantEntry: string | null;
+  selectedTenantEntry: DriftTenantCompareEntry | null;
   onTenantChange: (tenantId: string) => void;
   onIncludeAssignmentsChange: (include: boolean) => void;
-  onToggleTenantEntry: (entry: DriftTenantCompareEntry, index: number) => void;
-  onRetryTenant: () => void;
+  onRunTenantCompare: () => void;
+  onSelectTenantEntry: (entry: DriftTenantCompareEntry | null) => void;
+  onOpenTenantSettings: () => void;
 }) {
   return (
-    <div className="space-y-4">
-      <Card className="overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
-          <div>
-            <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
-              Comparison mode
-            </h2>
-            <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-              Compare retained configuration from the local cache
-            </div>
-          </div>
-          <div
-            role="group"
-            aria-label="Comparison mode"
-            className="inline-flex rounded-lg bg-[var(--color-bg-raised)] p-1 ring-1 ring-[var(--color-border-soft)]"
-          >
-            {(["time", "tenant"] satisfies CompareMode[]).map((value) => {
-              const active = mode === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => onModeChange(value)}
-                  className={`rounded-md px-3 py-1.5 text-[11.5px] font-medium transition-colors ${focusRingClass} ${
-                    active
-                      ? "bg-[var(--color-surface)] text-[var(--color-text)] ring-1 ring-[var(--color-border)]"
-                      : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                  }`}
-                >
-                  {value === "time" ? "Over time" : "Between tenants"}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end gap-3 border-b border-[var(--color-border-soft)] pb-4">
+        <SegmentedControl
+          ariaLabel="Comparison mode"
+          value={mode}
+          onValueChange={(value) => onModeChange(value as CompareMode)}
+          options={[
+            { id: "time", label: "Over time" },
+            { id: "tenant", label: "Between tenants" },
+          ]}
+        />
         {mode === "time" ? (
-          <div className="flex flex-wrap items-end gap-3 px-4 py-4">
+          <>
             <CompareDateField
               id="compare-from-date"
               label="From"
@@ -1391,30 +2232,17 @@ function CompareSegment({
             >
               {timeLoading ? "Comparing…" : "Run compare"}
             </Button>
-            {timeValidation ? (
-              <div
-                id="compare-date-validation"
-                role="alert"
-                className="w-full text-[11.5px] text-[var(--color-danger)]"
-              >
-                {timeValidation}
-              </div>
-            ) : null}
-          </div>
-        ) : tenants.length === 0 ? null : (
-          <div className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
-            <div>
-              <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                Tenant A
-              </div>
-              <div className="mt-2 flex h-10 items-center rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
+          </>
+        ) : tenants.length > 0 ? (
+          <>
+            <div className="min-w-44">
+              <div className="text-xs text-[var(--color-text-muted)]">Tenant A</div>
+              <div className="mt-1 h-9 rounded-md bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
                 {activeTenant.displayName}
               </div>
             </div>
-            <label htmlFor="compare-tenant-b" className="block">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                Tenant B
-              </span>
+            <label htmlFor="compare-tenant-b" className="min-w-44">
+              <span className="text-xs text-[var(--color-text-muted)]">Tenant B</span>
               <Select
                 id="compare-tenant-b"
                 name="compare-tenant-b"
@@ -1422,7 +2250,7 @@ function CompareSegment({
                 value={selectedTenantId}
                 disabled={tenantLoading}
                 onChange={(event) => onTenantChange(event.target.value)}
-                className={`mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] disabled:opacity-60 ${focusRingClass}`}
+                className="mt-1 h-9 w-full"
               >
                 {tenants.map((tenant) => (
                   <option key={tenant.id} value={tenant.id}>
@@ -1431,44 +2259,54 @@ function CompareSegment({
                 ))}
               </Select>
             </label>
-            <label className="flex min-h-10 items-start gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+            <label className="flex h-9 items-center gap-2 text-sm text-[var(--color-text-soft)]">
               <input
                 type="checkbox"
                 name="include-assignments"
-                aria-label="Include assignments"
-                autoComplete="off"
                 checked={includeAssignments}
                 disabled={tenantLoading}
                 onChange={(event) =>
                   onIncludeAssignmentsChange(event.target.checked)
                 }
-                className={`mt-0.5 h-4 w-4 accent-[var(--color-accent)] ${focusRingClass}`}
+                className="h-4 w-4 accent-[var(--color-accent)]"
               />
-              <span>
-                <span className="block text-[12px] font-medium text-[var(--color-text)]">
-                  Include assignments
-                </span>
-                <span className="mt-0.5 block max-w-[330px] text-[10.5px] leading-4 text-[var(--color-text-muted)]">
-                  Assignments target tenant-specific groups and are excluded by
-                  default.
-                </span>
-              </span>
+              Include assignments
             </label>
-          </div>
-        )}
-      </Card>
+            <Button
+              variant="primary"
+              disabled={tenantLoading || !selectedTenantId}
+              onClick={onRunTenantCompare}
+            >
+              {tenantLoading ? "Comparing…" : "Run compare"}
+            </Button>
+          </>
+        ) : null}
+      </div>
+
+      {timeValidation && mode === "time" ? (
+        <CompactNotice tone="danger">{timeValidation}</CompactNotice>
+      ) : null}
 
       {mode === "time" ? (
         <TimeCompareResults
           loading={timeLoading}
           error={timeError}
           result={timeResult}
-          expandedEntry={expandedTimeEntry}
+          selectedEntry={selectedTimeEntry}
+          onSelectEntry={onSelectTimeEntry}
           onRetry={onRunTimeCompare}
-          onToggleEntry={onToggleTimeEntry}
         />
       ) : tenants.length === 0 ? (
-        <SecondTenantRequiredState />
+        <EmptyState
+          icon={<IconChanges size={18} />}
+          title="Connect a second tenant"
+          description="Between-tenant comparison requires two connected Microsoft 365 tenants."
+          action={
+            <Button variant="secondary" onClick={onOpenTenantSettings}>
+              Open tenant settings
+            </Button>
+          }
+        />
       ) : (
         <TenantCompareResults
           loading={tenantLoading}
@@ -1476,9 +2314,9 @@ function CompareSegment({
           result={tenantResult}
           tenantA={activeTenant}
           tenantB={selectedTenant}
-          expandedEntry={expandedTenantEntry}
-          onRetry={onRetryTenant}
-          onToggleEntry={onToggleTenantEntry}
+          selectedEntry={selectedTenantEntry}
+          onSelectEntry={onSelectTenantEntry}
+          onRetry={onRunTenantCompare}
         />
       )}
     </div>
@@ -1502,9 +2340,7 @@ function CompareDateField({
 }) {
   return (
     <label htmlFor={id} className="block">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </span>
+      <span className="text-xs text-[var(--color-text-muted)]">{label}</span>
       <input
         id={id}
         name={id}
@@ -1512,10 +2348,9 @@ function CompareDateField({
         value={value}
         disabled={disabled}
         aria-invalid={invalid}
-        aria-describedby={invalid ? "compare-date-validation" : undefined}
         autoComplete="off"
         onChange={(event) => onChange(event.target.value)}
-        className={`mt-2 h-10 rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] disabled:opacity-60 ${focusRingClass}`}
+        className="mt-1 h-9 rounded-md bg-[var(--color-surface)] px-3 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] disabled:opacity-50"
       />
     </label>
   );
@@ -1525,241 +2360,66 @@ function TimeCompareResults({
   loading,
   error,
   result,
-  expandedEntry,
+  selectedEntry,
+  onSelectEntry,
   onRetry,
-  onToggleEntry,
 }: {
   loading: boolean;
   error: string | null;
   result: DriftTimeCompareResult | null;
-  expandedEntry: string | null;
+  selectedEntry: DriftBaselineDriftEntry | null;
+  onSelectEntry: (entry: DriftBaselineDriftEntry | null) => void;
   onRetry: () => void;
-  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
 }) {
-  if (loading)
-    return <CompareLoadingState label="Comparing configuration over time" />;
+  if (loading) return <ComparisonLoading />;
   if (error) {
     return (
-      <InlineState
-        tone="danger"
+      <EmptyState
+        icon={<IconWarning size={18} />}
         title="Time comparison unavailable"
-        message={`${error} Adjust the date window or retry after the local cache is ready.`}
+        description={error}
         action={
-          <Button
-            size="sm"
-            variant="secondary"
-            leadingIcon={<IconRefresh size={12} />}
-            onClick={onRetry}
-          >
-            Retry
+          <Button variant="secondary" onClick={onRetry}>
+            Try again
           </Button>
         }
       />
     );
   }
-  if (!result) {
-    return (
-      <Card className="px-5 py-8 text-center">
-        <div className="text-[13px] font-medium text-[var(--color-text)]">
-          No comparison run
-        </div>
-        <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-          Choose a date window, then run the comparison.
-        </div>
-      </Card>
-    );
-  }
+  if (!result) return null;
 
-  const resources = result.resources.filter(
-    (resource) => resource.added + resource.removed + resource.modified > 0,
-  );
-  const empty = resources.length === 0 && result.entries.length === 0;
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {result.retentionLimited ? (
-        <InlineState
-          tone="info"
-          title="Retention-limited window"
-          message="Retention has pruned history older than part of this window. The before side may be incomplete."
+        <CompactNotice tone="info">
+          Retention pruned part of this window, so the earlier side may be incomplete.
+        </CompactNotice>
+      ) : null}
+      <ResourceDriftTable resources={result.resources} caption="Changes by resource" />
+      <DriftEntriesTable
+        entries={result.entries}
+        caption="Objects changed over time"
+        onSelectEntry={onSelectEntry}
+      />
+      {result.entries.length === 0 ? (
+        <EmptyState
+          icon={<StatusDot tone="success" size="md" />}
+          title="No changes in this window"
+          description="Tracked configuration was unchanged between the selected dates."
         />
       ) : null}
-      {empty ? (
-        <Card className="px-5 py-12 text-center">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
-            No tracked configuration changed in this window.
-          </div>
-        </Card>
-      ) : (
-        <>
-          {resources.length > 0 ? (
-            <TimeCompareResourceSummary resources={resources} />
-          ) : null}
-          <TimeCompareEntries
-            result={result}
-            expandedEntry={expandedEntry}
-            onToggleEntry={onToggleEntry}
-          />
-        </>
-      )}
+      {result.hasMore ? (
+        <div className="text-sm text-[var(--color-text-muted)]">
+          More comparison entries exist than the local display limit.
+        </div>
+      ) : null}
+      <ComparisonDiffDrawer
+        open={Boolean(selectedEntry)}
+        title={selectedEntry?.displayName ?? selectedEntry?.graphId ?? "Changed object"}
+        entry={selectedEntry}
+        onClose={() => onSelectEntry(null)}
+      />
     </div>
-  );
-}
-
-function TimeCompareResourceSummary({
-  resources,
-}: {
-  resources: DriftTimeCompareResult["resources"];
-}) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="border-b border-[var(--color-border-soft)] px-5 py-3">
-        <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
-          Changes by resource
-        </h2>
-        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-          Resources with tracked changes in this window
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[540px] text-left text-[12px]">
-          <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-            <tr>
-              <th scope="col" className="px-3 py-2 font-medium">
-                Resource
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Added
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Removed
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Modified
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {resources.map((resource) => (
-              <tr
-                key={resource.resource}
-                aria-label={`${resource.resourceLabel}: ${resource.added} added, ${resource.removed} removed, ${resource.modified} modified`}
-                className="border-t border-[var(--color-border-soft)]"
-              >
-                <th
-                  scope="row"
-                  className="px-3 py-2.5 font-medium text-[var(--color-text-soft)]"
-                >
-                  {resource.resourceLabel}
-                </th>
-                <td className="px-3 py-2.5 text-right font-mono text-[var(--color-success)]">
-                  {resource.added.toLocaleString()}
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono text-[var(--color-danger)]">
-                  {resource.removed.toLocaleString()}
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono text-[var(--color-accent)]">
-                  {resource.modified.toLocaleString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}
-
-function TimeCompareEntries({
-  result,
-  expandedEntry,
-  onToggleEntry,
-}: {
-  result: DriftTimeCompareResult;
-  expandedEntry: string | null;
-  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
-}) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-3">
-        <div>
-          <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
-            Changed objects
-          </h2>
-          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            {result.entries.length.toLocaleString()} objects changed in this
-            window
-          </div>
-        </div>
-        <span className="text-[11px] text-[var(--color-text-muted)]">
-          {formatDateTime(result.evaluatedAt)}
-        </span>
-      </div>
-      {result.entries.length === 0 ? (
-        <div className="px-5 py-10 text-center text-[13px] font-medium text-[var(--color-text)]">
-          No tracked configuration changed in this window.
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--color-border-soft)]">
-          {result.entries.map((entry, index) => {
-            const key = baselineDriftEntryKey(entry);
-            const expanded = expandedEntry === key;
-            const detailId = `time-compare-detail-${index}`;
-            const name = entry.displayName ?? entry.graphId;
-            return (
-              <div key={key}>
-                <button
-                  type="button"
-                  aria-expanded={expanded}
-                  aria-controls={detailId}
-                  aria-label={`${expanded ? "Collapse" : "Expand"} time comparison details for ${name}`}
-                  onClick={() => onToggleEntry(entry)}
-                  className={`grid w-full gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
-                >
-                  <span className="min-w-0">
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <ChangeKindChip kind={entry.changeKind} />
-                      <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
-                        {name}
-                      </span>
-                    </span>
-                    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-                      <span>{entry.resourceLabel}</span>
-                      <span
-                        aria-hidden="true"
-                        className="text-[var(--color-text-faint)]"
-                      >
-                        ·
-                      </span>
-                      <span className="truncate font-mono">
-                        {entry.graphId}
-                      </span>
-                    </span>
-                  </span>
-                  <span className="flex items-center justify-end gap-3 self-center text-[11px] text-[var(--color-text-muted)]">
-                    <span>{formatFieldCount(entry.fieldChangeCount)}</span>
-                    <IconChevronDown
-                      size={13}
-                      aria-hidden="true"
-                      className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-                    />
-                  </span>
-                </button>
-                {expanded ? (
-                  <div
-                    id={detailId}
-                    className="space-y-3 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] p-4"
-                  >
-                    {entry.truncated ? <CompareTruncationNotice /> : null}
-                    <FieldChangesTable changes={entry.changes} />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-          {result.hasMore ? <CompareHasMoreNotice /> : null}
-        </div>
-      )}
-    </Card>
   );
 }
 
@@ -1769,56 +2429,191 @@ function TenantCompareResults({
   result,
   tenantA,
   tenantB,
-  expandedEntry,
+  selectedEntry,
+  onSelectEntry,
   onRetry,
-  onToggleEntry,
 }: {
   loading: boolean;
   error: string | null;
   result: DriftTenantCompareResult | null;
-  tenantA: { id: string; displayName: string };
-  tenantB?: { id: string; displayName: string };
-  expandedEntry: string | null;
+  tenantA: { displayName: string };
+  tenantB?: { displayName: string };
+  selectedEntry: DriftTenantCompareEntry | null;
+  onSelectEntry: (entry: DriftTenantCompareEntry | null) => void;
   onRetry: () => void;
-  onToggleEntry: (entry: DriftTenantCompareEntry, index: number) => void;
 }) {
-  if (loading)
-    return <CompareLoadingState label="Comparing tenant configuration" />;
+  if (loading) return <ComparisonLoading />;
   if (error) {
     return (
-      <InlineState
-        tone="danger"
+      <EmptyState
+        icon={<IconWarning size={18} />}
         title="Tenant comparison unavailable"
-        message={`${error} Retry after both tenant caches are ready.`}
+        description={error}
         action={
-          <Button
-            size="sm"
-            variant="secondary"
-            leadingIcon={<IconRefresh size={12} />}
-            onClick={onRetry}
-          >
-            Retry
+          <Button variant="secondary" onClick={onRetry}>
+            Try again
           </Button>
         }
       />
     );
   }
   if (!result || !tenantB) return null;
-
   if (!result.tenantAHasData || !result.tenantBHasData) {
+    const missing = [
+      ...(!result.tenantAHasData ? [tenantA.displayName] : []),
+      ...(!result.tenantBHasData ? [tenantB.displayName] : []),
+    ];
     return (
-      <div className="space-y-4">
-        {!result.tenantAHasData ? (
-          <NoCapturedConfigurationState tenantName={tenantA.displayName} />
-        ) : null}
-        {!result.tenantBHasData ? (
-          <NoCapturedConfigurationState tenantName={tenantB.displayName} />
-        ) : null}
-      </div>
+      <EmptyState
+        icon={<IconRefresh size={18} />}
+        title="Captured configuration is missing"
+        description={`Refresh tenant data for ${missing.join(" and ")}, then run the comparison again.`}
+        action={
+          <Button variant="secondary" onClick={onRetry}>
+            Try again
+          </Button>
+        }
+      />
     );
   }
 
-  const resources = result.resources.filter(
+  return (
+    <div className="space-y-6">
+      <TenantResourceTable resources={result.resources} />
+      <TenantDifferenceTable
+        entries={result.entries}
+        onSelectEntry={onSelectEntry}
+      />
+      {result.entries.length === 0 ? (
+        <EmptyState
+          icon={<StatusDot tone="success" size="md" />}
+          title="No configuration differences"
+          description={`${tenantA.displayName} and ${tenantB.displayName} match across the tracked resources.`}
+        />
+      ) : null}
+      {result.hasMore ? (
+        <div className="text-sm text-[var(--color-text-muted)]">
+          More comparison entries exist than the local display limit.
+        </div>
+      ) : null}
+      <ComparisonDiffDrawer
+        open={Boolean(selectedEntry)}
+        title={selectedEntry?.displayName ?? "Configuration difference"}
+        entry={selectedEntry}
+        onClose={() => onSelectEntry(null)}
+      />
+    </div>
+  );
+}
+
+function ResourceDriftTable({
+  resources,
+  caption,
+}: {
+  resources: DriftBaselineResourceDrift[];
+  caption: string;
+}) {
+  const columns = useMemo<DataTableColumn<DriftBaselineResourceDrift>[]>(
+    () => [
+      { id: "resource", header: "Resource", accessor: "resourceLabel", sortable: true },
+      { id: "added", header: "Added", accessor: "added", sortable: true, align: "right" },
+      { id: "removed", header: "Removed", accessor: "removed", sortable: true, align: "right" },
+      { id: "modified", header: "Modified", accessor: "modified", sortable: true, align: "right" },
+    ],
+    [],
+  );
+  const changed = resources.filter(
+    (resource) => resource.added + resource.removed + resource.modified > 0,
+  );
+  if (changed.length === 0) return null;
+  return (
+    <Section title={caption}>
+      <DataTable
+        caption={caption}
+        columns={columns}
+        rows={changed}
+        rowKey={(resource) => resource.resource}
+      />
+    </Section>
+  );
+}
+
+function DriftEntriesTable({
+  entries,
+  caption,
+  onSelectEntry,
+}: {
+  entries: DriftBaselineDriftEntry[];
+  caption: string;
+  onSelectEntry: (entry: DriftBaselineDriftEntry) => void;
+}) {
+  const columns = useMemo<DataTableColumn<DriftBaselineDriftEntry>[]>(
+    () => [
+      {
+        id: "object",
+        header: "Object",
+        sortValue: (entry) => entry.displayName ?? entry.graphId,
+        sortable: true,
+        render: (entry) => (
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--color-text)]">
+              {entry.displayName ?? entry.graphId}
+            </div>
+            <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
+              {entry.graphId}
+            </div>
+          </div>
+        ),
+      },
+      { id: "resource", header: "Resource", accessor: "resourceLabel", sortable: true },
+      {
+        id: "kind",
+        header: "Change kind",
+        accessor: "changeKind",
+        sortable: true,
+        render: (entry) => <ChangeKindBadge kind={entry.changeKind} />,
+      },
+      {
+        id: "fields",
+        header: "Fields",
+        accessor: "fieldChangeCount",
+        sortable: true,
+        align: "right",
+      },
+    ],
+    [],
+  );
+  if (entries.length === 0) return null;
+  return (
+    <Section title="Changed objects">
+      <DataTable
+        caption={caption}
+        columns={columns}
+        rows={entries}
+        rowKey={baselineDriftEntryKey}
+        onRowClick={onSelectEntry}
+      />
+    </Section>
+  );
+}
+
+function TenantResourceTable({
+  resources,
+}: {
+  resources: DriftTenantCompareResourceCounts[];
+}) {
+  const columns = useMemo<DataTableColumn<DriftTenantCompareResourceCounts>[]>(
+    () => [
+      { id: "resource", header: "Resource", accessor: "resourceLabel", sortable: true },
+      { id: "same", header: "Same", accessor: "matchedSame", sortable: true, align: "right" },
+      { id: "different", header: "Different", accessor: "different", sortable: true, align: "right" },
+      { id: "onlyA", header: "Only in A", accessor: "onlyInA", sortable: true, align: "right" },
+      { id: "onlyB", header: "Only in B", accessor: "onlyInB", sortable: true, align: "right" },
+      { id: "ambiguous", header: "Ambiguous", accessor: "ambiguous", sortable: true, align: "right" },
+    ],
+    [],
+  );
+  const visible = resources.filter(
     (resource) =>
       resource.matchedSame +
         resource.different +
@@ -1827,1252 +2622,199 @@ function TenantCompareResults({
         resource.ambiguous >
       0,
   );
+  if (visible.length === 0) return null;
   return (
-    <div className="space-y-4">
-      {resources.length > 0 ? (
-        <TenantCompareResourceSummary resources={resources} />
-      ) : null}
-      <TenantCompareEntries
-        result={result}
-        tenantA={tenantA}
-        tenantB={tenantB}
-        expandedEntry={expandedEntry}
-        onToggleEntry={onToggleEntry}
+    <Section title="Comparison by resource">
+      <DataTable
+        caption="Tenant comparison by resource"
+        columns={columns}
+        rows={visible}
+        rowKey={(resource) => resource.resource}
       />
-    </div>
-  );
-}
-
-function TenantCompareResourceSummary({
-  resources,
-}: {
-  resources: DriftTenantCompareResult["resources"];
-}) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="border-b border-[var(--color-border-soft)] px-5 py-3">
-        <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
-          Comparison by resource
-        </h2>
-        <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-          Unique display names are matched across tenant caches
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[620px] text-left text-[12px]">
-          <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-            <tr>
-              <th scope="col" className="w-[34%] px-4 py-2 font-medium">
-                Resource
-              </th>
-              <th scope="col" className="px-4 py-2 font-medium">
-                Buckets
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {resources.map((resource) => (
-              <tr
-                key={resource.resource}
-                aria-label={tenantResourceSummaryLabel(resource)}
-                className="border-t border-[var(--color-border-soft)]"
-              >
-                <th
-                  scope="row"
-                  className="px-4 py-3 align-top font-medium text-[var(--color-text-soft)]"
-                >
-                  {resource.resourceLabel}
-                </th>
-                <td className="px-4 py-3 tabular-nums">
-                  <div className="flex flex-wrap gap-2">
-                    {resource.matchedSame > 0 ? (
-                      <Pill tone="success">
-                        {resource.matchedSame.toLocaleString()} same
-                      </Pill>
-                    ) : null}
-                    {resource.different > 0 ? (
-                      <Pill tone="warning">
-                        {resource.different.toLocaleString()} different
-                      </Pill>
-                    ) : null}
-                    {resource.onlyInA > 0 ? (
-                      <Pill tone="default">
-                        {resource.onlyInA.toLocaleString()} only in A
-                      </Pill>
-                    ) : null}
-                    {resource.onlyInB > 0 ? (
-                      <Pill tone="info">
-                        {resource.onlyInB.toLocaleString()} only in B
-                      </Pill>
-                    ) : null}
-                    {resource.ambiguous > 0 ? (
-                      <Pill tone="warning">
-                        {resource.ambiguous.toLocaleString()} ambiguous
-                      </Pill>
-                    ) : null}
-                  </div>
-                  {resource.ambiguous > 0 ? (
-                    <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-                      {ambiguousObjectNote(resource.ambiguous)}
-                    </div>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}
-
-function TenantCompareEntries({
-  result,
-  tenantA,
-  tenantB,
-  expandedEntry,
-  onToggleEntry,
-}: {
-  result: DriftTenantCompareResult;
-  tenantA: { displayName: string };
-  tenantB: { displayName: string };
-  expandedEntry: string | null;
-  onToggleEntry: (entry: DriftTenantCompareEntry, index: number) => void;
-}) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-3">
-        <div>
-          <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
-            Configuration differences
-          </h2>
-          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            {tenantA.displayName} compared with {tenantB.displayName}
-          </div>
-        </div>
-        <span className="text-[11px] text-[var(--color-text-muted)]">
-          {formatDateTime(result.evaluatedAt)}
-        </span>
-      </div>
-      {result.entries.length === 0 ? (
-        <div className="px-5 py-10 text-center">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
-            No configuration differences between these tenants.
-          </div>
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--color-border-soft)]">
-          {result.entries.map((entry, index) => {
-            const key = tenantCompareEntryKey(entry, index);
-            const expandable = entry.bucket === "different";
-            const expanded = expandable && expandedEntry === key;
-            const detailId = `tenant-compare-detail-${index}`;
-            const rowContent = (
-              <>
-                <span className="min-w-0">
-                  <span className="flex min-w-0 flex-wrap items-center gap-2">
-                    <TenantCompareBucketPill bucket={entry.bucket} />
-                    <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
-                      {entry.displayName}
-                    </span>
-                  </span>
-                  <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
-                    {entry.resourceLabel}
-                  </span>
-                </span>
-                <span className="flex items-center justify-end gap-3 self-center text-[11px] text-[var(--color-text-muted)]">
-                  {expandable ? (
-                    <>
-                      <span>{formatFieldCount(entry.fieldChangeCount)}</span>
-                      <IconChevronDown
-                        size={13}
-                        aria-hidden="true"
-                        className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-                      />
-                    </>
-                  ) : null}
-                </span>
-              </>
-            );
-            return (
-              <div key={key}>
-                {expandable ? (
-                  <button
-                    type="button"
-                    aria-expanded={expanded}
-                    aria-controls={detailId}
-                    aria-label={`${expanded ? "Collapse" : "Expand"} tenant comparison details for ${entry.displayName}`}
-                    onClick={() => onToggleEntry(entry, index)}
-                    className={`grid w-full gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
-                  >
-                    {rowContent}
-                  </button>
-                ) : (
-                  <div className="grid w-full gap-3 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                    {rowContent}
-                  </div>
-                )}
-                {expanded ? (
-                  <div
-                    id={detailId}
-                    className="space-y-3 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] p-4"
-                  >
-                    {entry.truncated ? <CompareTruncationNotice /> : null}
-                    <FieldChangesTable changes={entry.changes} />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-          {result.hasMore ? <CompareHasMoreNotice /> : null}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function TenantCompareBucketPill({
-  bucket,
-}: {
-  bucket: DriftTenantCompareEntry["bucket"];
-}) {
-  if (bucket === "different") return <Pill tone="warning">Different</Pill>;
-  if (bucket === "only-in-b") return <Pill tone="info">Only in B</Pill>;
-  return <Pill tone="default">Only in A</Pill>;
-}
-
-function CompareLoadingState({ label }: { label: string }) {
-  return (
-    <div className="space-y-3" aria-label={label}>
-      <Card className="h-32 animate-pulse bg-[var(--color-bg-raised)]">
-        <span className="sr-only">{label}</span>
-      </Card>
-      <Card className="h-48 animate-pulse bg-[var(--color-bg-raised)]">
-        <span className="sr-only">Loading comparison entries</span>
-      </Card>
-    </div>
-  );
-}
-
-function CompareTruncationNotice() {
-  return (
-    <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-      Raw before/after bodies exceeded the local display cap. The field list
-      below is complete.
-    </div>
-  );
-}
-
-function CompareHasMoreNotice() {
-  return (
-    <div className="px-5 py-3 text-center text-[11px] text-[var(--color-text-muted)]">
-      This comparison contains more entries than the local display limit.
-    </div>
-  );
-}
-
-function SecondTenantRequiredState() {
-  return (
-    <Card className="px-6 py-14 text-center">
-      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-        <IconChanges size={18} />
-      </div>
-      <h2 className="mt-4 text-[15px] font-semibold text-[var(--color-text)]">
-        Connect a second tenant to compare configurations.
-      </h2>
-    </Card>
-  );
-}
-
-function NoCapturedConfigurationState({ tenantName }: { tenantName: string }) {
-  return (
-    <Card className="px-6 py-10 text-center">
-      <div className="text-[13px] font-medium text-[var(--color-text)]">
-        No captured configuration for {tenantName}. Refresh its cache first.
-      </div>
-    </Card>
-  );
-}
-
-function BaselinesSegment({
-  loading,
-  error,
-  activeBaseline,
-  drift,
-  retiredBaselines,
-  expandedEntry,
-  onToggleEntry,
-  onCreate,
-  onRename,
-  onRetire,
-  onRollback,
-  onRetry,
-  rollbackSelection,
-  onToggleRollbackSelection,
-}: {
-  loading: boolean;
-  error: string | null;
-  activeBaseline?: DriftBaseline;
-  drift: DriftBaselineDriftResult | null;
-  retiredBaselines: DriftBaseline[];
-  expandedEntry: string | null;
-  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
-  rollbackSelection: ReadonlySet<string>;
-  onToggleRollbackSelection: (entry: DriftBaselineDriftEntry) => void;
-  onCreate: () => void;
-  onRename: () => void;
-  onRetire: () => void;
-  onRollback?: () => void;
-  onRetry: () => void;
-}) {
-  if (loading && !activeBaseline && retiredBaselines.length === 0 && !error) {
-    return (
-      <div className="space-y-4" aria-label="Loading baselines">
-        <Card className="h-52 animate-pulse bg-[var(--color-bg-raised)]">
-          <span className="sr-only">Loading active baseline</span>
-        </Card>
-        <Card className="h-44 animate-pulse bg-[var(--color-bg-raised)]">
-          <span className="sr-only">Loading baseline drift</span>
-        </Card>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {error ? (
-        <InlineState
-          tone="danger"
-          title="Baselines unavailable"
-          message={`${error} Try again after the desktop bridge and local cache are ready.`}
-          action={
-            <Button
-              size="sm"
-              variant="secondary"
-              leadingIcon={<IconRefresh size={12} />}
-              onClick={onRetry}
-            >
-              Retry
-            </Button>
-          }
-        />
-      ) : null}
-
-      {activeBaseline ? (
-        <ActiveBaselineCard
-          baseline={activeBaseline}
-          drift={drift}
-          loading={loading}
-          onRename={onRename}
-          onRetire={onRetire}
-        />
-      ) : error ? null : (
-        <NoActiveBaselineState onCreate={onCreate} />
-      )}
-
-      {activeBaseline && drift ? (
-        <BaselineDriftEntries
-          selected={rollbackSelection}
-          onToggleSelected={onToggleRollbackSelection}
-          drift={drift}
-          expandedEntry={expandedEntry}
-          onToggleEntry={onToggleEntry}
-          onRollback={onRollback}
-        />
-      ) : null}
-
-      <RetiredBaselinesList baselines={retiredBaselines} />
-    </div>
-  );
-}
-
-function ActiveBaselineCard({
-  baseline,
-  drift,
-  loading,
-  onRename,
-  onRetire,
-}: {
-  baseline: DriftBaseline;
-  drift: DriftBaselineDriftResult | null;
-  loading: boolean;
-  onRename: () => void;
-  onRetire: () => void;
-}) {
-  const resourceLabels = baseline.resources.map((resource) =>
-    baselineResourceLabel(resource, drift),
-  );
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h2 className="truncate text-[15px] font-semibold text-[var(--color-text)]">
-              {baseline.name}
-            </h2>
-            <Pill tone="success">Active baseline</Pill>
-          </div>
-          <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-            {drift
-              ? `Evaluated ${formatDateTime(drift.evaluatedAt)}`
-              : loading
-                ? "Evaluating drift…"
-                : "Drift evaluation unavailable"}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={onRename}>
-            Rename
-          </Button>
-          <Button size="sm" variant="danger" onClick={onRetire}>
-            Retire
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-px bg-[var(--color-border-soft)] sm:grid-cols-3">
-        <BaselineMetric
-          label="Created"
-          value={formatDateTime(baseline.createdAt)}
-        />
-        <BaselineMetric
-          label="Pinned objects"
-          value={baseline.pinnedObjectCount.toLocaleString()}
-        />
-        <BaselineMetric
-          label="Resources covered"
-          value={`${baseline.resources.length.toLocaleString()} covered`}
-          detail={resourceLabels.join(", ") || "No resources recorded"}
-        />
-      </div>
-
-      <div className="border-t border-[var(--color-border-soft)] px-5 py-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-[12px] font-semibold text-[var(--color-text)]">
-              Drift by resource
-            </h3>
-            <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-              Object changes against the pinned versions
-            </div>
-          </div>
-          {loading ? (
-            <Pill tone="default">
-              <span className="h-2 w-2 animate-spin rounded-full border border-current border-t-transparent" />
-              Loading…
-            </Pill>
-          ) : null}
-        </div>
-        {drift && drift.resources.length > 0 ? (
-          <div className="overflow-x-auto rounded-lg ring-1 ring-[var(--color-border-soft)]">
-            <table className="w-full min-w-[540px] text-left text-[12px]">
-              <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-                <tr>
-                  <th scope="col" className="px-3 py-2 font-medium">
-                    Resource
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Added
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Removed
-                  </th>
-                  <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Modified
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {drift.resources.map((resource) => (
-                  <tr
-                    key={resource.resource}
-                    aria-label={`${resource.resourceLabel}: ${resource.added} added, ${resource.removed} removed, ${resource.modified} modified`}
-                    className="border-t border-[var(--color-border-soft)]"
-                  >
-                    <th
-                      scope="row"
-                      className="px-3 py-2.5 font-medium text-[var(--color-text-soft)]"
-                    >
-                      {resource.resourceLabel}
-                    </th>
-                    <td className="px-3 py-2.5 text-right font-mono text-[var(--color-success)]">
-                      {resource.added.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-[var(--color-danger)]">
-                      {resource.removed.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-mono text-[var(--color-accent)]">
-                      {resource.modified.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-            {loading
-              ? "Evaluating drift against the pinned versions…"
-              : drift
-                ? "No resource drift counts were returned."
-                : "Drift counts are not available."}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function BaselineMetric({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: string;
-  detail?: string;
-}) {
-  return (
-    <div className="min-w-0 bg-[var(--color-surface)] px-5 py-3">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className="mt-1 text-[12px] font-medium text-[var(--color-text)]">
-        {value}
-      </div>
-      {detail ? (
-        <div
-          className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]"
-          title={detail}
-        >
-          {detail}
+      {visible.some((resource) => resource.ambiguous > 0) ? (
+        <div className="mt-3 text-sm text-[var(--color-text-muted)]">
+          Objects with duplicate display names are marked ambiguous and are not matched.
         </div>
       ) : null}
-    </div>
+    </Section>
   );
 }
 
-function BaselineDriftEntries({
-  drift,
-  expandedEntry,
-  onToggleEntry,
-  onRollback,
-  selected,
-  onToggleSelected,
-}: {
-  drift: DriftBaselineDriftResult;
-  expandedEntry: string | null;
-  onToggleEntry: (entry: DriftBaselineDriftEntry) => void;
-  onRollback?: () => void;
-  /** Keys of entries picked for rollback. Empty means roll back all. */
-  selected: ReadonlySet<string>;
-  onToggleSelected: (entry: DriftBaselineDriftEntry) => void;
-}) {
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-3">
-        <div>
-          <h2 className="text-[12px] font-semibold text-[var(--color-text)]">
-            Drift entries
-          </h2>
-          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            {drift.entries.length.toLocaleString()} objects differ from the
-            baseline
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="text-[11px] text-[var(--color-text-muted)]">
-            {formatDateTime(drift.evaluatedAt)}
-          </span>
-          {onRollback && drift.entries.length > 0 ? (
-            <Button size="sm" variant="primary" onClick={onRollback}>
-              Roll back drift
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      {drift.entries.length === 0 ? (
-        <div className="px-5 py-10 text-center">
-          <div className="text-[13px] font-medium text-[var(--color-text)]">
-            No baseline drift detected
-          </div>
-          <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-            The latest tracked versions match this baseline.
-          </div>
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--color-border-soft)]">
-          {drift.entries.map((entry, index) => {
-            const key = baselineDriftEntryKey(entry);
-            const expanded = expandedEntry === key;
-            const detailId = `baseline-drift-detail-${index}`;
-            const name = entry.displayName ?? entry.graphId;
-            return (
-              <div key={key}>
-                <div className="flex items-start">
-                  <label className="flex shrink-0 items-center self-stretch pl-5 pr-1">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(key)}
-                      onChange={() => onToggleSelected(entry)}
-                      aria-label={`Select ${name} for rollback`}
-                      className="h-3.5 w-3.5 accent-[var(--color-accent)]"
-                    />
-                  </label>
-                <button
-                  type="button"
-                  aria-expanded={expanded}
-                  aria-controls={detailId}
-                  aria-label={`${expanded ? "Collapse" : "Expand"} baseline drift details for ${name}`}
-                  onClick={() => onToggleEntry(entry)}
-                  className={`grid w-full min-w-0 gap-3 py-3 pl-1 pr-5 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:grid-cols-[minmax(0,1fr)_auto] ${focusRingClass}`}
-                >
-                  <span className="min-w-0">
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <ChangeKindChip kind={entry.changeKind} />
-                      <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
-                        {name}
-                      </span>
-                    </span>
-                    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-                      <span>{entry.resourceLabel}</span>
-                      <span
-                        aria-hidden="true"
-                        className="text-[var(--color-text-faint)]"
-                      >
-                        ·
-                      </span>
-                      <span className="truncate font-mono">
-                        {entry.graphId}
-                      </span>
-                    </span>
-                  </span>
-                  <span className="flex items-center justify-end gap-3 self-center text-[11px] text-[var(--color-text-muted)]">
-                    <span>{formatFieldCount(entry.fieldChangeCount)}</span>
-                    <IconChevronDown
-                      size={13}
-                      aria-hidden="true"
-                      className={`transition-transform ${expanded ? "rotate-180" : ""}`}
-                    />
-                  </span>
-                </button>
-                </div>
-                {expanded ? (
-                  <div
-                    id={detailId}
-                    className="space-y-3 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] p-4"
-                  >
-                    {entry.truncated ? (
-                      <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-                        Raw before/after bodies exceeded the local display cap.
-                        The field list below is complete.
-                      </div>
-                    ) : null}
-                    <FieldChangesTable changes={entry.changes} />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-          {drift.hasMore ? (
-            <div className="px-5 py-3 text-center text-[11px] text-[var(--color-text-muted)]">
-              This evaluation contains more drift entries than the local display
-              limit.
-            </div>
-          ) : null}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function NoActiveBaselineState({ onCreate }: { onCreate: () => void }) {
-  return (
-    <Card className="px-6 py-14 text-center">
-      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-        <IconClock size={18} />
-      </div>
-      <h2 className="mt-4 text-[15px] font-semibold text-[var(--color-text)]">
-        No active baseline
-      </h2>
-      <p className="mx-auto mt-1 max-w-[560px] text-[13px] leading-6 text-[var(--color-text-muted)]">
-        A baseline is a pinned copy of this tenant&apos;s configuration. Drift
-        is measured against it.
-      </p>
-      <Button
-        className="mt-5"
-        variant="primary"
-        leadingIcon={<IconPlus size={12} />}
-        onClick={onCreate}
-      >
-        Create baseline
-      </Button>
-    </Card>
-  );
-}
-
-function RetiredBaselinesList({ baselines }: { baselines: DriftBaseline[] }) {
-  if (baselines.length === 0) return null;
-  return (
-    <section aria-labelledby="retired-baselines-heading">
-      <h2
-        id="retired-baselines-heading"
-        className="mb-2 px-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
-      >
-        Retired baselines
-      </h2>
-      <Card className="divide-y divide-[var(--color-border-soft)] overflow-hidden">
-        {baselines.map((baseline) => (
-          <div
-            key={baseline.id}
-            className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-6"
-          >
-            <div className="min-w-0 truncate text-[12.5px] font-medium text-[var(--color-text-soft)]">
-              {baseline.name}
-            </div>
-            <div className="text-[11px] text-[var(--color-text-muted)]">
-              Created {formatDateTime(baseline.createdAt)}
-            </div>
-            <div className="text-[11px] text-[var(--color-text-muted)]">
-              {baseline.retiredAt
-                ? `Retired ${formatDateTime(baseline.retiredAt)}`
-                : "Retired date unavailable"}
-            </div>
-          </div>
-        ))}
-      </Card>
-    </section>
-  );
-}
-
-function FiltersRow({
-  resources,
-  selectedResource,
-  onResourceChange,
-  dateRange,
-  onDateRangeChange,
-  query,
-  onQueryChange,
-  disabled,
-}: {
-  resources: DriftResourceStatus[];
-  selectedResource: "all" | GraphCacheResourceKind;
-  onResourceChange: (value: string) => void;
-  dateRange: DateRangeValue;
-  onDateRangeChange: (value: string) => void;
-  query: string;
-  onQueryChange: (value: string) => void;
-  disabled: boolean;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label
-        htmlFor="changes-resource-filter"
-        className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--color-surface)] px-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-      >
-        <span>Resource</span>
-        <Select
-          id="changes-resource-filter"
-          name="changes-resource-filter"
-          aria-label="Resource"
-          value={selectedResource}
-          disabled={disabled}
-          onChange={(event) => onResourceChange(event.target.value)}
-          className={`h-7 min-w-[190px] bg-transparent text-[var(--color-text)] outline-none disabled:opacity-60 ${focusRingClass}`}
-        >
-          <option value="all">All tracked resources</option>
-          {resources.map((resource) => (
-            <option key={resource.resource} value={resource.resource}>
-              {resource.resourceLabel}
-            </option>
-          ))}
-        </Select>
-      </label>
-
-      <label
-        htmlFor="changes-date-range"
-        className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--color-surface)] px-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
-      >
-        <span>Range</span>
-        <Select
-          id="changes-date-range"
-          name="changes-date-range"
-          aria-label="Date range"
-          value={dateRange}
-          disabled={disabled}
-          onChange={(event) => onDateRangeChange(event.target.value)}
-          className={`h-7 min-w-[110px] bg-transparent text-[var(--color-text)] outline-none disabled:opacity-60 ${focusRingClass}`}
-        >
-          {DATE_RANGES.map((range) => (
-            <option key={range.value} value={range.value}>
-              {range.label}
-            </option>
-          ))}
-        </Select>
-      </label>
-
-      <div className="relative min-w-[240px] flex-1 sm:flex-none">
-        <IconSearch
-          size={14}
-          aria-hidden="true"
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-        />
-        <label htmlFor="changes-display-name-filter" className="sr-only">
-          Filter by display name
-        </label>
-        <input
-          id="changes-display-name-filter"
-          name="changes-display-name-filter"
-          type="search"
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Filter by display name"
-          autoComplete="off"
-          className="h-9 w-full rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
-        />
-      </div>
-    </div>
-  );
-}
-
-function TimelinePanel({
-  loading,
-  groups,
-  hasAnyEntries,
-  hasMore,
-  selectedEntry,
+function TenantDifferenceTable({
+  entries,
   onSelectEntry,
-  onLoadMore,
 }: {
-  loading: boolean;
-  groups: EntryDayGroup[];
-  hasAnyEntries: boolean;
-  hasMore: boolean;
-  selectedEntry: DriftTimelineEntry | null;
-  onSelectEntry: (entry: DriftTimelineEntry) => void;
-  onLoadMore: () => void;
+  entries: DriftTenantCompareEntry[];
+  onSelectEntry: (entry: DriftTenantCompareEntry) => void;
+}) {
+  const columns = useMemo<DataTableColumn<DriftTenantCompareEntry>[]>(
+    () => [
+      {
+        id: "object",
+        header: "Object",
+        accessor: "displayName",
+        sortable: true,
+        render: (entry) => (
+          <span className="font-medium text-[var(--color-text)]">{entry.displayName}</span>
+        ),
+      },
+      { id: "resource", header: "Resource", accessor: "resourceLabel", sortable: true },
+      {
+        id: "kind",
+        header: "Change kind",
+        accessor: "bucket",
+        sortable: true,
+        render: (entry) => <TenantDifferenceBadge bucket={entry.bucket} />,
+      },
+      {
+        id: "fields",
+        header: "Fields",
+        accessor: "fieldChangeCount",
+        sortable: true,
+        align: "right",
+      },
+    ],
+    [],
+  );
+  if (entries.length === 0) return null;
+  return (
+    <Section title="Configuration differences">
+      <DataTable
+        caption="Tenant configuration differences"
+        columns={columns}
+        rows={entries}
+        rowKey={(entry) => `${entry.resource}:${entry.displayName}:${entry.bucket}`}
+        onRowClick={onSelectEntry}
+      />
+    </Section>
+  );
+}
+
+function ComparisonDiffDrawer({
+  open,
+  title,
+  entry,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  entry:
+    | DriftBaselineDriftEntry
+    | DriftTenantCompareEntry
+    | null;
+  onClose: () => void;
 }) {
   return (
-    <Card className="min-w-0 overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
-        <div>
-          <div className="text-[12px] font-semibold text-[var(--color-text)]">
-            Timeline
-          </div>
-          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            Newest local snapshot changes first
-          </div>
-        </div>
-        {loading ? (
-          <Pill tone="default">
-            <span className="h-2 w-2 animate-spin rounded-full border border-current border-t-transparent" />
-            Loading
-          </Pill>
-        ) : null}
-      </div>
-
-      {loading && groups.length === 0 ? (
-        <div className="space-y-2 p-4">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div
-              key={index}
-              className="h-16 animate-pulse rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]"
+    <Drawer open={open} title={title} onClose={onClose}>
+      {entry ? (
+        <div className="space-y-5 p-5">
+          <dl className="divide-y divide-[var(--color-border-soft)]">
+            <KeyValue label="Resource" value={entry.resourceLabel} />
+            <KeyValue
+              label="Change kind"
+              value={
+                "bucket" in entry ? (
+                  <TenantDifferenceBadge bucket={entry.bucket} />
+                ) : (
+                  <ChangeKindBadge kind={entry.changeKind} />
+                )
+              }
             />
-          ))}
-        </div>
-      ) : groups.length === 0 ? (
-        <div className="px-5 py-12 text-center">
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-            <IconSearch size={17} />
-          </div>
-          <div className="mt-3 text-[13px] font-medium text-[var(--color-text)]">
-            No changes match these filters.
-          </div>
-          <div className="mt-1 text-[12px] text-[var(--color-text-muted)]">
-            Widen the date range, clear the display-name filter, or choose
-            another resource.
-          </div>
-        </div>
-      ) : (
-        <div className="divide-y divide-[var(--color-border-soft)]">
-          {groups.map((group) => (
-            <section
-              key={group.key}
-              aria-labelledby={`changes-day-${group.key}`}
-            >
-              <div
-                id={`changes-day-${group.key}`}
-                className="bg-[var(--color-bg)] px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
-              >
-                {group.label}
-              </div>
-              <div className="divide-y divide-[var(--color-border-soft)]">
-                {group.entries.map((entry) => (
-                  <TimelineRow
-                    key={entry.id}
-                    entry={entry}
-                    selected={selectedEntry?.id === entry.id}
-                    onClick={() => onSelectEntry(entry)}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-          {hasMore ? (
-            <div className="flex justify-center px-4 py-4">
-              <Button
-                size="sm"
-                variant="secondary"
-                leadingIcon={<IconChevronDown size={12} />}
-                onClick={onLoadMore}
-              >
-                Load more
-              </Button>
-            </div>
-          ) : hasAnyEntries ? (
-            <div className="px-4 py-3 text-center text-[11px] text-[var(--color-text-muted)]">
-              End of local change history for this filter.
-            </div>
+            <KeyValue
+              label="Fields changed"
+              value={entry.fieldChangeCount.toLocaleString()}
+            />
+          </dl>
+          {entry.truncated ? (
+            <CompactNotice tone="warning">
+              Raw before and after bodies exceeded the local display cap. The field list is complete.
+            </CompactNotice>
           ) : null}
+          <FieldChangesTable changes={entry.changes} />
         </div>
-      )}
-    </Card>
+      ) : null}
+    </Drawer>
   );
 }
 
-function TimelineRow({
-  entry,
-  selected,
-  onClick,
-}: {
-  entry: DriftTimelineEntry;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const isBaseline = entry.changeKind === "baseline";
-  const objectName = displayNameForEntry(entry);
+function ComparisonLoading() {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-expanded={selected}
-      aria-label={
-        isBaseline
-          ? `Open baseline details for ${entry.resourceLabel}`
-          : `Open change details for ${objectName}`
-      }
-      className={`grid w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] ${focusRingClass} ${
-        selected ? "bg-[var(--color-accent-soft)]/40" : ""
-      }`}
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <ChangeKindChip kind={entry.changeKind} />
-        <span className="truncate text-[12px] text-[var(--color-text-soft)]">
-          {entry.resourceLabel}
-        </span>
-        <span aria-hidden="true" className="text-[var(--color-text-faint)]">
-          ·
-        </span>
-        <span className="font-mono text-[10.5px] text-[var(--color-text-muted)]">
-          {formatShortDateTime(entry.capturedAt)}
-        </span>
-        {entry.timestampOnly ? (
-          <Pill tone="default" className="text-[10.5px]">
-            Timestamp-only
-          </Pill>
-        ) : null}
-      </div>
-
-      {isBaseline ? (
-        <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-            Baseline captured: {(entry.rowCount ?? 0).toLocaleString()} objects
-            tracked
-          </div>
-          <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            Future snapshots compare against this local baseline.
-          </div>
-        </div>
-      ) : (
-        <div className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(160px,0.7fr)]">
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-              {objectName}
-            </div>
-            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-              {entry.graphId ? (
-                <span className="truncate font-mono">{entry.graphId}</span>
-              ) : null}
-              {entry.changeKind === "modified" ? (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className="text-[var(--color-text-faint)]"
-                  >
-                    ·
-                  </span>
-                  <span>
-                    {entry.fieldChangeCount.toLocaleString()} fields changed
-                  </span>
-                </>
-              ) : null}
-            </div>
-          </div>
-          <AttributionInline attribution={entry.attribution} />
-        </div>
-      )}
-    </button>
-  );
-}
-
-function DetailPane({
-  entry,
-  detail,
-  history,
-  loading,
-  error,
-  markdown,
-  workspaces,
-  onCopy,
-  onOpenPin,
-}: {
-  entry: DriftTimelineEntry | null;
-  detail: DriftEntryDetail | null;
-  history: DriftObjectHistoryResult | null;
-  loading: boolean;
-  error: string | null;
-  markdown: string;
-  workspaces: WorkspaceSummary[];
-  onCopy: () => void;
-  onOpenPin: () => void;
-}) {
-  if (!entry) {
-    return (
-      <Card className="flex min-h-[360px] items-center justify-center p-8 text-center">
-        <div>
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-            <IconChanges size={18} />
-          </div>
-          <div className="mt-3 text-[13px] font-medium text-[var(--color-text)]">
-            Select a change
-          </div>
-          <div className="mt-1 text-[12px] leading-5 text-[var(--color-text-muted)]">
-            Field-level diffs, attribution, and object history open here.
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
-  const attribution = detail?.attribution ?? entry.attribution;
-  const objectName = displayNameForEntry(entry);
-  const canCopy = entry.changeKind === "baseline" || Boolean(detail);
-  const canPin = canCopy && markdown.trim().length > 0;
-
-  return (
-    <OutputPane
-      title={objectName}
-      subtitle={`${entry.resourceLabel} · ${formatDateTime(entry.capturedAt)}`}
-      badge={<ChangeKindChip kind={entry.changeKind} />}
-      actions={
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            leadingIcon={<IconCopy size={12} />}
-            disabled={!canCopy}
-            onClick={onCopy}
-          >
-            Copy
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            leadingIcon={<IconHardDrive size={12} />}
-            disabled={!canPin}
-            title={
-              workspaces.length === 0
-                ? "Create a workspace before pinning evidence."
-                : undefined
-            }
-            onClick={onOpenPin}
-          >
-            Pin to Workspace
-          </Button>
-        </div>
-      }
-      className="min-w-0 self-start"
-    >
-      {entry.changeKind === "baseline" ? (
-        <div className="space-y-3 p-4">
-          <OutputPaneSection
-            title="Baseline"
-            collapsible={false}
-            bodyClassName="p-3"
-          >
-            <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-              Baseline captured: {(entry.rowCount ?? 0).toLocaleString()}{" "}
-              objects tracked. This is the reference point for later drift
-              detection, not a list of additions.
-            </div>
-          </OutputPaneSection>
-        </div>
-      ) : loading ? (
-        <div className="space-y-3 p-4">
-          <div className="h-24 animate-pulse rounded-lg bg-[var(--color-bg)] ring-1 ring-[var(--color-border-soft)]" />
-          <div className="h-44 animate-pulse rounded-lg bg-[var(--color-bg)] ring-1 ring-[var(--color-border-soft)]" />
-        </div>
-      ) : error ? (
-        <div className="p-4">
-          <InlineState
-            tone="danger"
-            title="Change detail unavailable"
-            message={`${error} The timeline row is still local; reload the detail after the cache settles.`}
-          />
-        </div>
-      ) : detail ? (
-        <div className="space-y-3 p-4">
-          <AttributionBlock attribution={attribution} />
-          {detail.truncated ? (
-            <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-              Raw before/after bodies exceeded the local display cap. The field
-              list below is complete.
-            </div>
-          ) : null}
-          <FieldChangesTable changes={detail.changes} />
-          {history && history.versions.length > 1 ? (
-            <OutputPaneSection
-              title={`History (${history.versions.length} versions)`}
-              defaultCollapsed
-            >
-              <div className="space-y-2">
-                {history.versions.map((version) => (
-                  <div
-                    key={`${version.snapshotId}:${version.version}`}
-                    className="rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-mono text-[11px] text-[var(--color-text)]">
-                        v{version.version}
-                      </span>
-                      <span className="text-[11px] text-[var(--color-text-muted)]">
-                        {formatDateTime(version.capturedAt)}
-                      </span>
-                    </div>
-                    <div className="mt-1 truncate font-mono text-[10.5px] text-[var(--color-text-muted)]">
-                      {version.contentHash}
-                    </div>
-                    {version.removedAt ? (
-                      <div className="mt-1 text-[10.5px] text-[var(--color-danger)]">
-                        Removed {formatDateTime(version.removedAt)}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </OutputPaneSection>
-          ) : null}
-        </div>
-      ) : (
-        <div className="p-4 text-[12px] text-[var(--color-text-muted)]">
-          Select a non-baseline change to inspect field-level differences.
-        </div>
-      )}
-    </OutputPane>
+    <DataTable
+      caption="Loading comparison results"
+      columns={[
+        { id: "object", header: "Object" },
+        { id: "resource", header: "Resource" },
+        { id: "kind", header: "Change kind" },
+      ]}
+      rows={[] as Array<Record<string, never>>}
+      rowKey={(_, index?: never) => String(index ?? "loading")}
+      loading
+    />
   );
 }
 
 function FieldChangesTable({ changes }: { changes: DriftFieldChange[] }) {
+  const columns = useMemo<DataTableColumn<DriftFieldChange>[]>(
+    () => [
+      {
+        id: "path",
+        header: "Path",
+        accessor: "path",
+        render: (change) => (
+          <span className="break-all font-mono text-[var(--color-info)]">
+            {change.path}
+          </span>
+        ),
+      },
+      {
+        id: "before",
+        header: "Before",
+        render: (change) => <LongValue value={change.before} />,
+      },
+      {
+        id: "after",
+        header: "After",
+        render: (change) => <LongValue value={change.after} />,
+      },
+    ],
+    [],
+  );
   return (
-    <OutputPaneSection
-      title="Field changes"
-      subtitle={`${changes.length.toLocaleString()} fields`}
-      collapsible={false}
-      bodyClassName="p-0"
-    >
+    <Section title="Field changes">
       {changes.length === 0 ? (
-        <div className="px-3 py-3 text-[12px] text-[var(--color-text-muted)]">
-          No field-level changes were recorded for this entry.
-        </div>
+        <EmptyState
+          icon={<IconChanges size={18} />}
+          title="No field changes"
+          description="This comparison did not record field-level differences for the object."
+          className="py-8"
+        />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-[620px] w-full text-left text-[12px]">
-            <thead className="bg-[var(--color-bg-raised)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
-              <tr>
-                <th scope="col" className="w-[28%] px-3 py-2 font-medium">
-                  Path
-                </th>
-                <th scope="col" className="w-[31%] px-3 py-2 font-medium">
-                  Before
-                </th>
-                <th
-                  scope="col"
-                  className="w-[10%] px-3 py-2 text-center font-medium"
-                >
-                  →
-                </th>
-                <th scope="col" className="w-[31%] px-3 py-2 font-medium">
-                  After
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {changes.map((change) => (
-                <tr
-                  key={`${change.path}:${change.kind}`}
-                  className="border-t border-[var(--color-border-soft)]"
-                >
-                  <td className="px-3 py-2 align-top font-mono text-[11px] text-[var(--color-accent)]">
-                    {change.path}
-                  </td>
-                  <td className="px-3 py-2 align-top">
-                    <LongValue value={change.before} tone="before" />
-                  </td>
-                  <td className="px-3 py-2 text-center align-top text-[var(--color-text-muted)]">
-                    →
-                  </td>
-                  <td className="px-3 py-2 align-top">
-                    <LongValue value={change.after} tone="after" />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          caption="Field-level changes"
+          columns={columns}
+          rows={changes}
+          rowKey={(change) => `${change.path}:${change.kind}`}
+        />
       )}
-    </OutputPaneSection>
+    </Section>
   );
 }
 
-function LongValue({
-  value,
-  tone,
-}: {
-  value: unknown;
-  tone: "before" | "after";
-}) {
+function LongValue({ value }: { value: unknown }) {
   const [expanded, setExpanded] = useState(false);
   const text = valueToText(value);
   const long = text.length > 180 || text.includes("\n");
-  const shown = long && !expanded ? `${text.slice(0, 180)}…` : text;
-  const borderLeftColor =
-    tone === "before" ? "var(--color-danger)" : "var(--color-success)";
-
   return (
-    <div
-      className="rounded-md border-l-2 bg-[var(--color-bg)] px-2 py-1.5 ring-1 ring-[var(--color-border-soft)]"
-      style={{ borderLeftColor }}
-    >
-      <pre className="whitespace-pre-wrap break-words font-mono text-[10.5px] leading-5 text-[var(--color-text-soft)]">
-        {shown}
+    <div className="min-w-40">
+      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-[var(--color-text-soft)]">
+        {long && !expanded ? `${text.slice(0, 180)}…` : text}
       </pre>
       {long ? (
         <button
           type="button"
           aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          className={`mt-1 rounded text-[10.5px] font-medium text-[var(--color-accent)] hover:text-[var(--color-text)] ${focusRingClass}`}
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-1 text-xs font-medium text-[var(--color-info)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         >
           {expanded ? "Collapse" : "Expand"}
         </button>
@@ -3081,231 +2823,49 @@ function LongValue({
   );
 }
 
-function AttributionBlock({ attribution }: { attribution?: DriftAttribution }) {
-  return (
-    <OutputPaneSection title="Attribution" collapsible={false}>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <AttributeTile
-          label="Actor"
-          value={
-            attribution?.status === "matched"
-              ? actorLabel(attribution)
-              : "actor unknown"
-          }
-          muted={attribution?.status !== "matched"}
-        />
-        <AttributeTile
-          label="Activity"
-          value={attribution?.activity ?? "No audit activity attached"}
-          muted={!attribution?.activity}
-        />
-        <AttributeTile
-          label="Source"
-          value={sourceLabel(attribution?.source)}
-          muted={!attribution?.source}
-        />
-        <AttributeTile
-          label="When"
-          value={
-            attribution?.activityDateTime
-              ? formatDateTime(attribution.activityDateTime)
-              : "No audit timestamp"
-          }
-          muted={!attribution?.activityDateTime}
-        />
-      </div>
-      {attribution?.alsoMatched ? (
-        <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          Also matched {attribution.alsoMatched.toLocaleString()} more audit
-          events.
-        </div>
-      ) : null}
-      {attribution?.reason === "audit-cache-stale" ? (
-        <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          Refresh audit data to attribute this change.
-        </div>
-      ) : null}
-    </OutputPaneSection>
-  );
-}
-
-function AttributeTile({
-  label,
-  value,
-  muted = false,
-}: {
-  label: string;
-  value: ReactNode;
-  muted?: boolean;
-}) {
-  return (
-    <div className="rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div
-        className={`mt-0.5 break-words text-[12px] ${
-          muted ? "text-[var(--color-text-muted)]" : "text-[var(--color-text)]"
-        }`}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function AttributionInline({
-  attribution,
-}: {
-  attribution?: DriftAttribution;
-}) {
-  if (attribution?.status === "matched") {
-    return (
-      <div className="min-w-0 text-[11px] leading-5 text-[var(--color-text-soft)]">
-        <span className="block truncate">{actorLabel(attribution)}</span>
-        {attribution.activity ? (
-          <span className="block truncate text-[var(--color-text-muted)]">
-            {attribution.activity}
-          </span>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-w-0 text-[11px] leading-5 text-[var(--color-text-muted)]">
-      <span className="block">actor unknown</span>
-      {attribution?.reason === "audit-cache-stale" ? (
-        <span className="block truncate">refresh audit data to attribute</span>
-      ) : null}
-    </div>
-  );
-}
-
-function ChangeKindChip({ kind }: { kind: DriftTimelineChangeKind }) {
+function ChangeKindBadge({ kind }: { kind: DriftTimelineChangeKind }) {
   const config = changeKindConfig(kind);
   return (
-    <Pill tone={config.tone}>
-      {config.icon}
+    <Badge tone={config.tone}>
+      <StatusDot tone={config.tone} />
       {config.label}
-    </Pill>
+    </Badge>
   );
 }
 
-function InlineState({
-  tone,
-  title,
-  message,
-  action,
+function TenantDifferenceBadge({
+  bucket,
 }: {
-  tone: "danger" | "success" | "info";
-  title: string;
-  message: string;
-  action?: ReactNode;
+  bucket: DriftTenantCompareEntry["bucket"];
 }) {
-  const palette =
-    tone === "danger"
-      ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/30"
-      : tone === "success"
-        ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/30"
-        : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-[var(--color-border-soft)]";
-  const icon =
-    tone === "danger" ? (
-      <IconWarning size={14} />
-    ) : tone === "success" ? (
-      <StatusDot tone="success" />
-    ) : (
-      <StatusDot tone="info" />
-    );
+  if (bucket === "different") return <Badge tone="warning">Modified</Badge>;
+  if (bucket === "only-in-b") return <Badge tone="info">Only in B</Badge>;
+  return <Badge tone="neutral">Only in A</Badge>;
+}
+
+function CompactNotice({
+  tone,
+  children,
+}: {
+  tone: "success" | "warning" | "danger" | "info";
+  children: ReactNode;
+}) {
   return (
     <div
-      className={`flex items-start justify-between gap-3 rounded-lg px-3 py-2 ring-1 ${palette}`}
+      role={tone === "danger" ? "alert" : "status"}
+      className={`mb-3 flex items-start gap-2 rounded-md px-3 py-2 text-sm ring-1 ${
+        tone === "danger"
+          ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-[var(--color-danger)]/25"
+          : tone === "warning"
+            ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/25"
+            : tone === "success"
+              ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/25"
+              : "bg-[var(--color-bg-raised)] text-[var(--color-text-soft)] ring-[var(--color-border)]"
+      }`}
     >
-      <div className="flex min-w-0 items-start gap-2">
-        <span className="mt-0.5 shrink-0">{icon}</span>
-        <div className="min-w-0">
-          <div className="text-[12px] font-medium">{title}</div>
-          <div className="mt-0.5 text-[11.5px] leading-5 text-[var(--color-text-soft)]">
-            {message}
-          </div>
-        </div>
-      </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      <StatusDot tone={tone} className="mt-1.5" />
+      <span>{children}</span>
     </div>
-  );
-}
-
-function NoTenantState({ onConnect }: { onConnect: () => void }) {
-  return (
-    <Card className="max-w-[640px] p-6">
-      <div className="flex items-start gap-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-danger-soft)] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          <IconWarning size={18} />
-        </div>
-        <div className="min-w-0">
-          <div className="text-[15px] font-semibold text-[var(--color-text)]">
-            No tenant connected
-          </div>
-          <div className="mt-1 text-[13px] leading-6 text-[var(--color-text-muted)]">
-            Change history is tenant-scoped. Connect a Microsoft 365 tenant
-            before reviewing drift snapshots.
-          </div>
-          <Button className="mt-4" variant="primary" onClick={onConnect}>
-            Connect tenant
-          </Button>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function NoBaselineState({ onOpenSettings }: { onOpenSettings: () => void }) {
-  return (
-    <Card className="max-w-[720px] p-6">
-      <div className="flex items-start gap-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-          <IconClock size={18} />
-        </div>
-        <div className="min-w-0">
-          <div className="text-[15px] font-semibold text-[var(--color-text)]">
-            No change history yet
-          </div>
-          <div className="mt-1 text-[13px] leading-6 text-[var(--color-text-muted)]">
-            Drift tracking starts with your first cache refresh, history appears
-            after the second.
-          </div>
-          <Button
-            className="mt-4"
-            variant="secondary"
-            leadingIcon={<IconRefresh size={12} />}
-            onClick={onOpenSettings}
-          >
-            Open cache settings
-          </Button>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function BaselineOnlyState({ baselineDate }: { baselineDate?: string }) {
-  return (
-    <Card className="max-w-[720px] p-6">
-      <div className="flex items-start gap-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
-          <StatusDot tone="success" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-[15px] font-semibold text-[var(--color-text)]">
-            Baseline captured
-          </div>
-          <div className="mt-1 text-[13px] leading-6 text-[var(--color-text-muted)]">
-            No configuration changes detected
-            {baselineDate ? ` since ${formatDateTime(baselineDate)}` : ""}.
-          </div>
-        </div>
-      </div>
-    </Card>
   );
 }
 
@@ -3327,8 +2887,6 @@ function BaselineNameModal({
   onSubmit: () => void;
 }) {
   const creating = mode === "create";
-  const errorId = "baseline-name-error";
-  const hintId = "baseline-name-hint";
   return (
     <Modal open={mode !== null} onClose={onClose} size="md">
       <ModalHeader
@@ -3347,57 +2905,35 @@ function BaselineNameModal({
           onSubmit();
         }}
       >
-        <div>
-          <label
-            htmlFor="baseline-name"
-            className="block text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]"
-          >
-            Baseline name
-          </label>
-          <input
-            id="baseline-name"
-            name="baseline-name"
-            type="text"
-            data-autofocus
-            autoComplete="off"
-            maxLength={80}
-            value={name}
-            aria-invalid={Boolean(error)}
-            aria-describedby={error ? `${hintId} ${errorId}` : hintId}
-            disabled={busy}
-            onChange={(event) => onNameChange(event.target.value)}
-            className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)] disabled:opacity-60"
-          />
-          <span
-            id={hintId}
-            className="mt-1.5 block text-[11px] text-[var(--color-text-muted)]"
-          >
-            Use 1 to 80 characters. Leading and trailing spaces are removed.
-          </span>
+        <label htmlFor="baseline-name" className="block text-sm text-[var(--color-text-muted)]">
+          Baseline name
+        </label>
+        <input
+          id="baseline-name"
+          name="baseline-name"
+          type="text"
+          data-autofocus
+          autoComplete="off"
+          maxLength={80}
+          value={name}
+          aria-invalid={Boolean(error)}
+          disabled={busy}
+          onChange={(event) => onNameChange(event.target.value)}
+          className="h-9 w-full rounded-md bg-[var(--color-surface)] px-3 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] disabled:opacity-50"
+        />
+        <div className="text-xs text-[var(--color-text-muted)]">
+          Use 1 to 80 characters. Leading and trailing spaces are removed.
         </div>
-
         {error ? (
-          <div
-            id={errorId}
-            role="alert"
-            className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
-          >
-            <div>{error}</div>
-            {isRefreshCacheRequired(error) ? (
-              <div className="mt-1 text-[var(--color-text-soft)]">
-                Refresh cache in Settings, then try again.
-              </div>
-            ) : null}
-          </div>
+          <CompactNotice tone="danger">
+            {error}
+            {isRefreshCacheRequired(error)
+              ? " Refresh tenant data, then try again."
+              : ""}
+          </CompactNotice>
         ) : null}
-
         <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={busy}
-            onClick={onClose}
-          >
+          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
           <Button type="submit" variant="primary" disabled={busy}>
@@ -3432,33 +2968,17 @@ function RetireBaselineModal({
 }) {
   return (
     <Modal open={open} onClose={onClose} size="md">
-      <ModalHeader
-        title="Retire baseline"
-        subtitle={baseline?.name ?? "Active baseline"}
-        onClose={onClose}
-      />
+      <ModalHeader title="Retire baseline" subtitle={baseline?.name} onClose={onClose} />
       <div className="space-y-4 p-6">
-        <p className="text-[13px] leading-6 text-[var(--color-text-soft)]">
-          Retiring keeps history but stops drift evaluation and pruning
-          protection.
+        <p className="text-base text-[var(--color-text-soft)]">
+          Retiring keeps history but stops drift evaluation and pruning protection.
         </p>
-        {error ? (
-          <div
-            role="alert"
-            className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
-          >
-            {error}
-          </div>
-        ) : null}
+        {error ? <CompactNotice tone="danger">{error}</CompactNotice> : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            variant="danger"
-            disabled={busy || !baseline}
-            onClick={onConfirm}
-          >
+          <Button variant="danger" disabled={busy || !baseline} onClick={onConfirm}>
             {busy ? "Retiring…" : "Retire baseline"}
           </Button>
         </div>
@@ -3486,31 +3006,15 @@ function BaselineRollbackModal({
 }) {
   return (
     <Modal open={open} onClose={onClose} size="md">
-      <ModalHeader
-        title="Roll back baseline drift"
-        subtitle="Pre-flight review"
-        onClose={onClose}
-      />
+      <ModalHeader title="Roll back baseline drift" subtitle="Pre-flight review" onClose={onClose} />
       <div className="space-y-4 p-6">
-        <p className="text-[13px] leading-6 text-[var(--color-text-soft)]">
-          This builds a rollback plan for{" "}
-          {selectionActive ? "the entries you selected" : "the drifted objects below"}.
-          Nothing is applied until you review the plan and type the confirmation
-          phrase on the run page.
+        <p className="text-base text-[var(--color-text-soft)]">
+          This builds a rollback plan for {selectionActive ? "the selected entries" : "all drifted objects"}. Nothing is applied until you review the plan and type the confirmation phrase on the run page.
         </p>
-        <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-          {entryCount.toLocaleString()} drifted{" "}
-          {entryCount === 1 ? "entry" : "entries"}{" "}
-          {entryCount === 1 ? "is" : "are"} included in this plan.
+        <div className="text-sm text-[var(--color-text-muted)]">
+          {entryCount.toLocaleString()} drifted {entryCount === 1 ? "entry" : "entries"} included.
         </div>
-        {error ? (
-          <div
-            role="alert"
-            className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
-          >
-            {error}
-          </div>
-        ) : null}
+        {error ? <CompactNotice tone="danger">{error}</CompactNotice> : null}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" disabled={busy} onClick={onClose}>
             Cancel
@@ -3550,29 +3054,21 @@ function PinChangeToWorkspaceModal({
 }) {
   return (
     <Modal open={open} onClose={onClose} size="md">
-      <ModalHeader
-        title="Pin change to workspace"
-        subtitle="Creates tenant-scoped evidence from this local drift diff"
-        badge={<Pill tone="accent">Workspace evidence</Pill>}
-        onClose={onClose}
-      />
+      <ModalHeader title="Pin change to workspace" onClose={onClose} />
       <div className="space-y-4 p-6">
         {workspaces.length === 0 ? (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-[12px] leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            No active workspaces exist for this tenant. Create a workspace
-            first, then pin this change as evidence.
-          </div>
+          <p className="text-base text-[var(--color-text-soft)]">
+            No active workspace exists for this tenant.
+          </p>
         ) : (
-          <label htmlFor="pin-change-workspace" className="block">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Workspace
-            </span>
+          <label htmlFor="pin-change-workspace" className="block text-sm text-[var(--color-text-muted)]">
+            Workspace
             <Select
               id="pin-change-workspace"
               name="pin-change-workspace"
               value={selectedWorkspaceId}
               onChange={(event) => onWorkspaceChange(event.target.value)}
-              className="mt-2 h-9 w-full rounded-md bg-[var(--color-bg-raised)] px-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+              className="mt-1 h-9 w-full"
             >
               {workspaces.map((workspace) => (
                 <option key={workspace.id} value={workspace.id}>
@@ -3582,10 +3078,10 @@ function PinChangeToWorkspaceModal({
             </Select>
           </label>
         )}
-        <div className="max-h-44 overflow-y-auto rounded-lg bg-[var(--color-bg)] p-3 font-mono text-[10.5px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <pre className="max-h-44 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--color-bg)] p-3 font-mono text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
           {markdown.slice(0, 900)}
           {markdown.length > 900 ? "\n…" : ""}
-        </div>
+        </pre>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -3595,11 +3091,7 @@ function PinChangeToWorkspaceModal({
               Open Workspaces
             </Button>
           ) : (
-            <Button
-              variant="primary"
-              disabled={!selectedWorkspaceId}
-              onClick={onConfirm}
-            >
+            <Button variant="primary" disabled={!selectedWorkspaceId} onClick={onConfirm}>
               Pin change
             </Button>
           )}
@@ -3609,38 +3101,14 @@ function PinChangeToWorkspaceModal({
   );
 }
 
-interface EntryDayGroup {
-  key: string;
-  label: string;
-  entries: DriftTimelineEntry[];
-}
-
-function groupEntriesByDay(entries: DriftTimelineEntry[]): EntryDayGroup[] {
-  const groups = new Map<string, EntryDayGroup>();
-  for (const entry of entries) {
-    const date = new Date(entry.capturedAt);
-    const key = Number.isNaN(date.getTime())
-      ? "unknown"
-      : `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-    const existing = groups.get(key);
-    if (existing) {
-      existing.entries.push(entry);
-      continue;
-    }
-    groups.set(key, {
-      key,
-      label: Number.isNaN(date.getTime())
-        ? "Unknown date"
-        : date.toLocaleDateString(undefined, {
-            weekday: "long",
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          }),
-      entries: [entry],
-    });
-  }
-  return [...groups.values()];
+function dateRangeBounds(value: DateRangeValue): { from?: string; to?: string } {
+  const range = DATE_RANGES.find((entry) => entry.value === value);
+  if (!range?.ms) return {};
+  const to = new Date();
+  return {
+    from: new Date(to.getTime() - range.ms).toISOString(),
+    to: to.toISOString(),
+  };
 }
 
 function defaultCompareDateValue(dayOffset: number): string {
@@ -3663,38 +3131,6 @@ function compareDateToIso(value: string): string {
   return new Date(Date.UTC(year, month - 1, day)).toISOString();
 }
 
-function tenantCompareEntryKey(
-  entry: DriftTenantCompareEntry,
-  index: number,
-): string {
-  return `${entry.resource}:${entry.displayName}:${entry.bucket}:${index}`;
-}
-
-function tenantResourceSummaryLabel(
-  resource: DriftTenantCompareResult["resources"][number],
-): string {
-  return `${resource.resourceLabel}: ${resource.matchedSame} matched same, ${resource.different} different, ${resource.onlyInA} only in A, ${resource.onlyInB} only in B, ${resource.ambiguous} ambiguous`;
-}
-
-function ambiguousObjectNote(count: number): string {
-  return count === 1
-    ? "1 object shares a display name and was not matched."
-    : `${count.toLocaleString()} objects share a display name and were not matched.`;
-}
-
-function dateRangeBounds(value: DateRangeValue): {
-  from?: string;
-  to?: string;
-} {
-  const range = DATE_RANGES.find((entry) => entry.value === value);
-  if (!range?.ms) return {};
-  const to = new Date();
-  return {
-    from: new Date(to.getTime() - range.ms).toISOString(),
-    to: to.toISOString(),
-  };
-}
-
 function latestBaselineDate(
   resources: DriftResourceStatus[],
   entries: DriftTimelineEntry[],
@@ -3712,27 +3148,21 @@ function latestBaselineDate(
 
 function changeKindConfig(kind: DriftTimelineChangeKind): {
   label: string;
-  tone: "default" | "accent" | "success" | "danger";
-  icon: ReactNode;
+  tone: BadgeTone;
 } {
-  if (kind === "added") {
-    return { label: "Added", tone: "success", icon: <IconPlus size={10} /> };
-  }
-  if (kind === "removed") {
-    return { label: "Removed", tone: "danger", icon: <IconClose size={10} /> };
-  }
-  if (kind === "modified") {
-    return {
-      label: "Modified",
-      tone: "accent",
-      icon: <IconChanges size={10} />,
-    };
-  }
-  return { label: "Baseline", tone: "default", icon: <IconClock size={10} /> };
+  if (kind === "added") return { label: "Added", tone: "success" };
+  if (kind === "removed") return { label: "Removed", tone: "danger" };
+  if (kind === "modified") return { label: "Modified", tone: "info" };
+  return { label: "Baseline", tone: "neutral" };
 }
 
 function displayNameForEntry(entry: DriftTimelineEntry): string {
   return entry.displayName ?? entry.graphId ?? entry.resourceLabel;
+}
+
+function attributionSummary(attribution?: DriftAttribution): string {
+  if (attribution?.status === "matched") return actorLabel(attribution);
+  return "Actor unknown";
 }
 
 function actorLabel(attribution: DriftAttribution): string {
@@ -3740,7 +3170,7 @@ function actorLabel(attribution: DriftAttribution): string {
     attribution.actor?.userPrincipalName ??
     attribution.actor?.appDisplayName ??
     attribution.actor?.actorType ??
-    "actor recorded"
+    "Actor recorded"
   );
 }
 
@@ -3750,26 +3180,8 @@ function sourceLabel(source?: DriftAttribution["source"]): string {
   return "No audit source";
 }
 
-function baselineResourceLabel(
-  resource: GraphCacheResourceKind,
-  drift: DriftBaselineDriftResult | null,
-): string {
-  const label = drift?.resources.find(
-    (entry) => entry.resource === resource,
-  )?.resourceLabel;
-  if (label) return label;
-  const spaced = resource.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-  return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
-}
-
 function baselineDriftEntryKey(entry: DriftBaselineDriftEntry): string {
   return `${entry.resource}:${entry.graphId}:${entry.changeKind}`;
-}
-
-function formatFieldCount(count: number): string {
-  return count === 1
-    ? "1 field changed"
-    : `${count.toLocaleString()} fields changed`;
 }
 
 function isNoActiveBaselineError(caught: unknown): boolean {
@@ -3784,8 +3196,7 @@ function isRefreshCacheRequired(message: string): boolean {
 function valueToText(value: unknown): string {
   if (value === undefined || value === null || value === "") return "Not set";
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
   try {
     return JSON.stringify(value, null, 2) ?? "Not set";
   } catch {
@@ -3818,30 +3229,12 @@ function buildChangeMarkdown(
   const attribution = detail?.attribution ?? entry.attribution;
   lines.push(
     `- Attribution: ${
-      attribution?.status === "matched"
-        ? actorLabel(attribution)
-        : "actor unknown"
+      attribution?.status === "matched" ? actorLabel(attribution) : "Actor unknown"
     }`,
   );
   if (attribution?.activity) lines.push(`- Activity: ${attribution.activity}`);
-  if (attribution?.source)
-    lines.push(`- Source: ${sourceLabel(attribution.source)}`);
-  if (attribution?.alsoMatched) {
-    lines.push(`- Also matched: ${attribution.alsoMatched} more audit events`);
-  }
-  if (attribution?.reason === "audit-cache-stale") {
-    lines.push(
-      "- Attribution hint: refresh audit data to attribute this change",
-    );
-  }
-  if (entry.timestampOnly) lines.push("- Timestamp-only change: yes");
-  if (detail?.truncated) {
-    lines.push(
-      "- Display note: raw before/after bodies exceeded the local display cap; field list is complete",
-    );
-  }
+  if (attribution?.source) lines.push(`- Source: ${sourceLabel(attribution.source)}`);
   lines.push("", "## Field changes", "");
-
   if (!detail || detail.changes.length === 0) {
     lines.push("_No field-level changes loaded._");
   } else {
@@ -3854,7 +3247,6 @@ function buildChangeMarkdown(
       );
     }
   }
-
   if (history && history.versions.length > 1) {
     lines.push("", `## History (${history.versions.length} versions)`, "");
     for (const version of history.versions) {
@@ -3863,7 +3255,6 @@ function buildChangeMarkdown(
       );
     }
   }
-
   return `${lines.join("\n")}\n`;
 }
 
@@ -3875,6 +3266,25 @@ function inlineMarkdownValue(value: unknown): string {
 
 function escapeMarkdownTable(value: string): string {
   return value.replaceAll("|", "\\|").replaceAll("\n", " ");
+}
+
+function formatDay(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatDateTime(value: string): string {
@@ -3898,4 +3308,19 @@ function formatShortDateTime(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatRelativeTime(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return formatDateTime(value);
+  const difference = Math.max(0, Date.now() - timestamp);
+  if (difference < 60_000) return "just now";
+  if (difference < 60 * 60_000) {
+    const minutes = Math.floor(difference / 60_000);
+    return `${minutes} min ago`;
+  }
+  if (difference < 24 * 60 * 60_000) {
+    return `${Math.floor(difference / (60 * 60_000))} hr ago`;
+  }
+  return `${Math.floor(difference / (24 * 60 * 60_000))} d ago`;
 }

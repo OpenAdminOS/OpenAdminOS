@@ -1,4 +1,5 @@
 import type { RunRecord } from "../shared/openAdminOS";
+import { KeyValue } from "./ui";
 
 export function RunTelemetry({
   run,
@@ -18,7 +19,7 @@ export function RunTelemetry({
   const skippedSteps = run.steps.filter((step) => step.status === "skipped").length;
   const totalSteps = run.steps.length;
   const settledSteps = completedSteps + skippedSteps;
-  const stepLabel = totalSteps > 0 ? `${settledSteps}/${totalSteps}` : "—";
+  const stepLabel = totalSteps > 0 ? `${settledSteps}/${totalSteps}` : "Not started";
   const stepCaption =
     totalSteps === 0
       ? "no steps yet"
@@ -35,13 +36,13 @@ export function RunTelemetry({
   const elapsed = formatElapsed(run, nowMs);
   const tokens = run.tokens?.totalTokens
     ?? ((run.tokens?.promptTokens ?? 0) + (run.tokens?.completionTokens ?? 0));
-  const tokensLabel = tokens && tokens > 0 ? tokens.toLocaleString() : "—";
+  const tokensLabel = tokens && tokens > 0 ? tokens.toLocaleString() : "Not recorded";
   const tokensCaption = run.tokens
     ? `${run.tokens.promptTokens?.toLocaleString() ?? "0"} prompt · ${run.tokens.completionTokens?.toLocaleString() ?? "0"} out`
     : "no llm calls yet";
 
   return (
-    <div className="grid grid-cols-2 gap-px border-b border-[var(--color-border-soft)] bg-[var(--color-border-soft)] sm:grid-cols-4 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-px border-b border-[var(--color-border-soft)] bg-[var(--color-border-soft)] sm:grid-cols-5">
       <TelemetryCell
         label="Elapsed"
         value={elapsed}
@@ -54,10 +55,10 @@ export function RunTelemetry({
         value={tokensLabel}
         caption={tokensCaption}
       />
-      <TelemetryCell label="Model" value={run.model ?? "—"} mono />
+      <TelemetryCell label="Model" value={run.model ?? "Not recorded"} mono />
       <TelemetryCell
         label="Cost"
-        value="—"
+        value="Not recorded"
         caption={providerIsLocal ? "local · not billed" : `hosted · ${providerName ?? "provider"}`}
       />
     </div>
@@ -81,11 +82,11 @@ function TelemetryCell({
 }) {
   return (
     <div className="bg-[var(--color-bg)] px-5 py-2.5">
-      <div className="text-[9.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
       <div
-        className={`mt-0.5 text-[14px] font-medium tabular-nums ${mono ? "font-mono text-[12.5px]" : ""} ${valueClass ?? "text-[var(--color-text)]"}`}
+        className={`mt-0.5 text-base font-medium tabular-nums ${mono ? "font-mono text-sm" : ""} ${valueClass ?? "text-[var(--color-text)]"}`}
       >
         {value}
         {accent && (
@@ -97,7 +98,7 @@ function TelemetryCell({
         )}
       </div>
       {caption && (
-        <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+        <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
           {caption}
         </div>
       )}
@@ -105,13 +106,64 @@ function TelemetryCell({
   );
 }
 
+export function CompactRunTelemetry({
+  run,
+  providerIsLocal,
+  providerName,
+}: {
+  run: RunRecord;
+  providerIsLocal?: boolean;
+  providerName?: string;
+}) {
+  const completedSteps = run.steps.filter(
+    (step) => step.status === "completed" || step.status === "skipped",
+  ).length;
+  const tokens =
+    run.tokens?.totalTokens ??
+    ((run.tokens?.promptTokens ?? 0) + (run.tokens?.completionTokens ?? 0));
+  return (
+    <section aria-labelledby="run-telemetry-title">
+      <h3
+        id="run-telemetry-title"
+        className="border-b border-[var(--color-border-soft)] pb-2 text-base font-semibold text-[var(--color-text)]"
+      >
+        Telemetry
+      </h3>
+      <dl className="divide-y divide-[var(--color-border-soft)]">
+        <KeyValue label="Duration" value={<span className="tabular-nums">{formatElapsed(run, Date.now())}</span>} />
+        <KeyValue label="Steps" value={`${completedSteps} of ${run.steps.length}`} />
+        <KeyValue label="Tokens" value={tokens > 0 ? tokens.toLocaleString() : "Not recorded"} />
+        <KeyValue
+          label="Provider"
+          value={providerName ?? run.providerId ?? "Not recorded"}
+        />
+        <KeyValue
+          label="Model"
+          value={
+            <span
+              title={run.model ?? "Not recorded"}
+              className="block max-w-full truncate font-mono text-sm"
+            >
+              {run.model ?? "Not recorded"}
+            </span>
+          }
+        />
+        <KeyValue
+          label="Cost"
+          value={providerIsLocal ? "Local, not billed" : "Hosted, not recorded"}
+        />
+      </dl>
+    </section>
+  );
+}
+
 function formatElapsed(run: RunRecord, nowMs: number): string {
   if (run.status === "queued") return "queued";
   if (run.status === "awaiting-confirmation") return "paused";
-  if (!run.startedAt) return "—";
+  if (!run.startedAt) return "Not started";
   const end = run.finishedAt ? new Date(run.finishedAt).getTime() : nowMs;
   const ms = end - new Date(run.startedAt).getTime();
-  if (Number.isNaN(ms) || ms < 0) return "—";
+  if (Number.isNaN(ms) || ms < 0) return "Not recorded";
   if (ms < 1000) return `${ms}ms`;
   const seconds = ms / 1000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;

@@ -12,7 +12,7 @@ import { app, BrowserWindow, screen, type Rectangle } from "electron";
  *
  * Lives in `userData/window-state.json` so it's per-profile, separate
  * from the runtime's `state.json`. Failures (missing file, malformed
- * JSON, off-screen rectangle) silently fall through to defaults — a
+ * JSON, off-screen rectangle) silently fall through to defaults. A
  * lost window position is not worth a startup error.
  */
 

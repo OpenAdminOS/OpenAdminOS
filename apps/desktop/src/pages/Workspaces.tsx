@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Select } from "../components/Select";
-import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
-import { Pill } from "../components/Pill";
 import {
   IconChat,
   IconChevronRight,
@@ -19,14 +17,33 @@ import type {
   WorkspaceDetail,
   WorkspaceSummary,
 } from "../shared/openAdminOS";
+import { Badge, Button, EmptyState, Section } from "../components/ui";
 
 const focusRingClass =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
 
-export default function Workspaces() {
+export interface WorkspacesProps {
+  embedded?: boolean;
+  leadingAction?: ReactNode;
+  selectedWorkspaceId?: string | null;
+  createRequest?: number;
+  onWorkspaceSelected?: (workspaceId: string | null) => void;
+  onWorkspacesChange?: (workspaces: WorkspaceSummary[]) => void;
+}
+
+export default function Workspaces({
+  embedded = false,
+  leadingAction,
+  selectedWorkspaceId,
+  createRequest = 0,
+  onWorkspaceSelected,
+  onWorkspacesChange,
+}: WorkspacesProps = {}) {
   const { state } = useAppState();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
+    selectedWorkspaceId ?? null,
+  );
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
   const [search, setSearch] = useState("");
@@ -49,10 +66,13 @@ export default function Workspaces() {
       api.listIntuneChatConversations(),
     ]);
     setWorkspaces(nextWorkspaces);
+    onWorkspacesChange?.(nextWorkspaces);
     setConversations(nextConversations);
     const nextId =
       preferredId !== undefined
         ? preferredId
+        : embedded
+          ? selectedWorkspaceId ?? null
         : activeWorkspaceId && nextWorkspaces.some((workspace) => workspace.id === activeWorkspaceId)
           ? activeWorkspaceId
           : nextWorkspaces[0]?.id ?? null;
@@ -68,11 +88,22 @@ export default function Workspaces() {
   };
 
   useEffect(() => {
-    void loadWorkspaces().catch((caught) =>
+    void loadWorkspaces(embedded ? selectedWorkspaceId ?? null : undefined).catch((caught) =>
       setError(caught instanceof Error ? caught.message : String(caught)),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeTenantId]);
+  }, [state.activeTenantId, embedded]);
+
+  useEffect(() => {
+    if (!embedded) return;
+    setActiveWorkspaceId(selectedWorkspaceId ?? null);
+  }, [embedded, selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!embedded || createRequest === 0) return;
+    setCreateTenantId(state.activeTenantId ?? state.tenants[0]?.id ?? "");
+    setCreateOpen(true);
+  }, [createRequest, embedded, state.activeTenantId, state.tenants]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -123,6 +154,7 @@ export default function Workspaces() {
       setCreateTitle("");
       setNotice(`Created workspace ${workspace.title}.`);
       await loadWorkspaces(workspace.id);
+      onWorkspaceSelected?.(workspace.id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -177,6 +209,7 @@ export default function Workspaces() {
       await api.archiveWorkspace(detail.id);
       setNotice("Workspace archived. Chat history, run history, and Graph cache were not deleted.");
       await loadWorkspaces(null);
+      onWorkspaceSelected?.(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -190,6 +223,7 @@ export default function Workspaces() {
       setDeleteOpen(false);
       setNotice("Workspace metadata deleted locally. Underlying chats, runs, and cache were left intact.");
       await loadWorkspaces(null);
+      onWorkspaceSelected?.(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -220,15 +254,16 @@ export default function Workspaces() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
-      <aside className="flex w-[320px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]">
+    <div className={`flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)] ${embedded ? "w-full" : ""}`}>
+      {!embedded && (
+        <aside className="flex w-[260px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]">
         <div className="border-b border-[var(--color-border-soft)] px-4 py-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              <div className="text-xs font-medium text-[var(--color-text-muted)]">
                 Workspaces
               </div>
-              <div className="mt-1 text-[13px] text-[var(--color-text-soft)]">
+              <div className="mt-1 text-base text-[var(--color-text-soft)]">
                 Single-tenant investigations
               </div>
             </div>
@@ -261,13 +296,13 @@ export default function Workspaces() {
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search workspaces"
               autoComplete="off"
-              className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-[12px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
+              className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
             />
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {filteredWorkspaces.length === 0 ? (
-            <div className="rounded-lg px-3 py-5 text-[12px] leading-5 text-[var(--color-text-muted)]">
+            <div className="rounded-lg px-3 py-5 text-sm leading-5 text-[var(--color-text-muted)]">
               No workspaces yet. Create one from an investigation, split a multi-tenant result, or start with a note.
             </div>
           ) : (
@@ -275,7 +310,10 @@ export default function Workspaces() {
               <button
                 key={workspace.id}
                 type="button"
-                onClick={() => setActiveWorkspaceId(workspace.id)}
+                onClick={() => {
+                  setActiveWorkspaceId(workspace.id);
+                  onWorkspaceSelected?.(workspace.id);
+                }}
                 className={`mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors ${focusRingClass} ${
                   activeWorkspaceId === workspace.id
                     ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
@@ -284,12 +322,12 @@ export default function Workspaces() {
               >
                 <div className="flex items-center gap-2">
                   <IconHardDrive size={13} className="text-[var(--color-accent)]" />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">
+                  <span className="min-w-0 flex-1 truncate text-base font-medium">
                     {workspace.title}
                   </span>
                   <IconChevronRight size={11} />
                 </div>
-                <div className="mt-1 truncate text-[10.5px] text-[var(--color-text-muted)]">
+                <div className="mt-1 truncate text-xs text-[var(--color-text-muted)]">
                   {workspace.tenantName ?? workspace.tenantId}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -301,18 +339,24 @@ export default function Workspaces() {
             ))
           )}
         </div>
-      </aside>
+        </aside>
+      )}
 
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] px-6">
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-              {detail?.title ?? "No workspace selected"}
-            </div>
-            <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-              {detail
-                ? `${detail.tenantName ?? detail.tenantId} · updated ${formatDateTime(detail.updatedAt)}`
-                : "Workspace evidence stays local and tenant-scoped."}
+          <div className="flex min-w-0 items-center gap-3">
+            {leadingAction}
+            <div
+              className="min-w-0"
+              title={
+                detail
+                  ? `${detail.tenantName ?? detail.tenantId}, updated ${formatDateTime(detail.updatedAt)}`
+                  : undefined
+              }
+            >
+              <div className="truncate text-base font-medium text-[var(--color-text)]">
+                {detail?.title ?? "No workspace selected"}
+              </div>
             </div>
           </div>
           {detail && (
@@ -332,12 +376,12 @@ export default function Workspaces() {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {error && (
-            <div className="mb-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+            <div className="mb-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
               {error}
             </div>
           )}
           {notice && (
-            <div className="mb-3 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-[12px] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+            <div className="mb-3 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
               {notice}
             </div>
           )}
@@ -355,23 +399,23 @@ export default function Workspaces() {
                   ) : (
                     <div className="grid gap-2">
                       {detail.evidence.map((evidence) => (
-                        <div key={evidence.id} className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+                        <div key={evidence.id} className="border-b border-[var(--color-border-soft)] py-3 last:border-b-0">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="min-w-0">
-                              <div className="truncate text-[12.5px] font-medium text-[var(--color-text)]">
+                              <div className="truncate text-base font-medium text-[var(--color-text)]">
                                 {evidence.title}
                               </div>
-                              <div className="mt-0.5 text-[10.5px] text-[var(--color-text-muted)]">
+                              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
                                 {evidence.sourceType} · {formatDateTime(evidence.createdAt)}
                               </div>
                             </div>
-                            <Pill tone={evidence.freshness?.cacheStatus === "stale" ? "warning" : "default"}>
+                            <Badge tone={evidence.freshness?.cacheStatus === "stale" ? "warning" : "neutral"}>
                               {evidence.freshness?.refreshedAt
                                 ? formatDateTime(evidence.freshness.refreshedAt)
                                 : "freshness unknown"}
-                            </Pill>
+                            </Badge>
                           </div>
-                          <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-[var(--color-bg)] p-3 font-mono text-[10.5px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+                          <pre className="mt-3 max-h-48 overflow-auto rounded-md bg-[var(--color-bg)] p-3 font-mono text-xs leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
                             {JSON.stringify(evidence.content, null, 2)}
                           </pre>
                         </div>
@@ -391,7 +435,7 @@ export default function Workspaces() {
                       value={noteText}
                       onChange={(event) => setNoteText(event.target.value)}
                       placeholder="Add a local investigation note"
-                      className="min-h-20 flex-1 resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12.5px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
+                      className="min-h-20 flex-1 resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-base text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
                     />
                     <Button variant="secondary" disabled={!noteText.trim()} onClick={() => void handleAddNote()}>
                       Add
@@ -402,11 +446,11 @@ export default function Workspaces() {
                       <EmptyInline text="No notes recorded for this workspace." />
                     ) : (
                       detail.notes.map((note) => (
-                        <div key={note.id} className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-                          <div className="text-[12.5px] leading-5 text-[var(--color-text-soft)]">
+                        <div key={note.id} className="border-b border-[var(--color-border-soft)] py-2 last:border-b-0">
+                          <div className="text-base leading-5 text-[var(--color-text-soft)]">
                             {note.content}
                           </div>
-                          <div className="mt-1 text-[10.5px] text-[var(--color-text-muted)]">
+                          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
                             {formatDateTime(note.updatedAt)}
                           </div>
                         </div>
@@ -443,11 +487,11 @@ export default function Workspaces() {
                       <EmptyInline text="No linked chats or agent runs." />
                     ) : (
                       detail.links.map((link) => (
-                        <div key={link.id} className="flex items-center gap-2 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
+                        <div key={link.id} className="flex items-center gap-2 border-b border-[var(--color-border-soft)] py-2 last:border-b-0">
                           {link.type === "conversation" ? <IconChat size={13} /> : <IconStar size={13} />}
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-[12px] text-[var(--color-text)]">{link.title}</div>
-                            <div className="text-[10.5px] text-[var(--color-text-muted)]">{link.type}</div>
+                            <div className="truncate text-sm text-[var(--color-text)]">{link.title}</div>
+                            <div className="text-xs text-[var(--color-text-muted)]">{link.type}</div>
                           </div>
                         </div>
                       ))
@@ -465,10 +509,10 @@ export default function Workspaces() {
                     value={instructions}
                     onChange={(event) => setInstructions(event.target.value)}
                     placeholder="Approved local instructions for this workspace"
-                    className="min-h-40 w-full resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12.5px] leading-5 text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
+                    className="min-h-40 w-full resize-y rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-base leading-5 text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
                   />
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <div className="text-[10.5px] leading-4 text-[var(--color-text-muted)]">
+                    <div className="text-xs leading-4 text-[var(--color-text-muted)]">
                       Instructions affect explicit prompt context only. They cannot add scopes or bypass confirmation.
                     </div>
                     <Button size="sm" variant="secondary" onClick={() => void handleSaveInstructions()}>
@@ -512,21 +556,19 @@ function WorkspaceSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg bg-[var(--color-bg)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          {title}
-        </div>
-        {badge && <Pill>{badge}</Pill>}
-      </div>
+    <Section
+      title={title}
+      action={badge ? <Badge>{badge}</Badge> : undefined}
+      className="py-1"
+    >
       {children}
-    </section>
+    </Section>
   );
 }
 
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+    <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 text-xs tabular-nums text-[var(--color-text-muted)]">
       {value} {label}
     </span>
   );
@@ -534,30 +576,23 @@ function MiniStat({ label, value }: { label: string; value: number }) {
 
 function EmptyWorkspaceState({ onCreate }: { onCreate: () => void }) {
   return (
-    <div className="flex min-h-[420px] items-center justify-center">
-      <div className="max-w-[520px] text-center">
-        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-          <IconHardDrive size={20} />
-        </div>
-        <h1 className="mt-5 text-[22px] font-semibold tracking-tight text-[var(--color-text)]">
-          No workspace selected
-        </h1>
-        <p className="mt-2 text-[13px] leading-6 text-[var(--color-text-soft)]">
-          Workspaces keep tenant-specific evidence, notes, linked chats, runs, and local instructions together.
-        </p>
-        <div className="mt-5">
-          <Button variant="primary" leadingIcon={<IconPlus size={13} />} onClick={onCreate}>
-            Create workspace
-          </Button>
-        </div>
-      </div>
-    </div>
+    <EmptyState
+      className="min-h-[420px] justify-center"
+      icon={<IconHardDrive size={20} />}
+      title="No workspace selected"
+      description="Workspaces keep tenant-specific evidence, notes, linked chats, runs, and local instructions together."
+      action={
+        <Button variant="primary" leadingIcon={<IconPlus size={13} />} onClick={onCreate}>
+          Create workspace
+        </Button>
+      }
+    />
   );
 }
 
 function EmptyInline({ text }: { text: string }) {
   return (
-    <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-3 text-[12px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+    <div className="py-3 text-sm text-[var(--color-text-muted)]">
       {text}
     </div>
   );
@@ -581,7 +616,7 @@ function LinkPicker({
       <Select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-[12px] text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+        className="min-w-0 flex-1 rounded-md bg-[var(--color-bg-raised)] px-2 text-sm text-[var(--color-text-soft)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
         aria-label={`Link ${label}`}
       >
         <option value="">Link {label.toLowerCase()}</option>
@@ -622,7 +657,7 @@ function CreateWorkspaceModal({
       <ModalHeader title="Create workspace" subtitle="Single-tenant local investigation" onClose={onClose} />
       <div className="space-y-4 p-6">
         <label htmlFor="workspace-title" className="block">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <span className="text-sm font-medium text-[var(--color-text-muted)]">
             Title
           </span>
           <input
@@ -631,11 +666,12 @@ function CreateWorkspaceModal({
             value={title}
             onChange={(event) => onTitleChange(event.target.value)}
             autoFocus
-            className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+            autoComplete="off"
+            className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-base text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
           />
         </label>
         <label htmlFor="workspace-tenant" className="block">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <span className="text-sm font-medium text-[var(--color-text-muted)]">
             Tenant
           </span>
           <Select
@@ -643,7 +679,7 @@ function CreateWorkspaceModal({
             name="workspace-tenant"
             value={tenantId}
             onChange={(event) => onTenantChange(event.target.value)}
-            className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-[13px] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
+            className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-base text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
           >
             {tenants.map((tenant) => (
               <option key={tenant.id} value={tenant.id}>
@@ -652,7 +688,7 @@ function CreateWorkspaceModal({
             ))}
           </Select>
         </label>
-        <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-[12px] leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+        <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-sm leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           Workspaces cannot mix tenant evidence. Multi-tenant chat results must be split into tenant-specific evidence entries.
         </div>
         <div className="flex justify-end gap-2">
@@ -684,11 +720,11 @@ function DeleteWorkspaceModal({
       <ModalHeader
         title="Delete workspace metadata"
         subtitle={workspace?.title ?? "Workspace"}
-        badge={<Pill tone="danger">Local delete</Pill>}
+        badge={<Badge tone="danger">Local delete</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-[12px] leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           This removes workspace notes, pinned evidence, local instructions, and links. Chat history, run history, tenant configuration, Graph cache, connector audit records, and self-training records are left intact.
         </div>
         <div className="flex justify-end gap-2">

@@ -9,7 +9,7 @@ import type {
 
 /**
  * Renders the install-time settings form for one agent. Inputs are driven
- * by the manifest's `definition.settings[]` — the same array shown in the
+ * by the manifest's `definition.settings[]`, the same array shown in the
  * Manifest Preview's "Configurable settings" card, but interactive. The
  * declared `type` picks the input widget; the YAML `default` is the
  * placeholder; the persisted override (if any) is the initial value.
@@ -48,7 +48,7 @@ export function ConfigureAgentModal({
     setValues(seedFormValues(declared, persisted));
     setError(null);
     setSubmitting(false);
-    // We deliberately reset every time the modal opens — if the user
+    // We deliberately reset every time the modal opens. If the user
     // edited then closed without saving, reopening should not preserve
     // the abandoned edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,7 +98,7 @@ export function ConfigureAgentModal({
       <form onSubmit={handleSubmit} className="flex flex-1 flex-col">
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {declared.length === 0 ? (
-            <div className="text-[13px] text-[var(--color-text-muted)]">
+            <div className="text-base text-[var(--color-text-muted)]">
               This agent does not declare any configurable settings.
             </div>
           ) : (
@@ -117,7 +117,7 @@ export function ConfigureAgentModal({
           )}
 
           {error && (
-            <div className="mt-4 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[12.5px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            <div className="mt-4 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-base text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
               {error}
             </div>
           )}
@@ -154,7 +154,7 @@ function SettingField({
     <div className="flex flex-col gap-1.5">
       <label
         htmlFor={inputId}
-        className="text-[12.5px] font-medium text-[var(--color-text)]"
+        className="text-base font-medium text-[var(--color-text)]"
       >
         {setting.label}
         {setting.required && (
@@ -162,14 +162,14 @@ function SettingField({
         )}
       </label>
       {setting.description && (
-        <div className="text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+        <div className="text-sm leading-relaxed text-[var(--color-text-muted)]">
           {setting.description}
         </div>
       )}
       {setting.type === "boolean" ? (
         <label
           htmlFor={inputId}
-          className="inline-flex items-center gap-2 text-[12.5px] text-[var(--color-text-soft)]"
+          className="inline-flex items-center gap-2 text-base text-[var(--color-text-soft)]"
         >
           <input
             id={inputId}
@@ -190,11 +190,11 @@ function SettingField({
           placeholder={
             setting.default !== undefined ? `default: ${String(setting.default)}` : undefined
           }
-          className="h-9 rounded-md bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+          className="h-9 rounded-md bg-[var(--color-surface)] px-3 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50"
         />
       )}
       {setting.hint && (
-        <div className="text-[11px] text-[var(--color-text-muted)]">
+        <div className="text-xs text-[var(--color-text-muted)]">
           {setting.hint}
         </div>
       )}
@@ -286,7 +286,7 @@ function isDirty(
     }
     return false;
   } catch {
-    // If coercion would throw, the form has at least one invalid edit —
+    // If coercion would throw, the form has at least one invalid edit :
     // treat that as dirty so the Save button surfaces the error.
     return true;
   }

@@ -1,8 +1,14 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
-import { makeMockBridge, renderRoute } from "../test/test-utils";
+import {
+  createMockAppState,
+  makeMockBridge,
+  mockTenant,
+  renderRoute,
+} from "../test/test-utils";
 
 describe("Command Palette", () => {
   it("uses complete combobox semantics and opens catalog-backed Settings results", async () => {
@@ -36,3 +42,189 @@ describe("Command Palette", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+it("lists the shell destinations and every Settings section", async () => {
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge(
+      {},
+      createMockAppState({
+        tenants: [
+          mockTenant,
+          {
+            ...mockTenant,
+            id: "tenant-2",
+            displayName: "Fabrikam",
+            homeAccountId: "home-account-2",
+          },
+        ],
+      }),
+    ),
+  });
+
+  await screen.findByRole("option", { name: /Changes: All tenants/ });
+
+  for (const label of [
+    "Go to Chat",
+    "Agents",
+    "Agents: Hub",
+    "Runs",
+    "Runs: Needs review",
+    "Runs: Failed",
+    "Go to Changes",
+    "Open Settings",
+    "Agent Team",
+    "Add teammate",
+    "Changes: All tenants",
+    "New chat",
+    "Workspaces",
+    "Open Voice",
+  ]) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    expect(
+      screen.getByRole("option", {
+        name:
+          label === "Agents" || label === "Runs"
+            ? new RegExp(`^${escapedLabel}$`)
+            : new RegExp(`^${escapedLabel}`),
+      }),
+    ).toBeInTheDocument();
+  }
+
+  expect(screen.getByRole("option", { name: /^Device Offboard/ })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /^Run Device Offboard/ })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Schedules/ })).not.toBeInTheDocument();
+
+  expect(screen.getByRole("option", { name: /^Data/ })).toBeInTheDocument();
+
+  for (const section of [
+    "Providers",
+    "Tenants",
+    "Data",
+    "Chat",
+    "Connectors",
+    "Gateway",
+    "General",
+    "Appearance",
+    "Privacy",
+    "About",
+  ]) {
+    expect(
+      screen.getByRole("option", { name: new RegExp(`Settings: ${section}`) }),
+    ).toBeInTheDocument();
+  }
+
+  expect(screen.queryByRole("option", { name: /Go to Cache/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Go to Connectors/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Team office/ })).not.toBeInTheDocument();
+});
+
+it("opens Agent Team and its teammate wizard on the canonical route", async () => {
+  const user = userEvent.setup();
+  const first = renderRoute(
+    <>
+      <CommandPalette open onClose={vi.fn()} />
+      <LocationProbe />
+    </>,
+    {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    },
+  );
+
+  await user.click(screen.getByRole("option", { name: /^Agent Team$/ }));
+  expect(screen.getByTestId("palette-location")).toHaveTextContent("/office");
+  first.unmount();
+
+  renderRoute(
+    <>
+      <CommandPalette open onClose={vi.fn()} />
+      <LocationProbe />
+    </>,
+    {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    },
+  );
+  await user.click(screen.getByRole("option", { name: /^Add teammate/ }));
+  expect(screen.getByTestId("palette-location")).toHaveTextContent(
+    "/office?add=teammate",
+  );
+});
+
+it("lists recent conversations and Workspaces with their Chat routes", async () => {
+  const bridge = makeMockBridge({
+    listIntuneChatConversations: vi.fn(async () => [
+      {
+        id: "conversation-1",
+        title: "Review stale devices",
+        createdAt: "2026-10-10T08:00:00.000Z",
+        updatedAt: "2026-10-10T09:00:00.000Z",
+        tenantId: "tenant-1",
+        scopeKind: "single-tenant" as const,
+      },
+    ]),
+    listWorkspaces: vi.fn(async () => [
+      {
+        id: "workspace-1",
+        tenantId: "tenant-1",
+        tenantName: "Contoso IT",
+        title: "Device investigation",
+        status: "active" as const,
+        evidenceCount: 1,
+        conversationCount: 1,
+        runCount: 0,
+        noteCount: 0,
+        createdAt: "2026-10-10T08:00:00.000Z",
+        updatedAt: "2026-10-10T09:00:00.000Z",
+      },
+    ]),
+  });
+
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge,
+  });
+
+  expect(
+    await screen.findByRole("option", { name: /Review stale devices/ }),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByRole("option", { name: /Device investigation/ }),
+  ).toBeInTheDocument();
+});
+
+it("lists all theme actions and applies the selected theme", async () => {
+  const user = userEvent.setup();
+  const setAppearance = vi.fn(async () => undefined);
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge({ setAppearance }),
+  });
+
+  for (const label of ["Graphite", "Midnight", "Off-white", "Sand"]) {
+    expect(
+      screen.getByRole("option", { name: new RegExp(`^Theme: ${label}`) }),
+    ).toBeInTheDocument();
+  }
+  expect(
+    screen.getByRole("option", { name: /^Theme: GraphiteCurrent · Dark/ }),
+  ).toBeInTheDocument();
+
+  await user.click(screen.getByRole("option", { name: /^Theme: Sand/ }));
+  expect(document.documentElement.dataset.theme).toBe("sand");
+  expect(document.documentElement.dataset.mode).toBe("light");
+  expect(setAppearance).toHaveBeenCalledWith("sand");
+
+  await user.click(screen.getByRole("option", { name: /^Theme: Graphite/ }));
+});
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="palette-location">{location.pathname + location.search}</div>;
+}

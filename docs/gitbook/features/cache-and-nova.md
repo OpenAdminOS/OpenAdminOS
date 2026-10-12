@@ -1,8 +1,8 @@
-# Cache and Nova
+# Data and Nova
 
 ## Prepare your tenant cache
 
-Open **Cache** in the sidebar. All supported resources are selected by default.
+Open **Settings > Data**. All supported resources are selected by default.
 Choose **Preload all** to collect every page of each selected resource, including
 available log history. You can deselect resource types or search the list. Search
 and **Needs attention** filter the list without changing your selections.
@@ -27,7 +27,7 @@ schedule. The cache is shared with Chat and Agent Team.
 Nova knows the selected tenant before you preload anything. For device and other
 tenant questions it asks the app to retrieve missing or stale relevant data.
 An empty cache does not mean there are no devices. Permission failures and partial
-coverage still need to be resolved through the tenant connection and Cache page.
+coverage still need to be resolved through the tenant connection and the Data section in Settings.
 
 Voice and reasoning have separate setup. The OpenAI key enables hosted speech and public web research;
 tenant answers use the reasoning provider and model shown in Nova. Connect that
@@ -78,9 +78,9 @@ the app also stops microphone use.
 You can say “Hey Nova” during a running session. Set a greeting name in the panel.
 The app does not listen for a wake word in the background.
 
-Ask about your tenant or say “Open Cache”, “Open Agent Team” or “Open Settings”.
+Ask about your tenant or say “Open Data settings”, “Open Agents” or “Open Settings”.
 Tenant questions use the existing Chat tools and the active agent model. Preload
-Cache before asking questions that need broad coverage. Open **evidence in Chat**
+data before asking questions that need broad coverage. Open **evidence in Chat**
 to inspect the answer and its sources. Missing data is not proof of a healthy state.
 Voice does not approve or execute tenant writes; use the existing visual review.
 
@@ -152,7 +152,7 @@ you can start that service and retry.
 
 After Nova completes an answer, try “Send this to my WhatsApp,” “Email this to me,”
 or “Send the report via Teams.” WhatsApp, Outlook/Exchange email, Teams, Slack,
-Discord and Signal use the connectors configured in **Connectors**. WhatsApp self
+Discord and Signal use the connectors configured in **Settings > Connectors**. WhatsApp self
 messages go to the linked account; email to yourself uses the connected tenant
 account. Other requests use the connector's saved destination. Personal Teams
 messages require an explicit configured chat destination.
@@ -166,12 +166,12 @@ destination. Sending through a connector shares the reviewed content even when
 local voice is selected.
 
 Say “Run” followed by an installed agent's name to prepare an agent launch. Review
-the tenant and click **Confirm run**. Follow the run in Activity. Write plans still
+the tenant and click **Confirm run**. Follow the run in **Runs**. Write plans still
 require their normal approval; existing saved delivery routes remain in effect.
 
 ## Understand device answers
 
-Fleet lists use reported Intune device fields, with snapshot time and incomplete
+All-tenant Changes lists use reported Intune device fields, with snapshot time and incomplete
 coverage disclosed. Missing encryption data is unknown, not unencrypted. Lists show
 up to 50 matching devices. For fleet questions about why devices are non-compliant,
 Nova reads actual failed compliance policy settings for up to ten matching devices.
@@ -193,7 +193,7 @@ the relevant report, then displays its content and destination for review. It do
 not send anything until you click **Confirm send**. You do not need to ask for the
 list separately first.
 
-| Connector | Setup in Connectors | Example after retrieving a result |
+| Connector | Setup in Settings > Connectors | Example after retrieving a result |
 | --- | --- | --- |
 | WhatsApp | Link the account with QR and choose a target | “Send this to my WhatsApp” |
 | Outlook / Exchange email | Connect the tenant, set recipients and test consent | “Email this to me” |

@@ -10,13 +10,13 @@ export function runReportPlaintext(
   ctx: RunReportContext = {},
 ): string {
   const title = ctx.agentName ?? run.agentSlug;
-  const tenant = ctx.tenantName ?? run.tenantId ?? "—";
+  const tenant = ctx.tenantName ?? run.tenantId ?? "Not available";
 
   const lines: string[] = [
-    `${title} — ${run.status}`,
+    `${title}: ${run.status}`,
     `Started: ${run.queuedAt}`,
     `Duration: ${formatDuration(run)}`,
-    `Provider: ${run.providerId ?? "—"}${run.model ? ` (${run.model})` : ""}`,
+    `Provider: ${run.providerId ?? "Not available"}${run.model ? ` (${run.model})` : ""}`,
     `Tenant: ${tenant}`,
   ];
 
@@ -27,7 +27,7 @@ export function runReportPlaintext(
   if (run.steps.length > 0) {
     lines.push("", "Steps:");
     for (const step of run.steps) {
-      lines.push(`  - [${step.status}] ${step.label}${step.detail ? ` — ${step.detail}` : ""}`);
+      lines.push(`  - [${step.status}] ${step.label}${step.detail ? `: ${step.detail}` : ""}`);
     }
   }
 
@@ -46,7 +46,7 @@ export function runReportMarkdown(
   ctx: RunReportContext = {},
 ): string {
   const title = ctx.agentName ?? run.agentSlug;
-  const tenant = ctx.tenantName ?? run.tenantId ?? "—";
+  const tenant = ctx.tenantName ?? run.tenantId ?? "Not available";
 
   const parts: string[] = [
     `# ${title}`,
@@ -54,7 +54,7 @@ export function runReportMarkdown(
     `**Status:** ${run.status}`,
     `**Started:** ${run.queuedAt}`,
     `**Duration:** ${formatDuration(run)}`,
-    `**Provider:** ${run.providerId ?? "—"}${run.model ? ` (\`${run.model}\`)` : ""}`,
+    `**Provider:** ${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`,
     `**Tenant:** ${tenant}`,
   ];
 
@@ -65,7 +65,7 @@ export function runReportMarkdown(
   if (run.steps.length > 0) {
     parts.push("", "## Steps", "");
     for (const step of run.steps) {
-      parts.push(`- **[${step.status}]** ${step.label}${step.detail ? ` — ${step.detail}` : ""}`);
+      parts.push(`- **[${step.status}]** ${step.label}${step.detail ? `: ${step.detail}` : ""}`);
     }
   }
 
@@ -89,12 +89,12 @@ export function runReportJson(run: RunRecord): string {
 }
 
 function formatDuration(run: RunRecord): string {
-  if (!run.startedAt) return "—";
+  if (!run.startedAt) return "Not available";
   const end = run.finishedAt
     ? new Date(run.finishedAt).getTime()
     : Date.now();
   const start = new Date(run.startedAt).getTime();
   const ms = end - start;
-  if (Number.isNaN(ms) || ms < 0) return "—";
+  if (Number.isNaN(ms) || ms < 0) return "Not available";
   return `${(ms / 1000).toFixed(1)}s`;
 }

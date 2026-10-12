@@ -69,14 +69,14 @@ export function OutputPane({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h2
               id={titleId}
-              className="truncate text-[12px] font-semibold text-[var(--color-text)]"
+              className="truncate text-sm font-semibold text-[var(--color-text)]"
             >
               {title}
             </h2>
             {badge}
           </div>
           {subtitle ? (
-            <div className="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">
+            <div className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
               {subtitle}
             </div>
           ) : null}
@@ -127,7 +127,7 @@ export function OutputPaneSection({
               aria-expanded={open}
               aria-controls={bodyId}
               onClick={() => setExpanded((current) => !current)}
-              className={`inline-flex max-w-full items-center gap-1.5 rounded-md text-left text-[12px] font-medium text-[var(--color-text)] transition-colors hover:text-[var(--color-accent)] ${focusRingClass}`}
+              className={`inline-flex max-w-full items-center gap-1.5 rounded-md text-left text-sm font-medium text-[var(--color-text)] transition-colors hover:text-[var(--color-accent)] ${focusRingClass}`}
             >
               <IconChevronDown
                 size={12}
@@ -146,7 +146,7 @@ export function OutputPaneSection({
             <div className="flex min-w-0 items-center gap-2">
               <h3
                 id={titleId}
-                className="truncate text-[12px] font-medium text-[var(--color-text)]"
+                className="truncate text-sm font-medium text-[var(--color-text)]"
               >
                 {title}
               </h3>
@@ -154,7 +154,7 @@ export function OutputPaneSection({
             </div>
           )}
           {subtitle ? (
-            <div className="mt-0.5 text-[10.5px] leading-5 text-[var(--color-text-muted)]">
+            <div className="mt-0.5 text-xs leading-5 text-[var(--color-text-muted)]">
               {subtitle}
             </div>
           ) : null}
@@ -213,10 +213,10 @@ export function OutputSummaryTile({
           : "text-[var(--color-text)]";
   return (
     <div className="rounded-lg bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      <div className="text-xs font-medium text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className={`mt-1 font-mono text-[18px] font-semibold tabular-nums ${toneClass}`}>
+      <div className={`mt-1 text-lg font-semibold tabular-nums ${toneClass}`}>
         {typeof value === "number" ? value.toLocaleString() : value}
       </div>
     </div>
@@ -239,7 +239,7 @@ export function OutputFilterSelect({
   return (
     <label
       htmlFor={selectId}
-      className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-[11.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
+      className="inline-flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg)] px-2 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]"
     >
       <span>{label}</span>
       <Select
@@ -321,8 +321,8 @@ export function OutputDataTable<Row,>({
 
   return (
     <div className="overflow-x-auto">
-      <table className={`${minWidthClassName} w-full text-left text-[12px] ${tableClassName}`}>
-        <thead className="bg-[var(--color-bg)] text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+      <table className={`${minWidthClassName} w-full text-left text-sm ${tableClassName}`}>
+        <thead className="bg-[var(--color-bg)] text-xs text-[var(--color-text-muted)]">
           <tr>
             {columns.map((column) => {
               const sortable = isColumnSortable(column);
@@ -382,7 +382,7 @@ export function OutputDataTable<Row,>({
             <tr className="border-t border-[var(--color-border-soft)]">
               <td
                 colSpan={columns.length}
-                className="px-3 py-3 text-[12px] text-[var(--color-text-muted)]"
+                className="px-3 py-3 text-sm text-[var(--color-text-muted)]"
               >
                 {emptyMessage}
               </td>
@@ -446,12 +446,12 @@ export function OutputKeyValueList({
           key={item.label}
           className="flex min-w-0 flex-col rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
         >
-          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          <span className="text-xs font-medium text-[var(--color-text-muted)]">
             {item.label}
           </span>
           <span
             title={item.title}
-            className={`mt-0.5 break-words text-[12px] text-[var(--color-text)] ${
+            className={`mt-0.5 break-words text-sm text-[var(--color-text)] ${
               item.mono ? "font-mono" : ""
             }`}
           >
@@ -476,13 +476,13 @@ export function OutputTextBlock({
     return (
       <MarkdownPreview
         source={source}
-        className={`text-[13px] leading-relaxed text-[var(--color-text-soft)] ${className}`}
+        className={`text-base leading-relaxed text-[var(--color-text-soft)] ${className}`}
       />
     );
   }
   return (
     <div
-      className={`whitespace-pre-wrap rounded-lg bg-[var(--color-bg-raised)] p-4 text-[12.5px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] ${className}`}
+      className={`whitespace-pre-wrap rounded-lg bg-[var(--color-bg-raised)] p-4 text-base leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] ${className}`}
     >
       {source}
     </div>
@@ -524,7 +524,7 @@ export function OutputJsonBlock({
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <pre className="max-h-[420px] overflow-auto p-4 font-mono text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+      <pre className="max-h-[420px] overflow-auto p-4 font-mono text-sm leading-relaxed text-[var(--color-text-soft)]">
         {content}
       </pre>
     </div>
@@ -542,7 +542,7 @@ export function OutputStructuredContent({
 
   if (value === undefined || value === null) {
     return (
-      <div className="text-[12.5px] text-[var(--color-text-muted)]">
+      <div className="text-base text-[var(--color-text-muted)]">
         Result not yet available.
       </div>
     );
@@ -557,7 +557,7 @@ export function OutputStructuredContent({
       <div className="flex flex-wrap gap-1.5">
         {value.map((entry, index) => (
           <Pill key={index}>
-            <span className="font-mono text-[10.5px]">{formatOutputValue(entry)}</span>
+            <span className="text-xs">{formatOutputValue(entry)}</span>
           </Pill>
         ))}
       </div>
@@ -582,7 +582,7 @@ export function OutputStructuredContent({
               bodyClassName="p-3"
             >
               {rows.length === 0 ? (
-                <div className="rounded-md bg-[var(--color-bg-raised)] px-3 py-2 text-[11.5px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+                <div className="rounded-md bg-[var(--color-bg-raised)] px-3 py-2 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
                   No entries.
                 </div>
               ) : (
@@ -617,7 +617,7 @@ function OutputRecordTable({
       header: humaniseOutputKey(key),
       render: (row) => formatOutputValue(row[key]),
       sortValue: (row) => sortableCellValue(row[key]),
-      cellClassName: "max-w-[220px] truncate font-mono text-[11px] text-[var(--color-text-soft)]",
+      cellClassName: "max-w-[220px] truncate text-xs text-[var(--color-text-soft)]",
       title: (row) => formatOutputValue(row[key]),
     }),
   );
@@ -630,7 +630,7 @@ function OutputRecordTable({
         getRowId={(_, index) => String(index)}
       />
       {rows.length > limit ? (
-        <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 text-[11px] text-[var(--color-text-muted)]">
+        <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
           Showing first {limit} of {rows.length}. Use "Show raw" for the full payload.
         </div>
       ) : null}

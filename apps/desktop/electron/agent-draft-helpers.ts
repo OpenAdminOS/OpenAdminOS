@@ -72,7 +72,7 @@ export function sanitizeSettingsAgainstSchema(
         break;
       }
       default: {
-        // Unknown type in the manifest schema — accept the value as-is.
+        // Unknown type in the manifest schema: accept the value as-is.
         // A separate slice tightens the schema with JSON Schema export.
         result[def.id] = raw;
       }
@@ -121,7 +121,7 @@ export function collectGraphStepErrors(manifest: { skills: DraftSkillLike[] }): 
       continue;
     }
 
-    // Generic graph-write — same catalogue check as reads, but the
+    // Generic graph-write: same catalogue check as reads, but the
     // method+path come from the action template. The legacy
     // retire-managed-device kind has its own hardcoded contract and
     // is skipped here.
@@ -282,7 +282,7 @@ export function validateAgentDraftSource(
 
   if (manifest && !manifest.skills.some((skill) => skill.format === "llm")) {
     validationErrors.push(
-      "Manifest has no `format: llm` step. OpenAdminOS requires every agent to invoke the LLM at least once — add a summary or rationale step.",
+      "Manifest has no `format: llm` step. OpenAdminOS requires every agent to invoke the LLM at least once. Add a summary or rationale step.",
     );
     manifest = undefined;
   }
@@ -953,7 +953,7 @@ export function formatCandidates(candidates: EndpointSummary[]): string {
         ep.scopesDelegated.length > 0
           ? ep.scopesDelegated[0]
           : "(no delegated scope documented)";
-      const summary = ep.summary ? ` — ${ep.summary}` : "";
+      const summary = ep.summary ? `; ${ep.summary}` : "";
       return `- ${ep.method} ${ep.path} | scope: ${scope}${summary}`;
     })
     .join("\n");
@@ -968,20 +968,20 @@ export function buildNl2AgentSystemPrompt(
 ): string {
   const readBlock =
     readCandidates.length === 0
-      ? "(No catalogue match for this prompt. Pick `GET /deviceManagement/managedDevices` if no better fit exists — it is always available.)"
+      ? "(No catalogue match for this prompt. Pick `GET /deviceManagement/managedDevices` if no better fit exists, it is always available.)"
       : formatCandidates(readCandidates);
 
   const writeBlock =
     writeCandidates.length === 0
       ? ""
-      : `\n\nCandidate write endpoints (use these for a \`graph-write\` step — declare the listed scope):\n${formatCandidates(writeCandidates)}`;
+      : `\n\nCandidate write endpoints (use these for a \`graph-write\` step; declare the listed scope):\n${formatCandidates(writeCandidates)}`;
 
   const reservedSlugBlock =
     reservedSlugs.length === 0
       ? "(none)"
       : reservedSlugs.slice(0, 80).map((slug) => `- ${slug}`).join("\n");
 
-  return `You generate Agent Template manifests for OpenAdminOS — a desktop tool that runs AI agents against a Microsoft 365 tenant.
+  return `You generate Agent Template manifests for OpenAdminOS, a desktop tool that runs AI agents against a Microsoft 365 tenant.
 
 The manifest is a YAML document with three top-level keys: descriptor, skills, definition.
 
@@ -992,7 +992,7 @@ Hard rules:
 - Do not reuse any reserved slug listed below. Pick a specific new slug such as "inactive-device-risk-review" rather than "test-agent".
 - New user-authored drafts start at version: 0.1.0. Use SemVer exactly.
 - Skill ids are lower-case snake_case, e.g. "load_devices".
-- Graph steps: pick the closest match from the candidate endpoints listed below. Do not invent endpoints — if none of the candidates fit, fall back to GET /deviceManagement/managedDevices. Always declare the scope shown alongside the endpoint.
+- Graph steps: pick the closest match from the candidate endpoints listed below. Do not invent endpoints. If none of the candidates fit, fall back to GET /deviceManagement/managedDevices. Always declare the scope shown alongside the endpoint.
 - Query values must be YAML strings, including numeric-looking OData values. Example: $top: "25".
 - Transform kinds available: group-by-age, filter-by-age, count-by-field, group-by-field, sort-by, correlate-stale-devices.
 - Use definition.settings for user-adjustable values. Reference them as {{ settings.settingId }}. Supported setting types: string, integer, boolean.
@@ -1000,9 +1000,9 @@ Hard rules:
 - Use a map step when the user asks for per-item triage/rationale/classification. Put the per-item LLM step inside settings.do and add a small limit, e.g. limit: 25.
 - Use LLM inputs when the prompt consumes multiple prior outputs: inputs: { devices: "{{ load_devices.output }}", counts: "{{ by_state.output }}" }.
 - Use connector steps only when the user explicitly asks to send/post results to Teams. Then merge a descriptor.connectors array into the single top-level descriptor and use a connector step with capability post-channel-message version 1.
-- EVERY agent MUST include at least one step with format: llm. This is what makes it an agent rather than a deterministic query — the LLM writes the headline summary an admin reads. Do not gate it with "when:". The runtime preflights the provider and fails the run if one isn't connected, so the gate is unnecessary and misleading.
-- definition.result.summary MUST reference the LLM step's output, e.g.: {{ summarize.output.text | default("Summary unavailable.") }}. Do not put raw counts in the summary line — those belong in result.data.
-- Write-action kinds available: \`graph-write\` (the generic kind — any POST/PATCH/PUT/DELETE Graph endpoint, with typed-confirmation diff) and \`retire-managed-device\` (legacy alias for POST /deviceManagement/managedDevices/{id}/retire). Always prefer \`graph-write\` for new agents. For write agents, the LLM step should explain the planned actions in plain language and the write step's actionTemplate.label / actionTemplate.description should make every individual action self-explanatory. \`severity: destructive\` is the safe default unless the action is plainly reversible.
+- EVERY agent MUST include at least one step with format: llm. This is what makes it an agent rather than a deterministic query. The LLM writes the headline summary an admin reads. Do not gate it with "when:". The runtime preflights the provider and fails the run if one isn't connected, so the gate is unnecessary and misleading.
+- definition.result.summary MUST reference the LLM step's output, e.g.: {{ summarize.output.text | default("Summary unavailable.") }}. Do not put raw counts in the summary line. Those belong in result.data.
+- Write-action kinds available: \`graph-write\` (the generic kind for any POST/PATCH/PUT/DELETE Graph endpoint, with typed-confirmation diff) and \`retire-managed-device\` (legacy alias for POST /deviceManagement/managedDevices/{id}/retire). Always prefer \`graph-write\` for new agents. For write agents, the LLM step should explain the planned actions in plain language and the write step's actionTemplate.label / actionTemplate.description should make every individual action self-explanatory. \`severity: destructive\` is the safe default unless the action is plainly reversible.
 - The confirmationPhrase must spell out the operation count and noun in CAPS, e.g. "DISABLE {{ actions | size }} GUEST ACCOUNTS" or "REVOKE {{ actions | size }} SESSIONS". This is what the admin types to approve the plan.
 - Templating uses Liquid-subset {{ path.expr | filter }}. Filters available: size, total, sample(n), default("…"), join(", ").
 - Always include a top-level "# yaml-language-server: $schema=../../schemas/agent-template.schema.json" comment.
@@ -1010,10 +1010,10 @@ Hard rules:
 Reserved slugs you must not use:
 ${reservedSlugBlock}
 
-Candidate Microsoft Graph read endpoints for this prompt (pick from these for graph steps — declare the listed scope):
+Candidate Microsoft Graph read endpoints for this prompt (pick from these for graph steps; declare the listed scope):
 ${readBlock}${writeBlock}
 
-Reference example — read agent, bucketed by compliance state, LLM summary as headline:
+Reference example: read agent, bucketed by compliance state, LLM summary as headline:
 
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
 descriptor:
@@ -1055,7 +1055,7 @@ skills:
       system: >-
         You are a Microsoft 365 administrator's assistant. Be concise and
         factual. Two sentences plus one prioritised action. Never invent
-        numbers — use only the figures you are given.
+        numbers. Use only the figures you are given.
       prompt: |-
         Total devices: {{ load_devices.output | size }}.
         Compliant: {{ by_state.output.compliant }}.
@@ -1077,7 +1077,7 @@ definition:
       counts: "{{ by_state.output }}"
       llmModel: "{{ summarize.output.model }}"
 
-Pattern snippet — per-item map step with an inner LLM classifier:
+Pattern snippet: per-item map step with an inner LLM classifier:
 
   - id: triage_items
     format: map
@@ -1098,7 +1098,7 @@ Pattern snippet — per-item map step with an inner LLM classifier:
             temperature: 0.1
             maxTokens: 180
 
-Pattern snippet — optional Teams connector delivery when explicitly requested:
+Pattern snippet: optional Teams connector delivery when explicitly requested:
 
 descriptor:
   connectors:
@@ -1120,7 +1120,7 @@ skills:
       args:
         markdown: "{{ summarize.output.text }}"
 
-Reference example — write agent using graph-write to disable inactive guest users:
+Reference example: write agent using graph-write to disable inactive guest users:
 
 # yaml-language-server: $schema=../../schemas/agent-template.schema.json
 descriptor:
@@ -1195,7 +1195,7 @@ definition:
       total: "{{ stale.output | size }}"
       llmModel: "{{ explain_plan.output.model }}"
 
-When the user's description is vague, pick sensible defaults and continue — don't ask clarifying questions. When you cannot fulfil a request inside the available endpoints / transforms, choose the closest supported shape rather than inventing new mechanisms.
+When the user's description is vague, pick sensible defaults and continue. Don't ask clarifying questions. When you cannot fulfil a request inside the available endpoints / transforms, choose the closest supported shape rather than inventing new mechanisms.
 
 Output: a single YAML manifest. Nothing else.`;
 }

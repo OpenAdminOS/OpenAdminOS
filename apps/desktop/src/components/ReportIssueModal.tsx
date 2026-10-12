@@ -180,7 +180,7 @@ function ReportIssueModal({
         onClose={handleClose}
       />
       <div className="min-h-0 overflow-y-auto p-6">
-        <div className="rounded-md border border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)] p-3 text-[12px] leading-relaxed text-[var(--color-warning)]">
+        <div className="rounded-md border border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)] p-3 text-sm leading-relaxed text-[var(--color-warning)]">
           <div className="flex items-start gap-2">
             <IconWarning size={14} className="mt-0.5 shrink-0" />
             <p>
@@ -233,7 +233,7 @@ function ReportIssueModal({
           </div>
         </div>
 
-        <label className="mt-5 flex items-start gap-3 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface)] p-3 text-[12px] text-[var(--color-text-soft)]">
+        <label className="mt-5 flex items-start gap-3 rounded-md border border-[var(--color-border-soft)] bg-[var(--color-surface)] p-3 text-sm text-[var(--color-text-soft)]">
           <input
             type="checkbox"
             checked={includeDiagnostics}
@@ -247,7 +247,7 @@ function ReportIssueModal({
           </span>
         </label>
 
-        <label className="mt-3 flex items-start gap-3 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] p-3 text-[12px] text-[var(--color-danger)]">
+        <label className="mt-3 flex items-start gap-3 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] p-3 text-sm text-[var(--color-danger)]">
           <input
             type="checkbox"
             checked={publicConfirmed}
@@ -261,7 +261,7 @@ function ReportIssueModal({
         </label>
 
         {notice && (
-          <div className="mt-4 rounded-md border border-[var(--color-success)]/30 bg-[var(--color-success-soft)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-success)]">
+          <div className="mt-4 rounded-md border border-[var(--color-success)]/30 bg-[var(--color-success-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-success)]">
             {notice}{" "}
             {issueResult && (
               <button
@@ -274,14 +274,14 @@ function ReportIssueModal({
           </div>
         )}
         {error && (
-          <div className="mt-4 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] leading-relaxed text-[var(--color-danger)]">
+          <div className="mt-4 rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-danger)]">
             {error}
           </div>
         )}
       </div>
 
       <div className="flex shrink-0 items-center justify-between border-t border-[var(--color-border-soft)] px-6 py-4">
-        <div className="max-w-[420px] text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+        <div className="max-w-[420px] text-xs leading-relaxed text-[var(--color-text-muted)]">
           OpenAdminOS sends this report to its server endpoint. The server
           creates the GitHub issue with a repo-scoped token.
         </div>
@@ -345,10 +345,10 @@ function TextField({
   return (
     <label className="block">
       <div className="mb-1 flex items-center justify-between gap-3">
-        <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+        <span className="text-xs font-medium text-[var(--color-text-muted)]">
           {label}
         </span>
-        <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+        <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
           {value.length}/{maxLength}
         </span>
       </div>
@@ -357,7 +357,7 @@ function TextField({
         maxLength={maxLength}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[13px] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
+        className="h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-base text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
       />
     </label>
   );
@@ -381,10 +381,10 @@ function TextArea({
   return (
     <label className="block">
       <div className="mb-1 flex items-center justify-between gap-3">
-        <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+        <span className="text-xs font-medium text-[var(--color-text-muted)]">
           {label}
         </span>
-        <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+        <span className="text-xs tabular-nums text-[var(--color-text-muted)]">
           {value.length}/{maxLength}
         </span>
       </div>
@@ -394,7 +394,7 @@ function TextArea({
         maxLength={maxLength}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full resize-none rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] leading-relaxed text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
+        className="w-full resize-none rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-base leading-relaxed text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:border-[var(--color-accent)]"
       />
     </label>
   );

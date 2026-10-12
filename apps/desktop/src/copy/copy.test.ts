@@ -55,7 +55,7 @@ describe("v0.4 copy catalog", () => {
     ];
     expect(new Set(ids).size).toBe(ids.length);
     expect(searchSettings("cache").map((result) => result.title)).toEqual(
-      expect.arrayContaining(["Chat", "Tenant cache", "Periodic cache refresh"]),
+      expect.arrayContaining(["Data", "Tenant cache", "Periodic cache refresh"]),
     );
   });
 

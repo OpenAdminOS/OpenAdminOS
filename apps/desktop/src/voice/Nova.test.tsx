@@ -3,6 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { Nova } from "./Nova";
 import { makeMockBridge, renderRoute } from "../test/test-utils";
+import { openNovaPanel } from "../shared/nova-panel";
+
+async function openNovaForTest() {
+  act(openNovaPanel);
+  await screen.findByText(/Contoso IT/);
+}
+
 it("does not activate the microphone until consent and releases a late permission grant after Stop", async () => {
   vi.stubGlobal("URL", { revokeObjectURL: vi.fn(), createObjectURL: vi.fn() });
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -25,7 +32,7 @@ it("does not activate the microphone until consent and releases a late permissio
   });
   renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await openNovaForTest();
   expect(screen.getByRole("button", { name: "Start Nova" })).toBeDisabled();
   expect(getUserMedia).not.toHaveBeenCalled();
   await user.click(screen.getByRole("checkbox"));
@@ -51,7 +58,7 @@ it("expands the voice view and hides captions without requesting the microphone"
   });
   renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await openNovaForTest();
   await user.click(screen.getByRole("button", { name: "Full screen" }));
   expect(
     screen.getByRole("dialog", { name: "Nova voice assistant" }),
@@ -88,7 +95,7 @@ it("keeps the microphone off when setup fails and explains the reasoning depende
   });
   renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await openNovaForTest();
   expect(screen.getByText(/The voice key powers speech/)).toBeVisible();
   expect(screen.getByText(/Preloading is optional/)).toBeInTheDocument();
   await user.click(screen.getByRole("checkbox"));
@@ -160,7 +167,7 @@ it("keeps transcript speakers distinct and returns a delegated answer to the liv
   });
   renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await openNovaForTest();
   await user.click(screen.getByRole("checkbox"));
   await user.click(screen.getByRole("button", { name: "Start Nova" }));
   await waitFor(() => expect(dc.onmessage).toBeTypeOf("function"));
@@ -401,7 +408,7 @@ it('preserves paused qualifiers and stage greetings through microphone activity 
   }) });
   renderRoute(<Nova />, { bridge, route: '/cache', path: '/cache' });
   const user = userEvent.setup();
-  await user.click(screen.getByRole('button', {name: /Talk to Nova/}));
+  await openNovaForTest();
   await user.click(screen.getByRole('checkbox'));
   const emit = (event: object) => dc.onmessage!({data: JSON.stringify(event)});
   const input = (delta: string, start_ms: number, end_ms: number) => emit({type:'session.input_transcript.delta', delta, start_ms, end_ms});
@@ -520,7 +527,7 @@ it("explains microphone permission recovery without starting a hosted session", 
   });
   renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await openNovaForTest();
   await user.click(screen.getByRole("checkbox"));
   await user.click(screen.getByRole("button", { name: "Start Nova" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -546,7 +553,7 @@ it("does not let a delayed key-status result undo a successful key save", async 
   });
   renderRoute(<Nova />, { bridge, route: "/cache", path: "/cache" });
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Talk to Nova/ }));
+  await openNovaForTest();
   await user.type(screen.getByLabelText("OpenAI API key"), "test-only-key");
   await user.click(screen.getByRole("button", { name: "Save key" }));
   await act(async () => {

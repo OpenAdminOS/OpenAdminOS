@@ -86,6 +86,27 @@ describe("RunResult write confirmation", () => {
     });
   });
 
+  it("keeps paused confirmation focused by hiding empty telemetry and detail tabs", async () => {
+    const run = createAwaitingConfirmationRun({ steps: [], logs: [] });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        installedAgents: [createMockAgent({ slug: run.agentSlug })],
+        runs: [run],
+      }),
+    );
+
+    renderRoute(<RunResult />, {
+      path: "/runs/:id",
+      route: `/runs/${run.id}`,
+      bridge,
+    });
+
+    expect(await screen.findByText("Type the phrase below to confirm")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Run detail views" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Telemetry" })).not.toBeInTheDocument();
+  });
+
   it("describes arbitrary Graph writes without inventing a device-retirement impact", async () => {
     const run = createAwaitingConfirmationRun({
       id: "run-disable-user",
@@ -204,6 +225,55 @@ describe("RunResult write confirmation", () => {
       screen.queryByRole("button", { name: "Run again" }),
     ).not.toBeInTheDocument();
   });
+});
+
+it("opens terminal runs in the URL-addressable run drawer", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "completed",
+    plan: undefined,
+    finishedAt: "2026-10-10T10:01:00.000Z",
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({
+      installedAgents: [createMockAgent({ slug: run.agentSlug })],
+      runs: [run],
+    }),
+  );
+
+  renderRoute(<RunResult />, {
+    path: "/runs/:id",
+    route: `/runs/${run.id}`,
+    bridge,
+  });
+
+  expect(await screen.findByRole("dialog", { name: "Device Offboard" })).toBeInTheDocument();
+  expect(screen.getByRole("tablist", { name: "Run detail views" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Telemetry" })).toBeInTheDocument();
+});
+
+it("opens queued and running runs in the live run modal", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "running",
+    plan: undefined,
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({
+      installedAgents: [createMockAgent({ slug: run.agentSlug })],
+      runs: [run],
+    }),
+  );
+
+  renderRoute(<RunResult />, {
+    path: "/runs/:id",
+    route: `/runs/${run.id}`,
+    bridge,
+  });
+
+  expect(await screen.findByRole("dialog", { name: "Live run: Device Offboard" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Run in background" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
 });
 
 it('retries Team evidence by source ID without sending evidence through the renderer', async () => {

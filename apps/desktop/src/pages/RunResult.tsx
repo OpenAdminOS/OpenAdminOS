@@ -1,133 +1,107 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useEffect, useId, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
-import { Card } from "../components/Card";
-import { Pill } from "../components/Pill";
-import { Button } from "../components/Button";
+import { ActivityFeed } from "../components/ActivityFeed";
+import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
+import { Modal } from "../components/Modal";
+import { ResultPanel } from "../components/ResultPanel";
+import { RunFailureRemediation } from "../components/RunFailureRemediation";
+import { CompactRunTelemetry, RunTelemetry } from "../components/RunTelemetry";
+import { useToast } from "../components/Toast";
 import {
   IconArrowLeft,
   IconBolt,
-  IconCheck,
   IconChevronDown,
-  IconCloud,
   IconCopy,
   IconDownload,
-  IconHardDrive,
-  IconLock,
   IconPlay,
-  IconShield,
+  IconShare,
   IconWarning,
 } from "../components/icons";
-
-import { ShareMenu } from "../components/ShareMenu";
-import { ActivityFeed } from "../components/ActivityFeed";
-import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
-import { ResultPanel } from "../components/ResultPanel";
-import { RunFailureRemediation } from "../components/RunFailureRemediation";
-import { RunTelemetry } from "../components/RunTelemetry";
-import { useToast } from "../components/Toast";
-import { useAppState } from "../state";
+import {
+  Badge,
+  Button,
+  Drawer,
+  IconButton,
+  Menu,
+  Section,
+  StatusDot,
+  type MenuEntry,
+} from "../components/ui";
+import { userFacingErrorReason } from "../copy";
+import { createPendingIntent } from "../setup/pending-intent";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 import { copyTextToClipboard } from "../shared/clipboard";
+import { formatAgentDisplayName } from "../shared/agent-display";
 import {
   deriveTrustState,
   type RunRecord,
-  type RunStatus,
   type TenantRecord,
   type WriteAction,
   type WritePlan,
 } from "../shared/openAdminOS";
-import { formatAgentDisplayName } from "../shared/agent-display";
 import {
   runReportJson,
   runReportMarkdown,
   runReportPlaintext,
 } from "../shared/runReport";
-import { userFacingErrorReason } from "../copy";
-import { createPendingIntent } from "../setup/pending-intent";
-import { useSetupFlow } from "../setup/SetupFlowContext";
+import { useAppState } from "../state";
+import Runs, {
+  agentNameForRun,
+  formatDate,
+  providerNameForRun,
+  statusLabel,
+  statusTone,
+  tenantNameForRun,
+  triggerForRun,
+} from "./Runs";
 
 export default function RunResult() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
   const { state, startRun, confirmRun, rejectRun, cancelRun } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const toast = useToast();
   const run = state.runs.find((candidate) => candidate.id === id);
-  const agent = run
-    ? state.installedAgents.find((candidate) => candidate.slug === run.agentSlug)
-    : undefined;
-  const isLive = run?.status === "queued" || run?.status === "running";
-  const isAwaiting = run?.status === "awaiting-confirmation";
-  const isBaselineRollback = run?.origin === "baseline-rollback";
-  const isExternalProposal = run?.origin === "external-proposal";
-  const isSystemRun = run?.origin !== undefined;
-  const runTenant = run?.tenantId
+
+  const closeToRuns = () => navigate(`/runs${location.search}`);
+
+  if (!run) {
+    return <MissingRun onBack={closeToRuns} />;
+  }
+
+  const agent = state.installedAgents.find(
+    (candidate) => candidate.slug === run.agentSlug,
+  );
+  const runTenant = run.tenantId
     ? state.tenants.find((tenant) => tenant.id === run.tenantId)
     : undefined;
-  const tenantDisplayName = runTenant?.displayName;
-  const runProvider = run?.providerId
+  const runProvider = run.providerId
     ? state.providers.find((provider) => provider.id === run.providerId)
     : undefined;
   const runTrust = deriveTrustState({
     provider: runProvider,
     activeTenant: runTenant,
-    model: run?.model,
+    model: run.model,
   });
-  const [now, setNow] = useState(() => Date.now());
-  const shouldShowResult =
-    run?.result !== undefined || run?.status === "completed" || run?.status === "failed";
+  const displayName = agent
+    ? formatAgentDisplayName(agent)
+    : agentNameForRun(run, state.installedAgents);
+  const tenantName = tenantNameForRun(run, state.tenants);
+  const isLive = run.status === "queued" || run.status === "running";
+  const isSystemRun = run.origin !== undefined;
+  const requiresTeamReview = Boolean(
+    run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
+  );
 
-  useEffect(() => {
-    if (!isLive) return;
-    const intervalId = window.setInterval(() => setNow(Date.now()), 100);
-    return () => window.clearInterval(intervalId);
-  }, [isLive]);
-
-  // Keyboard: Esc cancels a live run.
-  useEffect(() => {
-    if (!isLive || !run) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        void cancelRun(run.id);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [isLive, run, cancelRun]);
-
-  if (!run) {
-    return (
-      <>
-        <PageHeader
-          eyebrow={
-            <button
-              type="button"
-              onClick={() => navigate("/activity")}
-              className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-            >
-              <IconArrowLeft size={12} aria-hidden="true" /> Run history
-            </button>
-          }
-          title="Run not found"
-          subtitle="This run is not present in local history."
-        />
-        <PageBody>
-          <Card>
-            <div className="p-8 text-[13px] text-[var(--color-text-muted)]">
-              Run records are stored locally in this app profile. It may have
-              been removed or created in another profile.
-            </div>
-          </Card>
-        </PageBody>
-      </>
-    );
-  }
-
-  const requiresTeamReview = Boolean(run.officeContext && (agent?.mode === "write" || !runTrust.isLocal));
   const reRun = () => {
     if (requiresTeamReview) {
-      navigate(run.office?.personaId ? `/office?persona=${encodeURIComponent(run.office.personaId)}` : "/office");
+      navigate(
+        run.office?.personaId
+          ? `/office?persona=${encodeURIComponent(run.office.personaId)}`
+          : "/office",
+      );
       return;
     }
     if (
@@ -145,9 +119,6 @@ export default function RunResult() {
     ) {
       return;
     }
-    // Preserve the run's tenant pinning, provider override, AND model
-    // override so re-runs don't silently drift to whatever's currently
-    // active globally.
     const options: {
       retryOfRunId?: string;
       tenantId?: string;
@@ -160,512 +131,545 @@ export default function RunResult() {
     if (run.model) options.model = run.model;
     void startRun(run.agentSlug, options)
       .then((nextRun) => navigate(`/runs/${nextRun.id}`))
-      .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
+      .catch((error) =>
+        toast.error(error instanceof Error ? error.message : String(error)),
+      );
   };
+
+  if (run.status === "awaiting-confirmation") {
+    return (
+      <ConfirmationPage
+        run={run}
+        displayName={displayName}
+        tenantName={tenantName}
+        trustDetail={runTrust.detail}
+        providerIsLocal={runProvider?.isLocal === true}
+        onBack={closeToRuns}
+        onConfirm={confirmRun}
+        onReject={rejectRun}
+      />
+    );
+  }
+
+  if (isLive) {
+    return (
+      <>
+        <Runs />
+        <LiveRunModal
+          run={run}
+          displayName={displayName}
+          tenantName={tenantName}
+          providerName={providerNameForRun(run, state.providers)}
+          providerIsLocal={runProvider?.isLocal}
+          trustDetail={runTrust.detail}
+          onBackground={closeToRuns}
+          onCancel={() => cancelRun(run.id)}
+        />
+      </>
+    );
+  }
 
   return (
     <>
-      <PageHeader
-        eyebrow={
-          <button
-            type="button"
-            onClick={() => navigate("/activity")}
-            className="inline-flex items-center gap-1.5 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)]"
-          >
-            <IconArrowLeft size={12} aria-hidden="true" /> Run history
-          </button>
-        }
-        title={
-          isBaselineRollback
-            ? "Baseline rollback"
-            : isExternalProposal
-              ? `External proposal from ${run.external?.clientName ?? "unknown client"}`
-              : agent
-                ? formatAgentDisplayName(agent)
-                : run.agentSlug
-        }
-        subtitle={
-          <div className="flex flex-col gap-1">
-            <span className="inline-flex flex-wrap items-center gap-2">
-              <Pill tone={statusTone(run.status)}>
-                {statusIcon(run.status)}
-                {statusLabel(run.status)}
-              </Pill>
-              {isLive && (
-                <span
-                  role="status"
-                  aria-live="polite"
-                  className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-info)]"
-                  />
-                  Streaming updates
-                </span>
-              )}
-              {run.tenantId && (
-                <Pill tone="success">
-                  Tenant: {tenantDisplayName ?? run.tenantId}
-                </Pill>
-              )}
-              {agent && (
-                <Pill tone={agent.mode === "write" ? "warning" : "default"}>
-                  {agent.mode === "write" ? "Write" : "Read"} · {agent.category}
-                </Pill>
-              )}
-            </span>
-            {isExternalProposal && (
-              <span className="inline-flex flex-wrap items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]">
-                <IconLock size={10} aria-hidden="true" />
-                <span>
-                  Required scopes: {run.external?.requiredScopes.length
-                    ? run.external.requiredScopes.join(", ")
-                    : "none declared"}
-                </span>
-              </span>
-            )}
-            <span className="inline-flex flex-wrap items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
-              <span>Run result</span>
-              <span className="opacity-50">·</span>
-              <span>{formatDate(run.queuedAt)}</span>
-              <span className="opacity-50">·</span>
-              <button
-                type="button"
-                aria-label={`Copy run id ${run.id}`}
-                onClick={() => {
-                  void copyTextToClipboard(run.id)
-                    .then(() => toast.success("Run ID copied."))
-                    .catch((error) =>
-                      toast.error(error instanceof Error ? error.message : String(error)),
-                    );
-                }}
-                title="Copy run id"
-                className="inline-flex items-center gap-1 font-mono transition-colors hover:text-[var(--color-text)]"
-              >
-                <IconCopy size={10} aria-hidden="true" />
-                <span>{run.id.slice(0, 8)}</span>
-              </button>
-            </span>
-          </div>
-        }
-        actions={
-          <>
-            <Button
-              variant="secondary"
-              size="md"
-              leadingIcon={<IconCopy size={12} />}
-              onClick={() => {
-                void copyTextToClipboard(
-                  runReportPlaintext(run, {
-                    agentName: agent?.name,
-                    tenantName: tenantDisplayName,
-                  }),
-                )
-                  .then(() => toast.success("Run report copied."))
-                  .catch((error) =>
-                    toast.error(error instanceof Error ? error.message : String(error)),
-                  );
-              }}
-            >
-              Copy report
-            </Button>
-            <Button
-              variant="secondary"
-              size="md"
-              leadingIcon={<IconDownload size={12} />}
-              onClick={() => {
-                void window.openAdminOS?.saveTextFile({
-                  suggestedName: `${run.agentSlug}-${run.id}.json`,
-                  content: runReportJson(run),
-                  filters: [{ name: "JSON", extensions: ["json"] }],
-                });
-              }}
-            >
-              Export
-            </Button>
-            <ShareMenu
-              contextLabel="run"
-              onExportMarkdown={() => {
-                void window.openAdminOS?.saveTextFile({
-                  suggestedName: `${run.agentSlug}-${run.id}.md`,
-                  content: runReportMarkdown(run, {
-                    agentName: agent?.name,
-                    tenantName: tenantDisplayName,
-                  }),
-                  filters: [{ name: "Markdown", extensions: ["md"] }],
-                });
-              }}
-              exportMarkdownHint="Save report as .md"
-            />
-            {isLive && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="md"
-                  onClick={() => navigate("/agents")}
-                  title="Run continues in the background"
-                >
-                  Run in background
-                </Button>
-                <Button
-                  size="md"
-                  onClick={() => {
-                    void cancelRun(run.id);
-                  }}
-                  className="!bg-[var(--color-danger-soft)] !text-[var(--color-danger)] !ring-1 !ring-[var(--color-danger)]/30 hover:!bg-[var(--color-danger)]/15"
-                  title="Cancel run (Esc)"
-                >
-                  Cancel run
-                </Button>
-              </>
-            )}
-            {!isLive && !isAwaiting && !isSystemRun && (
-              <Button
-                variant="primary"
-                size="md"
-                leadingIcon={<IconPlay size={12} />}
-                onClick={reRun}
-                title={requiresTeamReview ? "Review this assignment and its provider in Agent Team" : "Re-run with the same tenant pinning"}
-              >
-                {requiresTeamReview ? "Review in Agent Team" : "Run again"}
-              </Button>
-            )}
-          </>
-        }
+      <Runs />
+      <RunDrawer
+        run={run}
+        displayName={displayName}
+        tenantName={tenantName}
+        providerName={providerNameForRun(run, state.providers)}
+        providerIsLocal={runProvider?.isLocal}
+        trustDetail={runTrust.detail}
+        activeTenantId={state.activeTenantId}
+        tenants={state.tenants}
+        isSystemRun={isSystemRun}
+        rerunLabel={requiresTeamReview ? "Review in Agent Team" : "Run again"}
+        onClose={closeToRuns}
+        onRerun={reRun}
+        onRetargetCurrent={() => {
+          if (
+            !requireTenantAndProvider(
+              createPendingIntent({
+                kind: "agent-run",
+                slug: run.agentSlug,
+                ...(state.activeTenantId
+                  ? { tenantId: state.activeTenantId }
+                  : {}),
+                returnTo: `/runs/${encodeURIComponent(run.id)}`,
+              }),
+            )
+          ) {
+            return;
+          }
+          const options: { tenantId?: string } = {};
+          if (state.activeTenantId) options.tenantId = state.activeTenantId;
+          void startRun(run.agentSlug, options)
+            .then((nextRun) => navigate(`/runs/${nextRun.id}`))
+            .catch((error) =>
+              toast.error(error instanceof Error ? error.message : String(error)),
+            );
+        }}
       />
+    </>
+  );
+}
+
+function MissingRun({ onBack }: { onBack: () => void }) {
+  return (
+    <>
+      <PageHeader title="Run not found" breadcrumb={<BackToRuns onClick={onBack} />} />
       <PageBody>
-        {!isSystemRun ? (
-          <TenantDriftNote
-            runTenantId={run.tenantId}
-            activeTenantId={state.activeTenantId}
-            tenants={state.tenants}
-            allowRetarget={!run.officeContext}
-            onRetargetCurrent={() => {
-              if (
-                !requireTenantAndProvider(
-                  createPendingIntent({
-                    kind: "agent-run",
-                    slug: run.agentSlug,
-                    ...(state.activeTenantId
-                      ? { tenantId: state.activeTenantId }
-                      : {}),
-                    returnTo: `/runs/${encodeURIComponent(run.id)}`,
-                  }),
-                )
-              ) {
-                return;
-              }
-              const options: { tenantId?: string } = {};
-              if (state.activeTenantId) options.tenantId = state.activeTenantId;
-              void startRun(run.agentSlug, options)
-                .then((nextRun) => navigate(`/runs/${nextRun.id}`))
-                .catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
-            }}
-          />
-        ) : null}
-
-        <OutcomeCard
-          run={run}
-          agent={agent}
-          trustLabel={runTrust.label}
-          trustDetail={runTrust.detail}
-          providerName={runProvider?.name ?? run.providerId}
-          providerIsLocal={runProvider?.isLocal}
-          tenantName={tenantDisplayName}
-        />
-
-        {isAwaiting && run.plan && (
-          <DiffConfirmPanel
-            runId={run.id}
-            plan={run.plan}
-            onConfirm={confirmRun}
-            onReject={rejectRun}
-            writesAreReal={Boolean(run.tenantId)}
-            tenantDisplayName={tenantDisplayName}
-          />
-        )}
-
-        <RunFailureRemediation run={run} />
-
-        {shouldShowResult && <ResultPanel run={run} />}
-
-        <div className="mb-6 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
-          <RunTelemetry
-            run={run}
-            nowMs={now}
-            isLive={isLive}
-            providerIsLocal={runProvider?.isLocal}
-            providerName={runProvider?.name}
-          />
-        </div>
-
-        <ActivityFeed run={run} />
-
-        <div className="mt-2 flex items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
-          <span
-            aria-hidden="true"
-            className={
-              runProvider?.isLocal
-                ? "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
-                : "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]"
-            }
-          />
-          <span>{runTrust.detail}</span>
+        <div className="rounded-[10px] bg-[var(--color-surface)] px-6 py-8 text-base text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
+          Run records are stored locally in this app profile. This record may
+          have been removed or created in another profile.
         </div>
       </PageBody>
     </>
   );
 }
 
-function statusIcon(status: RunStatus) {
-  if (status === "completed") return <IconCheck size={10} aria-hidden="true" />;
-  if (status === "failed" || status === "rejected" || status === "cancelled") {
-    return <IconWarning size={10} aria-hidden="true" />;
-  }
-  if (status === "awaiting-confirmation") return <IconBolt size={10} aria-hidden="true" />;
+function RunDrawer({
+  run,
+  displayName,
+  tenantName,
+  providerName,
+  providerIsLocal,
+  trustDetail,
+  activeTenantId,
+  tenants,
+  isSystemRun,
+  rerunLabel,
+  onClose,
+  onRerun,
+  onRetargetCurrent,
+}: {
+  run: RunRecord;
+  displayName: string;
+  tenantName: string;
+  providerName: string;
+  providerIsLocal?: boolean;
+  trustDetail: string;
+  activeTenantId?: string;
+  tenants: TenantRecord[];
+  isSystemRun: boolean;
+  rerunLabel: string;
+  onClose: () => void;
+  onRerun: () => void;
+  onRetargetCurrent: () => void;
+}) {
+  const shouldShowResult =
+    run.result !== undefined || run.status === "completed" || run.status === "failed";
   return (
-    <span
-      aria-hidden="true"
-      className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-current"
-    />
+    <Drawer
+      open
+      title={displayName}
+      onClose={onClose}
+      actions={
+        <>
+          {!isSystemRun ? (
+            <Button
+              variant="primary"
+              size="sm"
+              leadingIcon={<IconPlay size={12} />}
+              onClick={onRerun}
+            >
+              {rerunLabel}
+            </Button>
+          ) : null}
+          <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
+        </>
+      }
+    >
+      <div className="space-y-6 p-5">
+        <section aria-label="Run summary" className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={statusTone(run.status)}>{statusLabel(run.status)}</Badge>
+            <span className="text-sm text-[var(--color-text-muted)]">
+              {tenantName} · {capitalize(triggerForRun(run))} · {formatDate(run.startedAt ?? run.queuedAt)}
+            </span>
+          </div>
+          <p className="text-md font-medium leading-relaxed text-[var(--color-text)]">
+            {run.liveSummary ?? run.summary
+              ? stripMarkdownToPlainText(run.liveSummary ?? run.summary ?? "")
+              : "No summary was recorded for this run."}
+          </p>
+          {run.external?.requiredScopes.length ? (
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Required scopes: {run.external.requiredScopes.join(", ")}
+            </p>
+          ) : null}
+          {run.rollback && run.rollback.manualCount > 0 ? (
+            <p className="text-sm text-[var(--color-text-muted)]">
+              {run.rollback.manualCount.toLocaleString()} changes need manual review and are not part of this plan.
+            </p>
+          ) : null}
+        </section>
+
+        {!isSystemRun ? (
+          <TenantDriftNote
+            runTenantId={run.tenantId}
+            activeTenantId={activeTenantId}
+            tenants={tenants}
+            allowRetarget={!run.officeContext}
+            onRetargetCurrent={onRetargetCurrent}
+          />
+        ) : null}
+
+        <RunFailureRemediation run={run} />
+        {shouldShowResult ? <ResultPanel run={run} /> : null}
+        <CompactRunTelemetry
+          run={run}
+          providerIsLocal={providerIsLocal}
+          providerName={providerName}
+        />
+        <ActivityFeed run={run} />
+        <TrustLine local={providerIsLocal === true} detail={trustDetail} />
+      </div>
+    </Drawer>
   );
 }
 
-function OutcomeCard({
+function LiveRunModal({
   run,
-  agent,
-  trustLabel,
-  trustDetail,
+  displayName,
+  tenantName,
   providerName,
   providerIsLocal,
-  tenantName,
+  trustDetail,
+  onBackground,
+  onCancel,
 }: {
   run: RunRecord;
-  agent: ReturnType<typeof useAppState>["state"]["installedAgents"][number] | undefined;
-  trustLabel: string;
-  trustDetail: string;
-  providerName?: string;
+  displayName: string;
+  tenantName: string;
+  providerName: string;
   providerIsLocal?: boolean;
-  tenantName?: string;
+  trustDetail: string;
+  onBackground: () => void;
+  onCancel: () => Promise<RunRecord>;
 }) {
-  const providerTone = providerIsLocal ? "success" : "warning";
-  const brief = buildRunBrief(run, agent?.description);
-  const displaySummary = run.liveSummary ?? run.summary;
-  const summaryIsStreaming = Boolean(run.liveSummary) && (run.status === "running" || run.status === "queued");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowMs(Date.now()), 250);
+    return () => window.clearInterval(interval);
+  }, []);
+
   return (
-    <Card className="mb-6">
-      <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="p-6">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            {statusToOutcomeLabel(run.status)} report
+    <Modal
+      open
+      size="lg"
+      closeOnScrim={false}
+      ariaLabel={`Live run: ${displayName}`}
+      onClose={() => void onCancel()}
+    >
+      <header className="flex shrink-0 items-start gap-3 border-b border-[var(--color-border-soft)] px-5 py-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="truncate text-md font-semibold text-[var(--color-text)]">
+              {displayName}
+            </h2>
+            <Badge tone={run.status === "running" ? "info" : "warning"}>
+              <StatusDot tone={run.status === "running" ? "info" : "warning"} />
+              {statusLabel(run.status)}
+            </Badge>
           </div>
-          {displaySummary ? (
-            <LiveReportPreview
-              source={displaySummary}
-              streaming={summaryIsStreaming}
+          <div className="mt-1 truncate text-sm text-[var(--color-text-muted)]">
+            {tenantName} · {providerName} · {run.id}
+          </div>
+        </div>
+        <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
+      </header>
+
+      <RunTelemetry
+        run={run}
+        nowMs={nowMs}
+        isLive
+        providerIsLocal={providerIsLocal}
+        providerName={providerName}
+      />
+
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+        {run.liveSummary || run.summary ? (
+          <section
+            aria-label="Live summary"
+            aria-live="polite"
+            className="border-b border-[var(--color-border-soft)] pb-5"
+          >
+            <MarkdownPreview
+              source={run.liveSummary ?? run.summary ?? ""}
+              className="text-base leading-relaxed text-[var(--color-text)]"
             />
-          ) : (
-            <div className="mt-4 text-[15px] font-medium leading-relaxed text-[var(--color-text)]">
-              Run is waiting for its first update.
-            </div>
-          )}
-          {agent?.description && (
-            <p className="mt-3 max-w-[640px] text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-              {agent.description}
-            </p>
-          )}
-          {brief && (
-            <div className="mt-5 grid gap-2 rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)] md:grid-cols-3">
-              <BriefItem label="Main finding" value={brief.main} />
-              <BriefItem label="Risk" value={brief.risk} />
-              <BriefItem label="Next action" value={brief.action} />
-            </div>
-          )}
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Pill>
-              {run.steps.length} step{run.steps.length === 1 ? "" : "s"}
-            </Pill>
-            <Pill>
-              {run.logs.length} log{run.logs.length === 1 ? "" : "s"}
-            </Pill>
-            {run.plan && (
-              <Pill tone="warning">
-                <IconLock size={9} /> {run.plan.actions.length} planned action
-                {run.plan.actions.length === 1 ? "" : "s"}
-              </Pill>
-            )}
+          </section>
+        ) : null}
+        {run.result !== undefined ? <ResultPanel run={run} /> : null}
+        <ActivityFeed run={run} />
+      </div>
+
+      <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t border-[var(--color-border-soft)] px-5 py-3">
+        <div className="min-w-0 flex-1">
+          <TrustLine local={providerIsLocal === true} detail={trustDetail} />
+        </div>
+        <Button variant="secondary" size="sm" onClick={onBackground}>
+          Run in background
+        </Button>
+        <Button variant="danger" size="sm" onClick={() => void onCancel()}>
+          Cancel run
+        </Button>
+      </footer>
+    </Modal>
+  );
+}
+
+function ConfirmationPage({
+  run,
+  displayName,
+  tenantName,
+  trustDetail,
+  providerIsLocal,
+  onBack,
+  onConfirm,
+  onReject,
+}: {
+  run: RunRecord;
+  displayName: string;
+  tenantName: string;
+  trustDetail: string;
+  providerIsLocal: boolean;
+  onBack: () => void;
+  onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
+  onReject: (runId: string) => Promise<RunRecord>;
+}) {
+  const plan = run.plan;
+  const destructiveCount =
+    plan?.actions.filter((action) => action.severity === "destructive").length ?? 0;
+  const actionCount = plan
+    ? `${plan.actions.length} ${plan.actions.length === 1 ? "action" : "actions"}`
+    : null;
+  return (
+    <>
+      <PageHeader
+        title={displayName}
+        breadcrumb={<BackToRuns onClick={onBack} />}
+        actions={
+          <>
+            <Badge tone="warning">Awaiting confirmation</Badge>
+            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
+          </>
+        }
+      />
+      <PageBody>
+        <div className="mx-auto max-w-[1040px] space-y-6">
+          <div className="flex items-start gap-3 border-b border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)] px-4 py-3 text-sm text-[var(--color-warning)]">
+            <IconWarning size={14} className="mt-0.5 shrink-0" />
+            <span>
+              Write operation paused for confirmation. OpenAdminOS will not proceed until the exact phrase is typed.
+            </span>
           </div>
-          {run.rollback && run.rollback.manualCount > 0 ? (
-            <div className="mt-3 text-[12px] text-[var(--color-text-muted)]">
-              {run.rollback.manualCount.toLocaleString()} changes need manual
-              review and are not part of this plan.
+
+          <p className="text-base text-[var(--color-text-soft)]">
+            {run.tenantId
+              ? `Applies to ${tenantName} through Microsoft Graph`
+              : `Simulates changes for ${tenantName} without Microsoft Graph writes`}
+            {actionCount ? ` · ${actionCount} · ${destructiveCount} destructive` : ""}
+          </p>
+
+          {plan && run.tenantId ? (
+            <div className="border-l-2 border-[var(--color-danger)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)]">
+              Approving will call Microsoft Graph. {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will be applied to {tenantName}. Review every operation below. Microsoft Graph changes may not be reversible.
+            </div>
+          ) : plan ? (
+            <div className="border-l-2 border-[var(--color-info)] bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-info)]">
+              Apply will be simulated. No Microsoft Graph writes will be made.
+            </div>
+          ) : null}
+
+          {run.external?.requiredScopes.length ? (
+            <p className="text-sm text-[var(--color-text-muted)]">
+              Required scopes: {run.external.requiredScopes.join(", ")}
+            </p>
+          ) : null}
+
+          {plan ? (
+            <>
+              <Section title={plan.summary}>
+                <div className="divide-y divide-[var(--color-border-soft)] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+                  {plan.actions.map((action, index) => (
+                    <ActionRow key={action.id} action={action} index={index} />
+                  ))}
+                </div>
+              </Section>
+              <TypedConfirmation
+                runId={run.id}
+                plan={plan}
+                onConfirm={onConfirm}
+                onReject={onReject}
+              />
+            </>
+          ) : (
+            <div
+              role="alert"
+              className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-base text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+            >
+              The confirmation plan is unavailable. Cancel this run and prepare a new proposal.
+            </div>
+          )}
+
+          <TrustLine local={providerIsLocal} detail={trustDetail} />
+        </div>
+      </PageBody>
+    </>
+  );
+}
+
+function TypedConfirmation({
+  runId,
+  plan,
+  onConfirm,
+  onReject,
+}: {
+  runId: string;
+  plan: WritePlan;
+  onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
+  onReject: (runId: string) => Promise<RunRecord>;
+}) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const armed = typed === plan.confirmationPhrase;
+
+  const confirm = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await onConfirm(runId, typed);
+      setTyped("");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reject = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await onReject(runId);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section
+      aria-labelledby="typed-confirmation-title"
+      className="border-t border-[var(--color-border)] pt-5"
+    >
+      <h2 id="typed-confirmation-title" className="text-md font-semibold text-[var(--color-text)]">
+        Type the phrase below to confirm
+      </h2>
+      <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+        Every destructive operation requires a typed phrase. There is no "remember my choice."
+      </p>
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_auto]">
+        <div className="flex min-h-11 items-center rounded-lg bg-[var(--color-bg-raised)] px-4 font-mono text-base text-[var(--color-warning)] ring-1 ring-[var(--color-border)]">
+          {plan.confirmationPhrase}
+        </div>
+        <label htmlFor="run-confirmation-phrase" className="sr-only">
+          Type confirmation phrase
+        </label>
+        <input
+          id="run-confirmation-phrase"
+          name="run-confirmation-phrase"
+          autoFocus
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          placeholder="Type here to enable Apply"
+          autoComplete="off"
+          disabled={busy}
+          className={`h-11 rounded-lg bg-[var(--color-bg-raised)] px-4 font-mono text-base text-[var(--color-text)] ring-1 placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-2 ${
+            armed
+              ? "ring-[var(--color-danger)] focus:ring-[var(--color-danger)]"
+              : "ring-[var(--color-border)] focus:ring-[var(--color-accent)]"
+          }`}
+        />
+        <div className="flex gap-2">
+          <Button variant="secondary" size="md" onClick={() => void reject()} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            size="md"
+            disabled={!armed || busy}
+            onClick={() => void confirm()}
+            leadingIcon={<IconBolt size={12} />}
+          >
+            Apply {plan.actions.length} change{plan.actions.length === 1 ? "" : "s"}
+          </Button>
+        </div>
+      </div>
+      {error ? (
+        <div role="alert" className="mt-3 text-sm text-[var(--color-danger)]">
+          {userFacingErrorReason(error) ??
+            "The confirmation action could not be completed. Review the tenant connection, then try again."}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ActionRow({ action, index }: { action: WriteAction; index: number }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewId = useId();
+  const destructive = action.severity === "destructive";
+  const badgeLabel = action.request?.method ?? action.kind;
+  return (
+    <div className="px-4 py-3">
+      <div className="grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3">
+        <div className="text-xs tabular-nums text-[var(--color-text-muted)]">
+          {String(index + 1).padStart(2, "0")}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-base font-medium text-[var(--color-text)]">
+            {action.label}
+          </div>
+          {action.description ? (
+            <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
+              {action.description}
             </div>
           ) : null}
         </div>
-        <div className="border-t border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] p-6 lg:border-l lg:border-t-0">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            Run context
-          </div>
-          <div className="mt-3 overflow-hidden rounded-lg ring-1 ring-[var(--color-border-soft)]">
-            <RunContextCell
-              label="Tenant"
-              value={tenantName ?? run.tenantId ?? "No tenant"}
-              subvalue={run.tenantId ? "Pinned at queue time" : "Run cannot access Graph"}
+        <Badge tone={destructive ? "danger" : "neutral"}>{badgeLabel}</Badge>
+      </div>
+      {action.request ? (
+        <div className="mt-2 pl-10">
+          <button
+            type="button"
+            onClick={() => setPreviewOpen((open) => !open)}
+            aria-expanded={previewOpen}
+            aria-controls={previewId}
+            className="inline-flex items-center gap-1.5 rounded text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          >
+            <IconChevronDown
+              size={11}
+              aria-hidden="true"
+              className={`transition-transform motion-reduce:transition-none ${previewOpen ? "" : "-rotate-90"}`}
             />
-            <div className="h-px bg-[var(--color-border-soft)]" />
-            <RunContextCell
-              label="Provider"
-              value={providerName ?? "Provider pending"}
-              subvalue={providerIsLocal ? "Local-only" : "Hosted LLM"}
-              tone={providerTone}
-              icon={providerIsLocal ? <IconHardDrive size={13} /> : <IconCloud size={13} />}
-            />
-            <div className="h-px bg-[var(--color-border-soft)]" />
-            <RunContextCell
-              label="Model"
-              value={run.model ?? "Provider default"}
-              subvalue={run.model ? "Pinned for this run" : "Resolved by provider"}
-            />
-            <div className="h-px bg-[var(--color-border-soft)]" />
-            <RunContextCell
-              label="Queued"
-              value={formatDate(run.queuedAt)}
-              subvalue={run.finishedAt ? `Finished ${formatDate(run.finishedAt)}` : "In local history"}
-            />
-          </div>
-          <div className="mt-4 rounded-md bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]">
-            <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-text)]">
-              <span
-                aria-hidden="true"
-                className={
-                  providerIsLocal
-                    ? "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-success)]"
-                    : "inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-warning)]"
-                }
-              />
-              {trustLabel}
-            </div>
-            <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-              {trustDetail}
-            </div>
-          </div>
+            {previewOpen ? "Hide request preview" : "Show request preview"}
+          </button>
+          {previewOpen ? (
+            <pre
+              id={previewId}
+              className="mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+            >
+              {formatRequestPreview(action.request)}
+            </pre>
+          ) : null}
         </div>
-      </div>
-    </Card>
-  );
-}
-
-function LiveReportPreview({
-  source,
-  streaming,
-}: {
-  source: string;
-  streaming: boolean;
-}) {
-  return (
-    <div
-      className="relative mt-4 max-w-[920px]"
-      aria-live={streaming ? "polite" : undefined}
-      aria-busy={streaming || undefined}
-    >
-      <MarkdownPreview
-        source={source}
-        className="text-[14px] font-normal leading-relaxed text-[var(--color-text)]"
-      />
-      {streaming && (
-        <span
-          role="status"
-          aria-live="polite"
-          className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]"
-        >
-          <span
-            aria-hidden="true"
-            className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-[var(--color-info)]"
-          />
-          generating report
-        </span>
-      )}
+      ) : null}
     </div>
   );
-}
-
-function BriefItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-soft)]">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function buildRunBrief(
-  run: RunRecord,
-  fallbackDescription: string | undefined,
-): { main: string; risk: string; action: string } | null {
-  const text = stripMarkdownToPlainText(run.liveSummary ?? run.summary ?? "").trim();
-  if (!text) return null;
-  const sentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
-  const main = sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence;
-  const lower = text.toLowerCase();
-  const risk =
-    lower.includes("missing") || lower.includes("gap") || lower.includes("risk")
-      ? "Review the flagged gaps before they become operational drift."
-      : fallbackDescription ?? "Use the report to decide whether this tenant state needs attention.";
-  const action =
-    lower.includes("recommendation")
-      ? "Follow the recommendation in the report and rerun after remediation."
-      : "Open the report, verify the finding, and rerun after any change.";
-  return { main, risk, action };
-}
-
-function RunContextCell({
-  label,
-  value,
-  subvalue,
-  tone = "default",
-  icon,
-}: {
-  label: string;
-  value: string;
-  subvalue: string;
-  tone?: "default" | "success" | "warning";
-  icon?: ReactNode;
-}) {
-  const toneClass =
-    tone === "success"
-      ? "text-[var(--color-success)]"
-      : tone === "warning"
-        ? "text-[var(--color-warning)]"
-        : "text-[var(--color-text)]";
-  return (
-    <div className="min-w-0 p-4">
-      <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className={`mt-1 flex min-w-0 items-center gap-1.5 text-[13px] font-medium ${toneClass}`}>
-        {icon}
-        <span className="truncate">{value}</span>
-      </div>
-      <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-        {subvalue}
-      </div>
-    </div>
-  );
-}
-
-function statusToOutcomeLabel(status: RunStatus): string {
-  if (status === "completed") return "Completed";
-  if (status === "running" || status === "queued") return "In progress";
-  if (status === "awaiting-confirmation") return "Waiting for confirmation";
-  if (status === "failed") return "Failed";
-  if (status === "rejected") return "Rejected";
-  if (status === "cancelled") return "Cancelled";
-  return "Outcome";
 }
 
 function TenantDriftNote({
@@ -681,277 +685,122 @@ function TenantDriftNote({
   allowRetarget: boolean;
   onRetargetCurrent: () => void;
 }) {
-  if (!runTenantId) return null;
-  if (runTenantId === activeTenantId) return null;
+  if (!runTenantId || runTenantId === activeTenantId) return null;
   const runTenant = tenants.find((tenant) => tenant.id === runTenantId);
   const activeTenant = activeTenantId
     ? tenants.find((tenant) => tenant.id === activeTenantId)
     : undefined;
   return (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/30">
-      <div className="flex items-start gap-3">
+    <div className="flex flex-wrap items-start justify-between gap-3 border-l-2 border-[var(--color-warning)] bg-[var(--color-warning-soft)] px-4 py-3">
+      <div className="flex min-w-0 flex-1 items-start gap-2 text-sm leading-relaxed text-[var(--color-text-soft)]">
         <IconWarning size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
-        <div className="text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-          This run executed against{" "}
-          <span className="font-medium text-[var(--color-text)]">
-            {runTenant?.displayName ?? `tenant ${runTenantId}`}
-          </span>
-          . The active tenant is now{" "}
-          <span className="font-medium text-[var(--color-text)]">
-            {activeTenant?.displayName ?? "no tenant"}
-          </span>
-          , so the results below reflect the original tenant.
-        </div>
+        <span>
+          This run used {runTenant?.displayName ?? runTenantId}. The active tenant is now {activeTenant?.displayName ?? "not connected"}, so this result still reflects the original tenant.
+        </span>
       </div>
-      {allowRetarget ? <Button variant="secondary" size="sm" onClick={onRetargetCurrent}>
-        Re-run against current tenant
-      </Button> : null}
+      {allowRetarget ? (
+        <Button variant="secondary" size="sm" onClick={onRetargetCurrent}>
+          Re-run against current tenant
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-function DiffConfirmPanel({
-  runId,
-  plan,
-  onConfirm,
-  onReject,
-  writesAreReal,
-  tenantDisplayName,
+function RunActionsMenu({
+  run,
+  agentName,
+  tenantName,
 }: {
-  runId: string;
-  plan: WritePlan;
-  onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
-  onReject: (runId: string) => Promise<RunRecord>;
-  writesAreReal: boolean;
-  tenantDisplayName: string | undefined;
+  run: RunRecord;
+  agentName: string;
+  tenantName: string;
 }) {
-  const [typed, setTyped] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const armed = typed === plan.confirmationPhrase;
-  const destructiveCount = plan.actions.filter(
-    (action) => action.severity === "destructive",
-  ).length;
-
-  const handleConfirm = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      await onConfirm(runId, typed);
-      setTyped("");
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleReject = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      await onReject(runId);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
-    } finally {
-      setBusy(false);
-    }
-  };
-
+  const toast = useToast();
+  const items: MenuEntry[] = [
+    {
+      id: "copy-report",
+      label: "Copy report",
+      icon: <IconCopy size={13} />,
+      onSelect: () => {
+        void copyTextToClipboard(runReportPlaintext(run, { agentName, tenantName }))
+          .then(() => toast.success("Run report copied."))
+          .catch((error) =>
+            toast.error(error instanceof Error ? error.message : String(error)),
+          );
+      },
+    },
+    {
+      id: "export",
+      label: "Export",
+      icon: <IconDownload size={13} />,
+      onSelect: () => {
+        void window.openAdminOS?.saveTextFile({
+          suggestedName: `${run.agentSlug}-${run.id}.json`,
+          content: runReportJson(run),
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        });
+      },
+    },
+    {
+      id: "share",
+      label: "Share",
+      icon: <IconShare size={13} />,
+      onSelect: () => {
+        void window.openAdminOS?.saveTextFile({
+          suggestedName: `${run.agentSlug}-${run.id}.md`,
+          content: runReportMarkdown(run, { agentName, tenantName }),
+          filters: [{ name: "Markdown", extensions: ["md"] }],
+        });
+      },
+    },
+    { id: "separator-id", type: "separator" },
+    {
+      id: "copy-id",
+      label: "Copy run ID",
+      icon: <IconCopy size={13} />,
+      onSelect: () => {
+        void copyTextToClipboard(run.id)
+          .then(() => toast.success("Run ID copied."))
+          .catch((error) =>
+            toast.error(error instanceof Error ? error.message : String(error)),
+          );
+      },
+    },
+  ];
   return (
-    <Card className="mb-6 ring-[var(--color-warning)]/35">
-      <div className="border-b border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)] px-6 py-3">
-        <div className="flex items-center gap-3 text-[12.5px] font-medium text-[var(--color-warning)]">
-          <IconWarning size={14} />
-          Write operation paused for confirmation. OpenAdminOS will not proceed until the exact phrase is typed.
-        </div>
-      </div>
-
-      {writesAreReal ? (
-        <div className="border-b border-[var(--color-danger)]/35 bg-[var(--color-danger-soft)] px-6 py-3">
-          <div className="flex items-start gap-3 text-[12.5px] text-[var(--color-danger)]">
-            <IconWarning size={14} className="mt-0.5 shrink-0" />
-            <span>
-              <span className="font-semibold">Approving will call Microsoft Graph.</span>{" "}
-              {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will
-              be applied to{" "}
-              <span className="font-mono">{tenantDisplayName ?? "the active tenant"}</span>.
-              Review every operation below. Microsoft Graph changes may not be reversible.
-            </span>
-          </div>
-        </div>
-      ) : (
-        <div className="border-b border-[var(--color-info)]/25 bg-[var(--color-info-soft)] px-6 py-3">
-          <div className="flex items-start gap-3 text-[12.5px] text-[var(--color-info)]">
-            <IconShield size={14} className="mt-0.5 shrink-0" />
-            <span>
-              <span className="font-semibold">Apply will be simulated.</span>{" "}
-              No Graph writes. The agent will emit a trace of the planned changes.
-              Connect a real tenant in Settings → Tenants to apply them.
-            </span>
-          </div>
-        </div>
-      )}
-
-      <div className="p-6">
-        <div className="mb-5 flex items-start justify-between gap-6">
-          <div className="min-w-0">
-            <div className="mb-1.5 flex items-center gap-2">
-              <Pill tone="warning">
-                <IconBolt size={10} /> Write
-              </Pill>
-              <Pill>
-                <IconLock size={10} /> {plan.actions.length} action{plan.actions.length === 1 ? "" : "s"}
-              </Pill>
-              {destructiveCount > 0 && (
-                <Pill tone="danger">{destructiveCount} destructive</Pill>
-              )}
-            </div>
-            <h2 className="text-[18px] font-medium text-[var(--color-text)]">
-              {plan.summary}
-            </h2>
-          </div>
-        </div>
-
-        <div className="mb-6 rounded-lg ring-1 ring-[var(--color-border-soft)]">
-          <div className="border-b border-[var(--color-border-soft)] px-5 py-2.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-            Operations
-          </div>
-          <div className="max-h-[320px] divide-y divide-[var(--color-border-soft)] overflow-auto">
-            {plan.actions.map((action, index) => (
-              <ActionRow key={action.id} action={action} index={index} />
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-lg bg-[var(--color-bg-raised)] p-5 ring-1 ring-[var(--color-border-soft)]">
-          <div className="flex items-start gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-warning-soft)]">
-              <IconWarning size={18} className="text-[var(--color-warning)]" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[14px] font-medium text-[var(--color-text)]">
-                Type the phrase below to confirm
-              </div>
-              <div className="mt-1 text-[12.5px] text-[var(--color-text-soft)]">
-                Every destructive operation requires a typed phrase. There is no "remember my choice."
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[280px_1fr_auto]">
-                <div className="flex h-11 items-center gap-2 rounded-lg bg-[var(--color-bg)] px-4 ring-1 ring-[var(--color-border)]">
-                  <span className="font-mono text-[13px] tracking-wide text-[var(--color-warning)]">
-                    {plan.confirmationPhrase}
-                  </span>
-                </div>
-                <label htmlFor="run-confirmation-phrase" className="sr-only">
-                  Type confirmation phrase
-                </label>
-                <input
-                  id="run-confirmation-phrase"
-                  name="run-confirmation-phrase"
-                  autoFocus
-                  value={typed}
-                  onChange={(event) => setTyped(event.target.value)}
-                  placeholder="Type here to enable Apply"
-                  autoComplete="off"
-                  disabled={busy}
-                  className={`h-11 rounded-lg bg-[var(--color-bg)] px-4 font-mono text-[13px] text-[var(--color-text)] ring-1 placeholder:text-[var(--color-text-placeholder)] focus:outline-none ${
-                    armed
-                      ? "ring-[var(--color-warning)]/55 focus:ring-[var(--color-warning)]"
-                      : "ring-[var(--color-border)] focus:ring-[var(--color-accent)]/50"
-                  }`}
-                />
-                <div className="flex gap-2">
-                  <Button variant="secondary" size="md" onClick={() => void handleReject()} disabled={busy}>
-                    Cancel
-                  </Button>
-                  <Button
-                    size="md"
-                    disabled={!armed || busy}
-                    onClick={() => void handleConfirm()}
-                    leadingIcon={<IconBolt size={11} />}
-                    className={
-                      armed
-                        ? "!bg-[var(--color-danger)] !text-[var(--color-on-accent)] hover:!bg-[var(--color-danger)]/90"
-                        : ""
-                    }
-                  >
-                    Apply {plan.actions.length} change{plan.actions.length === 1 ? "" : "s"}
-                  </Button>
-                </div>
-              </div>
-
-              {error && (
-                <div role="alert" className="mt-3 text-[12px] text-[var(--color-danger)]">
-                  {userFacingErrorReason(error) ??
-                    "The confirmation action could not be completed. Review the tenant connection, then try again."}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </Card>
+    <Menu
+      ariaLabel="Run actions"
+      items={items}
+      trigger={
+        <IconButton
+          label="Run actions"
+          tooltip="Copy, export, or share"
+          size="sm"
+          icon={<span className="text-md leading-none">•••</span>}
+        />
+      }
+    />
   );
 }
 
-function ActionRow({ action, index }: { action: WriteAction; index: number }) {
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const previewId = useId();
-  const destructive = action.severity === "destructive";
-  // For graph-write actions we display the HTTP method as the badge;
-  // for the legacy retire-managed-device kind (no rendered request)
-  // we fall back to the kind string so the existing UI keeps working.
-  const badgeLabel = action.request?.method ?? action.kind;
+function BackToRuns({ onClick }: { onClick: () => void }) {
   return (
-    <div className="px-5 py-3">
-      <div className="grid grid-cols-[40px_1fr_auto] items-center gap-4">
-        <div className="font-mono text-[10.5px] text-[var(--color-text-muted)] tabular-nums">
-          {String(index + 1).padStart(2, "0")}
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
-            {action.label}
-          </div>
-          {action.description && (
-            <div className="mt-0.5 truncate text-[11px] text-[var(--color-text-muted)]">
-              {action.description}
-            </div>
-          )}
-        </div>
-        <Pill tone={destructive ? "danger" : "default"}>
-          <IconBolt size={9} /> {badgeLabel}
-        </Pill>
-      </div>
-      {action.request && (
-        <div className="mt-2 pl-[56px]">
-          <button
-            type="button"
-            onClick={() => setPreviewOpen((open) => !open)}
-            aria-expanded={previewOpen}
-            aria-controls={previewId}
-            className="inline-flex items-center gap-1.5 rounded text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text-soft)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
-          >
-            <IconChevronDown
-              size={10}
-              aria-hidden="true"
-              style={{
-                transform: previewOpen ? "rotate(0deg)" : "rotate(-90deg)",
-                transition: "transform 0.15s ease",
-              }}
-            />
-            {previewOpen ? "Hide request preview" : "Show request preview"}
-          </button>
-          {previewOpen && (
-            <pre
-              id={previewId}
-              className="mt-2 max-h-[280px] overflow-auto whitespace-pre-wrap rounded-md bg-[var(--color-bg-raised)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-            >
-              {formatRequestPreview(action.request)}
-            </pre>
-          )}
-        </div>
-      )}
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+    >
+      <IconArrowLeft size={12} aria-hidden="true" /> Runs
+    </button>
+  );
+}
+
+function TrustLine({ local, detail }: { local: boolean; detail: string }) {
+  return (
+    <div className="flex items-start gap-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
+      <StatusDot tone={local ? "success" : "warning"} />
+      <span>{detail}</span>
     </div>
   );
 }
@@ -968,30 +817,6 @@ function formatRequestPreview(request: NonNullable<WriteAction["request"]>): str
   return `${head}\n\n${body}`;
 }
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function statusLabel(status: RunStatus) {
-  if (status === "queued") return "Queued";
-  if (status === "running") return "Running";
-  if (status === "awaiting-confirmation") return "Awaiting confirmation";
-  if (status === "completed") return "Completed";
-  if (status === "rejected") return "Rejected";
-  if (status === "cancelled") return "Cancelled";
-  return "Failed";
-}
-
-function statusTone(status: RunStatus) {
-  if (status === "failed") return "danger";
-  if (status === "rejected" || status === "cancelled") return "default";
-  if (status === "completed") return "success";
-  return "warning";
+function capitalize(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }

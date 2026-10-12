@@ -6,6 +6,7 @@ import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
 import { ManifestPreview } from "./ManifestPreview";
 import { CommunityShareModal } from "./CommunityShareModal";
+import { Badge } from "./ui";
 import { IconCheck, IconExternal, IconShare, IconSparkle, IconWarning } from "./icons";
 import { useAppState } from "../state";
 import type {
@@ -23,9 +24,9 @@ import type {
  * user-agents directory and we navigate to its detail page.
  *
  * The state machine has three modes:
- *   - prompt    — empty / typing / submitting
- *   - draft     — a draft is ready (may be valid OR have validation errors)
- *   - saving    — Save is in flight
+ *   - prompt: empty / typing / submitting
+ *   - draft: a draft is ready (may be valid OR have validation errors)
+ *   - saving: Save is in flight
  *
  * Errors are shown inline at the bottom of whichever pane is active so
  * the user never loses the prompt or the draft after a failure.
@@ -70,7 +71,7 @@ export function NewAgentModal({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Reset whenever the modal opens. Abandoned drafts should not survive
-  // a close/reopen — fresh start every time.
+  // a close/reopen. Start fresh every time.
   useEffect(() => {
     if (!open) return;
     setPrompt("");
@@ -212,7 +213,7 @@ export function NewAgentModal({
       await saveAgentDraft(yamlSource);
       const slug = draft.manifest?.descriptor.id;
       if (slug) {
-        // The button reads "Save & install" — actually install it so
+        // The button reads "Save & install", so install it and ensure
         // the user lands on a detail page that knows about the agent.
         await installAgent(slug);
         setSavedSlug(slug);
@@ -283,7 +284,7 @@ export function NewAgentModal({
         )}
 
         {!savedSlug && !draft && initialYamlSource && (
-          <div className="flex-1 px-6 py-5 text-[13px] text-[var(--color-text-muted)]">
+          <div className="flex-1 px-6 py-5 text-base text-[var(--color-text-muted)]">
             Loading local agent…
           </div>
         )}
@@ -347,10 +348,10 @@ function SavedPane({
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/30">
         <IconCheck size={18} />
       </div>
-      <div className="mt-4 text-[15px] font-semibold text-[var(--color-text)]">
+      <div className="mt-4 text-md font-semibold text-[var(--color-text)]">
         {name} is installed
       </div>
-      <div className="mt-2 max-w-[460px] text-[12.5px] leading-relaxed text-[var(--color-text-muted)]">
+      <div className="mt-2 max-w-[460px] text-base leading-relaxed text-[var(--color-text-muted)]">
         The agent is local to this device. Sharing creates a public GitHub issue for
         maintainer review; it does not publish the agent into Agent Hub.
       </div>
@@ -373,7 +374,7 @@ function SavedPane({
           Close
         </Button>
       </div>
-      <div className="mt-4 font-mono text-[11px] text-[var(--color-text-muted)]">
+      <div className="mt-4 font-mono text-xs text-[var(--color-text-muted)]">
         {slug}
       </div>
     </div>
@@ -412,18 +413,18 @@ function CapabilityPreview({
         : "No write confirmation";
 
   return (
-    <div className="mb-4 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
+    <div className="mb-4 border-y border-[var(--color-border-soft)] py-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+          <div className="text-base font-medium text-[var(--color-text)]">
             Capability review
           </div>
-          <div className="text-[11.5px] text-[var(--color-text-muted)]">
+          <div className="text-sm text-[var(--color-text-muted)]">
             Check this before installing the local agent.
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-2 text-[11.5px] text-[var(--color-text-muted)]">
+          <label className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             Version
             <input
               value={readDescriptorVersion(yamlSource)}
@@ -432,16 +433,16 @@ function CapabilityPreview({
                   replaceDescriptorVersion(yamlSource, event.currentTarget.value),
                 )
               }
-              className="h-7 w-[92px] rounded-md bg-[var(--color-surface)] px-2 font-mono text-[11.5px] text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+              className="h-7 w-[92px] rounded-md bg-[var(--color-surface)] px-2 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)]/50"
             />
           </label>
-          <span className="rounded-full bg-[var(--color-surface)] px-2 py-1 text-[11px] uppercase tracking-wider text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          <Badge tone={manifest.descriptor.mode === "write" ? "warning" : "neutral"}>
             {manifest.descriptor.mode}
-          </span>
+          </Badge>
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-px overflow-hidden rounded-md bg-[var(--color-border-soft)] md:grid-cols-4">
         <CapabilityCell
           label="Graph"
           value={`${graphSteps.length} step${graphSteps.length === 1 ? "" : "s"}`}
@@ -542,14 +543,14 @@ function CapabilityCell({
   detail: string;
 }) {
   return (
-    <div className="min-w-0 rounded-md bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-[10.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+    <div className="min-w-0 bg-[var(--color-surface)] p-3">
+      <div className="text-xs text-[var(--color-text-muted)]">
         {label}
       </div>
-      <div className="mt-1 truncate text-[12.5px] font-medium text-[var(--color-text)]">
+      <div className="mt-1 truncate text-base font-medium text-[var(--color-text)]">
         {value}
       </div>
-      <div className="mt-1 line-clamp-2 text-[11.5px] leading-snug text-[var(--color-text-muted)]">
+      <div className="mt-1 line-clamp-2 text-sm leading-snug text-[var(--color-text-muted)]">
         {detail}
       </div>
     </div>
@@ -565,34 +566,34 @@ function PreflightResult({ result }: { result: AgentDraftPreflightResult }) {
     : "Draft preflight needs attention";
   return (
     <div
-      className={`mb-4 rounded-lg p-4 ring-1 ${
+      className={`mb-4 rounded-lg p-4 ${
         result.ok
-          ? "bg-[var(--color-success-soft)] ring-[var(--color-success)]/25"
-          : "bg-[var(--color-danger-soft)] ring-[var(--color-danger)]/30"
+          ? "bg-[var(--color-success-soft)]"
+          : "bg-[var(--color-danger-soft)]"
       }`}
     >
       <div
-        className={`text-[12.5px] font-medium ${
+        className={`text-base font-medium ${
           result.ok ? "text-[var(--color-success)]" : "text-[var(--color-danger)]"
         }`}
       >
         {title}
       </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-2">
+      <div className="mt-3 grid gap-px overflow-hidden rounded-md bg-[var(--color-border-soft)] md:grid-cols-2">
         {result.checks.map((check) => (
           <div
             key={check.id}
-            className="rounded-md bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]"
+            className="bg-[var(--color-surface)] p-3"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="text-[12px] font-medium text-[var(--color-text)]">
+              <div className="text-sm font-medium text-[var(--color-text)]">
                 {check.label}
               </div>
-              <span className={`text-[10.5px] uppercase tracking-wider ${preflightTone(check.status)}`}>
+              <span className={`text-xs ${preflightTone(check.status)}`}>
                 {check.status}
               </span>
             </div>
-            <div className="mt-1 text-[11.5px] leading-relaxed text-[var(--color-text-muted)]">
+            <div className="mt-1 text-sm leading-relaxed text-[var(--color-text-muted)]">
               {check.detail}
             </div>
           </div>
@@ -654,16 +655,16 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
     <>
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mb-4 rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
-          <div className="flex items-center gap-2 text-[11.5px] uppercase tracking-wider text-[var(--color-text-muted)]">
+          <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
             <IconSparkle size={12} className="text-[var(--color-accent)]" /> What you can ask for
           </div>
-          <ul className="mt-2 space-y-1 text-[12.5px] leading-relaxed text-[var(--color-text-soft)]">
-            <li>· Read-only agents that call any Microsoft Graph GET endpoint — users, devices, groups, sign-in logs, compliance policies, audit logs, reports, and more.</li>
+          <ul className="mt-2 space-y-1 text-base leading-relaxed text-[var(--color-text-soft)]">
+            <li>· Read-only agents that call any Microsoft Graph GET endpoint: users, devices, groups, sign-in logs, compliance policies, audit logs, reports, and more.</li>
             <li>· Transforms over the results: group / count / sort / bucket-by-age.</li>
-            <li>· An LLM step that writes the headline summary (required — every agent must invoke the model at least once).</li>
+            <li>· An LLM step that writes the headline summary (required, every agent must invoke the model at least once).</li>
             <li>· Settings the user can override at install time (integer / string / boolean).</li>
           </ul>
-          <p className="mt-2 text-[11.5px] text-[var(--color-text-muted)]">
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">
             The drafter looks up real Graph endpoints for your prompt and refuses to invent paths. Write operations use the same typed confirmation gate as published agents.
           </p>
         </div>
@@ -716,7 +717,7 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
 
         <label
           htmlFor="new-agent-prompt"
-          className="block text-[12.5px] font-medium text-[var(--color-text)]"
+          className="block text-base font-medium text-[var(--color-text)]"
         >
           Describe the agent
         </label>
@@ -728,13 +729,13 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
           value={prompt}
           onChange={(event) => onPromptChange(event.currentTarget.value)}
           disabled={drafting}
-          className="mt-2 w-full resize-y rounded-lg bg-[var(--color-surface)] p-3 font-mono text-[12.5px] leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50 disabled:opacity-60"
+          className="mt-2 w-full resize-y rounded-lg bg-[var(--color-surface)] p-3 font-mono text-base leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-[var(--color-accent)]/50 disabled:opacity-60"
         />
 
         {!llmReady && (
           <div className="mt-3 flex items-start gap-2 rounded-md bg-[var(--color-warning-soft)] px-3 py-2 ring-1 ring-[var(--color-warning)]/30">
             <IconWarning size={12} className="mt-0.5 text-[var(--color-warning)]" />
-            <div className="text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <div className="text-sm leading-relaxed text-[var(--color-text-soft)]">
               <span className="font-medium text-[var(--color-text)]">
                 {providerName} isn't reachable.
               </span>{" "}
@@ -753,7 +754,7 @@ const PromptPane = forwardRef<HTMLTextAreaElement, PromptPaneProps>(
         )}
 
         {error && (
-          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {error}
           </div>
         )}
@@ -791,13 +792,13 @@ function BuilderSelect({
   onChange: (next: string) => void;
 }) {
   return (
-    <label className="block text-[11.5px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+    <label className="block text-sm font-medium text-[var(--color-text-muted)]">
       {label}
       <Select
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="mt-1 h-9 w-full rounded-md bg-[var(--color-surface)] px-2 text-[12.5px] normal-case tracking-normal text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)]/50 disabled:opacity-60"
+        className="mt-1 h-9 w-full rounded-md bg-[var(--color-surface)] px-2 text-base normal-case tracking-normal text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)]/50 disabled:opacity-60"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -861,15 +862,15 @@ function DraftPane({
 
         {!valid && (
           <div className="mb-4 rounded-lg bg-[var(--color-danger-soft)] p-4 ring-1 ring-[var(--color-danger)]/30">
-            <div className="flex items-center gap-2 text-[12.5px] font-medium text-[var(--color-danger)]">
+            <div className="flex items-center gap-2 text-base font-medium text-[var(--color-danger)]">
               <IconWarning size={12} /> The draft needs changes before it can be saved
             </div>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-[11.5px] leading-relaxed text-[var(--color-text-soft)]">
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-[var(--color-text-soft)]">
               {draft.validationErrors.map((msg, idx) => (
                 <li key={idx}>{msg}</li>
               ))}
             </ul>
-            <p className="mt-3 text-[11.5px] text-[var(--color-text-muted)]">
+            <p className="mt-3 text-sm text-[var(--color-text-muted)]">
               Edit the YAML below and validate again, or go back and refine
               the prompt.
             </p>
@@ -897,10 +898,10 @@ function DraftPane({
           <div className="min-w-0 rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
             <div className="mb-2 flex items-center justify-between gap-3">
               <div>
-                <div className="text-[12.5px] font-medium text-[var(--color-text)]">
+                <div className="text-base font-medium text-[var(--color-text)]">
                   Manifest YAML
                 </div>
-                <div className="text-[11.5px] text-[var(--color-text-muted)]">
+                <div className="text-sm text-[var(--color-text-muted)]">
                   Local draft only. Validate before saving.
                 </div>
               </div>
@@ -917,13 +918,13 @@ function DraftPane({
               value={yamlSource}
               onChange={(event) => onYamlSourceChange(event.currentTarget.value)}
               spellCheck={false}
-              className="h-[520px] w-full resize-y rounded-md bg-[var(--color-surface)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)]/50"
+              className="h-[520px] w-full resize-y rounded-md bg-[var(--color-surface)] p-3 font-mono text-xs leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)]/50"
             />
           </div>
         </div>
 
         {error && (
-          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-[12px] text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          <div className="mt-3 rounded-md bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             {error}
           </div>
         )}

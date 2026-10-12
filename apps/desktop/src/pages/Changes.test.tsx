@@ -16,6 +16,7 @@ import type {
   DriftBaseline,
   DriftBaselineDriftResult,
   DriftEntryDetail,
+  GraphCacheStatus,
   DriftObjectHistoryResult,
   DriftStatus,
   DriftTenantCompareInput,
@@ -218,6 +219,152 @@ const tenantCompareResult: DriftTenantCompareResult = {
 };
 
 describe("Changes page", () => {
+  it("opens URL-addressable baseline and compare views", async () => {
+    const baselineBridge = makeTimelineBridge([], {
+      listDriftBaselines: vi.fn(async () => [activeNamedBaseline]),
+      getDriftBaselineDrift: vi.fn(async () => namedBaselineDrift),
+      getDriftTimeCompare: vi.fn(async () => timeCompareResult),
+    });
+
+    const baselineRender = renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes?view=baselines",
+      bridge: baselineBridge,
+    });
+    expect(
+      await screen.findByRole("tab", { name: "Baselines" }),
+    ).toHaveAttribute("aria-selected", "true");
+    baselineRender.unmount();
+
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes?view=compare",
+      bridge: baselineBridge,
+    });
+    expect(await screen.findByRole("tab", { name: "Compare" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Run compare" })).toBeInTheDocument();
+  });
+
+  it("opens the all-tenant scope from the URL", async () => {
+    const appState = createMockAppState({
+      tenants: [mockTenant, secondTenant],
+      activeTenantId: mockTenant.id,
+    });
+
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes?scope=all",
+      bridge: makeTimelineBridge(
+        [],
+        {
+          getFleetDriftStatus: vi.fn(async () => ({
+            evaluatedAt: modifiedAt,
+            tenants: [
+              {
+                tenantId: mockTenant.id,
+                tenantName: mockTenant.displayName,
+                lastCaptureAt: modifiedAt,
+                trackedObjectCount: 18,
+              },
+              {
+                tenantId: secondTenant.id,
+                tenantName: secondTenant.displayName,
+                lastCaptureAt: modifiedAt,
+                trackedObjectCount: 12,
+              },
+            ],
+          })),
+          listMultiTenantAgentBatches: vi.fn(async () => []),
+        },
+        appState,
+      ),
+    });
+
+    expect(await screen.findByRole("radio", { name: "All tenants" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      await screen.findByRole("table", { name: "Tenant fleet drift status" }),
+    ).toBeInTheDocument();
+  });
+
+  it("refreshes and cancels the active tenant cache from the header", async () => {
+    const user = userEvent.setup();
+    const refreshedStatus: GraphCacheStatus = {
+      tenantId: mockTenant.id,
+      resources: [
+        {
+          resource: "deviceConfigurations",
+          label: "Device configurations",
+          rows: 18,
+          refreshedAt: modifiedAt,
+          scopeSet: ["DeviceManagementConfiguration.Read.All"],
+        },
+      ],
+    };
+    const runningStatus: GraphCacheStatus = {
+      ...refreshedStatus,
+      preload: {
+        tenantId: mockTenant.id,
+        status: "running",
+        total: 2,
+        completed: 1,
+        active: ["configurationPolicies"],
+        results: [],
+      },
+    };
+    const cancelledStatus: GraphCacheStatus = {
+      ...refreshedStatus,
+      preload: {
+        ...runningStatus.preload!,
+        status: "cancelled",
+        active: [],
+      },
+    };
+    const getGraphCacheStatus = vi
+      .fn()
+      .mockResolvedValueOnce(refreshedStatus)
+      .mockResolvedValueOnce(runningStatus)
+      .mockResolvedValue(cancelledStatus);
+    const startGraphCachePreload = vi.fn(async () => undefined);
+    const cancelGraphCachePreload = vi.fn(async () => undefined);
+    const getDriftTimeline = vi.fn(
+      async (input: DriftTimelineInput): Promise<DriftTimelineResult> => ({
+        tenantId: mockTenant.id,
+        entries: [],
+        hasMore: false,
+        limit: input.limit ?? 100,
+      }),
+    );
+
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes",
+      bridge: makeTimelineBridge([], {
+        getGraphCacheStatus,
+        startGraphCachePreload,
+        cancelGraphCachePreload,
+        getDriftTimeline,
+      }),
+    });
+
+    await screen.findByText(/Updated /);
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => {
+      expect(startGraphCachePreload).toHaveBeenCalledWith({
+        tenantId: mockTenant.id,
+        resources: ["deviceConfigurations"],
+      });
+    });
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(cancelGraphCachePreload).toHaveBeenCalledWith(mockTenant.id);
+    await waitFor(() => expect(getDriftTimeline).toHaveBeenCalledTimes(2));
+  });
+
   it("renders the baseline-only empty state from DriftStatus", async () => {
     const bridge = makeMockBridge({
       getDriftStatus: vi.fn(async () => driftStatus),
@@ -252,7 +399,7 @@ describe("Changes page", () => {
       screen.getByText(/No configuration changes detected since/i),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Baselines" }),
+      screen.queryByRole("tab", { name: "Baselines" }),
     ).not.toBeInTheDocument();
   });
 
@@ -281,10 +428,10 @@ describe("Changes page", () => {
       }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Baselines" }));
+    await user.click(await screen.findByRole("tab", { name: "Baselines" }));
     expect(
       await screen.findByText(
-        /A baseline is a pinned copy of this tenant's configuration/i,
+        /Create a baseline to pin the tenant's current tracked configuration/i,
       ),
     ).toBeInTheDocument();
 
@@ -307,7 +454,7 @@ describe("Changes page", () => {
       });
     });
     expect(
-      await screen.findByRole("heading", { name: "Monthly control plane" }),
+      await screen.findByText("Monthly control plane"),
     ).toBeInTheDocument();
   });
 
@@ -324,22 +471,20 @@ describe("Changes page", () => {
       }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Baselines" }));
+    await user.click(await screen.findByRole("tab", { name: "Baselines" }));
     expect(
       await screen.findByRole("row", {
-        name: "Device configurations: 1 added, 0 removed, 2 modified",
+        name: "Device configurations 1 0 2",
       }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("row", {
-        name: "Configuration policies: 0 added, 1 removed, 0 modified",
+        name: "Configuration policies 0 1 0",
       }),
     ).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Expand baseline drift details for Device restriction policy",
-      }),
+      screen.getByText("Device restriction policy").closest("tr")!,
     );
     expect(
       await screen.findByText("settings.passwordRequired"),
@@ -348,7 +493,7 @@ describe("Changes page", () => {
     expect(screen.getByText("true")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Raw before\/after bodies exceeded the local display cap/i,
+        /Raw before and after bodies exceeded the local display cap/i,
       ),
     ).toBeInTheDocument();
     expect(getDriftBaselineDrift).toHaveBeenCalledWith({
@@ -385,7 +530,7 @@ describe("Changes page", () => {
       { route: "/changes", bridge },
     );
 
-    await user.click(await screen.findByRole("button", { name: "Baselines" }));
+    await user.click(await screen.findByRole("tab", { name: "Baselines" }));
     await user.click(
       await screen.findByRole("button", { name: "Roll back drift" }),
     );
@@ -393,14 +538,10 @@ describe("Changes page", () => {
     const dialog = await screen.findByRole("dialog", {
       name: "Roll back baseline drift",
     });
-    expect(
-      within(dialog).getByText(
-        "This builds a rollback plan for the drifted objects below. Nothing is applied until you review the plan and type the confirmation phrase on the run page.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText("1 drifted entry is included in this plan."),
-    ).toBeInTheDocument();
+    expect(dialog).toHaveTextContent(
+      "This builds a rollback plan for all drifted objects. Nothing is applied until you review the plan and type the confirmation phrase on the run page.",
+    );
+    expect(dialog).toHaveTextContent("1 drifted entry included.");
 
     await user.click(
       within(dialog).getByRole("button", { name: "Build rollback plan" }),
@@ -432,7 +573,7 @@ describe("Changes page", () => {
       }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Baselines" }));
+    await user.click(await screen.findByRole("tab", { name: "Baselines" }));
     await user.click(
       await screen.findByRole("button", { name: "Roll back drift" }),
     );
@@ -468,9 +609,12 @@ describe("Changes page", () => {
       }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Baselines" }));
-    await screen.findByRole("heading", { name: "Quarterly control plane" });
-    await user.click(screen.getByRole("button", { name: "Retire" }));
+    await user.click(await screen.findByRole("tab", { name: "Baselines" }));
+    await screen.findByText("Quarterly control plane");
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Quarterly control plane" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Retire" }));
 
     const dialog = await screen.findByRole("dialog", {
       name: "Retire baseline",
@@ -493,7 +637,7 @@ describe("Changes page", () => {
     expect(
       await screen.findByRole("heading", { name: "No active baseline" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Retired baselines")).toBeInTheDocument();
+    expect(screen.getByText("Retired")).toBeInTheDocument();
   });
 
   it("treats a no-active-baseline drift rejection as the empty state", async () => {
@@ -510,7 +654,7 @@ describe("Changes page", () => {
       }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Baselines" }));
+    await user.click(await screen.findByRole("tab", { name: "Baselines" }));
     expect(
       await screen.findByRole("heading", { name: "No active baseline" }),
     ).toBeInTheDocument();
@@ -527,24 +671,22 @@ describe("Changes page", () => {
       bridge: makeTimelineBridge([], { getDriftTimeCompare }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Compare" }));
+    await user.click(await screen.findByRole("tab", { name: "Compare" }));
     await user.click(screen.getByRole("button", { name: "Run compare" }));
 
     expect(
       await screen.findByRole("row", {
-        name: "Device configurations: 1 added, 0 removed, 2 modified",
+        name: "Device configurations 1 0 2",
       }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Retention has pruned history older than part of this window. The before side may be incomplete.",
+        "Retention pruned part of this window, so the earlier side may be incomplete.",
       ),
     ).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", {
-        name: "Expand time comparison details for Device restriction policy",
-      }),
+      screen.getByText("Device restriction policy").closest("tr")!,
     );
     expect(
       await screen.findByText("settings.passwordRequired"),
@@ -569,7 +711,7 @@ describe("Changes page", () => {
       bridge: makeTimelineBridge([], { getDriftTimeCompare }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Compare" }));
+    await user.click(await screen.findByRole("tab", { name: "Compare" }));
     const from = screen.getByLabelText("From");
     const to = screen.getByLabelText("To");
     await user.clear(from);
@@ -612,21 +754,25 @@ describe("Changes page", () => {
       ),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Compare" }));
-    await user.click(screen.getByRole("button", { name: "Between tenants" }));
+    await user.click(await screen.findByRole("tab", { name: "Compare" }));
+    await user.click(screen.getByRole("radio", { name: "Between tenants" }));
+    await user.click(screen.getByRole("button", { name: "Run compare" }));
 
     expect(
       await screen.findByRole("row", {
-        name: "Device configurations: 4 matched same, 2 different, 1 only in A, 3 only in B, 2 ambiguous",
+        name: "Device configurations 4 2 1 3 2",
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("2 objects share a display name and were not matched."),
+      screen.getByText(
+        "Objects with duplicate display names are marked ambiguous and are not matched.",
+      ),
     ).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("checkbox", { name: "Include assignments" }),
     );
+    await user.click(screen.getByRole("button", { name: "Run compare" }));
     await waitFor(() => {
       expect(getDriftTenantCompare).toHaveBeenLastCalledWith({
         tenantIdA: "tenant-1",
@@ -650,12 +796,12 @@ describe("Changes page", () => {
       }),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Compare" }));
-    await user.click(screen.getByRole("button", { name: "Between tenants" }));
+    await user.click(await screen.findByRole("tab", { name: "Compare" }));
+    await user.click(screen.getByRole("radio", { name: "Between tenants" }));
 
     expect(
       screen.getByRole("heading", {
-        name: "Connect a second tenant to compare configurations.",
+        name: "Connect a second tenant",
       }),
     ).toBeInTheDocument();
     expect(getDriftTenantCompare).not.toHaveBeenCalled();
@@ -673,9 +819,9 @@ describe("Changes page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("admin@contoso.example")).toBeInTheDocument();
     expect(screen.getByText("Conditional Access baseline")).toBeInTheDocument();
-    expect(screen.getByText("actor unknown")).toBeInTheDocument();
+    expect(screen.getByText(/actor unknown/i)).toBeInTheDocument();
     expect(
-      screen.getByText("refresh audit data to attribute"),
+      screen.getByText(/refresh audit data to attribute/i),
     ).toBeInTheDocument();
   });
 
@@ -731,9 +877,7 @@ describe("Changes page", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", {
-        name: /Open change details for Device restriction policy/i,
-      }),
+      (await screen.findByText("Device restriction policy")).closest("tr")!,
     );
 
     expect(await screen.findByText("Field changes")).toBeInTheDocument();
@@ -743,7 +887,16 @@ describe("Changes page", () => {
     expect(screen.getByText("group-old")).toBeInTheDocument();
     expect(screen.getByText("group-new")).toBeInTheDocument();
     expect(screen.getByText("settings.passwordRequired")).toBeInTheDocument();
-    expect(screen.getByText("History (2 versions)")).toBeInTheDocument();
+    expect(screen.getByText("History (2)")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Pin change to workspace" }),
+    );
+    const pinDialog = await screen.findByRole("dialog", {
+      name: "Pin change to workspace",
+    });
+    expect(
+      within(pinDialog).getByRole("button", { name: "Open Workspaces" }),
+    ).toBeInTheDocument();
     expect(getDriftEntryDetail).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       snapshotId: "snapshot-2",
@@ -798,13 +951,9 @@ describe("Changes page", () => {
       screen.queryByText("Device restriction policy"),
     ).not.toBeInTheDocument();
 
-    const timeline = screen.getByText("Timeline").closest("div");
-    expect(timeline).not.toBeNull();
     expect(
-      within(document.body).getByRole("button", {
-        name: /Open change details for Conditional Access baseline/i,
-      }),
-    ).toBeInTheDocument();
+      screen.getByText("Conditional Access baseline").closest("tr"),
+    ).toHaveAttribute("tabindex", "0");
   });
 });
 

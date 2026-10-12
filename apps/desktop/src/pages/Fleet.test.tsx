@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import Fleet from "./Fleet";
+import FleetScope from "./Fleet";
 import {
   createMockAppState,
   makeMockBridge,
@@ -59,12 +59,12 @@ const fleetState = createMockAppState({
   activeTenantId: mockTenant.id,
 });
 
-describe("Fleet", () => {
+describe("all-tenant Changes scope", () => {
   it("renders tenant drift rows and the no-baseline state", async () => {
     const getFleetDriftStatus = vi.fn(async () => fleetStatus);
-    renderRoute(<Fleet />, {
-      path: "/fleet",
-      route: "/fleet",
+    renderRoute(<FleetScope />, {
+      path: "/changes",
+      route: "/changes?scope=all",
       bridge: makeMockBridge(
         {
           getFleetDriftStatus,
@@ -85,9 +85,9 @@ describe("Fleet", () => {
       .closest("tr");
     expect(contosoRow).not.toBeNull();
     expect(within(contosoRow!).getByText("Production standard")).toBeInTheDocument();
-    expect(within(contosoRow!).getByText("+2")).toBeInTheDocument();
-    expect(within(contosoRow!).getByText("-1")).toBeInTheDocument();
-    expect(within(contosoRow!).getByText("~3")).toBeInTheDocument();
+    expect(
+      within(contosoRow!).getByText("2 added, 1 removed, 3 modified"),
+    ).toBeInTheDocument();
     expect(within(contosoRow!).getByText("48")).toBeInTheDocument();
 
     const fabrikamRow = within(table)
@@ -111,9 +111,9 @@ describe("Fleet", () => {
       },
     ];
     const getFleetDriftStatus = vi.fn(async () => fleetStatus);
-    renderRoute(<Fleet />, {
-      path: "/fleet",
-      route: "/fleet",
+    renderRoute(<FleetScope />, {
+      path: "/changes",
+      route: "/changes?scope=all",
       bridge: makeMockBridge(
         {
           getFleetDriftStatus,

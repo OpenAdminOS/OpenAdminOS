@@ -7,7 +7,7 @@ interface SparklineProps {
 
 /**
  * A minimal SVG bar-sparkline. Bars use the accent color, last bar can be highlighted.
- * Width is responsive — uses preserveAspectRatio: none so it stretches to container.
+ * Width is responsive. It uses preserveAspectRatio: none so it stretches to the container.
  */
 export function Sparkline({
   data,

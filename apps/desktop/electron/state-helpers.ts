@@ -42,7 +42,7 @@ import { withAgentCompatibility } from "./agent-draft-helpers.js";
  * Default stats aggregator URL. Constructor option `statsApiUrl` wins;
  * env var `OPENAGENTS_STATS_API` is the next fallback; otherwise the
  * official deployment URL. An empty string disables the POST entirely
- * — installs still complete locally, the count just doesn't flow to
+ * Installs still complete locally, the count just doesn't flow to
  * the public stats file. main.ts passes `""` in dev so we don't
  * report dev installs to production.
  */

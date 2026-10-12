@@ -16,14 +16,13 @@ export function ResultPanel({ run }: { run: RunRecord }) {
   return (
     <OutputPane
       title="Result"
-      className="mb-6"
       actions={
         result !== undefined && result !== null ? (
           <button
             type="button"
             onClick={() => setRawOpen((open) => !open)}
             aria-expanded={rawOpen}
-            className="inline-flex items-center gap-1 rounded-md px-1.5 text-[11.5px] font-medium text-[var(--color-text-soft)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+            className="inline-flex items-center gap-1 rounded-md px-1.5 text-sm font-medium text-[var(--color-text-soft)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
           >
             <IconChevronDown
               size={11}
@@ -45,7 +44,7 @@ export function ResultPanel({ run }: { run: RunRecord }) {
               size={13}
               className="mt-0.5 shrink-0 text-[var(--color-info)]"
             />
-            <div className="text-[12px] leading-relaxed text-[var(--color-text-soft)]">
+            <div className="text-sm leading-relaxed text-[var(--color-text-soft)]">
               {emptyContextMessage}
             </div>
           </div>

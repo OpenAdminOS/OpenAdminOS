@@ -13,6 +13,7 @@ import {
   IconShield,
   IconWarning,
 } from "../components/icons";
+import { Badge, EmptyState } from "../components/ui";
 import { useAppState } from "../state";
 import type {
   AppState,
@@ -252,12 +253,12 @@ export default function MenuBarCompanion() {
       const result = await api.runDueReadSchedules();
       setNotice(`${result.queued} read schedule${result.queued === 1 ? "" : "s"} queued.`);
       if (result.errors.length > 0) {
-        await openMain("/agents/schedules");
+        await openMain("/agents?filter=scheduled");
       }
       await loadSnapshot();
     } catch {
       setNotice("Open Schedules in the full app for queue details.");
-      await openMain("/agents/schedules");
+      await openMain("/agents?filter=scheduled");
     } finally {
       setBusyAction(null);
     }
@@ -275,7 +276,7 @@ export default function MenuBarCompanion() {
         />
 
         {notice && (
-          <div className="companion-break-text animate-companion-rise min-w-0 max-w-full rounded-lg bg-[var(--color-info-soft)] px-3 py-2 text-[11.5px] leading-relaxed text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
+          <div className="companion-break-text animate-companion-rise min-w-0 max-w-full rounded-lg bg-[var(--color-info-soft)] px-3 py-2 text-sm leading-relaxed text-[var(--color-info)] ring-1 ring-[var(--color-info)]/25">
             {notice}
           </div>
         )}
@@ -354,10 +355,10 @@ function CompanionHeader({
               <span className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--color-bg-elevated)] ${snapshot.activeTenant ? "bg-[var(--color-success)]" : "bg-[var(--color-text-muted)]"}`} />
             </span>
             <span className="min-w-0">
-              <span className="block truncate text-[13.5px] font-semibold text-[var(--color-text)]">
+              <span className="block truncate text-base font-semibold text-[var(--color-text)]">
                 {snapshot.activeTenant?.displayName ?? "No tenant connected"}
               </span>
-              <span className="block truncate text-[10.5px] text-[var(--color-text-muted)]">
+              <span className="block truncate text-xs text-[var(--color-text-muted)]">
                 {bridgeAvailable ? `Updated ${lastSnapshotAt ? formatTime(lastSnapshotAt) : "now"}` : "Desktop bridge unavailable"}
               </span>
             </span>
@@ -420,16 +421,16 @@ function AskPanel({
     <div className="companion-panel animate-companion-rise p-2.5">
       <div className="mb-2 flex items-center justify-between gap-2 px-0.5">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[12px] font-semibold text-[var(--color-text)]">
+          <div className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-text)]">
             <IconChat size={13} />
             Chat
           </div>
-          <div className="mt-0.5 truncate text-[10.5px] text-[var(--color-text-muted)]">
+          <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
             {blocker ?? chat.status}
           </div>
         </div>
         {sending && (
-          <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-[var(--color-info)]">
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-[var(--color-info)]">
             <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-info)]" />
             streaming
           </span>
@@ -445,21 +446,21 @@ function AskPanel({
               <ProgressLine label="Generating response" active />
             </div>
           ) : chat.error ? (
-            <p className="text-[12px] leading-relaxed">Continue in the full app to review this chat.</p>
+            <p className="text-sm leading-relaxed">Continue in the full app to review this chat.</p>
           ) : chat.content ? (
-            <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed">{chat.content}</p>
+            <p className="whitespace-pre-wrap text-base leading-relaxed">{chat.content}</p>
           ) : (
-            <p className="text-[12px] leading-relaxed">{chat.status}</p>
+            <p className="text-sm leading-relaxed">{chat.status}</p>
           )}
           {chat.sources.length > 0 && (
             <div className="mt-2 grid gap-1">
               {chat.sources.slice(0, 3).map((source) => (
                 <div
                   key={`${source.resource}-${source.refreshedAt ?? "none"}`}
-                  className="flex items-center justify-between gap-2 rounded-md bg-black/10 px-2 py-1 text-[10px] ring-1 ring-white/[0.05]"
+                  className="flex items-center justify-between gap-2 rounded-md bg-black/10 px-2 py-1 text-xs ring-1 ring-white/[0.05]"
                 >
                   <span className="truncate text-[var(--color-text-soft)]">{source.label}</span>
-                  <span className="shrink-0 font-mono text-[var(--color-text-muted)]">
+                  <span className="shrink-0 tabular-nums text-[var(--color-text-muted)]">
                     {source.rows} rows
                   </span>
                 </div>
@@ -560,11 +561,16 @@ function SchedulesSection({
         icon={<IconClock size={13} />}
         title="Next schedules"
         action="Open"
-        onAction={() => onOpen("/agents/schedules")}
+        onAction={() => onOpen("/agents?filter=scheduled")}
       />
       <div className="mt-2 grid gap-1.5">
         {snapshot.upcomingSchedules.length === 0 ? (
-          <EmptyMini title="No schedules" body="Add recurrence in the full app when a run should repeat." />
+          <EmptyState
+            icon={<IconClock size={14} />}
+            title="No schedules"
+            description="Set a recurring schedule from Agents."
+            className="!px-3 !py-4 [&>h2]:mt-2"
+          />
         ) : (
           snapshot.upcomingSchedules.slice(0, 3).map((item, index) => (
             <button
@@ -575,17 +581,17 @@ function SchedulesSection({
             >
               <span className="min-w-0">
                 <span className="flex items-center gap-1.5">
-                  <span className="truncate text-[11.5px] font-semibold text-[var(--color-text)]">{item.agentName}</span>
-                  <span className={`rounded-full px-1.5 py-0.5 text-[9px] ring-1 ${item.mode === "write" ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/25" : "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/25"}`}>
+                  <span className="truncate text-sm font-semibold text-[var(--color-text)]">{item.agentName}</span>
+                  <Badge tone={item.mode === "write" ? "warning" : "neutral"}>
                     {item.mode}
-                  </span>
+                  </Badge>
                 </span>
-                <span className="mt-0.5 block truncate text-[10px] text-[var(--color-text-muted)]">
+                <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
                   Every {formatInterval(item.intervalSeconds)}
                   {item.changeState ? ` - ${changeLabel(item.changeState)}` : ""}
                 </span>
               </span>
-              <span className="shrink-0 font-mono text-[10.5px] text-[var(--color-text-soft)]">
+              <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-soft)]">
                 {formatFuture(item.nextRunAt)}
               </span>
             </button>
@@ -609,7 +615,7 @@ function ActivitySection({
         icon={<IconActivity size={13} />}
         title="Recent"
         action="History"
-        onAction={() => onOpen("/activity")}
+        onAction={() => onOpen("/runs")}
       />
       <div className="mt-2 grid gap-1.5">
         {snapshot.inFlight.slice(0, 2).map((item) => (
@@ -619,8 +625,8 @@ function ActivitySection({
             onClick={() => item.route && onOpen(item.route)}
           >
             <span className="min-w-0">
-              <span className="block truncate text-[11.5px] font-semibold text-[var(--color-text)]">{item.label}</span>
-              <span className="mt-0.5 block text-[10px] text-[var(--color-info)]">{item.status}</span>
+              <span className="block truncate text-sm font-semibold text-[var(--color-text)]">{item.label}</span>
+              <span className="mt-0.5 block text-xs text-[var(--color-info)]">{item.status}</span>
             </span>
             <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[var(--color-info)]" />
           </button>
@@ -633,8 +639,8 @@ function ActivitySection({
             onClick={() => onOpen(item.route)}
           >
             <span className="min-w-0">
-              <span className="block truncate text-[11.5px] font-semibold text-[var(--color-text)]">{item.label}</span>
-              <span className="mt-0.5 block truncate text-[10px] text-[var(--color-text-muted)]">
+              <span className="block truncate text-sm font-semibold text-[var(--color-text)]">{item.label}</span>
+              <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
                 {item.summary ?? formatRelative(item.queuedAt)}
               </span>
             </span>
@@ -659,7 +665,7 @@ function SectionHeader({
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <h2 className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--color-text)]">
+      <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-text)]">
         {icon}
         {title}
       </h2>
@@ -679,23 +685,17 @@ function StatusChip({
   icon: ReactNode;
   label: string;
 }) {
-  const toneClass =
-    tone === "success"
-      ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/25"
-      : tone === "warning"
-        ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/25"
-        : "bg-black/10 text-[var(--color-text-muted)] ring-white/[0.06]";
   return (
-    <span className={`inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] ring-1 ${toneClass}`}>
+    <Badge tone={tone} className="min-w-0 max-w-full py-1">
       <span className="shrink-0">{icon}</span>
       <span className="truncate">{label}</span>
-    </span>
+    </Badge>
   );
 }
 
 function ProgressLine({ label, active }: { label: string; active?: boolean }) {
   return (
-    <div className="flex items-center gap-2 text-[11.5px] text-[var(--color-text-soft)]">
+    <div className="flex items-center gap-2 text-sm text-[var(--color-text-soft)]">
       {active ? (
         <span className="h-3 w-3 shrink-0 animate-spin rounded-full border border-[var(--color-border-strong)] border-t-[var(--color-info)]" />
       ) : (
@@ -706,27 +706,14 @@ function ProgressLine({ label, active }: { label: string; active?: boolean }) {
   );
 }
 
-function EmptyMini({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg border border-dashed border-[var(--color-border-soft)] bg-black/10 px-3 py-4 text-center">
-      <div className="text-[11.5px] font-semibold text-[var(--color-text)]">{title}</div>
-      <p className="mt-1 text-[10.5px] leading-relaxed text-[var(--color-text-muted)]">{body}</p>
-    </div>
-  );
-}
-
 function OutcomeBadge({ status }: { status: string }) {
   const tone =
     status === "completed"
-      ? "bg-[var(--color-success-soft)] text-[var(--color-success)] ring-[var(--color-success)]/25"
+      ? "success"
       : status === "failed"
-        ? "bg-black/10 text-[var(--color-text-muted)] ring-white/[0.06]"
-        : "bg-[var(--color-warning-soft)] text-[var(--color-warning)] ring-[var(--color-warning)]/25";
-  return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9.5px] ring-1 ${tone}`}>
-      {status}
-    </span>
-  );
+        ? "danger"
+        : "warning";
+  return <Badge tone={tone} className="shrink-0">{status}</Badge>;
 }
 
 function fallbackSnapshot(state: AppState): CompanionSnapshot {

@@ -1,57 +1,6 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
-
-type Variant = "primary" | "secondary" | "ghost" | "danger";
-type Size = "sm" | "md" | "lg";
-
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: Variant;
-  size?: Size;
-  leadingIcon?: ReactNode;
-  trailingIcon?: ReactNode;
-}
-
-const variants: Record<Variant, string> = {
-  primary:
-    "bg-[var(--color-accent)] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]",
-  secondary:
-    "bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-hover)] ring-1 ring-[var(--color-border)]",
-  ghost:
-    "bg-transparent text-[var(--color-text-soft)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)]",
-  danger:
-    "bg-[var(--color-danger-soft)] text-[var(--color-danger)] hover:bg-[var(--color-danger)]/20 ring-1 ring-[var(--color-danger)]/30",
-};
-
-const sizes: Record<Size, string> = {
-  sm: "h-7 px-2.5 text-[12px] rounded-md gap-1.5",
-  md: "h-9 px-3.5 text-[13px] rounded-lg gap-2",
-  lg: "h-11 px-5 text-[14px] rounded-lg gap-2",
-};
-
-export function Button({
-  variant = "secondary",
-  size = "md",
-  leadingIcon,
-  trailingIcon,
-  className = "",
-  children,
-  ...rest
-}: ButtonProps) {
-  return (
-    <button
-      {...rest}
-      className={`inline-flex items-center justify-center whitespace-nowrap font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
-    >
-      {leadingIcon ? (
-        <span aria-hidden="true" className="inline-flex shrink-0">
-          {leadingIcon}
-        </span>
-      ) : null}
-      {children}
-      {trailingIcon ? (
-        <span aria-hidden="true" className="inline-flex shrink-0">
-          {trailingIcon}
-        </span>
-      ) : null}
-    </button>
-  );
-}
+export { Button } from "./ui/Button";
+export type {
+  ButtonProps,
+  ButtonSize,
+  ButtonVariant,
+} from "./ui/Button";

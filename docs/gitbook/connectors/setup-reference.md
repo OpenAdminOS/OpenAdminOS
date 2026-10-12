@@ -5,7 +5,7 @@ description: "Setup requirements for Teams, Outlook, WhatsApp Web, Slack, Discor
 
 # Connector Setup Reference
 
-The Connectors page keeps the in-app setup compact. This reference lists the external steps that may be required before a connector can test successfully.
+The **Connectors** section in Settings keeps the in-app setup compact. This reference lists the external steps that may be required before a connector can test successfully.
 
 ## Microsoft Teams
 
@@ -14,7 +14,7 @@ Teams uses Microsoft Graph delegated permissions and posts as the signed-in admi
 Setup:
 
 1. Connect a Microsoft 365 tenant in OpenAdminOS.
-2. Open **Connectors** and test Microsoft Teams.
+2. Open **Settings > Connectors** and test Microsoft Teams.
 3. Approve the incremental Graph consent if the tenant has not granted the Teams scopes yet.
 4. Pick a default team and channel.
 5. Enable Teams delivery on the relevant agent detail pages.
@@ -28,7 +28,7 @@ Outlook uses Microsoft Graph delegated `Mail.Send` and sends as the signed-in ad
 Setup:
 
 1. Connect a Microsoft 365 tenant in OpenAdminOS.
-2. Open **Connectors** and enter default recipients.
+2. Open **Settings > Connectors** and enter default recipients.
 3. Optionally set a subject prefix, such as `[OpenAdminOS]`.
 4. Test Outlook and approve `Mail.Send` if Microsoft prompts for consent.
 5. Enable Outlook delivery on the relevant agent detail pages.
@@ -41,7 +41,7 @@ WhatsApp Web uses a local linked-device session. OpenAdminOS does not use the Wh
 
 Setup:
 
-1. Open **Connectors** and start WhatsApp Web setup.
+1. Open **Settings > Connectors** and start WhatsApp Web setup.
 2. Scan the QR code from the WhatsApp mobile app.
 3. Wait for the linked session to show as connected.
 4. Pick a default target: yourself, a group, or a manual number/JID.
