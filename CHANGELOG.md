@@ -6,47 +6,42 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
-- Add four built-in desktop themes with an accessible picker, command palette actions, synchronized companion styling, and matching native window chrome.
-
-- Add a clickable desktop preview to the homepage using actual app captures for navigation, agent browsing, change review, and Settings.
-
-- Add a saved light/dark appearance setting and an interactive monochrome design reference.
-
 ### Changed
-
-- Polish the desktop redesign with a consistent five-step type scale, shared status and filter controls, URL-aware section scrolling, responsive page containment, and updated screenshot coverage.
-- Consolidate conversations and Workspaces in Chat, with an integrated scope composer, compact suggested agents, inline answer details, and addressable Workspace views.
-- Consolidate run review, live progress, and searchable history in Runs, with focused write confirmation and URL-addressable run details.
-- Restore Agent Team as its own sidebar destination with addressable persona selection and direct teammate setup.
-- Consolidate installed agents, Hub browsing, schedules, and agent details into one Agents Library surface with URL-addressable drawers.
-- Consolidate provider, tenant, data, chat, connector, gateway, general, appearance, privacy, and about controls into one searchable Settings page with section links and connector drawers.
-- Consolidate tenant timelines, baselines, comparison, all-tenant drift status, and cache freshness controls in Changes.
-
-- Establish the enterprise desktop shell with a six-item collapsible sidebar, compact status strip, Runs routing, sidebar Voice access, and accessible shared UI primitives.
-
-- Cycle idle teammates through workstations, sofa seats, and the game station in the desktop office and website recording, while preserving real task and approval states.
-
-- Show the full three-teammate office in the website preview, using the built app’s real movement with pause and reduced-motion support.
-
-- Remove preview labels from captured tenant fields and add clickable Dev Tenant and Customer Tenant choices that persist across page navigation.
-
-- Replace the recreated homepage preview with real screenshots of the built desktop app and control-aligned clickable navigation.
-
-- Remove the label, walkthrough, and reset toolbar above the homepage app preview.
-
-- Restore the prior light-mode landing page, reverting the experimental workflow sections and revised page layout.
-
-- Switch the public website to off-white light mode with graphite controls, readable status colors and charts, and a matching light desktop preview.
-
-- Redesign the desktop UI and website branding with graphite/off-white colors, a vector OA monogram, compact shared controls, and refreshed installer, app, and social icons while retaining semantic status colors and approval safeguards.
 
 ### Removed
 
 ### Fixed
 
-- Keep the website hero screenshot borderless with a soft shadow; strengthen animated change-review borders, with visible device rows before playback and solid confirmation states in light mode.
-
 ### Security
+
+## [0.7.0] - 2026-10-12
+
+A redesigned desktop app: a new monochrome identity, six consolidated pages, and four built-in themes. Every previous page URL redirects to its new location, and existing settings, agents, runs, conversations, workspaces and teammates carry over.
+
+### Added
+
+- Four built-in themes: Graphite (default), Midnight, Off-white and Sand. Choose one in Settings > Appearance or with the Theme actions in the command palette; native window chrome follows the theme. Existing dark and light preferences map to Graphite and Off-white.
+- Runs page with a Needs review inbox for write plans, team approvals and gateway proposals, live run progress, a searchable history table, and run details in a side drawer.
+- Clickable desktop preview on the website homepage, built from real app captures.
+
+### Changed
+
+- New monochrome identity: graphite and off-white colors, the OA monogram, and refreshed app, installer and social icons. Semantic status colors and approval safeguards are unchanged.
+- Navigation reduced to six pages: Chat, Agent Team, Agents, Runs, Changes and Settings.
+- Chat: Workspaces live in the Chat side panel, conversation actions move into one menu, tenant scope and saved queries move into the message box, suggested agents appear once, and engine notes move into a collapsed "How this was answered" row.
+- Agents: installed agents and the Hub share one Library table, with schedules as a column and agent details in a side drawer.
+- Changes: timeline, baselines, comparison and the all-tenant view (formerly Fleet) on one page, with data freshness and Refresh in the header.
+- Settings: one searchable page with Providers, Tenants, Data (formerly Cache), Chat, Connectors, Gateway, General, Appearance, Privacy and About.
+- Agent Team keeps its own page with the office, roster, inbox and teammate details, and a single summary line.
+- Voice opens from the sidebar or Alt+V instead of a floating button.
+- A calmer interface throughout: one type scale, one primary action per view, tables for lists, and fewer badges and labels.
+- The public website uses an off-white light theme.
+
+### Fixed
+
+- The floating voice button no longer covers the Chat Send button.
+- The Settings > Chat investigation mode label no longer collapses to one word per line.
+- Incomplete data refreshes show an amber progress bar instead of a green one.
 
 ## [0.6.4] - 2026-09-21
 
