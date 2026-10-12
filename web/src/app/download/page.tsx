@@ -121,13 +121,13 @@ export default async function DownloadPage() {
         description={DESCRIPTION}
       />
 
-      <section className="mt-10 border-y border-white/10">
-        <div className="flex flex-col gap-3 border-b border-white/10 py-4 md:flex-row md:items-center md:justify-between">
+      <section className="mt-10 border-y border-brand-ink/10">
+        <div className="flex flex-col gap-3 border-b border-brand-ink/10 py-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/38">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-muted">
               Current release
             </p>
-            <p className="mt-1 font-mono text-sm text-white/70">
+            <p className="mt-1 font-mono text-sm text-brand-muted">
               {latestRelease.version}
             </p>
           </div>
@@ -136,7 +136,7 @@ export default async function DownloadPage() {
               href={latestRelease.releaseNotesUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center rounded-md border border-white/10 px-3 font-medium text-white/70 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+              className="inline-flex min-h-11 items-center rounded-md border border-brand-ink/10 px-3 font-medium text-brand-muted transition hover:border-brand-ink/25 hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
             >
               Release notes
             </Link>
@@ -144,7 +144,7 @@ export default async function DownloadPage() {
               href={latestRelease.checksumUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center rounded-md border border-white/10 px-3 font-medium text-white/70 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+              className="inline-flex min-h-11 items-center rounded-md border border-brand-ink/10 px-3 font-medium text-brand-muted transition hover:border-brand-ink/25 hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
             >
               SHA256SUMS.txt
             </Link>
@@ -171,16 +171,16 @@ export default async function DownloadPage() {
         />
       </section>
 
-      <section className="mt-12 grid gap-8 border-t border-white/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
+      <section className="mt-12 grid gap-8 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
             Source
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
             Inspect the code before connecting a tenant.
           </h2>
         </div>
-        <div className="text-sm leading-6 text-white/62">
+        <div className="text-sm leading-6 text-brand-muted">
           <p>
             The app, runtime, registry contract, and SDK are open-source under
             the MIT License.
@@ -189,23 +189,23 @@ export default async function DownloadPage() {
             href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"
-            className="mt-5 inline-flex text-sm font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+            className="mt-5 inline-flex text-sm font-medium text-brand-ink underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
           >
             Inspect the repository
           </Link>
         </div>
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-white/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
             Before first run
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
             Connect a tenant and choose a model provider.
           </h2>
         </div>
-        <div className="space-y-5 text-sm leading-6 text-white/62">
+        <div className="space-y-5 text-sm leading-6 text-brand-muted">
           <p>
             OpenAdminOS uses MSAL for Microsoft 365 tenant consent and Microsoft
             Graph access. Local model providers keep prompts and tenant context
@@ -218,7 +218,7 @@ export default async function DownloadPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+            className="inline-flex font-medium text-brand-ink underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
           >
             Read the trust model
           </Link>
@@ -253,13 +253,13 @@ function DownloadGroup({
   return (
     <section
       id={id}
-      className="grid gap-4 border-b border-white/10 py-6 last:border-b-0 md:grid-cols-[180px_1fr]"
+      className="grid gap-4 border-b border-brand-ink/10 py-6 last:border-b-0 md:grid-cols-[180px_1fr]"
     >
       <div>
-        <h2 className="text-base font-semibold text-white">{title}</h2>
-        <p className="mt-2 text-sm leading-5 text-white/48">{description}</p>
+        <h2 className="text-base font-semibold text-brand-ink">{title}</h2>
+        <p className="mt-2 text-sm leading-5 text-brand-muted">{description}</p>
       </div>
-      <div className="divide-y divide-white/10 border-y border-white/10">
+      <div className="divide-y divide-brand-ink/10 border-y border-brand-ink/10">
         {items.map((item) => (
           <DownloadRow item={item} key={item.label} />
         ))}
@@ -273,15 +273,15 @@ function DownloadRow({ item }: { item: DownloadItem }) {
     <div className="grid gap-4 py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold text-white">{item.label}</h3>
+          <h3 className="text-sm font-semibold text-brand-ink">{item.label}</h3>
           {item.badge ? (
-            <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">
+            <span className="rounded border border-brand-ink/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-muted">
               {item.badge}
             </span>
           ) : null}
-          <span className="text-xs text-white/35">{item.meta}</span>
+          <span className="text-xs text-brand-muted">{item.meta}</span>
         </div>
-        <p className="mt-1 text-sm leading-5 text-white/55">{item.detail}</p>
+        <p className="mt-1 text-sm leading-5 text-brand-muted">{item.detail}</p>
         <ChecksumValue hash={item.hash} />
       </div>
       <Link
@@ -290,8 +290,8 @@ function DownloadRow({ item }: { item: DownloadItem }) {
         rel="noreferrer"
         className={
           item.primary
-            ? "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md bg-white px-3 text-sm font-semibold text-[#070709] transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:w-44"
-            : "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md border border-white/10 px-3 text-sm font-semibold text-white/70 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:w-44"
+            ? "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md bg-brand-ink px-3 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35 md:w-44"
+            : "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md border border-brand-ink/10 px-3 text-sm font-semibold text-brand-muted transition hover:border-brand-ink/25 hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35 md:w-44"
         }
       >
         {item.actionLabel}
@@ -303,10 +303,10 @@ function DownloadRow({ item }: { item: DownloadItem }) {
 function ChecksumValue({ hash }: { hash: string | undefined }) {
   return (
     <div className="mt-3 grid min-w-0 gap-1 sm:grid-cols-[72px_1fr] sm:items-start">
-      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/35">
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-brand-muted">
         SHA-256
       </p>
-      <code className="block max-w-full break-all font-mono text-[10px] leading-4 text-white/58 [overflow-wrap:anywhere]">
+      <code className="block max-w-full break-all font-mono text-[10px] leading-4 text-brand-muted [overflow-wrap:anywhere]">
         {hash ?? "Checksum unavailable"}
       </code>
     </div>

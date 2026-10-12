@@ -56,7 +56,7 @@ export function TradeoffChart({
             x2={LEFT + PLOT_W}
             y1={y(value)}
             y2={y(value)}
-            stroke="rgba(255,255,255,0.07)"
+            stroke="rgba(23,25,29,0.07)"
             strokeWidth={1}
             shapeRendering="crispEdges"
           />
@@ -64,7 +64,7 @@ export function TradeoffChart({
             x={LEFT - 10}
             y={y(value) + 4}
             textAnchor="end"
-            className="fill-white/35 text-[11px]"
+            className="fill-brand-muted text-[11px]"
           >
             {value}
           </text>
@@ -80,7 +80,7 @@ export function TradeoffChart({
               x2={x(value)}
               y1={TOP}
               y2={TOP + PLOT_H}
-              stroke="rgba(255,255,255,0.07)"
+              stroke="rgba(23,25,29,0.07)"
               strokeWidth={1}
               shapeRendering="crispEdges"
             />
@@ -88,7 +88,7 @@ export function TradeoffChart({
               x={x(value)}
               y={TOP + PLOT_H + 20}
               textAnchor="middle"
-              className="fill-white/35 text-[11px]"
+              className="fill-brand-muted text-[11px]"
             >
               {format(value)}
             </text>
@@ -100,11 +100,11 @@ export function TradeoffChart({
         x={LEFT + PLOT_W / 2}
         y={HEIGHT - 12}
         textAnchor="middle"
-        className="fill-white/40 text-[11px]"
+        className="fill-brand-muted text-[11px]"
       >
         {axisLabel}
       </text>
-      <text x={LEFT + 6} y={TOP - 8} className="fill-white/40 text-[11px]">
+      <text x={LEFT + 6} y={TOP - 8} className="fill-brand-muted text-[11px]">
         {cornerLabel}
       </text>
 

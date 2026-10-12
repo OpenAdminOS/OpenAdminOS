@@ -74,6 +74,30 @@ describe("Office scene", () => {
       screen.getByRole("button", { name: "Teammate 0, Needs approval" }),
     ).toBeInTheDocument();
   });
+  it("cycles each idle teammate through lounge, game, and desk without reporting work", () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <OfficeScene
+        personas={personas.slice(0, 3)}
+        statuses={{}}
+        onSelect={vi.fn()}
+      />,
+    );
+    const visited = [new Set<string>(), new Set<string>(), new Set<string>()];
+    for (let second = 0; second <= 72; second++) {
+      container
+        .querySelectorAll<HTMLElement>(".scene-persona-position")
+        .forEach((element, index) => {
+          visited[index]!.add(element.dataset.seat!.split("-")[0]!);
+        });
+      expect(
+        container.querySelectorAll(".is-working, .scene-desk-active"),
+      ).toHaveLength(0);
+      act(() => vi.advanceTimersByTime(1000));
+    }
+    for (const zones of visited)
+      expect([...zones].sort()).toEqual(["desk", "game", "lounge"]);
+  });
   it("opens the selected persona's floor and keeps every persona reachable", () => {
     const select = vi.fn();
     render(

@@ -4,6 +4,7 @@ import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
+import { captureWebsiteDemo } from "./website-demo-capture.js";
 import {
   app,
   BrowserWindow,
@@ -12,6 +13,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  nativeTheme,
   Notification,
   session,
   shell,
@@ -520,6 +522,7 @@ interface ScreenshotRegistryEntry {
 function seedScreenshotCaptureState(userDataDir: string): void {
   if (!isScreenshotCaptureLaunch) return;
   mkdirSync(userDataDir, { recursive: true });
+  const isWebsiteCapture = process.env.OPENADMINOS_WEBSITE_CAPTURE === "1";
   const now = new Date().toISOString();
   const entries = loadScreenshotRegistryEntries();
   const installedSlugs = new Set([
@@ -568,7 +571,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
             startedAt: now,
             providerId: "ollama",
             model: "screenshot-local-model-with-a-deliberately-long-identifier",
-            tenantId: "contoso-demo-tenant",
+            tenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             summary: "Write plan is ready for review.",
             steps: [],
             logs: [],
@@ -604,15 +607,19 @@ function seedScreenshotCaptureState(userDataDir: string): void {
         ],
         tenants: [
           {
-            id: "contoso-demo-tenant",
-            displayName: "Contoso Demo — European Endpoint Administration and Security",
-            username: "admin@contoso-demo.invalid",
-            homeAccountId: "contoso-demo-home-account",
+            id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
+            displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo — European Endpoint Administration and Security",
+            username: isWebsiteCapture ? "admin@contoso.invalid" : "admin@contoso-demo.invalid",
+            homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
             entraTier: "p2",
           },
+          ...(isWebsiteCapture ? [
+            { id: "website-dev", displayName: "Dev Tenant", username: "admin@dev.invalid", homeAccountId: "website-dev-account", addedAt: now, entraTier: "p2" },
+            { id: "website-customer", displayName: "Customer Tenant", username: "admin@customer.invalid", homeAccountId: "website-customer-account", addedAt: now, entraTier: "p2" },
+          ] : []),
         ],
-        activeTenantId: "contoso-demo-tenant",
+        activeTenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
         registryInstallCountsEnabled: false,
       },
       null,
@@ -971,6 +978,14 @@ async function runScreenshotCapture(): Promise<void> {
     return;
   }
 
+  if (process.env.OPENADMINOS_WEBSITE_CAPTURE === "1") {
+    await captureWebsiteDemo(window, screenshotCaptureOutDir, (route, waitFor, prepare) =>
+      runScreenshotCaptureStep(window, { kind: "route", route, waitFor, prepare, reducedMotion: true }),
+    );
+    app.exit(0);
+    return;
+  }
+
   const entries = loadScreenshotRegistryEntries();
   const appShots: Array<{
     route: string;
@@ -1037,6 +1052,31 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Settings",
     },
   ];
+
+  if (process.env.OPENADMINOS_BRAND_CAPTURE === "1") {
+    const extraShots = [
+      { route: "/cache", name: "cache", waitFor: ["Cache"] },
+      { route: "/office", name: "agent-team", waitFor: ["Agent Team"] },
+      { route: "/fleet", name: "fleet", waitFor: [] },
+      { route: "/workspaces", name: "workspaces", waitFor: ["Workspaces"] },
+      { route: "/connectors", name: "connectors", waitFor: ["Connectors"] },
+      { route: "/activity", name: "activity", waitFor: ["Run history"] },
+      { route: "/agents/schedules", name: "schedules", waitFor: ["Schedules"] },
+      { route: "/settings/general", name: "appearance", waitFor: ["Graphite dark"] },
+    ];
+    window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
+    for (const theme of ["dark", "light"]) {
+      await window.webContents.executeJavaScript(`window.openAdminOS.setAppearance(${JSON.stringify(theme)})`);
+      await window.webContents.executeJavaScript(`localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)}); window.dispatchEvent(new StorageEvent("storage", {key:"openadminos:appearance:v1"}));`);
+      for (const shot of [...appShots, ...extraShots]) {
+        await runScreenshotCaptureStep(window, { kind: "route", ...shot, reducedMotion: true });
+        await captureScreenshotPng(window, `app/brand-${theme}-${shot.name}.png`);
+      }
+    }
+    console.log("[screenshot-capture] passed both brand themes and all route families");
+    app.exit(0);
+    return;
+  }
 
   let count = 0;
   const chatEmptyShot = appShots.find((shot) => shot.name === "chat-empty");
@@ -4718,7 +4758,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: "#1c1917",
+    backgroundColor: "#17191d",
     show: false,
     // Windows: draw our own chrome and overlay the system buttons on it,
     // so the app header replaces the native title bar instead of stacking
@@ -4736,8 +4776,8 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
             // Must match --color-bg and --color-text-muted in
             // src/styles/globals.css. Any drift paints the window-control
             // strip as a visibly different block from the app chrome.
-            color: "#1c1917",
-            symbolColor: "#9a9085",
+            color: "#17191d",
+            symbolColor: "#a8b0bb",
             height: 32,
           },
         }
@@ -4838,7 +4878,7 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     fullscreenable: false,
     skipTaskbar: true,
     title: "OpenAdminOS Menu Bar",
-    backgroundColor: "#1c1917",
+    backgroundColor: "#17191d",
     vibrancy: process.platform === "darwin" ? "menu" : undefined,
     visualEffectState: "active",
     webPreferences: {
@@ -4991,6 +5031,17 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
 }
 
 function registerIpcHandlers() {
+  ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
+    if (theme !== "dark" && theme !== "light") throw new Error("Choose dark or light appearance.");
+    nativeTheme.themeSource = theme;
+    const color = theme === "light" ? "#f4f5f7" : "#17191d";
+    const symbolColor = theme === "light" ? "#535e6c" : "#a8b0bb";
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue;
+      window.setBackgroundColor(color);
+      if (process.platform === "win32") window.setTitleBarOverlay({ color, symbolColor, height: 32 });
+    }
+  }));
   ipcMain.handle(
     "openadminos:get-companion-snapshot",
     handleTrusted(() => getCompanionSnapshot()),

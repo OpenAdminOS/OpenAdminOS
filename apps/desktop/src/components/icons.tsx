@@ -225,9 +225,8 @@ export const IconSparkle = ({ size = 14, ...p }: IconProps) => (
 );
 
 export const IconLogo = ({ size = 22, ...p }: IconProps) => (
-  <svg {...base(size, p)}>
-    <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth={1.6} />
-    <circle cx="12" cy="12" r="2.25" fill="currentColor" stroke="none" />
+  <svg {...base(size, p)} viewBox="0 0 100 100">
+    <path d="M30 16H70Q84 16 84 30V70Q84 84 70 84L50 50L30 84Q16 84 16 70V30Q16 16 30 16Z M32 28H68Q72 28 72 32V69L50 31L28 69V32Q28 28 32 28Z M46 64H54L59 73H41Z" fill="currentColor" fillRule="evenodd" stroke="none" />
   </svg>
 );
 

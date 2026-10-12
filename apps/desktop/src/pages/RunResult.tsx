@@ -872,7 +872,7 @@ function DiffConfirmPanel({
                     leadingIcon={<IconBolt size={11} />}
                     className={
                       armed
-                        ? "!bg-[var(--color-warning)] !text-[var(--color-on-accent)] hover:!bg-[var(--color-warning)]/90"
+                        ? "!bg-[var(--color-danger)] !text-[var(--color-on-accent)] hover:!bg-[var(--color-danger)]/90"
                         : ""
                     }
                   >

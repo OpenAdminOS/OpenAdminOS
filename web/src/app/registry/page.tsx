@@ -87,23 +87,23 @@ export default function RegistryPage() {
         {AGENT_GROUPS.map((group) => (
           <TextCard key={group.name} title={group.name}>
             <p>{group.detail}</p>
-            <p className="mt-4 font-mono text-xs text-white/45">
+            <p className="mt-4 font-mono text-xs text-brand-muted">
               {group.examples}
             </p>
           </TextCard>
         ))}
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-white/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-300/80">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-800/80">
             Manifest contract
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
             The registry is inspectable before install.
           </h2>
         </div>
-        <div className="space-y-5 text-sm leading-6 text-white/62">
+        <div className="space-y-5 text-sm leading-6 text-brand-muted">
           <p>
             Every public agent ships with a manifest that declares its Microsoft
             Graph scopes, read/write classification, model requirements,
@@ -117,7 +117,7 @@ export default function RegistryPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-sky-200 underline-offset-4 transition hover:text-white hover:underline"
+            className="inline-flex font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             See how registry trust is enforced
           </Link>

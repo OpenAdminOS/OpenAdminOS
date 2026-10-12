@@ -41,7 +41,7 @@ function NavRow({ item }: { item: NavItem }) {
       className={({ isActive }) =>
         `group relative flex items-center gap-2.5 rounded-lg py-1.5 text-[13px] font-medium transition-colors duration-150 ${
           isActive
-            ? "bg-gradient-to-r from-[var(--color-surface-hover)] to-[var(--color-surface)] text-[var(--color-text)] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
+            ? "bg-[var(--color-bg-raised)] text-[var(--color-text)] ring-1 ring-inset ring-[var(--color-border)]"
             : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
         } ${item.indent ? "ml-5 px-2" : "px-2.5"}`
       }
@@ -181,16 +181,16 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   return (
     <aside
       aria-label="Application navigation"
-      className="flex h-full overflow-y-auto w-[252px] shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
+      className="app-sidebar flex h-full overflow-y-auto shrink-0 flex-col border-r border-[var(--color-border-soft)] bg-[var(--color-sidebar-solid)]"
       onKeyDown={focusAdjacentNav}
     >
       {/* Brand row — small */}
-      <div className="flex h-12 items-center gap-2 px-3.5">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-          <IconLogo size={13} />
+      <div className="flex h-16 items-center gap-2.5 px-3.5">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)]">
+          <IconLogo size={25} />
         </div>
         <div className="flex items-center gap-1.5 leading-none">
-          <span className="text-[12px] font-semibold tracking-tight text-[var(--color-text)]">
+          <span className="text-[13px] font-semibold tracking-tight text-[var(--color-text)]">
             OpenAdminOS
           </span>
           <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-[9.5px] text-[var(--color-text-muted)]">

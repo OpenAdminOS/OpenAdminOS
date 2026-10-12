@@ -20,7 +20,7 @@ export const SETTINGS_ITEMS = {
   "os-scheduler": { section: "general", title: "OS scheduler", description: "Run active schedules in the background.", keywords: ["background", "schedule"] },
   "default-tenant-scope": { section: "general", title: "Default tenant scope", description: "Review the tenant used for agent runs.", keywords: ["active tenant", "scope"] },
   "destructive-confirmation": { section: "general", title: "Destructive write confirmation", description: "Require a typed phrase for destructive writes.", keywords: ["typed phrase", "safety", "write"] },
-  theme: { section: "general", title: "Theme", description: "Review the current appearance setting.", keywords: ["dark", "appearance"] },
+  theme: { section: "general", title: "Theme", description: "Choose the color theme for this device.", keywords: ["dark", "light", "appearance", "monochrome"] },
   "run-history-retention": { section: "general", title: "Run history retention", description: "Control pruning of local run records.", keywords: ["history", "prune", "local"] },
   "change-history": { section: "general", title: "Change history", description: "Control pruning of local drift snapshots.", keywords: ["drift", "retention", "snapshots"] },
   "audit-log-export": { section: "general", title: "Audit log export", description: "Export retained audit records.", keywords: ["json", "csv", "events"] },

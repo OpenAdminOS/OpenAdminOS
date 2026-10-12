@@ -22,13 +22,6 @@ function timeSince(iso?: string): string {
   return `Ran ${d}d ago`;
 }
 
-const categoryAccent: Record<AgentDisplay["category"], string> = {
-  devices: "from-[#e8a87c]/16 to-[#e8a87c]/4",
-  apps: "from-[#a3bfd9]/16 to-[#a3bfd9]/4",
-  policies: "from-[#9cc88f]/16 to-[#9cc88f]/4",
-  compliance: "from-[#c4a5d9]/16 to-[#c4a5d9]/4",
-  updates: "from-[#e5c678]/16 to-[#e5c678]/4",
-};
 
 export function AgentCard({
   agent,
@@ -44,9 +37,7 @@ export function AgentCard({
       <div className="flex flex-col gap-4 p-5">
         <div className="flex items-start gap-3">
           <div
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${
-              categoryAccent[agent.category]
-            } ring-1 ring-[var(--color-border)]`}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border)]"
           >
             {agent.mode === "write" ? (
               <IconBolt size={18} className="text-[var(--color-warning)]" />

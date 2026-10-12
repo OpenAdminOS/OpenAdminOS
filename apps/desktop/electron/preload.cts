@@ -31,6 +31,7 @@ function detectPlatform(): HostPlatform {
 
 const api: OpenAdminOSApi = {
   platform,
+  setAppearance: (theme) => ipcRenderer.invoke("openadminos:set-appearance", theme),
   getCompanionSnapshot: () =>
     ipcRenderer.invoke("openadminos:get-companion-snapshot"),
   getCompanionLaunchSettings: () =>

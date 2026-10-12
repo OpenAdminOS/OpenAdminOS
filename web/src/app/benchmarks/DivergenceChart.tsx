@@ -72,7 +72,7 @@ export function DivergenceChart({
               x2={LEFT + PLOT_W}
               y1={y(value)}
               y2={y(value)}
-              stroke="rgba(255,255,255,0.07)"
+              stroke="rgba(23,25,29,0.07)"
               strokeWidth={1}
               shapeRendering="crispEdges"
             />
@@ -80,7 +80,7 @@ export function DivergenceChart({
               x={LEFT - 10}
               y={y(value) + 4}
               textAnchor="end"
-              className="fill-white/35 text-[11px]"
+              className="fill-brand-muted text-[11px]"
             >
               {value}
             </text>
@@ -93,11 +93,11 @@ export function DivergenceChart({
           y1={y(1)}
           x2={x(n - 1)}
           y2={y(n)}
-          stroke="rgba(255,255,255,0.25)"
+          stroke="rgba(23,25,29,0.25)"
           strokeWidth={1}
           strokeDasharray="3 5"
         />
-        <text x={x(n - 1) + 8} y={y(n) + 4} className="fill-white/35 text-[11px]">
+        <text x={x(n - 1) + 8} y={y(n) + 4} className="fill-brand-muted text-[11px]">
           perfect
         </text>
 
@@ -142,20 +142,20 @@ export function DivergenceChart({
             x2={x(hover)}
             y1={TOP}
             y2={TOP + PLOT_H}
-            stroke="rgba(255,255,255,0.4)"
+            stroke="rgba(23,25,29,0.4)"
             strokeWidth={1}
             shapeRendering="crispEdges"
           />
         )}
 
-        <text x={LEFT} y={HEIGHT - 16} className="fill-white/35 text-[11px]">
+        <text x={LEFT} y={HEIGHT - 16} className="fill-brand-muted text-[11px]">
           task 1
         </text>
         <text
           x={LEFT + PLOT_W}
           y={HEIGHT - 16}
           textAnchor="end"
-          className="fill-white/35 text-[11px]"
+          className="fill-brand-muted text-[11px]"
         >
           task {n}
         </text>
@@ -171,12 +171,12 @@ export function DivergenceChart({
         />
       </svg>
 
-      <figcaption className="mt-3 min-h-[3.25rem] text-sm text-white/50">
+      <figcaption className="mt-3 min-h-[3.25rem] text-sm text-brand-muted">
         {hover === null ? (
           <>Hover the chart to read every model&rsquo;s score at a given task.</>
         ) : (
           <span className="flex flex-wrap items-center gap-x-5 gap-y-1">
-            <span className="text-white/70">
+            <span className="text-brand-muted">
               Task {hover + 1} · {data.taskIds[hover]?.replace("v2-", "")}
             </span>
             {data.models.map((model) => (

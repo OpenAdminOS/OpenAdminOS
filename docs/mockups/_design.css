@@ -3,27 +3,27 @@
    Shared tokens & components for all screens
    ============================================ */
 
-/* Legacy variable names, mapped to the warm production palette
+/* Legacy variable names, mapped to the monochrome production palette
    (apps/desktop/src/styles/globals.css) so the older mockups keep
    working while showing the shipped color system. */
 :root {
-  --bg-0: #1c1917;
-  --bg-1: #191614;
-  --bg-2: #232120;
-  --bg-3: #2a2724;
-  --bg-4: #2d2926;
-  --border: #322e2a;
-  --border-strong: #403a35;
-  --text-0: #f5f1eb;
-  --text-1: #b5ada3;
-  --text-2: #9a9085;
-  --text-3: #6b6157;
-  --accent: #e8a87c;
-  --accent-dim: #d99868;
-  --accent-bg: rgba(232, 168, 124, 0.12);
+  --bg-0: #17191d;
+  --bg-1: #121418;
+  --bg-2: #1e2126;
+  --bg-3: #262a31;
+  --bg-4: #292d34;
+  --border: #343940;
+  --border-strong: #626a75;
+  --text-0: #f4f5f7;
+  --text-1: #c2c7ce;
+  --text-2: #a8b0bb;
+  --text-3: #737c89;
+  --accent: #f4f5f7;
+  --accent-dim: #dce0e6;
+  --accent-bg: rgba(244, 245, 247, 0.12);
   --success: #9cc88f;
   --warning: #e5c678;
-  --danger: #e58888;
+  --danger: #f1a0a0;
   --purple: #c4a5d9;
 }
 
@@ -114,7 +114,7 @@ html, body {
 }
 .brand-mark {
   width: 28px; height: 28px;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+  background: var(--accent);
   border-radius: 7px;
   display: grid;
   place-items: center;
@@ -177,7 +177,7 @@ html, body {
   border-radius: 4px;
   font-weight: 500;
 }
-.nav-item.active .nav-badge { background: rgba(232, 168, 124, 0.15); color: var(--accent); }
+.nav-item.active .nav-badge { background: rgba(244, 245, 247, 0.15); color: var(--accent); }
 
 .tenant-switcher {
   margin-top: auto;
@@ -365,7 +365,7 @@ html, body {
 }
 .tag-read { background: rgba(156, 200, 143, 0.1); color: var(--success); border: 1px solid rgba(156, 200, 143, 0.2); }
 .tag-write { background: rgba(229, 198, 120, 0.1); color: var(--warning); border: 1px solid rgba(229, 198, 120, 0.2); }
-.tag-verified { background: rgba(232, 168, 124, 0.1); color: var(--accent); border: 1px solid rgba(232, 168, 124, 0.2); }
+.tag-verified { background: rgba(244, 245, 247, 0.1); color: var(--accent); border: 1px solid rgba(244, 245, 247, 0.2); }
 .tag-community { background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border); }
 
 /* ============================================
@@ -507,7 +507,7 @@ html, body {
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   box-shadow:
-    0 0 0 1px rgba(232, 168, 124, 0.06),
+    0 0 0 1px rgba(244, 245, 247, 0.06),
     0 30px 80px rgba(0, 0, 0, 0.6);
   overflow: hidden;
   display: flex;

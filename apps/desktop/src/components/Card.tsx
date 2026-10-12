@@ -9,7 +9,7 @@ export function Card({ interactive = false, className = "", children, ...rest }:
   return (
     <div
       {...rest}
-      className={`rounded-xl bg-[var(--color-surface)] ring-1 ring-[var(--color-border-soft)] ${
+      className={`rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] ${
         interactive
           ? "cursor-pointer transition-colors duration-150 hover:bg-[var(--color-surface-hover)] hover:ring-[var(--color-border-strong)]"
           : ""

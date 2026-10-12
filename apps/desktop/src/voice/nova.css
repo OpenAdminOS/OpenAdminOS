@@ -47,7 +47,7 @@
   gap: 16px;
   padding: 22px;
   border: 1px solid var(--color-border);
-  border-radius: 22px;
+  border-radius: 12px;
   background: var(--color-bg);
   box-shadow: 0 15px 65px #0006;
 }
@@ -80,7 +80,7 @@
   border-radius: 50%;
   box-shadow:
     0 18px 45px -20px #000a,
-    0 0 34px -14px #e5a26750;
+    0 0 34px -14px #a8b0bb30;
   transform: scale(calc(1 + var(--voice-level) * 0.16));
   transition: transform 90ms linear;
 }
@@ -105,7 +105,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  border: 1px solid #d9976618;
+  border: 1px solid #a8b0bb28;
   border-radius: 50%;
   transform: scale(calc(1 + var(--voice-level) * 0.2));
   transition: transform 120ms linear;
@@ -114,7 +114,7 @@
   animation-duration: 2.8s;
 }
 .nova-orb[data-phase="speaking"] .nova-orb-ring {
-  border-color: #e8ba8655;
+  border-color: #c2c7ce55;
 }
 .nova-orb[data-phase="connecting"] .nova-orb-ring,
 .nova-orb[data-phase="thinking"] .nova-orb-ring {
@@ -408,10 +408,10 @@
 .nova-activity-label { margin-left: auto; font-size: 8px; letter-spacing: .1em; opacity: .7; }
 .nova-activity-mark { width: 13px; height: 13px; display: inline-grid; place-items: center; color: var(--color-accent); font-size: 11px; flex-shrink: 0; }
 .nova-activity-card[data-status="running"] .nova-activity-mark { border: 1.5px solid var(--color-border); border-top-color: var(--color-accent); border-radius: 50%; animation: nova-activity-spin 1s linear infinite; }
-.nova-activity-card[data-status="failed"] .nova-activity-mark { color: #edab9e; }
+.nova-activity-card[data-status="failed"] .nova-activity-mark { color: var(--color-danger); }
 .nova-activity-card > ol { list-style: none; display: grid; gap: 4px; padding: 8px 0 0 20px; margin: 0; }
 .nova-activity-card > ol > li::before { content: "·"; margin-right: 6px; }
-.nova-activity-card li[data-status="failed"] { color: #edab9e; }
+.nova-activity-card li[data-status="failed"] { color: var(--color-danger); }
 .nova-activity-card details { margin: 9px 0 0 20px; }
 .nova-activity-card summary { cursor: pointer; color: var(--color-text-muted); font-size: 11px; }
 .nova-activity-result { margin-top: 10px; color: var(--color-text); }

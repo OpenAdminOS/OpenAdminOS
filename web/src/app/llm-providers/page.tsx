@@ -74,16 +74,16 @@ export default function LlmProvidersPage() {
         ))}
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-white/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
             Provider trust
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
             The selected model changes the data boundary.
           </h2>
         </div>
-        <div className="space-y-5 text-sm leading-6 text-white/62">
+        <div className="space-y-5 text-sm leading-6 text-brand-muted">
           <p>
             With a local provider selected, the desktop app sends agent prompts
             to the local model host and keeps tenant context on the device. With
@@ -96,7 +96,7 @@ export default function LlmProvidersPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-white underline-offset-4 transition hover:text-white/70 hover:underline"
+            className="inline-flex font-medium text-brand-ink underline-offset-4 transition hover:text-brand-muted hover:underline"
           >
             Read the full trust model
           </Link>
