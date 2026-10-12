@@ -1,5 +1,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { createContext, useContext, useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { COMMON_COPY } from "../copy";
 import { registerOverlay } from "../shared/overlay-stack";
 import { IconClose } from "./icons";
@@ -88,9 +89,11 @@ export function Modal({
     }
   };
 
-  return (
+  // Portaled to the body and stacked above drawers (z-90) so dialogs opened
+  // from a drawer, such as Configure or the run review, are never covered.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center px-6 py-10"
+      className="fixed inset-0 z-[95] flex items-center justify-center px-6 py-10"
       style={{ background: "rgba(10, 12, 16, 0.62)" }}
       onClick={() => {
         if (closeOnScrim) onClose();
@@ -111,7 +114,8 @@ export function Modal({
           {children}
         </ModalHeadingContext.Provider>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

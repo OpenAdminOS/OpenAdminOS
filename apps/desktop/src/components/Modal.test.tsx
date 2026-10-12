@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Modal, ModalHeader } from "./Modal";
+import { Drawer } from "./ui/Drawer";
 
 describe("Modal accessibility", () => {
   it("labels the dialog, traps focus, closes on Escape, and restores focus", async () => {
@@ -64,5 +65,30 @@ describe("Modal accessibility", () => {
     await user.keyboard("{Escape}");
     expect(closeSecond).toHaveBeenCalledTimes(1);
     expect(closeFirst).not.toHaveBeenCalled();
+  });
+
+  it("stacks a dialog opened from a drawer above the drawer", async () => {
+    const onClose = vi.fn();
+    render(
+      <Drawer open title="Offboarding agent" onClose={onClose}>
+        <Modal open onClose={onClose}>
+          <ModalHeader title="Review run" onClose={onClose} />
+          <button>Start run</button>
+        </Modal>
+      </Drawer>,
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Review run" });
+    const drawer = screen.getByRole("dialog", { name: "Offboarding agent" });
+    const layer = (element: HTMLElement) => {
+      let node: HTMLElement | null = element;
+      while (node && node.parentElement !== document.body) node = node.parentElement;
+      return node!;
+    };
+    const zIndex = (element: HTMLElement) =>
+      Number(/(?:^|\s)z-\[(\d+)\]/.exec(element.className)?.[1] ?? 0);
+
+    expect(layer(dialog).parentElement).toBe(document.body);
+    expect(zIndex(layer(dialog))).toBeGreaterThan(zIndex(layer(drawer)));
   });
 });
