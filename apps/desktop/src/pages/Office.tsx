@@ -165,18 +165,6 @@ export default function Office() {
           </Button>
         </div>
       )}
-      {!fullscreen.active && (
-        <div className="team-attention-summary">
-          <span>
-            <strong>{attention}</strong>{" "}
-            {attention === 1 ? "teammate needs" : "teammates need"} attention ·{" "}
-            <strong>{running}</strong> assignments in progress
-          </span>
-          <button type="button" onClick={() => setInboxOpen(true)}>
-            Review inbox
-          </button>
-        </div>
-      )}
       <Modal
         open={inboxOpen && !presentation}
         onClose={() => setInboxOpen(false)}
@@ -194,12 +182,14 @@ export default function Office() {
       </Modal>
       <div className="office-toolbar">
         <div>
-          <strong>{office.personas.length}</strong> teammates <span>·</span>{" "}
-          <strong>{running}</strong> assignments in progress <span>·</span>{" "}
-          <strong>{attention}</strong> need attention
+          <strong>{office.personas.length}</strong>{" "}
+          {office.personas.length === 1 ? "teammate" : "teammates"} <span>·</span>{" "}
+          <strong>{running}</strong> in progress <span>·</span>{" "}
+          <strong>{attention}</strong>{" "}
+          {attention === 1 ? "needs attention" : "need attention"}
         </div>
         <div className="office-view" aria-label="Agent Team controls">
-          {fullscreen.active && !presentation && (
+          {!presentation && (
             <Button size="sm" variant="ghost" onClick={() => setInboxOpen(true)}>Review inbox</Button>
           )}
           <SegmentedControl

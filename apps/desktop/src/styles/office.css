@@ -1747,32 +1747,6 @@ html[data-team-presentation]
   opacity: 0.5;
   cursor: default;
 }
-.team-attention-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 18px;
-  padding: 10px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-bg-elevated);
-  font-size: 12px;
-  color: var(--color-text-soft);
-}
-.team-attention-summary strong {
-  color: var(--color-text);
-}
-.team-attention-summary button {
-  color: var(--color-accent);
-  padding: 5px 8px;
-  cursor: pointer;
-  border-radius: 5px;
-}
-.team-attention-summary button:hover {
-  background: var(--color-surface-hover);
-}
 .team-inbox-dialog {
   overflow: auto;
   padding: 0 18px 18px;
@@ -1923,7 +1897,6 @@ html[data-team-fullscreen] .app-region-drag {
   gap: 10px;
 }
 .office-fullscreen > .office-header,
-.office-fullscreen > .team-attention-summary,
 .office-fullscreen > .office-briefing,
 .office-fullscreen > .office-availability {
   display: none;
