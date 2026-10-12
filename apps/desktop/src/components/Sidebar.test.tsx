@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 describe("Sidebar", () => {
-  it("renders exactly five primary destinations in the locked order", () => {
+  it("renders exactly six primary destinations in the locked order", () => {
     renderRoute(<Sidebar />, {
       path: "*",
       route: "/chat",
@@ -32,9 +32,9 @@ describe("Sidebar", () => {
       within(primary)
         .getAllByRole("link")
         .map((link) => link.textContent?.trim()),
-    ).toEqual(["Chat", "Agents", "Runs", "Changes", "Settings"]);
+    ).toEqual(["Chat", "Agent Team", "Agents", "Runs", "Changes", "Settings"]);
     expect(screen.queryByRole("navigation", { name: "More" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Agent Team/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Agent Team" })).toHaveAttribute("href", "/office");
   });
 
   it("shows the Runs review badge only when a run awaits confirmation", async () => {
@@ -96,6 +96,8 @@ describe("Sidebar", () => {
       bridge: makeMockBridge(),
     });
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Agent Team" })).toHaveAttribute("href", "/office");
+    expect(screen.getByRole("tooltip", { name: "Agent Team" })).toBeInTheDocument();
     restored.unmount();
 
     localStorage.clear();

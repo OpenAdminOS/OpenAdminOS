@@ -1850,24 +1850,30 @@ messages, and never suggest the same agent twice in one conversation.
 
 ### Navigation (locked for the enterprise redesign)
 
-The sidebar contains exactly five destinations in this order:
+The sidebar contains exactly six destinations in this order:
 
 | Nav item | Route | Contains |
 |---|---|---|
 | Chat | `/chat` and `/chat/workspaces/:workspaceId` | Tenant Q&A, conversation history, and Workspaces |
-| Agents | `/agents` | Team roster, installed and Hub libraries, schedules, and agent details |
+| Agent Team | `/office` | Persistent teammates, assignments, evidence review, conversations, and the Office and List views |
+| Agents | `/agents` | Installed and Hub libraries, schedules, and agent details |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
 | Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, four device-local themes in Appearance, Privacy, and About |
 
+**Decided 2026-10-12 by Ugur:** Agent Team stays a top-level destination; Runs
+stays a daily page; Workspaces in Chat; Connectors and Data in Settings; Nova in
+the sidebar; Chat boundary line shown only for hosted providers.
+
 Workspaces live in the Chat left panel and remain reachable from the command
 palette. Legacy `/workspaces` and `/workspaces/:workspaceId` URLs redirect to
-the corresponding Chat panel and detail routes. Agent Team now renders at the top of Agents,
-with the full office at `/agents/office` and persona details at
-`/agents/team/:personaId`. Installed agents and Hub share the Library section;
+the corresponding Chat panel and detail routes. Agent Team is the `/office`
+destination, and persona selection remains addressable with `?persona=<id>`.
+Installed agents and Hub share the Agents Library section;
 schedule filtering and controls live there and in each agent drawer. Legacy
-`/office`, `/hub`, `/agents/hub`, and `/agents/schedules` URLs redirect into
-these routes and query filters. Cache and Connectors now live in Settings;
+`/agents/office` and `/agents/team/:personaId` URLs redirect to `/office`, while
+`/hub`, `/agents/hub`, and `/agents/schedules` redirect into Agents query filters.
+Cache and Connectors now live in Settings;
 legacy `/cache` and `/connectors` URLs redirect to their Settings sections,
 including connector drawer deep links. `/fleet` redirects to the all-tenant
 Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
@@ -1875,7 +1881,8 @@ Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
 | Legacy route | Current location |
 |---|---|
 | `/activity` | `/runs` |
-| `/office` | `/agents`, `/agents/team/:personaId`, or `/agents/office` depending on legacy state |
+| `/agents/office` | `/office`, preserving query and hash state |
+| `/agents/team/:personaId` | `/office?persona=:personaId` |
 | `/hub`, `/agents/hub` | `/agents?source=hub` |
 | `/agents/schedules` | `/agents?filter=scheduled` |
 | `/cache` | `/settings/data` |
@@ -1919,7 +1926,8 @@ North-star metric: time from install to first successful result, target under 5 
 | Term | Status | Meaning |
 |---|---|---|
 | Chat | Nav label (was "Intune Chat") | Plain-language tenant Q&A. Internal ids keep `intune-chat`. |
-| Agents | Nav label | Installed agents and the entry point for Hub, Schedules, and Agent Team |
+| Agent Team | Nav label | Persistent personas, assignments, and evidence-linked briefings at `/office` |
+| Agents | Nav label | Installed agents and the entry point for Hub, Schedules, and agent details |
 | Runs | Nav label (replaces "Run history" and "Activity") | Review inbox, active progress, and searchable run history |
 | Changes | Nav label | Tenant drift timeline, retained baselines, comparison, and an all-tenant scope (formerly Fleet) |
 | Settings | Nav label | Provider, tenant, data, connector, gateway, appearance, privacy, and application configuration |
@@ -1927,7 +1935,6 @@ North-star metric: time from install to first successful result, target under 5 
 | Agent | Unchanged | Installable module with declared scopes and read/write mode |
 | Hub | Library source inside Agents (was "Agent Hub" nav item) | Community agent store, selected as a Library mode |
 | Schedules | Filter and columns inside Agents, plus an agent drawer section | Recurring agent runs and their latest outcome |
-| Agent Team | Team section and full office inside Agents | Persistent personas, assignments, and evidence-linked briefings |
 | Workspace | Chat panel and palette destination | Tenant-scoped evidence, notes, linked chats, runs, and local instructions; Workspaces live in Chat |
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls; Connectors live in Settings |
 | Tenant | Unchanged | The Microsoft 365 tenant |
@@ -1963,12 +1970,12 @@ North-star metric: time from install to first successful result, target under 5 
 
 ### Agent Team and persistent teammates (approved 2026-09-10; expanded 2026-09-11)
 
-Agent Team is part of the Agents surface. Its compact roster is at `/agents`,
-persona details open at `/agents/team/:personaId`, and the full room is at
-`/agents/office`.
-Teammate shortcuts use original robot, cat, fox, and owl icons, live attention badges,
-search, and a collapsible group. Selection and room/list view are addressable in the
-route query. Human invitations, shared credentials, cloud coordination, and floating
+Agent Team is a top-level surface at `/office`. The same page provides its Office
+and List views, roster, assignment panel, evidence review, and teammate setup.
+Persona selection is addressable at `/office?persona=<id>`.
+The room and list views use original robot, cat, fox, and owl icons, live attention
+badges, search, and floor navigation. Selection and room/list view are addressable in
+the route query. Human invitations, shared credentials, cloud coordination, and floating
 desktop characters remain outside this scope.
 
 The user approved the [15-item improvement plan](../tasks/agent-team-improvement-plan.md).

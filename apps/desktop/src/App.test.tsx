@@ -8,6 +8,7 @@ import {
   LegacyConnectorRedirect,
   LegacySettingsRedirect,
   OfficeRedirect,
+  PersonaOfficeRedirect,
   WorkspaceDetailRedirect,
   WorkspacesRedirect,
 } from "./App";
@@ -100,40 +101,28 @@ describe("legacy Agents routes", () => {
     );
   });
 
-  it("redirects Office landing and persona links to their consolidated locations", async () => {
+  it("redirects the legacy Office route to Agent Team and preserves route state", async () => {
     const { unmount } = renderWithAppState(
       <Routes>
-        <Route path="/office" element={<OfficeRedirect />} />
-        <Route path="/agents" element={<LocationProbe />} />
+        <Route path="/agents/office" element={<OfficeRedirect />} />
+        <Route path="/office" element={<LocationProbe />} />
       </Routes>,
-      { route: "/office" },
+      { route: "/agents/office?assignment=mission-42&inbox=1#review" },
     );
-    expect(await screen.findByTestId("location")).toHaveTextContent("/agents");
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/office?assignment=mission-42&inbox=1#review",
+    );
     unmount();
 
     renderWithAppState(
       <Routes>
-        <Route path="/office" element={<OfficeRedirect />} />
-        <Route path="/agents/team/:personaId" element={<LocationProbe />} />
+        <Route path="/agents/team/:personaId" element={<PersonaOfficeRedirect />} />
+        <Route path="/office" element={<LocationProbe />} />
       </Routes>,
-      { route: "/office?persona=policy-watcher&view=list#assignment" },
+      { route: "/agents/team/policy-watcher?view=list#assignment" },
     );
     expect(await screen.findByTestId("location")).toHaveTextContent(
-      "/agents/team/policy-watcher?view=list#assignment",
-    );
-  });
-
-  it("keeps assignment Office links in the full office view", async () => {
-    renderWithAppState(
-      <Routes>
-        <Route path="/office" element={<OfficeRedirect />} />
-        <Route path="/agents/office" element={<LocationProbe />} />
-      </Routes>,
-      { route: "/office?assignment=mission-42&inbox=1" },
-    );
-
-    expect(await screen.findByTestId("location")).toHaveTextContent(
-      "/agents/office?assignment=mission-42&inbox=1",
+      "/office?view=list&persona=policy-watcher#assignment",
     );
   });
 });

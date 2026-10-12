@@ -1,5 +1,6 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
 import {
@@ -73,7 +74,7 @@ it("lists the shell destinations and every Settings section", async () => {
     "Runs: Failed",
     "Go to Changes",
     "Open Settings",
-    "Team office",
+    "Agent Team",
     "Add teammate",
     "Changes: All tenants",
     "New chat",
@@ -116,6 +117,42 @@ it("lists the shell destinations and every Settings section", async () => {
 
   expect(screen.queryByRole("option", { name: /Go to Cache/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /Go to Connectors/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: /Team office/ })).not.toBeInTheDocument();
+});
+
+it("opens Agent Team and its teammate wizard on the canonical route", async () => {
+  const user = userEvent.setup();
+  const first = renderRoute(
+    <>
+      <CommandPalette open onClose={vi.fn()} />
+      <LocationProbe />
+    </>,
+    {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    },
+  );
+
+  await user.click(screen.getByRole("option", { name: /^Agent Team$/ }));
+  expect(screen.getByTestId("palette-location")).toHaveTextContent("/office");
+  first.unmount();
+
+  renderRoute(
+    <>
+      <CommandPalette open onClose={vi.fn()} />
+      <LocationProbe />
+    </>,
+    {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    },
+  );
+  await user.click(screen.getByRole("option", { name: /^Add teammate/ }));
+  expect(screen.getByTestId("palette-location")).toHaveTextContent(
+    "/office?add=teammate",
+  );
 });
 
 it("lists recent conversations and Workspaces with their Chat routes", async () => {
@@ -186,3 +223,8 @@ it("lists all theme actions and applies the selected theme", async () => {
 
   await user.click(screen.getByRole("option", { name: /^Theme: Graphite/ }));
 });
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="palette-location">{location.pathname + location.search}</div>;
+}

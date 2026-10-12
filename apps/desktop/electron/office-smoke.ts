@@ -43,7 +43,7 @@ export async function runOfficeSmoke(
   await evaluate(
     `window.openAdminOS.setActiveModel("ollama", "test-smoke-local-model")`,
   );
-  await evaluate(`location.hash = '/agents/office'`);
+  await evaluate(`location.hash = '/office'`);
   await wait(`Boolean(document.querySelector('.office-empty'))`);
   await evaluate(
     `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Add teammate').click()`,

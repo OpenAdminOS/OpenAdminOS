@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import type {
   OfficeMission,
   OfficeFinding,
@@ -10,7 +10,7 @@ import { useAppState } from "../state";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/AppShell";
 import { IconButton, SegmentedControl } from "../components/ui";
-import { IconArrowLeft, IconRefresh } from "../components/icons";
+import { IconRefresh } from "../components/icons";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
@@ -53,7 +53,6 @@ function status(
   return p.nextRunAt ? "Scheduled" : "Ready";
 }
 export default function Office() {
-  const navigate = useNavigate();
   const { state, refresh, loading, error: stateError } = useAppState();
   const [params, setParams] = useSearchParams();
   const fullscreen = useOfficeFullscreen();
@@ -72,13 +71,20 @@ export default function Office() {
     );
   const setSelectedId = (id: string) => setParam("persona", id);
   const setView = (view: string) => setParam("view", view);
-  const [editing, setEditing] = useState<OfficePersona | "new">();
+  const [editing, setEditing] = useState<OfficePersona | "new" | undefined>(() =>
+    params.get("add") === "teammate" ? "new" : undefined,
+  );
   const [removeId, setRemoveId] = useState<string>();
   const [historyQuery, setHistoryQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const focusedOffice = expanded || fullscreen.active;
   const [presentation, setPresentation] = useState(false);
+  useEffect(() => {
+    if (params.get("add") === "teammate") {
+      setEditing((current) => current ?? "new");
+    }
+  }, [params]);
   useEffect(() => {
     document.documentElement.toggleAttribute(
       "data-team-presentation",
@@ -135,19 +141,10 @@ export default function Office() {
   return (
     <>
     <PageHeader
-      breadcrumb={
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          onClick={() => navigate("/agents")}
-        >
-          <IconArrowLeft size={12} /> Agents
-        </button>
-      }
-      title="Team office"
+      title="Agent Team"
       actions={
         <Button
-          variant="secondary"
+          variant="primary"
           size="sm"
           disabled={busy || !api?.saveOfficePersona}
           onClick={() => setEditing("new")}
@@ -201,7 +198,7 @@ export default function Office() {
           <strong>{running}</strong> assignments in progress <span>·</span>{" "}
           <strong>{attention}</strong> need attention
         </div>
-        <div className="office-view" aria-label="Team office controls">
+        <div className="office-view" aria-label="Agent Team controls">
           {fullscreen.active && !presentation && (
             <Button size="sm" variant="ghost" onClick={() => setInboxOpen(true)}>Review inbox</Button>
           )}
@@ -361,7 +358,7 @@ export default function Office() {
                 Choose a responsibility, assign installed agents, and decide
                 when the work should run.
               </p>
-              <Button variant="primary" onClick={() => setEditing("new")}>
+              <Button variant="secondary" onClick={() => setEditing("new")}>
                 Add your first teammate
               </Button>
               <ol className="team-empty-steps">
@@ -546,7 +543,7 @@ export default function Office() {
               </p>
               <div className="office-actions">
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   disabled={
                     busy ||
                     !selected.enabled ||
@@ -779,6 +776,14 @@ export default function Office() {
             if (!busy) {
               setEditing(undefined);
               setError("");
+              setParams(
+                (previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.delete("add");
+                  return next;
+                },
+                { replace: true },
+              );
             }
           }}
           onSave={async (input) => {
@@ -792,7 +797,15 @@ export default function Office() {
                 )?.id;
               })
             ) {
-              if (savedId) setSelectedId(savedId);
+              setParams(
+                (previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.delete("add");
+                  if (savedId) next.set("persona", savedId);
+                  return next;
+                },
+                { replace: true },
+              );
               setShowDetails(true);
               setEditing(undefined);
             }

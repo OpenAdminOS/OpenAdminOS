@@ -1001,7 +1001,7 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/agents",
       name: "agents-home",
       file: "app/agents-home.png",
-      waitFor: ["Team", "Library"],
+      waitFor: ["Library"],
       heading: "Agents",
     },
     {
@@ -1078,12 +1078,12 @@ async function runScreenshotCapture(): Promise<void> {
   if (process.env.OPENADMINOS_BRAND_CAPTURE === "1") {
     const extraShots = [
       { route: "/settings/data", name: "cache", waitFor: ["Data", "Tenant cache"] },
-      { route: "/agents/office", name: "agent-team", waitFor: ["Team office"] },
+      { route: "/office", name: "agent-team", waitFor: ["Agent Team", "Review inbox"] },
       { route: "/changes?scope=all", name: "fleet", waitFor: ["Changes"] },
       { route: "/chat?panel=workspaces", name: "workspaces", waitFor: ["Workspaces"] },
       { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
-      { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Team", "Library"] },
+      { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Library"] },
       { route: "/settings/appearance", name: "appearance", waitFor: ["Midnight"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);

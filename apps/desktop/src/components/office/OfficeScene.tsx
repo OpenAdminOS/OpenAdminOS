@@ -752,7 +752,7 @@ export function OfficeScene({
     >
       <div className="scene-toolbar">
         <span>
-          <i /> Team office <small>Live assignments, a little downtime</small>
+          <i /> Agent Team <small>Live assignments, a little downtime</small>
         </span>
         <IconButton
           label={reduced ? "Reduced motion is active" : paused ? "Resume motion" : "Pause motion"}
@@ -857,7 +857,7 @@ export function OfficeScene({
             href={
               latestEvent[1].runId
                 ? `#/runs/${latestEvent[1].runId}`
-                : `#/agents/team/${encodeURIComponent(latestEvent[0])}`
+                : `#/office?persona=${encodeURIComponent(latestEvent[0])}`
             }
           >
             Open evidence →

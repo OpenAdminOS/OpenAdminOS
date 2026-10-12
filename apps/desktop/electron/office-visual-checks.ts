@@ -151,7 +151,7 @@ export async function runOfficeVisualChecks(
   await sleep(500);
   if (window.isFullScreen())
     throw new Error("Route exit did not restore the window.");
-  await evaluate(`location.hash='/agents/office'`);
+  await evaluate(`location.hash='/office'`);
   await wait(`Boolean(document.querySelector('.scene-persona'))`);
   window.setBounds(bounds);
   window.setMinimumSize(minimum[0], minimum[1]);

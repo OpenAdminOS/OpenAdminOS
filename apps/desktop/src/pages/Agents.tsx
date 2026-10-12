@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
-import { IconAgentTeam, IconChevronDown, IconHub, IconPlus } from "../components/icons";
+import { IconChevronDown, IconHub, IconPlus } from "../components/icons";
 import { Button, Menu } from "../components/ui";
 import AgentDetail from "./AgentDetail";
 import AgentsHome from "./AgentsHome";
@@ -15,7 +15,7 @@ export default function Agents({ startRunOnOpen = false }: { startRunOnOpen?: bo
         actions={
           <Menu
             align="end"
-            ariaLabel="Add agent or teammate"
+            ariaLabel="Add agent"
             trigger={
               <Button
                 variant="primary"
@@ -27,12 +27,6 @@ export default function Agents({ startRunOnOpen = false }: { startRunOnOpen?: bo
               </Button>
             }
             items={[
-              {
-                id: "add-teammate",
-                label: "Add teammate",
-                icon: <IconAgentTeam size={14} />,
-                onSelect: () => navigate("/agents?add=teammate"),
-              },
               {
                 id: "install-hub",
                 label: "Install from hub",

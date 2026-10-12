@@ -56,8 +56,8 @@ export default function App() {
           <Route path="/" element={<Navigate to="/chat" replace />} />
           <Route path="/onboarding" element={<Navigate to="/chat" replace />} />
           <Route path="/agents" element={<Agents />} />
-          <Route path="/agents/office" element={<Office />} />
-          <Route path="/agents/team/:personaId" element={<Agents />} />
+          <Route path="/agents/office" element={<OfficeRedirect />} />
+          <Route path="/agents/team/:personaId" element={<PersonaOfficeRedirect />} />
           <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
           <Route path="/agents/schedules" element={<AgentsQueryRedirect filter="scheduled" />} />
           <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
@@ -66,7 +66,7 @@ export default function App() {
           <Route path="/chat/workspaces/:workspaceId" element={<IntuneChat />} />
           <Route path="/chat/:conversationId?" element={<IntuneChat />} />
           <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
-          <Route path="/office" element={<OfficeRedirect />} />
+          <Route path="/office" element={<Office />} />
           <Route path="/changes" element={<Changes />} />
           <Route path="/fleet" element={<FleetRedirect />} />
           <Route path="/workspaces" element={<WorkspacesRedirect />} />
@@ -152,27 +152,28 @@ export function AgentsQueryRedirect({
 
 export function OfficeRedirect() {
   const location = useLocation();
-  const search = new URLSearchParams(location.search);
-  const personaId = search.get("persona");
-  if (personaId) {
-    search.delete("persona");
-    return (
-      <Navigate
-        to={{
-          pathname: `/agents/team/${encodeURIComponent(personaId)}`,
-          search: search.toString() ? `?${search.toString()}` : "",
-          hash: location.hash,
-        }}
-        replace
-      />
-    );
-  }
-  const hasOfficeState = search.has("view") || search.has("assignment") || search.has("inbox");
   return (
     <Navigate
       to={{
-        pathname: hasOfficeState ? "/agents/office" : "/agents",
-        search: hasOfficeState && search.toString() ? `?${search.toString()}` : "",
+        pathname: "/office",
+        search: location.search,
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function PersonaOfficeRedirect() {
+  const location = useLocation();
+  const { personaId } = useParams<{ personaId: string }>();
+  const search = new URLSearchParams(location.search);
+  if (personaId) search.set("persona", personaId);
+  return (
+    <Navigate
+      to={{
+        pathname: "/office",
+        search: search.toString() ? `?${search.toString()}` : "",
         hash: location.hash,
       }}
       replace

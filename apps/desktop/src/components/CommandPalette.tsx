@@ -178,9 +178,9 @@ export function CommandPalette({
         action: go("/agents?source=hub"),
       },
       {
-        id: "nav-office", label: "Team office", group: "Navigate",
+        id: "nav-office", label: "Agent Team", group: "Navigate",
         icon: <IconAgentTeam size={13} className="text-[var(--color-accent)]" />,
-        action: go("/agents/office"),
+        action: go("/office"),
       },
       {
         id: "nav-changes",
@@ -249,7 +249,7 @@ export function CommandPalette({
         hint: "Create a persistent assignment",
         group: "Actions",
         icon: <IconAgentTeam size={13} className="text-[var(--color-accent)]" />,
-        action: go("/agents?add=teammate"),
+        action: go("/office?add=teammate"),
       },
       {
         id: "act-voice",

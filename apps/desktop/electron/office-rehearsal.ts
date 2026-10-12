@@ -53,7 +53,7 @@ export async function runOfficeRehearsal(
     );
   };
   window.setContentSize(1440, 1000);
-  await evaluate(`location.hash='/agents/office'`);
+  await evaluate(`location.hash='/office'`);
   await wait(`Boolean(document.querySelector('.team-office'))`);
   const ids = await evaluate<{
     source: string;
@@ -70,7 +70,7 @@ export async function runOfficeRehearsal(
    return {source:source.id,research:research.id,chief:chief.id};
  })()`);
   const select = async (id: string) => {
-    await evaluate(`location.hash='/agents/office?persona=${id}'`);
+    await evaluate(`location.hash='/office?persona=${id}'`);
     await sleep(200);
   };
   await select(ids.source);

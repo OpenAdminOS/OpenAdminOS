@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import Agents from "./Agents";
-import type { OfficePersona } from "../shared/openAdminOS";
 import {
   createMockAgent,
   createMockAppState,
@@ -63,6 +62,7 @@ describe("Agents schedule actions", () => {
     expect(screen.getByPlaceholderText("Search hub…")).toBeInTheDocument();
     expect(screen.getByText("Scheduled only")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Schedules" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument();
   });
 
   it("opens the URL-addressable agent drawer and targets its schedule section", async () => {
@@ -104,35 +104,4 @@ describe("Agents schedule actions", () => {
     expect(screen.getAllByText("Device Offboard").length).toBeGreaterThan(0);
   });
 
-  it("opens a persona drawer from its consolidated Team URL", async () => {
-    const persona: OfficePersona = {
-      id: "policy-watcher",
-      name: "Policy Watcher",
-      responsibility: "Review policy changes",
-      avatar: "robot",
-      color: "amber",
-      tenantId: "tenant-1",
-      providerId: "ollama",
-      agentSlugs: ["device-offboard"],
-      intervalMinutes: null,
-      maxMinutes: 30,
-      enabled: true,
-      createdAt: "2026-09-10T10:00:00Z",
-      updatedAt: "2026-09-10T10:00:00Z",
-    };
-    const state = createMockAppState({
-      office: { personas: [persona], missions: [] },
-    });
-
-    renderRoute(<Agents />, {
-      path: "/agents/team/:personaId",
-      route: "/agents/team/policy-watcher",
-      bridge: makeMockBridge({}, state),
-    });
-
-    const drawer = await screen.findByRole("dialog", { name: "Policy Watcher" });
-    expect(within(drawer).getByRole("heading", { name: "Assignment" })).toBeInTheDocument();
-    expect(within(drawer).getByRole("heading", { name: "Work order" })).toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "Run first assignment" })).toBeInTheDocument();
-  });
 });

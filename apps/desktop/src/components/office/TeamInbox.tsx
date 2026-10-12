@@ -134,7 +134,7 @@ export function TeamInbox({
               <Badge tone="danger">Operational issue</Badge>
               <h3>{p.name}</h3>
               <p>{p.lastError}</p>
-              <Link to={`/agents/team/${encodeURIComponent(p.id)}`}>
+              <Link to={`/office?persona=${encodeURIComponent(p.id)}`}>
                 Open assignment →
               </Link>
             </article>
@@ -284,7 +284,7 @@ export function PersonaConversation({
             <p key={h.id}>
               {h.reason}{" "}
               <Link
-                to={`/agents/team/${encodeURIComponent(h.targetPersonaId)}`}
+                to={`/office?persona=${encodeURIComponent(h.targetPersonaId)}`}
               >
                 Open specialist →
               </Link>

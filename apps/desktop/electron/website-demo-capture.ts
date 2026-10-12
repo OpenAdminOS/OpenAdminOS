@@ -32,18 +32,18 @@ export async function captureWebsiteDemo(
       prepare: "chat-empty" as const,
       click: "Devices",
     },
-    { id: "team", route: "/agents/office", label: "Team office", wait: ["Team office"] },
+    { id: "team", route: "/office", label: "Agent Team", wait: ["Agent Team", "Review inbox"] },
     {
       id: "team-paused",
-      route: "/agents/office",
-      label: "Team office, motion paused",
-      wait: ["Team office"],
+      route: "/office",
+      label: "Agent Team, motion paused",
+      wait: ["Agent Team", "Review inbox"],
     },
     {
       id: "agents",
       route: "/agents",
       label: "Installed agents",
-      wait: ["Team", "Library"],
+      wait: ["Library"],
     },
     {
       id: "hub",
@@ -55,7 +55,7 @@ export async function captureWebsiteDemo(
       id: "schedules",
       route: "/agents?filter=scheduled",
       label: "Scheduled agents",
-      wait: ["Team", "Library"],
+      wait: ["Library"],
     },
     {
       id: "agent-details",
@@ -164,9 +164,9 @@ export async function captureWebsiteDemo(
     },
     {
       id: "team-add",
-      route: "/agents?add=teammate",
+      route: "/office?add=teammate",
       label: "Add teammate",
-      wait: ["Add a teammate"],
+      wait: ["Add teammate"],
     },
     {
       id: "workspace-add",
@@ -315,8 +315,8 @@ export async function captureWebsiteDemo(
       const heading =
         screen.route === "/chat?panel=workspaces"
           ? "No workspace selected"
-          : screen.route === "/agents/office"
-            ? "Team office"
+          : screen.route.startsWith("/office")
+            ? "Agent Team"
           : screen.route.startsWith("/settings")
               ? "Settings"
               : screen.route.startsWith("/agents")

@@ -5,14 +5,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { AgentIdentity } from "../components/AgentCard";
 import { NewAgentModal } from "../components/NewAgentModal";
-import { PersonaEditor } from "../components/office/PersonaEditor";
-import { PersonaAvatar } from "../components/office/OfficeScene";
 import { useToast } from "../components/Toast";
 import {
-  IconAgentTeam,
   IconChevronDown,
   IconClock,
   IconPlay,
@@ -25,10 +22,7 @@ import {
   Badge,
   Button,
   DataTable,
-  Drawer,
-  EmptyState,
   IconButton,
-  KeyValue,
   Menu,
   Section,
   SegmentedControl,
@@ -40,9 +34,6 @@ import {
 import type { AgentDisplay } from "../shared/agent-display";
 import type {
   AgentSummary,
-  OfficeFinding,
-  OfficeMission,
-  OfficePersona,
   RegistryAgentSummary,
   RunRecord,
 } from "../shared/openAdminOS";
@@ -68,13 +59,11 @@ interface LibraryRow {
 export default function AgentsHome() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { personaId } = useParams<{ personaId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
   const {
     state,
     registryAgents,
-    refresh,
     refreshRegistry,
     startRun,
   } = useAppState();
@@ -83,9 +72,6 @@ export default function AgentsHome() {
   const [refreshingHub, setRefreshingHub] = useState(false);
   const [bulkRunning, setBulkRunning] = useState<"due" | "all" | null>(null);
   const [schedulerRegistered, setSchedulerRegistered] = useState<boolean | null>(null);
-  const [personaEditing, setPersonaEditing] = useState<OfficePersona | undefined>();
-  const [personaBusy, setPersonaBusy] = useState(false);
-  const [personaError, setPersonaError] = useState("");
   const resumedBatchRef = useRef<string | null>(null);
 
   const source: LibrarySource = searchParams.get("source") === "hub" ? "hub" : "installed";
@@ -95,8 +81,6 @@ export default function AgentsHome() {
   const scheduledOnly = searchParams.get("filter") === "scheduled";
   const updatesOnly = searchParams.get("updates") === "available";
   const addFlow = searchParams.get("add");
-  const office = state.office ?? { personas: [], missions: [] };
-  const selectedPersona = office.personas.find((persona) => persona.id === personaId);
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
@@ -113,6 +97,16 @@ export default function AgentsHome() {
     () => scheduledAgents.filter((agent) => nextRunTime(agent) <= Date.now()),
     [scheduledAgents],
   );
+
+  useEffect(() => {
+    if (addFlow !== "teammate") return;
+    const next = new URLSearchParams(searchParams);
+    next.set("add", "teammate");
+    navigate(
+      { pathname: "/office", search: `?${next.toString()}`, hash: location.hash },
+      { replace: true },
+    );
+  }, [addFlow, navigate, searchParams]);
 
   useEffect(() => {
     if (!scheduledOnly) return;
@@ -529,100 +523,8 @@ export default function AgentsHome() {
     },
   ];
 
-  const attentionPersonas = office.personas.filter((persona) =>
-    personaNeedsAttention(persona, state.runs, office.findings),
-  );
-  const reviewRun = state.runs.find(
-    (run) => run.office && run.status === "awaiting-confirmation",
-  );
-
-  const personaAct = async (action: () => Promise<unknown>) => {
-    setPersonaBusy(true);
-    setPersonaError("");
-    try {
-      await action();
-      await refresh();
-      return true;
-    } catch (caught) {
-      setPersonaError(caught instanceof Error ? caught.message : String(caught));
-      return false;
-    } finally {
-      setPersonaBusy(false);
-    }
-  };
-
   return (
-    <div className="space-y-8">
-      <Section
-        title="Team"
-        action={
-          <div className="flex items-center gap-2">
-            {attentionPersonas.length > 0 ? (
-              <Link
-                to={reviewRun ? `/runs/${reviewRun.id}` : "/agents/office?inbox=1"}
-                className="rounded-md px-2 py-1 text-sm text-[var(--color-warning)] hover:bg-[var(--color-warning-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-              >
-                Review inbox ({attentionPersonas.length})
-              </Link>
-            ) : null}
-            <Button variant="ghost" size="sm" onClick={() => navigate("/agents/office")}>
-              Open office
-            </Button>
-          </div>
-        }
-      >
-        {office.personas.length === 0 ? (
-          <EmptyState
-            icon={<IconAgentTeam size={18} />}
-            title="No teammates"
-            description="Add a teammate to assign installed agents, a tenant, and a schedule."
-            action={
-              <Button variant="secondary" size="sm" onClick={() => navigate("/agents?add=teammate")}>
-                Add teammate
-              </Button>
-            }
-            className="py-6"
-          />
-        ) : (
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-px overflow-hidden rounded-[10px] bg-[var(--color-border-soft)] ring-1 ring-[var(--color-border)]">
-            {office.personas.map((persona) => {
-              const mission = office.missions.find((candidate) => candidate.personaId === persona.id);
-              const personaStatus = getPersonaStatus(persona, mission, state.runs, office.findings);
-              const attention = countPersonaAttention(persona, state.runs, office.findings);
-              return (
-                <button
-                  key={persona.id}
-                  type="button"
-                  className="min-w-0 bg-[var(--color-surface)] p-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-                  onClick={() => navigate(`/agents/team/${encodeURIComponent(persona.id)}${location.search}`)}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="shrink-0 scale-75 origin-top-left">
-                      <PersonaAvatar avatar={persona.avatar} color={persona.color} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-[var(--color-text)]">{persona.name}</span>
-                      <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">{persona.responsibility}</span>
-                    </span>
-                    <Badge tone={personaStatusTone(personaStatus)}>{personaStatus}</Badge>
-                  </div>
-                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--color-border-soft)] pt-2 text-xs text-[var(--color-text-muted)]">
-                    <span className="truncate">
-                      {formatPersonaSchedule(persona)}
-                    </span>
-                    {attention > 0 ? (
-                      <Badge tone="warning">{attention} to review</Badge>
-                    ) : (
-                      <span>Nothing to review</span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </Section>
-
+    <div>
       <Section title="Library">
         <Toolbar
           search={
@@ -742,265 +644,9 @@ export default function AgentsHome() {
           }
         />
       </Section>
-
-      <PersonaDrawer
-        persona={selectedPersona}
-        missions={office.missions}
-        findings={office.findings}
-        runs={state.runs}
-        installedAgents={state.installedAgents}
-        busy={personaBusy}
-        error={personaError}
-        onClose={() => navigate(`/agents${location.search}`)}
-        onEdit={() => selectedPersona && setPersonaEditing(selectedPersona)}
-        onRun={() =>
-          selectedPersona
-            ? void personaAct(() => window.openAdminOS!.startOfficePersona!(selectedPersona.id))
-            : undefined
-        }
-        onStop={() =>
-          selectedPersona
-            ? void personaAct(() => window.openAdminOS!.stopOfficePersona!(selectedPersona.id))
-            : undefined
-        }
-      />
-
-      {(addFlow === "teammate" || personaEditing) ? (
-        <PersonaEditor
-          persona={personaEditing}
-          state={state}
-          busy={personaBusy}
-          error={personaError}
-          onClose={() => {
-            if (personaBusy) return;
-            setPersonaEditing(undefined);
-            setPersonaError("");
-            closeAddFlow();
-          }}
-          onSave={async (input) => {
-            let savedId = input.id;
-            if (
-              await personaAct(async () => {
-                const result = await window.openAdminOS!.saveOfficePersona!(input);
-                savedId ??= result.personas.find(
-                  (persona) => !office.personas.some((existing) => existing.id === persona.id),
-                )?.id;
-              })
-            ) {
-              setPersonaEditing(undefined);
-              if (savedId) navigate(`/agents/team/${encodeURIComponent(savedId)}`);
-              else closeAddFlow();
-            }
-          }}
-        />
-      ) : null}
       <NewAgentModal open={addFlow === "agent"} onClose={closeAddFlow} />
     </div>
   );
-}
-
-function PersonaDrawer({
-  persona,
-  missions,
-  findings,
-  runs,
-  installedAgents,
-  busy,
-  error,
-  onClose,
-  onEdit,
-  onRun,
-  onStop,
-}: {
-  persona?: OfficePersona;
-  missions: OfficeMission[];
-  findings?: OfficeFinding[];
-  runs: RunRecord[];
-  installedAgents: AgentSummary[];
-  busy: boolean;
-  error: string;
-  onClose: () => void;
-  onEdit: () => void;
-  onRun: () => void;
-  onStop: () => void;
-}) {
-  const personaMissions = missions
-    .filter((mission) => mission.personaId === persona?.id)
-    .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt));
-  const activeMission = personaMissions.find((mission) =>
-    ["queued", "running", "executing", "awaiting-review"].includes(mission.status),
-  );
-  const personaStatus = persona
-    ? getPersonaStatus(persona, activeMission, runs, findings)
-    : "Ready";
-
-  return (
-    <Drawer
-      open={Boolean(persona)}
-      title={persona?.name ?? "Teammate"}
-      onClose={onClose}
-      actions={
-        persona ? (
-          <>
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={busy || !persona.enabled || Boolean(activeMission)}
-              onClick={onRun}
-            >
-              {personaMissions.length === 0 ? "Run first assignment" : "Run assignment"}
-            </Button>
-            <Menu
-              ariaLabel={`${persona.name} actions`}
-              trigger={
-                <IconButton
-                  label={`${persona.name} actions`}
-                  icon={<IconChevronDown size={13} />}
-                  size="sm"
-                />
-              }
-              items={[
-                { id: "edit", label: "Edit", onSelect: onEdit },
-                {
-                  id: "stop",
-                  label: "Stop & pause",
-                  danger: true,
-                  disabled: busy || (!persona.enabled && !activeMission),
-                  onSelect: onStop,
-                },
-              ]}
-            />
-          </>
-        ) : null
-      }
-    >
-      {persona ? (
-        <div className="space-y-6 p-5">
-          <div className="flex items-start gap-3">
-            <PersonaAvatar avatar={persona.avatar} color={persona.color} />
-            <div className="min-w-0 flex-1">
-              <div className="font-medium text-[var(--color-text)]">{persona.responsibility}</div>
-              <div className="mt-1 flex items-center gap-2">
-                <Badge tone={personaStatusTone(personaStatus)}>{personaStatus}</Badge>
-                {countPersonaAttention(persona, runs, findings) > 0 ? (
-                  <Badge tone="warning">Needs review</Badge>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          {error ? (
-            <div role="alert" className="text-sm text-[var(--color-danger)]">
-              {error} Review the assignment and try again.
-            </div>
-          ) : null}
-
-          <Section title="Assignment">
-            <dl className="divide-y divide-[var(--color-border-soft)]">
-              <KeyValue label="State" value={activeMission?.status.replaceAll("-", " ") ?? "Idle"} />
-              <KeyValue label="Schedule" value={formatPersonaSchedule(persona)} />
-              <KeyValue label="Next run" value={persona.nextRunAt ? new Date(persona.nextRunAt).toLocaleString() : "Manual"} />
-              <KeyValue label="Time budget" value={`${persona.maxMinutes} minutes`} />
-            </dl>
-          </Section>
-
-          <Section title="Work order">
-            <ol className="divide-y divide-[var(--color-border-soft)] rounded-lg bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
-              {persona.agentSlugs.map((slug, index) => {
-                const agent = installedAgents.find((candidate) => candidate.slug === slug);
-                const run = runs.find(
-                  (candidate) => activeMission?.runIds.includes(candidate.id) && candidate.agentSlug === slug,
-                );
-                return (
-                  <li key={slug} className="flex items-center gap-3 px-3 py-2.5">
-                    <span className="text-xs tabular-nums text-[var(--color-text-muted)]">{index + 1}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-base text-[var(--color-text)]">{agent?.name ?? slug}</span>
-                      <span className="block text-xs text-[var(--color-text-muted)]">
-                        {run?.status.replaceAll("-", " ") ?? "Not started"}
-                        {agent?.mode === "write" ? ", approval required" : ""}
-                      </span>
-                    </span>
-                    {run ? <Link className="text-sm text-[var(--color-text-soft)] hover:text-[var(--color-text)]" to={`/runs/${run.id}`}>View</Link> : null}
-                  </li>
-                );
-              })}
-            </ol>
-          </Section>
-
-          <Section title="Recent assignments">
-            {personaMissions.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)]">No assignments have run.</p>
-            ) : (
-              <div className="divide-y divide-[var(--color-border-soft)]">
-                {personaMissions.slice(0, 5).map((mission) => (
-                  <div key={mission.id} className="flex items-center justify-between gap-3 py-2.5">
-                    <span>
-                      <span className="block text-base text-[var(--color-text)]">{mission.status.replaceAll("-", " ")}</span>
-                      <span className="block text-xs text-[var(--color-text-muted)]">{new Date(mission.startedAt).toLocaleString()}</span>
-                    </span>
-                    {mission.runIds[0] ? <Link className="text-sm text-[var(--color-text-soft)] hover:text-[var(--color-text)]" to={`/runs/${mission.runIds[0]}`}>View evidence</Link> : null}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
-        </div>
-      ) : null}
-    </Drawer>
-  );
-}
-
-function getPersonaStatus(
-  persona: OfficePersona,
-  mission: OfficeMission | undefined,
-  runs: RunRecord[],
-  findings?: OfficeFinding[],
-) {
-  const currentRun = runs.find(
-    (run) => mission?.runIds.includes(run.id) && ["queued", "running", "awaiting-confirmation"].includes(run.status),
-  );
-  if (currentRun?.status === "awaiting-confirmation") return "Needs approval";
-  if (currentRun?.status === "running") return "Working";
-  if (["queued", "running", "executing", "awaiting-review"].includes(mission?.status ?? "")) return "Queued";
-  if (personaNeedsAttention(persona, runs, findings)) return "Needs attention";
-  if (!persona.enabled) return "Paused";
-  return persona.nextRunAt ? "Scheduled" : "Ready";
-}
-
-function personaStatusTone(status: string): "neutral" | "success" | "warning" | "danger" | "info" {
-  if (status === "Working") return "info";
-  if (status === "Needs approval" || status === "Needs attention") return "warning";
-  if (status === "Paused") return "neutral";
-  return "success";
-}
-
-function personaNeedsAttention(
-  persona: OfficePersona,
-  runs: RunRecord[],
-  findings?: OfficeFinding[],
-) {
-  return countPersonaAttention(persona, runs, findings) > 0;
-}
-
-function countPersonaAttention(
-  persona: OfficePersona,
-  runs: RunRecord[],
-  findings?: OfficeFinding[],
-) {
-  return (
-    (persona.lastError ? 1 : 0) +
-    (findings?.filter((finding) => finding.personaId === persona.id && finding.state === "open").length ?? 0) +
-    runs.filter((run) => run.office?.personaId === persona.id && run.status === "awaiting-confirmation").length
-  );
-}
-
-function formatPersonaSchedule(persona: OfficePersona) {
-  if (!persona.enabled) return "Paused";
-  if (persona.calendar) return `${persona.calendar.time}, ${persona.calendar.timeZone}`;
-  if (persona.intervalMinutes) return `Every ${formatInterval(persona.intervalMinutes * 60)}`;
-  if (persona.watch) return "On finding change";
-  return "Manual";
 }
 
 function toInstalledDisplay(agent: AgentSummary): AgentDisplay {

@@ -28,6 +28,38 @@ const persona: OfficePersona = {
 };
 
 describe("Office", () => {
+  it("uses the Agent Team header and opens the teammate wizard from the route", async () => {
+    renderRoute(<Office />, {
+      route: "/office?add=teammate",
+      path: "/office",
+      bridge: makeMockBridge(),
+    });
+
+    expect(await screen.findByRole("heading", { name: "Agent Team" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add teammate" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Add teammate" })).toBeInTheDocument();
+  });
+
+  it("selects persona details from the addressable query", async () => {
+    const research = {
+      ...persona,
+      id: "persona-2",
+      name: "Research Bot",
+      responsibility: "Review supplied evidence",
+    };
+    const state = createMockAppState({
+      office: { personas: [persona, research], missions: [] },
+    });
+    renderRoute(<Office />, {
+      route: "/office?persona=persona-2",
+      path: "/office",
+      bridge: makeMockBridge({}, state),
+    });
+
+    expect(await screen.findByRole("heading", { name: "Research Bot" })).toBeInTheDocument();
+    expect(screen.getByText("Review supplied evidence")).toBeInTheDocument();
+  });
+
   it("guides a custom assignment and requires hosted consent before saving", async () => {
     const user = userEvent.setup();
     const state = createMockAppState({

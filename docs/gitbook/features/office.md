@@ -6,7 +6,7 @@ Their office, assignments, findings, and conversations live on your computer.
 
 ## Start with a role
 
-1. Open **Agents**, find the **Team** section, and choose **Add teammate** (or **Add your first teammate**).
+1. Open **Agent Team** from the sidebar and choose **Add teammate** (or **Add your first teammate**).
 2. **Choose a role.** Pick Policy Watcher, Chief of Staff, Research Bot, Script Bot, or Custom role. Each card explains its responsibility and workflows. Give your teammate a name and avatar.
 3. **Prepare workspace.** Choose its tenant and model provider. The checklist shows what is ready. Use **Connect tenant** or the provider setup guide when needed. For missing workflows, choose **Review and install**, confirm installation, then **Return to teammate**. Your draft stays open.
 4. **Choose schedule.** Keep the suggested interval or choose manual runs. Review when work starts and whether the app needs to stay open. Advanced instructions, handoffs, calendar schedules and quiet hours remain available below.
@@ -117,8 +117,8 @@ available when the assigned model is offline.
 
 ## Your team's office
 
-AI teammates appear in the **Team** section of Agents with icons, search, and attention
-indicators. Open the full office from that section, or select a teammate to open its assignment. Six teammates fit on each floor, up to
+AI teammates live in the **Agent Team** destination with icons, search, and attention
+indicators. Select a teammate to open its assignment. Six teammates fit on each floor, up to
 24 in total. Floor alerts and search keep distant teammates reachable.
 
 Characters walk along office aisles, sit at desks, relax in the lounge, and use the TV

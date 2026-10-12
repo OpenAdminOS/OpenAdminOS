@@ -7,6 +7,7 @@ import {
 import { NavLink } from "react-router";
 import {
   IconActivity,
+  IconAgentTeam,
   IconAgents,
   IconChanges,
   IconChat,
@@ -106,6 +107,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
 
   const items: NavItem[] = [
     { to: "/chat", label: "Chat", icon: <IconChat size={17} /> },
+    { to: "/office", label: "Agent Team", icon: <IconAgentTeam size={17} /> },
     { to: "/agents", label: "Agents", icon: <IconAgents size={17} /> },
     {
       to: "/runs",
