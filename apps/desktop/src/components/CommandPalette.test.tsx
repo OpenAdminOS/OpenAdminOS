@@ -160,3 +160,29 @@ it("lists recent conversations and Workspaces with their Chat routes", async () 
     await screen.findByRole("option", { name: /Device investigation/ }),
   ).toBeInTheDocument();
 });
+
+it("lists all theme actions and applies the selected theme", async () => {
+  const user = userEvent.setup();
+  const setAppearance = vi.fn(async () => undefined);
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge({ setAppearance }),
+  });
+
+  for (const label of ["Graphite", "Midnight", "Off-white", "Sand"]) {
+    expect(
+      screen.getByRole("option", { name: new RegExp(`^Theme: ${label}`) }),
+    ).toBeInTheDocument();
+  }
+  expect(
+    screen.getByRole("option", { name: /^Theme: GraphiteCurrent · Dark/ }),
+  ).toBeInTheDocument();
+
+  await user.click(screen.getByRole("option", { name: /^Theme: Sand/ }));
+  expect(document.documentElement.dataset.theme).toBe("sand");
+  expect(document.documentElement.dataset.mode).toBe("light");
+  expect(setAppearance).toHaveBeenCalledWith("sand");
+
+  await user.click(screen.getByRole("option", { name: /^Theme: Graphite/ }));
+});

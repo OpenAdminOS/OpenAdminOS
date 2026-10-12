@@ -66,6 +66,40 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(heading).toHaveFocus());
   });
 
+  it("applies themes immediately and supports arrow-key selection", async () => {
+    const user = userEvent.setup();
+    const setAppearance = vi.fn(async () => undefined);
+    const bridge = makeMockBridge({ setAppearance });
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/appearance",
+      bridge,
+    });
+
+    const picker = await screen.findByRole("radiogroup", { name: "Color theme" });
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Appearance" })).toHaveFocus(),
+    );
+    expect(within(picker).getAllByRole("radio")).toHaveLength(4);
+    const graphite = within(picker).getByRole("radio", { name: /Graphite, Dark/ });
+    graphite.focus();
+    await user.keyboard("{ArrowRight}");
+
+    const midnight = within(picker).getByRole("radio", { name: /Midnight, Dark/ });
+    expect(midnight).toHaveFocus();
+    expect(midnight).toHaveAttribute("aria-checked", "true");
+    expect(document.documentElement.dataset.theme).toBe("midnight");
+    expect(document.documentElement.dataset.mode).toBe("dark");
+    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("midnight");
+    expect(setAppearance).toHaveBeenLastCalledWith("midnight");
+
+    await user.keyboard("{ArrowRight}");
+    expect(document.documentElement.dataset.theme).toBe("off-white");
+    expect(document.documentElement.dataset.mode).toBe("light");
+
+    await user.click(graphite);
+  });
+
   it("scrolls deep links inside the Settings content container", async () => {
     const scrollTo = vi.fn();
     const originalScrollTo = HTMLElement.prototype.scrollTo;

@@ -1,4 +1,4 @@
-import { useAppearance } from "../styles/appearance";
+import { THEMES, useAppearance, type ThemeId } from "../styles/appearance";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageHeader } from "../components/AppShell";
@@ -3619,21 +3619,109 @@ function AuditLogExportControls({
 
 function AppearanceSection() {
   const appearance = useAppearance();
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+
+  const selectWithKeyboard = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    themeId: ThemeId,
+  ) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = THEMES.findIndex((theme) => theme.id === themeId);
+    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+    const next =
+      event.key === "Home"
+        ? THEMES[0]
+        : event.key === "End"
+          ? THEMES.at(-1)
+          : THEMES[(currentIndex + (forward ? 1 : -1) + THEMES.length) % THEMES.length];
+    if (!next) return;
+    appearance.setAppearance(next.id);
+    pickerRef.current
+      ?.querySelector<HTMLButtonElement>(`[data-theme-choice="${next.id}"]`)
+      ?.focus();
+  };
+
   return (
     <div className="max-w-[1040px] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
       <SettingRow
         id="theme"
-        description={appearance.error ?? "Choose graphite dark or off-white light. The preference is stored on this device and shared with the menu bar companion."}
+        stacked
+        description={appearance.error ?? "Choose a built-in theme. This device-only preference is shared with the menu bar companion."}
         control={
-          <SegmentedControl
-            ariaLabel="Color theme"
-            value={appearance.theme}
-            onValueChange={(value) => appearance.setAppearance(value === "light" ? "light" : "dark")}
-            options={[
-              { id: "dark", label: "Graphite dark" },
-              { id: "light", label: "Off-white light" },
-            ]}
-          />
+          <div
+            ref={pickerRef}
+            role="radiogroup"
+            aria-label="Color theme"
+            className="grid w-full grid-cols-2 gap-2 xl:grid-cols-4"
+          >
+            {THEMES.map((theme) => {
+              const selected = appearance.theme === theme.id;
+              const modeLabel = theme.mode === "dark" ? "Dark" : "Light";
+              return (
+                <button
+                  key={theme.id}
+                  type="button"
+                  role="radio"
+                  data-theme-choice={theme.id}
+                  aria-checked={selected}
+                  aria-label={`${theme.label}, ${modeLabel}`}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => appearance.setAppearance(theme.id)}
+                  onKeyDown={(event) => selectWithKeyboard(event, theme.id)}
+                  className={`min-w-0 rounded-lg p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                    selected
+                      ? "bg-[var(--color-accent-soft)] ring-2 ring-[var(--color-accent)]"
+                      : "bg-[var(--color-bg)] ring-1 ring-[var(--color-border)] hover:bg-[var(--color-surface-hover)] hover:ring-[var(--color-border-strong)]"
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="relative block h-12 overflow-hidden rounded-md ring-1 ring-black/15"
+                    style={{ backgroundColor: theme.swatches.background }}
+                  >
+                    <span
+                      className="absolute inset-y-0 left-0 w-3"
+                      style={{ backgroundColor: theme.swatches.surface }}
+                    />
+                    <span
+                      className="absolute inset-y-1.5 left-4 right-1.5 rounded-sm"
+                      style={{ backgroundColor: theme.swatches.surface }}
+                    />
+                    <span
+                      className="absolute left-6 top-3 h-1.5 w-8 rounded-sm"
+                      style={{ backgroundColor: theme.swatches.accent }}
+                    />
+                    <span
+                      className="absolute bottom-3 left-6 h-1 w-12 rounded-sm opacity-70"
+                      style={{ backgroundColor: theme.swatches.text }}
+                    />
+                  </span>
+                  <span className="mt-2 flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-[var(--color-text)]">
+                        {theme.label}
+                      </span>
+                      <span className="block text-xs text-[var(--color-text-muted)]">
+                        {modeLabel}
+                      </span>
+                    </span>
+                    {selected ? (
+                      <span
+                        aria-hidden="true"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-on-accent)]"
+                      >
+                        <IconCheck size={12} />
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="sr-only">{theme.description}</span>
+                </button>
+              );
+            })}
+          </div>
         }
       />
     </div>

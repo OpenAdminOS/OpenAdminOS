@@ -106,7 +106,7 @@ export async function captureWebsiteDemo(
       id: "appearance",
       route: "/settings/appearance",
       label: "Appearance",
-      wait: ["Graphite dark"],
+      wait: ["Midnight"],
     },
     {
       id: "privacy",

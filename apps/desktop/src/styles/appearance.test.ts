@@ -6,24 +6,37 @@ beforeEach(() => {
 });
 
 describe("saved appearance", () => {
-  it("defaults to dark and restores a saved light preference", async () => {
+  it("defaults to Graphite and applies every theme with its matching mode", async () => {
     const appearance = await import("./appearance");
-    expect(appearance.readAppearance()).toBe("dark");
-    appearance.setAppearance("light");
-    expect(appearance.readAppearance()).toBe("light");
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(document.documentElement.style.colorScheme).toBe("light");
-    appearance.initializeAppearance();
-    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(appearance.readAppearance()).toBe("graphite");
+
+    for (const theme of appearance.THEMES) {
+      appearance.setAppearance(theme.id);
+      expect(appearance.readAppearance()).toBe(theme.id);
+      expect(document.documentElement.dataset.theme).toBe(theme.id);
+      expect(document.documentElement.dataset.mode).toBe(theme.mode);
+      expect(document.documentElement.style.colorScheme).toBe(theme.mode);
+    }
   });
 
-  it("ignores invalid stored values and follows changes in another window", async () => {
+  it("maps legacy values, stores normalized ids, and rejects unknown stored values", async () => {
     const appearance = await import("./appearance");
+    appearance.setAppearance("dark");
+    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("graphite");
+    appearance.setAppearance("light");
+    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("off-white");
+
     localStorage.setItem("openadminos:appearance:v1", "invalid");
-    expect(appearance.readAppearance()).toBe("dark");
+    expect(appearance.readAppearance()).toBe("graphite");
+    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("graphite");
+  });
+
+  it("follows saved theme changes in another renderer window", async () => {
+    const appearance = await import("./appearance");
     appearance.initializeAppearance();
-    localStorage.setItem("openadminos:appearance:v1", "light");
+    localStorage.setItem("openadminos:appearance:v1", "sand");
     window.dispatchEvent(new StorageEvent("storage", { key: "openadminos:appearance:v1" }));
-    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("sand");
+    expect(document.documentElement.dataset.mode).toBe("light");
   });
 });

@@ -8,6 +8,7 @@ import {
   IconChanges,
   IconAgentTeam,
   IconChat,
+  IconCheck,
   IconHardDrive,
   IconHub,
   IconPlay,
@@ -25,6 +26,11 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { openNovaPanel } from "../shared/nova-panel";
 import { Kbd } from "./ui";
 import type { IntuneChatConversation, WorkspaceSummary } from "../shared/openAdminOS";
+import {
+  THEMES,
+  setAppearance as applyAppearance,
+  useAppearance,
+} from "../styles/appearance";
 
 interface PaletteItem {
   id: string;
@@ -46,6 +52,7 @@ export function CommandPalette({
   const navigate = useNavigate();
   const { state, startRun } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
+  const { theme: activeTheme } = useAppearance();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -115,6 +122,24 @@ export function CommandPalette({
         icon: <IconChat size={13} className="text-[var(--color-accent)]" />,
         action: go("/chat?new=1"),
       },
+      ...THEMES.map((theme) => ({
+        id: `act-theme-${theme.id}`,
+        label: `Theme: ${theme.label}`,
+        hint: `${theme.id === activeTheme ? "Current · " : ""}${
+          theme.mode === "dark" ? "Dark" : "Light"
+        }`,
+        group: "Actions" as const,
+        icon:
+          theme.id === activeTheme ? (
+            <IconCheck size={13} className="text-[var(--color-accent)]" />
+          ) : (
+            <IconSettings size={13} className="text-[var(--color-text-soft)]" />
+          ),
+        action: () => {
+          applyAppearance(theme.id);
+          onClose();
+        },
+      })),
       ...recentConversations.map((conversation) => ({
         id: `chat-${conversation.id}`,
         label: conversation.title,
@@ -266,7 +291,7 @@ export function CommandPalette({
           ] as PaletteItem[])
         : []),
     ];
-  }, [navigate, onClose, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
+  }, [activeTheme, navigate, onClose, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;

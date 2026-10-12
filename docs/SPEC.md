@@ -1720,24 +1720,29 @@ The approved identity uses the OA monogram in graphite `#17191D` and off-white
 public website branding. `docs/brand/oa-mark.svg` is the vector reference;
 `docs/mockups/22-monochrome-brand.html` records the original interactive study.
 
-Desktop appearance defaults to dark. Settings > General offers a saved light
-or dark preference, stored locally and synchronized across renderer windows.
-Native window controls follow this preference. The public website uses the off-white light theme with graphite actions, slate secondary text, and a matching light desktop screenshot. The screenshot has no visible border or padded frame, using only rounded corners and a soft shadow for separation; the animated change-review demo uses stronger panel/input borders and solid confirmation states so it remains legible on light backgrounds.
+Desktop appearance defaults to the Graphite theme. Settings > Appearance offers
+four built-in themes: Graphite and Midnight are dark, while Off-white and Sand
+are light. The preference stays on the device, is synchronized across renderer
+windows, and emits no telemetry. Saved legacy `dark` and `light` values map to
+Graphite and Off-white. Native window controls use the selected theme colors and
+follow its dark or light mode. The public website uses the off-white light theme with graphite actions, slate secondary text, and a matching light desktop screenshot. The screenshot has no visible border or padded frame, using only rounded corners and a soft shadow for separation; the animated change-review demo uses stronger panel/input borders and solid confirmation states so it remains legible on light backgrounds.
 Semantic success, warning, danger, information, and reasoning colors remain
 separate from the brand accent. Destructive approval uses danger; typed
 confirmation and tenant/provider trust behavior are unchanged.
 
 ### Tokens
 
-`apps/desktop/src/styles/globals.css` is the production source of truth for both
-themes. All shared controls, navigation, dialogs, page layouts, and custom voice
+`apps/desktop/src/styles/globals.css` is the production source of truth for all
+four themes. All shared controls, navigation, dialogs, page layouts, and custom voice
 and companion surfaces consume these tokens. The Agent Team illustration is
 neutral, while activity and attention indicators retain semantic color.
 
-- Dark: graphite base, off-white primary actions, slate borders and surfaces.
-- Light: off-white base, white surfaces, graphite primary actions.
+- Graphite: neutral charcoal base with off-white actions.
+- Midnight: cool navy surfaces with a pale blue action color.
+- Off-white: neutral light surfaces with graphite actions.
+- Sand: warm light surfaces with a rust action color.
 - Body, metadata, placeholder, and semantic text meet 4.5:1 contrast against
-  their supported surfaces in both themes, verified by automated tests.
+  their supported surfaces in every theme, verified by automated tests.
 - Cards use a 10px radius; status badges use a compact 6px radius.
 - The sidebar is 224px wide and collapses to a 56px icon rail; shared page
   padding is 24px vertically and 32px horizontally.
@@ -1853,7 +1858,7 @@ The sidebar contains exactly five destinations in this order:
 | Agents | `/agents` | Team roster, installed and Hub libraries, schedules, and agent details |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
-| Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, Appearance, Privacy, and About |
+| Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, four device-local themes in Appearance, Privacy, and About |
 
 Workspaces live in the Chat left panel and remain reachable from the command
 palette. Legacy `/workspaces` and `/workspaces/:workspaceId` URLs redirect to
@@ -1927,6 +1932,7 @@ North-star metric: time from install to first successful result, target under 5 
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls; Connectors live in Settings |
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
+| Theme | Appearance setting | Device-local Graphite, Midnight, Off-white, or Sand color scheme shared by renderer windows and native chrome |
 
 ### Quality implementation decisions (locked for v0.4)
 

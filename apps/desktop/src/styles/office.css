@@ -182,6 +182,12 @@
   overflow: hidden;
   min-height: 33px;
 }
+.office-room > .office-stations .office-station {
+  color: #ece2d5;
+}
+.office-room > .office-stations .office-station-task {
+  color: #b4a798;
+}
 .office-station-tenant {
   font: 9px monospace;
   color: #a49688;

@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Add four built-in desktop themes with an accessible picker, command palette actions, synchronized companion styling, and matching native window chrome.
+
 - Add a clickable desktop preview to the homepage using actual app captures for navigation, agent browsing, change review, and Settings.
 
 - Add a saved light/dark appearance setting and an interactive monochrome design reference.

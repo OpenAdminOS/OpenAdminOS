@@ -5,6 +5,7 @@ import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import { captureWebsiteDemo } from "./website-demo-capture.js";
+import { NATIVE_THEME_COLORS, parseNativeTheme } from "./appearance.js";
 import {
   app,
   BrowserWindow,
@@ -1083,10 +1084,10 @@ async function runScreenshotCapture(): Promise<void> {
       { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
       { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Team", "Library"] },
-      { route: "/settings/appearance", name: "appearance", waitFor: ["Graphite dark"] },
+      { route: "/settings/appearance", name: "appearance", waitFor: ["Midnight"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
-    for (const theme of ["dark", "light"]) {
+    for (const theme of ["graphite", "midnight", "off-white", "sand"] as const) {
       await window.webContents.executeJavaScript(`window.openAdminOS.setAppearance(${JSON.stringify(theme)})`);
       await window.webContents.executeJavaScript(`localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)}); window.dispatchEvent(new StorageEvent("storage", {key:"openadminos:appearance:v1"}));`);
       for (const shot of [...appShots, ...extraShots]) {
@@ -1094,7 +1095,7 @@ async function runScreenshotCapture(): Promise<void> {
         await captureScreenshotPng(window, `app/brand-${theme}-${shot.name}.png`);
       }
     }
-    console.log("[screenshot-capture] passed both brand themes and all route families");
+    console.log("[screenshot-capture] passed all four brand themes and route families");
     app.exit(0);
     return;
   }
@@ -4825,7 +4826,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: "#17191d",
+    backgroundColor: NATIVE_THEME_COLORS.graphite.background,
     show: false,
     // Windows: draw our own chrome and overlay the system buttons on it,
     // so the app header replaces the native title bar instead of stacking
@@ -4840,11 +4841,8 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
-            // Must match --color-bg and --color-text-muted in
-            // src/styles/globals.css. Any drift paints the window-control
-            // strip as a visibly different block from the app chrome.
-            color: "#17191d",
-            symbolColor: "#a8b0bb",
+            color: NATIVE_THEME_COLORS.graphite.background,
+            symbolColor: NATIVE_THEME_COLORS.graphite.textMuted,
             height: 32,
           },
         }
@@ -4945,7 +4943,7 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     fullscreenable: false,
     skipTaskbar: true,
     title: "OpenAdminOS Menu Bar",
-    backgroundColor: "#17191d",
+    backgroundColor: NATIVE_THEME_COLORS.graphite.background,
     vibrancy: process.platform === "darwin" ? "menu" : undefined,
     visualEffectState: "active",
     webPreferences: {
@@ -5099,14 +5097,19 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
 
 function registerIpcHandlers() {
   ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
-    if (theme !== "dark" && theme !== "light") throw new Error("Choose dark or light appearance.");
-    nativeTheme.themeSource = theme;
-    const color = theme === "light" ? "#f4f5f7" : "#17191d";
-    const symbolColor = theme === "light" ? "#535e6c" : "#a8b0bb";
+    const themeId = parseNativeTheme(theme);
+    const colors = NATIVE_THEME_COLORS[themeId];
+    nativeTheme.themeSource = colors.mode;
     for (const window of BrowserWindow.getAllWindows()) {
       if (window.isDestroyed()) continue;
-      window.setBackgroundColor(color);
-      if (process.platform === "win32") window.setTitleBarOverlay({ color, symbolColor, height: 32 });
+      window.setBackgroundColor(colors.background);
+      if (process.platform === "win32") {
+        window.setTitleBarOverlay({
+          color: colors.background,
+          symbolColor: colors.textMuted,
+          height: 32,
+        });
+      }
     }
   }));
   ipcMain.handle(
