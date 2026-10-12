@@ -353,12 +353,23 @@ export function DataSettingsSection() {
                 </span>
                 <span className="text-xs tabular-nums">{job.completed}/{job.total}</span>
               </div>
-              <progress
-                className="w-full accent-[var(--color-accent)]"
+              <div
+                role="progressbar"
                 aria-label="Cache preload progress"
-                max={job.total || 1}
-                value={job.completed}
-              />
+                aria-valuemin={0}
+                aria-valuemax={job.total || 1}
+                aria-valuenow={job.completed}
+                className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-bg-raised)]"
+              >
+                <div
+                  className={`h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none ${
+                    job.status === "running" || job.status === "complete"
+                      ? "bg-[var(--color-accent)]"
+                      : "bg-[var(--color-warning)]"
+                  }`}
+                  style={{ width: `${Math.min(100, Math.round((job.completed / (job.total || 1)) * 100))}%` }}
+                />
+              </div>
               {job.error ? <p className="text-sm text-[var(--color-danger)]">{job.error}</p> : null}
             </div>
           ) : (
