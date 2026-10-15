@@ -1,6 +1,316 @@
 [
   {
     "officeBounds": null,
+    "id": "chat-answer",
+    "baseId": "chat-answer",
+    "tenant": "contoso",
+    "menuBounds": null,
+    "route": "/chat",
+    "label": "Chat answer",
+    "width": 1600,
+    "height": 1000,
+    "hotspots": [
+      {
+        "label": "Contoso admin@contoso.invalid",
+        "href": null,
+        "disabled": false,
+        "x": 0.5078125,
+        "y": 0.975,
+        "width": 12.921875,
+        "height": 5.0625
+      },
+      {
+        "label": "Search",
+        "href": null,
+        "disabled": false,
+        "x": 0.5078125,
+        "y": 7.012500000000001,
+        "width": 12.921875,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Chat",
+        "href": "#/chat",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 10.9125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Agent Team",
+        "href": "#/office",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 14.1625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Agents",
+        "href": "#/agents",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 17.4125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Runs 1",
+        "href": "#/runs",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 20.6625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Changes",
+        "href": "#/changes",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 23.9125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Settings",
+        "href": "#/settings",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 27.1625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Voice",
+        "href": null,
+        "disabled": false,
+        "x": 0.40625,
+        "y": 91.225,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Collapse sidebar",
+        "href": null,
+        "disabled": false,
+        "x": 0.40625,
+        "y": 94.475,
+        "width": 13.125,
+        "height": 2.6
+      },
+      {
+        "label": "Chats",
+        "href": null,
+        "disabled": false,
+        "x": 14.710937499999998,
+        "y": 1.4625000000000001,
+        "width": 5.5546875,
+        "height": 2.275
+      },
+      {
+        "label": "Workspaces",
+        "href": null,
+        "disabled": false,
+        "x": 20.265625,
+        "y": 1.4625000000000001,
+        "width": 5.5546875,
+        "height": 2.275
+      },
+      {
+        "label": "Collapse chat panel",
+        "href": null,
+        "disabled": false,
+        "x": 26.53125,
+        "y": 1.4625000000000001,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "New chat",
+        "href": null,
+        "disabled": false,
+        "x": 28.15625,
+        "y": 1.4625000000000001,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Search conversations",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 4.9750000000000005,
+        "width": 15.375,
+        "height": 2.6
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 8.225,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Which managed devices have not synced in the last 7...",
+        "href": null,
+        "disabled": false,
+        "x": 33.703125,
+        "y": 1.225,
+        "width": 20.146484375,
+        "height": 2
+      },
+      {
+        "label": "Conversation actions",
+        "href": null,
+        "disabled": false,
+        "x": 96.953125,
+        "y": 0.7625,
+        "width": 1.828125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Copy prompt",
+        "href": null,
+        "disabled": false,
+        "x": 85.490234375,
+        "y": 11.575000000000001,
+        "width": 3.0556640625,
+        "height": 1.95
+      },
+      {
+        "label": "Edit and resend prompt",
+        "href": null,
+        "disabled": false,
+        "x": 88.9521484375,
+        "y": 11.575000000000001,
+        "width": 1.8291015625,
+        "height": 1.95
+      },
+      {
+        "label": "How this was answered",
+        "href": null,
+        "disabled": false,
+        "x": 39.46875,
+        "y": 20.974999999999998,
+        "width": 47.5,
+        "height": 3.1
+      },
+      {
+        "label": "Copy response",
+        "href": null,
+        "disabled": false,
+        "x": 45.1806640625,
+        "y": 24.725,
+        "width": 3.0556640625,
+        "height": 1.95
+      },
+      {
+        "label": "Pin response to workspace",
+        "href": null,
+        "disabled": true,
+        "x": 48.642578125,
+        "y": 24.725,
+        "width": 3.955078125,
+        "height": 1.95
+      },
+      {
+        "label": "Regenerate response",
+        "href": null,
+        "disabled": false,
+        "x": 53.00390625,
+        "y": 24.725,
+        "width": 4.224609375,
+        "height": 1.95
+      },
+      {
+        "label": "Dismiss suggested agents",
+        "href": null,
+        "disabled": false,
+        "x": 84.9375,
+        "y": 28.625,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Details",
+        "href": null,
+        "disabled": false,
+        "x": 78.869140625,
+        "y": 33.16875,
+        "width": 3.4580078124999996,
+        "height": 2.275
+      },
+      {
+        "label": "Run",
+        "href": null,
+        "disabled": false,
+        "x": 82.9365234375,
+        "y": 33.16875,
+        "width": 3.4228515624999996,
+        "height": 2.275
+      },
+      {
+        "label": "Details",
+        "href": null,
+        "disabled": false,
+        "x": 78.869140625,
+        "y": 38.58125,
+        "width": 3.4580078124999996,
+        "height": 2.275
+      },
+      {
+        "label": "Run",
+        "href": null,
+        "disabled": false,
+        "x": 82.9365234375,
+        "y": 38.58125,
+        "width": 3.4228515624999996,
+        "height": 2.275
+      },
+      {
+        "label": "Ask about devices, users, apps, policies, sign-ins, or identity…",
+        "href": null,
+        "disabled": false,
+        "x": 38.65625,
+        "y": 85.375,
+        "width": 52.93750000000001,
+        "height": 7.199999999999999
+      },
+      {
+        "label": "Scope: Contoso",
+        "href": null,
+        "disabled": false,
+        "x": 38.859375,
+        "y": 93.175,
+        "width": 4.8779296875,
+        "height": 2.275
+      },
+      {
+        "label": "Saved queries",
+        "href": null,
+        "disabled": false,
+        "x": 43.9404296875,
+        "y": 93.175,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Send",
+        "href": null,
+        "disabled": true,
+        "x": 88.6494140625,
+        "y": 93.175,
+        "width": 2.7412109375,
+        "height": 2.275
+      }
+    ]
+  },
+  {
+    "officeBounds": null,
     "id": "chat",
     "baseId": "chat",
     "tenant": "contoso",
@@ -153,6 +463,15 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -2857,7 +3176,7 @@
       {
         "label": "Clear chat history",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 76.4267578125,
         "y": 39.118750000000006,
         "width": 7.1513671875,
@@ -2866,7 +3185,7 @@
       {
         "label": "Clear active tenant cache",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 83.984375,
         "y": 39.118750000000006,
         "width": 9.75,
@@ -3747,7 +4066,7 @@
       {
         "label": "Clear chat history",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 76.4267578125,
         "y": 71.51875,
         "width": 7.1513671875,
@@ -3756,7 +4075,7 @@
       {
         "label": "Clear active tenant cache",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 83.984375,
         "y": 71.51875,
         "width": 9.75,
@@ -7170,6 +7489,15 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -7469,6 +7797,15 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -7772,6 +8109,15 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -8071,6 +8417,15 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -8374,6 +8729,15 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -8675,6 +9039,15 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -8904,7 +9277,7 @@
         "height": 4.9
       },
       {
-        "label": "Theme: Midnight Dark",
+        "label": "Theme: Midnight Current · Dark",
         "href": null,
         "disabled": false,
         "x": 30.3046875,
@@ -9093,6 +9466,15 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -9223,6 +9605,325 @@
         "href": null,
         "disabled": false,
         "x": 43.9404296875,
+        "y": 93.175,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Send",
+        "href": null,
+        "disabled": true,
+        "x": 88.6494140625,
+        "y": 93.175,
+        "width": 2.7412109375,
+        "height": 2.275
+      }
+    ]
+  },
+  {
+    "officeBounds": null,
+    "id": "chat-answer--dev",
+    "baseId": "chat-answer",
+    "tenant": "dev",
+    "menuBounds": null,
+    "route": "/chat",
+    "label": "Chat answer",
+    "width": 1600,
+    "height": 1000,
+    "hotspots": [
+      {
+        "label": "Dev Tenant admin@dev.invalid",
+        "href": null,
+        "disabled": false,
+        "x": 0.5078125,
+        "y": 0.975,
+        "width": 12.921875,
+        "height": 5.0625
+      },
+      {
+        "label": "Search",
+        "href": null,
+        "disabled": false,
+        "x": 0.5078125,
+        "y": 7.012500000000001,
+        "width": 12.921875,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Chat",
+        "href": "#/chat",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 10.9125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Agent Team",
+        "href": "#/office",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 14.1625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Agents",
+        "href": "#/agents",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 17.4125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Runs 1",
+        "href": "#/runs",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 20.6625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Changes",
+        "href": "#/changes",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 23.9125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Settings",
+        "href": "#/settings",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 27.1625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Voice",
+        "href": null,
+        "disabled": false,
+        "x": 0.40625,
+        "y": 91.225,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Collapse sidebar",
+        "href": null,
+        "disabled": false,
+        "x": 0.40625,
+        "y": 94.475,
+        "width": 13.125,
+        "height": 2.6
+      },
+      {
+        "label": "Chats",
+        "href": null,
+        "disabled": false,
+        "x": 14.710937499999998,
+        "y": 1.4625000000000001,
+        "width": 5.5546875,
+        "height": 2.275
+      },
+      {
+        "label": "Workspaces",
+        "href": null,
+        "disabled": false,
+        "x": 20.265625,
+        "y": 1.4625000000000001,
+        "width": 5.5546875,
+        "height": 2.275
+      },
+      {
+        "label": "Collapse chat panel",
+        "href": null,
+        "disabled": false,
+        "x": 26.53125,
+        "y": 1.4625000000000001,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "New chat",
+        "href": null,
+        "disabled": false,
+        "x": 28.15625,
+        "y": 1.4625000000000001,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Search conversations",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 4.9750000000000005,
+        "width": 15.375,
+        "height": 2.6
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 8.225,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 14.099999999999998,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Which managed devices have not synced in the last 7...",
+        "href": null,
+        "disabled": false,
+        "x": 33.703125,
+        "y": 1.225,
+        "width": 20.146484375,
+        "height": 2
+      },
+      {
+        "label": "Conversation actions",
+        "href": null,
+        "disabled": false,
+        "x": 96.953125,
+        "y": 0.7625,
+        "width": 1.828125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Copy prompt",
+        "href": null,
+        "disabled": false,
+        "x": 85.490234375,
+        "y": 11.575000000000001,
+        "width": 3.0556640625,
+        "height": 1.95
+      },
+      {
+        "label": "Edit and resend prompt",
+        "href": null,
+        "disabled": false,
+        "x": 88.9521484375,
+        "y": 11.575000000000001,
+        "width": 1.8291015625,
+        "height": 1.95
+      },
+      {
+        "label": "How this was answered",
+        "href": null,
+        "disabled": false,
+        "x": 39.46875,
+        "y": 20.974999999999998,
+        "width": 47.5,
+        "height": 3.1
+      },
+      {
+        "label": "Copy response",
+        "href": null,
+        "disabled": false,
+        "x": 45.1806640625,
+        "y": 24.725,
+        "width": 3.0556640625,
+        "height": 1.95
+      },
+      {
+        "label": "Pin response to workspace",
+        "href": null,
+        "disabled": true,
+        "x": 48.642578125,
+        "y": 24.725,
+        "width": 3.955078125,
+        "height": 1.95
+      },
+      {
+        "label": "Regenerate response",
+        "href": null,
+        "disabled": false,
+        "x": 53.00390625,
+        "y": 24.725,
+        "width": 4.224609375,
+        "height": 1.95
+      },
+      {
+        "label": "Dismiss suggested agents",
+        "href": null,
+        "disabled": false,
+        "x": 84.9375,
+        "y": 28.625,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Details",
+        "href": null,
+        "disabled": false,
+        "x": 78.869140625,
+        "y": 33.16875,
+        "width": 3.4580078124999996,
+        "height": 2.275
+      },
+      {
+        "label": "Run",
+        "href": null,
+        "disabled": false,
+        "x": 82.9365234375,
+        "y": 33.16875,
+        "width": 3.4228515624999996,
+        "height": 2.275
+      },
+      {
+        "label": "Details",
+        "href": null,
+        "disabled": false,
+        "x": 78.869140625,
+        "y": 38.58125,
+        "width": 3.4580078124999996,
+        "height": 2.275
+      },
+      {
+        "label": "Run",
+        "href": null,
+        "disabled": false,
+        "x": 82.9365234375,
+        "y": 38.58125,
+        "width": 3.4228515624999996,
+        "height": 2.275
+      },
+      {
+        "label": "Ask about devices, users, apps, policies, sign-ins, or identity…",
+        "href": null,
+        "disabled": false,
+        "x": 38.65625,
+        "y": 85.375,
+        "width": 52.93750000000001,
+        "height": 7.199999999999999
+      },
+      {
+        "label": "Scope: Dev Tenant",
+        "href": null,
+        "disabled": false,
+        "x": 38.859375,
+        "y": 93.175,
+        "width": 5.9013671875,
+        "height": 2.275
+      },
+      {
+        "label": "Saved queries",
+        "href": null,
+        "disabled": false,
+        "x": 44.9638671875,
         "y": 93.175,
         "width": 1.421875,
         "height": 2.275
@@ -9392,6 +10093,24 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -12096,7 +12815,7 @@
       {
         "label": "Clear chat history",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 76.4267578125,
         "y": 39.118750000000006,
         "width": 7.1513671875,
@@ -12105,7 +12824,7 @@
       {
         "label": "Clear active tenant cache",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 83.984375,
         "y": 39.118750000000006,
         "width": 9.75,
@@ -12986,7 +13705,7 @@
       {
         "label": "Clear chat history",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 76.4267578125,
         "y": 71.51875,
         "width": 7.1513671875,
@@ -12995,7 +13714,7 @@
       {
         "label": "Clear active tenant cache",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 83.984375,
         "y": 71.51875,
         "width": 9.75,
@@ -16409,6 +17128,24 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -16708,6 +17445,24 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -17011,6 +17766,24 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -17310,6 +18083,24 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -17613,6 +18404,24 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -17914,6 +18723,24 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -18143,7 +18970,7 @@
         "height": 4.9
       },
       {
-        "label": "Theme: Midnight Dark",
+        "label": "Theme: Midnight Current · Dark",
         "href": null,
         "disabled": false,
         "x": 30.3046875,
@@ -18332,6 +19159,24 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -18462,6 +19307,334 @@
         "href": null,
         "disabled": false,
         "x": 44.9638671875,
+        "y": 93.175,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Send",
+        "href": null,
+        "disabled": true,
+        "x": 88.6494140625,
+        "y": 93.175,
+        "width": 2.7412109375,
+        "height": 2.275
+      }
+    ]
+  },
+  {
+    "officeBounds": null,
+    "id": "chat-answer--customer",
+    "baseId": "chat-answer",
+    "tenant": "customer",
+    "menuBounds": null,
+    "route": "/chat",
+    "label": "Chat answer",
+    "width": 1600,
+    "height": 1000,
+    "hotspots": [
+      {
+        "label": "Customer Tenant admin@customer.invalid",
+        "href": null,
+        "disabled": false,
+        "x": 0.5078125,
+        "y": 0.975,
+        "width": 12.921875,
+        "height": 5.0625
+      },
+      {
+        "label": "Search",
+        "href": null,
+        "disabled": false,
+        "x": 0.5078125,
+        "y": 7.012500000000001,
+        "width": 12.921875,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Chat",
+        "href": "#/chat",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 10.9125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Agent Team",
+        "href": "#/office",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 14.1625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Agents",
+        "href": "#/agents",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 17.4125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Runs 1",
+        "href": "#/runs",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 20.6625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Changes",
+        "href": "#/changes",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 23.9125,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Settings",
+        "href": "#/settings",
+        "disabled": false,
+        "x": 0.40625,
+        "y": 27.1625,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Voice",
+        "href": null,
+        "disabled": false,
+        "x": 0.40625,
+        "y": 91.225,
+        "width": 13.125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Collapse sidebar",
+        "href": null,
+        "disabled": false,
+        "x": 0.40625,
+        "y": 94.475,
+        "width": 13.125,
+        "height": 2.6
+      },
+      {
+        "label": "Chats",
+        "href": null,
+        "disabled": false,
+        "x": 14.710937499999998,
+        "y": 1.4625000000000001,
+        "width": 5.5546875,
+        "height": 2.275
+      },
+      {
+        "label": "Workspaces",
+        "href": null,
+        "disabled": false,
+        "x": 20.265625,
+        "y": 1.4625000000000001,
+        "width": 5.5546875,
+        "height": 2.275
+      },
+      {
+        "label": "Collapse chat panel",
+        "href": null,
+        "disabled": false,
+        "x": 26.53125,
+        "y": 1.4625000000000001,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "New chat",
+        "href": null,
+        "disabled": false,
+        "x": 28.15625,
+        "y": 1.4625000000000001,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Search conversations",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 4.9750000000000005,
+        "width": 15.375,
+        "height": 2.6
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 8.225,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 14.099999999999998,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.975,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Which managed devices have not synced in the last 7...",
+        "href": null,
+        "disabled": false,
+        "x": 33.703125,
+        "y": 1.225,
+        "width": 20.146484375,
+        "height": 2
+      },
+      {
+        "label": "Conversation actions",
+        "href": null,
+        "disabled": false,
+        "x": 96.953125,
+        "y": 0.7625,
+        "width": 1.828125,
+        "height": 2.9250000000000003
+      },
+      {
+        "label": "Copy prompt",
+        "href": null,
+        "disabled": false,
+        "x": 85.490234375,
+        "y": 11.575000000000001,
+        "width": 3.0556640625,
+        "height": 1.95
+      },
+      {
+        "label": "Edit and resend prompt",
+        "href": null,
+        "disabled": false,
+        "x": 88.9521484375,
+        "y": 11.575000000000001,
+        "width": 1.8291015625,
+        "height": 1.95
+      },
+      {
+        "label": "How this was answered",
+        "href": null,
+        "disabled": false,
+        "x": 39.46875,
+        "y": 20.974999999999998,
+        "width": 47.5,
+        "height": 3.1
+      },
+      {
+        "label": "Copy response",
+        "href": null,
+        "disabled": false,
+        "x": 45.1806640625,
+        "y": 24.725,
+        "width": 3.0556640625,
+        "height": 1.95
+      },
+      {
+        "label": "Pin response to workspace",
+        "href": null,
+        "disabled": true,
+        "x": 48.642578125,
+        "y": 24.725,
+        "width": 3.955078125,
+        "height": 1.95
+      },
+      {
+        "label": "Regenerate response",
+        "href": null,
+        "disabled": false,
+        "x": 53.00390625,
+        "y": 24.725,
+        "width": 4.224609375,
+        "height": 1.95
+      },
+      {
+        "label": "Dismiss suggested agents",
+        "href": null,
+        "disabled": false,
+        "x": 84.9375,
+        "y": 28.625,
+        "width": 1.421875,
+        "height": 2.275
+      },
+      {
+        "label": "Details",
+        "href": null,
+        "disabled": false,
+        "x": 78.869140625,
+        "y": 33.16875,
+        "width": 3.4580078124999996,
+        "height": 2.275
+      },
+      {
+        "label": "Run",
+        "href": null,
+        "disabled": false,
+        "x": 82.9365234375,
+        "y": 33.16875,
+        "width": 3.4228515624999996,
+        "height": 2.275
+      },
+      {
+        "label": "Details",
+        "href": null,
+        "disabled": false,
+        "x": 78.869140625,
+        "y": 38.58125,
+        "width": 3.4580078124999996,
+        "height": 2.275
+      },
+      {
+        "label": "Run",
+        "href": null,
+        "disabled": false,
+        "x": 82.9365234375,
+        "y": 38.58125,
+        "width": 3.4228515624999996,
+        "height": 2.275
+      },
+      {
+        "label": "Ask about devices, users, apps, policies, sign-ins, or identity…",
+        "href": null,
+        "disabled": false,
+        "x": 38.65625,
+        "y": 85.375,
+        "width": 52.93750000000001,
+        "height": 7.199999999999999
+      },
+      {
+        "label": "Scope: Customer Tenant",
+        "href": null,
+        "disabled": false,
+        "x": 38.859375,
+        "y": 93.175,
+        "width": 7.90234375,
+        "height": 2.275
+      },
+      {
+        "label": "Saved queries",
+        "href": null,
+        "disabled": false,
+        "x": 46.96484375,
         "y": 93.175,
         "width": 1.421875,
         "height": 2.275
@@ -18631,6 +19804,33 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -21292,7 +22492,7 @@
         "href": null,
         "disabled": false,
         "x": 78.6533203125,
-        "y": 15.34375,
+        "y": 16.243750000000002,
         "width": 5.3642578125,
         "height": 2.275
       },
@@ -21301,7 +22501,7 @@
         "href": null,
         "disabled": false,
         "x": 84.423828125,
-        "y": 15.34375,
+        "y": 16.243750000000002,
         "width": 9.310546875,
         "height": 2.275
       },
@@ -21310,7 +22510,7 @@
         "href": null,
         "disabled": false,
         "x": 80.267578125,
-        "y": 23.9375,
+        "y": 25.7375,
         "width": 7.024414062500001,
         "height": 2.275
       },
@@ -21319,7 +22519,7 @@
         "href": null,
         "disabled": true,
         "x": 87.6982421875,
-        "y": 23.9375,
+        "y": 25.7375,
         "width": 6.0361328125,
         "height": 2.275
       },
@@ -21328,25 +22528,25 @@
         "href": null,
         "disabled": false,
         "x": 85.765625,
-        "y": 30.331249999999997,
+        "y": 32.13125,
         "width": 7.968749999999999,
         "height": 2.9250000000000003
       },
       {
         "label": "Clear chat history",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 76.4267578125,
-        "y": 39.118750000000006,
+        "y": 40.918749999999996,
         "width": 7.1513671875,
         "height": 2.275
       },
       {
         "label": "Clear active tenant cache",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 83.984375,
-        "y": 39.118750000000006,
+        "y": 40.918749999999996,
         "width": 9.75,
         "height": 2.275
       },
@@ -21355,7 +22555,7 @@
         "href": null,
         "disabled": false,
         "x": 30.765625000000004,
-        "y": 45.8375,
+        "y": 47.6375,
         "width": 62.96874999999999,
         "height": 2
       },
@@ -21364,7 +22564,7 @@
         "href": null,
         "disabled": false,
         "x": 90.1455078125,
-        "y": 56.3125,
+        "y": 58.1125,
         "width": 4.6044921875,
         "height": 2.275
       },
@@ -21373,7 +22573,7 @@
         "href": null,
         "disabled": false,
         "x": 80.7578125,
-        "y": 62.431250000000006,
+        "y": 64.23124999999999,
         "width": 2.55859375,
         "height": 2.275
       },
@@ -21382,7 +22582,7 @@
         "href": null,
         "disabled": false,
         "x": 83.31640625,
-        "y": 62.431250000000006,
+        "y": 64.23124999999999,
         "width": 5.046875,
         "height": 2.275
       },
@@ -21391,7 +22591,7 @@
         "href": null,
         "disabled": false,
         "x": 88.36328125,
-        "y": 62.431250000000006,
+        "y": 64.23124999999999,
         "width": 5.26953125,
         "height": 2.275
       },
@@ -21400,7 +22600,7 @@
         "href": null,
         "disabled": false,
         "x": 87.8623046875,
-        "y": 70.03125,
+        "y": 71.83125,
         "width": 5.8720703125,
         "height": 3.3000000000000003
       },
@@ -21409,7 +22609,7 @@
         "href": null,
         "disabled": false,
         "x": 30.765625000000004,
-        "y": 77.08749999999999,
+        "y": 78.8875,
         "width": 62.96874999999999,
         "height": 2
       },
@@ -21418,7 +22618,7 @@
         "href": null,
         "disabled": false,
         "x": 29.75,
-        "y": 87.8,
+        "y": 89.60000000000001,
         "width": 4.03515625,
         "height": 1.7999999999999998
       },
@@ -21427,7 +22627,7 @@
         "href": null,
         "disabled": false,
         "x": 91.025390625,
-        "y": 87.5625,
+        "y": 89.3625,
         "width": 3.724609375,
         "height": 2.275
       },
@@ -21436,7 +22636,7 @@
         "href": null,
         "disabled": false,
         "x": 90.501953125,
-        "y": 92.95625,
+        "y": 94.75625,
         "width": 3.232421875,
         "height": 2.275
       }
@@ -22182,7 +23382,7 @@
         "href": null,
         "disabled": false,
         "x": 78.6533203125,
-        "y": 47.74375,
+        "y": 48.643750000000004,
         "width": 5.3642578125,
         "height": 2.275
       },
@@ -22191,7 +23391,7 @@
         "href": null,
         "disabled": false,
         "x": 84.423828125,
-        "y": 47.74375,
+        "y": 48.643750000000004,
         "width": 9.310546875,
         "height": 2.275
       },
@@ -22200,7 +23400,7 @@
         "href": null,
         "disabled": false,
         "x": 80.267578125,
-        "y": 56.3375,
+        "y": 58.137499999999996,
         "width": 7.024414062500001,
         "height": 2.275
       },
@@ -22209,7 +23409,7 @@
         "href": null,
         "disabled": true,
         "x": 87.6982421875,
-        "y": 56.3375,
+        "y": 58.137499999999996,
         "width": 6.0361328125,
         "height": 2.275
       },
@@ -22218,25 +23418,25 @@
         "href": null,
         "disabled": false,
         "x": 85.765625,
-        "y": 62.73125,
+        "y": 64.53125,
         "width": 7.968749999999999,
         "height": 2.9250000000000003
       },
       {
         "label": "Clear chat history",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 76.4267578125,
-        "y": 71.51875,
+        "y": 73.31875,
         "width": 7.1513671875,
         "height": 2.275
       },
       {
         "label": "Clear active tenant cache",
         "href": null,
-        "disabled": true,
+        "disabled": false,
         "x": 83.984375,
-        "y": 71.51875,
+        "y": 73.31875,
         "width": 9.75,
         "height": 2.275
       },
@@ -22245,7 +23445,7 @@
         "href": null,
         "disabled": false,
         "x": 30.765625000000004,
-        "y": 78.23750000000001,
+        "y": 80.0375,
         "width": 62.96874999999999,
         "height": 2
       },
@@ -22254,35 +23454,8 @@
         "href": null,
         "disabled": false,
         "x": 90.1455078125,
-        "y": 88.7125,
+        "y": 90.51249999999999,
         "width": 4.6044921875,
-        "height": 2.275
-      },
-      {
-        "label": "Auto",
-        "href": null,
-        "disabled": false,
-        "x": 80.7578125,
-        "y": 94.83125,
-        "width": 2.55859375,
-        "height": 2.275
-      },
-      {
-        "label": "Investigative",
-        "href": null,
-        "disabled": false,
-        "x": 83.31640625,
-        "y": 94.83125,
-        "width": 5.046875,
-        "height": 2.275
-      },
-      {
-        "label": "Deterministic",
-        "href": null,
-        "disabled": false,
-        "x": 88.36328125,
-        "y": 94.83125,
-        "width": 5.26953125,
         "height": 2.275
       }
     ]
@@ -25648,6 +26821,33 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -25947,6 +27147,33 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -26250,6 +27477,33 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -26549,6 +27803,33 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
@@ -26852,6 +28133,33 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -27153,6 +28461,33 @@
         "height": 5.35
       },
       {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
         "label": "New conversation",
         "href": null,
         "disabled": true,
@@ -27382,7 +28717,7 @@
         "height": 4.9
       },
       {
-        "label": "Theme: Midnight Dark",
+        "label": "Theme: Midnight Current · Dark",
         "href": null,
         "disabled": false,
         "x": 30.3046875,
@@ -27569,6 +28904,33 @@
         "y": 8.225,
         "width": 15.375,
         "height": 5.35
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:04 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 13.900000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:03 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 19.775000000000002,
+        "width": 15.375,
+        "height": 5.55
+      },
+      {
+        "label": "Open conversation Which managed devices have not synced in the last 7.... Updated Oct 15, 09:01 AM",
+        "href": null,
+        "disabled": false,
+        "x": 14.406250000000002,
+        "y": 25.650000000000002,
+        "width": 15.375,
+        "height": 5.55
       },
       {
         "label": "New conversation",
