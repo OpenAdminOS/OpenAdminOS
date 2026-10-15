@@ -6,9 +6,9 @@ beforeEach(() => {
 });
 
 describe("saved appearance", () => {
-  it("defaults to Graphite and applies every theme with its matching mode", async () => {
+  it("defaults to Midnight and applies every theme with its matching mode", async () => {
     const appearance = await import("./appearance");
-    expect(appearance.readAppearance()).toBe("graphite");
+    expect(appearance.readAppearance()).toBe("midnight");
 
     for (const theme of appearance.THEMES) {
       appearance.setAppearance(theme.id);
@@ -27,8 +27,8 @@ describe("saved appearance", () => {
     expect(localStorage.getItem("openadminos:appearance:v1")).toBe("off-white");
 
     localStorage.setItem("openadminos:appearance:v1", "invalid");
-    expect(appearance.readAppearance()).toBe("graphite");
-    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("graphite");
+    expect(appearance.readAppearance()).toBe("midnight");
+    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("midnight");
   });
 
   it("follows saved theme changes in another renderer window", async () => {

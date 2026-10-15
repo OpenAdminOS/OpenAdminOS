@@ -13,20 +13,20 @@ describe("windows title bar overlay", () => {
   it("paints the overlay in the renderer's background color", () => {
     assert.match(
       main,
-      /titleBarOverlay:\s*\{[^}]*color:\s*NATIVE_THEME_COLORS\.graphite\.background/,
+      /titleBarOverlay:\s*\{[^}]*color:\s*NATIVE_THEME_COLORS\[DEFAULT_NATIVE_THEME_ID\]\.background/,
     );
   });
 
   it("paints the window control glyphs in the muted text color", () => {
     assert.match(
       main,
-      /symbolColor:\s*NATIVE_THEME_COLORS\.graphite\.textMuted/,
+      /symbolColor:\s*NATIVE_THEME_COLORS\[DEFAULT_NATIVE_THEME_ID\]\.textMuted/,
     );
   });
 
   it("opens the window on the renderer background so launch does not flash", () => {
     const backgrounds = main.match(
-      /backgroundColor:\s*NATIVE_THEME_COLORS\.graphite\.background/g,
+      /backgroundColor:\s*NATIVE_THEME_COLORS\[DEFAULT_NATIVE_THEME_ID\]\.background/g,
     );
     assert.ok(
       (backgrounds?.length ?? 0) >= 2,

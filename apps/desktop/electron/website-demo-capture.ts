@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 type CaptureRoute = (
   route: string,
   waitFor: string[],
-  prepare?: "chat-empty" | "write-confirmation",
+  prepare?: "chat-empty" | "chat-transcript" | "write-confirmation",
 ) => Promise<unknown>;
 
 export async function captureWebsiteDemo(
@@ -21,9 +21,16 @@ export async function captureWebsiteDemo(
     route: string;
     label: string;
     wait: string[];
-    prepare?: "chat-empty" | "write-confirmation";
+    prepare?: "chat-empty" | "chat-transcript" | "write-confirmation";
     click?: string;
   }> = [
+    {
+      id: "chat-answer",
+      route: "/chat",
+      label: "Chat answer",
+      wait: ["Chat", "Ollama"],
+      prepare: "chat-transcript" as const,
+    },
     {
       id: "chat",
       route: "/chat",
@@ -258,10 +265,10 @@ export async function captureWebsiteDemo(
   await loaded;
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await window.webContents.executeJavaScript(
-    'window.openAdminOS.setAppearance("light")',
+    'window.openAdminOS.setAppearance("midnight")',
   );
   await window.webContents.executeJavaScript(
-    'localStorage.setItem("openadminos:appearance:v1","light");window.dispatchEvent(new StorageEvent("storage",{key:"openadminos:appearance:v1"}));',
+    'localStorage.setItem("openadminos:appearance:v1","midnight");window.dispatchEvent(new StorageEvent("storage",{key:"openadminos:appearance:v1"}));',
   );
   const only = process.env.OPENADMINOS_WEBSITE_CAPTURE_ONLY;
   const manifest = only

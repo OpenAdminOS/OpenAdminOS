@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
-import { NATIVE_THEME_COLORS, parseNativeTheme } from "./appearance.js";
+import {
+  DEFAULT_NATIVE_THEME_ID,
+  NATIVE_THEME_COLORS,
+  parseNativeTheme,
+} from "./appearance.js";
 
 const stylesheet = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles/globals.css"),
@@ -41,6 +45,7 @@ describe("native appearance", () => {
   });
 
   it("accepts current theme ids and normalizes legacy aliases", () => {
+    assert.equal(DEFAULT_NATIVE_THEME_ID, "midnight");
     for (const themeId of Object.keys(NATIVE_THEME_COLORS)) {
       assert.equal(parseNativeTheme(themeId), themeId);
     }

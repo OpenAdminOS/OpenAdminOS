@@ -5,7 +5,11 @@ import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import { captureWebsiteDemo } from "./website-demo-capture.js";
-import { NATIVE_THEME_COLORS, parseNativeTheme } from "./appearance.js";
+import {
+  DEFAULT_NATIVE_THEME_ID,
+  NATIVE_THEME_COLORS,
+  parseNativeTheme,
+} from "./appearance.js";
 import {
   app,
   BrowserWindow,
@@ -4826,7 +4830,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: NATIVE_THEME_COLORS.graphite.background,
+    backgroundColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
     show: false,
     // Windows: draw our own chrome and overlay the system buttons on it,
     // so the app header replaces the native title bar instead of stacking
@@ -4841,8 +4845,8 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
-            color: NATIVE_THEME_COLORS.graphite.background,
-            symbolColor: NATIVE_THEME_COLORS.graphite.textMuted,
+            color: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
+            symbolColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].textMuted,
             height: 32,
           },
         }
@@ -4943,7 +4947,7 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     fullscreenable: false,
     skipTaskbar: true,
     title: "OpenAdminOS Menu Bar",
-    backgroundColor: NATIVE_THEME_COLORS.graphite.background,
+    backgroundColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
     vibrancy: process.platform === "darwin" ? "menu" : undefined,
     visualEffectState: "active",
     webPreferences: {

@@ -213,7 +213,7 @@ it("lists all theme actions and applies the selected theme", async () => {
     ).toBeInTheDocument();
   }
   expect(
-    screen.getByRole("option", { name: /^Theme: GraphiteCurrent · Dark/ }),
+    screen.getByRole("option", { name: /^Theme: MidnightCurrent · Dark/ }),
   ).toBeInTheDocument();
 
   await user.click(screen.getByRole("option", { name: /^Theme: Sand/ }));
